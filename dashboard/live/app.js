@@ -3811,7 +3811,7 @@ function optRealizedGamma(candles, nowS = Date.now() / 1000, ref = RG_REF, cut =
 }
 // 2026-09-28 네 코인(ETH·BTC 역옵션 · SOL·XRP USDC 선형옵션). DVOL 지수는 ETH·BTC 뿐 -- 나머지는 30일 ATM IV(iv30)로 폭을 잰다.
 function optData() {
-  const cur = { eth: "ETH", btc: "BTC", sol: "SOL", xrp: "XRP" }[activeSnapshotAsset] || null;
+  const cur = { eth: "ETH", btc: "BTC", sol: "SOL", xrp: "XRP", sndk: "SNDK" }[activeSnapshotAsset] || null;
   const g = cur && latestGex && latestGex.available ? (latestGex.currencies || {})[cur] : null;
   const blocks = cur ? ((((latestGex || {}).block_trades || {}).by_coin || {})[cur] || []) : [];
   return { cur, g, o: g && g.options, blocks };
@@ -3888,10 +3888,10 @@ function optAsOf(o) {
   const t = Date.parse(o.recorded_at_utc || ""), age = (Date.now() - t) / 60e3;
   if (!Number.isFinite(t)) return "";
   const hm = new Date(t).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false });
-  return age > 25 ? ` · <span class="opt-warn">${hm} 기준(${Math.round(age)}분 전 값)</span>` : ` · ${hm} 기준`;
+  return age > 25 ? ` · <span class="opt-warn">${hm} 기준(${age >= 120 ? `${Math.round(age / 60)}시간` : `${Math.round(age)}분`} 전 값)</span>` : ` · ${hm} 기준`;
 }
 // 제목 옆 한 줄 = 수집 시각(2026-10-02 딜러 감마 «커버» 줄 제거와 함께 시각만 남김)
-const optHead = (o) => `<span class="opt-cov-h" role="status">Deribit · 참고, 신호 아님${optAsOf(o)}</span>`;
+const optHead = (o) => `<span class="opt-cov-h" role="status">${o.src || "Deribit"} · 참고, 신호 아님${optAsOf(o)}</span>`;
 let optLadderScope = (() => { try { return localStorage.getItem("optLadder") || "week"; } catch (e) { return "week"; } })();
 // 범위 칩 -- 사다리가 비거나 «만기 교체 중»일 때도 보여야 다른 범위로 옮길 수 있다(2026-09-30 검증)
 // 2026-10-08 닿음 등고선(사용자 시안 3 선택): 가까운 만기 행사가별 IV 스마일(서버 /api/opt-smile) → «만기 전 한 번이라도 닿을 확률».
@@ -4179,7 +4179,7 @@ function renderOptions() {
       + optLaneSvg(o, lw);   // 2026-09-29 블록 점 제거(사용자 지시) -- 블록은 옵션 카드 «블록 거래» 칸만
     flowBody.innerHTML = (fl.length ? head("flow", "옵션 순매수 흐름 · 지난 24시간", `<b class="opt-good">콜</b> · <b class="opt-bad">풋</b> 매수−매도(${escapeHtml(cur)}) · <b class="opt-c">선</b> 체결 순델타(24h) 누적 · 테이커 기준${optNewTxt(fl.slice(0, -1)).replace(" · 미결제", " · 24h 미결제")}${fl.some((b) => b.liq > 0) ? ` · 강제청산 ${fmtNum(fl.reduce((a, b) => a + (b.liq || 0), 0), 0)}` : ""}`) + optFlowSvg(fl, fw) : "");
     const bt = (latestGex || {}).block_trades || {};
-    if (blkBody) blkBody.innerHTML = head("blocks", "블록 거래 · 지난 24시간", "")
+    if (blkBody) blkBody.innerHTML = o.src ? "" : head("blocks", "블록 거래 · 지난 24시간", "")
       + (bt.available === false ? `<div class="opt-note opt-warn">블록 수집 지연 — 아래 목록은 마지막으로 받은 값</div>` : "")
       // 🔴`?.[` 는 CI 문법 검사(esprima)가 못 읽는다(2026-09-30 배포 막힘) -- `(x || {})[k]` 로 쓴다.
       + optBlkHtml(blocks, (bt.n_by_coin || {})[cur], window.matchMedia("(max-width: 720px)").matches,
