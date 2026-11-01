@@ -2010,7 +2010,9 @@ function cycleSvg(t, pos, rows, now, W) {
 }
 function renderCycleCard(A, positions, equity) {
   cycleArgs = [A, positions, equity];
-  const now = Date.now(), W = Math.max(320, el("snapAcctCycle")?.clientWidth || 760);   // 화면 폭 그대로 -- 고정 viewBox 는 넓은 화면에서 가운데 작게 떴다
+  // 2026-11-02 사용자 «순환 섹션 너비를 절반으로 -- 현재 높이에 2개가 들어가게»: 넓은 화면에서 #snapAcctCycle 이 2열 격자(CSS) -- 차트 폭도 한 열 폭으로 그린다.
+  const cyBox = el("snapAcctCycle"), cols = cyBox ? getComputedStyle(cyBox).gridTemplateColumns.split(" ").length : 1;
+  const now = Date.now(), W = Math.max(320, cyBox ? (cyBox.clientWidth - (cols > 1 ? 16 : 0)) / cols : 760);   // 화면 폭 그대로 -- 고정 viewBox 는 넓은 화면에서 가운데 작게 떴다
   // 🔴2026-11-02 사용자 «ETH 롱 순환 2개»: 같은 (심볼, 방향)의 열린 왕복이 둘 오면(서버 재동기화 파편 + 진짜) 카드가 그대로 둘이었다 -- 잘리지 않은 것 중
   //   진입이 가장 늦은 하나만, 없으면 잘린 것 중 하나(서버도 같은 규칙으로 파편을 거른다).
   const pick = new Map();
