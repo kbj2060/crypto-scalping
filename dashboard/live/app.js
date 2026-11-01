@@ -7408,7 +7408,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     //   (시안 때 쓴 "L"·"R" 분기는 남겨 둔다 -- 위치만 다른 같은 그림이다.)
     // 2026-10-20 연속 줌: 박스는 창(fpZoomed)이 아니라 **봉 폭**이 정한다 -- 12봉을 넘겨 넓혔는데 칸 숫자(showQty: half ≥ 18)가 안 들어가는 폭이면
     //   박스 없이 가운데 채운 캔들(fpThin). 12봉(버튼 자리)은 폭과 무관하게 늘 풋프린트. 휠로 좁히면 숫자가 들어가는 폭에서 박스가 돌아온다.
-    const fpcWC = Math.max(3, Math.min(8, slot * 0.14)), fpThin = svg.id === "candleSvgSnapshot" && chartWindowBars > 12 + 1e-6 && Math.max(2, (bw - fpcWC - 2) / 2 - 0.5) < 18;
+    const fpcWC = Math.max(3, Math.min(8, slot * 0.14)), fpThin = svg.id === "candleSvgSnapshot" && chartWindowBars > 12 + 1e-6 && Math.max(2, (bw - fpcWC - 2) / 2 - 0.5) < 5;   // 2026-11-01 사용자 «축소해도 체결 데이터가 나오게» -- 숫자(18) 대신 색 칸이 보일 폭(5px)까지 박스 유지(숫자는 showQty 가 따로 뺀다)
     if (svg.id === "candleSvgSnapshot") fpBoxesOff = fpThin;
     const FPC = bw >= 14 || fpThin ? "C" : "";
     // 2026-10-12 사용자 «모바일에서는 5분봉에 있는 체결박스들만 모두 제거 · 데스크탑은 수정하지 마»(실데이터 시안 B):
