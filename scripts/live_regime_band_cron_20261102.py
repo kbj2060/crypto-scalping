@@ -42,8 +42,12 @@ def panel(symbol: str, now_ms: int, fetch=rest_klines) -> pd.DataFrame:
 def main(dry: bool = False, now_ms: int | None = None, fetch=rest_klines, log=R.LOG, scored=R.SCORED, summary=SUMMARY) -> dict:
     now_ms = now_ms or int(time.time() * 1000)
     panels = {c: panel(f"{c}USDT", now_ms, fetch) for c in R.COINS}
+    # 가장 최근 정시 마감 봉(시가 55분)까지만 쓴다 -- 크론이 늦거나 수동 실행해도 같은 결정 시각을 기록한다(그 뒤 봉은 안 씀)
+    panels = {c: p.loc[: p.index[p.index.minute == 55][-1]] for c, p in panels.items()}
     last = {c: p.index[-1] for c, p in panels.items()}
-    assert len({t.minute for t in last.values()}) == 1 and all(t.minute == 55 for t in last.values()), f"마지막 봉이 정시 마감 봉이 아님: {last}"
+    assert len(set(last.values())) == 1, f"코인별 마지막 정시 봉이 다름: {last}"
+    age_min = (now_ms / 1000 - (last["XRP"] + pd.Timedelta(minutes=5)).timestamp()) / 60
+    assert age_min <= 70, f"데이터가 오래됨({age_min:.0f}분 전 결정 시각) -- 수집 지연/장애"
     if dry:
         return {c: {k: v for k, v in S.predict_latest(panels, c).items() if k != "features"} for c in R.COINS}
     new = R.record(panels, log)
