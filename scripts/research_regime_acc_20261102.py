@@ -23,6 +23,41 @@ HS = (12, 48, 144)                      # 1h · 4h · 12h
 SPL = rf.SPLITS
 
 
+def frame_for(df, i, btc, snaps):
+    """결정 인덱스 i 의 피쳐 프레임(학습·서빙 공용). snaps = {경계 시각(초): (가격, 지지[], 저항[])}."""
+    c = df.c.to_numpy()
+    ts = df.index.values.astype("datetime64[s]").astype("int64")
+    R1, S1, nR, nS, R2, S2 = (np.full(len(i), np.nan) for _ in range(6))
+    for k, ix in enumerate(i):
+        sn = snaps.get(ts[ix] + 300)
+        if sn is None:
+            continue
+        _, sup, res = sn
+        nR[k], nS[k] = len(res), len(sup)
+        if res:
+            R1[k] = min(res)
+            R2[k] = max(res)
+        if sup:
+            S1[k] = max(sup)
+            S2[k] = min(sup)
+    X = rf.features(df, i, btc)
+    p = c[i]
+    sig = np.sqrt(pd.Series(np.diff(np.log(c), prepend=np.nan) ** 2).rolling(48).sum().to_numpy())[i]
+    X["lw"] = np.log((R1 - S1) / p)
+    X["lw_sig"] = np.log((R1 - S1) / p / sig)
+    X["dR"], X["dS"] = np.log(R1 / p) - np.log(sig), np.log(p / S1) - np.log(sig)
+    X["bpos"] = (p - S1) / (R1 - S1)
+    X["nR"], X["nS"] = nR, nS
+    X["wide_R"], X["wide_S"] = np.log(R2 / p) - np.log(sig), np.log(p / S2) - np.log(sig)
+    hh, ll = df.h.to_numpy(), df.l.to_numpy()
+    for k in (12, 48, 144):                                  # 과거 k봉이 현재 띠 바깥/가장자리에 얼마나 닿았나
+        Wc, Wh, Wl = sw(c, k + 1)[i - k], sw(hh, k + 1)[i - k], sw(ll, k + 1)[i - k]
+        X[f"ex_up{k}"], X[f"ex_dn{k}"] = np.log(Wc.max(1) / R1), np.log(S1 / Wc.min(1))
+        X[f"touchR{k}"], X[f"touchS{k}"] = (Wh >= R1[:, None] * 0.999).mean(1), (Wl <= S1[:, None] * 1.001).mean(1)
+    X["rng_band"] = np.log((pd.Series(hh).rolling(288).max().to_numpy()[i] - pd.Series(ll).rolling(288).min().to_numpy()[i]) / (R1 - S1))
+    return X, R1, S1, sig, p
+
+
 def build():
     b = rf.load("BTC")
     bc = b.c
@@ -35,34 +70,7 @@ def build():
         c = df.c.to_numpy()
         snaps = pickle.load(open(ROOT / "tmp" / "levels_4coin_20261102" / f"levels_{coin}.pkl", "rb"))
         ts = df.index.values.astype("datetime64[s]").astype("int64")
-        R1, S1, nR, nS, R2, S2 = (np.full(len(i), np.nan) for _ in range(6))
-        for k, ix in enumerate(i):
-            sn = snaps.get(ts[ix] + 300)
-            if sn is None:
-                continue
-            _, sup, res = sn
-            nR[k], nS[k] = len(res), len(sup)
-            if res:
-                R1[k] = min(res)
-                R2[k] = max(res)
-            if sup:
-                S1[k] = max(sup)
-                S2[k] = min(sup)
-        X = rf.features(df, i, btc)
-        p = c[i]
-        sig = np.sqrt(pd.Series(np.diff(np.log(c), prepend=np.nan) ** 2).rolling(48).sum().to_numpy())[i]
-        X["lw"] = np.log((R1 - S1) / p)
-        X["lw_sig"] = np.log((R1 - S1) / p / sig)
-        X["dR"], X["dS"] = np.log(R1 / p) - np.log(sig), np.log(p / S1) - np.log(sig)
-        X["bpos"] = (p - S1) / (R1 - S1)
-        X["nR"], X["nS"] = nR, nS
-        X["wide_R"], X["wide_S"] = np.log(R2 / p) - np.log(sig), np.log(p / S2) - np.log(sig)
-        hh, ll = df.h.to_numpy(), df.l.to_numpy()
-        for k in (12, 48, 144):                                  # 과거 k봉이 현재 띠 바깥/가장자리에 얼마나 닿았나
-            Wc, Wh, Wl = sw(c, k + 1)[i - k], sw(hh, k + 1)[i - k], sw(ll, k + 1)[i - k]
-            X[f"ex_up{k}"], X[f"ex_dn{k}"] = np.log(Wc.max(1) / R1), np.log(S1 / Wc.min(1))
-            X[f"touchR{k}"], X[f"touchS{k}"] = (Wh >= R1[:, None] * 0.999).mean(1), (Wl <= S1[:, None] * 1.001).mean(1)
-        X["rng_band"] = np.log((pd.Series(hh).rolling(288).max().to_numpy()[i] - pd.Series(ll).rolling(288).min().to_numpy()[i]) / (R1 - S1))
+        X, R1, S1, sig, p = frame_for(df, i, btc, snaps)
         for H in HS:
             ok = i + H < len(c)
             W = np.full((len(i), H), np.nan)
@@ -164,5 +172,19 @@ def evaluate():
     print("== 시험 (1회):", json.dumps(out["test"], indent=1))
 
 
+def final():
+    """배포용 최종 모델: 선택 구성(HGB depth3 lr.03 600회, 레벨 과거이력 제외)을 라벨이 있는 전 행으로 적합해 저장(재현 가능)."""
+    import joblib
+    from sklearn.ensemble import HistGradientBoostingClassifier as HGB
+    d = pd.read_parquet(OUT / "data.parquet")
+    ALL = [c for c in d.columns if c not in META]
+    cols = [c for c in ALL if c not in HIST]
+    x = d.dropna(subset=["yA48"])
+    m = HGB(max_depth=3, learning_rate=0.03, max_iter=600, l2_regularization=1.0, min_samples_leaf=200, early_stopping=False, random_state=0).fit(x[cols], x.yA48.astype(int))
+    joblib.dump({"model": m, "features": cols, "label": "yA48: 앞으로 4h 종가가 가장 가까운 지지~저항 띠를 이탈하면 1(추세) 아니면 0(횡보)", "threshold": 0.5,
+                 "trained_rows": len(x), "trained_until": str(x.ts.max())}, OUT / "regime_band_h48_model.joblib")
+    print("saved", len(cols), "features", len(x), "rows")
+
+
 if __name__ == "__main__":
-    {"build": build, "eval": evaluate}[sys.argv[1]]()
+    {"build": build, "eval": evaluate, "final": final}[sys.argv[1]]()
