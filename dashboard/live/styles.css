@@ -3130,6 +3130,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .fc-c { --fc: var(--muted); position: relative; display: flex; flex-direction: column; gap: 2px; padding: 0 8px 2px; min-width: 0; cursor: help; }
 .fc-c + .fc-c { border-left: 1px dashed var(--soft-line); }
 .fc-c.up { --fc: var(--good); } .fc-c.dn { --fc: var(--bad); }
+.fc-c.trd { --fc: var(--warn); }   /* 2026-11-02 «횡보·추세» 칸: 추세(띠 이탈 예상) = 주황 -- 방향이 아니라 초록/빨강을 쓰지 않는다 */
 .fc-c .hz { display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 700; color: var(--muted); white-space: nowrap; }
 .fc-c .hz::after { content: ""; flex: 1; height: 1px; background: var(--line); }   /* 칸마다 이어지는 시간축 */
 .fc-c > b { font-size: 15px; font-weight: 800; color: var(--fc); line-height: 1.25; }

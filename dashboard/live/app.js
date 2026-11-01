@@ -4470,9 +4470,21 @@ function fcTrendCell(t, cell) {
     tags + `<span class="sub">일 전 종가보다 위 ${ups} · 아래 ${n - ups}</span><span class="sub">${t.age_days}일째 · 매일 09시 마감</span>`).replace('<span class="sub"></span>', "");
 }
 
-// 2026-10-31 ⑤ 툴팁 코인별 실측 -- docs/experiments/xrp_trend_cb7d_20261031.md · «지금 추세» 다음 7일 적중 · «7일 예측» 보류 적중(2024-01~2026-10-23, |z|≥1 날만)
+// 2026-10-31 ⑤ 툴팁 코인별 실측 -- docs/experiments/xrp_trend_cb7d_20261031.md · «지금 추세» 다음 7일 적중(2024-01~2026-10-23)
 const TREND_NOTE = { xrp: " · XRP 실측(2018~): 다음 7일 적중 45% · 5표 모두 위일 때 40%만 오름 -- XRP 에선 추세가 이어진다는 뜻이 아니다" };
-const CB7_HIT = { eth: " · 보류 2024~26 ETH 적중 65%(188/288)", xrp: " · 보류 2024~26 XRP 적중 60%(172/288 · 2025 44%) · 통과 후보" };
+// 2026-11-02 사용자 «7일 예측 칸을 빼고 이번 모델(횡보/추세 분별)을 넣어줘» -- 값은 서버 크론이 매 시 정각(+2분) 쌓은 마지막 행(/api/regime-band), 화면은 계산 안 함
+const REGIME_BAND_POLL_MS = 300000;
+let latestRegimeBand = null, regimeBandLastFetchAt = 0;
+async function refreshRegimeBand() {
+  if (activePageTab !== "snapshot" || document.hidden) return;
+  const now = Date.now();
+  if (now - regimeBandLastFetchAt < REGIME_BAND_POLL_MS) return;
+  regimeBandLastFetchAt = now;
+  try {
+    const res = await fetch("/api/regime-band", { cache: "no-cache" });
+    if (res.ok) latestRegimeBand = await res.json();
+  } catch (error) { /* 다음 주기에 다시 -- 받아 둔 값은 그대로 */ }
+}
 // ⑤ 예측 줄(시장 맥락 판 아래, 사용자 시안 B): 지금 추세 → 15분·1시간 예측(10-28) → 4h 예측(+변동성) → 7일(4~13주는 10-28 Macro Trend 카드로). sec = renderMarketCtx 의 판 틀(? 설명).
 function fcRowHtml(sec) {
   const t = latestTrend && latestTrend.ok ? latestTrend : null, ds = latestDirSig && latestDirSig.ok ? latestDirSig : {};
@@ -4546,13 +4558,29 @@ function fcRowHtml(sec) {
       + (ago ? `<u class="ago" style="left:${X(ago[col])}%"></u>` : "") + `<u style="left:${X(p.pct)}%"></u></span>` : "";
     return cell(`${ko} 예측`, p ? cls(p.signal) : "flat", p ? word(p.signal) : "-", sub, tip, gauge);
   };
+  // 2026-11-02 «횡보·추세» 칸(7일 예측 자리): 앞으로 4시간 안에 가장 가까운 지지~저항 띠를 종가로 벗어날 확률 p. 방향이 아니라 «벗어나느냐» -- 상승/하락 색(초록/빨강)을 쓰지 않고
+  //   횡보 = 중립색 · 추세 = 주황(--warn, 띠가 뚫릴 수 있음). 확신 |p−.5|×2 < 0.2 는 과거 정확도 57%(동전)라 «애매»로 비운다. 정시 +90분 넘게 묵으면 «지연».
+  const rb = latestRegimeBand && latestRegimeBand.ok ? (latestRegimeBand.coins || {})[activeSnapshotAsset] : null;
+  const rbOld = !!rb && Date.now() - rb.decided_at_ms > 90 * 60e3;
+  const rbPx = (x) => Number(Number(x).toPrecision(5));
+  const rbTipBase = "횡보·추세 — 앞으로 4시간 안에 종가가 가장 가까운 지지~저항 띠(청산맵·S/R)를 벗어날 확률 p. p < 50% 횡보 · ≥ 50% 추세. 방향은 말하지 않는다.\n"
+    + "확신 = |p−0.5|×2. 표본 밖 정확도(2026-06~10, BTC·ETH·SOL·XRP): 확신 0.8↑ 95% · 0.6~0.8 86% · 0.4~0.6 75% · 0.2~0.4 67% · 0.2 미만 57%(동전 → «애매»). 전체 68.7%(띠 폭÷변동성 기하만 쓴 기준선 61.8%) · 미학습 5코인 제로샷 66.6%.\n"
+    + "매 시 정각 마감 5분봉으로 갱신(+2분). 참고용 — 이 판별로 만든 매매 규칙은 검정 통과 못 했다(전진 판정 전).";
+  const rbCell = !rb ? cell("횡보·추세", "flat", "-", !DIRSHORT_ASSETS.has(activeSnapshotAsset) ? "ETH·BTC·SOL·XRP 전용" : latestRegimeBand ? "기록 대기" : "불러오는 중", rbTipBase)
+    : (() => {
+      const pt = rb.p_trend, conf = rb.confidence, trend = pt >= 0.5, vague = conf < 0.2;
+      const main = rbOld ? "-" : vague ? "애매" : trend ? "추세" : "횡보";
+      const sub = rbOld ? "지연" : vague ? `추세 ${Math.round(pt * 100)}%` : `${Math.round((trend ? pt : 1 - pt) * 100)}% · 확신 ${conf >= 0.6 ? "높음" : conf >= 0.4 ? "중간" : "낮음"}`;
+      const tip = `${rbTipBase}\n지금: 추세 확률 ${(pt * 100).toFixed(1)}% · 확신 ${conf.toFixed(2)} · 띠 ${rbPx(rb.support)} ~ ${rbPx(rb.resistance)} · ${kst(rb.decided_at_ms)} KST 판정${rbOld ? " · 🔴90분 넘게 묵음(수집 지연)" : ""}`;
+      return cell("횡보·추세", !rbOld && !vague && trend ? "trd" : "flat", main, sub, tip);
+    })();
   // 2026-10-17 펜 메모 «타이틀 제거 · 예측은 지금 유지»: 제목 단추(⑤ 예측 · 지금에서 멀리 ?)를 빼고 종합 칩만 머리에 -- 설명은 머리 툴팁
   return `<div class="mc-sec mc-fc"><h4>${eth ? fcSum : ""}${mcTipBtn("q_fc", "⑤ 예측 · 지금에서 멀리")}</h4><div class="fc-row">`
     + (t ? fcTrendCell(t, cell)
          : cell("지금 추세", "flat now", "-", "불러오는 중", "지금 추세"))
     + sCell("15m", "15분", 3, 1) + sCell("1h", "1시간", 12, 2)
     + cell("4h 예측", g4 && !old4 ? cls(g4.signal) : "flat", g4 ? word(g4.signal) : "-", d4Sub, d4Tip, d4Gauge + volLine)
-    + sig(ds.cb, "7일 예측", "z 코인베이스 프리미엄 7일 변화(BTC 기준)" + (CB7_HIT[activeSnapshotAsset] || ""))
+    + rbCell
     + `</div></div>`;   // 2026-10-28 사용자 «4~13주 예측은 Macro Trend 카드로 대체» -- z91 칸 뺌(서버 계산·전진 판정 2027-06 은 그대로)
 }
 
@@ -4628,7 +4656,7 @@ MC_TIPS.q_fc = "지평 = 지금에서 멀리. «지금 추세»만 예측이 아
   + "15분·1시간 예측 = 매달 재학습 LightGBM(ETH 65피쳐 + 호가 깊이 10열 · 표적 4종 × 시드 5) · 표본 밖 예측(2026-06~10) 하위·상위 20% 밖만 방향 · "
   + "그 밖 적중 15분 56% · 1시간 55%(안쪽 51~52%) · 호가 깊이 예열 중(워커 재시작 뒤 12시간)이면 비움 · 참고용(전진 판정 전).\n"
   + "4h 예측 = 매달 재학습 HGB(ETH 65피쳐 · 최근 365일, 과거 표본 밖 예측 상·하위 20% 만) · 2025~26 IC .06 · 2023~24 검증 불통과.\n"
-  + "7일 예측 = 코인베이스 프리미엄 7일 변화 z(BTC 기준, |z|≥1 만) · 2024~26 보류 BTC 59% · ETH 65% · XRP 60%(엄격 기준 60% 에 못 미친 통과 후보).\n"
+  + "횡보·추세 = 앞으로 4시간 안에 종가가 가장 가까운 지지~저항 띠(청산맵·S/R)를 벗어날 확률(BTC·ETH·SOL·XRP 4코인 HGB · 매 시 정각 갱신) · 표본 밖 정확도 68.7%(띠 폭÷변동성 기하만 쓴 기준선 61.8%) · 미학습 5코인 66.6% · 확신 0.8↑ 95% · 방향은 말하지 않음 · 참고용(전진 판정 전). 7일 예측(코인베이스 프리미엄)은 이 칸으로 대체.\n"
   + "4~13주 = Macro Trend 카드(달러지수·순유동성 등 지표별 13주 변화 · ETF 이후 기준).\n"
   + "변동성 = 4시간 실현변동성 QX4(ETH·XRP·BTC·SOL 4코인 HGB·MLP 결합 · 2026-10-26 배포 · 굴림 3창 옛 GBM 이김) · 방향 정보 없음 · 표시 전용(주문 크기에 안 씀). "
   + "ETH 차트 미래 칸 옵션 색 부채꼴 = QX4I(QX4 + 직전 정시 옵션 ATM IV 보정 · 조건부 채택, 전진 판정 2027-01-22) ±1σ — 이 줄 σ 와 조금 다를 수 있다. XRP 부채꼴 = IV 보정 없는 QX4 ±1σ(이 줄 σ 와 같다).\n"
@@ -9326,6 +9354,7 @@ async function tick() {
       refreshTrend();                // 2026-09-28 30분 카드 추세 칸 (60초, 일봉)
       refreshIceberg();              // 2026-10-16 풋프린트 칸별 아이스버그 (30초, ETH · 검증 중 · 신호 아님)
       refreshDirSig();               // 2026-10-15 지평 사다리 7일·4~13주 (10분, 서버 1시간 캐시)
+      refreshRegimeBand();           // 2026-11-02 ⑤ 예측 줄 «횡보·추세» (5분, 서버 크론이 매 시 쌓은 마지막 행 · ETH·BTC·SOL·XRP)
       refreshVol4h();                // 2026-10-15 ⑤ 예측 판 4h 변동성 (5분, ETH)
       refreshDir4h();                // 2026-10-15 ⑤ 예측 판 4h 방향 (2분, ETH·SOL·XRP · 서버 5분 캐시)
       refreshDirShort();             // 2026-10-28 ⑤ 예측 판 15분·1시간 방향 (1분, ETH·BTC·SOL·XRP · 서버 5분 캐시)

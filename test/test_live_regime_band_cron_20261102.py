@@ -42,6 +42,22 @@ def main():
     s = json.loads(summ.read_text())
     # 마지막 결정 시각에서 4h(48봉)가 지난 행만 채점 = 처음 60−4=56시간분(마지막 4시간 결정은 미성숙)
     assert s["n_scored"] == (60 - 4) * 4, s["n_scored"]
+    # 지연 실행(+8분): 마지막 닫힌 봉이 00분 봉이어도 같은 결정 시각(직전 정시)을 기록해야 한다 -- 이미 기록돼 있으므로 0건
+    late_ms = int((last_open + pd.Timedelta(minutes=5 + 8)).timestamp() * 1000)
+    late = C.main(now_ms=late_ms, fetch=make_fetch(full, last_open + pd.Timedelta(minutes=5)), log=log, scored=scored, summary=summ)
+    assert late["recorded"] == 0 and late["decision_ts"].endswith(str(last_open + pd.Timedelta(minutes=5)).split(" ")[1]), late
+    # 새 시각을 지연(+8분)으로 처음 기록하는 경우
+    nxt = last_open + pd.Timedelta(hours=1)
+    first = C.main(now_ms=int((nxt + pd.Timedelta(minutes=13)).timestamp() * 1000), fetch=make_fetch(full, nxt + pd.Timedelta(minutes=5)), log=log, scored=scored, summary=summ)
+    assert first["recorded"] == 4, first
+    # 오래된 데이터(+90분)는 거부하고 아무것도 쓰지 않는다
+    before = sum(1 for _ in log.open())
+    try:
+        C.main(now_ms=int((nxt + pd.Timedelta(minutes=5 + 90)).timestamp() * 1000), fetch=make_fetch(full, nxt), log=log, scored=scored, summary=summ)
+        raise SystemExit("오래된 데이터를 받아들임")
+    except AssertionError:
+        pass
+    assert sum(1 for _ in log.open()) == before
     p = C.panel("XRPUSDT", now_ms, make_fetch(full, last_open))
     assert p.index[-1] == last_open and p.index[-1].minute == 55, "형성 중 봉이 제거되지 않음"
     print("cron 래퍼: 기록", n_log, "채점", s["n_scored"], "정확도(학습 포함 구간·참고 불가)", round(s["acc"], 3), "확신도별", {k: v["n"] for k, v in s["by_conf"].items()})
