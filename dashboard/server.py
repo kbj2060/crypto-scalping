@@ -3600,7 +3600,9 @@ def make_app() -> web.Application:
         if not ox["ctx_ok"]:
             fails.append("okx oi/liq")
         bar = lambda ms: int(ms) // 1000 // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS   # noqa: E731
-        cells = fpd.week_bars(bn, ox if okx_on else None, d0, d1, FOOTPRINT_BAR_SECONDS)
+        # 2026-11-02 사용자 «체결 데이터는 바이낸스만»: 칸(풋프린트 셀)은 바이낸스 테이프만 -- OKX 를 더하면 5분봉 저가 아래로 나온다.
+        #   OI·청산 레인은 위 ox 로 그대로 합산된다(아래 oi_ox·liq).
+        cells = fpd.week_bars(bn, None, d0, d1, FOOTPRINT_BAR_SECONDS)
         oi_bn: dict[int, tuple[float, float]] = {}
         for ts, v in rows(BINANCE_CTX_DB, "SELECT ts_ms, open_interest FROM oi_1s WHERE symbol = ? AND ts_ms >= ? AND ts_ms < ? "
                                                  "ORDER BY ts_ms", [sym, d0 * 1000, d1 * 1000]):
