@@ -16,7 +16,8 @@ chunk = cut("    async def api_oi_5m(", "    async def api_liquidation_5m_histor
     + cut("    async def api_liquidation_5m_history(", "    async def api_breakout_detector(")
 cached = [[600, 10.0, 1000.0, 50, 0], [900, -4.0, 996.0, 50, 0], [1200, 2.0, 998.0, 50, 0]]
 async def swr_cached(key, ttl, produce, **kw): return cached
-ns = {"web": web, "asyncio": asyncio, "swr_cached": swr_cached, "oi_1s": {}, "OI_5M_WINDOW_BARS": 48,
+from dashboard.coin_flow import okx_basis_shift   # 2026-11-02 api_footprint 가 OKX 칸을 바이낸스에 맞춘다
+ns = {"web": web, "asyncio": asyncio, "okx_basis_shift": okx_basis_shift, "swr_cached": swr_cached, "oi_1s": {}, "OI_5M_WINDOW_BARS": 48,
       "OI_5M_BAR_SECONDS": 300, "FOOTPRINT_SYMBOL": "ETHUSDT", "NOCACHE": {}, "oi_5m_buckets": None,
       # OKX 는 900 봉부터(재기동). 900 은 봉 안 Δ, 1200 은 직전 봉 끝 기준 Δ
       "okx_oi_5m": {900: [500.0, 503.0], 1200: [503.5, 501.0]},
@@ -78,7 +79,8 @@ async def main():
     assert cached[1] == [900, -4.0, 996.0, 50, 0], "swr 캐시를 고쳤다 -- 다음 요청에 두 번 더해진다"
     fp = json.loads((await ns["api_footprint"](Req({"since": "0"}))).body)
     assert [b["time"] for b in fp["bars"]] == [900, 1200]
-    assert fp["okxLive"] == {"time": 1200, "levels": [[2740.0, 1.0, 2.0, 0.0, 0.0, 1.0, 0.0]]}
+    assert fp["okxShift"] == 1   # 2026-11-02 이 봉은 바이낸스 칸 5481 · OKX 칸 5480 -- OKX 를 1칸 올려 맞춘다
+    assert fp["okxLive"] == {"time": 1200, "levels": [[2740.5, 1.0, 2.0, 0.0, 0.0, 1.0, 0.0]]}
     # ── 5분봉 청산 원: OKX 가 온전히 본 봉(600 초과)만 더한다 · 캐시 불변 · ETH 만 ──
     lq = json.loads((await ns["api_liquidation_5m_history"](Req({"asset": "eth"}))).body)
     b600, b900, b1200 = lq["bars"]
