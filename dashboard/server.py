@@ -3527,9 +3527,10 @@ def make_app() -> web.Application:
         #   **이후**만 내보낸다 -- 그 전 봉은 바이낸스만이라 더하면 단차가 된다.
         #   `first_bar` 자신은 OKX 가 중간에 합류한 봉이라 **빼고**(> 비교) 시작한다.
         okx_from = okx_fp["first_bar"]
+        # 2026-11-01 사용자 «풋프린트 2개밖에 안 보여» -- 수집기가 멈춰 OKX 이력이 못 살아난 날 이 필터가
+        #   바이낸스 144봉을 전부 숨겼다. 단차(OKX 가 더해지는 첫 봉부터 양이 커짐)보다 이력이 낫다고 보고
+        #   거르지 않는다. 화면이 경계를 알 수 있게 `okxFrom` 을 싣는다.
         base = sorted(footprint_state["bars"].items())
-        if okx_from:
-            base = [(b, c) for b, c in base if b > okx_from]
         recent = base[-want:]
         def _merged(bar: int, cells: dict[int, list[float]]) -> dict[int, list[float]]:
             add = okx_bars.get(bar)
@@ -3591,6 +3592,7 @@ def make_app() -> web.Application:
             #   수급(CVD)은 «수량의 합»이라 가격이 무관해서 현물이 들어간다 -- 같은 데이터가
             #   한 쪽엔 들어가고 한 쪽엔 안 들어가는 게 맞다.
             "venues": ["binance-perp", "okx-swap"] if okx_from else ["binance-perp"],
+            "okxFrom": okx_from,
             "bars": [
                 {"time": bar,
                  # aggTrades 로 메운 봉은 체결이 **묶여** 있어 고래가 과장된다.
