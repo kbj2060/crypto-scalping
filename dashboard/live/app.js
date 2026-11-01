@@ -1065,6 +1065,52 @@ function scheduleSnapshotChartRender() {
 // null 이면 아직 못 받았거나 구버전 서버다 -- 그 경우 전부 보인다(있던 걸 없애지 않는다).
 let enabledAssets = null;
 
+// 2026-11-02 고정한 코인·주식(칩으로 늘 보임). 브라우저 기억 · 기본 = ETH·SOL·XRP·SNDK(사용자 «A 드롭다운» 시안).
+const STOCK_ASSETS = new Set(["sndk"]);   // Binance TradFi 주식 선물 -- 팝오버 «주식» 그룹
+function assetPins() {
+  try { const v = JSON.parse(localStorage.getItem("snapPins") || "null"); if (Array.isArray(v)) return new Set(v); } catch (e) { /* 기억은 편의 */ }
+  return new Set(["eth", "sol", "xrp", "sndk"]);
+}
+function assetPinToggle(a) {
+  const p = assetPins(); if (p.has(a)) p.delete(a); else p.add(a);
+  try { localStorage.setItem("snapPins", JSON.stringify([...p])); } catch (e) { /* 기억은 편의 */ }
+  renderSnapshotAssetTabs(); renderAssetPop();
+}
+function assetPopClose() { const p = el("assetPop"); if (p && !p.hidden) { p.hidden = true; el("assetMore")?.setAttribute("aria-expanded", "false"); } }
+function renderAssetPop() {
+  const body = el("assetPopBody"), pop = el("assetPop");
+  if (!body || !pop || pop.hidden) return;
+  const q = (el("assetSearch")?.value || "").trim().toLowerCase(), pins = assetPins();
+  const items = [...document.querySelectorAll("#snapshotAssetTabs .asset-tab")].filter((b) => !b.hidden)
+    .map((b) => ({ key: b.dataset.asset, label: b.textContent.trim() })).filter((x) => !q || x.label.toLowerCase().includes(q) || x.key.includes(q));
+  const cell = (x) => `<div class="asset-cell${x.key === activeSnapshotAsset ? " on" : ""}"><button type="button" class="ac-pick" data-pick="${x.key}">${escapeHtml(x.label)}</button>`
+    + `<button type="button" class="ac-pin${pins.has(x.key) ? " on" : ""}" data-pin="${x.key}" aria-pressed="${pins.has(x.key)}" title="${pins.has(x.key) ? "고정 해제" : "칩으로 고정"}">★</button></div>`;
+  const sec = (t, l) => l.length ? `<div class="asset-grp">${t}</div><div class="asset-grid">${l.map(cell).join("")}</div>` : "";
+  body.innerHTML = sec("고정", items.filter((x) => pins.has(x.key))) + sec("코인", items.filter((x) => !STOCK_ASSETS.has(x.key))) + sec("주식", items.filter((x) => STOCK_ASSETS.has(x.key)))
+    || '<p class="muted" style="padding:8px 4px">찾는 코인·주식이 없습니다.</p>';
+}
+function setupAssetPop() {
+  const more = el("assetMore"), pop = el("assetPop"), search = el("assetSearch");
+  if (!more || !pop) return;
+  document.body.appendChild(pop);   // 카드(backdrop-filter)·상단 칸 안에 두면 position:fixed 가 그 상자 기준이 돼 어긋난다 -- body 로 옮긴다
+  const open = () => {
+    pop.hidden = false; more.setAttribute("aria-expanded", "true"); if (search) search.value = ""; renderAssetPop();
+    const r = more.getBoundingClientRect(), w = Math.min(540, innerWidth - 16);
+    pop.style.width = `${w}px`; pop.style.top = `${Math.round(r.bottom + 8)}px`; pop.style.left = `${Math.max(8, Math.min(Math.round(r.left), innerWidth - w - 8))}px`;
+    search?.focus();
+  };
+  more.addEventListener("click", () => (pop.hidden ? open() : assetPopClose()));
+  search?.addEventListener("input", renderAssetPop);
+  search?.addEventListener("keydown", (e) => { if (e.key === "Enter") { const f = pop.querySelector("[data-pick]"); if (f) f.click(); } });
+  pop.addEventListener("click", (e) => {
+    const pin = e.target.closest("[data-pin]"), pick = e.target.closest("[data-pick]");
+    if (pin) { assetPinToggle(pin.dataset.pin); return; }
+    if (pick) { assetPopClose(); setActiveSnapshotAsset(pick.dataset.pick); more.focus(); }
+  });
+  document.addEventListener("pointerdown", (e) => { if (!pop.hidden && !pop.contains(e.target) && !more.contains(e.target)) assetPopClose(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !pop.hidden) { assetPopClose(); more.focus(); } });
+  addEventListener("resize", assetPopClose);
+}
 function renderSnapshotAssetTabs() {
   const cn = el("fpCoinName"); if (cn) cn.textContent = String(activeSnapshotAsset || "eth").toUpperCase();
   document.querySelectorAll("#snapshotAssetTabs .asset-tab").forEach((btn) => {
@@ -1077,8 +1123,13 @@ function renderSnapshotAssetTabs() {
     if (enabledAssets) btn.hidden = !on;
     btn.classList.toggle("active", on && btn.dataset.asset === activeSnapshotAsset);
   });
+  // 2026-11-02 칩 = 고정한 것 + 지금 보는 것만(나머지는 «전체 ▾» 팝오버) -- off-chip 은 CSS 가 가린다.
+  const pins = assetPins();
+  document.querySelectorAll("#snapshotAssetTabs .asset-tab").forEach((btn) => btn.classList.toggle("off-chip", !pins.has(btn.dataset.asset) && btn.dataset.asset !== activeSnapshotAsset));
+  const allOn = [...document.querySelectorAll("#snapshotAssetTabs .asset-tab")].filter((b) => !b.hidden), mn = el("assetMoreN");
+  if (mn) mn.textContent = String(allOn.length);
   // 2026-10-01 코인 탭 = 1h~12h 와 같은 세그먼트(사용자 지시) -- 숨은 코인(BTC·HYPE)은 칸이 아니므로 «보이는 칸» 기준으로 조각 폭·위치를 준다.
-  const host = el("snapshotAssetTabs"), vis = [...document.querySelectorAll("#snapshotAssetTabs .asset-tab")].filter((b) => !b.hidden);
+  const host = el("snapshotAssetTabs"), vis = allOn.filter((b) => !b.classList.contains("off-chip"));
   if (host) { host.style.setProperty("--seg-n", String(vis.length || 1)); host.style.setProperty("--i", String(Math.max(0, vis.findIndex((b) => b.classList.contains("active"))))); }
 }
 
@@ -1275,6 +1326,7 @@ function setupSnapshotAssetTabs() {
     btn.addEventListener("click", () => setActiveSnapshotAsset(btn.dataset.asset));
   });
   renderSnapshotAssetTabs();
+  setupAssetPop();
   // 2026-11-02 새로고침해도 보던 코인·주식 탭 유지 -- 전환 코드가 아래 const 들을 쓰므로 스크립트가 끝까지 읽힌 뒤(setTimeout 0)에 부른다.
   setTimeout(() => {
     let saved = ""; try { saved = localStorage.getItem("snapAsset") || ""; } catch (e) { /* 기억은 편의 */ }
@@ -2868,7 +2920,7 @@ function renderMacroCalendar(payload) {
 const PAGE_TABS_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1200px)") : null;
 function placeTopLeft() {
   const top = document.querySelector(".topbar"), slot = el("topLeftSlot"), mid = el("topCenterSlot");
-  const coins = el("snapshotAssetTabs"), home = el("coinHome"), sess = document.querySelector(".top-right");
+  const coins = el("assetBar"), home = el("coinHome"), sess = document.querySelector(".top-right");
   if (!top || !slot || !mid) return;
   if (PAGE_TABS_WIDE && PAGE_TABS_WIDE.matches) {
     if (sess && sess.parentElement !== slot) slot.appendChild(sess);

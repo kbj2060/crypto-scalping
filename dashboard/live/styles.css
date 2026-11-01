@@ -3299,3 +3299,28 @@ html.fit1 #mtBody .mt-det { min-height: 0; overflow-y: auto; scrollbar-width: th
 .entry-pop .ep-btns button:hover { background: rgb(var(--lift) / .08); } .entry-pop small { color: var(--muted); font-size: 10.5px; }
 .entry-pop .hold-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: currentColor; opacity: .30; pointer-events: none; }
 .entry-pop .ep-btns span { position: relative; z-index: 1; }
+
+/* 2026-11-02 코인·주식 탭 = A 드롭다운(사용자 선택): 칩(고정+지금 것) + «전체 N ▾» 팝오버(검색 · 고정 ★ · 코인/주식 그룹). */
+.asset-bar { display: contents; }
+.asset-tab.off-chip { display: none; }
+.asset-more { height: 30px; margin-left: 8px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: rgb(var(--lift) / .035);
+  color: var(--muted); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.asset-more b { font-weight: 800; color: var(--text); }
+.asset-more:hover, .asset-more[aria-expanded="true"] { color: var(--text); background: rgb(var(--lift) / .08); }
+.asset-more:focus-visible, .asset-search:focus-visible, .asset-cell button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.asset-pop { position: fixed; z-index: 2000; padding: 12px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel-strong);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .35); max-height: min(70vh, 520px); overflow: auto; }
+.asset-pop[hidden] { display: none; }
+.asset-search { width: 100%; height: 34px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
+.asset-grp { margin: 12px 4px 6px; font-size: 10px; font-weight: 700; letter-spacing: .14em; color: var(--muted); }
+.asset-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+@media (max-width: 520px) { .asset-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.asset-cell { display: flex; align-items: center; border-radius: 10px; background: rgb(var(--lift) / .05); overflow: hidden; }
+.asset-cell.on { background: var(--text); }
+.asset-cell.on button { color: var(--bg); }
+.asset-cell button { border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.asset-cell .ac-pick { flex: 1 1 auto; min-height: 38px; padding: 0 10px; text-align: left; }
+.asset-cell .ac-pin { flex: none; width: 32px; min-height: 38px; color: var(--muted); opacity: .45; }
+.asset-cell .ac-pin.on { color: var(--amber); opacity: 1; }
+.asset-cell:hover:not(.on) { background: rgb(var(--lift) / .09); }
+@media (max-width: 720px) { .asset-more { margin-left: 0; padding: 0 8px; flex: none; } .asset-more .am-t { display: none; } }   /* 휴대폰: 코인 칩 옆 좁은 칸 -- «N ▾» 만 */
