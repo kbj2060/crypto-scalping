@@ -148,7 +148,7 @@
 /* 유리는 «뒤에 뭔가 있어야» 유리로 보인다. 단색 흰 바탕 위의 blur 는 아무 일도 하지 않으므로,
    굴절시킬 색 덩어리를 깔아 준다(애플이 배경에 쓰는 소프트 메시). */
 [data-theme="light"] body {
-  background:
+  --page-bg:
     /* 2026-09-16 오른쪽 초록 덩어리 제거(사용자). 남은 메시로도 blur 가 굴절할 색은 충분하다. */
     radial-gradient(circle 230px at 92% 66%, color-mix(in srgb, var(--warn) 30%, transparent), transparent 64%),
     radial-gradient(circle 260px at 10% 70%, color-mix(in srgb, var(--bad) 24%, transparent), transparent 62%),
@@ -157,6 +157,7 @@
     radial-gradient(ellipse 900px 700px at 76% 62%, color-mix(in srgb, var(--bad) 22%, transparent), transparent 68%),
     radial-gradient(ellipse 820px 620px at 16% 96%, color-mix(in srgb, var(--warn) 24%, transparent), transparent 66%),
     linear-gradient(180deg, #e3e8f2 0%, var(--bg) 46%, #ccd5e4 100%);
+  background: var(--page-bg);
   background-attachment: fixed;
 }
 [data-theme="light"] html { background: var(--bg); }
@@ -241,9 +242,11 @@ html {
   overscroll-behavior-y: none;
 }
 body {
-  background:
+  /* 2026-11-02 페이지 배경을 변수로 -- 왼쪽 내비·고정 앱바가 같은 그림(창에 고정)을 깔아 이음매 없이 맞는다(사용자 «카드 좌우 백그라운드 색이 이상해졌어») */
+  --page-bg:
     radial-gradient(ellipse 900px 520px at 12% -8%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 55%),
     linear-gradient(180deg, #1d222b 0%, var(--bg) 46%, #13171f 100%);
+  background: var(--page-bg);
   background-attachment: fixed;
   color: var(--text);
   font-family: var(--font-sans);
@@ -2304,7 +2307,7 @@ html.fit1 #snapshotTabPanel > .panel { scroll-margin-top: var(--apph, 64px); }  
 }
 /* 2026-11-02 왼쪽 세로 내비(사용자 «B안: 왼쪽 세로 내비 · 오른쪽 점 레일 제거»). 마크업·동작(app.js setupCardRail/cardRailSync)은 점 레일 그대로 -- 겉만 바꿨다. */
 .card-rail { display: none; position: fixed; z-index: 800; left: 0; top: 0; bottom: 0; width: 72px; align-content: start; justify-items: center; gap: 6px; padding: 18px 0;
-  background: var(--bg); border-right: 1px solid var(--line); }
+  background: var(--page-bg); background-attachment: fixed; border-right: 1px solid var(--line); }
 .card-rail button { width: 58px; padding: 10px 0 9px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer;
   display: grid; justify-items: center; gap: 5px; font-family: inherit; font-size: 11px; font-weight: 600; line-height: 1; transition: background .18s ease-out, color .18s ease-out; }
 .card-rail button[hidden] { display: none; }
@@ -3327,4 +3330,4 @@ html.fit1 #mtBody .mt-det { min-height: 0; overflow-y: auto; scrollbar-width: th
 
 /* 2026-11-02 사용자 펜 메모 «왼쪽 내비로 옮길 때도 앱바는 항상 위에»: 넓은 화면(내비가 보일 때)은 앱바를 위에 고정한다. 아래 여백은 앱바 안(padding)으로 넣어 비치지 않게. */
 body:has(.card-rail:not([hidden])) .app { padding-top: 0; }
-body:has(.card-rail:not([hidden])) header.top { position: sticky; top: 0; z-index: 40; margin-bottom: 0; padding: 10px 0 8px; background: var(--bg); }   /* 위 여백 10 도 앱바 안에 -- 고정돼도 높이가 같다 */
+body:has(.card-rail:not([hidden])) header.top { position: sticky; top: 0; z-index: 40; margin-bottom: 0; padding: 10px 0 8px; background: var(--page-bg); background-attachment: fixed; }   /* 위 여백 10 도 앱바 안에 -- 고정돼도 높이가 같다 */
