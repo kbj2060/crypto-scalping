@@ -3293,8 +3293,8 @@ html.fit1 #mtBody .mt-det { min-height: 0; overflow-y: auto; scrollbar-width: th
 
 /* 2026-11-01 진입가 라벨 팝업(청산 내용) -- 기존 토큰만 */
 .lt-armed .lt-tag.en { pointer-events: auto; cursor: pointer; }
-.entry-pop { position: fixed; z-index: 60; width: 220px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--chart-bg);
-  box-shadow: 0 8px 28px rgb(var(--shadow) / .4); font-size: 12px; display: grid; gap: 8px; }
+.entry-pop { position: fixed; z-index: 60; width: 220px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--pop-bg);   /* 2026-11-02 불투명(사용자 «청산 팝업이 투명이라 안 보여») -- 글래스의 --chart-bg 는 반투명이다 */
+  box-shadow: 0 2px 6px rgb(var(--shadow) / .12), 0 22px 54px -10px rgb(var(--shadow) / .4); font-size: 12px; display: grid; gap: 8px; }
 .entry-pop dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; } .entry-pop dt { color: var(--muted); } .entry-pop dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
 .entry-pop .good { color: var(--good); } .entry-pop .bad { color: var(--bad); }
 .entry-pop .ep-btns { display: flex; gap: 6px; } .entry-pop .ep-btns button { position: relative; overflow: hidden; user-select: none; touch-action: none; flex: 1; padding: 6px 0; border-radius: 7px; border: 1px solid var(--bad); background: none; color: var(--bad); font: 700 12px var(--font-sans); cursor: pointer; }
