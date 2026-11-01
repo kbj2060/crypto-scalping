@@ -39,11 +39,10 @@ def trade_returns(coin="XRP"):
     ts = df.index[i + 1]
     day = ts.normalize()
     out = pd.DataFrame({"day": day, "hour": ts.hour, "long": R[:, 0], "short": R[:, 1]})
-    days = sorted(out.day.unique())
+    code, days = pd.factorize(out.day, sort=True)
     arr = np.zeros((len(days), 24, 2))
-    di = {d: k for k, d in enumerate(days)}
-    arr[out.day.map(di).to_numpy(), out.hour.to_numpy(), 0] = out.long.to_numpy()
-    arr[out.day.map(di).to_numpy(), out.hour.to_numpy(), 1] = out.short.to_numpy()
+    arr[code, out.hour.to_numpy(), 0] = out.long.to_numpy()
+    arr[code, out.hour.to_numpy(), 1] = out.short.to_numpy()
     return days, arr
 
 
