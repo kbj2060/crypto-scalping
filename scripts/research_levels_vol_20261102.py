@@ -54,11 +54,21 @@ def trades(df, i, side, sig):
     o, h, l = df.o.to_numpy(), df.h.to_numpy(), df.l.to_numpy()
     e, s = o[i + 1], sig[i]
     sl = np.where(side < 0, np.maximum(e * (1 + SL_K * s), h[i] * 1.0001), np.minimum(e * (1 - SL_K * s), l[i] * 0.9999))
-    tp = e * (1 - side * TP_K * s)
+    tp = e * (1 + side * TP_K * s)          # 롱 +σ · 숏 −σ (이익 방향)
     return rf.barrier(df, i, side, tp, sl)
 
 
+def selfcheck():
+    df = rf.load('XRP'); i = np.array([5000]); sig = np.full(len(df), 0.01)
+    for sd in (1, -1):
+        o = df.o.to_numpy()[5001]; n, g = trades(df, i, np.array([sd]), sig)
+        tp = o * (1 + sd * TP_K * 0.01)
+        assert (tp > o) == (sd > 0), 'TP 방향'
+    assert (np.abs(trades(df, np.arange(3000, 3300), np.where(np.arange(300) % 2, 1, -1), sig)[0]) > 0).any(), '유효 거래 0건'
+
+
 def main():
+    selfcheck()
     rng = np.random.default_rng(rf.SEED)
     parts, dfs, sigs = [], {}, {}
     for coin in rf.COINS:
