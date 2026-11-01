@@ -2520,15 +2520,12 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   border: 1px solid var(--line); border-right: 0; border-radius: 12px 0 0 12px; background: var(--bg); color: var(--text); cursor: pointer;
   box-shadow: 0 8px 24px rgb(var(--shadow) / .32); font: 700 12px/1 var(--font-sans); touch-action: manipulation; }
 .ofab-tab[hidden] { display: none; }
-.ofab-tab.left { right: auto; left: 0; border-right: 1px solid var(--line); border-left: 0; border-radius: 0 12px 12px 0; padding: 10px 8px 10px 6px; }
-.ofab-tab.left svg { transform: scaleX(-1); }
 .ofab-tab svg { width: 14px; height: 14px; color: var(--muted); }
 .ofab-tab b { writing-mode: vertical-rl; letter-spacing: .12em; }
 .ofab-tab i { display: none; width: 7px; height: 7px; border-radius: 50%; }
 .ofab-tab.long i, .ofab-tab.short i { display: block; }
 .ofab-tab.long i { background: var(--good); } .ofab-tab.short i { background: var(--bad); }
 .ofab-tab.long::before, .ofab-tab.short::before { content: ""; position: absolute; left: -1px; top: 10px; bottom: 10px; width: 3px; border-radius: 3px; }
-.ofab-tab.left::before { left: auto; right: -1px; }
 .ofab-tab.long::before { background: var(--good); } .ofab-tab.short::before { background: var(--bad); }
 .ofab-tab:hover svg { color: var(--text); }
 .ofab-dir.long { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }

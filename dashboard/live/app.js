@@ -11019,7 +11019,7 @@ document.querySelectorAll(".chipset").forEach((box) => {
 // 🔴끄는 건 손잡이(⠿)로만 -- 주문 버튼이 «길게 누르기»라 끌기와 한 표면을 쓰면 옮기다 멈춘 순간 발주된다.
 const OFAB_POS_KEY = "ofabPos";
 const ofab = { open: false, home: null, next: null, x: null, y: null, w: 0, h: 0 };
-// 2026-10-30 사용자 «떠 있는 주문 버튼도 숨겼다 꺼냈다» 시안 A: 숨기면 버튼이 있던 높이의 가까운 화면 가장자리에 손잡이(#ofabTab)만.
+// 2026-10-30 사용자 «떠 있는 주문 버튼도 숨겼다 꺼냈다» 시안 A: 숨기면 버튼이 있던 높이의 화면 오른쪽 가장자리에 손잡이(#ofabTab · 요약 글자)만.
 let ofabHid = false;
 try { ofabHid = localStorage.getItem("ofabHid") === "1"; } catch (e) { /* 기억은 편의일 뿐 */ }
 function ofabHide(hid) {
@@ -11031,8 +11031,7 @@ function ofabHide(hid) {
 function ofabTabPlace() {
   const t = el("ofabTab");
   if (!t || t.hidden) return;
-  const w = ofab.w || 220, h = ofab.h || 46, left = (ofab.x ?? innerWidth) + w / 2 < innerWidth / 2;
-  t.classList.toggle("left", left);
+  const h = ofab.h || 46;   // 2026-11-02 사용자 펜 메모 «플로팅 버튼을 축소시킬 시 오른쪽에만 요약되서 붙도록» -- 왼쪽 가장자리 손잡이는 없앴다(항상 오른쪽)
   t.style.top = `${Math.max(8, Math.min((ofab.y ?? innerHeight) + h / 2 - t.offsetHeight / 2, innerHeight - t.offsetHeight - 8))}px`;
 }
 
@@ -11191,6 +11190,7 @@ function renderOfab() {
   const tb = el("ofabTab");
   if (tb) {
     tb.classList.toggle("long", side === "LONG"); tb.classList.toggle("short", side === "SHORT");
+    const tl = tb.querySelector("b"); if (tl) tl.textContent = el("ofabPos")?.textContent || "주문";   // 2026-11-02 손잡이 글자 = 요약(«LONG 28% · +$59.76», 포지션 없으면 «주문»)
     tb.setAttribute("aria-label", `주문 버튼 꺼내기${qty ? ` — ${side} ${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(2)}` : ""}`);
     tb.title = tb.getAttribute("aria-label");
   }
