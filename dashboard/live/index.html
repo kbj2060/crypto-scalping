@@ -28,7 +28,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
-  <link rel="stylesheet" href="styles.css?v=20261101-fp24">
+  <link rel="stylesheet" href="styles.css?v=20261102-rail">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -574,13 +574,13 @@
     </section>
 
   </main>
-  <!-- 2026-09-30 카드 이동 레일(사용자 지시 «점만 남기고 글자는 제거»). 넓은 화면·스냅샷 탭에서만. app.js setupCardRail -->
+  <!-- 2026-11-02 왼쪽 세로 내비로 바꿈(사용자 «B안 왼쪽 세로 내비 · 오른쪽 레일 제거»; 점+글자 없음 → 아이콘+글자). 2026-09-30 카드 이동 레일(사용자 지시 «점만 남기고 글자는 제거»). 넓은 화면·스냅샷 탭에서만. app.js setupCardRail -->
   <nav id="cardRail" class="card-rail" aria-label="카드 이동" hidden>
-    <button type="button" data-go="fpCard" aria-label="Footprint 카드로" title="Footprint"></button>
-    <button type="button" data-go="mtCard" aria-label="Macro Trend 카드로" title="Macro Trend"></button>
-    <button type="button" data-go="newsCard" aria-label="뉴스 카드로" title="뉴스"></button>
-    <button type="button" data-go="optCard" aria-label="Option 카드로" title="Option"></button>
-    <button type="button" data-go="acctCard" aria-label="계좌 카드로" title="계좌"></button>
+    <button type="button" data-go="fpCard" aria-label="Footprint 카드로" title="Footprint"><i aria-hidden="true">▦</i><span>풋프린트</span></button>
+    <button type="button" data-go="mtCard" aria-label="Macro Trend 카드로" title="Macro Trend"><i aria-hidden="true">◐</i><span>매크로</span></button>
+    <button type="button" data-go="newsCard" aria-label="뉴스 카드로" title="뉴스"><i aria-hidden="true">☰</i><span>뉴스</span></button>
+    <button type="button" data-go="optCard" aria-label="Option 카드로" title="Option"><i aria-hidden="true">◇</i><span>옵션</span></button>
+    <button type="button" data-go="acctCard" aria-label="계좌 카드로" title="계좌"><i aria-hidden="true">$</i><span>계좌</span></button>
   </nav>
   <!-- 2026-09-25 떠다니는 주문 버튼(사용자 지시). 손잡이(⠿)로만 끈다 -- 주문 버튼이 «길게 누르기»라
        끌기와 한 표면을 쓰면 옮기다 손이 멈춘 순간 주문이 나갈 수 있다. 펼치면 계좌 카드의 주문

@@ -2247,7 +2247,7 @@ body.order-coin-off .acct-lanes::before {
   /* 2026-09-30 옵션 카드를 풋프린트 카드 안 오른쪽 칸으로 흡수(사용자 지시) -- 카드가 윗줄 전폭. */
   /* 2026-09-30 시안 Y(사용자 선택): 카드 셋이 위에서부터 Footprint · Option · 계좌(전부 전폭, 왼쪽 정렬) + 오른쪽 점 레일 자리.
      시장 맥락은 Footprint 안(1초 수급 아래 칸, app.js mcPlace), 옵션·블록은 Option 카드. */
-  #snapshotTabPanel { margin-right: 36px; }
+  #snapshotTabPanel { margin-right: 0; }   /* 2026-11-02 오른쪽 점 레일 자리(36px)는 왼쪽 내비로 옮겼다 */
   #snapshotTabPanel > .liq-map-panel { position: relative; }
   #mcBody.mc-cmp { position: absolute; z-index: 1; overflow: hidden; align-content: start;   /* 줄을 위로 -- 칸 높이만큼 늘어난 줄을 «내용 높이»로 재던 되먹임(5초마다 +10px)을 막는다 */   /* 2026-09-30 스크롤 없음 -- 높이는 renderCandleSvg 가 내용에 맞춰 준다(mcNeedH) */
     padding-top: 4px; column-gap: 14px; }   /* 2026-10-01 윗선 제거(사용자 «①~④ 회색 실선 모두 제거») */
@@ -2312,14 +2312,17 @@ html.fit1 #snapshotTabPanel > .panel { scroll-margin-top: 10px; }
   html.fit1 #snapAcctPerf .acct-plot svg { height: var(--acctplot, 240px); max-height: none; }   /* 2026-10-01 줄을 위로 -- 남는 칸을 app.js fitLayout 이 재서 사다리에 준다 */   /* 고정 -- 일정 받기 전 안내 줄로 174px 였다가 113px 로 줄며 차트가 늘었다 */
   html.fit1 #fpCard > .ops-health-head, html.fit1 #liquidationMapList { flex: none; }
 }
-.card-rail { display: none; position: fixed; z-index: 800; right: 12px; top: 50%; transform: translateY(-50%); gap: 18px; padding: 6px 0; }
-.card-rail::before { content: ""; position: absolute; left: 50%; top: 10px; bottom: 10px; width: 2px; margin-left: -1px; background: var(--line); border-radius: 1px; }
-.card-rail button { position: relative; width: 16px; height: 16px; padding: 0; border-radius: 50%; border: 2px solid var(--line); background: var(--bg, var(--panel)); cursor: pointer;
-  transition: background .18s ease-out, border-color .18s ease-out, transform .18s ease-out; }
-.card-rail button::after { content: ""; position: absolute; inset: -8px; }   /* 누르는 면 32px */
-.card-rail button:hover { border-color: var(--muted); }
-.card-rail button:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
-.card-rail button.on { background: var(--text); border-color: var(--text); transform: scale(1.12); }
+/* 2026-11-02 왼쪽 세로 내비(사용자 «B안: 왼쪽 세로 내비 · 오른쪽 점 레일 제거»). 마크업·동작(app.js setupCardRail/cardRailSync)은 점 레일 그대로 -- 겉만 바꿨다. */
+.card-rail { display: none; position: fixed; z-index: 800; left: 0; top: 0; bottom: 0; width: 72px; align-content: start; justify-items: center; gap: 6px; padding: 18px 0;
+  background: var(--bg); border-right: 1px solid var(--line); }
+.card-rail button { width: 58px; padding: 10px 0 9px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer;
+  display: grid; justify-items: center; gap: 5px; font-family: inherit; font-size: 11px; font-weight: 600; line-height: 1; transition: background .18s ease-out, color .18s ease-out; }
+.card-rail button[hidden] { display: none; }
+.card-rail button i { font-style: normal; font-size: 17px; line-height: 1; }
+.card-rail button:hover { background: var(--panel); color: var(--text); }
+.card-rail button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.card-rail button.on { background: var(--panel-strong); color: var(--text); }
+body:has(.card-rail:not([hidden])) { padding-left: 72px; }
 @media (prefers-reduced-motion: reduce) { .card-rail button { transition: none; } }
 /* 2026-09-27 헤더 한 줄(사용자 지시): 스냅샷의 «코인 탭 · 발표 경보 · 테마» 줄을 페이지 탭과 세션 사이로 올렸다.
    다른 탭에서는 지금처럼 안 보인다. 모바일(≤720)은 세션 다음 줄로 보내 전과 같은 모양을 지킨다. */
