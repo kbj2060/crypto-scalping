@@ -3404,3 +3404,9 @@ html.lg-on .ofab-bar { background: rgba(255, 255, 255, 0.4); }
 .lt-tag.en.lane > b, .lt-tag.en.lane > span { flex: 0 0 100%; white-space: nowrap; }   /* 줄마다 한 항목 */
 .lt-en-r::before { content: " · "; font-weight: 700; }   /* 레인이 아니면 예전처럼 한 줄 «· 증거금 …» */
 .lt-tag.en.lane .lt-en-r::before { content: none; }
+
+/* 2026-11-02 사용자 «글래스 테마에서 모든 팝업창과 드롭다운이 투명해서 안 보인다» -- 떠 있는 면(주문 패널 말풍선·선 도구 주문창·지표 팝업·설명 대화상자·알림 센터·툴팁)은 불투명 바닥 + 흐림 없음. */
+.ofab-say, .lt-tk, .fp-ind-pop, .help-dlg, .ofab-panel, .nc, .chart-tooltip.visible {
+  background: var(--pop-bg); backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+[data-theme="light"] .chart-tooltip.visible { background: #2d333d; }

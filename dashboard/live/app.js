@@ -10368,7 +10368,7 @@ const manualButtonsDisabled = (v) =>
 
 async function manualEntryPreview(side, kind = "entry", ov = null) {
   const box = el("snapEntryResult");
-  if (!box || manualOrderBusy) return;   // 진행 중인 주문 표시를 덮지 않는다
+  if (!box || manualOrderBusy) { manualPreviewInFlight = false; manualFireOnPreview = false; return; }   // 진행 중인 주문 표시를 덮지 않는다
   manualPreviewInFlight = true;
   manualButtonsDisabled(true);
   box.hidden = false;
@@ -11099,6 +11099,9 @@ function switchPlan(side) {
 async function manualExitPreview(side, ov = null) {
   manualEntryClearConfirm();   // 🔴옛 확인(다른 방향·진입)이 계좌 조회 동안 남아 있으면 0.4초 길게 누르기 타이머가 그걸 낸다(10-16 감사)
   manualButtonsDisabled(true);
+  // 🔴2026-11-02 «청산 100% 꾹 눌렀는데 안 나갔다»: 계좌 조회가 길어 꾹 누르기 타이머(1.5초)가 조회 도중 끝나면
+  //   pending 도 inFlight 도 없어 **아무 일 없이 지나갔고**, 미리보기는 뒤늦게 30초 확인 버튼만 띄웠다. 조회 구간도 «진행 중»이다.
+  manualPreviewInFlight = true;
   try {
     binanceAccountLastFetchAt = 0;      // 클라이언트 30초 게이트 우회
     await refreshBinanceAccount();
