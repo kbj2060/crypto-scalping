@@ -81,7 +81,7 @@ def build():
         btc = pd.DataFrame({"er48": (b - b.shift(48)).abs() / b.diff().abs().rolling(48).sum(),
                             "rv": np.log(np.sqrt((np.log(b).diff() ** 2).rolling(48).sum()) / np.sqrt((np.log(b).diff() ** 2).rolling(288).sum()))})
         i = np.arange(len(df))
-        i = i[(i % STEP == STEP - 1) & (i >= WARM)]
+        i = i[(i % STEP == STEP - 1) & (i >= WARM) & (i + 1 < len(df))]
         snaps = pickle.load(open(ROOT / "tmp" / "levels_4coin_20261102" / f"levels_{coin}.pkl", "rb"))
         X = edge_frame(df, i, btc, snaps)
         X["coin"], X["ts"] = coin, df.index[i + 1]                              # 결정 시각 T = 봉 i 마감 = 다음 봉 시가
