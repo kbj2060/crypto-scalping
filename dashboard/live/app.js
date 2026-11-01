@@ -2961,11 +2961,10 @@ function fitOn() {
 function fitLayout() {
   // 2026-09-30(2) 측정해서 고치는 방식을 버렸다(새로고침마다 두세 번 크기가 바뀌었다): 풋프린트 차트 칸은 CSS(html.fit1 — 카드 = 창 높이, 차트 칸 = 남는 공간)가
   //   첫 배치부터 정하고, 행사가 사다리는 창 높이 공식 하나로 정한다. 여기서는 모드 켜기/끄기와 계좌·Option 최소 높이만.
-  const on = fitOn(), vh = innerHeight - 20;
+  const apph = appBarH(), on = fitOn(), vh = innerHeight - apph - 10;   // 2026-11-02 앱바가 위에 고정 -- 카드 높이 = 창 − 앱바 − 아래 여백
   document.documentElement.classList.toggle("fit1", on);
-  // 2026-11-02 사용자 펜 메모 «앱바와 카드까지가 화면에 꽉 차도록»: 첫 화면 = 앱바 + 풋프린트 카드. 앱바 아래 끝을 재서 카드 높이에서 뺀다(styles.css html.fit1 #fpCard).
-  const bar = document.querySelector("header.top");
-  if (on && bar) document.documentElement.style.setProperty("--apph", `${Math.round(bar.offsetTop + bar.offsetHeight + (parseFloat(getComputedStyle(bar).marginBottom) || 0))}px`);
+  // 2026-11-02 사용자 펜 메모 «앱바와 카드까지가 화면에 꽉 차도록»: 앱바 아래 끝을 CSS 변수로 -- 카드 높이(styles.css html.fit1)와 스크롤 여백이 쓴다.
+  if (on) document.documentElement.style.setProperty("--apph", `${apph}px`);
   const acct = el("acctCard"), opt = el("optCard");
   if (acct) { acct.style.minHeight = on ? `${vh}px` : ""; if (!on) acct.style.removeProperty("--acctz"); }
   if (opt) opt.style.minHeight = on ? `${vh}px` : "";
@@ -3036,13 +3035,18 @@ function fitLayout() {
 }
 // Option 격자: 머리·커버 줄(~130) 아래 여섯 줄 중 사다리가 넷(칸 머리·칩 ~70 을 빼고) -- 측정 없이 창 높이로.
 // 2026-10-07 ⑤ 다음 24시간이 뉴스 카드로 가서(사용자 지시) 예전에 빼던 152(116 + 여백·선 36)를 사다리에 돌려준다.
-function fitLadderFormula() { return Math.max(300, Math.min(900, Math.round(((innerHeight - 20 - 130) * 4) / 6 - 70))); }
+function appBarH() {   // 앱바가 차지하는 높이(위 여백 포함) -- 🔴offsetTop 은 고정(sticky)이면 스크롤 따라 변하므로 쓰지 않는다
+  const b = document.querySelector("header.top"); if (!b) return 64;
+  const cs = getComputedStyle(b), pt = cs.position === "sticky" ? 0 : parseFloat(getComputedStyle(b.parentElement).paddingTop) || 0;
+  return Math.round(pt + b.offsetHeight + (parseFloat(cs.marginBottom) || 0));
+}
+function fitLadderFormula() { return Math.max(300, Math.min(900, Math.round(((innerHeight - appBarH() - 10 - 130) * 4) / 6 - 70))); }
 // 첫 렌더 전에 모드 클래스와 최소 높이를 바로 입힌다 -- 데이터가 오기 전에 상자 높이가 이미 맞아 있다
 function fitApplyCached() {
   if (!fitOn()) return;
   document.documentElement.classList.add("fit1");
   fitOptLadderH = FIT0.lad || fitLadderFormula();   // 지난번에 잰 값(같은 창 높이) -- 새로고침 첫 그림부터 맞는다
-  ["acctCard", "optCard"].forEach((id) => { const c = el(id); if (c) c.style.minHeight = `${innerHeight - 20}px`; });
+  ["acctCard", "optCard"].forEach((id) => { const c = el(id); if (c) c.style.minHeight = `${innerHeight - appBarH() - 10}px`; });
   if (fitAcctPlotH) el("acctCard")?.style.setProperty("--acctplot", `${fitAcctPlotH}px`);
   const ac = el("acctCard");
   if (ac && fitAcctZ < 1) ac.style.setProperty("--acctz", String(fitAcctZ));
@@ -5429,7 +5433,6 @@ function renderSupply1s(box) {
   // 🔴이 줄이 없어서 HTML 의 고정 viewBox(1200) 가 그대로 남아 있었다. 폭을 부모에서 받도록
   //   바꾸는 순간 그림이 viewBox 밖으로 나간다 -- 좌표계와 뷰박스는 같이 움직여야 한다.
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  svg.innerHTML = "";
 
   const now = S.now || 0;
   // 🔴창이 «최근 5분»(미끄러짐)이 아니라 **지금 만들어지고 있는 5분봉 그 자체**다
@@ -5444,6 +5447,12 @@ function renderSupply1s(box) {
   const allSecs = [...S.supply.keys()].filter((s) => s >= first && s <= now)
                                       .sort((a, b) => a - b);
   const secs = allSecs;
+  // 2026-11-02 사용자 펜 메모 «5분 정각마다 차트 전체가 비워지고 다시 생긴다 -- 바뀌는 것만»: 새 봉의 첫 1~2초(점 2개 미만)에
+  //   전체를 지우고 «집계 중» 글자만 두던 것을, 지난 그림을 흐리게 남겼다가 새 선이 생기면 바꿔 그린다.
+  svg.style.transition = "opacity .25s";
+  if (secs.length < 2 && svg.querySelector("polyline, path")) { svg.style.opacity = ".35"; return; }
+  svg.style.opacity = "";
+  svg.innerHTML = "";
   if (secs.length < 2) {
     const txt = document.createElementNS(NS, "text");
     txt.setAttribute("x", w / 2); txt.setAttribute("y", h / 2);
@@ -6371,7 +6380,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   (그냥 풋프린트 위에 얹으면 모바일은 밀도 범례, 데스크톱은 1초 수급의 시각 눈금과 겹쳤다.)
   const STATS_ROW_H = subOn && !splitR ? 14 : 0;
   // 청산 밀도 범례(9px 한 줄) -- 풋프린트 배경을 설명하므로 풋프린트 바로 위(2026-09-21).
-  const SUB_LEGEND_H = subOn ? 14 : 0;
+  const SUB_LEGEND_H = subOn ? 38 : 0;   // 2026-11-02 14 -> 38(사용자 펜 메모 «버튼들의 여유 공간이 너무 없어») -- 차트 위 한 줄(LONG/SHORT·지표) 높이
   // 순서(2026-09-28, 호가·체결 프로파일 제거 후): 1단(데스크톱·모바일) = 1초 수급 → 밀도 범례 → 풋프린트 → 레인,
   //   2단 = 왼쪽 밀도 범례 → 풋프린트 → 레인 · 오른쪽 1초 수급. 본문의 `h` 는 상자 전체(hAll)다.
   // 2026-10-01 1단(휴대폰·세로 화면)은 1초 수급을 풋프린트 **아래**로(사용자 지시): 위 = 밀도 범례 + 호가 요약 줄 → 풋프린트 → 레인·리본 → 1초 수급.

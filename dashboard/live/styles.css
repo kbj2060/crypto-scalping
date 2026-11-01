@@ -2285,7 +2285,7 @@ body.not-eth:not([data-coin="xrp"]) #mcWhen { display: none; }   /* ⑤ = 옵션
 /* 2026-09-30 카드 이동 레일(점만, 사용자 지시): 오른쪽 가운데 고정 · 지금 보는 카드 = 채운 점. 넓은 화면(위 미디어 쿼리)에서만 보인다. */
 /* 2026-09-30 한 화면 모드(app.js fitLayout): 카드 단위 스냅 */
 /* 2026-10-01 스크롤 스냅 제거(사용자 «스크롤 하면 자동으로 내려가는 건 제거») -- 카드 이동은 오른쪽 점 레일로 */
-html.fit1 #snapshotTabPanel > .panel { scroll-margin-top: 10px; }
+html.fit1 #snapshotTabPanel > .panel { scroll-margin-top: var(--apph, 64px); }   /* 2026-11-02 앱바가 위에 고정 -- 내비로 옮겨도 카드가 앱바 아래에서 시작 */
 /* 2026-09-30(2) 풋프린트 카드 = 창 높이, 차트 칸 = 남는 공간(flex) -- 차트 높이를 JS 가 재서 고치지 않는다(새로고침 때 흔들렸다).
    ⑤ 24시간은 자리를 미리 잡아(내용이 늦게 와도 차트 칸이 안 줄어든다). */
 @media (min-width: 1700px) and (orientation: landscape) {
@@ -2659,7 +2659,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .fp-line-switch .mc-sw-g { flex-wrap: nowrap; }
 .fp-line-switch .mc-sw-ma { position: absolute; right: 0; bottom: calc(100% + 3px); }
 /* 2026-10-28 펜 메모: 넓은 화면 차트 위 줄 = [미니맵 | 선 주문(가운데, 큰 버튼) | 지표(오른쪽, 누르면 팝업)] */
-.fp-ind-btn { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line);
+.fp-ind-btn { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--line);
   background: var(--glass); color: var(--text); font: 700 12px/1 var(--font-sans); cursor: pointer; }
 .fp-ind-btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .fp-ind-btn b { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; display: inline-grid; place-items: center;
@@ -2679,8 +2679,8 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 /* 2026-10-30 [LONG | SHORT] 시안 B(사용자 선택) -- 터미널 탭: 테두리 없이 색 점 + 등폭 글자 · 바닥 실선 하나 · 눌린 쪽(지금 선 배치의 방향) 아래로
    그 색 막대가 미끄러져 온다(app.js renderLineTool 이 자리를 잡는다). 글자도 그 색. */
 #fpCard.fp-toprow:not(.fp-alt-on) .fp-line-btn { position: absolute; z-index: 2; transform: translate(-50%, -50%); display: inline-flex; }
-.fp-line-btn { gap: 2px; height: 32px; padding: 0 2px; border-bottom: 1px solid var(--line); }
-.fp-line-btn button { display: inline-flex; align-items: center; height: 100%; padding: 0 14px; border: 0; background: none; color: var(--muted);
+.fp-line-btn { gap: 8px; height: 34px; padding: 0 6px; border-bottom: 1px solid var(--line); }   /* 2026-11-02 여유(gap 2→8 · 높이 32→34) -- 사용자 펜 메모 */
+.fp-line-btn button { display: inline-flex; align-items: center; height: 100%; padding: 0 20px; border: 0; background: none; color: var(--muted);
   font: 700 12px/1 var(--font-mono); letter-spacing: .2em; cursor: pointer; transition: color .16s; }
 .fp-line-btn button::before { content: ""; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; }
 .fp-line-btn [data-lines="LONG"]::before { background: var(--good); } .fp-line-btn [data-lines="SHORT"]::before { background: var(--bad); }
@@ -2825,7 +2825,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .ops-health-head h3.card-title { margin: 0 14px 0 0; }
 #acctCard .opt-card-head { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
 #newsCard .opt-card-head .muted, #optCard .opt-card-head .muted, #acctCard .opt-card-head .muted { margin: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
-html.fit1 #newsCard { height: calc(100vh - 20px); display: flex; flex-direction: column; }
+html.fit1 #newsCard { height: calc(100vh - var(--apph, 64px) - 10px); display: flex; flex-direction: column; }
 html.fit1 #newsCard[hidden] { display: none; }
 html.fit1 #newsCard > .ops-health-head { flex: none; }
 html.fit1 #newsBody { flex: 1 1 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
@@ -3265,7 +3265,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .mt-foot { margin: 14px 0 0; font-size: 11px; }
 /* 2026-10-28 한 화면 모드(사용자 «다른 카드들처럼 한 화면에 꽉 차게»): 카드 = 창 높이 · 표 지표 줄이 남는 높이를 나눠 갖는다(1fr, 최소 22px) ·
    상세 칸은 넘치면 제 안에서만 스크롤. html.fit1 은 1700px 이상 가로 화면에서만 켜진다(app.js fitOn). */
-html.fit1 #mtCard { height: calc(100vh - 20px); display: flex; flex-direction: column; }
+html.fit1 #mtCard { height: calc(100vh - var(--apph, 64px) - 10px); display: flex; flex-direction: column; }
 html.fit1 #mtCard > .ops-health-head, html.fit1 #mtBody .mt-foot, html.fit1 #mtBody .mt-key { flex: none; }
 html.fit1 #mtBody { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
 html.fit1 #mtBody .mt-wrap { flex: 1 1 0; min-height: 0; }
@@ -3324,3 +3324,7 @@ html.fit1 #mtBody .mt-det { min-height: 0; overflow-y: auto; scrollbar-width: th
 .asset-cell .ac-pin.on { color: var(--amber); opacity: 1; }
 .asset-cell:hover:not(.on) { background: rgb(var(--lift) / .09); }
 @media (max-width: 720px) { .asset-more { margin-left: 0; padding: 0 8px; flex: none; } .asset-more .am-t { display: none; } }   /* 휴대폰: 코인 칩 옆 좁은 칸 -- «N ▾» 만 */
+
+/* 2026-11-02 사용자 펜 메모 «왼쪽 내비로 옮길 때도 앱바는 항상 위에»: 넓은 화면(내비가 보일 때)은 앱바를 위에 고정한다. 아래 여백은 앱바 안(padding)으로 넣어 비치지 않게. */
+body:has(.card-rail:not([hidden])) .app { padding-top: 0; }
+body:has(.card-rail:not([hidden])) header.top { position: sticky; top: 0; z-index: 40; margin-bottom: 0; padding: 10px 0 8px; background: var(--bg); }   /* 위 여백 10 도 앱바 안에 -- 고정돼도 높이가 같다 */
