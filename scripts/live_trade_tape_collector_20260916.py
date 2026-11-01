@@ -771,7 +771,7 @@ async def backfill_loop(store: TapeStore, fetch_minute, per_cycle: int, source: 
 #   그래서 복구 aggTrades(가중치 20)는 프로세스 전체가 최소 간격으로(분당 ≤ 600) 나가고, 응답 헤더의 IP 1분 사용량이
 #   BN_WEIGHT_YIELD 이상이면 다음 분까지 양보한다 -- 복구가 느려질 뿐 봇을 막는 418 차단을 부르지 않는다.
 BN_AGG_GAP_S = 2.0
-BN_WEIGHT_YIELD = 1700
+BN_WEIGHT_YIELD = 1500    # 복구 없이도 분당 ~1,200 이 나간다(2026-11-01 실측) -- 한도 2,400 에서 900 은 남긴다
 _BN_PACE = {"next": 0.0}
 
 
