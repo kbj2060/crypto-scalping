@@ -2311,10 +2311,12 @@ html.fit1 #snapshotTabPanel > .panel { scroll-margin-top: var(--apph, 64px); }  
 .card-rail button { width: 58px; padding: 10px 0 9px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer;
   display: grid; justify-items: center; gap: 5px; font-family: inherit; font-size: 11px; font-weight: 600; line-height: 1; transition: background .18s ease-out, color .18s ease-out; }
 .card-rail button[hidden] { display: none; }
-.card-rail button i { font-style: normal; font-size: 17px; line-height: 1; }
+.card-rail button svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }   /* 2026-11-02 아이콘 = 선 그림(사용자 «C안») */
 .card-rail button:hover { background: var(--panel); color: var(--text); }
 .card-rail button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
-.card-rail button.on { background: var(--panel-strong); color: var(--text); }
+.card-rail button.on { background: transparent; color: var(--text); }
+.card-rail button.on::before { content: ""; position: absolute; left: -7px; top: 10px; bottom: 10px; width: 3px; border-radius: 3px; background: var(--amber); }   /* 선택 = 왼쪽 막대(시안 C) */
+.card-rail button { position: relative; }
 body:has(.card-rail:not([hidden])) { padding-left: 72px; }
 @media (prefers-reduced-motion: reduce) { .card-rail button { transition: none; } }
 /* 2026-09-27 헤더 한 줄(사용자 지시): 스냅샷의 «코인 탭 · 발표 경보 · 테마» 줄을 페이지 탭과 세션 사이로 올렸다.
