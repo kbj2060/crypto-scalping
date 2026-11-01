@@ -231,5 +231,101 @@ def s0v3():
         print(k, {a: (round(b, 2) if isinstance(b, float) else b) for a, b in v.items()} if isinstance(v, dict) else v)
 
 
+# ---- 진단 S2d: 큰 움직임(ER 상위 1/3) 예측 가능성 + R2 정책 쓰임 (보고 전용, 승격 근거 아님; regime_f_diag_20261102.md) ----
+def features(df, i, btc):
+    from numpy.lib.stride_tricks import sliding_window_view as sw
+    c, h, l, qv, tb = (df[x] for x in ("c", "h", "l", "qv", "tbqv"))
+    lc = np.log(c)
+    r1 = lc.diff()
+    rv = {w: np.sqrt((r1 ** 2).rolling(w).sum()) for w in (12, 48, 288, 2016)}
+    ad = c.diff().abs()
+    er = {w: (c - c.shift(w)).abs() / ad.rolling(w).sum() for w in (48, 288)}
+    vr = (lc.diff(12).rolling(288).var()) / (12 * r1.rolling(288).var())
+    hi, lo = h.rolling(288).max(), l.rolling(288).min()
+    s12 = qv.rolling(12).sum()
+    X = pd.DataFrame({
+        "rv12_288": np.log(rv[12] / rv[288]), "rv48_288": np.log(rv[48] / rv[288]), "rv288_2016": np.log(rv[288] / rv[2016]), "lrv288": np.log(rv[288]),
+        "er48": er[48], "er288": er[288], "vr": vr, "pos": (c - lo) / (hi - lo), "rng_rv": np.log((hi - lo) / c) - np.log(rv[288]),
+        "qv_ratio": np.log(s12 / s12.rolling(2016).mean()), "tk12": (2 * tb - qv).rolling(12).sum() / s12, "tk48": (2 * tb - qv).rolling(48).sum() / qv.rolling(48).sum(),
+    }).iloc[i].reset_index(drop=True)
+    hh, ll = sw(h.to_numpy(), 288)[i - 287], sw(l.to_numpy(), 288)[i - 287]
+    X["since_hi"], X["since_lo"] = 287 - hh.argmax(1), 287 - ll.argmin(1)
+    hr = (df.index[i] + pd.Timedelta(minutes=5)).hour.values
+    X["hs"], X["hc"] = np.sin(2 * np.pi * hr / 24), np.cos(2 * np.pi * hr / 24)
+    X["btc_er48"], X["btc_rv"] = btc["er48"].iloc[i].values, btc["rv"].iloc[i].values
+    return X
+
+
+def s2d():
+    from sklearn.ensemble import HistGradientBoostingClassifier as HGB
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import roc_auc_score
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+    rng = np.random.default_rng(SEED)
+    b = load("BTC")
+    bc = b.c
+    btc = pd.DataFrame({"er48": (bc - bc.shift(48)).abs() / bc.diff().abs().rolling(48).sum(),
+                        "rv": np.log(np.sqrt((np.log(bc).diff() ** 2).rolling(48).sum()) / np.sqrt((np.log(bc).diff() ** 2).rolling(288).sum()))})
+    parts = []
+    for coin in COINS:
+        df = load(coin)
+        i = decisions(df)
+        (rn, rg), _ = strategies2(df, i)
+        X = features(df, i, btc)
+        X["coin"], X["ts"], X["er"], X["r"], X["rg"] = coin, df.index[i + 1], er_fwd(df.c.to_numpy(), i), rn, rg
+        parts.append(X)
+    d = pd.concat(parts, ignore_index=True).replace([np.inf, -np.inf], np.nan)
+    d["day"] = d.ts.dt.date
+    FE = [c for c in d.columns if c not in ("coin", "ts", "er", "r", "rg", "day")]
+    GEO = ["pos", "rng_rv", "since_hi", "since_lo"]
+    VOL = ["rv12_288", "rv48_288", "rv288_2016", "lrv288"]
+    PERS = ["er48", "er288"]
+    tr = d[window(d.ts, *SPLITS["학습"])]
+    purge = pd.Timestamp(TRAIN_END) - pd.Timedelta(minutes=5 * H)
+    tr = tr[tr.ts < purge].dropna(subset=FE)
+    q2 = tr.er.quantile(2 / 3)
+    d["y"] = (d.er >= q2).astype(int)
+    tr = tr.assign(y=(tr.er >= q2).astype(int))
+    mods = {"M_HGB": (HGB(max_depth=4, learning_rate=0.05, max_iter=300, l2_regularization=1.0, min_samples_leaf=200, early_stopping=False, random_state=0), FE),
+            "B1_pers": (make_pipeline(StandardScaler(), LogisticRegression(max_iter=500)), PERS),
+            "B2_vol": (make_pipeline(StandardScaler(), LogisticRegression(max_iter=500)), PERS + VOL if False else VOL),
+            "B3_geo": (make_pipeline(StandardScaler(), LogisticRegression(max_iter=500)), VOL + GEO)}
+    out = {"q2_train": q2, "base_rate_train": float(tr.y.mean())}
+    pol_r = {}
+    for name, (m, cols) in mods.items():
+        m.fit(tr[cols], tr.y)
+        pol_r[name] = (m, cols)
+    for w in ("검증", "시험"):
+        x = d[window(d.ts, *SPLITS[w])].dropna(subset=FE).reset_index(drop=True)
+        res = {"n": len(x), "base_rate": float(x.y.mean())}
+        P = {n: m.predict_proba(x[cols])[:, 1] for n, (m, cols) in pol_r.items()}
+        for n, p in P.items():
+            res[f"auc_{n}"] = float(roc_auc_score(x.y, p))
+            res[f"brier_{n}"] = float(((p - x.y) ** 2).mean())
+        res["brier_base"] = float(((x.y.mean() - x.y) ** 2).mean())
+        bl = min(("B1_pers", "B2_vol", "B3_geo"), key=lambda n: res[f"brier_{n}"])
+        dq = ((P["M_HGB"] - x.y) ** 2 - (P[bl] - x.y) ** 2).to_numpy()
+        res["best_baseline"], res["dBrier_M_vs_best"] = bl, float(dq.mean())
+        res["dBrier_ci90_upper"] = float(day_ci(x.day, dq, rng, 0, 90)[1])
+        for thr in (0.40, 0.50):
+            for n in ("M_HGB", "B2_vol", "B3_geo"):
+                act = P[n] >= thr
+                res[f"R2_net_{n}_p{int(thr * 100)}"] = float(np.where(act, x.r, 0.0).mean())
+                res[f"R2_act_{n}_p{int(thr * 100)}"] = float(act.mean())
+        res["R2_net_always"] = float(x.r.mean())
+        res["R2_net_oracle_high"] = float(np.where(x.y == 1, x.r, 0.0).mean())
+        act = P["M_HGB"] >= 0.40
+        gain = np.where(act, x.r, 0.0)
+        res["gain_M_p40_ci95"] = day_ci(x.day, gain, rng).tolist()
+        null = np.array([np.where(rng.random(len(x)) < act.mean(), x.r, 0.0).mean() for _ in range(NPLA)])
+        res["gain_M_p40_vs_random_pct"] = float((null < gain.mean()).mean() * 100)
+        out[w] = res
+    OUT.mkdir(parents=True, exist_ok=True)
+    json.dump(out, open(OUT / "s2d.json", "w"), indent=1, default=float)
+    for k, v in out.items():
+        print(k, {a: (round(b, 4) if isinstance(b, float) else b) for a, b in v.items()} if isinstance(v, dict) else v)
+
+
 if __name__ == "__main__":
-    {"s0": s0, "s0v2": s0v2, "s0v3": s0v3}[sys.argv[1]]()
+    {"s0": s0, "s0v2": s0v2, "s0v3": s0v3, "s2d": s2d}[sys.argv[1]]()
