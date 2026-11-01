@@ -5,6 +5,7 @@
   체인 전체(계약별 호가·IV·그릭스·OI·거래량·마지막 체결)를 준다(2026-11-01 SNDK 11,816계약·23만기·5.2MB 실측).
 무엇이 안 되는가: 체결 한 건 한 건(블록 포함)은 없다 -- 계약별 «마지막 체결»과 하루 거래량 집계뿐이다. 체결 전체는 OPRA 유료 공급자가 필요하다.
 🔴공식 개발자 API 가 아니라 사이트가 쓰는 주소다. 자동 수집 약관 허용 여부는 확인하지 못했다 -- 막히거나 바뀌면 이 수집기는 조용히 멈춘다(로그만 남는다).
+요약: 저장한 직후 cboe_option_summary_20261101.write_state -> data/live/cboe_option_state.json (Option 카드).
 저장: data/live/options_equity/cboe/<SYM>/<UTC날짜>/<HHMMSS>.json.gz (거래소 응답 그대로 · 해석하지 않는다 · SNDK 한 번 ~0.7MB).
 장 휴장 판단: 응답의 `seqno` 가 직전과 같으면 저장하지 않는다 -- 주말·휴장·장외에 같은 마감 스냅샷이 쌓이지 않는다(달력 불필요).
 주문 없음 · 바이낸스 호출 없음. cron 이 10분마다 부른다:
@@ -58,6 +59,9 @@ def main(argv: list[str]) -> int:
     for sym in [a.upper() for a in argv] or ["SNDK"]:
         try:
             got = collect(sym)
+            if got:      # 저장한 스냅샷을 대시보드 Option 카드용 요약으로(원본 저장이 먼저 -- 요약이 실패해도 원본은 남는다)
+                import cboe_option_summary_20261101 as summ
+                summ.write_state(Path(got))
             print(f"[{time.strftime('%Y-%m-%dT%H:%M:%S')}] {sym} {'저장 ' + got if got else '변화 없음(휴장·장외)'}", flush=True)
         except Exception as exc:  # noqa: BLE001 -- 한 종목 실패가 다른 종목을 막지 않는다
             print(f"[{time.strftime('%Y-%m-%dT%H:%M:%S')}] {sym} 실패 {type(exc).__name__}: {exc}", flush=True)
