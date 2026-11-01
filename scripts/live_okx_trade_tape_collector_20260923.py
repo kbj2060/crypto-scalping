@@ -254,12 +254,29 @@ def group_fills(fills: list[dict]) -> list[tuple[int, float, float, bool, int]]:
     return [tuple(x) for x in out]
 
 
+# 2026-11-01 심볼 통합 뒤 복구 요청 7심볼이 동시에 나가 한도(20회/2초, IP 단위)를 넘겨 매 분 429 였다(18시간 공백 복구가 막힘).
+#   프로세스 전체가 한 속도로 -- 요청 사이 최소 간격을 심볼 구분 없이 지키고, 429 를 받으면 10초 쉰다.
+OKX_MIN_GAP_S = 0.15
+_PACE = {"next": 0.0}
+
+
+async def _pace(penalty: float = 0.0) -> None:
+    now = time.monotonic()
+    wait = _PACE["next"] - now                      # 다음 슬롯을 «먼저 예약»하고 기다린다 -- 동시에 깬 태스크가 같은 슬롯을 안 잡는다
+    _PACE["next"] = max(_PACE["next"], now) + OKX_MIN_GAP_S + penalty
+    if wait > 0:
+        await asyncio.sleep(wait)
+
+
 def okx_minute_fetcher(session, inst: str, bucket: float, ct_val: float):
     """OKX REST 로 한 분을 다시 만든다. 🔴페이지는 **tradeId(type=1)** 로 넘긴다 -- ts(type=2)로
     넘기면 같은 ms 의 체결이 경계에서 빠져 2026-09-24 실측 −9.4% 였다(tradeId 로는 연속 1,853건,
     1분봉 volCcy 와 오차 0). 요청 한도 20회/2초 -- 사이에 0.12초 쉰다."""
     async def get(url: str, params: dict) -> list:
+        await _pace()
         async with session.get(url, headers=HTTP_HEADERS, params=params, timeout=_rest_timeout()) as r:
+            if r.status == 429:
+                _PACE["next"] = max(_PACE["next"], time.monotonic()) + 10.0
             r.raise_for_status()
             body = await r.json()
         if str(body.get("code")) != "0":
@@ -313,7 +330,7 @@ async def collect(inst: str, db_path: Path) -> None:
     async with ClientSession(timeout=ClientTimeout(total=None)) as session:
         await assert_ct_val(session, inst, ct_val)
         backfill = asyncio.create_task(_bn.backfill_loop(  # noqa: F841 -- 수집이 끝날 때까지 돈다
-            store, okx_minute_fetcher(session, inst, bucket, ct_val), per_cycle=5,
+            store, okx_minute_fetcher(session, inst, bucket, ct_val), per_cycle=15,   # 요청 속도는 _pace 가 묶는다 -- 18시간 공백도 따라잡게
             source="okx rest history-trades(type=1)",
             note="주문 = 연속 (ts,side,px) 묶음 -- 라이브보다 주문수 ~7% 적음, 총량·체결수 정확"))
         flushed_at = verified_at = time.monotonic()
@@ -429,6 +446,14 @@ def selftest() -> None:
                      f(5, 101, "sell", "2500.1", "1"), f(6, 101, "sell", "2500.1", "4")])
     assert g == [(100, 2500.0, 5.0, False, 2), (100, 2500.1, 1.0, False, 1),
                  (100, 2500.1, 1.0, True, 1), (101, 2500.1, 5.0, True, 2)], g
+    # ── 요청 속도: 7심볼이 동시에 요청해도 슬롯이 겹치지 않는다(429 폭주 재발 방지) ─────────────
+    async def _burst() -> float:
+        _PACE["next"] = 0.0
+        t0 = time.monotonic()
+        await asyncio.gather(*[_pace() for _ in range(7)])
+        return time.monotonic() - t0
+    took = asyncio.run(_burst())
+    assert took >= 6 * OKX_MIN_GAP_S - 0.02, ("동시 요청이 한 슬롯을 같이 잡았다", took)
     print("selftest OK")
 
 
