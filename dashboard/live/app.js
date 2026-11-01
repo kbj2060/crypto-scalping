@@ -392,7 +392,7 @@ const LINE_RR = [1, 1.5, 2, 3];
 // 2026-10-30 사용자 «SLTP 가 마진이 너무 작게 들어간다(2%)» → «증거금 % 슬라이더»(시안 C): 자동 2× 규칙(계좌 전체 명목 ≤ 순자산 × 2 · 첫 1/3) 대신
 //   떠 있는 버튼 «직접»과 같은 크기(증거금 = 순자산 × 이 %, 레버리지 = 화면 레버). 다른 코인 포지션이 상한을 먹어 작아지던 것이 없어진다.
 let linePct = 10;
-try { linePct = Math.min(50, Math.max(1, Math.round(Number(localStorage.getItem("linePct"))) || 10)); } catch (e) { /* 기억은 편의일 뿐 */ }   // 2026-10-29 손익비 버튼(익절 거리 ÷ 손절 거리)
+try { linePct = Math.min(100, Math.max(1, Math.round(Number(localStorage.getItem("linePct"))) || 10)); } catch (e) { /* 기억은 편의일 뿐 */ }   // 2026-10-29 손익비 버튼(익절 거리 ÷ 손절 거리)
 let lineDrag = null, lineHold = 0, linePrevT = 0, linePt = "", linePrevSeq = 0;   // linePrevSeq = 선이 바뀔 때마다 +1 -- 늦게 온 옛 미리보기 응답은 버린다(10-30 검토 S1)
 // 2026-10-31 사용자 «현재가 peg 말고 가격선을 정해 limit 으로 기다리게 · 그 선도 끌어 주문 수정»: t.entry = 진입 지정가(null = 지금가 peg, 현행).
 //   방향·손익비·손절 손실은 진입선(ref)이 기준 -- 지정가면 ref = entry. 롱 지정가는 지금가 아래 · 숏 지정가는 위(메이커)여야 하고 넘으면 peg 로 되돌린다.
@@ -412,6 +412,10 @@ function lineToolToggle(want) {   // 2026-10-30 사용자 «롱만 나오고 숏
     lineTool = { tp: sh ? dn : up, sl: sh ? up : dn, plan: null, err: "", asset: activeSnapshotAsset };
   }
   renderLineTool(); linePreview();
+}
+function lineMaxPct() {   // 2026-11-01 사용자 «진입비율 최대 50% → 현재 남은 증거금에서 최대» -- 슬라이더 상한 = 가용 ÷ 순자산(%). 계좌를 못 읽으면 예전 50
+  const b = latestBinanceAccount?.balance, eq = Number(b?.margin) || 0, av = Number(b?.available) || 0;
+  return eq > 0 && av > 0 ? Math.max(1, Math.min(100, Math.floor(100 * av / eq))) : 50;
 }
 function linePreview() {   // 크기는 서버 미리보기(증거금 linePct %)가 정한다 -- 끌기를 멈추고 0.5초 뒤 한 번
   clearTimeout(linePrevT);
@@ -478,7 +482,7 @@ function lineToolEl(box) {
   h.addEventListener("pointerup", end); h.addEventListener("pointercancel", end); h.addEventListener("pointerleave", end);
   h.querySelector(".lt-go").addEventListener("pointerleave", end);   // 꾹 누르다 버튼 밖으로 나가면 취소(표 안에서도)
   h.querySelector(".lt-mg-r").addEventListener("input", (e) => {   // 끄는 동안 숫자·손절 손실은 바로, 크기는 멈추고 0.5초 뒤 서버 미리보기
-    linePct = Math.min(50, Math.max(1, Math.round(Number(e.target.value)) || 10));
+    linePct = Math.min(lineMaxPct(), Math.max(1, Math.round(Number(e.target.value)) || 10));
     try { localStorage.setItem("linePct", String(linePct)); } catch (err) { /* 기억은 편의일 뿐 */ }
     if (lineTool) { lineTool.plan = null; lineTool.arm = 0; renderLineTool(); linePreview(); }
   });
@@ -662,6 +666,7 @@ function renderLineTool() {
   //   손실 = 미리보기 수량 × |지금가 − 손절|, 미리보기 전(끄는 중)엔 순자산 × % × 레버 ÷ 지금가로 어림(서버가 상한으로 줄이면 미리보기 뒤 그 값).
   const pl = t.plan, eq = Number(pl?.projection?.equity_usdt) || Number(latestBinanceAccount?.balance?.margin) || 0, nt = Number(pl?.notional_usdt) || 0;
   const rg = h.querySelector(".lt-mg-r");
+  const mxPct = lineMaxPct(); rg.max = String(mxPct); if (linePct > mxPct && !t.placed) linePct = mxPct;   // 가용이 줄었으면 값도 상한으로
   if (Number(rg.value) !== linePct) rg.value = String(linePct);
   rg.disabled = !!t.placed; h.querySelectorAll("[data-rr]").forEach((b) => { b.disabled = !!t.placed; });
   h.querySelector(".lt-mg-v").innerHTML = `${linePct}%${eq > 0 ? `<small>$${Math.round(eq * linePct / 100).toLocaleString()}</small>` : ""}`;   // 숫자뿐
@@ -1244,7 +1249,7 @@ function renderChartWindowTabs() {
   const daily = typeof window.fpDailyActive === "function" && window.fpDailyActive();
   const per = typeof window.fpDailyPeriod === "function" ? window.fpDailyPeriod() : "1d";   // 2026-10-20 같은 그림이 4h(4시간봉)도 그린다
   tabs.forEach((btn, k) => {
-    const on = btn.id === "fpDailyBtn" ? daily && per === "1d" : btn.dataset.tf ? daily && per === btn.dataset.tf : !daily && Number(btn.dataset.bars) === chartWindowBars && (Number(btn.dataset.tfk) || 1) === chartTfK;
+    const on = btn.id === "fpDailyBtn" ? daily && per === "1d" : btn.dataset.tf ? daily && per === btn.dataset.tf : !daily && !fpZoomed() && (Number(btn.dataset.tfk) || 1) === chartTfK;   // 2026-11-01 막대 수는 안 본다: 기본 창(24봉)보다 줄여 12~24봉이면 어느 칸도 안 맞아 하이라이트가 5m 로 돌아갔다
     btn.classList.toggle("active", on);
     if (on) idx = k;
   });
@@ -6044,6 +6049,7 @@ function setupChartPan() {
   svg.addEventListener("pointerdown", (ev) => {
     chartFlingStop();
     if (ev.button !== 0 || ev.pointerType === "touch") return;   // 세로 이동은 창 크기와 무관하게 늘 된다(가로만 canPan)
+    if (flowOn() && !fpAltOn() && zoneY(ev.clientY) !== "plot") return;   // 2026-11-01 사용자 «아래 수급 차트 2개를 끌면 풋프린트가 움직인다» -- 가격 칸 밖(프로파일·1초 수급·레인)에서 시작한 끌기는 차트를 안 옮긴다(휴대폰 규약과 같다)
     const g = chartSlotPx(svg);
     drag = { x: ev.clientX, y: ev.clientY, lx: ev.clientX, py: chartPanY, k: chartYPerPx, slot: g ? g.px : 1, moved: false, id: ev.pointerId, v: [] };
   });

@@ -67,7 +67,7 @@ def _split_flips(fills: Iterable[dict[str, Any]]) -> Iterable[dict[str, Any]]:
             net = 0.0  # 잔여 1e-16이 다음 체결을 가짜 뒤집기로 쪼개 유령 왕복을 만든다
 
 
-def round_trips(fills: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+def round_trips(fills: Iterable[dict[str, Any]], open_qty: dict[tuple[str, str], float] | None = None) -> list[dict[str, Any]]:
     """Fold userTrades fills into round trips: a trip opens when net position leaves 0 and closes
     when it returns to 0. realizedPnl/commission are summed over every fill in between, so a
     scaled-in or partially-closed position still reports one entry time and one exit time.
@@ -82,12 +82,34 @@ def round_trips(fills: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         groups.setdefault((fill["symbol"], fill.get("positionSide", "BOTH")), []).append(fill)
     trips: list[dict[str, Any]] = []
     for (_symbol, position_side), group in groups.items():
-        trips.extend(_fold(group, position_side))
+        trips.extend(_fold(group, position_side, (open_qty or {}).get((_symbol, position_side))))
     trips.sort(key=lambda t: t["entry_time"])
     return trips
 
 
-def _fold(fills: list[dict[str, Any]], position_side: str = "BOTH") -> list[dict[str, Any]]:
+def _resync_index(fills: list[dict[str, Any]], position_side: str, end_qty: float | None) -> int | None:
+    """7일 창이 포지션 한가운데서 시작한 헤지 스트림의 «진짜 평탄» 체결 인덱스(그 체결 직후가 평탄), 못 구하면 None.
+
+    창 앞에 열려 있던 수량 Q0 는 모른다. 하지만 **지금 열린 수량(end_qty)** 을 알면 Q0 = end_qty - (창 안 순증감) 이고,
+    진짜 수량 = 접은 수량 + Q0 이므로 그것이 처음 0 이 되는 체결이 창 앞 포지션이 다 닫힌 자리다. 그 뒤 체결은 평탄에서 시작해 믿을 수 있다.
+    (2026-11-01 XRP 롱 손절이 «잘린 스트림»으로 영영 원장에 안 들어갔다: 창 앞 포지션이 닫힌 뒤 7일이 지나야 표식이 풀렸다.)
+    ponytail: 단방향(BOTH)은 한 체결이 뒤집을 수 있어 안 한다."""
+    if end_qty is None or position_side not in ("LONG", "SHORT"):
+        return None
+    sgn = 1.0 if position_side == "LONG" else -1.0
+    cum = [0.0]
+    for f in fills:
+        cum.append(cum[-1] + float(f["qty"]) * (1.0 if f["side"] == "BUY" else -1.0) * sgn)
+    q0 = end_qty - cum[-1]
+    if q0 <= QTY_EPS:
+        return None   # 창 앞 수량이 없다고 나오면 표식 원인이 다른 것(모순) -- 건드리지 않는다
+    for i in range(1, len(cum)):
+        if abs(cum[i] + q0) <= 1e-6 * max(1.0, q0):
+            return i - 1
+    return None
+
+
+def _fold(fills: list[dict[str, Any]], position_side: str = "BOTH", end_qty: float | None = None) -> list[dict[str, Any]]:
     """One (symbol, positionSide) stream, oldest first. BUY=+qty / SELL=-qty throughout: a hedge
     LONG stream stays >=0 and a hedge SHORT stream stays <=0, so the same zero-crossing test ends
     a trip in every mode."""
@@ -162,6 +184,14 @@ def _fold(fills: list[dict[str, Any]], position_side: str = "BOTH") -> list[dict
     if current is not None:
         trips.append(_finish(current))
     if truncated:
+        cut = _resync_index(fills, position_side, end_qty)
+        if cut is not None and cut + 1 < len(fills):
+            # 평탄 뒤는 다시 접는다(접힌 0 이 진짜 0 이 아니었으므로). 앞쪽은 이전처럼 표식.
+            for trip in trips:
+                if trip["entry_time"] <= int(fills[cut]["time"]):
+                    trip["truncated_open"] = True
+            kept = [t for t in trips if t["entry_time"] <= int(fills[cut]["time"])]
+            return kept + _fold(fills[cut + 1:], position_side, None)
         for trip in trips:
             trip["truncated_open"] = True
     return trips
@@ -312,6 +342,8 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
     leverage_by_symbol = {} if isinstance(risk, dict) else {
         p["symbol"]: float(p.get("leverage") or 0.0) for p in risk if p.get("leverage")}
 
+    # 지금 열린 수량 (심볼, positionSide) -- 잘린 스트림의 진짜 평탄 지점을 구하는 데 쓴다(_resync_index). 없는 쪽 = 0
+    open_qty = {(p["symbol"], p.get("positionSide")): abs(float(p["positionAmt"])) for p in risk if p.get("positionSide") in ("LONG", "SHORT")}
     trips: list[dict[str, Any]] = []
     truncated: list[str] = []
     for symbol in symbols:
@@ -320,7 +352,7 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
             continue
         # 정확히 limit개면 그 앞이 잘렸다는 뜻 -- 창 밖에서 열린 포지션은 중간부터 접히므로
         # 가장 오래된 왕복 하나는 진입가/방향이 틀릴 수 있다. 숨기지 말고 알린다.
-        folded = round_trips(fills)
+        folded = round_trips(fills, open_qty)
         # limit 에 닿은 경우와, 7일 창이 진입을 잘라 폴딩이 깨진 경우. 후자가 실제로 일어나는
         # 쪽이고 limit 검사로는 안 걸린다(_fold 의 truncated_open 주석 참조).
         if len(fills) >= trade_limit or any(t.get("truncated_open") for t in folded):
