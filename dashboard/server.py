@@ -3259,25 +3259,6 @@ def make_app() -> web.Application:
         except asyncio.CancelledError:
             pass
 
-    def supervised_processes(specs: list[tuple[str, str]]) -> list[dict[str, Any]]:
-        pids: dict[str, int] = {}
-        for proc_dir in Path("/proc").glob("[0-9]*"):
-            if len(pids) == len(specs):
-                break
-            try:
-                cmdline = (proc_dir / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
-            except OSError:
-                continue
-            for name, signature in specs:
-                if name not in pids and signature in cmdline:
-                    pids[name] = int(proc_dir.name)
-        return [
-            {"name": name, "status": "RUNNING", "pid": pids[name]}
-            if name in pids
-            else {"name": name, "status": "STOPPED", "pid": None}
-            for name, _ in specs
-        ]
-
     async def index(_: web.Request) -> web.Response:
         raise web.HTTPFound("/dashboard/live/")
 
@@ -4495,33 +4476,6 @@ def make_app() -> web.Application:
         sec_prices=lambda a: None if a not in flows else [(t, float(c[6])) for t, c in list(flows[a].footprint_state["sec"].items()) if c[6]])
     keep_trip_ledger = order_api.keep_trip_ledger
 
-    async def api_ops_status(request: web.Request) -> web.Response:
-        ops_dir = LIVE_DIR / "ops_watchdog"
-        health_path = ops_dir / "health_snapshot.json"
-        heartbeat_path = ops_dir / "watchdog_heartbeat.json"
-        state_path = ops_dir / "state.json"
-        health_sig = file_signature(health_path)
-        heartbeat_sig = file_signature(heartbeat_path)
-        state_sig = file_signature(state_path)
-        etag = make_etag("ops-status", health_sig, heartbeat_sig, state_sig)
-        if etag_matches(request, etag):
-            return json_response(request, None, etag)
-        payload = {
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "health": load_json_cached(health_path, health_sig) or {},
-            "heartbeat": load_json_cached(heartbeat_path, heartbeat_sig) or {},
-            # Match the managed process itself, not the supervisor that launched it --
-            # these run under systemd now (previously bash _supervise.sh), and matching
-            # the old bash wrapper's argv left this permanently reporting STOPPED after
-            # the migration even though everything was healthy.
-            # 2026-10-12 trading_bot 은퇴(f7ea55d3) -- 그 수집 몫을 넘겨받은 시장 데이터 워커를 대신 본다.
-            "supervisors": supervised_processes([
-                ("market_data_worker", "duckdb_persist_worker.py"),
-                ("ops_watchdog", "ops_watchdog.py"),
-            ]),
-        }
-        return json_response(request, payload, etag)
-
     app.router.add_get("/", index)
     app.router.add_get("/dashboard/live", dashboard_index)
     app.router.add_get("/dashboard/live/", dashboard_index)
@@ -4597,7 +4551,6 @@ def make_app() -> web.Application:
     app.router.add_post("/api/manual-exit/submit", lambda r: order_api.busy_or(order_api.api_manual_exit_submit, r))
     app.router.add_post("/api/manual-exit/submit-all", lambda r: order_api.busy_or(order_api.api_manual_exit_all_submit, r))   # 2026-10-22 여러 코인 한꺼번에
     app.router.add_get("/api/liquidation-5m-history", api_liquidation_5m_history)
-    app.router.add_get("/api/ops-status", api_ops_status)
     # show_index=False (data/live 는 2026-10-19 보안 수정으로 더는 정적 서빙하지 않는다): this directory is reachable from the
     # public tunnel, and a listing advertised every file sitting in it (e.g. the
     # *.bak_pre_live_tab_removal_20260831 snapshots) rather than just the three the page

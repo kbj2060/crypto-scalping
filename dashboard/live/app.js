@@ -1,5 +1,4 @@
 const API_EVENTS_URL = "/api/events";
-const API_OPS_STATUS_URL = "/api/ops-status";
 const API_BINANCE_ACCOUNT_URL = "/api/binance-account";
 const API_LIQUIDATION_MAP_URL = "/api/liquidation-map";
 const API_MACRO_CALENDAR_URL = "/api/macro-calendar";
@@ -53,8 +52,6 @@ let tickInFlight = false;
 let latestLivePriceByAsset = {};
 let latestLivePriceTsByAsset = {};
 let candleHistoryByAsset = {};
-let opsStatusEtag = "";
-let opsLastFetchAt = 0;
 // 2026-09-09 청산맵 신호 마커(C안 하이브리드): 증거신호는 고정 레인, 이벤트 트리거는 봉 밀착.
 let latestChartMarkers = null;
 let chartMarkersLastFetchAt = 0;
@@ -948,7 +945,7 @@ const BINANCE_ACCOUNT_POLL_MS = 10000;   // 2026-10-02 30 -> 10초(사용자 지
 let sessionAlertsLastFetchAt = 0;
 let lastSnapshotHistoryFetchAt = 0;
 let lastSnapshotChartRenderAt = 0;
-let activePageTab = "snapshot"; // "ops" | "snapshot" (라이브 탭 제거, 2026-08-31) -- must match index.html's default active tab (data-page-tab="snapshot" carries the initial "active" class)
+const activePageTab = "snapshot"; // 2026-11-02 탭이 하나(스냅샷)뿐 -- 아래 «activePageTab === "snapshot"» 가드는 그대로 참이다
 // 2026-09-21 🔴**불리언 래치를 시각으로 바꿨다.** `isScrolling = true` 를 걸고 150ms
 // setTimeout 으로만 풀면, 배경 탭·가려진 창에서 그 타이머가 안 와 **영구히 true** 로 남는다.
 // 그러면 maybeRenderSnapshotChartNow()/render() 가 계속 조기 반환해 차트가 그 시점에 굳는데
@@ -960,7 +957,6 @@ let lastScrollAt = 0;
 const isScrolling = () => Date.now() - lastScrollAt < SCROLL_IDLE_MS;
 let scrollIdleTimer = 0;
 let dashboardEvents = null;
-const OPS_POLL_MS = 30000;
 const LIQUIDATION_5M_POLL_MS = 60000; // matches server's own 60s cache + the 1-row-per-minute source
 // 2026-09-16 300초 -> 60초. 서버 캐시를 60초로 줄였으므로(입력이 1시간봉이라 그 아래로는
 // 의미가 없다) 클라가 5분마다 물으면 **새 시간봉이 최대 5분 늦게** 보인다. 캐시와 같은 주기로.
@@ -1089,6 +1085,7 @@ function renderSnapshotAssetTabs() {
 async function setActiveSnapshotAsset(asset) {
   if (!SNAPSHOT_ASSET_KEYS.includes(asset) || asset === activeSnapshotAsset) return;
   activeSnapshotAsset = asset;
+  try { localStorage.setItem("snapAsset", asset); } catch (e) { /* 기억은 편의 */ }   // 2026-11-02 사용자 펜 메모: 새로고침해도 보던 코인·주식 탭 유지
   try { renderNews(); } catch (e) { console.error("news render:", e); }   // 2026-10-05 뉴스 카드의 «지금 코인» 강조·필터(예외가 코인 전환을 끊지 않게)
   chartPanReset();   // 코인을 바꾸면 실시간으로(관성도 멈춘다 -- 리뷰: 미끄러지던 게 새 코인을 과거로 끌었다)
   renderSnapshotAssetTabs();
@@ -1278,6 +1275,12 @@ function setupSnapshotAssetTabs() {
     btn.addEventListener("click", () => setActiveSnapshotAsset(btn.dataset.asset));
   });
   renderSnapshotAssetTabs();
+  // 2026-11-02 새로고침해도 보던 코인·주식 탭 유지 -- 전환 코드가 아래 const 들을 쓰므로 스크립트가 끝까지 읽힌 뒤(setTimeout 0)에 부른다.
+  setTimeout(() => {
+    let saved = ""; try { saved = localStorage.getItem("snapAsset") || ""; } catch (e) { /* 기억은 편의 */ }
+    const tab = saved && document.querySelector(`#snapshotAssetTabs .asset-tab[data-asset="${saved}"]`);
+    if (tab && !tab.hidden) setActiveSnapshotAsset(saved);   // 꺼진 코인(hidden)이면 ETH 그대로
+  }, 0);
 }
 
 function fmtNum(v, d = 2) {
@@ -1520,81 +1523,9 @@ function disconnectDashboardEvents() {
   dashboardEvents = null;
 }
 
-function opsTone(status) {
-  const value = String(status || "").toUpperCase();
-  if (value === "OK" || value === "RUNNING") return "good";
-  if (value === "WARN") return "warn";
-  if (value === "CRITICAL" || value === "BLOCKED" || value === "STOPPED") return "bad";
-  return "neutral";
-}
-
-function opsLabel(value) {
-  return ({ trading_bot: "트레이딩 봇", ops_watchdog: "Ops Watchdog", trading_bot_process: "트레이딩 봇 프로세스", decision_snapshot: "의사결정 스냅샷", trading_bot_heartbeat: "봇 heartbeat", data_pipeline: "데이터 파이프라인", pipeline_contract: "파이프라인 계약", market_data_sources: "시장 데이터 소스", dashboard_state: "대시보드 상태", execution_contract: "실행 안전 계약", runtime_resources: "시스템 자원", watchdog_storage: "watchdog 저장소" })[value] || String(value || "알 수 없음");
-}
-
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>'"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[ch]);
 }
-
-function renderOpsStatus(payload) {
-  const heartbeat = payload?.heartbeat || {};
-  const health = payload?.health || {};
-  const badge = el("opsWatchdogBadge");
-  if (badge) {
-    badge.className = `ops-badge ${heartbeat.status === "ok" ? "good" : "bad"}`;
-    badge.textContent = `WATCHDOG ${heartbeat.status === "ok" ? "RUNNING" : "UNKNOWN"}`;
-  }
-  setT("opsUpdatedAt", `서버 갱신 ${fmtTs(health.updated_at_kst || payload?.generated_at)}`);
-  setT("opsHeartbeatText", `watchdog heartbeat: ${fmtTs(heartbeat.recorded_at_kst)} · ${heartbeat.check_count || 0}개 점검`);
-  const checks = Array.isArray(health.checks) ? health.checks : [];
-  const badCount = checks.filter((c) => opsTone(c.status) === "bad").length;
-  const warnCount = checks.filter((c) => opsTone(c.status) === "warn").length;
-  const summaryEl = el("opsHealthSummary");
-  if (summaryEl) {
-    if (!checks.length) {
-      summaryEl.textContent = "점검 항목 없음";
-      summaryEl.className = "ops-health-summary neutral";
-    } else if (badCount > 0) {
-      summaryEl.textContent = `${badCount}개 이상 감지`;
-      summaryEl.className = "ops-health-summary bad";
-    } else if (warnCount > 0) {
-      summaryEl.textContent = `${warnCount}개 주의`;
-      summaryEl.className = "ops-health-summary warn";
-    } else {
-      summaryEl.textContent = `${checks.length}/${checks.length} 정상`;
-      summaryEl.className = "ops-health-summary good";
-    }
-  }
-  setH("opsHealthList", checks.map((check) => {
-    const details = check?.details || {};
-    const age = Number(details.age_minutes);
-    const ageText = Number.isFinite(age) ? `${age.toFixed(age < 10 ? 1 : 0)}분 전` : "-";
-    const tone = opsTone(check.status);
-    return `<article class="ops-health-row ${tone}">
-      <span class="ops-health-dot" aria-hidden="true"></span>
-      <div class="ops-health-info">
-        <strong>${escapeHtml(opsLabel(check.component))}</strong>
-        <span>${escapeHtml(check.summary || "-")}</span>
-      </div>
-      <div class="ops-health-meta">
-        <span class="ops-health-status-badge">${escapeHtml(check.status || "UNKNOWN")}</span>
-        <small>${ageText}</small>
-      </div>
-    </article>`;
-  }).join("") + opsOkToggleHtml(checks.filter((c) => opsTone(c.status) === "good").length));
-}
-// 2026-10-17 휴대폰(≤720)만 보이는 «정상 N개 보기» -- 정상 줄은 CSS 가 접고, 펼침은 목록의 show-ok 클래스(30초 재그리기에도 유지)
-function opsOkToggleHtml(n) {
-  const open = !!el("opsHealthList")?.classList.contains("show-ok");
-  return n ? `<button type="button" class="ops-ok-toggle" aria-expanded="${open}">정상 ${n}개 ${open ? "접기" : "보기"}</button>` : "";
-}
-document.addEventListener("click", (e) => {
-  const b = e.target instanceof Element ? e.target.closest(".ops-ok-toggle") : null;
-  if (!b) return;
-  const open = b.parentElement.classList.toggle("show-ok");
-  b.setAttribute("aria-expanded", String(open));
-  b.textContent = b.textContent.replace(/보기|접기/, open ? "접기" : "보기");
-});
 
 // 잔고가 «어느 자산 지갑»의 것인지, 그리고 화면이 안 쓰는 지갑에 돈이 남아 있는지.
 // 🔴단일자산 담보 모드에서 최상위 합계는 USDT 전용이라, 서버가 수동 주문 심볼의 담보 자산
@@ -2044,7 +1975,7 @@ function renderCycleCard(A, positions, equity) {
   }).join(""));
 }
 
-// 거래소 실계좌(수동 매매 포함) 패널. 봇 원장(trade_journal)과 달리 여기 숫자는 바이낸스가 준 것.
+// 거래소 실계좌(수동 매매 포함). 봇 원장(trade_journal)과 달리 여기 숫자는 바이낸스가 준 것.
 function renderBinanceAccount(payload) {
   // 스냅샷 탭 요약과 청산맵 진입선이 같은 값을 쓴다 -- 두 번 받지 않도록 여기서 보관한다.
   latestBinanceAccount = payload?.ok ? payload : null;
@@ -2055,55 +1986,6 @@ function renderBinanceAccount(payload) {
   // 에만 맞춰서, 화면을 열고 **63초 뒤에야** 청산 버튼이 나타났다(2026-09-13 실측).
   // 급히 닫으려고 연 사람에게 1분을 기다리게 하는 건 이 버튼의 존재 이유와 정면으로 어긋난다.
   if (typeof manualExitSyncButtons === "function") manualExitSyncButtons();
-  const summary = el("acctSummary");
-  if (!payload?.ok) {
-    const msg = payload?.hint || payload?.error || "계정을 불러오지 못했습니다.";
-    if (summary) { summary.textContent = "연결 안 됨"; summary.className = "ops-health-summary bad"; }
-    setT("acctBalanceText", msg);
-    setH("acctPositions", "");
-    setH("acctTrades", "");
-    return;
-  }
-  const b = payload.balance || {};
-  setT("acctBalanceText", `지갑 ${fmtUsd(b.wallet)} · 평가 ${fmtUsd(b.margin)} · 가용 ${fmtUsd(b.available)}`
-    + ` · 미실현 ${fmtUsd(b.unrealized)}${balanceAssetNote()}`);
-  const positions = payload.positions || [];
-  const trades = payload.trades || [];
-  if (summary) {
-    summary.textContent = positions.length ? `보유 ${positions.length}종목` : "포지션 없음";
-    summary.className = `ops-health-summary ${positions.length ? "good" : "neutral"}`;
-  }
-  setH("acctPositions", positions.length ? positions.map((p) => {
-    const tone = p.unrealized_pnl > 0 ? "good" : p.unrealized_pnl < 0 ? "bad" : "neutral";
-    return `<article class="ops-health-row ${tone}">
-      <span class="ops-health-dot" aria-hidden="true"></span>
-      <div class="ops-health-info">
-        <strong>${escapeHtml(p.symbol)} ${p.side === "LONG" ? "롱" : "숏"} ×${escapeHtml(p.leverage)}</strong>
-        <span>진입 ${fmtUsd(p.entry_price)} → 현재 ${fmtUsd(p.mark_price)} · 청산가 ${fmtUsd(p.liquidation_price)} · 수량 ${escapeHtml(p.qty)}</span>
-      </div>
-      <div class="ops-health-meta">
-        <span class="ops-health-status-badge">${fmtUsd(p.unrealized_pnl)}</span>
-        <small>${fmtTs(p.entry_at)} 진입</small>
-      </div>
-    </article>`;
-  }).join("") : '<p class="muted">열려 있는 포지션이 없습니다.</p>');
-  // 이력이 잘리면 가장 오래된 왕복은 창 밖에서 열렸을 수 있어 진입가/방향이 틀릴 수 있다.
-  const truncNote = (payload.trades_truncated || []).length
-    ? `<p class="muted">${escapeHtml((payload.trades_truncated || []).join(", "))}는 체결 이력이 잘려 가장 오래된 왕복이 부정확할 수 있습니다.</p>` : "";
-  setH("acctTrades", trades.length ? truncNote + trades.slice(0, 20).map((t) => {
-    const tone = !t.closed ? "warn" : t.net_pnl > 0 ? "good" : t.net_pnl < 0 ? "bad" : "neutral";
-    return `<article class="ops-health-row ${tone}">
-      <span class="ops-health-dot" aria-hidden="true"></span>
-      <div class="ops-health-info">
-        <strong>${escapeHtml(t.symbol)} ${t.side === "LONG" ? "롱" : "숏"}</strong>
-        <span>${fmtTs(t.entry_at)} 진입 → ${t.closed ? `${fmtTs(t.exit_at)} 청산` : "보유 중"} · ${escapeHtml(t.fills)}회 체결</span>
-      </div>
-      <div class="ops-health-meta">
-        <span class="ops-health-status-badge">${t.closed ? fmtUsd(t.net_pnl) : "-"}</span>
-        <small>수수료 ${fmtUsd(t.commission)}</small>
-      </div>
-    </article>`;
-  }).join("") : '<p class="muted">체결 내역이 없습니다.</p>');
 }
 
 function fmtUsd(value) {
@@ -2113,7 +1995,7 @@ function fmtUsd(value) {
 }
 
 async function refreshBinanceAccount(force = false) {
-  // ops 탭(refreshOpsStatus)과 스냅샷 탭(tick) 양쪽에서 부르므로 자체 게이트를 둔다.
+  // tick 과 주문 직후에서 부르므로 자체 게이트를 둔다.
   // force = 주문 체결 직후(2026-10-06 사용자 «완료되면 플로팅 버튼에 바로») -- 게이트·서버 캐시(10초)를 건너뛰고 떠 있는 버튼을 바로 다시 그린다.
   const now = Date.now();
   if (!force && now - binanceAccountLastFetchAt < BINANCE_ACCOUNT_POLL_MS) return;
@@ -2128,24 +2010,6 @@ async function refreshBinanceAccount(force = false) {
   }
 }
 
-
-async function refreshOpsStatus() {
-  const now = Date.now();
-  if (now - opsLastFetchAt < OPS_POLL_MS) return;
-  opsLastFetchAt = now;
-  refreshBinanceAccount();
-  try {
-    const res = await fetch(API_OPS_STATUS_URL, { cache: "no-cache", headers: opsStatusEtag ? { "If-None-Match": opsStatusEtag } : {} });
-    if (res.status === 304) return;
-    if (!res.ok) throw new Error(`ops status ${res.status}`);
-    opsStatusEtag = res.headers.get("ETag") || opsStatusEtag;
-    renderOpsStatus(await res.json());
-  } catch (error) {
-    console.error("Ops status fetch error:", error);
-    const badge = el("opsWatchdogBadge");
-    if (badge) { badge.className = "ops-badge bad"; badge.textContent = "WATCHDOG UNREACHABLE"; }
-  }
-}
 
 // Shared open/closed state for the per-signal "자세히" detail toggles (model indicators AND
 // evidence signals use the same key space, prefixed "model:"/"evidence:" to avoid collisions).
@@ -2999,53 +2863,22 @@ function renderMacroCalendar(payload) {
 }
 
 
-// 2026-10-16 펜 메모(3차 «화살표대로 순서»): 넓은 화면(≥1200) 스냅샷 = 맨 위 [세션(왼쪽) | 코인 탭(가운데) | 경보·다크·알림(오른쪽)] ·
-//   스냅샷/운영 관리 = 맨 위 제일 왼쪽(10-17 펜 메모 «카드 머리에서 대시보드 최상단 제일 왼쪽으로», 세션은 그 오른쪽). 운영 관리 화면 = 탭은 맨 위 왼쪽, 세션 가운데.
-//   좁은 화면은 옛 자리 그대로(탭 = 맨 위 첫 줄 · 코인 = 카드 머리 · 세션 = CSS 배치).
+// 2026-11-02 운영 관리·스냅샷 탭 제거(사용자 펜 메모) -- 화면은 스냅샷 하나다.
+// 넓은 화면(≥1200) = 맨 위 [세션(왼쪽) | 코인 탭(가운데) | 경보·다크·알림(오른쪽)] · 좁은 화면은 코인 탭 = 카드 머리 · 세션 = CSS 배치.
 const PAGE_TABS_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1200px)") : null;
 function placeTopLeft() {
-  const nav = document.querySelector(".page-tabs"), top = document.querySelector(".topbar"), slot = el("topLeftSlot"), mid = el("topCenterSlot");
+  const top = document.querySelector(".topbar"), slot = el("topLeftSlot"), mid = el("topCenterSlot");
   const coins = el("snapshotAssetTabs"), home = el("coinHome"), sess = document.querySelector(".top-right");
-  if (!nav || !top || !slot || !mid) return;
-  const wide = !!(PAGE_TABS_WIDE && PAGE_TABS_WIDE.matches), snap = activePageTab === "snapshot";
-  const coinsHome = () => { if (coins && home && coins.previousElementSibling !== home) home.after(coins); };
-  const sessHome = () => { if (sess && sess.parentElement !== top) top.appendChild(sess); };
-  if (wide && snap) {
-    if (slot.firstElementChild !== nav) slot.prepend(nav);
+  if (!top || !slot || !mid) return;
+  if (PAGE_TABS_WIDE && PAGE_TABS_WIDE.matches) {
     if (sess && sess.parentElement !== slot) slot.appendChild(sess);
     if (coins && coins.parentElement !== mid) mid.appendChild(coins);
   } else {
-    coinsHome(); sessHome();
-    if (wide) { if (nav.parentElement !== slot) slot.appendChild(nav); }
-    else if (nav.parentElement !== top) slot.after(nav);
+    if (coins && home && coins.previousElementSibling !== home) home.after(coins);
+    if (sess && sess.parentElement !== top) top.appendChild(sess);
   }
 }
 if (PAGE_TABS_WIDE && PAGE_TABS_WIDE.addEventListener) PAGE_TABS_WIDE.addEventListener("change", placeTopLeft);   // 🔴CI 검사기(esprima)는 ?.( 를 못 읽는다
-function setupPageTabs() {
-  document.querySelectorAll(".page-tab").forEach((button) => button.addEventListener("click", () => {
-    const target = button.dataset.pageTab; // "ops" | "snapshot" (라이브 탭 제거 08-31 · 알림 탭 → 알림 센터 모달 10-05)
-    activePageTab = target;
-    el("opsTabPanel")?.classList.toggle("hidden", target !== "ops");
-    el("snapshotTabPanel")?.classList.toggle("hidden", target !== "snapshot");
-    cardRailSync();   // 2026-09-30 카드 이동 레일도 스냅샷 탭에서만
-    ofabSync();   // 2026-09-25 떠다니는 주문 버튼은 스냅샷 탭에서만 -- 떠나면 조작부를 카드로 먼저 돌려놓는다
-    document.querySelectorAll(".page-tab").forEach((tab) => {
-      tab.classList.toggle("active", tab === button);
-      if (tab === button) tab.setAttribute("aria-current", "page"); else tab.removeAttribute("aria-current");
-    });
-    placeTopLeft();
-    if (target === "ops") {
-      opsLastFetchAt = 0; refreshOpsStatus();
-    } else if (target === "snapshot") {
-      chartMarkersLastFetchAt = 0; latestChartMarkers = null; refreshChartMarkers();
-      liquidation5mLastFetchAt = 0; refreshLiquidation5mSignal();
-      liquidationMapLastFetchAt = 0; refreshLiquidationMap();
-      macroCalendarLastFetchAt = 0; refreshMacroCalendar();
-      sessionAlertsLastFetchAt = 0; refreshSessionAlerts();
-      lastSnapshotHistoryFetchAt = 0; maybeFetchSnapshotChartHistory();
-    }
-  }));
-}
 
 // 2026-09-30 카드 이동 레일(사용자 지시 «점만»): 점을 누르면 그 카드로 스크롤 · 지금 보는 카드의 점이 채워진다. 스냅샷 탭에서만.
 function cardRailSync() {
@@ -3078,6 +2911,9 @@ function fitLayout() {
   //   첫 배치부터 정하고, 행사가 사다리는 창 높이 공식 하나로 정한다. 여기서는 모드 켜기/끄기와 계좌·Option 최소 높이만.
   const on = fitOn(), vh = innerHeight - 20;
   document.documentElement.classList.toggle("fit1", on);
+  // 2026-11-02 사용자 펜 메모 «앱바와 카드까지가 화면에 꽉 차도록»: 첫 화면 = 앱바 + 풋프린트 카드. 앱바 아래 끝을 재서 카드 높이에서 뺀다(styles.css html.fit1 #fpCard).
+  const bar = document.querySelector("header.top");
+  if (on && bar) document.documentElement.style.setProperty("--apph", `${Math.round(bar.offsetTop + bar.offsetHeight + (parseFloat(getComputedStyle(bar).marginBottom) || 0))}px`);
   const acct = el("acctCard"), opt = el("optCard");
   if (acct) { acct.style.minHeight = on ? `${vh}px` : ""; if (!on) acct.style.removeProperty("--acctz"); }
   if (opt) opt.style.minHeight = on ? `${vh}px` : "";
@@ -5959,6 +5795,7 @@ let chartPanKey = "", chartPanGeo = null;
 function renderChartPan() {
   const box = el("chartPan");
   if (!box) return;
+  if (box.classList.contains("inrow")) { box.hidden = true; chartPanKey = ""; return; }   // 2026-11-02 사용자 펜 메모 «박스 안의 왼쪽 그래프 요약 표시는 제거» -- 넓은 화면 차트 위 줄. 휴대폰 머리 줄 것은 그대로
   const full = chartTfFull();
   if (!full.length || !flowOn()) { box.hidden = true; chartPanKey = ""; return; }
   box.hidden = false;
@@ -6026,6 +5863,7 @@ function setupChartPan() {
   //   (끝(12봉·1주일), 30m·1h 창, 이동 못 하는 가로 휠도). 페이지 스크롤은 차트 밖에서. ctrl+휠(브라우저 확대)만 통과.
   svg.addEventListener("wheel", (ev) => {
     if (!flowOn() || ev.ctrlKey) return;
+    if (!fpAltOn() && zoneX(ev.clientX) === "side") return;   // 2026-11-02 사용자 펜 메모 «수급 차트 2개에서 휠로 확대·축소하면 풋프린트가 따라 움직인다 -- 독립적이게»: 오른쪽 수급 칸은 풋프린트 줌을 안 건드린다(페이지 스크롤은 그대로)
     ev.preventDefault();
     if (fpAltOn()) return;   // 리뷰: 4h·1d·청산맵·버블이 덮은 동안 안 보이는 5분 차트를 줌/이동하고 1주일까지 받았다(페이지 스크롤은 그대로 막는다)
     chartFlingStop();
@@ -9334,15 +9172,8 @@ async function tick() {
   try {
     ensureLiveStream();              // 2026-09-24 수급·상황 밀어주기 (탭/코인/가시성 변화가 여기로 수렴)
     refreshNotifyCenter();           // 2026-10-05 종 옆 점(판정일·새 알림) -- 탭과 무관 (자체 5분 게이트)
-    // 2026-08-25 perf pass (Snapshot's 6 fetches), extended 2026-08-31 to Ops's own status poll
-    // now that the Live tab (previously the 3rd, always-unconditional, tab) is gone -- each branch
-    // only matters while that tab is actually visible; gating stops background fetch/compute work
-    // for a hidden panel (see activePageTab, set by setupPageTabs()'s click handler). Both tabs'
-    // click handlers already force an immediate refresh on switching to them, so this doesn't delay
-    // first paint after a tab switch -- it only stops the ongoing poll while elsewhere.
-    if (activePageTab === "ops") {
-      refreshOpsStatus();
-    } else if (activePageTab === "snapshot") {
+    // 2026-11-02 탭이 스냅샷 하나뿐이라 가드는 사실상 항상 참 -- 폴링을 멈추는 건 document.hidden(위)이다.
+    if (activePageTab === "snapshot") {
       refreshBinanceAccount();       // 2026-09-10 청산맵 위 계좌 요약 + 진입선 (자체 30초 게이트)
       refreshChartMarkers();         // 2026-09-09 청산맵 신호 마커
       refreshLiquidation5mSignal();
@@ -9405,7 +9236,6 @@ document.addEventListener("visibilitychange", () => {
 setupSnapshotAssetTabs();
 setupThemeToggle();
 setupChartModeTabs();
-setupPageTabs();
 placeTopLeft();
 setupScrollRendering();
 setupCardRail();

@@ -28,7 +28,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
-  <link rel="stylesheet" href="styles.css?v=20261102-rail">
+  <link rel="stylesheet" href="styles.css?v=20261102-memos">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -50,10 +50,6 @@
         <!-- 2026-10-16 펜 메모(3차): 넓은 화면 스냅샷 = 세션(아시아·유럽·미국) 왼쪽 · 운영 관리 화면 = 탭 (app.js placeTopLeft) · 좁은 화면은 비어 숨김 -->
         <div id="topLeftSlot" class="top-left-slot"></div>
         <div id="topCenterSlot" class="top-center-slot"></div>   <!-- 2026-10-16 펜 메모(3차): 넓은 화면 스냅샷 = 코인 탭(맨 위 가운데) -->
-        <nav class="page-tabs" aria-label="대시보드 탭">
-          <button type="button" class="page-tab active" data-page-tab="snapshot" aria-current="page">스냅샷</button>
-          <button type="button" class="page-tab" data-page-tab="ops">운영 관리</button>
-        </nav>
         <!-- 2026-09-26 사용자 지시로 가운데 현재가·5분 변화·시계를 뺐다(가격은 차트·계좌 레일에 이미 있다). -->
         <!-- 2026-09-27 헤더 한 줄(사용자 지시) -- 원래 스냅샷 패널 첫 줄이었다. 다른 탭에서는 CSS 가 숨긴다. -->
         <div class="ops-panel-head snap-head">
@@ -147,41 +143,6 @@
         </section>
       </div>
     </dialog>
-
-    <section id="opsTabPanel" class="ops-tab-panel hidden">
-      <div class="ops-panel-head">
-        <div>
-          <p class="eyebrow">READ-ONLY OPERATIONS</p>
-          <h2>운영 관리</h2>
-          <p id="opsUpdatedAt" class="muted">상태 불러오는 중…</p>
-        </div>
-        <div id="opsWatchdogBadge" class="ops-badge neutral">WATCHDOG -</div>
-      </div>
-      <section class="panel ops-health-panel">
-        <div class="ops-health-head">
-          <div><h3>헬스 체크</h3><p id="opsHeartbeatText" class="muted">-</p></div>
-          <div class="ops-health-head-tools">
-            <span id="opsHealthSummary" class="ops-health-summary">-</span>
-            <span class="ops-readonly">읽기 전용 · 30초 갱신</span>
-          </div>
-        </div>
-        <div id="opsHealthList" class="ops-health-list"></div>
-      </section>
-      <section class="panel ops-health-panel">
-        <div class="ops-health-head">
-          <div><h3>바이낸스 계정</h3><p id="acctBalanceText" class="muted">-</p></div>
-          <div class="ops-health-head-tools">
-            <span id="acctSummary" class="ops-health-summary">-</span>
-            <span class="ops-readonly">거래소 실계좌 · 읽기 전용 · 30초 갱신</span>
-          </div>
-        </div>
-        <div id="acctPositions" class="ops-health-list"></div>
-        <div class="ops-health-head" style="margin-top:12px">
-          <div><h3>최근 거래</h3><p class="muted">체결 내역을 왕복 단위로 묶은 것 · 진입→청산 시각</p></div>
-        </div>
-        <div id="acctTrades" class="ops-health-list"></div>
-      </section>
-    </section>
 
     <!-- 2026-09-26 비평: 탭 패널 전체의 aria-live 를 걷었다 -- 0.25초마다 바뀌는 화면 전체가 낭독 대상이었다.
          알릴 것은 주문 결과(#snapEntryResult)와 진입 가부(#snapEntrySize)뿐이다. -->
@@ -613,7 +574,7 @@
   </div>
   <button type="button" id="ofabTab" class="ofab-tab" hidden aria-label="주문 버튼 꺼내기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg><i aria-hidden="true"></i><b>주문</b></button>
-  <script src="./app.js?v=20261101-tab4"></script>
+  <script src="./app.js?v=20261102-memos"></script>
   <script src="./fp_daily.js?v=20261031-btc"></script>
   <script src="./liq_profile.js?v=20261015-align"></script>
   <script src="./bubble_map.js?v=20261016-minitop"></script>
