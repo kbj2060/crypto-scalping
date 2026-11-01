@@ -190,26 +190,6 @@ def okx_tape_footprint(tape_db: Path, ctx_db: Path, inst: str, lo_sec: int, t0_m
         ctx_ok = False
     tape_max = _read_only_rows(tape_db, "SELECT max(ts_sec) FROM trade_tape_1s WHERE symbol = ?", [inst])
     return {"bars": bars, "ok_min": ok_min, "oi": oi, "liq": liq, "tape_max": int(tape_max[0][0] or 0), "ctx_ok": ctx_ok}
-def okx_basis_shift(base: list, okx_bars: dict, last_n: int = 24) -> int:
-    """OKX 칸을 바이낸스 가격 칸에 맞추려고 옮길 **칸 수**. base = [(봉, {칸: 셀})] 시간순.
-
-    2026-11-02 사용자 «풋프린트가 5분봉보다 더 아래까지 나온다»: 바이낸스 단독 풋프린트는 5분봉과 정확히 맞는데(저가 격차
-    중앙값 0.00칸), OKX 체결을 **가격 보정 없이** 칸 번호 그대로 더해 두 거래소의 가격 차(OKX 가 평균적으로 낮다 · 실측
-    XRP 2.3칸 · SNDK 1.2칸 · BTC 0.8칸 · ETH 0.3칸)만큼 아래쪽만 늘었다(위쪽은 바이낸스가 정해 그대로).
-    봉별 체결량 가중 평균 칸의 차를 최근 last_n 봉에서 구해 **중앙값**을 반올림한다 -- 1칸 미만 차이는 0 이라 ETH 는 그대로.
-    """
-    d = []
-    for bar, cells in base[-last_n:]:
-        o = okx_bars.get(bar)
-        if not o or not cells:
-            continue
-        vb = sum(v[0] + v[1] for v in cells.values()); vo = sum(v[0] + v[1] for v in o.values())
-        if vb <= 0 or vo <= 0:
-            continue
-        d.append(sum(k * (v[0] + v[1]) for k, v in cells.items()) / vb - sum(k * (v[0] + v[1]) for k, v in o.items()) / vo)
-    return round(sorted(d)[len(d) // 2]) if d else 0
-
-
 def tape_seconds(tape_db: Path, symbol: str, lo_sec: int, hi_sec: int,
                  tape_bucket: float) -> tuple[dict[int, list[float]], int]:
     """체결 테이프 -> 1초 수급 칸 {초: [리테일매수, 리테일매도, 고래매수, 고래매도, 총매수, 총매도, 가격]} (2026-09-27 재시작 복원).

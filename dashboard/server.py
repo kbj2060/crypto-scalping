@@ -415,7 +415,7 @@ from dashboard.coin_flow import (  # noqa: E402,F401
     FOOTPRINT_SNAPSHOT_PATH, FOOTPRINT_SNAPSHOT_SECONDS, FOOTPRINT_MAX_WINDOW_BARS, FOOTPRINT_KEEP_BARS,
     SUPPLY_1S_SECONDS, OI_1S_DB_PATH, OI_1S_TABLE, OI_5M_BAR_SECONDS, OKX_INST, OKX_WS_URL, OKX_TAPE_DB_PATH,
     OKX_CTX_DB_PATH, OKX_LIQ_DB_PATH, _read_only_rows, okx_tape_footprint, tape_seconds, OKX_CT_VAL,
-    OKX_RECV_TIMEOUT, SPOT_WS_URL, SPOT_RECV_TIMEOUT, FlowSpec, _flow_spec, FLOW_SPECS, make_coin_flow, okx_basis_shift)
+    OKX_RECV_TIMEOUT, SPOT_WS_URL, SPOT_RECV_TIMEOUT, FlowSpec, _flow_spec, FLOW_SPECS, make_coin_flow)
 
 
 def footprint_window_bars(request) -> int:
@@ -3513,15 +3513,13 @@ def make_app() -> web.Application:
         #   거르지 않는다. 화면이 경계를 알 수 있게 `okxFrom` 을 싣는다.
         base = sorted(footprint_state["bars"].items())
         recent = base[-want:]
-        # 2026-11-02 OKX 칸을 바이낸스 가격에 맞춘다(okx_basis_shift) -- 안 맞추면 풋프린트가 5분봉 저가보다 아래로 나온다.
-        shift = okx_basis_shift(base, okx_bars) if okx_from else 0
         def _merged(bar: int, cells: dict[int, list[float]]) -> dict[int, list[float]]:
             add = okx_bars.get(bar)
             if not add:
                 return cells
             out = {k: list(v) for k, v in cells.items()}
             for k, v in add.items():
-                t = out.setdefault(k + shift, [0.0] * 6)
+                t = out.setdefault(k, [0.0] * 6)
                 for j in range(6):
                     t[j] += v[j]
             return out
@@ -3548,7 +3546,7 @@ def make_app() -> web.Application:
         live_bar = recent[-1][0] if recent else 0
         okx_live = ({"time": live_bar,
                      "levels": [[round(k * FOOTPRINT_BUCKET, dp)] + [round(x, 3) for x in v]
-                                for k, v in sorted((k + shift, v) for k, v in okx_bars[live_bar].items())]}
+                                for k, v in sorted(okx_bars[live_bar].items())]}
                     if okx_from and live_bar in okx_bars else None)
         return web.json_response({
             "okxLive": okx_live,
@@ -3576,7 +3574,6 @@ def make_app() -> web.Application:
             #   한 쪽엔 들어가고 한 쪽엔 안 들어가는 게 맞다.
             "venues": ["binance-perp", "okx-swap"] if okx_from else ["binance-perp"],
             "okxFrom": okx_from,
-            "okxShift": shift,   # OKX 칸을 바이낸스에 맞추려고 옮긴 칸 수(okx_basis_shift)
             "bars": [
                 {"time": bar,
                  # aggTrades 로 메운 봉은 체결이 **묶여** 있어 고래가 과장된다.
