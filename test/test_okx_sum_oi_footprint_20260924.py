@@ -78,7 +78,9 @@ async def main():
     assert cached[1] == [900, -4.0, 996.0, 50, 0], "swr 캐시를 고쳤다 -- 다음 요청에 두 번 더해진다"
     fp = json.loads((await ns["api_footprint"](Req({"since": "0"}))).body)
     assert [b["time"] for b in fp["bars"]] == [900, 1200]
-    assert fp["okxLive"] == {"time": 1200, "levels": [[2740.0, 1.0, 2.0, 0.0, 0.0, 1.0, 0.0]]}
+    # 2026-11-02 풋프린트는 바이낸스만 -- OKX 몫(okxLive)도 OKX 칸도 안 더한다(1200 봉 = 바이낸스 칸 5481 의 4.0 그대로)
+    assert fp["venues"] == ["binance-perp"] and "okxLive" not in fp
+    assert fp["bars"][1]["levels"] == [[2740.5] + [4.0] * 6]
     # ── 5분봉 청산 원: OKX 가 온전히 본 봉(600 초과)만 더한다 · 캐시 불변 · ETH 만 ──
     lq = json.loads((await ns["api_liquidation_5m_history"](Req({"asset": "eth"}))).body)
     b600, b900, b1200 = lq["bars"]
@@ -96,8 +98,6 @@ async def main():
         raise AssertionError("꺼진 코인에 ETH 풋프린트를 줬다")
     except web.HTTPNotFound:
         pass
-    ns["okx_fp"]["first_bar"] = 0                                         # OKX 없음 -> okxLive 없음
-    assert json.loads((await ns["api_footprint"](Req({"since": "0"}))).body)["okxLive"] is None
     print("ok")
 
 asyncio.run(main())

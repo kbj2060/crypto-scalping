@@ -3502,27 +3502,14 @@ def make_app() -> web.Application:
         want = footprint_window_bars(request)
         f = flow_for(request.query)       # 2026-09-26 코인별 -- 아래 본문의 이름을 그 코인으로 가린다
         RETAIL_MAX_USD, WHALE_MIN_USD = f.retail_max, f.whale_min   # noqa: N806 -- 코인별 경계
-        footprint_state, okx_bars, okx_fp = f.footprint_state, f.okx_bars, f.okx_fp
+        footprint_state = f.footprint_state
         FOOTPRINT_SYMBOL, FOOTPRINT_BUCKET, dp = f.spec.symbol, f.spec.bucket, f.spec.price_dp   # noqa: N806
-        # 🔴OKX 를 **여기서만** 더한다(위 okx_bars 주석). 그리고 OKX 가 완전히 덮은 첫 봉
-        #   **이후**만 내보낸다 -- 그 전 봉은 바이낸스만이라 더하면 단차가 된다.
-        #   `first_bar` 자신은 OKX 가 중간에 합류한 봉이라 **빼고**(> 비교) 시작한다.
-        okx_from = okx_fp["first_bar"]
-        # 2026-11-01 사용자 «풋프린트 2개밖에 안 보여» -- 수집기가 멈춰 OKX 이력이 못 살아난 날 이 필터가
-        #   바이낸스 144봉을 전부 숨겼다. 단차(OKX 가 더해지는 첫 봉부터 양이 커짐)보다 이력이 낫다고 보고
-        #   거르지 않는다. 화면이 경계를 알 수 있게 `okxFrom` 을 싣는다.
+        # 2026-11-02 사용자 «체결 데이터는 그냥 바이낸스만 표시하는 건 어때?» -- 풋프린트는 바이낸스 선물 체결만이다.
+        #   OKX 를 더하면 두 가지가 깨졌다: ① OKX 가 평균적으로 낮은 만큼(XRP 2.3칸) 풋프린트가 5분봉 저가 아래로 나왔다
+        #   (바이낸스 단독은 5분봉과 정확히 맞다 -- 저가 격차 중앙값 0.00칸) ② OKX 수집기가 멈추면 이력이 사라졌다(11-01 «2봉만»).
+        #   OKX 는 수급(CVD)·OI 에는 그대로 합산된다 -- 가격 칸이 필요한 이 그림만 뺐다.
         base = sorted(footprint_state["bars"].items())
         recent = base[-want:]
-        def _merged(bar: int, cells: dict[int, list[float]]) -> dict[int, list[float]]:
-            add = okx_bars.get(bar)
-            if not add:
-                return cells
-            out = {k: list(v) for k, v in cells.items()}
-            for k, v in add.items():
-                t = out.setdefault(k, [0.0] * 6)
-                for j in range(6):
-                    t[j] += v[j]
-            return out
         agg_bars = footprint_state["agg_bars"]
         # ── `?since=<봉시각>` 증분 (2026-09-20) ──────────────────────────────
         # 400ms 폴링인데 48봉을 통째로 보내고 있었다. 실측: 400ms 간격 19번 중 내용이 실제로
@@ -3537,19 +3524,9 @@ def make_app() -> web.Application:
             since = int(request.query.get("since", "0"))
         except (TypeError, ValueError):
             since = 0
-        # A안: OKX 과거 봉을 방금 되살렸으면 잠깐 전량 -- 증분만 받는 열린 화면은 그 봉을 못 받는다.
-        full = since <= 0 or not footprint_state["ready"] or time.time() < okx_fp["resync_until"]
+        full = since <= 0 or not footprint_state["ready"]
         sent = recent if full else [(b, c) for b, c in recent if b >= since]
-        # 2026-09-24 진행 중인 봉의 **OKX 몫만** 따로. 클라는 그 봉을 바이낸스 직결 WS 셀로
-        #   갈아끼우므로(footprintMergeLive) 합산분이 빠져 봉이 ~2/3 로 그려지다가 마감 때 튀었다
-        #   (실측 화면 2,908 vs 서버 4,343). 클라가 실시간 바이낸스 셀에 이걸 더한다.
-        live_bar = recent[-1][0] if recent else 0
-        okx_live = ({"time": live_bar,
-                     "levels": [[round(k * FOOTPRINT_BUCKET, dp)] + [round(x, 3) for x in v]
-                                for k, v in sorted(okx_bars[live_bar].items())]}
-                    if okx_from and live_bar in okx_bars else None)
         return web.json_response({
-            "okxLive": okx_live,
             "symbol": FOOTPRINT_SYMBOL,
             "bucket": FOOTPRINT_BUCKET,
             "barSeconds": FOOTPRINT_BAR_SECONDS,
@@ -3572,14 +3549,13 @@ def make_app() -> web.Application:
             #   어긋나고(2026-09-23 실측) 베이시스가 시변이라 가짜 이중 봉우리가 된다.
             #   수급(CVD)은 «수량의 합»이라 가격이 무관해서 현물이 들어간다 -- 같은 데이터가
             #   한 쪽엔 들어가고 한 쪽엔 안 들어가는 게 맞다.
-            "venues": ["binance-perp", "okx-swap"] if okx_from else ["binance-perp"],
-            "okxFrom": okx_from,
+            "venues": ["binance-perp"],
             "bars": [
                 {"time": bar,
                  # aggTrades 로 메운 봉은 체결이 **묶여** 있어 고래가 과장된다.
                  "agg": bar in agg_bars,
                  "levels": [[round(k * FOOTPRINT_BUCKET, dp)] + [round(x, 3) for x in v]
-                            for k, v in sorted(_merged(bar, cells).items())]}
+                            for k, v in sorted(cells.items())]}
                 for bar, cells in sent
             ],
         }, headers=NOCACHE)
