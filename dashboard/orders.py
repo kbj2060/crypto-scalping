@@ -331,7 +331,7 @@ def record_account_trips(payload: dict, seen: dict[str, tuple[str, str, int, int
 POSITION_SIZING_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_position_sizing_state.json"
 POSITION_SIZING_MAX_AGE_MIN = 30.0         # 워커 주기 300초 x 6
 
-MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT"}
+MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT", "sndk": "SNDKUSDT", "soxl": "SOXLUSDT"}   # 2026-11-02 TradFi 주식 선물 -- USDC 시장이 없어 주문도 USDT
 # 2026-09-19 수동 진입이 나갈 심볼. **차트·시세·청산맵과 분리한다** -- MARKET_SYMBOLS 는
 # 화면 전체가 공유하므로 그걸 뒤집으면 데이터 출처까지 통째로 바뀐다.
 # ⭐왜 USDC 인가: 계정 실요율(/fapi/v1/commissionRate) ETHUSDT 메이커 2.0bp vs **ETHUSDC 0bp**.
@@ -343,7 +343,8 @@ MANUAL_EXEC_SYMBOL = (os.getenv("DASHBOARD_MANUAL_EXEC_SYMBOL", "").strip().uppe
 # 2026-09-26 SOL·XRP 주문(사용자 지시, 단순 규칙). 🔴데이터는 USDT · 주문만 USDC -- SOLUSDC·XRPUSDC 는 계정 요율
 #   메이커 0bp·테이커 4bp(ETHUSDC 와 같음, 09-26 commissionRate 조회). SOL·XRP 는 ETH 위험 모델을 안 쓰고
 #   상한은 증거금 50% 하나뿐이다(assemble_entry_plan 의 asset 분기).
-MANUAL_EXEC_SYMBOLS = {"eth": MANUAL_EXEC_SYMBOL, "sol": "SOLUSDC", "xrp": "XRPUSDC"}
+MANUAL_EXEC_SYMBOLS = {"eth": MANUAL_EXEC_SYMBOL, "sol": "SOLUSDC", "xrp": "XRPUSDC",
+                        "sndk": "SNDKUSDT", "soxl": "SOXLUSDT"}   # 2026-11-02 사용자 «둘 다 열어줘» -- 주식은 USDT 하나(basis 1)
 
 
 def exec_asset_of(symbol: str) -> str | None:

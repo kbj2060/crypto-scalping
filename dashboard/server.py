@@ -170,9 +170,6 @@ import scripts.binance_ban_guard as ban_guard  # noqa: E402 -- requests 도 전�
 #   patch.object(server, …) 가 orders 쪽 이름을 못 막아 실주문 경로가 열린다. 지금은 그 patch 가 AttributeError 로 깨진다.
 from dashboard import orders  # noqa: E402
 from dashboard.orders import MARKET_SYMBOLS, MANUAL_EXEC_SYMBOLS, ACCOUNT_TRIP_RECORD_SECONDS  # noqa: E402 -- MARKET_SYMBOLS 는 주문 심볼 기본값도 써서 정의는 orders 한 곳
-# 2026-11-01 SNDK(Binance TradFi 주식 선물): 화면·시세 전용이라 **여기 사본에만** 넣는다. orders.MARKET_SYMBOLS 에 넣으면 계좌 조회가
-#   심볼마다 userTrades·openOrders 를 더 부른다(실계좌 경로). 주문은 MANUAL_EXEC_SYMBOLS 에 없어 그대로 막힌다.
-MARKET_SYMBOLS = {**MARKET_SYMBOLS, "sndk": "SNDKUSDT", "soxl": "SOXLUSDT"}
 # 2026-09-04: PWA 웹푸시. 사용자가 "다른 작업 중이라 신호를 계속 놓친다"고 해서 추가했다.
 # 이 파일은 구독 등록/해지/테스트발송만 담당하고, 실제로 무엇을 언제 보낼지 판단하는 것은
 # scripts/live_push_notifier_20260904.py(별도 데몬)다 -- 대시보드 서버는 조회가 있을 때만
