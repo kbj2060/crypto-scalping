@@ -810,9 +810,12 @@ function renderArmedLines() {
     const y = Y(v), off = y < top ? "↑ " : y > bot ? "↓ " : "", d = v / en - 1;
     set(`.lt-ln.${k}`, { left: L + "px", width: R - L + "px", top: clampY(y) + "px", opacity: off ? "0" : "" });
     const tag = set(`.lt-tag.${k}`, { left: cx + "px", top: clampY(y) + "px" });
-    const pnl = qty ? ` <span class="lt-s">${d * sgn >= 0 ? "+" : "−"}$${Math.abs((v - en) * qty).toFixed(1)}</span>` : "";
+    // 2026-11-03 사용자 «이미 포지션 있는 진입 라벨이 큰 박스로 청산 프로파일을 가린다»(시안 B와 같은 소형): 금액만 · 가격·%는 툴팁
+    const amt = qty ? `${d * sgn >= 0 ? "+" : "−"}$${Math.abs((v - en) * qty).toFixed(1)}` : `${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%`;
     const st = k === "tp" ? (a.b.tp_resting ? "" : " · 서버 감시") : (a.b.sl_off ? " · 꺼짐" : "");
-    tag.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${off}${k === "tp" ? "익절" : "손절"} ${lineFmt(v)} <span>${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%</span>${mob ? "" : pnl}${st}`;
+    tag.classList.add("lt-mini");
+    tag.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${off}${amt}${st}`;
+    tag.title = `${k === "tp" ? "익절" : "손절"} ${lineFmt(v)} (${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%)`;
     tag.setAttribute("aria-label", `${k === "tp" ? "익절" : "손절"}선 ${lineFmt(v)} — 위아래로 끌어 놓으면 주문이 그 가격으로 바뀝니다`);
     tag.disabled = !!(armedEdit && armedEdit.busy);
   });
@@ -822,9 +825,12 @@ function renderArmedLines() {
   const enTag = set(".lt-tag.en", { left: x0 + 6 + "px", top: yE + "px" });
   // 2026-11-02 레인 칩은 줄을 의도대로 나눈다(방향·진입 / 가격 / 손익 / 증거금 %) -- 글자 흐름대로 접히면 «증거/금»처럼 단어 중간에서 끊겼다. 레인이 아니면 예전과 같은 한 줄.
   const pc = upnl >= 0 ? "good" : "bad";
-  enTag.innerHTML = `${a.side === "SHORT" ? "SHORT" : "LONG"} · 진입 <b class="lt-en-px">${lineFmt(en)}</b>`   // 숫자·고정 글자뿐
-    + (pNow > 0 && qty ? ` <span class="lt-en-p ${pc}">${sg(upnl)}$${Math.abs(upnl).toFixed(2)}</span>${im > 0 && !mob ? `<span class="lt-en-p lt-en-r ${pc}">증거금 ${sg(upnl)}${Math.abs(100 * upnl / im).toFixed(1)}%</span>` : ""}` : "");
-  ltLanePlace(enTag, yE, R, X, top, bot, mob, svg, box);
+  // 2026-11-03 사용자 «진입 라벨이 큰 박스로 청산 프로파일을 가린다 · short +$1 처럼 포지션이랑 수익금만»: 한 줄 작은 알약 «SHORT +$10.52» -- 진입가·증거금 수익률은 툴팁.
+  //   체결 기둥·청산 프로파일 칸(lane)으로 안 들어간다(진입선 왼쪽 끝).
+  enTag.classList.add("lt-mini"); enTag.classList.remove("lane"); enTag.style.width = "";
+  enTag.title = `${a.side === "SHORT" ? "SHORT" : "LONG"} 진입 ${lineFmt(en)}${im > 0 && pNow > 0 && qty ? ` · 증거금 ${sg(upnl)}${Math.abs(100 * upnl / im).toFixed(1)}%` : ""} — 누르면 청산 메뉴`;
+  enTag.innerHTML = `${a.side === "SHORT" ? "SHORT" : "LONG"}`
+    + (pNow > 0 && qty ? ` <span class="lt-en-p ${pc}">${sg(upnl)}$${Math.abs(upnl).toFixed(2)}</span>` : "");
   const note = h.querySelector(".lt-am-note"), e = armedEdit;
   note.textContent = e && e.busy ? "주문 수정 중…" : e && e.err ? `수정 실패 — ${e.err}`
     : e && e.okAt && Date.now() - e.okAt < 6000 ? (e.warn ? `수정됨 — ${e.warn}` : e.tpOk === false ? "수정됨 — 익절 지정가를 못 걸어 서버가 닿으면 닫습니다" : "수정됨")
