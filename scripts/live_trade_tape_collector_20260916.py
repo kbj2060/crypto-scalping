@@ -429,6 +429,35 @@ def _init_sqlite(path: Path) -> None:
         con.close()
 
 
+_SQLITE: dict = {}
+_SQLITE_G = threading.Lock()
+
+
+@contextmanager
+def sqlite_shared(path):
+    """파일마다 연결 하나를 프로세스 안에서 붙들고 쓴다(자동커밋 모드, 락으로 한 번에 한 스레드).
+    쓰기마다 열고 닫으면 close() 가 체크포인트·WAL 정리를 돌려 1GB 파일에서 10분 넘게 걸렸고(2026-11-02 09:05 스택),
+    같은 파일을 쓰는 스토어 7개가 connect/close 로 서로를 막았다. WAL 이라 읽는 쪽(대시보드·감시기)은 안 막힌다.
+    오류가 나면 연결을 버리고 다음에 새로 연다. ponytail: 체크포인트는 SQLite 자동(1000쪽) 몫 -- WAL 이 커지면 따로 TRUNCATE."""
+    with _SQLITE_G:
+        ent = _SQLITE.setdefault(str(path), [threading.Lock(), None])
+    with ent[0]:
+        if ent[1] is None:
+            ent[1] = sqlite3.connect(path, timeout=30, isolation_level=None, check_same_thread=False)
+        con = ent[1]
+        try:
+            yield con
+            if con.in_transaction:      # BEGIN 뒤 COMMIT 을 빼먹은 경로가 다음 사용자에게 새지 않게
+                con.execute("ROLLBACK")
+        except BaseException:
+            ent[1] = None
+            try:
+                con.close()
+            except Exception:  # noqa: BLE001 -- 이미 망가진 연결
+                pass
+            raise
+
+
 class TapeStore:
     """저장소 두 가지를 같은 SQL 로 다룬다(경로 확장자로 고른다).
     · .sqlite = hot(2026-10-01 저장 재설계 3b, 바이낸스 테이프 5코인 한 파일): WAL 이라 읽는 쪽(대시보드·감시기·봉인기)과
@@ -534,10 +563,12 @@ class TapeStore:
 
     @contextmanager
     def _connect(self):
+        if self.sqlite:      # 자동커밋 -- 트랜잭션은 BEGIN/COMMIT 문장으로 두 엔진 똑같이 연다
+            with sqlite_shared(self.db_path) as con:
+                yield con
+            return
         with self._lock:
-            # SQLite 는 자동커밋 모드(isolation_level=None) -- 트랜잭션은 BEGIN/COMMIT 문장으로 두 엔진 똑같이 연다.
-            con = (sqlite3.connect(self.db_path, timeout=30, isolation_level=None) if self.sqlite
-                   else duckdb_connect_retry(self.db_path))
+            con = duckdb_connect_retry(self.db_path)
             try:
                 yield con
             finally:

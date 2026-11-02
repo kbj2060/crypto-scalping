@@ -182,9 +182,12 @@ class ContextStore:
 
     @contextmanager
     def _connect(self):
-        """SQLite 는 자동커밋(isolation_level=None) + BEGIN/COMMIT 문장 -- 두 엔진 같은 코드."""
-        con = (sqlite3.connect(self.db_path, timeout=30, isolation_level=None) if self.sqlite
-               else _tape._bn.duckdb_connect_retry(self.db_path))   # DuckDB: 읽는 쪽과 잠금 충돌이면 잠깐 기다린다
+        """SQLite 는 프로세스 공용 연결 하나(자동커밋 + BEGIN/COMMIT 문장) -- 두 엔진 같은 코드."""
+        if self.sqlite:
+            with _tape._bn.sqlite_shared(self.db_path) as con:
+                yield con
+            return
+        con = _tape._bn.duckdb_connect_retry(self.db_path)   # DuckDB: 읽는 쪽과 잠금 충돌이면 잠깐 기다린다
         try:
             yield con
         finally:
