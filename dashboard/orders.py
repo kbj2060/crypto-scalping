@@ -75,9 +75,10 @@ def load_account_trip_rows() -> list[dict]:
     ponytail: 꼬리만 읽는다(liq_events_load 와 같은 패턴). 매 조회마다 파일을 훑지만 30초
     캐시 뒤이고 지금 40KB 다. 수 MB 가 되면 바이트 tail 로 바꾼다."""
     try:
-        with open(ACCOUNT_TRIP_LEDGER_PATH, encoding="utf-8") as fh:
+        # 🔴2026-11-02 errors="replace" -- 깨진 바이트 하나가 UnicodeDecodeError(ValueError 계열)로 계좌 응답 전체를 실패시켰다. 그 줄만 json 에서 걸러진다.
+        with open(ACCOUNT_TRIP_LEDGER_PATH, encoding="utf-8", errors="replace") as fh:
             tail = deque(fh, maxlen=ACCOUNT_TRIP_CARD_ROWS)
-    except OSError:
+    except (OSError, ValueError):
         return []
     keep = ("symbol", "side", "entry_time", "exit_time", "entry_price", "exit_price",
             "max_qty", "net_pnl")
@@ -238,7 +239,8 @@ def load_account_trip_keys() -> dict[str, tuple[str, str, int, int]]:
     2026-09-12: 키만 담던 것을 **구간까지** 담게 바꿨다. 키(진입시각)만으로는 중복을 못 막는다 --
     아래 record_account_trips 주석 참조."""
     try:
-        lines = ACCOUNT_TRIP_LEDGER_PATH.read_text().splitlines()
+        # 🔴2026-11-02 errors="replace" -- 전체 디코딩이 줄 단위 try 앞에 있어 깨진 바이트 하나에 seen 이 비고, 7일 창의 닫힌 왕복이 전부 다시 적혔다(중복 기록).
+        lines = ACCOUNT_TRIP_LEDGER_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
     except FileNotFoundError:
         return {}
     except Exception as exc:
@@ -309,16 +311,17 @@ def record_account_trips(payload: dict, seen: dict[str, tuple[str, str, int, int
         return 0
     now = datetime.now(timezone.utc).isoformat()
     equity = (payload.get("balance") or {}).get("margin")     # 습관 분해의 «진입 시 자본» 근사(trip_habit)
+    written: list[dict] = []   # 2026-11-02 줄마다 적힌 것을 센다 -- 중간에 실패해도 이미 적힌 줄은 seen 에 넣어 다음 주기에 두 번 적히지 않게
     try:
-        with ACCOUNT_TRIP_LEDGER_PATH.open("a") as handle:
+        with ACCOUNT_TRIP_LEDGER_PATH.open("a", encoding="utf-8") as handle:
             for trip in fresh:
                 handle.write(json.dumps({**trip, "recorded_at": now, "equity_at_record": equity},
                                         ensure_ascii=False) + "\n")
+                written.append(trip)
     except Exception as exc:
         print(f"account_round_trips append failed: {exc}", flush=True)
-        return 0
-    seen.update({trip_key(t): trip_span(t) for t in fresh})
-    return len(fresh)
+    seen.update({trip_key(t): trip_span(t) for t in written})
+    return len(written)
 
 
 # 2026-09-11 크기 가늠자 -- 역변동성 사이징의 실시간 눈금
@@ -587,6 +590,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
     """make_app() 이 부른다. 인자 = 코어·시장 쪽 객체(server.py make_app 지역 · 모듈 상수). sec_prices(asset) = 1초 마지막 체결가 [(초, 가격)] · 없는 코인 None(선 손절 감시). 돌려주는 것 = 라우트·기동/정리 훅이 쓸 함수들.
     라우트 등록·on_startup 순서는 server.py 에 그대로 둔다(기동 순서 불변)."""
     binance_account_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
+    account_last_good: dict[str, Any] = {"ts": 0.0, "payload": None}   # 2026-11-02 마지막 정상 응답 -- 실패 응답에 «last_good» 로 붙여 화면이 낡음 배지와 함께 쓴다
     # 진행 중인 수동 주문 하나. 동시에 둘을 두지 않는다 -- 겹치면 단건 상한의 뜻이 흐려진다.
     manual_entry_state: dict[str, Any] = {"phase": "idle"}
     # 2026-10-20 사용자 «청산만 코인별 허용»: 위 칸을 **다른 코인**이 쓰는 동안(예: ETH 손절 청산 최대 2분) 이 코인 청산은 자기 칸으로 나간다.
@@ -652,6 +656,13 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 payload["day_start"] = account_day_start(payload)
             except OSError as exc:   # 기록 실패는 화면 추정으로 돌아갈 뿐 -- 계좌 응답을 막지 않는다
                 print(f"account_day_start: {type(exc).__name__}: {exc}", flush=True)
+        # 🔴2026-11-02 사용자 «가끔 불러오지 않는 데이터»: 조회 한 번 실패(418·5xx·타임아웃)에 카드 전체가 비었다. ok=false 는 **그대로 둔다**(브래킷 감시·주문 경로는
+        #   «못 읽음 = 모름» 으로 다룬다 -- 09-26 사고) -- 화면용으로만 마지막 정상값을 같이 싣는다(30분까지).
+        if isinstance(payload, dict):
+            if payload.get("ok"):
+                account_last_good.update(ts=time.time(), payload=payload)
+            elif account_last_good["payload"] is not None and time.time() - account_last_good["ts"] < 1800:
+                payload["last_good"] = {**account_last_good["payload"], "age_s": int(time.time() - account_last_good["ts"])}
         return payload
 
     income_cache: dict[str, Any] = {"ts": 0.0, "state": None}

@@ -1,5 +1,4 @@
 const API_EVENTS_URL = "/api/events";
-const API_OPS_STATUS_URL = "/api/ops-status";
 const API_BINANCE_ACCOUNT_URL = "/api/binance-account";
 const API_LIQUIDATION_MAP_URL = "/api/liquidation-map";
 const API_MACRO_CALENDAR_URL = "/api/macro-calendar";
@@ -53,8 +52,6 @@ let tickInFlight = false;
 let latestLivePriceByAsset = {};
 let latestLivePriceTsByAsset = {};
 let candleHistoryByAsset = {};
-let opsStatusEtag = "";
-let opsLastFetchAt = 0;
 // 2026-09-09 청산맵 신호 마커(C안 하이브리드): 증거신호는 고정 레인, 이벤트 트리거는 봉 밀착.
 let latestChartMarkers = null;
 let chartMarkersLastFetchAt = 0;
@@ -333,7 +330,7 @@ const API_POSITION_PROFILE_URL = "/api/position-profile";
 let latestPositionProfile = null, posProfileFetchAt = 0, posProfileInflight = false;
 // 2026-10-28 펜 메모 «체결/청산(왼쪽)과 포지션/호가(오른쪽)를 버튼으로»: 기둥 둘을 따로 고른다 -- 옛 fpCol(trade|pos|liq) 저장값을 이어받는다
 const fpColLoad = (key, old, alt, dflt) => { try { const v = localStorage.getItem(key) || (localStorage.getItem("fpCol") === old ? alt : dflt); return v === alt ? alt : dflt; } catch (e) { return dflt; } };
-let fpColL = fpColLoad("fpColL", "liq", "liq", "trade"), fpColR = fpColLoad("fpColR", "pos", "pos", "book");
+let fpColL = fpColLoad("fpColL", "liq", "liq", "trade"), fpColR = "book";   // 2026-11-02 사용자 «포지션은 비활성화» -- 포지션 기둥은 꺼 둔다(저장값 무시 · 버튼 숨김). 되살리려면 fpColLoad("fpColR", "pos", "pos", "book")
 let fpPosWin = (() => { try { const v = Number(localStorage.getItem("fpPosWin")); return v === 1 || v === 30 ? v : 7; } catch (e) { return 7; } })();
 // 2026-10-27 «청산» 기둥 기간 -- 옛 청산맵 보기의 1d·7d·30d 저장값(liqDays)을 그대로 잇는다
 let fpLiqWin = (() => { try { const v = Number(localStorage.getItem("liqDays")); return v === 7 || v === 30 ? v : 1; } catch (e) { return 1; } })();
@@ -347,7 +344,7 @@ function fpColTogEl(svg) {
   const wins = (side) => [1, 7, 30].map((d) => `<button type="button" data-win="${d}" data-side="${side}">${d}d</button>`).join("");
   el.innerHTML = `<span class="fp-col-seg fp-col-win l" role="group" aria-label="청산 기간">${wins("l")}</span>`
     + '<span class="fp-col-seg" role="group" aria-label="왼쪽 기둥"><button type="button" data-col="trade">체결</button><button type="button" data-col="liq">청산</button></span>'
-    + '<span class="fp-col-seg" role="group" aria-label="오른쪽 기둥"><button type="button" data-col="pos">포지션</button><button type="button" data-col="book">호가</button></span>'
+    + '<span class="fp-col-seg" role="group" aria-label="오른쪽 기둥"><button type="button" data-col="book">호가</button></span>'
     + `<span class="fp-col-seg fp-col-win r" role="group" aria-label="포지션 기간">${wins("r")}</span>`
     + '<span class="fp-col-seg" role="group" aria-label="SLTP 선 주문"><button type="button" data-lines="LONG" title="LONG SLTP — 익절선 위·손절선 아래로 놓고 peg 메이커로 진입(증거금 % 직접)">LONG</button>'
     + '<button type="button" data-lines="SHORT" title="SHORT SLTP — 익절선 아래·손절선 위로 놓고 peg 메이커로 진입(증거금 % 직접)">SHORT</button></span>';
@@ -362,14 +359,15 @@ function fpColTogEl(svg) {
   svg.parentElement.appendChild(el);
   return el;
 }
-function placeFpColTog(svg, xr, yTop, show) {   // xr·yTop = viewBox 좌표(체결 기둥 오른쪽 끝 · 머리 줄 위)
+function placeFpColTog(svg, xr, yTop, show, five) {   // xr·yTop = viewBox 좌표(체결 기둥 오른쪽 끝 · 머리 줄 위)
   const el = fpColTogEl(svg);
   if (!el) return;
   if (el.hidden !== !show) el.hidden = !show;
   if (!show) return;
   el.querySelectorAll("[data-col]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.col === fpColL || b.dataset.col === fpColR)));
   el.querySelectorAll("[data-win]").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.win) === (b.dataset.side === "l" ? fpLiqWin : fpPosWin))));
-  el.querySelector(".fp-col-win.l").hidden = fpColL !== "liq"; el.querySelector(".fp-col-win.r").hidden = fpColR !== "pos";
+  el.querySelector(".fp-col-win.l").hidden = !five && fpColL !== "liq"; el.querySelector(".fp-col-win.r").hidden = fpColR !== "pos";
+  el.querySelectorAll('[aria-label="왼쪽 기둥"], [aria-label="오른쪽 기둥"]').forEach((g) => { g.hidden = !!five; });   // 2026-11-02 데스크톱 5칸은 칸 전환이 없다(청산 기간 1·7·30d 와 LONG/SHORT 만)
   const m = svg.getScreenCTM(), pr = el.parentElement.getBoundingClientRect();
   if (!m) return;
   const L = Math.round(m.a * xr + m.e - pr.left) + "px", T = Math.round(m.d * yTop + m.f - pr.top) + "px";
@@ -452,15 +450,15 @@ function lineToolEl(box) {
     + '<input type="range" class="lt-mg-r" min="1" max="50" step="1" aria-label="진입 증거금 (순자산 대비 %)"><div class="lt-mg-risk"></div></div>'
     + '<div class="lt-sz"></div><div class="lt-row lt-rr"></div>'
     + `<div class="lt-rrb" role="group" aria-label="손익비로 익절선 맞추기 (손절선은 그대로)">${LINE_RR.map((r) => `<button type="button" data-rr="${r}">1:${r}</button>`).join("")}</div>`
-    + '<button type="button" class="lt-go"></button><div class="lt-note"></div></div>'
-    + '<button type="button" class="lt-x">선 지우기</button>';
+    + '<button type="button" class="lt-go"></button>'
+    + '<button type="button" class="lt-x" aria-label="닫기">✕</button></div>';
   h.addEventListener("pointerdown", (e) => {
     e.stopPropagation();   // 차트 끌기로 번지지 않게
     linePt = e.pointerType;
     const tag = e.target.closest(".lt-tx") ? null : e.target.closest(".lt-tag[data-k]"), go = e.target.closest(".lt-go");
     if (tag && lineTool) { lineDrag = { k: tag.dataset.k, id: e.pointerId }; tag.setPointerCapture(e.pointerId); e.preventDefault(); }
     if (go && e.pointerType === "mouse" && !go.disabled) {   // 마우스 = 1.5초 꾹(떠 있는 버튼과 같은 규약)
-      go.classList.add("hold"); lineHold = setTimeout(() => { go.classList.remove("hold"); lineFire(); }, 1500);
+      go.classList.add("hold"); lineHold = setTimeout(() => { go.classList.remove("hold"); lineFire(); }, HOLD_FIRE_MS);
     }
   });
   h.addEventListener("pointermove", (e) => {
@@ -604,6 +602,30 @@ function renderPegTag() {
   if (h._h !== html) { h._h = html; h.innerHTML = html; }
   h.setAttribute("aria-label", o.action ? "취소 요청됨" : "peg 진입 주문 취소"); h.title = o.action ? "취소 요청됨 — 3초 안에 처리" : "걸려 있는 peg 진입 주문을 바로 취소(든 몫은 그대로 · 남은 수량 시장가 없음)";
 }
+// 2026-11-02 사용자 «진입 라벨만 오른쪽 전용 레인으로(D안)»: 진입 라벨(지정가·peg·들어간 포지션)을 플롯 오른쪽 끝 **바깥 띠**로 옮긴다 -- 풋프린트 셀 위에서 묻히던 것을
+//   불투명 칩(두~세 줄 · 정보는 그대로)으로 읽히게. 띠가 좁거나(휴대폰·기둥 없음) 없으면 예전 자리. 띠 안의 차트 글자(청산 띠 거리 «+18.3 · 0.78%» 등)와 겹치면 위·아래로 비켜 앉는다.
+function ltLanePlace(en, y, R, X, top, bot, mob, svg, box) {
+  // 띠 = 플롯 오른쪽 끝(R) 바로 뒤의 체결 기둥 칸(TRADE_W≈104px) -- 기둥은 그 위로 겹쳐 보여도(칩이 불투명) 값이 읽힌다. 기둥이 없는(fpProfileSpan 없음)·휴대폰은 예전 자리.
+  const sp = typeof fpProfileSpan !== "undefined" ? fpProfileSpan : null, on = !!sp && !mob;
+  en.classList.toggle("lane", on);
+  if (!on) { en.style.width = ""; return; }
+  const w = 112, left = R + 5;
+  Object.assign(en.style, { left: left + "px", width: w + "px" });
+  const h = en.offsetHeight || 40, pr = box.getBoundingClientRect(), taken = [];
+  svg.querySelectorAll("text").forEach((t) => {
+    const r = t.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    const l = r.left - pr.left, rt = r.right - pr.left;
+    if (rt > left - 2 && l < left + w + 2) taken.push([r.top - pr.top - 2, r.bottom - pr.top + 2]);
+  });
+  const step = h + 4, free = (yy) => !taken.some(([a, b]) => yy - h / 2 < b && yy + h / 2 > a);
+  let best = y;
+  for (const off of [0, step, -step, 2 * step, -2 * step]) {
+    const yy = Math.min(bot - h / 2, Math.max(top + h / 2, y + off));
+    if (free(yy)) { best = yy; break; }
+  }
+  en.style.top = best + "px";
+}
 function renderLineTool() {
   renderPegTag();
   const svg = el("candleSvgSnapshot"), G = chartGeo, box = svg && svg.parentElement;
@@ -630,6 +652,9 @@ function renderLineTool() {
   const side = lineSide(t, p), sgn = side === "SHORT" ? -1 : 1, ref = lineRef(t, p), lim = t.entry > 0;   // ref = 진입선 가격(지정가면 그 선 · 아니면 지금가)
   const yP = clampY(Y(ref)), yNow = clampY(Y(p)), yT = clampY(Y(t.tp)), yS = clampY(Y(t.sl));
   const qty = Number(t.plan?.quantity) || 0, unit = coinUnit();
+  // 🔴2026-11-02 사용자 «익절·손절을 끌 때마다 가격·%·금액이 맞게 변하게»: 끄는 동안 plan=null 이라 qty=0 이 되어 **금액이 사라졌다**. 서버 수량이 없으면 어림 수량으로 계속 보인다(«≈»).
+  const eq0 = Number(t.plan?.projection?.equity_usdt) || Number(latestBinanceAccount?.balance?.margin) || 0, lev0 = Number(t.plan?.target_leverage) || Number(manualLevEffective()) || 0;
+  const qShow = qty || (eq0 > 0 && lev0 > 0 && ref > 0 ? eq0 * linePct / 100 * lev0 / ref : 0);
   const set = (sel, css) => { const n = h.querySelector(sel); if (n) Object.assign(n.style, css); return n; };
   set(".lt-zone.up", { left: x0 + "px", width: w + "px", top: Math.min(yT, yP) + "px", height: Math.abs(yP - yT) + "px" });
   set(".lt-zone.dn", { left: x0 + "px", width: w + "px", top: Math.min(yS, yP) + "px", height: Math.abs(yP - yS) + "px" });
@@ -637,7 +662,7 @@ function renderLineTool() {
     const y = Y(v), off = y < top ? "↑ " : y > bot ? "↓ " : "", d = v / ref - 1;
     set(`.lt-ln.${k}`, { left: L + "px", width: R - L + "px", top: clampY(y) + "px", opacity: off ? "0" : "" });
     const tag = set(`.lt-tag.${k}`, { left: cx + "px", top: clampY(y) + "px" });
-    const pnl = qty ? ` <span class="lt-s">${d * sgn >= 0 ? "+" : "−"}$${Math.abs(d * ref * qty).toFixed(1)}</span>` : "";
+    const pnl = qShow ? ` <span class="lt-s">${qty ? "" : "≈"}${d * sgn >= 0 ? "+" : "−"}$${Math.abs(d * ref * qShow).toFixed(1)}</span>` : "";
     tag.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${off}${k === "tp" ? "익절" : "손절"} ${lineFmt(v)} <span>${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%</span>${mob ? "" : pnl}`;
     tag.setAttribute("aria-label", `${k === "tp" ? "익절" : "손절"}선 ${lineFmt(v)} — 위아래로 끌어 옮기기`);
   });
@@ -646,10 +671,11 @@ function renderLineTool() {
   const en = set(".lt-tag.en", { left: x0 + 6 + "px", top: yP + "px" });
   en.classList.toggle("lim", lim);
   en.title = lim && t.px ? `차트(USDT) 선 ${lineFmt(ref)} — 실제 주문가(USDC) ${lineFmt(t.px)} · 접수 때 USDC/USDT 차이(basis)를 곱해 걸었습니다` : "";
-  en.innerHTML = lim ? `<span class="lt-grip" aria-hidden="true"></span>${t.placed ? "대기" : "지정가"} ${lineFmt(ref)} <span>${ref < p ? "−" : "+"}${Math.abs(100 * (ref / p - 1)).toFixed(2)}%</span>`
+  en.innerHTML = lim ? `<span class="lt-grip" aria-hidden="true"></span>${t.placed ? "대기" : "지정가"} ${lineFmt(ref)}`
       + (t.placed ? `<span class="lt-tx" role="button" tabindex="0" aria-label="지정가 주문 취소" title="주문 취소">✕</span>` : "")
     : `<span class="lt-grip" aria-hidden="true"></span>진입 peg ${lineFmt(p)} <span class="lt-s">끌면 지정가</span>`;
   en.setAttribute("aria-label", lim ? `지정가 진입선 ${lineFmt(ref)} — 위아래로 끌어 옮기기` : "지금가 peg 진입선 — 끌어서 지정가로 바꾸기");
+  ltLanePlace(en, yP, R, X, top, bot, mob, svg, box);
   h.classList.toggle("short", side === "SHORT");
   // 표는 플롯 왼쪽 -- 두 꼬리표의 높이 띠(±22px)를 피한 빈 구간 중 표가 들어가는 첫 곳(위부터, 대개 두 선 사이). 없으면 가장 넓은 곳.
   const tk = h.querySelector(".lt-tk"), th = tk.offsetHeight + 8, ys = [yT, yS].sort((a, b) => a - b);
@@ -684,12 +710,7 @@ function renderLineTool() {
   go.innerHTML = t.placed ? `✓ ${side === "LONG" ? "롱" : "숏"} 지정가 대기 중`
     : armed ? `확인: ${side === "LONG" ? "롱" : "숏"} ${qty} ${unit} ${lim ? "지정가 " + lineFmt(ref) : "주문"}`
     : `${side || "진입"} ${lim ? "지정가 대기" : "진입 · peg"} <small>${matchMedia("(pointer: coarse)").matches ? (mob ? "두 번" : "두 번 눌러 확인") : "1.5초 꾹"}</small>`;
-  h.querySelector(".lt-note").textContent = t.placed ? (t.err ? `수정 실패 — ${t.err}(서버 값으로 되돌렸습니다)` : `대기 주문 — 선(진입·익절·손절)을 끌어 놓으면 서버가 주문을 수정합니다${t.amended ? ` · 수정 ${t.amended}회` : ""}`)
-    : lim ? "지정가 = 메이커(post-only)로 걸어 두고 체결되면 익절·손절 선이 자동으로 걸림 · 진입선을 지금가 쪽으로 끌면 peg 로 돌아감"
-    : mob ? "익절·손절 모두 메이커로 닫음"
-    : "청산 둘 다 메이커 — 익절 = 체결 즉시 지정가(post-only) · 손절 = 1초 가격이 닿으면 peg(마감 뒤 남은 수량 시장가)";
-  const lx = h.querySelector(".lt-x"); lx.textContent = t.placed ? (t.busy ? "취소 중…" : "주문 취소") : "선 지우기";
-  set(".lt-x", { left: R - 6 + "px", top: top + 8 + "px" });
+  const lx = h.querySelector(".lt-x"); lx.setAttribute("aria-label", t.placed ? (t.busy ? "취소 중…" : "주문 취소") : "닫기 (선 지우기)"); lx.disabled = !!t.busy;
 }
 // ── 2026-10-29 사용자 «SLTP 선주문에서 이미 들어간 주문은 풋프린트에 선과 띠를 계속 · 선을 움직이면 움직인 대로 주문 수정»
 //   계좌 응답의 bracket_armed(서버 with_bracket)에서 이 코인 주문 심볼의 선 무장(lines) + 열린 포지션 → 익절·손절 선 + 진입가~선 띠(선 주문 상자와 같은 모양 · 실선).
@@ -791,8 +812,12 @@ function renderArmedLines() {
   set(".lt-ln.en", { left: x0 + "px", width: w + "px", top: yE + "px" });
   const pNow = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), upnl = pNow > 0 ? (pNow - en) * qty * sgn : 0, lv = Number(a.p.leverage) || 0;
   const im = lv > 0 ? qty * en / lv : 0, sg = (v) => (v >= 0 ? "+" : "−");   // 증거금 = 명목 ÷ 레버(거래소 ROE 분모)
-  set(".lt-tag.en", { left: x0 + 6 + "px", top: yE + "px" }).innerHTML = `${a.side === "SHORT" ? "SHORT" : "LONG"} · 진입 ${lineFmt(en)}`   // 숫자·고정 글자뿐
-    + (pNow > 0 && qty ? ` <span class="lt-en-p ${upnl >= 0 ? "good" : "bad"}">${sg(upnl)}$${Math.abs(upnl).toFixed(2)}${im > 0 && !mob ? ` · 증거금 ${sg(upnl)}${Math.abs(100 * upnl / im).toFixed(1)}%` : ""}</span>` : "");
+  const enTag = set(".lt-tag.en", { left: x0 + 6 + "px", top: yE + "px" });
+  // 2026-11-02 레인 칩은 줄을 의도대로 나눈다(방향·진입 / 가격 / 손익 / 증거금 %) -- 글자 흐름대로 접히면 «증거/금»처럼 단어 중간에서 끊겼다. 레인이 아니면 예전과 같은 한 줄.
+  const pc = upnl >= 0 ? "good" : "bad";
+  enTag.innerHTML = `${a.side === "SHORT" ? "SHORT" : "LONG"} · 진입 <b class="lt-en-px">${lineFmt(en)}</b>`   // 숫자·고정 글자뿐
+    + (pNow > 0 && qty ? ` <span class="lt-en-p ${pc}">${sg(upnl)}$${Math.abs(upnl).toFixed(2)}</span>${im > 0 && !mob ? `<span class="lt-en-p lt-en-r ${pc}">증거금 ${sg(upnl)}${Math.abs(100 * upnl / im).toFixed(1)}%</span>` : ""}` : "");
+  ltLanePlace(enTag, yE, R, X, top, bot, mob, svg, box);
   const note = h.querySelector(".lt-am-note"), e = armedEdit;
   note.textContent = e && e.busy ? "주문 수정 중…" : e && e.err ? `수정 실패 — ${e.err}`
     : e && e.okAt && Date.now() - e.okAt < 6000 ? (e.warn ? `수정됨 — ${e.warn}` : e.tpOk === false ? "수정됨 — 익절 지정가를 못 걸어 서버가 닿으면 닫습니다" : "수정됨")
@@ -820,7 +845,7 @@ function entryPopOpen(x, y) {
     + `<dl><dt>평단</dt><dd>${lineFmt(en)}</dd><dt>수량</dt><dd>${qty}</dd>`
     + `<dt>미실현</dt><dd class="${up >= 0 ? "good" : "bad"}">${sg(up)}$${Math.abs(up).toFixed(2)}</dd>`
     + `<dt>청산가</dt><dd>${liq > 0 ? `${lineFmt(liq)}${dist != null ? ` · ${dist.toFixed(1)}% 남음` : ""}` : "없음"}</dd></dl>`
-    + `<div class="ep-btns">${[25, 50, 100].map((v) => `<button type="button" data-pct="${v}"><i class="hold-fill" aria-hidden="true"></i><span>${v}% 청산</span></button>`).join("")}</div>`
+    + `<div class="ep-btns">${[25, 50, 100].map((v) => `<button type="button" data-pct="${v}" aria-label="${v}% 청산"><i class="hold-fill" aria-hidden="true"></i><span>${v}%</span></button>`).join("")}</div>`
     + `<small>꾹 누르면 게이지가 차고 다 차면 청산 주문이 나갑니다 · 터치는 탭 → 확인</small>`;
   document.body.appendChild(d);
   const r = d.getBoundingClientRect();
@@ -838,7 +863,7 @@ function entryPopOpen(x, y) {
   });
   ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => d.addEventListener(ev, (e) => {
     const b = e.target.closest?.("button[data-pct]");
-    if (b) { released = true; manualHoldCancel(b); }
+    if (b) { if (e.type === "pointerleave") { if (manualHoldLeave(b, e)) released = true; } else { released = true; manualHoldCancel(b); } }
   }, true));
   d.addEventListener("click", (e) => {
     const b = e.target.closest("button[data-pct]");
@@ -943,12 +968,15 @@ let latestBinanceAccount = null;
 // 버튼이 사라진다(2026-09-13 사용자 신고). 버튼은 이 값으로 판단하고, 낡았으면 표시만 한다.
 let lastGoodAccount = null;
 let lastGoodAccountAt = 0;
+let staleAccount = null;       // 2026-11-02 조회 실패 중 카드에만 쓰는 낡은 값 {payload, at} -- latestBinanceAccount 는 null 그대로(주문·청산 경로는 «모름»으로 다룬다)
+let lastAccountError = "";     // 실패 사유(서버 error/hint) -- 낡은 값조차 없을 때 카드에 말해 준다
+let accountReqSeq = 0, accountAppliedSeq = 0;   // 응답 순서 가드 -- 먼저 보낸 느린 응답이 새 값을 덮지 않게
 let binanceAccountLastFetchAt = 0;
 const BINANCE_ACCOUNT_POLL_MS = 10000;   // 2026-10-02 30 -> 10초(사용자 지시) -- 서버 캐시(BINANCE_ACCOUNT_CACHE_SECONDS)와 같게
 let sessionAlertsLastFetchAt = 0;
 let lastSnapshotHistoryFetchAt = 0;
 let lastSnapshotChartRenderAt = 0;
-let activePageTab = "snapshot"; // "ops" | "snapshot" (라이브 탭 제거, 2026-08-31) -- must match index.html's default active tab (data-page-tab="snapshot" carries the initial "active" class)
+const activePageTab = "snapshot"; // 2026-11-02 탭이 하나(스냅샷)뿐 -- 아래 «activePageTab === "snapshot"» 가드는 그대로 참이다
 // 2026-09-21 🔴**불리언 래치를 시각으로 바꿨다.** `isScrolling = true` 를 걸고 150ms
 // setTimeout 으로만 풀면, 배경 탭·가려진 창에서 그 타이머가 안 와 **영구히 true** 로 남는다.
 // 그러면 maybeRenderSnapshotChartNow()/render() 가 계속 조기 반환해 차트가 그 시점에 굳는데
@@ -960,7 +988,6 @@ let lastScrollAt = 0;
 const isScrolling = () => Date.now() - lastScrollAt < SCROLL_IDLE_MS;
 let scrollIdleTimer = 0;
 let dashboardEvents = null;
-const OPS_POLL_MS = 30000;
 const LIQUIDATION_5M_POLL_MS = 60000; // matches server's own 60s cache + the 1-row-per-minute source
 // 2026-09-16 300초 -> 60초. 서버 캐시를 60초로 줄였으므로(입력이 1시간봉이라 그 아래로는
 // 의미가 없다) 클라가 5분마다 물으면 **새 시간봉이 최대 5분 늦게** 보인다. 캐시와 같은 주기로.
@@ -1069,6 +1096,52 @@ function scheduleSnapshotChartRender() {
 // null 이면 아직 못 받았거나 구버전 서버다 -- 그 경우 전부 보인다(있던 걸 없애지 않는다).
 let enabledAssets = null;
 
+// 2026-11-02 고정한 코인·주식(칩으로 늘 보임). 브라우저 기억 · 기본 = ETH·SOL·XRP·SNDK(사용자 «A 드롭다운» 시안).
+const STOCK_ASSETS = new Set(["sndk"]);   // Binance TradFi 주식 선물 -- 팝오버 «주식» 그룹
+function assetPins() {
+  try { const v = JSON.parse(localStorage.getItem("snapPins") || "null"); if (Array.isArray(v)) return new Set(v); } catch (e) { /* 기억은 편의 */ }
+  return new Set(["eth", "sol", "xrp", "sndk"]);
+}
+function assetPinToggle(a) {
+  const p = assetPins(); if (p.has(a)) p.delete(a); else p.add(a);
+  try { localStorage.setItem("snapPins", JSON.stringify([...p])); } catch (e) { /* 기억은 편의 */ }
+  renderSnapshotAssetTabs(); renderAssetPop();
+}
+function assetPopClose() { const p = el("assetPop"); if (p && !p.hidden) { p.hidden = true; el("assetMore")?.setAttribute("aria-expanded", "false"); } }
+function renderAssetPop() {
+  const body = el("assetPopBody"), pop = el("assetPop");
+  if (!body || !pop || pop.hidden) return;
+  const q = (el("assetSearch")?.value || "").trim().toLowerCase(), pins = assetPins();
+  const items = [...document.querySelectorAll("#snapshotAssetTabs .asset-tab")].filter((b) => !b.hidden)
+    .map((b) => ({ key: b.dataset.asset, label: b.textContent.trim() })).filter((x) => !q || x.label.toLowerCase().includes(q) || x.key.includes(q));
+  const cell = (x) => `<div class="asset-cell${x.key === activeSnapshotAsset ? " on" : ""}"><button type="button" class="ac-pick" data-pick="${x.key}">${escapeHtml(x.label)}</button>`
+    + `<button type="button" class="ac-pin${pins.has(x.key) ? " on" : ""}" data-pin="${x.key}" aria-pressed="${pins.has(x.key)}" title="${pins.has(x.key) ? "고정 해제" : "칩으로 고정"}">★</button></div>`;
+  const sec = (t, l) => l.length ? `<div class="asset-grp">${t}</div><div class="asset-grid">${l.map(cell).join("")}</div>` : "";
+  body.innerHTML = sec("고정", items.filter((x) => pins.has(x.key))) + sec("코인", items.filter((x) => !STOCK_ASSETS.has(x.key))) + sec("주식", items.filter((x) => STOCK_ASSETS.has(x.key)))
+    || '<p class="muted" style="padding:8px 4px">찾는 코인·주식이 없습니다.</p>';
+}
+function setupAssetPop() {
+  const more = el("assetMore"), pop = el("assetPop"), search = el("assetSearch");
+  if (!more || !pop) return;
+  document.body.appendChild(pop);   // 카드(backdrop-filter)·상단 칸 안에 두면 position:fixed 가 그 상자 기준이 돼 어긋난다 -- body 로 옮긴다
+  const open = () => {
+    pop.hidden = false; more.setAttribute("aria-expanded", "true"); if (search) search.value = ""; renderAssetPop();
+    const r = more.getBoundingClientRect(), w = Math.min(540, innerWidth - 16);
+    pop.style.width = `${w}px`; pop.style.top = `${Math.round(r.bottom + 8)}px`; pop.style.left = `${Math.max(8, Math.min(Math.round(r.left), innerWidth - w - 8))}px`;
+    search?.focus();
+  };
+  more.addEventListener("click", () => (pop.hidden ? open() : assetPopClose()));
+  search?.addEventListener("input", renderAssetPop);
+  search?.addEventListener("keydown", (e) => { if (e.key === "Enter") { const f = pop.querySelector("[data-pick]"); if (f) f.click(); } });
+  pop.addEventListener("click", (e) => {
+    const pin = e.target.closest("[data-pin]"), pick = e.target.closest("[data-pick]");
+    if (pin) { assetPinToggle(pin.dataset.pin); return; }
+    if (pick) { assetPopClose(); setActiveSnapshotAsset(pick.dataset.pick); more.focus(); }
+  });
+  document.addEventListener("pointerdown", (e) => { if (!pop.hidden && !pop.contains(e.target) && !more.contains(e.target)) assetPopClose(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !pop.hidden) { assetPopClose(); more.focus(); } });
+  addEventListener("resize", assetPopClose);
+}
 function renderSnapshotAssetTabs() {
   const cn = el("fpCoinName"); if (cn) cn.textContent = String(activeSnapshotAsset || "eth").toUpperCase();
   document.querySelectorAll("#snapshotAssetTabs .asset-tab").forEach((btn) => {
@@ -1081,14 +1154,20 @@ function renderSnapshotAssetTabs() {
     if (enabledAssets) btn.hidden = !on;
     btn.classList.toggle("active", on && btn.dataset.asset === activeSnapshotAsset);
   });
+  // 2026-11-02 칩 = 고정한 것 + 지금 보는 것만(나머지는 «전체 ▾» 팝오버) -- off-chip 은 CSS 가 가린다.
+  const pins = assetPins();
+  document.querySelectorAll("#snapshotAssetTabs .asset-tab").forEach((btn) => btn.classList.toggle("off-chip", !pins.has(btn.dataset.asset) && btn.dataset.asset !== activeSnapshotAsset));
+  const allOn = [...document.querySelectorAll("#snapshotAssetTabs .asset-tab")].filter((b) => !b.hidden), mn = el("assetMoreN");
+  if (mn) mn.textContent = String(allOn.length);
   // 2026-10-01 코인 탭 = 1h~12h 와 같은 세그먼트(사용자 지시) -- 숨은 코인(BTC·HYPE)은 칸이 아니므로 «보이는 칸» 기준으로 조각 폭·위치를 준다.
-  const host = el("snapshotAssetTabs"), vis = [...document.querySelectorAll("#snapshotAssetTabs .asset-tab")].filter((b) => !b.hidden);
+  const host = el("snapshotAssetTabs"), vis = allOn.filter((b) => !b.classList.contains("off-chip"));
   if (host) { host.style.setProperty("--seg-n", String(vis.length || 1)); host.style.setProperty("--i", String(Math.max(0, vis.findIndex((b) => b.classList.contains("active"))))); }
 }
 
 async function setActiveSnapshotAsset(asset) {
   if (!SNAPSHOT_ASSET_KEYS.includes(asset) || asset === activeSnapshotAsset) return;
   activeSnapshotAsset = asset;
+  try { localStorage.setItem("snapAsset", asset); } catch (e) { /* 기억은 편의 */ }   // 2026-11-02 사용자 펜 메모: 새로고침해도 보던 코인·주식 탭 유지
   try { renderNews(); } catch (e) { console.error("news render:", e); }   // 2026-10-05 뉴스 카드의 «지금 코인» 강조·필터(예외가 코인 전환을 끊지 않게)
   chartPanReset();   // 코인을 바꾸면 실시간으로(관성도 멈춘다 -- 리뷰: 미끄러지던 게 새 코인을 과거로 끌었다)
   renderSnapshotAssetTabs();
@@ -1278,6 +1357,13 @@ function setupSnapshotAssetTabs() {
     btn.addEventListener("click", () => setActiveSnapshotAsset(btn.dataset.asset));
   });
   renderSnapshotAssetTabs();
+  setupAssetPop();
+  // 2026-11-02 새로고침해도 보던 코인·주식 탭 유지 -- 전환 코드가 아래 const 들을 쓰므로 스크립트가 끝까지 읽힌 뒤(setTimeout 0)에 부른다.
+  setTimeout(() => {
+    let saved = ""; try { saved = localStorage.getItem("snapAsset") || ""; } catch (e) { /* 기억은 편의 */ }
+    const tab = saved && document.querySelector(`#snapshotAssetTabs .asset-tab[data-asset="${saved}"]`);
+    if (tab && !tab.hidden) setActiveSnapshotAsset(saved);   // 꺼진 코인(hidden)이면 ETH 그대로
+  }, 0);
 }
 
 function fmtNum(v, d = 2) {
@@ -1520,81 +1606,9 @@ function disconnectDashboardEvents() {
   dashboardEvents = null;
 }
 
-function opsTone(status) {
-  const value = String(status || "").toUpperCase();
-  if (value === "OK" || value === "RUNNING") return "good";
-  if (value === "WARN") return "warn";
-  if (value === "CRITICAL" || value === "BLOCKED" || value === "STOPPED") return "bad";
-  return "neutral";
-}
-
-function opsLabel(value) {
-  return ({ trading_bot: "트레이딩 봇", ops_watchdog: "Ops Watchdog", trading_bot_process: "트레이딩 봇 프로세스", decision_snapshot: "의사결정 스냅샷", trading_bot_heartbeat: "봇 heartbeat", data_pipeline: "데이터 파이프라인", pipeline_contract: "파이프라인 계약", market_data_sources: "시장 데이터 소스", dashboard_state: "대시보드 상태", execution_contract: "실행 안전 계약", runtime_resources: "시스템 자원", watchdog_storage: "watchdog 저장소" })[value] || String(value || "알 수 없음");
-}
-
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>'"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[ch]);
 }
-
-function renderOpsStatus(payload) {
-  const heartbeat = payload?.heartbeat || {};
-  const health = payload?.health || {};
-  const badge = el("opsWatchdogBadge");
-  if (badge) {
-    badge.className = `ops-badge ${heartbeat.status === "ok" ? "good" : "bad"}`;
-    badge.textContent = `WATCHDOG ${heartbeat.status === "ok" ? "RUNNING" : "UNKNOWN"}`;
-  }
-  setT("opsUpdatedAt", `서버 갱신 ${fmtTs(health.updated_at_kst || payload?.generated_at)}`);
-  setT("opsHeartbeatText", `watchdog heartbeat: ${fmtTs(heartbeat.recorded_at_kst)} · ${heartbeat.check_count || 0}개 점검`);
-  const checks = Array.isArray(health.checks) ? health.checks : [];
-  const badCount = checks.filter((c) => opsTone(c.status) === "bad").length;
-  const warnCount = checks.filter((c) => opsTone(c.status) === "warn").length;
-  const summaryEl = el("opsHealthSummary");
-  if (summaryEl) {
-    if (!checks.length) {
-      summaryEl.textContent = "점검 항목 없음";
-      summaryEl.className = "ops-health-summary neutral";
-    } else if (badCount > 0) {
-      summaryEl.textContent = `${badCount}개 이상 감지`;
-      summaryEl.className = "ops-health-summary bad";
-    } else if (warnCount > 0) {
-      summaryEl.textContent = `${warnCount}개 주의`;
-      summaryEl.className = "ops-health-summary warn";
-    } else {
-      summaryEl.textContent = `${checks.length}/${checks.length} 정상`;
-      summaryEl.className = "ops-health-summary good";
-    }
-  }
-  setH("opsHealthList", checks.map((check) => {
-    const details = check?.details || {};
-    const age = Number(details.age_minutes);
-    const ageText = Number.isFinite(age) ? `${age.toFixed(age < 10 ? 1 : 0)}분 전` : "-";
-    const tone = opsTone(check.status);
-    return `<article class="ops-health-row ${tone}">
-      <span class="ops-health-dot" aria-hidden="true"></span>
-      <div class="ops-health-info">
-        <strong>${escapeHtml(opsLabel(check.component))}</strong>
-        <span>${escapeHtml(check.summary || "-")}</span>
-      </div>
-      <div class="ops-health-meta">
-        <span class="ops-health-status-badge">${escapeHtml(check.status || "UNKNOWN")}</span>
-        <small>${ageText}</small>
-      </div>
-    </article>`;
-  }).join("") + opsOkToggleHtml(checks.filter((c) => opsTone(c.status) === "good").length));
-}
-// 2026-10-17 휴대폰(≤720)만 보이는 «정상 N개 보기» -- 정상 줄은 CSS 가 접고, 펼침은 목록의 show-ok 클래스(30초 재그리기에도 유지)
-function opsOkToggleHtml(n) {
-  const open = !!el("opsHealthList")?.classList.contains("show-ok");
-  return n ? `<button type="button" class="ops-ok-toggle" aria-expanded="${open}">정상 ${n}개 ${open ? "접기" : "보기"}</button>` : "";
-}
-document.addEventListener("click", (e) => {
-  const b = e.target instanceof Element ? e.target.closest(".ops-ok-toggle") : null;
-  if (!b) return;
-  const open = b.parentElement.classList.toggle("show-ok");
-  b.setAttribute("aria-expanded", String(open));
-  b.textContent = b.textContent.replace(/보기|접기/, open ? "접기" : "보기");
-});
 
 // 잔고가 «어느 자산 지갑»의 것인지, 그리고 화면이 안 쓰는 지갑에 돈이 남아 있는지.
 // 🔴단일자산 담보 모드에서 최상위 합계는 USDT 전용이라, 서버가 수동 주문 심볼의 담보 자산
@@ -1805,17 +1819,41 @@ let entryProjPreview = null;
 let entryProjKey = "";
 let lastEntryPlan = null;
 
+// 2026-11-02 사용자 «가끔 불러오지 않는 데이터»: 조회가 한 번 실패하면 달력·성과·순환 카드가 통째로 비었다 다음 폴링에 돌아왔다. 낡은 값이 있으면(서버 last_good ·
+//   없으면 이 화면의 마지막 정상값, 30분까지) 카드만 그것으로 그리고 «낡은 값» 배지를 단다. latestBinanceAccount 는 건드리지 않는다 -- 그걸 읽는 주문·청산·진입선은 «모름».
 function renderSnapshotAccount() {
+  if (!latestBinanceAccount && staleAccount) {
+    const keep = latestBinanceAccount;
+    latestBinanceAccount = staleAccount.payload;
+    try {
+      renderSnapshotAccountCore();
+      const sm = el("snapAcctSummary"), min = Math.max(1, Math.round((Date.now() - staleAccount.at) / 60000));
+      if (sm) { sm.textContent = `낡은 값 · ${min}분 전 · 갱신 실패`; sm.className = "ops-health-summary warn"; }
+    } finally { latestBinanceAccount = keep; }
+    return;
+  }
+  renderSnapshotAccountCore();
+}
+function renderSnapshotAccountCore() {
   syncOrderCoinGate();
   const summary = el("snapAcctSummary");
   if (!el("snapAcctPosition")) return;
+  const warn = el("snapAcctWarn");
   if (!latestBinanceAccount) {
     if (summary) { summary.textContent = "데이터 없음"; summary.className = "ops-health-summary neutral"; }
     setT("snapAcctBalance", "-");
-    setH("snapAcctPosition", '<p class="muted">계좌를 불러오지 못했습니다.</p>');
+    setH("snapAcctPosition", `<p class="muted">계좌를 불러오지 못했습니다.${lastAccountError ? ` (${escapeHtml(lastAccountError)})` : ""}</p>`);
     setH("snapAcctPerf", "");
     setH("snapAcctCycle", "");
+    if (warn) warn.hidden = true;
     return;
+  }
+  // 2026-11-02 «누락처럼 보임» -- 서버가 알려 주는 체결 조회 실패·잘림 심볼을 화면이 말한다(전엔 trades_truncated 를 아무도 안 읽었다)
+  if (warn) {
+    const failed = latestBinanceAccount.trades_failed || [], cutSyms = latestBinanceAccount.trades_truncated || [];
+    const msg = [failed.length ? `체결 조회 실패: ${failed.join(", ")} — 이 심볼의 진행 중 순환·원장이 잠시 빠졌습니다(다음 조회에 복구)` : "",
+                 cutSyms.length ? `체결 이력 잘림: ${cutSyms.join(", ")} — 오래된 왕복·진행 중 합계가 창 안 몫만일 수 있습니다` : ""].filter(Boolean).join(" · ");
+    warn.hidden = !msg; warn.textContent = msg;
   }
   const A = latestBinanceAccount, b = A.balance || {}, wallet = Number(b.wallet) || 0;
   const positions = (A.positions || []).filter((p) => Math.abs(Number(p.qty) || 0) > 0);
@@ -2000,9 +2038,18 @@ function cycleSvg(t, pos, rows, now, W) {
 }
 function renderCycleCard(A, positions, equity) {
   cycleArgs = [A, positions, equity];
-  const now = Date.now(), W = Math.max(320, el("snapAcctCycle")?.clientWidth || 760);   // 화면 폭 그대로 -- 고정 viewBox 는 넓은 화면에서 가운데 작게 떴다
-  const open = (A.trades || []).map((t) => [t, positions.find((p) => p.symbol === t.symbol && p.side === t.side)])
-    .filter(([t, p]) => !t.closed && p && (t.legs || []).length);
+  // 2026-11-02 사용자 «순환 섹션 너비를 절반으로 -- 현재 높이에 2개가 들어가게»: 넓은 화면에서 #snapAcctCycle 이 2열 격자(CSS) -- 차트 폭도 한 열 폭으로 그린다.
+  const cyBox = el("snapAcctCycle"), cols = cyBox ? getComputedStyle(cyBox).gridTemplateColumns.split(" ").length : 1;
+  const now = Date.now(), W = Math.max(320, cyBox ? (cyBox.clientWidth - (cols > 1 ? 16 : 0)) / cols : 760);   // 화면 폭 그대로 -- 고정 viewBox 는 넓은 화면에서 가운데 작게 떴다
+  // 🔴2026-11-02 사용자 «ETH 롱 순환 2개»: 같은 (심볼, 방향)의 열린 왕복이 둘 오면(서버 재동기화 파편 + 진짜) 카드가 그대로 둘이었다 -- 잘리지 않은 것 중
+  //   진입이 가장 늦은 하나만, 없으면 잘린 것 중 하나(서버도 같은 규칙으로 파편을 거른다).
+  const pick = new Map();
+  for (const t of A.trades || []) {
+    if (t.closed || !(t.legs || []).length) continue;
+    const k = `${t.symbol}|${t.side}`, cur = pick.get(k);
+    if (!cur || (!!cur.truncated_open && !t.truncated_open) || (!!cur.truncated_open === !!t.truncated_open && t.entry_time > cur.entry_time)) pick.set(k, t);
+  }
+  const open = [...pick.values()].map((t) => [t, positions.find((p) => p.symbol === t.symbol && p.side === t.side)]).filter(([, p]) => p);
   setH("snapAcctCycle", open.map(([t, pos]) => {
     const key = `${t.symbol}|${t.side}|${t.entry_time}`, c = cyclePaths[key] || (cyclePaths[key] = { at: 0, rows: [] });
     if (now - c.at > 60000) {
@@ -2033,7 +2080,7 @@ function renderCycleCard(A, positions, equity) {
         ${tile("지금", `${cycleQ(pos.qty)} ${coin}`, "", `평단 ${acctPx(pos.entry_price)}`)}
         ${tile("미실현", acctSu(unreal), acctTone(unreal), `현재가 ${acctPx(pos.mark_price)}`)}
         ${tile("실현(부분 정리)", acctSu(real), acctTone(real), `수수료 $${fee.toFixed(2)}`)}
-        ${tile("합계", cut ? acctSu(total) : withPct(acctSu(total), totR), acctTone(total), (cut ? "" : `최대 원금 ${acctSuc(peak).slice(1)} 대비 · `) + (equity > 0 ? `순자산 ${acctPct(total / equity)}` : ""))}
+        ${tile("합계", cut ? acctSu(total) : withPct(acctSu(total), totR), acctTone(total), (cut ? "체결 이력이 잘려 창 안 몫만 · " : `최대 원금 ${acctSuc(peak).slice(1)} 대비 · `) + (equity > 0 ? `순자산 ${acctPct(total / equity)}` : ""))}
         ${tile("그냥 보유였다면", cut ? "—" : withPct(acctSu(hold), holdR), cut ? "" : acctTone(hold), cut ? "체결 이력이 잘려 첫 체결 모름" : `최대 원금 ${acctSuc(hold0).slice(1)} · 첫 진입가 @${acctPx(fpx)}`)}
         ${tile("순환 효과", cut ? "—" : `${acctSu(cyc)} <small>${(totR - holdR) * 100 >= 0 ? "+" : "−"}${Math.abs((totR - holdR) * 100).toFixed(2)}%p</small>`, cut ? "" : acctTone(cyc), "합계 − 그냥 보유 · 수익률 차")}
       </div>
@@ -2044,66 +2091,24 @@ function renderCycleCard(A, positions, equity) {
   }).join(""));
 }
 
-// 거래소 실계좌(수동 매매 포함) 패널. 봇 원장(trade_journal)과 달리 여기 숫자는 바이낸스가 준 것.
+// 거래소 실계좌(수동 매매 포함). 봇 원장(trade_journal)과 달리 여기 숫자는 바이낸스가 준 것.
 function renderBinanceAccount(payload) {
   // 스냅샷 탭 요약과 청산맵 진입선이 같은 값을 쓴다 -- 두 번 받지 않도록 여기서 보관한다.
   latestBinanceAccount = payload?.ok ? payload : null;
-  if (payload?.ok) { lastGoodAccount = payload; lastGoodAccountAt = Date.now(); }
-  renderSnapshotAccount();
+  if (payload?.ok) { lastGoodAccount = payload; lastGoodAccountAt = Date.now(); staleAccount = null; lastAccountError = ""; }
+  else {
+    cycleArgs = null;   // 🔴실패 뒤 늦게 온 /api/cycle-path 응답이 옛 계좌로 순환 카드를 되살리지 않게
+    lastAccountError = String(payload?.hint || payload?.error || "");
+    const lg = payload?.last_good, ago = Number(lg?.age_s) || 0;
+    staleAccount = lg && lg.ok ? { payload: lg, at: Date.now() - ago * 1000 }
+      : lastGoodAccount && Date.now() - lastGoodAccountAt < 1800000 ? { payload: lastGoodAccount, at: lastGoodAccountAt } : null;
+  }
+  try { renderSnapshotAccount(); } catch (err) { console.error("계좌 카드 렌더 예외:", err); }   // 한 칸의 예외가 차트·청산 버튼 동기화를 막지 않게
   renderSnapshotChart();
   // 🔴계좌가 **도착하는 즉시** 청산 버튼을 맞춘다. 예전에는 60초 주기(MANUAL_ENTRY_REFRESH_MS)
   // 에만 맞춰서, 화면을 열고 **63초 뒤에야** 청산 버튼이 나타났다(2026-09-13 실측).
   // 급히 닫으려고 연 사람에게 1분을 기다리게 하는 건 이 버튼의 존재 이유와 정면으로 어긋난다.
   if (typeof manualExitSyncButtons === "function") manualExitSyncButtons();
-  const summary = el("acctSummary");
-  if (!payload?.ok) {
-    const msg = payload?.hint || payload?.error || "계정을 불러오지 못했습니다.";
-    if (summary) { summary.textContent = "연결 안 됨"; summary.className = "ops-health-summary bad"; }
-    setT("acctBalanceText", msg);
-    setH("acctPositions", "");
-    setH("acctTrades", "");
-    return;
-  }
-  const b = payload.balance || {};
-  setT("acctBalanceText", `지갑 ${fmtUsd(b.wallet)} · 평가 ${fmtUsd(b.margin)} · 가용 ${fmtUsd(b.available)}`
-    + ` · 미실현 ${fmtUsd(b.unrealized)}${balanceAssetNote()}`);
-  const positions = payload.positions || [];
-  const trades = payload.trades || [];
-  if (summary) {
-    summary.textContent = positions.length ? `보유 ${positions.length}종목` : "포지션 없음";
-    summary.className = `ops-health-summary ${positions.length ? "good" : "neutral"}`;
-  }
-  setH("acctPositions", positions.length ? positions.map((p) => {
-    const tone = p.unrealized_pnl > 0 ? "good" : p.unrealized_pnl < 0 ? "bad" : "neutral";
-    return `<article class="ops-health-row ${tone}">
-      <span class="ops-health-dot" aria-hidden="true"></span>
-      <div class="ops-health-info">
-        <strong>${escapeHtml(p.symbol)} ${p.side === "LONG" ? "롱" : "숏"} ×${escapeHtml(p.leverage)}</strong>
-        <span>진입 ${fmtUsd(p.entry_price)} → 현재 ${fmtUsd(p.mark_price)} · 청산가 ${fmtUsd(p.liquidation_price)} · 수량 ${escapeHtml(p.qty)}</span>
-      </div>
-      <div class="ops-health-meta">
-        <span class="ops-health-status-badge">${fmtUsd(p.unrealized_pnl)}</span>
-        <small>${fmtTs(p.entry_at)} 진입</small>
-      </div>
-    </article>`;
-  }).join("") : '<p class="muted">열려 있는 포지션이 없습니다.</p>');
-  // 이력이 잘리면 가장 오래된 왕복은 창 밖에서 열렸을 수 있어 진입가/방향이 틀릴 수 있다.
-  const truncNote = (payload.trades_truncated || []).length
-    ? `<p class="muted">${escapeHtml((payload.trades_truncated || []).join(", "))}는 체결 이력이 잘려 가장 오래된 왕복이 부정확할 수 있습니다.</p>` : "";
-  setH("acctTrades", trades.length ? truncNote + trades.slice(0, 20).map((t) => {
-    const tone = !t.closed ? "warn" : t.net_pnl > 0 ? "good" : t.net_pnl < 0 ? "bad" : "neutral";
-    return `<article class="ops-health-row ${tone}">
-      <span class="ops-health-dot" aria-hidden="true"></span>
-      <div class="ops-health-info">
-        <strong>${escapeHtml(t.symbol)} ${t.side === "LONG" ? "롱" : "숏"}</strong>
-        <span>${fmtTs(t.entry_at)} 진입 → ${t.closed ? `${fmtTs(t.exit_at)} 청산` : "보유 중"} · ${escapeHtml(t.fills)}회 체결</span>
-      </div>
-      <div class="ops-health-meta">
-        <span class="ops-health-status-badge">${t.closed ? fmtUsd(t.net_pnl) : "-"}</span>
-        <small>수수료 ${fmtUsd(t.commission)}</small>
-      </div>
-    </article>`;
-  }).join("") : '<p class="muted">체결 내역이 없습니다.</p>');
 }
 
 function fmtUsd(value) {
@@ -2113,39 +2118,27 @@ function fmtUsd(value) {
 }
 
 async function refreshBinanceAccount(force = false) {
-  // ops 탭(refreshOpsStatus)과 스냅샷 탭(tick) 양쪽에서 부르므로 자체 게이트를 둔다.
+  // tick 과 주문 직후에서 부르므로 자체 게이트를 둔다.
   // force = 주문 체결 직후(2026-10-06 사용자 «완료되면 플로팅 버튼에 바로») -- 게이트·서버 캐시(10초)를 건너뛰고 떠 있는 버튼을 바로 다시 그린다.
   const now = Date.now();
   if (!force && now - binanceAccountLastFetchAt < BINANCE_ACCOUNT_POLL_MS) return;
   binanceAccountLastFetchAt = now;
+  const seq = ++accountReqSeq;
   try {
     const res = await fetch(API_BINANCE_ACCOUNT_URL + (force ? "?fresh=1" : ""), { cache: "no-cache" });
-    renderBinanceAccount(await res.json());
+    const j = await res.json();
+    if (seq < accountAppliedSeq) return;   // 더 나중에 보낸 요청의 응답이 이미 반영됐다 -- 늦게 온 옛 응답은 버린다
+    accountAppliedSeq = seq;
+    renderBinanceAccount(j);
     if (force) renderOfab();
   } catch (error) {
     console.error("Binance account fetch error:", error);
+    if (seq < accountAppliedSeq) return;
+    accountAppliedSeq = seq;
     renderBinanceAccount({ ok: false, error: "대시보드 서버에 연결하지 못했습니다." });
   }
 }
 
-
-async function refreshOpsStatus() {
-  const now = Date.now();
-  if (now - opsLastFetchAt < OPS_POLL_MS) return;
-  opsLastFetchAt = now;
-  refreshBinanceAccount();
-  try {
-    const res = await fetch(API_OPS_STATUS_URL, { cache: "no-cache", headers: opsStatusEtag ? { "If-None-Match": opsStatusEtag } : {} });
-    if (res.status === 304) return;
-    if (!res.ok) throw new Error(`ops status ${res.status}`);
-    opsStatusEtag = res.headers.get("ETag") || opsStatusEtag;
-    renderOpsStatus(await res.json());
-  } catch (error) {
-    console.error("Ops status fetch error:", error);
-    const badge = el("opsWatchdogBadge");
-    if (badge) { badge.className = "ops-badge bad"; badge.textContent = "WATCHDOG UNREACHABLE"; }
-  }
-}
 
 // Shared open/closed state for the per-signal "자세히" detail toggles (model indicators AND
 // evidence signals use the same key space, prefixed "model:"/"evidence:" to avoid collisions).
@@ -2999,53 +2992,22 @@ function renderMacroCalendar(payload) {
 }
 
 
-// 2026-10-16 펜 메모(3차 «화살표대로 순서»): 넓은 화면(≥1200) 스냅샷 = 맨 위 [세션(왼쪽) | 코인 탭(가운데) | 경보·다크·알림(오른쪽)] ·
-//   스냅샷/운영 관리 = 맨 위 제일 왼쪽(10-17 펜 메모 «카드 머리에서 대시보드 최상단 제일 왼쪽으로», 세션은 그 오른쪽). 운영 관리 화면 = 탭은 맨 위 왼쪽, 세션 가운데.
-//   좁은 화면은 옛 자리 그대로(탭 = 맨 위 첫 줄 · 코인 = 카드 머리 · 세션 = CSS 배치).
+// 2026-11-02 운영 관리·스냅샷 탭 제거(사용자 펜 메모) -- 화면은 스냅샷 하나다.
+// 넓은 화면(≥1200) = 맨 위 [세션(왼쪽) | 코인 탭(가운데) | 경보·다크·알림(오른쪽)] · 좁은 화면은 코인 탭 = 카드 머리 · 세션 = CSS 배치.
 const PAGE_TABS_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1200px)") : null;
 function placeTopLeft() {
-  const nav = document.querySelector(".page-tabs"), top = document.querySelector(".topbar"), slot = el("topLeftSlot"), mid = el("topCenterSlot");
-  const coins = el("snapshotAssetTabs"), home = el("coinHome"), sess = document.querySelector(".top-right");
-  if (!nav || !top || !slot || !mid) return;
-  const wide = !!(PAGE_TABS_WIDE && PAGE_TABS_WIDE.matches), snap = activePageTab === "snapshot";
-  const coinsHome = () => { if (coins && home && coins.previousElementSibling !== home) home.after(coins); };
-  const sessHome = () => { if (sess && sess.parentElement !== top) top.appendChild(sess); };
-  if (wide && snap) {
-    if (slot.firstElementChild !== nav) slot.prepend(nav);
+  const top = document.querySelector(".topbar"), slot = el("topLeftSlot"), mid = el("topCenterSlot");
+  const coins = el("assetBar"), home = el("coinHome"), sess = document.querySelector(".top-right");
+  if (!top || !slot || !mid) return;
+  if (PAGE_TABS_WIDE && PAGE_TABS_WIDE.matches) {
     if (sess && sess.parentElement !== slot) slot.appendChild(sess);
     if (coins && coins.parentElement !== mid) mid.appendChild(coins);
   } else {
-    coinsHome(); sessHome();
-    if (wide) { if (nav.parentElement !== slot) slot.appendChild(nav); }
-    else if (nav.parentElement !== top) slot.after(nav);
+    if (coins && home && coins.previousElementSibling !== home) home.after(coins);
+    if (sess && sess.parentElement !== top) top.appendChild(sess);
   }
 }
 if (PAGE_TABS_WIDE && PAGE_TABS_WIDE.addEventListener) PAGE_TABS_WIDE.addEventListener("change", placeTopLeft);   // 🔴CI 검사기(esprima)는 ?.( 를 못 읽는다
-function setupPageTabs() {
-  document.querySelectorAll(".page-tab").forEach((button) => button.addEventListener("click", () => {
-    const target = button.dataset.pageTab; // "ops" | "snapshot" (라이브 탭 제거 08-31 · 알림 탭 → 알림 센터 모달 10-05)
-    activePageTab = target;
-    el("opsTabPanel")?.classList.toggle("hidden", target !== "ops");
-    el("snapshotTabPanel")?.classList.toggle("hidden", target !== "snapshot");
-    cardRailSync();   // 2026-09-30 카드 이동 레일도 스냅샷 탭에서만
-    ofabSync();   // 2026-09-25 떠다니는 주문 버튼은 스냅샷 탭에서만 -- 떠나면 조작부를 카드로 먼저 돌려놓는다
-    document.querySelectorAll(".page-tab").forEach((tab) => {
-      tab.classList.toggle("active", tab === button);
-      if (tab === button) tab.setAttribute("aria-current", "page"); else tab.removeAttribute("aria-current");
-    });
-    placeTopLeft();
-    if (target === "ops") {
-      opsLastFetchAt = 0; refreshOpsStatus();
-    } else if (target === "snapshot") {
-      chartMarkersLastFetchAt = 0; latestChartMarkers = null; refreshChartMarkers();
-      liquidation5mLastFetchAt = 0; refreshLiquidation5mSignal();
-      liquidationMapLastFetchAt = 0; refreshLiquidationMap();
-      macroCalendarLastFetchAt = 0; refreshMacroCalendar();
-      sessionAlertsLastFetchAt = 0; refreshSessionAlerts();
-      lastSnapshotHistoryFetchAt = 0; maybeFetchSnapshotChartHistory();
-    }
-  }));
-}
 
 // 2026-09-30 카드 이동 레일(사용자 지시 «점만»): 점을 누르면 그 카드로 스크롤 · 지금 보는 카드의 점이 채워진다. 스냅샷 탭에서만.
 function cardRailSync() {
@@ -3076,8 +3038,10 @@ function fitOn() {
 function fitLayout() {
   // 2026-09-30(2) 측정해서 고치는 방식을 버렸다(새로고침마다 두세 번 크기가 바뀌었다): 풋프린트 차트 칸은 CSS(html.fit1 — 카드 = 창 높이, 차트 칸 = 남는 공간)가
   //   첫 배치부터 정하고, 행사가 사다리는 창 높이 공식 하나로 정한다. 여기서는 모드 켜기/끄기와 계좌·Option 최소 높이만.
-  const on = fitOn(), vh = innerHeight - 20;
+  const apph = appBarH(), on = fitOn(), vh = innerHeight - apph - 10;   // 2026-11-02 앱바가 위에 고정 -- 카드 높이 = 창 − 앱바 − 아래 여백
   document.documentElement.classList.toggle("fit1", on);
+  // 2026-11-02 사용자 펜 메모 «앱바와 카드까지가 화면에 꽉 차도록»: 앱바 아래 끝을 CSS 변수로 -- 카드 높이(styles.css html.fit1)와 스크롤 여백이 쓴다.
+  if (on) document.documentElement.style.setProperty("--apph", `${apph}px`);
   const acct = el("acctCard"), opt = el("optCard");
   if (acct) { acct.style.minHeight = on ? `${vh}px` : ""; if (!on) acct.style.removeProperty("--acctz"); }
   if (opt) opt.style.minHeight = on ? `${vh}px` : "";
@@ -3148,13 +3112,18 @@ function fitLayout() {
 }
 // Option 격자: 머리·커버 줄(~130) 아래 여섯 줄 중 사다리가 넷(칸 머리·칩 ~70 을 빼고) -- 측정 없이 창 높이로.
 // 2026-10-07 ⑤ 다음 24시간이 뉴스 카드로 가서(사용자 지시) 예전에 빼던 152(116 + 여백·선 36)를 사다리에 돌려준다.
-function fitLadderFormula() { return Math.max(300, Math.min(900, Math.round(((innerHeight - 20 - 130) * 4) / 6 - 70))); }
+function appBarH() {   // 앱바가 차지하는 높이(위 여백 포함) -- 🔴offsetTop 은 고정(sticky)이면 스크롤 따라 변하므로 쓰지 않는다
+  const b = document.querySelector("header.top"); if (!b) return 64;
+  const cs = getComputedStyle(b), pt = cs.position === "sticky" ? 0 : parseFloat(getComputedStyle(b.parentElement).paddingTop) || 0;
+  return Math.round(pt + b.offsetHeight + (parseFloat(cs.marginBottom) || 0));
+}
+function fitLadderFormula() { return Math.max(300, Math.min(900, Math.round(((innerHeight - appBarH() - 10 - 130) * 4) / 6 - 70))); }
 // 첫 렌더 전에 모드 클래스와 최소 높이를 바로 입힌다 -- 데이터가 오기 전에 상자 높이가 이미 맞아 있다
 function fitApplyCached() {
   if (!fitOn()) return;
   document.documentElement.classList.add("fit1");
   fitOptLadderH = FIT0.lad || fitLadderFormula();   // 지난번에 잰 값(같은 창 높이) -- 새로고침 첫 그림부터 맞는다
-  ["acctCard", "optCard"].forEach((id) => { const c = el(id); if (c) c.style.minHeight = `${innerHeight - 20}px`; });
+  ["acctCard", "optCard"].forEach((id) => { const c = el(id); if (c) c.style.minHeight = `${innerHeight - appBarH() - 10}px`; });
   if (fitAcctPlotH) el("acctCard")?.style.setProperty("--acctplot", `${fitAcctPlotH}px`);
   const ac = el("acctCard");
   if (ac && fitAcctZ < 1) ac.style.setProperty("--acctz", String(fitAcctZ));
@@ -3542,17 +3511,7 @@ function footprintMergeLive(byTime, bucket) {
   //   갈아치웠다. 이 함수는 «더 나은 값으로 교체»할 때만 의미가 있다.
   if (!footprintLive.cells.size) return;
   const merged = new Map([...footprintLive.cells.entries()].map(([k, c]) => [k, c.slice(0, 6)]));
-  // 2026-09-24 서버가 준 **OKX 몫**을 더한다(`okxLive`, 같은 봉일 때만). 빼면 이 봉만 바이낸스
-  //   단독이라 ~2/3 로 그려지다 마감 때 합산본으로 튄다. OKX 쪽만 폴링 주기만큼 늦다.
-  const okx = latestFootprint && latestFootprint.okxLive;
-  if (okx && okx.time === bar) {
-    (okx.levels || []).forEach((l) => {
-      const k = Math.round(l[0] / bucket);
-      const c = merged.get(k) || [0, 0, 0, 0, 0, 0];
-      for (let j = 0; j < 6; j++) c[j] += Number(l[j + 1]) || 0;
-      merged.set(k, c);
-    });
-  }
+  // 2026-11-02 풋프린트는 바이낸스만 -- 서버가 주던 OKX 몫(okxLive)을 더하던 자리를 뺐다.
   byTime.set(bar, [...merged.entries()]
     .map(([k, c]) => [k * bucket, c[0], c[1], c[2], c[3], c[4], c[5]])
     .sort((a, b) => a[0] - b[0]));
@@ -4512,9 +4471,21 @@ function fcTrendCell(t, cell) {
     tags + `<span class="sub">일 전 종가보다 위 ${ups} · 아래 ${n - ups}</span><span class="sub">${t.age_days}일째 · 매일 09시 마감</span>`).replace('<span class="sub"></span>', "");
 }
 
-// 2026-10-31 ⑤ 툴팁 코인별 실측 -- docs/experiments/xrp_trend_cb7d_20261031.md · «지금 추세» 다음 7일 적중 · «7일 예측» 보류 적중(2024-01~2026-10-23, |z|≥1 날만)
+// 2026-10-31 ⑤ 툴팁 코인별 실측 -- docs/experiments/xrp_trend_cb7d_20261031.md · «지금 추세» 다음 7일 적중(2024-01~2026-10-23)
 const TREND_NOTE = { xrp: " · XRP 실측(2018~): 다음 7일 적중 45% · 5표 모두 위일 때 40%만 오름 -- XRP 에선 추세가 이어진다는 뜻이 아니다" };
-const CB7_HIT = { eth: " · 보류 2024~26 ETH 적중 65%(188/288)", xrp: " · 보류 2024~26 XRP 적중 60%(172/288 · 2025 44%) · 통과 후보" };
+// 2026-11-02 사용자 «7일 예측 칸을 빼고 이번 모델(횡보/추세 분별)을 넣어줘» -- 값은 서버 크론이 매 시 정각(+2분) 쌓은 마지막 행(/api/regime-band), 화면은 계산 안 함
+const REGIME_BAND_POLL_MS = 300000;
+let latestRegimeBand = null, regimeBandLastFetchAt = 0;
+async function refreshRegimeBand() {
+  if (activePageTab !== "snapshot" || document.hidden) return;
+  const now = Date.now();
+  if (now - regimeBandLastFetchAt < REGIME_BAND_POLL_MS) return;
+  regimeBandLastFetchAt = now;
+  try {
+    const res = await fetch("/api/regime-band", { cache: "no-cache" });
+    if (res.ok) latestRegimeBand = await res.json();
+  } catch (error) { /* 다음 주기에 다시 -- 받아 둔 값은 그대로 */ }
+}
 // ⑤ 예측 줄(시장 맥락 판 아래, 사용자 시안 B): 지금 추세 → 15분·1시간 예측(10-28) → 4h 예측(+변동성) → 7일(4~13주는 10-28 Macro Trend 카드로). sec = renderMarketCtx 의 판 틀(? 설명).
 function fcRowHtml(sec) {
   const t = latestTrend && latestTrend.ok ? latestTrend : null, ds = latestDirSig && latestDirSig.ok ? latestDirSig : {};
@@ -4588,13 +4559,29 @@ function fcRowHtml(sec) {
       + (ago ? `<u class="ago" style="left:${X(ago[col])}%"></u>` : "") + `<u style="left:${X(p.pct)}%"></u></span>` : "";
     return cell(`${ko} 예측`, p ? cls(p.signal) : "flat", p ? word(p.signal) : "-", sub, tip, gauge);
   };
+  // 2026-11-02 «횡보·추세» 칸(7일 예측 자리): 앞으로 4시간 안에 가장 가까운 지지~저항 띠를 종가로 벗어날 확률 p. 방향이 아니라 «벗어나느냐» -- 상승/하락 색(초록/빨강)을 쓰지 않고
+  //   횡보 = 중립색 · 추세 = 주황(--warn, 띠가 뚫릴 수 있음). 확신 |p−.5|×2 < 0.2 는 과거 정확도 57%(동전)라 «애매»로 비운다. 정시 +90분 넘게 묵으면 «지연».
+  const rb = latestRegimeBand && latestRegimeBand.ok ? (latestRegimeBand.coins || {})[activeSnapshotAsset] : null;
+  const rbOld = !!rb && Date.now() - rb.decided_at_ms > 90 * 60e3;
+  const rbPx = (x) => Number(Number(x).toPrecision(5));
+  const rbTipBase = "횡보·추세 — 앞으로 4시간 안에 종가가 가장 가까운 지지~저항 띠(청산맵·S/R)를 벗어날 확률 p. p < 50% 횡보 · ≥ 50% 추세. 방향은 말하지 않는다.\n"
+    + "확신 = |p−0.5|×2. 표본 밖 정확도(2026-06~10, BTC·ETH·SOL·XRP): 확신 0.8↑ 95% · 0.6~0.8 86% · 0.4~0.6 75% · 0.2~0.4 67% · 0.2 미만 57%(동전 → «애매»). 전체 68.7%(띠 폭÷변동성 기하만 쓴 기준선 61.8%) · 미학습 5코인 제로샷 66.6%.\n"
+    + "매 시 정각 마감 5분봉으로 갱신(+2분). 참고용 — 이 판별로 만든 매매 규칙은 검정 통과 못 했다(전진 판정 전).";
+  const rbCell = !rb ? cell("횡보·추세", "flat", "-", !DIRSHORT_ASSETS.has(activeSnapshotAsset) ? "ETH·BTC·SOL·XRP 전용" : latestRegimeBand ? "기록 대기" : "불러오는 중", rbTipBase)
+    : (() => {
+      const pt = rb.p_trend, conf = rb.confidence, trend = pt >= 0.5, vague = conf < 0.2;
+      const main = rbOld ? "-" : vague ? "애매" : trend ? "추세" : "횡보";
+      const sub = rbOld ? "지연" : vague ? `추세 ${Math.round(pt * 100)}%` : `${Math.round((trend ? pt : 1 - pt) * 100)}% · 확신 ${conf >= 0.6 ? "높음" : conf >= 0.4 ? "중간" : "낮음"}`;
+      const tip = `${rbTipBase}\n지금: 추세 확률 ${(pt * 100).toFixed(1)}% · 확신 ${conf.toFixed(2)} · 띠 ${rbPx(rb.support)} ~ ${rbPx(rb.resistance)} · ${kst(rb.decided_at_ms)} KST 판정${rbOld ? " · 🔴90분 넘게 묵음(수집 지연)" : ""}`;
+      return cell("횡보·추세", !rbOld && !vague && trend ? "trd" : "flat", main, sub, tip);
+    })();
   // 2026-10-17 펜 메모 «타이틀 제거 · 예측은 지금 유지»: 제목 단추(⑤ 예측 · 지금에서 멀리 ?)를 빼고 종합 칩만 머리에 -- 설명은 머리 툴팁
   return `<div class="mc-sec mc-fc"><h4>${eth ? fcSum : ""}${mcTipBtn("q_fc", "⑤ 예측 · 지금에서 멀리")}</h4><div class="fc-row">`
     + (t ? fcTrendCell(t, cell)
          : cell("지금 추세", "flat now", "-", "불러오는 중", "지금 추세"))
     + sCell("15m", "15분", 3, 1) + sCell("1h", "1시간", 12, 2)
     + cell("4h 예측", g4 && !old4 ? cls(g4.signal) : "flat", g4 ? word(g4.signal) : "-", d4Sub, d4Tip, d4Gauge + volLine)
-    + sig(ds.cb, "7일 예측", "z 코인베이스 프리미엄 7일 변화(BTC 기준)" + (CB7_HIT[activeSnapshotAsset] || ""))
+    + rbCell
     + `</div></div>`;   // 2026-10-28 사용자 «4~13주 예측은 Macro Trend 카드로 대체» -- z91 칸 뺌(서버 계산·전진 판정 2027-06 은 그대로)
 }
 
@@ -4670,7 +4657,7 @@ MC_TIPS.q_fc = "지평 = 지금에서 멀리. «지금 추세»만 예측이 아
   + "15분·1시간 예측 = 매달 재학습 LightGBM(ETH 65피쳐 + 호가 깊이 10열 · 표적 4종 × 시드 5) · 표본 밖 예측(2026-06~10) 하위·상위 20% 밖만 방향 · "
   + "그 밖 적중 15분 56% · 1시간 55%(안쪽 51~52%) · 호가 깊이 예열 중(워커 재시작 뒤 12시간)이면 비움 · 참고용(전진 판정 전).\n"
   + "4h 예측 = 매달 재학습 HGB(ETH 65피쳐 · 최근 365일, 과거 표본 밖 예측 상·하위 20% 만) · 2025~26 IC .06 · 2023~24 검증 불통과.\n"
-  + "7일 예측 = 코인베이스 프리미엄 7일 변화 z(BTC 기준, |z|≥1 만) · 2024~26 보류 BTC 59% · ETH 65% · XRP 60%(엄격 기준 60% 에 못 미친 통과 후보).\n"
+  + "횡보·추세 = 앞으로 4시간 안에 종가가 가장 가까운 지지~저항 띠(청산맵·S/R)를 벗어날 확률(BTC·ETH·SOL·XRP 4코인 HGB · 매 시 정각 갱신) · 표본 밖 정확도 68.7%(띠 폭÷변동성 기하만 쓴 기준선 61.8%) · 미학습 5코인 66.6% · 확신 0.8↑ 95% · 방향은 말하지 않음 · 참고용(전진 판정 전). 7일 예측(코인베이스 프리미엄)은 이 칸으로 대체.\n"
   + "4~13주 = Macro Trend 카드(달러지수·순유동성 등 지표별 13주 변화 · ETF 이후 기준).\n"
   + "변동성 = 4시간 실현변동성 QX4(ETH·XRP·BTC·SOL 4코인 HGB·MLP 결합 · 2026-10-26 배포 · 굴림 3창 옛 GBM 이김) · 방향 정보 없음 · 표시 전용(주문 크기에 안 씀). "
   + "ETH 차트 미래 칸 옵션 색 부채꼴 = QX4I(QX4 + 직전 정시 옵션 ATM IV 보정 · 조건부 채택, 전진 판정 2027-01-22) ±1σ — 이 줄 σ 와 조금 다를 수 있다. XRP 부채꼴 = IV 보정 없는 QX4 ±1σ(이 줄 σ 와 같다).\n"
@@ -5551,7 +5538,6 @@ function renderSupply1s(box) {
   // 🔴이 줄이 없어서 HTML 의 고정 viewBox(1200) 가 그대로 남아 있었다. 폭을 부모에서 받도록
   //   바꾸는 순간 그림이 viewBox 밖으로 나간다 -- 좌표계와 뷰박스는 같이 움직여야 한다.
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  svg.innerHTML = "";
 
   const now = S.now || 0;
   // 🔴창이 «최근 5분»(미끄러짐)이 아니라 **지금 만들어지고 있는 5분봉 그 자체**다
@@ -5566,6 +5552,12 @@ function renderSupply1s(box) {
   const allSecs = [...S.supply.keys()].filter((s) => s >= first && s <= now)
                                       .sort((a, b) => a - b);
   const secs = allSecs;
+  // 2026-11-02 사용자 펜 메모 «5분 정각마다 차트 전체가 비워지고 다시 생긴다 -- 바뀌는 것만»: 새 봉의 첫 1~2초(점 2개 미만)에
+  //   전체를 지우고 «집계 중» 글자만 두던 것을, 지난 그림을 흐리게 남겼다가 새 선이 생기면 바꿔 그린다.
+  svg.style.transition = "opacity .25s";
+  if (secs.length < 2 && svg.querySelector("polyline, path")) { svg.style.opacity = ".35"; return; }
+  svg.style.opacity = "";
+  svg.innerHTML = "";
   if (secs.length < 2) {
     const txt = document.createElementNS(NS, "text");
     txt.setAttribute("x", w / 2); txt.setAttribute("y", h / 2);
@@ -5959,6 +5951,7 @@ let chartPanKey = "", chartPanGeo = null;
 function renderChartPan() {
   const box = el("chartPan");
   if (!box) return;
+  if (box.classList.contains("inrow")) { box.hidden = true; chartPanKey = ""; return; }   // 2026-11-02 사용자 펜 메모 «박스 안의 왼쪽 그래프 요약 표시는 제거» -- 넓은 화면 차트 위 줄. 휴대폰 머리 줄 것은 그대로
   const full = chartTfFull();
   if (!full.length || !flowOn()) { box.hidden = true; chartPanKey = ""; return; }
   box.hidden = false;
@@ -6026,6 +6019,7 @@ function setupChartPan() {
   //   (끝(12봉·1주일), 30m·1h 창, 이동 못 하는 가로 휠도). 페이지 스크롤은 차트 밖에서. ctrl+휠(브라우저 확대)만 통과.
   svg.addEventListener("wheel", (ev) => {
     if (!flowOn() || ev.ctrlKey) return;
+    if (!fpAltOn() && zoneX(ev.clientX) === "side") return;   // 2026-11-02 사용자 펜 메모 «수급 차트 2개에서 휠로 확대·축소하면 풋프린트가 따라 움직인다 -- 독립적이게»: 오른쪽 수급 칸은 풋프린트 줌을 안 건드린다(페이지 스크롤은 그대로)
     ev.preventDefault();
     if (fpAltOn()) return;   // 리뷰: 4h·1d·청산맵·버블이 덮은 동안 안 보이는 5분 차트를 줌/이동하고 1주일까지 받았다(페이지 스크롤은 그대로 막는다)
     chartFlingStop();
@@ -6491,7 +6485,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   (그냥 풋프린트 위에 얹으면 모바일은 밀도 범례, 데스크톱은 1초 수급의 시각 눈금과 겹쳤다.)
   const STATS_ROW_H = subOn && !splitR ? 14 : 0;
   // 청산 밀도 범례(9px 한 줄) -- 풋프린트 배경을 설명하므로 풋프린트 바로 위(2026-09-21).
-  const SUB_LEGEND_H = subOn ? 14 : 0;
+  const SUB_LEGEND_H = subOn ? 38 : 0;   // 2026-11-02 14 -> 38(사용자 펜 메모 «버튼들의 여유 공간이 너무 없어») -- 차트 위 한 줄(LONG/SHORT·지표) 높이
   // 순서(2026-09-28, 호가·체결 프로파일 제거 후): 1단(데스크톱·모바일) = 1초 수급 → 밀도 범례 → 풋프린트 → 레인,
   //   2단 = 왼쪽 밀도 범례 → 풋프린트 → 레인 · 오른쪽 1초 수급. 본문의 `h` 는 상자 전체(hAll)다.
   // 2026-10-01 1단(휴대폰·세로 화면)은 1초 수급을 풋프린트 **아래**로(사용자 지시): 위 = 밀도 범례 + 호가 요약 줄 → 풋프린트 → 레인·리본 → 1초 수급.
@@ -6622,18 +6616,24 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   이름이 같아도 값이 다르다. 툴팁에 창을 적는다.
   // 2026-09-27 풋프린트 오른쪽 «실시간 호가 띠»(사용자 지시) -- 캔들 폭에서 띠 폭을 뗀다(데스크톱 70 · 모바일 40).
   // 2026-09-27 넓혔다(사용자 «호가 너비를 키워줘») -- 오른쪽 배지 자리(86px)를 띠에 줬다: 70 -> 148 · 모바일 40 -> 56.
-  const BOOK_W = footprint ? (mobileChart ? (PROF_H ? 0 : 56) : 104) : 0;   // 2026-10-29 140 -> 104(펜 메모 «차트를 오른쪽으로 키우고 박스 오른쪽 너비는 줄여») · 2026-09-30 148 -> 112 -> 140(꼬리표 칸을 없애 돌려줌)(사용자 «차트·프로파일을 조금 줄여도 데이터가 다 보이게»)   // 모바일은 수량 글자 없이
+  const PS = w >= 1000 ? 1 : 0.76;   // 2026-11-02 5칸(시안 3) -- 좁은 창은 칸을 줄인다
+  const BOOK_W = footprint ? (mobileChart ? (PROF_H ? 0 : 56) : Math.round(84 * PS)) : 0;   // 2026-10-29 140 -> 104(펜 메모 «차트를 오른쪽으로 키우고 박스 오른쪽 너비는 줄여») · 2026-09-30 148 -> 112 -> 140(꼬리표 칸을 없애 돌려줌)(사용자 «차트·프로파일을 조금 줄여도 데이터가 다 보이게»)   // 모바일은 수량 글자 없이
   // 2026-09-28 체결 기둥(사용자 선택 시안 B) -- 풋프린트와 호가 띠 사이 150px. 모바일은 기둥 없이 셀 뒤에 깐다(시안 A).
-  const TRADE_W = footprint && !mobileChart ? 104 : 0;   // 2026-10-29 140 -> 104(같은 펜 메모 -- 캔들 칸 +72px) · 2026-09-30 150 -> 112 -> 140
+  const TRADE_W = footprint && !mobileChart ? Math.round(88 * PS) : 0;   // 2026-10-29 140 -> 104(같은 펜 메모 -- 캔들 칸 +72px) · 2026-09-30 150 -> 112 -> 140
   // 2026-09-30 가격 꼬리표 칸(사용자 «왼쪽 라벨을 오른쪽으로, 겹치지 않게»): 캔들 칸과 체결 기둥 사이 120px.
   //   가격 선·레벨의 이름+가격을 여기 세로로 쌓고(겹침 회피) 실제 가격 행까지 지시선을 긋는다. 오른쪽 끝 30px 는 행사가 감마 막대.
   // 2026-09-30 가격 이름 = 시안 C(사용자 선택): 꼬리표 칸을 없애(폭은 체결·호가 띠로) 플롯 안 오른쪽 끝에 **짧은 약어**(R1·S1·MP·1h·5m·VW·ΓF·HL롱),
   //   이름·가격은 마우스를 올리면. 현재가는 상자 없이 **숫자만** 크게(바탕 외곽선).
   const LBL = "C";
-  const cw = w - ml - mr - BOOK_W - TRADE_W;
-  const tradeX0 = ml + cw;   // 체결 기둥 왼쪽 끝
+  // 2026-11-02 사용자 «시안 3» -- 데스크톱 프로파일 5칸 한 줄: [캔들][청산][체결][델타][TPO][호가]. 체결은 오른쪽 바닥선에서 왼쪽으로, 호가·TPO 는 왼쪽 바닥선에서 오른쪽으로 자란다.
+  const LIQ_C = TRADE_W ? Math.round(72 * PS) : 0, DT_W = TRADE_W ? Math.round(64 * PS) : 0, DT_G = 6;
+  const REG_W = TRADE_W ? LIQ_C + TRADE_W + 2 * DT_W + BOOK_W + 4 * DT_G + 2 : BOOK_W;   // 프로파일 영역 전체 폭
+  const cw = w - ml - mr - REG_W;
+  const tradeX0 = ml + cw;   // 프로파일 영역 왼쪽 끝(캔들 플롯 오른쪽 끝)
+  const cBook = w - mr - BOOK_W + 6, cTpo = cBook - DT_G - DT_W, cDel = cTpo - DT_G - DT_W, tAnc = cDel - DT_G;   // 호가·TPO·델타 왼쪽 끝 · 체결 바닥선(데스크톱)
   fpProfileSpan = TRADE_W ? [tradeX0, w - mr] : null;   // 아래 옵션 줄 가운데 칸이 이 폭·x 를 따른다(optRowCols)
   let tradeInfo = null;       // 체결 행(호버가 읽는다) -- 풋프린트 블록이 채운다
+  let dtInfo = null;          // 2026-11-02 델타·TPO 행(호버가 읽는다)
   let stackItem = null, liqLive = null, cellTip = () => "";   // 2026-10-20 형성 봉 갱신(fpCv.live)이 다시 부르는 봉별 칠하기 · 칸 호버 줄
   let posInfo = null;         // 2026-10-10 포지션 행(호버가 읽는다) -- 포지션 보기일 때 체결 대신
   let liqInfo = null;         // 2026-10-27 청산 행(호버가 읽는다) -- 청산 보기일 때 체결 대신
@@ -7095,13 +7095,13 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     //   풋프린트 가격 폭이 좁아 대부분이 화면 밖이다 -- 위·아래 끝에 «화면 밖 몫», 기둥 왼쪽 10px 에 창 전체 미니맵 + 보이는 범위 괄호.
     //   🔴지도다. 덩어리 저항·재방문·고통 지수는 매매 검정 불통과(= VWAP 평균회귀 재표현, 2026-10-09).
     //   2026-10-27 휴대폰(사용자 «모바일도 체결/포지션/청산 프로파일»): 같은 기둥을 아래 칸(PROF) 왼쪽 절반에 -- colX0·colW·pTop·pBot·pyAt 이 그 자리다.
-    const colX0 = PROF ? ml + 2 : tradeX0, colW = PROF ? PROF.cx - PROF_GAP - 4 - colX0 : TRADE_W;
+    const colX0 = PROF ? ml + 2 : tradeX0 + 4, colW = PROF ? PROF.cx - PROF_GAP - 4 - colX0 : LIQ_C;   // 데스크톱 = 5칸 맨 왼쪽 청산 칸
     //   2026-10-28 펜 메모: 왼쪽 기둥(colX0·colW) = 체결|청산 · 오른쪽(호가 띠 자리 bkX0·bkW) = 포지션|호가 -- 포지션 그림은 자리만 바꿔 같은 코드
-    const bkX0 = PROF ? PROF.cx + PROF_GAP : tradeX0 + TRADE_W + 6, bkW = PROF ? w - mr - bkX0 - 8 : BOOK_W - 10;   // = 아래 bookInfo 의 x0·L
-    const posOn = !!((TRADE_W || PROF) && (BOOK_W || PROF) && fpColR === "pos" && flowOn()), liqOn = !!((TRADE_W || PROF) && fpColL === "liq" && flowOn());
-    post.push(() => placeFpColTog(svg, w - mr, PROF ? h + SUB_GAP + 2 : mt - 16, !!((TRADE_W || PROF) && flowOn()
+    const bkX0 = PROF ? PROF.cx + PROF_GAP : TRADE_W ? cBook : tradeX0 + TRADE_W + 6, bkW = PROF ? w - mr - bkX0 - 8 : BOOK_W - 10;   // = 아래 bookInfo 의 x0·L
+    const posOn = !!((TRADE_W || PROF) && (BOOK_W || PROF) && fpColR === "pos" && flowOn()), liqOn = !!((TRADE_W || (PROF && fpColL === "liq")) && flowOn());
+    post.push(() => placeFpColTog(svg, TRADE_W && !PROF ? colX0 - 2 : w - mr, PROF ? h + SUB_GAP + 2 : mt - 16, !!((TRADE_W || PROF) && flowOn()
       && !(typeof window.fpBubbleActive === "function" && window.fpBubbleActive())
-      && !(typeof window.fpDailyActive === "function" && window.fpDailyActive()))));   // 버블·일봉이 덮을 땐 숨김 · 화면 상자를 재므로 끝에서(post)
+      && !(typeof window.fpDailyActive === "function" && window.fpDailyActive())), !!TRADE_W && !PROF));   // 버블·일봉이 덮을 땐 숨김 · 화면 상자를 재므로 끝에서(post)
     if (posOn) {
       const colX0 = bkX0, colW = bkW;   // 오른쪽 기둥(호가 자리)에 -- 바닥선 = 기둥 오른쪽 끝, 왼쪽으로 자란다
       const P = latestPositionProfile, W = P && P.win && P.win[String(fpPosWin)];
@@ -7298,7 +7298,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       ln.setAttribute("stroke", "var(--soft-line)"); g.appendChild(ln);
       svg.appendChild(g);
     }
-    if (!liqOn) {
+    if (!liqOn || TRADE_W) {
       const tr = new Map();   // 행 키 -> [총, 고래, 리테일, 매수, 매도]
       candles.forEach((c) => (footprint.byTime.get(c.time) || []).forEach((l) => {
         const k = rowOf(l[0]), a = tr.get(k) || [0, 0, 0, 0, 0];
@@ -7309,9 +7309,9 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       let tmax = 0, pocK = null;
       tr.forEach((a, k) => { if (a[0] > tmax) { tmax = a[0]; pocK = k; } });
       if (tmax > 0) {
-        const anchor = PROF ? PROF.cx - PROF_GAP : TRADE_W ? tradeX0 + TRADE_W + 4 : ml - 2;   // 데스크톱 = 호가 띠 바닥선 2px 앞 · 모바일 = 아래 칸 등뼈 왼쪽(왼쪽으로 자란다)
+        const anchor = PROF ? PROF.cx - PROF_GAP : TRADE_W ? tAnc : ml - 2;   // 데스크톱 = 호가 띠 바닥선 2px 앞 · 모바일 = 아래 칸 등뼈 왼쪽(왼쪽으로 자란다)
         const L = PROF ? anchor - ml - 2 : TRADE_W ? TRADE_W - 10 : TRADE_L - 6, alpha = 1;
-        tradeInfo = { rows: tr, rowSize, off, max: tmax, pocK, x0: PROF ? ml : TRADE_W ? tradeX0 : ml - TRADE_L, x1: anchor };
+        tradeInfo = { rows: tr, rowSize, off, max: tmax, pocK, x0: PROF ? ml : TRADE_W ? tAnc - TRADE_W : ml - TRADE_L, x1: anchor };
         const g = document.createElementNS(NS, "g");
         tr.forEach((a, k) => {
           const yTop = Math.max(pTop, pyAt(rowLo(k + 1))), yBot = Math.min(pBot, pyAt(rowLo(k)));
@@ -7355,6 +7355,56 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           g.appendChild(ln);
         }
         svg.appendChild(g);                        // 셀보다 먼저
+      }
+    }
+    if (TRADE_W && !PROF) {   // 2026-11-02 델타·TPO 칸(사용자 선택 시안 3) -- 체결 기둥과 같은 행 격자·같은 보이는 봉. 참고용이며 지지·저항 신호가 아니다
+      const dt = new Map();   // 행 키 -> [델타(매수−매도), TPO(그 가격에 체결이 있던 봉 수)]
+      candles.forEach((c) => {
+        const seen = new Set();
+        (footprint.byTime.get(c.time) || []).forEach((l) => {
+          const k = rowOf(l[0]), a = dt.get(k) || [0, 0];
+          a[0] += (+l[1] || 0) - (+l[2] || 0);
+          if (!seen.has(k)) { seen.add(k); a[1]++; }
+          dt.set(k, a);
+        });
+      });
+      let dMax = 0, tMax = 0, tK = null, tSum = 0, kLo = Infinity, kHi = -Infinity;
+      dt.forEach((a, k) => { dMax = Math.max(dMax, Math.abs(a[0])); tSum += a[1]; if (a[1] > tMax) { tMax = a[1]; tK = k; } kLo = Math.min(kLo, k); kHi = Math.max(kHi, k); });
+      if (tMax > 0) {
+        // 가치 영역 = TPO 최다 행에서 위·아래 중 큰 쪽을 붙여 가며 전체 TPO 의 70% 까지
+        let up = tK, dn = tK, acc = tMax;
+        while (acc < 0.7 * tSum && (up < kHi || dn > kLo)) {
+          const u = up < kHi ? (dt.get(up + 1) || [0, 0])[1] : -1, d = dn > kLo ? (dt.get(dn - 1) || [0, 0])[1] : -1;
+          if (u >= d) { up++; acc += Math.max(u, 0); } else { dn--; acc += Math.max(d, 0); }
+        }
+        const dX0 = cDel, tX0 = cTpo, dMid = dX0 + DT_W / 2;
+        dtInfo = { rows: dt, rowSize, off, x0: dX0, x1: tX0 + DT_W, dX1: dX0 + DT_W, nBars: candles.length, tK, vaLo: dn, vaHi: up, dMax, tMax };
+        const g = document.createElementNS(NS, "g");
+        const mkR = (x, y, wd, hh, fill, op) => {
+          const r = document.createElementNS(NS, "rect");
+          r.setAttribute("x", x); r.setAttribute("y", y); r.setAttribute("width", wd); r.setAttribute("height", hh);
+          r.setAttribute("fill", fill); r.setAttribute("fill-opacity", op); g.appendChild(r); return r;
+        };
+        const vaT = Math.max(pTop, pyAt(rowLo(up + 1))), vaB = Math.min(pBot, pyAt(rowLo(dn)));
+        if (vaB > vaT) mkR(dX0, vaT, tX0 + DT_W - dX0, vaB - vaT, "var(--accent)", 0.07);
+        dt.forEach((a, k) => {
+          const yTop = Math.max(pTop, pyAt(rowLo(k + 1))), yBot = Math.min(pBot, pyAt(rowLo(k)));
+          if (yBot - yTop < 1) return;
+          const hh = Math.max(1, yBot - yTop - 1), dw = dMax > 0 ? (DT_W / 2 - 1) * Math.abs(a[0]) / dMax : 0, tw = DT_W * a[1] / tMax;
+          if (dw > 0.5) mkR(a[0] >= 0 ? dMid : dMid - dw, yTop + 0.5, dw, hh, a[0] >= 0 ? "var(--good)" : "var(--bad)", 0.85);
+          const inVa = k >= dn && k <= up;
+          mkR(tX0, yTop + 0.5, tw, hh, "var(--accent)", inVa ? 0.55 : 0.28);
+          if (k === tK) { const o = mkR(tX0, yTop + 0.5, tw, hh, "none", 1); o.setAttribute("stroke", "var(--ink)"); o.setAttribute("stroke-width", "1.2"); o.setAttribute("stroke-opacity", "0.9"); }
+          if (a[1] === 1) { const c1 = document.createElementNS(NS, "circle"); c1.setAttribute("cx", tX0 + tw + 4); c1.setAttribute("cy", (yTop + yBot) / 2); c1.setAttribute("r", 1.8); c1.setAttribute("fill", "var(--accent)"); g.appendChild(c1); }
+        });
+        const ax = document.createElementNS(NS, "line");   // 델타 0 선
+        ax.setAttribute("x1", dMid); ax.setAttribute("x2", dMid); ax.setAttribute("y1", pTop); ax.setAttribute("y2", pBot); ax.setAttribute("stroke", "var(--soft-line)"); g.appendChild(ax);
+        [[colX0, "청산"], [tAnc - TRADE_W, "체결"], [dX0, "델타"], [tX0, "TPO"], [cBook, "호가"]].forEach(([x, s]) => {
+          const t = document.createElementNS(NS, "text");
+          t.setAttribute("x", x); t.setAttribute("y", pTop - 4); t.setAttribute("font-size", "9"); t.setAttribute("font-weight", "700"); t.setAttribute("fill", "var(--muted)");
+          t.setAttribute("paint-order", "stroke"); t.setAttribute("stroke", "var(--chart-bg)"); t.setAttribute("stroke-width", "3"); t.textContent = s; g.appendChild(t);
+        });
+        svg.appendChild(g);
       }
     }
     if (PROF) {   // 아래 프로파일 칸 가운데 등뼈 = 위·아래 끝 가격 + 현재가 점선(차트와 같은 범위라 높이로 맞대 읽는다)
@@ -8656,6 +8706,21 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         + `<br><span style="opacity:.7">추정 청산맵(최근 ${liqInfo.win}일 · 가격이 지나간 칸은 지움) · 실측 아님 · 지도로만</span></div>`);
       return;
     }
+    // 2026-11-02 델타·TPO 칸 위면 그 가격 행의 풀이
+    if (dtInfo && !PROF && mx > dtInfo.x0 && mx < dtInfo.x1) {
+      vLine.style.display = "none";
+      const k = Math.floor((priceAtY + dtInfo.off) / dtInfo.rowSize), a = dtInfo.rows.get(k);
+      if (!a) { hideTooltip(); return; }
+      const fq = (q) => (Math.abs(q) >= 1000 ? (q / 1000).toFixed(1) + "k" : Math.abs(q) >= 10 ? q.toFixed(0) : q.toFixed(1));
+      const rs = dtInfo.rowSize, o = dtInfo.off, dp = Math.max(pxDp(), (String(o).split(".")[1] || "").length);
+      showTooltip(evt.pageX, evt.pageY, `<div style="white-space:normal;max-width:min(360px,calc(100vw - 24px))">`
+        + `${(k * rs - o).toFixed(dp)}–${((k + 1) * rs - o).toFixed(dp)}`
+        + `<br><span style="color:${a[0] >= 0 ? "var(--good)" : "var(--bad)"};font-weight:700">델타 ${a[0] >= 0 ? "+" : "−"}${fq(Math.abs(a[0]))} ${coinUnit()}</span> (${a[0] >= 0 ? "매수" : "매도"} 우위 · 테이커 기준)`
+        + `<br><span style="font-weight:700">TPO ${a[1]}/${dtInfo.nBars}봉</span> — 이 가격에 체결이 있던 봉 수`
+        + (k === dtInfo.tK ? ` · 최다(POC)` : "") + (k >= dtInfo.vaLo && k <= dtInfo.vaHi ? ` · 가치 영역(70%) 안` : ` · 가치 영역 밖`) + (a[1] === 1 ? ` · 한 번만 지난 가격` : "")
+        + `<br><span style="opacity:.7">보이는 봉 ${dtInfo.nBars}개 합 · 30분 문자표 TPO 가 아니라 5분봉 수 · 참고, 신호 아님</span></div>`);
+      return;
+    }
     // 2026-09-28 체결 기둥 위면 그 가격 행의 체결 풀이(데스크톱 기둥 · 모바일 왼쪽 띠).
     if (tradeInfo && (inProf ? mx < PROF.cx : !PROF && mx > tradeInfo.x0 && mx < tradeInfo.x1 + 2)) {   // 휴대폰 tradeInfo.x 는 아래 칸 자리
       vLine.style.display = "none";
@@ -8676,7 +8741,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       return;
     }
     // 2026-09-27 호가 띠 위면 봉 툴팁 대신 **호가 해석** -- 커서 가격의 칸(없으면 가장 가까운 칸).
-    if (bookInfo && !bookHidden && (inProf ? mx >= PROF.cx : mx > tradeX0 && mx <= w - mr)) {
+    if (bookInfo && !bookHidden && (inProf ? mx >= PROF.cx : (TRADE_W ? mx >= cBook - 4 : mx > tradeX0) && mx <= w - mr)) {
       vLine.style.display = "none";
       const priceAt = priceAtY;
       let best = null;
@@ -8684,7 +8749,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       if (best && Math.abs(best.p - priceAt) <= bookInfo.bs) { showTooltip(evt.pageX, evt.pageY, bookTipHtml(best)); return; }
       hideTooltip(); return;
     }
-    if (inProf || mx < ml || mx > w - mr || (!PROF && TRADE_W && mx > tradeX0)) { vLine.style.display = "none"; hideTooltip(); return; }   // 10-28 기둥 칸 빈 곳 = 봉 툴팁 아님
+    if (inProf || mx < ml || mx > w - mr || (!PROF && TRADE_W && mx > ml + cw)) { vLine.style.display = "none"; hideTooltip(); return; }   // 10-28 기둥 칸 빈 곳 = 봉 툴팁 아님
 
     const idx = Math.min(candles.length - 1, Math.max(0, Math.floor((mx - ml) / slot - X0)));
     const c = candles[idx];
@@ -8749,7 +8814,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     // 2026-09-28 호가 칸을 **풋프린트(체결 기둥)와 같은 행**으로 묶는다(사용자 «y축이 벌어지면 막대가 작아진다») --
     //   0.5달러 칸 그대로면 창이 넓을 때 한 칸이 2~3px 로 눌렸다. 행 안에서 수량·버틴 양·재깔림(refill·peak)은 더하고,
     //   매수·매도가 한 행에 섞이면(현재가 행) 큰 쪽으로 칠한다. ○(접근행동)는 행 안 **가장 얇아진** 값(approachAt).
-    const bin = book.bin_size, bs = Math.max(bin, fpRowSize || bin), x0 = PROF ? PROF.cx + PROF_GAP : tradeX0 + TRADE_W + 6, L = PROF ? w - mr - x0 - 8 : BOOK_W - 10;   // 휴대폰 = 아래 칸 등뼈 오른쪽(◌ 자리 8)
+    const bin = book.bin_size, bs = Math.max(bin, fpRowSize || bin), x0 = PROF ? PROF.cx + PROF_GAP : TRADE_W ? cBook : tradeX0 + TRADE_W + 6, L = PROF ? w - mr - x0 - 8 : BOOK_W - 10;   // 휴대폰 = 아래 칸 등뼈 오른쪽(◌ 자리 8)
     const accAt = (key, p) => {               // 축적 통계는 창 전체를 접은 행 배열이라 제 격자(bin_lo) -- 가격으로 찾는다
       if (!acc || !acc[key] || !(acc.bin_size > 0)) return 0;
       const i = Math.round(p / acc.bin_size) - acc.bin_lo;
@@ -8793,7 +8858,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // 네 막대 계기 자리(그림과 호버가 같이 쓴다). 데스크톱 = 기둥 머리(체결 기둥 왼쪽 끝 ~ 오른쪽 여백), 모바일 = 풋프린트 위 한 줄.
   const statsGeo = bookInfo && !(TRADE_W && splitR && flowOn()) ? (() => {   // 2026-09-30 넓은 화면은 ④로 옮겼다(2026-10-04 SOL·XRP 도)
     if (TRADE_W && !splitR) {   // 2026-10-30 1단 데스크톱: 기둥 머리(체결·청산|포지션·호가 토글)와 같은 자리에 겹쳤다 → 캔들 칸 오른쪽 위
-      const rm = Math.round(Math.min(280, (tradeX0 - ml) * 0.3)), sx1 = tradeX0 - 12 - rm;
+      const rm = Math.round(Math.min(280, (tradeX0 - ml) * 0.3)), sx1 = tradeX0 - 12 - rm - 100;   // 2026-11-02 -100 = 청산 기간 버튼(1d 7d 30d)이 청산 칸 왼쪽 위에 앉는 자리
       return { sx: sx1, slotW: rm / 4, labY: mt - 14, barY: mt - 11, y0: mt - 24, y1: mt - 2 };
     }
     const sx = TRADE_W ? tradeX0 + 6 : ml, room = (TRADE_W ? w - mr : PROF ? w - mr - 60 : bookInfo.x0 - 8) - sx;   // 휴대폰 아래 칸이면 오른쪽 끝 60 = 맨 위 레벨 꼬리표(max pain 등) 자리
@@ -9212,7 +9277,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       const v = bh >= 60 ? `${bh}px` : "0px"; if (mcBubbleEl.style.height !== v) mcBubbleEl.style.height = v; mcBubbleEl.hidden = bh < 60; }
     post.push(() => mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1Hd + 12, w: subW - 16, h: floorY - (sub1sY + s1Hd + 12) } : null,
             mcSplit && TRADE_W ? (() => { const y = plotBottom + 12;   // 2026-10-01(4) 프로파일 아래 = 2026-10-04 모의 판(renderPaper 가 채운다)
-              return { x: ml + cw + 4, y, w: TRADE_W + BOOK_W - 8, h: floorY - y }; })() : null));   // 10-26 레인 값 칸(옛 LANE_VAL_W 144)을 빼 지지/저항 칸이 제자리로
+              return { x: tradeX0 + 4, y, w: REG_W - 8, h: floorY - y }; })() : null));   // 10-26 레인 값 칸(옛 LANE_VAL_W 144)을 빼 지지/저항 칸이 제자리로
     supply1sSubBox = {
       svg: subSvg("s1", subX, sub1sY, subW, s1Hd, sub1sKey(subW, s1Hd),
                   (g) => renderSupply1s({ svg: g, w: subW, h: s1Hd })),
@@ -9334,15 +9399,8 @@ async function tick() {
   try {
     ensureLiveStream();              // 2026-09-24 수급·상황 밀어주기 (탭/코인/가시성 변화가 여기로 수렴)
     refreshNotifyCenter();           // 2026-10-05 종 옆 점(판정일·새 알림) -- 탭과 무관 (자체 5분 게이트)
-    // 2026-08-25 perf pass (Snapshot's 6 fetches), extended 2026-08-31 to Ops's own status poll
-    // now that the Live tab (previously the 3rd, always-unconditional, tab) is gone -- each branch
-    // only matters while that tab is actually visible; gating stops background fetch/compute work
-    // for a hidden panel (see activePageTab, set by setupPageTabs()'s click handler). Both tabs'
-    // click handlers already force an immediate refresh on switching to them, so this doesn't delay
-    // first paint after a tab switch -- it only stops the ongoing poll while elsewhere.
-    if (activePageTab === "ops") {
-      refreshOpsStatus();
-    } else if (activePageTab === "snapshot") {
+    // 2026-11-02 탭이 스냅샷 하나뿐이라 가드는 사실상 항상 참 -- 폴링을 멈추는 건 document.hidden(위)이다.
+    if (activePageTab === "snapshot") {
       refreshBinanceAccount();       // 2026-09-10 청산맵 위 계좌 요약 + 진입선 (자체 30초 게이트)
       refreshChartMarkers();         // 2026-09-09 청산맵 신호 마커
       refreshLiquidation5mSignal();
@@ -9368,6 +9426,7 @@ async function tick() {
       refreshTrend();                // 2026-09-28 30분 카드 추세 칸 (60초, 일봉)
       refreshIceberg();              // 2026-10-16 풋프린트 칸별 아이스버그 (30초, ETH · 검증 중 · 신호 아님)
       refreshDirSig();               // 2026-10-15 지평 사다리 7일·4~13주 (10분, 서버 1시간 캐시)
+      refreshRegimeBand();           // 2026-11-02 ⑤ 예측 줄 «횡보·추세» (5분, 서버 크론이 매 시 쌓은 마지막 행 · ETH·BTC·SOL·XRP)
       refreshVol4h();                // 2026-10-15 ⑤ 예측 판 4h 변동성 (5분, ETH)
       refreshDir4h();                // 2026-10-15 ⑤ 예측 판 4h 방향 (2분, ETH·SOL·XRP · 서버 5분 캐시)
       refreshDirShort();             // 2026-10-28 ⑤ 예측 판 15분·1시간 방향 (1분, ETH·BTC·SOL·XRP · 서버 5분 캐시)
@@ -9405,10 +9464,69 @@ document.addEventListener("visibilitychange", () => {
 setupSnapshotAssetTabs();
 setupThemeToggle();
 setupChartModeTabs();
-setupPageTabs();
 placeTopLeft();
 setupScrollRendering();
 setupCardRail();
+
+// ── 굴절 유리 (2026-11-02 사용자 «진주빛 + 굴절 유리») ──────────────────────────────────────────────────────────────────────
+// 애플 Liquid Glass 에 가장 가까운 웹 구현: 요소 크기마다 «가장자리 굴절 지도»(볼록 베젤 -- 가장자리일수록 크게 꺾임)와 «림 반사광»(빛 -60°, 좌상)을
+// 캔버스로 만들어 SVG 필터(feDisplacementMap)에 넣고 backdrop-filter 로 건다. 🔴SVG 필터를 backdrop-filter 로 쓰는 건 **Chromium 전용**이라
+// 그 밖의 브라우저·다크 테마·«투명도 줄이기» 설정에서는 아무것도 안 건다(CSS 글래스 그대로). 작은 컨트롤에만 쓴다 -- 큰 카드는 지도 비용이 크고 글자를 해친다.
+const LG_TARGETS = [["#cardRail", { radius: 0, bezel: 14, scale: 22 }], ["#snapshotAssetTabs", { radius: 22, bezel: 16, scale: 30 }],
+  ["#assetMore", { radius: 15, bezel: 11, scale: 22 }], [".push-toggle", { radius: 16, bezel: 12, scale: 24 }], [".ofab-bar", { radius: 24, bezel: 14, scale: 26 }]];
+const lgState = new Map();   // 요소 -> { svg, ro }
+function lgSupported() {
+  try { return /Chrome\/\d+/.test(navigator.userAgent) && !matchMedia("(prefers-reduced-transparency: reduce)").matches; } catch (e) { return false; }
+}
+function lgRelease(node) {
+  const st = lgState.get(node); if (!st) return;
+  st.ro.disconnect(); st.svg?.remove(); node.style.backdropFilter = ""; node.style.webkitBackdropFilter = ""; lgState.delete(node);
+}
+function lgBuild(node, o) {
+  const r = node.getBoundingClientRect(), W = Math.round(r.width), H = Math.round(r.height), st = lgState.get(node);
+  if (!st || W < 8 || H < 8) return;
+  if (st.W === W && st.H === H) return;
+  st.W = W; st.H = H; st.svg?.remove();
+  const mk = () => { const c = document.createElement("canvas"); c.width = W; c.height = H; return c; };
+  const cm = mk(), cs = mk(), im = cm.getContext("2d").createImageData(W, H), sp = cs.getContext("2d").createImageData(W, H);
+  const R = Math.min(o.radius, W / 2, H / 2), bx = W / 2, by = H / 2, lx = Math.cos(-Math.PI / 3), ly = Math.sin(-Math.PI / 3);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const px = x + 0.5 - bx, py = y + 0.5 - by, qx = Math.abs(px) - (bx - R), qy = Math.abs(py) - (by - R);
+    const ox = Math.max(qx, 0), oy = Math.max(qy, 0), len = Math.hypot(ox, oy), depth = -(len + Math.min(Math.max(qx, qy), 0) - R);   // 안쪽 깊이(px)
+    let nx, ny;   // 가장자리 바깥 방향 법선
+    if (qx > 0 && qy > 0) { nx = Math.sign(px) * ox / (len || 1); ny = Math.sign(py) * oy / (len || 1); }
+    else if (qx > qy) { nx = Math.sign(px); ny = 0; } else { nx = 0; ny = Math.sign(py); }
+    const t = Math.min(Math.max(depth / o.bezel, 0), 1), m = Math.pow(1 - t, 2.2), i = (y * W + x) * 4;   // 베젤 안쪽 t=1 에서 0
+    im.data[i] = 128 - 127 * nx * m; im.data[i + 1] = 128 - 127 * ny * m; im.data[i + 2] = 128; im.data[i + 3] = 255;
+    const k = nx * lx + ny * ly, rim = Math.pow(1 - t, 3) * (Math.max(0, k) + 0.35 * Math.max(0, -k));   // 광원 쪽 가장자리 밝음 · 반대편 옅은 반사
+    sp.data[i] = sp.data[i + 1] = sp.data[i + 2] = 255; sp.data[i + 3] = Math.round(255 * Math.min(1, rim * 0.9));
+  }
+  cm.getContext("2d").putImageData(im, 0, 0); cs.getContext("2d").putImageData(sp, 0, 0);
+  const id = "lg" + Math.random().toString(36).slice(2, 8), NS = "http://www.w3.org/2000/svg", svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("width", "0"); svg.setAttribute("height", "0"); svg.style.position = "absolute"; svg.setAttribute("aria-hidden", "true");
+  svg.innerHTML = `<filter id="${id}" x="0" y="0" width="${W}" height="${H}" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">`
+    + `<feImage href="${cm.toDataURL()}" x="0" y="0" width="${W}" height="${H}" result="map"/>`
+    + `<feDisplacementMap in="SourceGraphic" in2="map" scale="${o.scale}" xChannelSelector="R" yChannelSelector="G" result="refr"/>`
+    + `<feImage href="${cs.toDataURL()}" x="0" y="0" width="${W}" height="${H}" result="spec"/><feBlend in="spec" in2="refr" mode="screen"/></filter>`;
+  document.body.appendChild(svg); st.svg = svg;
+  node.style.backdropFilter = `url(#${id}) blur(1.5px) saturate(1.6) brightness(1.04)`; node.style.webkitBackdropFilter = node.style.backdropFilter;
+}
+function lgApply() {
+  const on = lgSupported() && document.documentElement.dataset.theme === "light";
+  document.documentElement.classList.toggle("lg-on", on);
+  LG_TARGETS.forEach(([sel, o]) => document.querySelectorAll(sel).forEach((node) => {
+    if (!on) { lgRelease(node); return; }
+    if (lgState.has(node)) return;
+    let timer = 0;
+    const ro = new ResizeObserver(() => { clearTimeout(timer); timer = setTimeout(() => lgBuild(node, o), 120); });   // 글자 길이가 바뀌어도 120ms 묶어 한 번만 다시 만든다
+    lgState.set(node, { ro, svg: null, W: 0, H: 0 }); ro.observe(node);
+  }));
+}
+function setupLiquidGlass() {
+  lgApply();
+  new MutationObserver(lgApply).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+}
+setupLiquidGlass();   // 🔴위 const(LG_TARGETS·lgState)가 만들어진 **뒤**에 부른다 -- 앞에서 부르면 TDZ 로 app.js 전체가 죽는다(node --check 는 못 잡는다)
 
 function showTooltip(x, y, html) {
   const t = el("chartTooltip");
@@ -10346,7 +10464,7 @@ const manualButtonsDisabled = (v) =>
 
 async function manualEntryPreview(side, kind = "entry", ov = null) {
   const box = el("snapEntryResult");
-  if (!box || manualOrderBusy) return;   // 진행 중인 주문 표시를 덮지 않는다
+  if (!box || manualOrderBusy) { manualPreviewInFlight = false; manualFireOnPreview = false; return; }   // 진행 중인 주문 표시를 덮지 않는다
   manualPreviewInFlight = true;
   manualButtonsDisabled(true);
   box.hidden = false;
@@ -10936,12 +11054,31 @@ function syncAllRangeFills(root) {
 // 🔴확인 클릭을 없앤 대신 «의도적 지속»을 받는다. 오클릭 한 번으로는 아무 일도 없다.
 // pointer 이벤트라 마우스·터치가 한 경로다. touch-action: none 은 styles.css 에서 준다
 // (없으면 모바일에서 누른 채 스크롤하다 발주된다).
-const HOLD_FIRE_MS = 400;
+// 2026-11-02 사용자 «꾹 누르면 주문 들어가는 버튼을 모두 플로팅 버튼 방식으로 통일»: **한 곳**에서 정한다 -- 계좌 카드 진입·청산·스위칭(manualHoldStart) · 청산 팝업 25/50/100% ·
+//   떠 있는 LONG·SHORT·«주문» · 선 주문의 진입 버튼 전부 같은 시간(1.5초)·같은 게이지(왼쪽→오른쪽 · 버튼 전체 · 방향색 30% · linear). 시간은 CSS 변수 --hold-ms 로도 내려간다.
+const HOLD_FIRE_MS = 1500;
+document.documentElement.style.setProperty("--hold-ms", `${HOLD_FIRE_MS}ms`);
 let manualPreviewInFlight = false;
 let manualFireOnPreview = false;
 let manualHoldFire = false;
 let manualHoldTimer = null;
 let manualHoldRaf = null;
+let manualHoldBtn = null;
+// 🔴2026-11-02 꾹 누르기 안전 -- 플로팅 버튼과 같은 규칙(누른 자리에서 8px 넘게 움직이면 취소 · 떼면 취소)으로 맞춘다. 이유: 미리보기가 시작되면 ① 이 버튼들이 disabled 가 되고(manualButtonsDisabled)
+//   비활성 버튼은 pointerup 을 못 받으며(실측: 이벤트 없음) ② 결과 상자가 생겨 레이아웃이 밀리면 버튼이 포인터 밑을 벗어나 pointerleave 가 나 게이지가 곧바로 지워졌다.
+//   그래서 손 뗌·취소·움직임은 **창 전체**에서 보고(비활성이어도 취소가 걸린다 -- 0.4초일 땐 묻혔지만 1.5초에서는 «떼도 나간다»가 된다), 포인터가 8px 안이면 pointerleave 는 취소로 안 친다.
+const HOLD_MOVE_PX = 8;
+let manualHoldPt = null;
+window.addEventListener("pointerdown", (e) => { manualHoldPt = { x: e.clientX, y: e.clientY }; }, true);
+function manualHoldLeave(btn, e) {
+  if (e && manualHoldPt && Math.hypot(e.clientX - manualHoldPt.x, e.clientY - manualHoldPt.y) <= HOLD_MOVE_PX) return false;   // 레이아웃·비활성이 일으킨 가짜 leave
+  manualHoldCancel(btn);
+  return true;   // 실제로 취소했는가(청산 팝업이 «떼었다»를 판단하는 데 쓴다)
+}
+window.addEventListener("pointermove", (e) => {
+  if (manualHoldBtn && (manualHoldTimer || manualHoldRaf) && manualHoldPt && Math.hypot(e.clientX - manualHoldPt.x, e.clientY - manualHoldPt.y) > HOLD_MOVE_PX) manualHoldCancel(manualHoldBtn);
+}, true);
+["pointerup", "pointercancel"].forEach((ev) => window.addEventListener(ev, () => { if (manualHoldBtn && (manualHoldTimer || manualHoldRaf)) manualHoldCancel(manualHoldBtn); }, true));
 
 function manualHoldPaint(btn, ratio) {
   const fill = btn?.querySelector(".hold-fill");
@@ -10960,6 +11097,7 @@ function manualHoldCancel(btn) {
 function manualHoldStart(btn, side, kind, ov = null) {
   if (manualOrderBusy || btn.disabled) return;
   manualHoldCancel(btn);
+  manualHoldBtn = btn;
   manualHoldFire = true;
   // 청산은 **계좌부터 새로 읽는다**(manualExitPreview) -- 닫으려는 수량이 낡으면 안 된다.
   if (kind === "exit") manualExitPreview(side, ov); else manualEntryPreview(side, "entry");
@@ -10972,6 +11110,7 @@ function manualHoldStart(btn, side, kind, ov = null) {
   manualHoldRaf = requestAnimationFrame(step);
   manualHoldTimer = setTimeout(() => {
     manualHoldTimer = null;
+    if (manualHoldRaf) { cancelAnimationFrame(manualHoldRaf); manualHoldRaf = null; }   // 마지막 프레임이 비운 게이지를 다시 100% 로 칠하던 것
     manualHoldPaint(btn, 0);
     manualHoldFire = false;
     // 미리보기가 막혔거나(blocked) 아직 안 왔으면 pending 이 없다 -- 그때는 안 나간다.
@@ -11007,7 +11146,7 @@ function manualHoldStart(btn, side, kind, ov = null) {
     if (kind === "exit") manualExitPreview(side); else manualEntryPreview(side, "entry");
   });
   ["pointerup", "pointerleave", "pointercancel"].forEach((ev) =>
-    btn.addEventListener(ev, () => manualHoldCancel(btn)));
+    btn.addEventListener(ev, (e) => (ev === "pointerleave" ? manualHoldLeave(btn, e) : manualHoldCancel(btn))));
 });
 // 🔴2026-10-10 사용자 결정 «스위칭은 즉시 체결 기본»: 아래 peg 설명은 옛 판 -- 이제 청산·반대 진입 둘 다 시장가(서버 exec=market 강제).
 // 2026-10-05 «스위칭»(사용자 지시, 떠 있는 패널에서만): 게이지와 상관없이 지금 쪽 **100% peg 메이커 청산** → 전량 체결되면
@@ -11047,7 +11186,7 @@ function switchPlan(side) {
     const s = held(), ov = plan(s);
     if (ov) manualExitPreview(s, ov);
   });
-  ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => btn?.addEventListener(ev, () => manualHoldCancel(btn)));
+  ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => btn?.addEventListener(ev, (e) => (ev === "pointerleave" ? manualHoldLeave(btn, e) : manualHoldCancel(btn))));
 }
 // 2026-09-14 사용자 요청: **청산은 강제 조회부터**. 화면 숫자가 30초(조회가 끊겼으면 그
 // 이상) 묵어 있을 수 있어서, 미리보기를 그리기 전에 계좌를 다시 받아 카드·아래 줄을 맞춘다.
@@ -11056,6 +11195,9 @@ function switchPlan(side) {
 async function manualExitPreview(side, ov = null) {
   manualEntryClearConfirm();   // 🔴옛 확인(다른 방향·진입)이 계좌 조회 동안 남아 있으면 0.4초 길게 누르기 타이머가 그걸 낸다(10-16 감사)
   manualButtonsDisabled(true);
+  // 🔴2026-11-02 «청산 100% 꾹 눌렀는데 안 나갔다»: 계좌 조회가 길어 꾹 누르기 타이머(1.5초)가 조회 도중 끝나면
+  //   pending 도 inFlight 도 없어 **아무 일 없이 지나갔고**, 미리보기는 뒤늦게 30초 확인 버튼만 띄웠다. 조회 구간도 «진행 중»이다.
+  manualPreviewInFlight = true;
   try {
     binanceAccountLastFetchAt = 0;      // 클라이언트 30초 게이트 우회
     await refreshBinanceAccount();
@@ -11138,7 +11280,7 @@ document.querySelectorAll(".chipset").forEach((box) => {
 // 🔴끄는 건 손잡이(⠿)로만 -- 주문 버튼이 «길게 누르기»라 끌기와 한 표면을 쓰면 옮기다 멈춘 순간 발주된다.
 const OFAB_POS_KEY = "ofabPos";
 const ofab = { open: false, home: null, next: null, x: null, y: null, w: 0, h: 0 };
-// 2026-10-30 사용자 «떠 있는 주문 버튼도 숨겼다 꺼냈다» 시안 A: 숨기면 버튼이 있던 높이의 가까운 화면 가장자리에 손잡이(#ofabTab)만.
+// 2026-10-30 사용자 «떠 있는 주문 버튼도 숨겼다 꺼냈다» 시안 A: 숨기면 버튼이 있던 높이의 화면 오른쪽 가장자리에 손잡이(#ofabTab · 요약 글자)만.
 let ofabHid = false;
 try { ofabHid = localStorage.getItem("ofabHid") === "1"; } catch (e) { /* 기억은 편의일 뿐 */ }
 function ofabHide(hid) {
@@ -11150,8 +11292,7 @@ function ofabHide(hid) {
 function ofabTabPlace() {
   const t = el("ofabTab");
   if (!t || t.hidden) return;
-  const w = ofab.w || 220, h = ofab.h || 46, left = (ofab.x ?? innerWidth) + w / 2 < innerWidth / 2;
-  t.classList.toggle("left", left);
+  const h = ofab.h || 46;   // 2026-11-02 사용자 펜 메모 «플로팅 버튼을 축소시킬 시 오른쪽에만 요약되서 붙도록» -- 왼쪽 가장자리 손잡이는 없앴다(항상 오른쪽)
   t.style.top = `${Math.max(8, Math.min((ofab.y ?? innerHeight) + h / 2 - t.offsetHeight / 2, innerHeight - t.offsetHeight - 8))}px`;
 }
 
@@ -11310,6 +11451,7 @@ function renderOfab() {
   const tb = el("ofabTab");
   if (tb) {
     tb.classList.toggle("long", side === "LONG"); tb.classList.toggle("short", side === "SHORT");
+    const tl = tb.querySelector("b"); if (tl) tl.textContent = el("ofabPos")?.textContent || "주문";   // 2026-11-02 손잡이 글자 = 요약(«LONG 28% · +$59.76», 포지션 없으면 «주문»)
     tb.setAttribute("aria-label", `주문 버튼 꺼내기${qty ? ` — ${side} ${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(2)}` : ""}`);
     tb.title = tb.getAttribute("aria-label");
   }
@@ -11419,7 +11561,7 @@ setInterval(renderOfab, 3000);
   // 기본 자리 = 오른쪽 아래(엄지가 닿는 곳). ofabPlace 가 화면 안으로 끌어넣는다.
   [ofab.x, ofab.y] = Array.isArray(saved) ? saved : [innerWidth, innerHeight - 24];
   // 짧게 = 펼치기/접기 · 1.5초 꾹 = 추가 진입(ofabQuickAdd). 8px 넘게 움직이면(스크롤·끌기) 취소 -- 터치 스크롤은 pointercancel 로도 끊긴다.
-  const OFAB_HOLD_MS = 1500;   // 2026-09-28 사용자 지시 0.5 -> 2초 · 2026-09-30 «너무 느리다» -> 1.5초 (styles.css .holding 채움 시간과 같이)
+  const OFAB_HOLD_MS = HOLD_FIRE_MS;   // 2026-09-28 0.5 -> 2초 · 2026-09-30 «너무 느리다» -> 1.5초 · 2026-11-02 모든 꾹 누르기 버튼이 이 시간을 쓴다(HOLD_FIRE_MS)
   // 같은 손짓을 세 버튼이 쓴다: «주문»(포지션 있음 = 추가 진입) · 2026-10-05 LONG·SHORT(포지션 없음 = 그 방향 진입).
   // onTap = 짧게 눌렀을 때(기본 = 펼치기/접기). 인자 = 그 누름의 pointerType(터치는 꾹 발주가 없으니 호출 측이 갈라 쓴다).
   const ofabHold = (btn, fire, onTap = () => ofabSetOpen(!ofab.open)) => {

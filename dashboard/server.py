@@ -137,6 +137,7 @@ from dashboard import situation as sit  # noqa: E402
 from dashboard import flow_read as fr  # noqa: E402
 from dashboard.trend_rule import trend_payload  # noqa: E402 -- 30분 카드 추세 칸(2026-09-28)
 from dashboard.dir_signals import dir_signals_payload, vol4h_from_klines, open_rev_from_klines  # noqa: E402 -- 풋프린트 머리 지평 사다리·⑤ 예측 판(2026-10-15)
+from dashboard.regime_band import regime_band_payload  # noqa: E402 -- ⑤ 예측 줄 «횡보·추세» 칸(2026-11-02, 전진 기록 크론이 쌓은 마지막 행)
 from dashboard.box_hold import BUNDLES as box_hold_bundles, payload as box_hold_payload, with_qx4i as box_hold_with_qx4i  # noqa: E402 -- 박스 유지 확률(2026-10-16, 방향 아님 · 10-20 XRP)
 from scripts.live_push_notifier_20260904 import PUSH_KINDS  # noqa: E402 -- 알림 센터 «무엇을 보내나»(2026-10-05)
 from scripts.ops_watchdog import send_telegram  # noqa: E402 -- 지지·저항 뚫림 알림(2026-10-25)
@@ -2575,6 +2576,13 @@ def make_app() -> web.Application:
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
         return web.json_response(payload, headers=NOCACHE)
 
+    async def api_regime_band(request: web.Request) -> web.Response:   # 2026-11-02 ⑤ 예측 줄 «횡보·추세» (크론이 매 시 쌓는 jsonl 의 코인별 마지막 행 -- 계산 없음)
+        try:
+            payload = await swr_cached("regime_band", 60.0, lambda: asyncio.to_thread(regime_band_payload), max_stale=7200.0)
+        except Exception as exc:  # noqa: BLE001
+            payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+        return web.json_response(payload, headers=NOCACHE)
+
     dir4h_art: dict = {}   # 코인 -> {mtime, art}
 
     async def api_dir4h(request: web.Request) -> web.Response:   # 2026-10-15 ⑤ 예측 판 «4h 방향»(scripts/live_eth_dir4h_20261015) · 10-31 SOL·XRP
@@ -3259,25 +3267,6 @@ def make_app() -> web.Application:
         except asyncio.CancelledError:
             pass
 
-    def supervised_processes(specs: list[tuple[str, str]]) -> list[dict[str, Any]]:
-        pids: dict[str, int] = {}
-        for proc_dir in Path("/proc").glob("[0-9]*"):
-            if len(pids) == len(specs):
-                break
-            try:
-                cmdline = (proc_dir / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
-            except OSError:
-                continue
-            for name, signature in specs:
-                if name not in pids and signature in cmdline:
-                    pids[name] = int(proc_dir.name)
-        return [
-            {"name": name, "status": "RUNNING", "pid": pids[name]}
-            if name in pids
-            else {"name": name, "status": "STOPPED", "pid": None}
-            for name, _ in specs
-        ]
-
     async def index(_: web.Request) -> web.Response:
         raise web.HTTPFound("/dashboard/live/")
 
@@ -3521,27 +3510,14 @@ def make_app() -> web.Application:
         want = footprint_window_bars(request)
         f = flow_for(request.query)       # 2026-09-26 코인별 -- 아래 본문의 이름을 그 코인으로 가린다
         RETAIL_MAX_USD, WHALE_MIN_USD = f.retail_max, f.whale_min   # noqa: N806 -- 코인별 경계
-        footprint_state, okx_bars, okx_fp = f.footprint_state, f.okx_bars, f.okx_fp
+        footprint_state = f.footprint_state
         FOOTPRINT_SYMBOL, FOOTPRINT_BUCKET, dp = f.spec.symbol, f.spec.bucket, f.spec.price_dp   # noqa: N806
-        # 🔴OKX 를 **여기서만** 더한다(위 okx_bars 주석). 그리고 OKX 가 완전히 덮은 첫 봉
-        #   **이후**만 내보낸다 -- 그 전 봉은 바이낸스만이라 더하면 단차가 된다.
-        #   `first_bar` 자신은 OKX 가 중간에 합류한 봉이라 **빼고**(> 비교) 시작한다.
-        okx_from = okx_fp["first_bar"]
-        # 2026-11-01 사용자 «풋프린트 2개밖에 안 보여» -- 수집기가 멈춰 OKX 이력이 못 살아난 날 이 필터가
-        #   바이낸스 144봉을 전부 숨겼다. 단차(OKX 가 더해지는 첫 봉부터 양이 커짐)보다 이력이 낫다고 보고
-        #   거르지 않는다. 화면이 경계를 알 수 있게 `okxFrom` 을 싣는다.
+        # 2026-11-02 사용자 «체결 데이터는 그냥 바이낸스만 표시하는 건 어때?» -- 풋프린트는 바이낸스 선물 체결만이다.
+        #   OKX 를 더하면 두 가지가 깨졌다: ① OKX 가 평균적으로 낮은 만큼(XRP 2.3칸) 풋프린트가 5분봉 저가 아래로 나왔다
+        #   (바이낸스 단독은 5분봉과 정확히 맞다 -- 저가 격차 중앙값 0.00칸) ② OKX 수집기가 멈추면 이력이 사라졌다(11-01 «2봉만»).
+        #   OKX 는 수급(CVD)·OI 에는 그대로 합산된다 -- 가격 칸이 필요한 이 그림만 뺐다.
         base = sorted(footprint_state["bars"].items())
         recent = base[-want:]
-        def _merged(bar: int, cells: dict[int, list[float]]) -> dict[int, list[float]]:
-            add = okx_bars.get(bar)
-            if not add:
-                return cells
-            out = {k: list(v) for k, v in cells.items()}
-            for k, v in add.items():
-                t = out.setdefault(k, [0.0] * 6)
-                for j in range(6):
-                    t[j] += v[j]
-            return out
         agg_bars = footprint_state["agg_bars"]
         # ── `?since=<봉시각>` 증분 (2026-09-20) ──────────────────────────────
         # 400ms 폴링인데 48봉을 통째로 보내고 있었다. 실측: 400ms 간격 19번 중 내용이 실제로
@@ -3556,19 +3532,9 @@ def make_app() -> web.Application:
             since = int(request.query.get("since", "0"))
         except (TypeError, ValueError):
             since = 0
-        # A안: OKX 과거 봉을 방금 되살렸으면 잠깐 전량 -- 증분만 받는 열린 화면은 그 봉을 못 받는다.
-        full = since <= 0 or not footprint_state["ready"] or time.time() < okx_fp["resync_until"]
+        full = since <= 0 or not footprint_state["ready"]
         sent = recent if full else [(b, c) for b, c in recent if b >= since]
-        # 2026-09-24 진행 중인 봉의 **OKX 몫만** 따로. 클라는 그 봉을 바이낸스 직결 WS 셀로
-        #   갈아끼우므로(footprintMergeLive) 합산분이 빠져 봉이 ~2/3 로 그려지다가 마감 때 튀었다
-        #   (실측 화면 2,908 vs 서버 4,343). 클라가 실시간 바이낸스 셀에 이걸 더한다.
-        live_bar = recent[-1][0] if recent else 0
-        okx_live = ({"time": live_bar,
-                     "levels": [[round(k * FOOTPRINT_BUCKET, dp)] + [round(x, 3) for x in v]
-                                for k, v in sorted(okx_bars[live_bar].items())]}
-                    if okx_from and live_bar in okx_bars else None)
         return web.json_response({
-            "okxLive": okx_live,
             "symbol": FOOTPRINT_SYMBOL,
             "bucket": FOOTPRINT_BUCKET,
             "barSeconds": FOOTPRINT_BAR_SECONDS,
@@ -3591,14 +3557,13 @@ def make_app() -> web.Application:
             #   어긋나고(2026-09-23 실측) 베이시스가 시변이라 가짜 이중 봉우리가 된다.
             #   수급(CVD)은 «수량의 합»이라 가격이 무관해서 현물이 들어간다 -- 같은 데이터가
             #   한 쪽엔 들어가고 한 쪽엔 안 들어가는 게 맞다.
-            "venues": ["binance-perp", "okx-swap"] if okx_from else ["binance-perp"],
-            "okxFrom": okx_from,
+            "venues": ["binance-perp"],
             "bars": [
                 {"time": bar,
                  # aggTrades 로 메운 봉은 체결이 **묶여** 있어 고래가 과장된다.
                  "agg": bar in agg_bars,
                  "levels": [[round(k * FOOTPRINT_BUCKET, dp)] + [round(x, 3) for x in v]
-                            for k, v in sorted(_merged(bar, cells).items())]}
+                            for k, v in sorted(cells.items())]}
                 for bar, cells in sent
             ],
         }, headers=NOCACHE)
@@ -3643,7 +3608,9 @@ def make_app() -> web.Application:
         if not ox["ctx_ok"]:
             fails.append("okx oi/liq")
         bar = lambda ms: int(ms) // 1000 // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS   # noqa: E731
-        cells = fpd.week_bars(bn, ox if okx_on else None, d0, d1, FOOTPRINT_BAR_SECONDS)
+        # 2026-11-02 사용자 «체결 데이터는 바이낸스만»: 칸(풋프린트 셀)은 바이낸스 테이프만 -- OKX 를 더하면 5분봉 저가 아래로 나온다.
+        #   OI·청산 레인은 위 ox 로 그대로 합산된다(아래 oi_ox·liq).
+        cells = fpd.week_bars(bn, None, d0, d1, FOOTPRINT_BAR_SECONDS)
         oi_bn: dict[int, tuple[float, float]] = {}
         for ts, v in rows(BINANCE_CTX_DB, "SELECT ts_ms, open_interest FROM oi_1s WHERE symbol = ? AND ts_ms >= ? AND ts_ms < ? "
                                                  "ORDER BY ts_ms", [sym, d0 * 1000, d1 * 1000]):
@@ -4495,33 +4462,6 @@ def make_app() -> web.Application:
         sec_prices=lambda a: None if a not in flows else [(t, float(c[6])) for t, c in list(flows[a].footprint_state["sec"].items()) if c[6]])
     keep_trip_ledger = order_api.keep_trip_ledger
 
-    async def api_ops_status(request: web.Request) -> web.Response:
-        ops_dir = LIVE_DIR / "ops_watchdog"
-        health_path = ops_dir / "health_snapshot.json"
-        heartbeat_path = ops_dir / "watchdog_heartbeat.json"
-        state_path = ops_dir / "state.json"
-        health_sig = file_signature(health_path)
-        heartbeat_sig = file_signature(heartbeat_path)
-        state_sig = file_signature(state_path)
-        etag = make_etag("ops-status", health_sig, heartbeat_sig, state_sig)
-        if etag_matches(request, etag):
-            return json_response(request, None, etag)
-        payload = {
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "health": load_json_cached(health_path, health_sig) or {},
-            "heartbeat": load_json_cached(heartbeat_path, heartbeat_sig) or {},
-            # Match the managed process itself, not the supervisor that launched it --
-            # these run under systemd now (previously bash _supervise.sh), and matching
-            # the old bash wrapper's argv left this permanently reporting STOPPED after
-            # the migration even though everything was healthy.
-            # 2026-10-12 trading_bot 은퇴(f7ea55d3) -- 그 수집 몫을 넘겨받은 시장 데이터 워커를 대신 본다.
-            "supervisors": supervised_processes([
-                ("market_data_worker", "duckdb_persist_worker.py"),
-                ("ops_watchdog", "ops_watchdog.py"),
-            ]),
-        }
-        return json_response(request, payload, etag)
-
     app.router.add_get("/", index)
     app.router.add_get("/dashboard/live", dashboard_index)
     app.router.add_get("/dashboard/live/", dashboard_index)
@@ -4561,6 +4501,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/situation", api_situation)
     app.router.add_get("/api/trend", api_trend)
     app.router.add_get("/api/dir-signals", api_dir_signals)
+    app.router.add_get("/api/regime-band", api_regime_band)
     app.router.add_get("/api/vol-forecast", api_vol_forecast)
     app.router.add_get("/api/dir4h", api_dir4h)
     app.router.add_get("/api/dir-short", api_dir_short)
@@ -4597,7 +4538,6 @@ def make_app() -> web.Application:
     app.router.add_post("/api/manual-exit/submit", lambda r: order_api.busy_or(order_api.api_manual_exit_submit, r))
     app.router.add_post("/api/manual-exit/submit-all", lambda r: order_api.busy_or(order_api.api_manual_exit_all_submit, r))   # 2026-10-22 여러 코인 한꺼번에
     app.router.add_get("/api/liquidation-5m-history", api_liquidation_5m_history)
-    app.router.add_get("/api/ops-status", api_ops_status)
     # show_index=False (data/live 는 2026-10-19 보안 수정으로 더는 정적 서빙하지 않는다): this directory is reachable from the
     # public tunnel, and a listing advertised every file sitting in it (e.g. the
     # *.bak_pre_live_tab_removal_20260831 snapshots) rather than just the three the page

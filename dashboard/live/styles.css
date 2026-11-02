@@ -148,7 +148,7 @@
 /* 유리는 «뒤에 뭔가 있어야» 유리로 보인다. 단색 흰 바탕 위의 blur 는 아무 일도 하지 않으므로,
    굴절시킬 색 덩어리를 깔아 준다(애플이 배경에 쓰는 소프트 메시). */
 [data-theme="light"] body {
-  background:
+  --page-bg:
     /* 2026-09-16 오른쪽 초록 덩어리 제거(사용자). 남은 메시로도 blur 가 굴절할 색은 충분하다. */
     radial-gradient(circle 230px at 92% 66%, color-mix(in srgb, var(--warn) 30%, transparent), transparent 64%),
     radial-gradient(circle 260px at 10% 70%, color-mix(in srgb, var(--bad) 24%, transparent), transparent 62%),
@@ -157,6 +157,7 @@
     radial-gradient(ellipse 900px 700px at 76% 62%, color-mix(in srgb, var(--bad) 22%, transparent), transparent 68%),
     radial-gradient(ellipse 820px 620px at 16% 96%, color-mix(in srgb, var(--warn) 24%, transparent), transparent 66%),
     linear-gradient(180deg, #e3e8f2 0%, var(--bg) 46%, #ccd5e4 100%);
+  background: var(--page-bg);
   background-attachment: fixed;
 }
 [data-theme="light"] html { background: var(--bg); }
@@ -202,7 +203,6 @@
 /* 차트 바닥. 다크에서는 불투명 판이지만 라이트에서는 유리라 뒤가 비쳐야 한다. */
 
 /* 알약 버튼들도 같은 재질로. 흰 유리 위에서 «흰 4%»는 보이지 않는다. */
-[data-theme="light"] .page-tab,
 [data-theme="light"] .push-toggle{
   background: rgba(255, 255, 255, 0.55);
   /* 🔴테두리는 --glass-edge(흰 0.72) 였다. 흰 유리 위의 흰 테두리는 «유리의 림»이 아니라
@@ -242,9 +242,11 @@ html {
   overscroll-behavior-y: none;
 }
 body {
-  background:
+  /* 2026-11-02 페이지 배경을 변수로 -- 왼쪽 내비·고정 앱바가 같은 그림(창에 고정)을 깔아 이음매 없이 맞는다(사용자 «카드 좌우 백그라운드 색이 이상해졌어») */
+  --page-bg:
     radial-gradient(ellipse 900px 520px at 12% -8%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 55%),
     linear-gradient(180deg, #1d222b 0%, var(--bg) 46%, #13171f 100%);
+  background: var(--page-bg);
   background-attachment: fixed;
   color: var(--text);
   font-family: var(--font-sans);
@@ -283,14 +285,14 @@ body {
 .app {
   max-width: 1400px;
   margin: 0 auto;
-  padding: 20px 24px 28px;
+  padding: 10px 24px 28px;   /* 2026-11-02 위 20 -> 10(앱바 높이 줄이기) */
 }
 
 .top {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 8px;   /* 2026-11-02 12 -> 8(사용자 펜 메모 «앱바 높이를 줄여줘 · 카드의 내용이 중요»; 아래 .app padding-top·.topbar min-height 도) */
 }
 
 .topbar {
@@ -298,12 +300,9 @@ body {
   grid-template-columns: 1fr auto; /* 좌(탭), 우(세션) -- 2026-09-26 가운데 가격·시계 제거(사용자) */
   width: 100%;
   align-items: center;
-  min-height: 58px; /* 큰 시계에 맞춰 높이 상향 */
+  min-height: 44px; /* 2026-11-02 58 -> 44(사용자 펜 메모) */
 }
 
-.page-tabs { display: flex; gap: 7px; align-items: center; }
-.page-tab { border: 1px solid var(--line); border-radius: 999px; background: rgb(var(--lift) / .035); color: var(--muted); padding: 8px 12px; font: 700 11px/1 var(--font-sans); cursor: pointer; }
-.page-tab.active { border-color: color-mix(in srgb, var(--accent) 70%, transparent); background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--ink); }
 .hidden { display: none !important; }
 .ops-tab-panel { display: grid; gap: 16px; }
 .ops-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding: 10px 2px; position: relative; }
@@ -1104,7 +1103,6 @@ svg {
   /* 터치 타깃. 실측 높이가 페이지탭 29px · 코인탭 30px였다 -- 손가락 접촉면(권장 44px)의
      3분의 2다. 폭이 아니라 **높이**가 병목이라 min-height와 세로 패딩만 올린다(가로로 더
      키우면 코인탭 5개가 375px를 다시 넘친다 -- 2026-08-31에 고친 그 헤더다). */
-  .page-tab { min-height: 40px; padding: 11px 13px; }
   .notify-btn { min-height: 40px; }
 
   /* 최소 글씨. 실측에서 9~10px가 38곳 있었다. 9.5px는 모바일에서 사실상 안 읽힌다.
@@ -1655,7 +1653,7 @@ svg {
 
   /* 손가락 목표는 44px 가 하한이다(애플 HIG). 알약 버튼들이 30~34px 였다. */
   .asset-tab { height: 38px; }
-  .page-tab, .push-toggle { min-height: 38px; }
+  .push-toggle { min-height: 38px; }
 
   /* 360px 에서 내부 가로 넘침 3곳 -- 줄바꿈을 허용해 잘림 대신 두 줄로 간다. */
   .manual-entry-row.fields { flex-wrap: wrap; }
@@ -1665,7 +1663,6 @@ svg {
 
 /* iOS 는 재질을 한 종류로 쓰지 않는다 -- 글자가 빽빽한 시트는 두껍고(.panel 0.46),
    툴바·탭·배지 같은 «크롬»은 얇다. 얇은 쪽에서 유리가 가장 잘 드러난다. */
-[data-theme="light"] .page-tab,
 [data-theme="light"] .push-toggle,
 [data-theme="light"] .asset-tabs,
 [data-theme="light"] .ops-badge.neutral,
@@ -1692,7 +1689,6 @@ svg {
      radius 2 종  999px · 10px
      활성   3 종  단색 배경 / 그라디언트+글로우 / 채운 상태색
    기준은 사용자가 고른 **글래스/다크 토글**(.push-toggle)이다. 새 버튼은 이 목록에 넣는다. */
-.page-tab,
 .push-toggle,
 .ops-badge,
 .ops-readonly,
@@ -1750,7 +1746,6 @@ svg {
    "색을 넣다보니까 버튼에 애플 글래스가 다 사라졌어"(사용자). 유리는 블러가 아니라
    가장자리 광택으로 읽힌다. 색은 유리를 **덮는 게 아니라 얹는다**: 틴트는 반투명으로 두고
    backdrop-filter 는 살려 둔 채, 림을 비활성과 같은 규격으로 돌려준다. */
-.page-tab.active,
 .asset-tab.active,
 .push-toggle[data-state="on"],
 .notify-btn.primary {
@@ -1772,7 +1767,6 @@ svg {
     inset 0 0 0 1px rgba(255, 255, 255, 0.45),
     0 2px 6px rgb(var(--shadow) / 0.22);
 }
-.page-tab:hover:not(.active),
 .asset-tab:hover:not(.active),
 .push-toggle:hover:not(:disabled),
 .notify-btn:hover:not(:disabled) {
@@ -1882,7 +1876,6 @@ svg {
 .asset-tab:hover:not(.active) { border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
 /* 차트 모드 탭(청산맵/풋프린트)도 같은 클래스라 함께 따라온다 -- 치수만 맞춘다. */
 .chart-mode-tabs .asset-tab { min-width: 0; height: auto; padding: 7px 11px; font-size: 11px; }
-.page-tab { padding: 7px 11px; }
 
 /* ── 2026-09-19 리퀴드 글래스 세그먼트 (사용자가 보낸 참조 이미지 기준) ────────────────
    앞선 세 판이 다 빗나갔다. 참조 이미지가 말하는 건 «버튼 여러 개»도, «칠한 알약»도 아니다:
@@ -2137,9 +2130,9 @@ body.not-eth [data-eth-only]::after {
 }
 .ofab-toggle { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
 /* 2026-09-28 2초 꾹 = 추가 진입 -- 누르는 동안 바닥에서 채움이 차오른다(진입 버튼 .hold-fill 과 같은 뜻). */
-.ofab-toggle { background-image: linear-gradient(currentColor, currentColor); background-repeat: no-repeat;
-  background-position: 0 100%; background-size: 0% 3px; }
-.ofab-toggle.holding { background-size: 100% 3px; transition: background-size 1.5s linear; }   /* = OFAB_HOLD_MS */
+.ofab-toggle { background-image: linear-gradient(color-mix(in srgb, currentColor 30%, transparent), color-mix(in srgb, currentColor 30%, transparent)); background-repeat: no-repeat;
+  background-position: 0 0; background-size: 0% 100%; }   /* 2026-11-02 아래 3px 막대 -> 버튼 전체(다른 꾹 누르기 버튼과 같은 게이지) */
+.ofab-toggle.holding { background-size: 100% 100%; transition: background-size var(--hold-ms, 1500ms) linear; }
 .ofab.long .ofab-toggle { color: var(--good); }
 .ofab.short .ofab-toggle { color: var(--bad); }
 .ofab-toggle[aria-expanded="true"] { background-color: rgb(var(--lift) / 0.08); }
@@ -2233,7 +2226,7 @@ body.order-coin-off .acct-lanes::before {
    ≥1700px 인 이유: 풋프린트 칸이 1,000px 밑으로 가면 셀 숫자가 안 들어간다(1440 창이면 776px 였다). */
 @media (min-width: 1700px) and (orientation: landscape) {
   .app { max-width: none; }
-  #candleSvgSnapshot { --fp-split: 0.37; height: 872px; }   /* 2026-10-13 0.33 -> 0.37(사용자 «이 너비 줄이고 오른쪽 키워») · 2026-09-30 0.25 -> 0.33: 오른쪽 칸(1초 수급 40% + 시장 맥락 ①②③)이 스크롤 없이 들어가게 */   /* 2026-09-30 0.38 -> 0.25(사용자 «수급 차트 폭 1/3 줄여», 풋프린트 셀 숫자·사분면 글자 자리) */
+  #candleSvgSnapshot { --fp-split: 0.31; height: 872px; }   /* 2026-11-02 0.37 -> 0.31(사용자 «프로파일 오른쪽 너비 줄이고 프로파일을 키워») -- 프로파일 5칸이 그만큼 넓어졌다 */   /* 2026-10-13 0.33 -> 0.37(사용자 «이 너비 줄이고 오른쪽 키워») · 2026-09-30 0.25 -> 0.33: 오른쪽 칸(1초 수급 40% + 시장 맥락 ①②③)이 스크롤 없이 들어가게 */   /* 2026-09-30 0.38 -> 0.25(사용자 «수급 차트 폭 1/3 줄여», 풋프린트 셀 숫자·사분면 글자 자리) */
   .candle-container { height: 884px; }
   .liq-map-panel { position: relative; }
   /* 풋프린트 아래 카드는 한 줄 너비에 세 칸(사용자 «최대한 너비 하나에 모두»): 내 계좌 | 30분 시나리오 | 신호·특화 신호·경제 일정.
@@ -2247,7 +2240,7 @@ body.order-coin-off .acct-lanes::before {
   /* 2026-09-30 옵션 카드를 풋프린트 카드 안 오른쪽 칸으로 흡수(사용자 지시) -- 카드가 윗줄 전폭. */
   /* 2026-09-30 시안 Y(사용자 선택): 카드 셋이 위에서부터 Footprint · Option · 계좌(전부 전폭, 왼쪽 정렬) + 오른쪽 점 레일 자리.
      시장 맥락은 Footprint 안(1초 수급 아래 칸, app.js mcPlace), 옵션·블록은 Option 카드. */
-  #snapshotTabPanel { margin-right: 36px; }
+  #snapshotTabPanel { margin-right: 0; }   /* 2026-11-02 오른쪽 점 레일 자리(36px)는 왼쪽 내비로 옮겼다 */
   #snapshotTabPanel > .liq-map-panel { position: relative; }
   #mcBody.mc-cmp { position: absolute; z-index: 1; overflow: hidden; align-content: start;   /* 줄을 위로 -- 칸 높이만큼 늘어난 줄을 «내용 높이»로 재던 되먹임(5초마다 +10px)을 막는다 */   /* 2026-09-30 스크롤 없음 -- 높이는 renderCandleSvg 가 내용에 맞춰 준다(mcNeedH) */
     padding-top: 4px; column-gap: 14px; }   /* 2026-10-01 윗선 제거(사용자 «①~④ 회색 실선 모두 제거») */
@@ -2295,11 +2288,11 @@ body.not-eth:not([data-coin="xrp"]) #mcWhen { display: none; }   /* ⑤ = 옵션
 /* 2026-09-30 카드 이동 레일(점만, 사용자 지시): 오른쪽 가운데 고정 · 지금 보는 카드 = 채운 점. 넓은 화면(위 미디어 쿼리)에서만 보인다. */
 /* 2026-09-30 한 화면 모드(app.js fitLayout): 카드 단위 스냅 */
 /* 2026-10-01 스크롤 스냅 제거(사용자 «스크롤 하면 자동으로 내려가는 건 제거») -- 카드 이동은 오른쪽 점 레일로 */
-html.fit1 #snapshotTabPanel > .panel { scroll-margin-top: 10px; }
+html.fit1 #snapshotTabPanel > .panel { scroll-margin-top: var(--apph, 64px); }   /* 2026-11-02 앱바가 위에 고정 -- 내비로 옮겨도 카드가 앱바 아래에서 시작 */
 /* 2026-09-30(2) 풋프린트 카드 = 창 높이, 차트 칸 = 남는 공간(flex) -- 차트 높이를 JS 가 재서 고치지 않는다(새로고침 때 흔들렸다).
    ⑤ 24시간은 자리를 미리 잡아(내용이 늦게 와도 차트 칸이 안 줄어든다). */
 @media (min-width: 1700px) and (orientation: landscape) {
-  html.fit1 #fpCard { height: calc(100vh - 20px); display: flex; flex-direction: column; }
+  html.fit1 #fpCard { height: calc(100vh - var(--apph, 64px) - 10px); display: flex; flex-direction: column; }   /* 2026-11-02 사용자 펜 메모 «앱바와 카드까지가 화면에 꽉 차도록» -- --apph = 앱바 아래 끝(app.js fitLayout) */
   html.fit1 #fpCard > .candle-container { flex: 1 1 0; min-height: 0; height: auto !important; }
   html.fit1 #candleSvgSnapshot { height: calc(100% - 12px) !important; }   /* 상자 = 차트 + 12(예전 884/872 과 같은 여유) */
   html.fit1 #mcBody:not(.mc-cmp), html.fit1 #mcWall:not(.on) { display: none; }   /* 제자리(차트 오른쪽 칸)에 놓이기 전엔 안 보인다 -- 첫 0.5초 흐름 속에 나타났다 사라지던 것 */
@@ -2312,14 +2305,19 @@ html.fit1 #snapshotTabPanel > .panel { scroll-margin-top: 10px; }
   html.fit1 #snapAcctPerf .acct-plot svg { height: var(--acctplot, 240px); max-height: none; }   /* 2026-10-01 줄을 위로 -- 남는 칸을 app.js fitLayout 이 재서 사다리에 준다 */   /* 고정 -- 일정 받기 전 안내 줄로 174px 였다가 113px 로 줄며 차트가 늘었다 */
   html.fit1 #fpCard > .ops-health-head, html.fit1 #liquidationMapList { flex: none; }
 }
-.card-rail { display: none; position: fixed; z-index: 800; right: 12px; top: 50%; transform: translateY(-50%); gap: 18px; padding: 6px 0; }
-.card-rail::before { content: ""; position: absolute; left: 50%; top: 10px; bottom: 10px; width: 2px; margin-left: -1px; background: var(--line); border-radius: 1px; }
-.card-rail button { position: relative; width: 16px; height: 16px; padding: 0; border-radius: 50%; border: 2px solid var(--line); background: var(--bg, var(--panel)); cursor: pointer;
-  transition: background .18s ease-out, border-color .18s ease-out, transform .18s ease-out; }
-.card-rail button::after { content: ""; position: absolute; inset: -8px; }   /* 누르는 면 32px */
-.card-rail button:hover { border-color: var(--muted); }
-.card-rail button:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
-.card-rail button.on { background: var(--text); border-color: var(--text); transform: scale(1.12); }
+/* 2026-11-02 왼쪽 세로 내비(사용자 «B안: 왼쪽 세로 내비 · 오른쪽 점 레일 제거»). 마크업·동작(app.js setupCardRail/cardRailSync)은 점 레일 그대로 -- 겉만 바꿨다. */
+.card-rail { display: none; position: fixed; z-index: 800; left: 0; top: 0; bottom: 0; width: 72px; align-content: start; justify-items: center; gap: 6px; padding: 18px 0;
+  background: var(--page-bg); background-attachment: fixed; border-right: 1px solid var(--line); }
+.card-rail button { width: 58px; padding: 10px 0 9px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer;
+  display: grid; justify-items: center; gap: 5px; font-family: inherit; font-size: 11px; font-weight: 600; line-height: 1; transition: background .18s ease-out, color .18s ease-out; }
+.card-rail button[hidden] { display: none; }
+.card-rail button svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }   /* 2026-11-02 아이콘 = 선 그림(사용자 «C안») */
+.card-rail button:hover { background: var(--panel); color: var(--text); }
+.card-rail button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.card-rail button.on { background: transparent; color: var(--text); }
+.card-rail button.on::before { content: ""; position: absolute; left: -7px; top: 10px; bottom: 10px; width: 3px; border-radius: 3px; background: var(--amber); }   /* 선택 = 왼쪽 막대(시안 C) */
+.card-rail button { position: relative; }
+body:has(.card-rail:not([hidden])) { padding-left: 72px; }
 @media (prefers-reduced-motion: reduce) { .card-rail button { transition: none; } }
 /* 2026-09-27 헤더 한 줄(사용자 지시): 스냅샷의 «코인 탭 · 발표 경보 · 테마» 줄을 페이지 탭과 세션 사이로 올렸다.
    다른 탭에서는 지금처럼 안 보인다. 모바일(≤720)은 세션 다음 줄로 보내 전과 같은 모양을 지킨다. */
@@ -2335,7 +2333,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 @media (max-width: 720px) {
   /* 2026-09-27 모바일 최적화: 세션과 테마를 한 줄에(전엔 테마 혼자 한 줄). 1줄 = 페이지 탭, 2줄 = 세션 | 테마. */
   .topbar { grid-template-columns: minmax(0, 1fr) auto; row-gap: 8px; }
-  .topbar > .page-tabs { grid-column: 1 / -1; }
   .topbar > .top-right { grid-column: 1; grid-row: 2; justify-content: flex-start; }
   .topbar > .snap-head { grid-column: 2; grid-row: 2; margin-top: 0; }
   /* 차트 머리: 1h~12h 와 ETH·SOL·XRP 를 한 줄에(전엔 두 줄). 좁은 폰에서만 줄바꿈된다. */
@@ -2355,14 +2352,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   .mc-q, .opt-q, .opt-chip-btn, .opt-blk-btn, #snapAcctPerf .chip { position: relative; }
   .mc-q::after, .opt-q::after, .opt-chip-btn::after, .opt-blk-btn::after, #snapAcctPerf .chip::after {
     content: ""; position: absolute; left: 50%; top: 50%; width: max(100% + 4px, 40px); height: 40px; transform: translate(-50%, -50%); }
-}
-/* 2026-10-17 휴대폰 운영 관리: 정상 줄 70개를 접는다(이상·주의 줄만 펼쳐 둠) -- 아래 «정상 N개 보기» */
-.ops-ok-toggle { display: none; }
-@media (max-width: 720px) {
-  #opsHealthList:not(.show-ok) > .ops-health-row.good { display: none; }
-  .ops-ok-toggle { display: block; margin: 10px 16px 14px; min-height: 44px; border-radius: 999px; background: none; cursor: pointer;
-    border: 1px solid var(--line); color: var(--muted); font: 600 13px/1 var(--font-sans); }
-  .ops-ok-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 
 /* 2026-09-28 옵션 카드(사용자 선택 A+C) · 차트 머리 칩. 색은 --option(청록) 하나 + 기존 방향색. */
@@ -2507,7 +2496,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   font-family: var(--font-mono); font-size: 13px; font-weight: 800; letter-spacing: .02em; white-space: nowrap;
   -webkit-touch-callout: none; user-select: none; -webkit-user-select: none;
   /* 2026-10-06 누르는 동안 알약 전체가 방향색으로 왼쪽→오른쪽 차오른다(사용자 «버튼 전체가 차오름») -- 다 차면 발주. 떼면 바로 비운다(전이 없음). */
-  background-image: linear-gradient(color-mix(in srgb, currentColor 26%, transparent), color-mix(in srgb, currentColor 26%, transparent));
+  background-image: linear-gradient(color-mix(in srgb, currentColor 30%, transparent), color-mix(in srgb, currentColor 30%, transparent));
   background-repeat: no-repeat; background-position: 0 0; background-size: 0% 100%;
 }
 .ofab-dir small { font-size: 11px; font-weight: 600; color: var(--muted); }
@@ -2533,15 +2522,12 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   border: 1px solid var(--line); border-right: 0; border-radius: 12px 0 0 12px; background: var(--bg); color: var(--text); cursor: pointer;
   box-shadow: 0 8px 24px rgb(var(--shadow) / .32); font: 700 12px/1 var(--font-sans); touch-action: manipulation; }
 .ofab-tab[hidden] { display: none; }
-.ofab-tab.left { right: auto; left: 0; border-right: 1px solid var(--line); border-left: 0; border-radius: 0 12px 12px 0; padding: 10px 8px 10px 6px; }
-.ofab-tab.left svg { transform: scaleX(-1); }
 .ofab-tab svg { width: 14px; height: 14px; color: var(--muted); }
 .ofab-tab b { writing-mode: vertical-rl; letter-spacing: .12em; }
 .ofab-tab i { display: none; width: 7px; height: 7px; border-radius: 50%; }
 .ofab-tab.long i, .ofab-tab.short i { display: block; }
 .ofab-tab.long i { background: var(--good); } .ofab-tab.short i { background: var(--bad); }
 .ofab-tab.long::before, .ofab-tab.short::before { content: ""; position: absolute; left: -1px; top: 10px; bottom: 10px; width: 3px; border-radius: 3px; }
-.ofab-tab.left::before { left: auto; right: -1px; }
 .ofab-tab.long::before { background: var(--good); } .ofab-tab.short::before { background: var(--bad); }
 .ofab-tab:hover svg { color: var(--text); }
 .ofab-dir.long { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
@@ -2561,7 +2547,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .ofab-dir.short { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .ofab-dir.long:hover { border-color: var(--good); }
 .ofab-dir.short:hover { border-color: var(--bad); }
-.ofab-dir.holding { background-size: 100% 100%; transition: background-size 1.5s linear; }   /* = OFAB_HOLD_MS */
+.ofab-dir.holding { background-size: 100% 100%; transition: background-size var(--hold-ms, 1500ms) linear; }
 .ofab-dir:focus-visible, .ofab-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* 2026-10-06 상세 펼치기 아이콘 -- 손잡이와 같은 무채색·같은 크기(색은 방향이 아니므로). 펼친 동안 밝아지고 옅은 바닥. */
 .ofab-more {
@@ -2675,7 +2661,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .fp-line-switch .mc-sw-g { flex-wrap: nowrap; }
 .fp-line-switch .mc-sw-ma { position: absolute; right: 0; bottom: calc(100% + 3px); }
 /* 2026-10-28 펜 메모: 넓은 화면 차트 위 줄 = [미니맵 | 선 주문(가운데, 큰 버튼) | 지표(오른쪽, 누르면 팝업)] */
-.fp-ind-btn { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line);
+.fp-ind-btn { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--line);
   background: var(--glass); color: var(--text); font: 700 12px/1 var(--font-sans); cursor: pointer; }
 .fp-ind-btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .fp-ind-btn b { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; display: inline-grid; place-items: center;
@@ -2695,8 +2681,8 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 /* 2026-10-30 [LONG | SHORT] 시안 B(사용자 선택) -- 터미널 탭: 테두리 없이 색 점 + 등폭 글자 · 바닥 실선 하나 · 눌린 쪽(지금 선 배치의 방향) 아래로
    그 색 막대가 미끄러져 온다(app.js renderLineTool 이 자리를 잡는다). 글자도 그 색. */
 #fpCard.fp-toprow:not(.fp-alt-on) .fp-line-btn { position: absolute; z-index: 2; transform: translate(-50%, -50%); display: inline-flex; }
-.fp-line-btn { gap: 2px; height: 32px; padding: 0 2px; border-bottom: 1px solid var(--line); }
-.fp-line-btn button { display: inline-flex; align-items: center; height: 100%; padding: 0 14px; border: 0; background: none; color: var(--muted);
+.fp-line-btn { gap: 8px; height: 34px; padding: 0 6px; border-bottom: 1px solid var(--line); }   /* 2026-11-02 여유(gap 2→8 · 높이 32→34) -- 사용자 펜 메모 */
+.fp-line-btn button { display: inline-flex; align-items: center; height: 100%; padding: 0 20px; border: 0; background: none; color: var(--muted);
   font: 700 12px/1 var(--font-mono); letter-spacing: .2em; cursor: pointer; transition: color .16s; }
 .fp-line-btn button::before { content: ""; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; }
 .fp-line-btn [data-lines="LONG"]::before { background: var(--good); } .fp-line-btn [data-lines="SHORT"]::before { background: var(--bad); }
@@ -2841,7 +2827,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .ops-health-head h3.card-title { margin: 0 14px 0 0; }
 #acctCard .opt-card-head { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
 #newsCard .opt-card-head .muted, #optCard .opt-card-head .muted, #acctCard .opt-card-head .muted { margin: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
-html.fit1 #newsCard { height: calc(100vh - 20px); display: flex; flex-direction: column; }
+html.fit1 #newsCard { height: calc(100vh - var(--apph, 64px) - 10px); display: flex; flex-direction: column; }
 html.fit1 #newsCard[hidden] { display: none; }
 html.fit1 #newsCard > .ops-health-head { flex: none; }
 html.fit1 #newsBody { flex: 1 1 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
@@ -3045,19 +3031,18 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .lt-side { font-weight: 800; } .lt-side.good { color: var(--good); } .lt-side.bad { color: var(--bad); }
 .lt-qty, .lt-rr { font: 700 12px/1.3 var(--font-mono); font-variant-numeric: tabular-nums; }
 .lt-rr { color: var(--muted); } .lt-rr.bad { color: var(--bad); font-family: var(--font-sans); }
-.lt-note { color: var(--muted); font-size: 11px; line-height: 1.5; }
 .lt-go { position: relative; overflow: hidden; height: 38px; border-radius: 999px; border: 1.5px solid var(--good); color: var(--good);
   background: color-mix(in srgb, var(--good) 10%, transparent); font: 800 13px/1 var(--font-sans); cursor: pointer; touch-action: manipulation; }
 .lt-go.short { border-color: var(--bad); color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent); }
 .lt-go small { font-weight: 600; font-size: 11px; opacity: .8; margin-left: 6px; }
-.lt-go::before { content: ""; position: absolute; inset: 0; background: currentColor; opacity: .22; transform: scaleX(0); transform-origin: left; }
-.lt-go.hold::before { transform: scaleX(1); transition: transform 1.5s linear; }   /* 꾹 1.5초 채움 */
+.lt-go::before { content: ""; position: absolute; inset: 0; background: currentColor; opacity: .30; transform: scaleX(0); transform-origin: left; }
+.lt-go.hold::before { transform: scaleX(1); transition: transform var(--hold-ms, 1500ms) linear; }   /* 꾹 누르기 채움(다른 버튼과 같은 시간·농도) */
 .lt-go.armed { background: color-mix(in srgb, currentColor 24%, transparent); }
 .lt-go:disabled { opacity: .45; cursor: not-allowed; }
 .lt-go:focus-visible, .lt-x:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
-.lt-x { position: absolute; transform: translateX(-100%); pointer-events: auto; white-space: nowrap; height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line);
-  background: var(--chart-bg); color: var(--muted); font: 600 11px/1 var(--font-sans); cursor: pointer; }
-.lt-x:hover { color: var(--text); }
+.lt-x { order: -1; justify-self: center; margin: -4px 0 -2px; width: 28px; height: 20px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px;
+  background: none; color: var(--muted); font: 600 13px/1 var(--font-sans); cursor: pointer; }
+.lt-x:hover { color: var(--text); background: rgb(var(--lift) / .1); }
 /* 2026-10-29 SLTP 상자: 크기 줄(레버리지·증거금·명목) + 손익비 버튼 */
 .lt-sz { display: flex; flex-wrap: wrap; gap: 2px 10px; font: 600 11.5px/1.35 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); }
 .lt-sz span { white-space: nowrap; }
@@ -3145,6 +3130,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .fc-c { --fc: var(--muted); position: relative; display: flex; flex-direction: column; gap: 2px; padding: 0 8px 2px; min-width: 0; cursor: help; }
 .fc-c + .fc-c { border-left: 1px dashed var(--soft-line); }
 .fc-c.up { --fc: var(--good); } .fc-c.dn { --fc: var(--bad); }
+.fc-c.trd { --fc: var(--warn); }   /* 2026-11-02 «횡보·추세» 칸: 추세(띠 이탈 예상) = 주황 -- 방향이 아니라 초록/빨강을 쓰지 않는다 */
 .fc-c .hz { display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 700; color: var(--muted); white-space: nowrap; }
 .fc-c .hz::after { content: ""; flex: 1; height: 1px; background: var(--line); }   /* 칸마다 이어지는 시간축 */
 .fc-c > b { font-size: 15px; font-weight: 800; color: var(--fc); line-height: 1.25; }
@@ -3197,7 +3183,6 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
    (주문 패널 칩 지정가/즉시 · 직접/자동/보유 · 따라가기/대기, 자산 곡선 기간 칩, 상단 탭이 24~32px). 같은 무게의 기본 규칙보다 뒤여야 한다. */
 @media (pointer: coarse) {
   .chipset .chip { min-height: 40px; min-width: 44px; }
-  .page-tab { min-height: 40px; }
   .ofab-panel .notify-btn.hold-fire { min-height: 44px; }   /* 꾹 누르는 진입·청산 버튼 38px → 바 LONG/SHORT(.ofab-dir)와 같은 44px */
   .mc-switch { row-gap: 6px; }
   .mc-chip { min-height: 40px; padding: 0 10px; }   /* «차트에 그리기» 칩 -- 손가락 목표 40px */
@@ -3282,7 +3267,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .mt-foot { margin: 14px 0 0; font-size: 11px; }
 /* 2026-10-28 한 화면 모드(사용자 «다른 카드들처럼 한 화면에 꽉 차게»): 카드 = 창 높이 · 표 지표 줄이 남는 높이를 나눠 갖는다(1fr, 최소 22px) ·
    상세 칸은 넘치면 제 안에서만 스크롤. html.fit1 은 1700px 이상 가로 화면에서만 켜진다(app.js fitOn). */
-html.fit1 #mtCard { height: calc(100vh - 20px); display: flex; flex-direction: column; }
+html.fit1 #mtCard { height: calc(100vh - var(--apph, 64px) - 10px); display: flex; flex-direction: column; }
 html.fit1 #mtCard > .ops-health-head, html.fit1 #mtBody .mt-foot, html.fit1 #mtBody .mt-key { flex: none; }
 html.fit1 #mtBody { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
 html.fit1 #mtBody .mt-wrap { flex: 1 1 0; min-height: 0; }
@@ -3308,11 +3293,120 @@ html.fit1 #mtBody .mt-det { min-height: 0; overflow-y: auto; scrollbar-width: th
 
 /* 2026-11-01 진입가 라벨 팝업(청산 내용) -- 기존 토큰만 */
 .lt-armed .lt-tag.en { pointer-events: auto; cursor: pointer; }
-.entry-pop { position: fixed; z-index: 60; width: 220px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--chart-bg);
-  box-shadow: 0 8px 28px rgb(var(--shadow) / .4); font-size: 12px; display: grid; gap: 8px; }
+.entry-pop { position: fixed; z-index: 60; width: 220px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--pop-bg);   /* 2026-11-02 불투명(사용자 «청산 팝업이 투명이라 안 보여») -- 글래스의 --chart-bg 는 반투명이다 */
+  box-shadow: 0 2px 6px rgb(var(--shadow) / .12), 0 22px 54px -10px rgb(var(--shadow) / .4); font-size: 12px; display: grid; gap: 8px; }
 .entry-pop dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; } .entry-pop dt { color: var(--muted); } .entry-pop dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
 .entry-pop .good { color: var(--good); } .entry-pop .bad { color: var(--bad); }
 .entry-pop .ep-btns { display: flex; gap: 6px; } .entry-pop .ep-btns button { position: relative; overflow: hidden; user-select: none; touch-action: none; flex: 1; padding: 6px 0; border-radius: 7px; border: 1px solid var(--bad); background: none; color: var(--bad); font: 700 12px var(--font-sans); cursor: pointer; }
 .entry-pop .ep-btns button:hover { background: rgb(var(--lift) / .08); } .entry-pop small { color: var(--muted); font-size: 10.5px; }
 .entry-pop .hold-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: currentColor; opacity: .30; pointer-events: none; }
 .entry-pop .ep-btns span { position: relative; z-index: 1; }
+
+/* 2026-11-02 코인·주식 탭 = A 드롭다운(사용자 선택): 칩(고정+지금 것) + «전체 N ▾» 팝오버(검색 · 고정 ★ · 코인/주식 그룹). */
+.asset-bar { display: contents; }
+.asset-tab.off-chip { display: none; }
+.asset-more { height: 30px; margin-left: 8px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: rgb(var(--lift) / .035);
+  color: var(--muted); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.asset-more b { font-weight: 800; color: var(--text); }
+.asset-more:hover, .asset-more[aria-expanded="true"] { color: var(--text); background: rgb(var(--lift) / .08); }
+.asset-more:focus-visible, .asset-search:focus-visible, .asset-cell button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.asset-pop { position: fixed; z-index: 2000; padding: 12px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel-strong);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .35); max-height: min(70vh, 520px); overflow: auto; }
+.asset-pop[hidden] { display: none; }
+.asset-search { width: 100%; height: 34px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
+.asset-grp { margin: 12px 4px 6px; font-size: 10px; font-weight: 700; letter-spacing: .14em; color: var(--muted); }
+.asset-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+@media (max-width: 520px) { .asset-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.asset-cell { display: flex; align-items: center; border-radius: 10px; background: rgb(var(--lift) / .05); overflow: hidden; }
+.asset-cell.on { background: var(--text); }
+.asset-cell.on button { color: var(--bg); }
+.asset-cell button { border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.asset-cell .ac-pick { flex: 1 1 auto; min-height: 38px; padding: 0 10px; text-align: left; }
+.asset-cell .ac-pin { flex: none; width: 32px; min-height: 38px; color: var(--muted); opacity: .45; }
+.asset-cell .ac-pin.on { color: var(--amber); opacity: 1; }
+.asset-cell:hover:not(.on) { background: rgb(var(--lift) / .09); }
+@media (max-width: 720px) { .asset-more { margin-left: 0; padding: 0 8px; flex: none; } .asset-more .am-t { display: none; } }   /* 휴대폰: 코인 칩 옆 좁은 칸 -- «N ▾» 만 */
+
+/* 2026-11-02 사용자 펜 메모 «왼쪽 내비로 옮길 때도 앱바는 항상 위에»: 넓은 화면(내비가 보일 때)은 앱바를 위에 고정한다. 아래 여백은 앱바 안(padding)으로 넣어 비치지 않게. */
+body:has(.card-rail:not([hidden])) .app { padding-top: 0; }
+body:has(.card-rail:not([hidden])) header.top { position: sticky; top: 0; z-index: 40; margin-bottom: 0; padding: 10px 0 8px; background: var(--page-bg); background-attachment: fixed; }   /* 위 여백 10 도 앱바 안에 -- 고정돼도 높이가 같다 */
+
+.acct-warn { margin: 6px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--amber); }
+.acct-warn[hidden] { display: none; }   /* 2026-11-02 계좌 카드 체결 조회 실패·잘림 경고 */
+
+/* ══ 2026-11-02 글래스 재질 고급화 + 코인 드롭다운 불투명(사용자 «글래스가 수준이 낮다 · 외부 문헌 조사해서 더 고급스럽게» · «드롭다운 배경이 투명해 글씨가 안 보인다») ══
+   조사(애플 Liquid Glass 해설 · 글래스모피즘 실무 가이드)에서 가져온 것 -- 이 저장소 값으로 다시 쟀다:
+   ① 블러는 카드에서 28px 미만 · 채도 160~180%(전: 34px · 200% -- 색이 탁하게 부풀었다)
+   ② 테두리는 «사방 흰 링»이 아니라 **윗면(좌상)은 밝고 반대편은 옅어지는 그라데이션 림**(애플 림 라이트가 한 방향에서 온다) -- ::before 마스크 링
+   ③ 그림자는 한 겹 큰 그림자(전 0 16px 40px .18)가 «떠 있는 흰 판»을 만든다 -- 접촉 · 중간 · 먼 그림자 세 겹을 옅게
+   ④ 뒤 배경이 «탁한 갈색»(초록·주황·빨강 덩어리가 섞여)이면 유리가 흐려 보인다 -- 청·보라·민트 중심의 맑은 메시에 따뜻한 한 점
+   ⑤ 글자는 유리가 아니라 그 위에 놓인다: 불투명도는 대비(보조문구 4.5:1)가 지키는 선까지만 내린다
+   ⑥ 폴백: 투명도 줄이기 설정 · backdrop-filter 미지원이면 거의 불투명 */
+[data-theme="light"] body {
+  --page-bg:
+    radial-gradient(ellipse 1000px 700px at 8% -10%, color-mix(in srgb, #a9c8ff 34%, transparent), transparent 64%),
+    radial-gradient(ellipse 900px 640px at 96% 0%, color-mix(in srgb, #cfc2ff 28%, transparent), transparent 66%),
+    linear-gradient(180deg, #f2f5fb 0%, #e7ecf5 50%, #dde4f0 100%);
+  --glass-blur: blur(20px) saturate(140%) brightness(1.04);   /* 시안 P «진주빛»(사용자 선택): 은백색 바탕 · 흐림 20px · 채도 140% */
+  --glass-edge: transparent;   /* 림은 아래 ::before 가 그린다 */
+}
+[data-theme="light"] .panel {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0, rgba(255, 255, 255, 0) 120px),
+    rgba(255, 255, 255, 0.5);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 0 0 1px rgb(var(--shadow) / 0.05),
+    0 1px 2px rgb(var(--shadow) / 0.05),
+    0 10px 28px -10px rgb(var(--shadow) / 0.12);
+}
+[data-theme="light"] .panel::before {   /* 그라데이션 림: 좌상 밝음 → 중간 옅음 → 우하 반사. 1px 링만 남기는 마스크 */
+  content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; pointer-events: none;
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 0.4) 26%, rgba(255, 255, 255, 0.12) 54%, rgba(255, 255, 255, 0.55) 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+[data-theme="light"] .panel:hover { border-color: transparent; }
+
+/* 폴백 -- 투명도 줄이기 · backdrop-filter 미지원은 거의 불투명(글자가 먼저다) */
+@media (prefers-reduced-transparency: reduce) {
+  [data-theme="light"] .panel { background: rgba(255, 255, 255, 0.92); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  [data-theme="light"] .panel { background: rgba(255, 255, 255, 0.9); }
+}
+
+/* 코인·주식 드롭다운 = 불투명 면(전: --panel-strong 반투명이라 글래스에서 글씨가 안 보였다) */
+:root { --pop-bg: #1b212b; }
+[data-theme="light"] { --pop-bg: #f7f9fd; }
+.asset-pop { background: var(--pop-bg); backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: 0 2px 6px rgb(var(--shadow) / 0.12), 0 22px 54px -10px rgb(var(--shadow) / 0.34); }
+.asset-cell { background: color-mix(in srgb, var(--text) 7%, var(--pop-bg)); }
+.asset-cell:hover:not(.on) { background: color-mix(in srgb, var(--text) 12%, var(--pop-bg)); }
+
+/* 굴절 유리(app.js setupLiquidGlass)가 켜진 때만(Chromium · 글래스 테마): 컨트롤은 뒤가 비쳐야 굴절이 보인다 -- 얇은 흰 막만 남긴다. 글자는 막이 아니라 그 위에 있다. */
+html.lg-on #cardRail { background: rgba(255, 255, 255, 0.14); }
+html.lg-on #snapshotAssetTabs, html.lg-on .asset-more, html.lg-on .push-toggle { background: rgba(255, 255, 255, 0.22); }
+html.lg-on .ofab-bar { background: rgba(255, 255, 255, 0.4); }
+
+/* 2026-11-02 계좌 카드 «순환» = 한 줄 2칸(사용자 «너비를 절반으로, 현재 높이에 2개»). 좁은 화면(<1100px)은 한 칸. 타일 글자는 한 칸 폭에 맞춰 줄인다. */
+@media (min-width: 1100px) {
+  #snapAcctCycle { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; align-items: start; }
+  #snapAcctCycle .cy-tiles b { font-size: 13px; }
+  #snapAcctCycle .cy-tiles { gap: 6px; }
+  #snapAcctCycle .cy-tiles div { padding: 7px 8px; }
+}
+@media (min-width: 1100px) and (max-width: 1599px) { #snapAcctCycle .cy-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }   /* 중간 폭: 한 칸이 좁아 타일을 2줄(3열)로 */
+
+/* 2026-11-02 진입 라벨 = 오른쪽 전용 레인(D안 · app.js ltLanePlace): 플롯 오른쪽 바깥 띠에 불투명 칩, 정보는 그대로(두~세 줄로 접힘). 끌기·✕ 는 그대로 동작한다. */
+.lt-tag.en.lane { display: flex; flex-wrap: wrap; align-items: baseline; gap: 1px 6px; white-space: normal; padding: 4px 7px 4px 6px; font-size: 11.5px; line-height: 1.3; background: var(--pop-bg); }
+.lt-tag.en.lane .lt-grip { display: none; }   /* 폭이 좁아 손잡이 점이 한 줄을 차지한다 -- 칩 어디든 끌 수 있다(ns-resize 커서) */
+.lt-tag.en.lane .lt-en-p, .lt-tag.en.lane > span { font-size: 11px; font-weight: 700; }
+.lt-tag.en.lane > b, .lt-tag.en.lane > span { flex: 0 0 100%; white-space: nowrap; }   /* 줄마다 한 항목 */
+.lt-en-r::before { content: " · "; font-weight: 700; }   /* 레인이 아니면 예전처럼 한 줄 «· 증거금 …» */
+.lt-tag.en.lane .lt-en-r::before { content: none; }
+
+/* 2026-11-02 사용자 «글래스 테마에서 모든 팝업창과 드롭다운이 투명해서 안 보인다» -- 떠 있는 면(주문 패널 말풍선·선 도구 주문창·지표 팝업·설명 대화상자·알림 센터·툴팁)은 불투명 바닥 + 흐림 없음. */
+.ofab-say, .lt-tk, .fp-ind-pop, .help-dlg, .ofab-panel, .nc, .chart-tooltip.visible {
+  background: var(--pop-bg); backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+[data-theme="light"] .chart-tooltip.visible { background: #2d333d; }

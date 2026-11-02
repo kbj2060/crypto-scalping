@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>인공지능 트레이딩 대시보드</title>
-  <link rel="icon" href="icons/favicon-64.png">
+  <title>트레이딩룸</title>
+  <link rel="icon" href="icons/favicon-64.png?v=3">
   <!-- 2026-09-04 PWA: Chrome/Edge에서 "앱으로 설치"가 뜨게 하고, 설치 후에는 자체 창을 가진
        데스크톱 앱이 된다. iOS는 apple-mobile-web-app-capable + 홈화면 추가를 해야만 웹푸시가
        동작한다(사파리 제약, 브라우저 탭 상태로는 알림 권한 자체를 못 받는다). -->
@@ -23,12 +23,12 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="트레이딩">
-  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png?v=3">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
-  <link rel="stylesheet" href="styles.css?v=20261101-fp24">
+  <link rel="stylesheet" href="styles.css?v=20261102-profile5-css">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -44,16 +44,12 @@
     <main class="app">
     <!-- 2026-09-21 감사: 문서에 h1 이 없어 제목이 h2 부터 시작했다. 화면에는 상단바가
          이미 제목 역할을 하므로 스크린리더에만 준다. -->
-    <h1 class="sr-only">인공지능 트레이딩 대시보드</h1>
+    <h1 class="sr-only">트레이딩룸</h1>
     <header class="top">
       <div class="topbar">
         <!-- 2026-10-16 펜 메모(3차): 넓은 화면 스냅샷 = 세션(아시아·유럽·미국) 왼쪽 · 운영 관리 화면 = 탭 (app.js placeTopLeft) · 좁은 화면은 비어 숨김 -->
         <div id="topLeftSlot" class="top-left-slot"></div>
         <div id="topCenterSlot" class="top-center-slot"></div>   <!-- 2026-10-16 펜 메모(3차): 넓은 화면 스냅샷 = 코인 탭(맨 위 가운데) -->
-        <nav class="page-tabs" aria-label="대시보드 탭">
-          <button type="button" class="page-tab active" data-page-tab="snapshot" aria-current="page">스냅샷</button>
-          <button type="button" class="page-tab" data-page-tab="ops">운영 관리</button>
-        </nav>
         <!-- 2026-09-26 사용자 지시로 가운데 현재가·5분 변화·시계를 뺐다(가격은 차트·계좌 레일에 이미 있다). -->
         <!-- 2026-09-27 헤더 한 줄(사용자 지시) -- 원래 스냅샷 패널 첫 줄이었다. 다른 탭에서는 CSS 가 숨긴다. -->
         <div class="ops-panel-head snap-head">
@@ -148,41 +144,6 @@
       </div>
     </dialog>
 
-    <section id="opsTabPanel" class="ops-tab-panel hidden">
-      <div class="ops-panel-head">
-        <div>
-          <p class="eyebrow">READ-ONLY OPERATIONS</p>
-          <h2>운영 관리</h2>
-          <p id="opsUpdatedAt" class="muted">상태 불러오는 중…</p>
-        </div>
-        <div id="opsWatchdogBadge" class="ops-badge neutral">WATCHDOG -</div>
-      </div>
-      <section class="panel ops-health-panel">
-        <div class="ops-health-head">
-          <div><h3>헬스 체크</h3><p id="opsHeartbeatText" class="muted">-</p></div>
-          <div class="ops-health-head-tools">
-            <span id="opsHealthSummary" class="ops-health-summary">-</span>
-            <span class="ops-readonly">읽기 전용 · 30초 갱신</span>
-          </div>
-        </div>
-        <div id="opsHealthList" class="ops-health-list"></div>
-      </section>
-      <section class="panel ops-health-panel">
-        <div class="ops-health-head">
-          <div><h3>바이낸스 계정</h3><p id="acctBalanceText" class="muted">-</p></div>
-          <div class="ops-health-head-tools">
-            <span id="acctSummary" class="ops-health-summary">-</span>
-            <span class="ops-readonly">거래소 실계좌 · 읽기 전용 · 30초 갱신</span>
-          </div>
-        </div>
-        <div id="acctPositions" class="ops-health-list"></div>
-        <div class="ops-health-head" style="margin-top:12px">
-          <div><h3>최근 거래</h3><p class="muted">체결 내역을 왕복 단위로 묶은 것 · 진입→청산 시각</p></div>
-        </div>
-        <div id="acctTrades" class="ops-health-list"></div>
-      </section>
-    </section>
-
     <!-- 2026-09-26 비평: 탭 패널 전체의 aria-live 를 걷었다 -- 0.25초마다 바뀌는 화면 전체가 낭독 대상이었다.
          알릴 것은 주문 결과(#snapEntryResult)와 진입 가부(#snapEntrySize)뿐이다. -->
     <section id="snapshotTabPanel" class="ops-tab-panel">
@@ -240,6 +201,7 @@
             <span id="fpPanHome" hidden></span>   <!-- 2026-10-16 넓은 화면은 #chartPan 을 차트 위 줄 가운데로 옮겼다가 좁아지면 여기로 되돌린다 -->
             <div id="chartPan" class="chart-pan" hidden></div>   <!-- 2026-10-01 창 이동 미니맵(12시간) · app.js renderChartPan -->
             <span id="coinHome" hidden></span>   <!-- 2026-10-16 넓은 화면은 코인 탭을 맨 위 왼쪽으로 옮겼다가 좁아지면 여기로 되돌린다 -->
+            <div id="assetBar" class="asset-bar">
             <div id="snapshotAssetTabs" class="asset-tabs chart-mode-tabs" aria-label="스냅샷 코인 선택" title="코인 전환 적용: 캔들·시장이력 · 청산맵(청산 밀도 히트맵·S/R 레벨) · 청산 방향압력 · 레짐 리본(ETH/BTC/XRP) · GEX. ETH 고정(코인을 바꿔도 ETH 값입니다 — 해당 카드에 «ETH 전용» 배지가 붙습니다): 변동성 수준 · 추세 전환 탐지기 · 추세 전환 경보기 · 상황 읽기 30분. 비ETH 에서는 아예 빠지는 것: 풋프린트 셀 · 수급 프로파일 · 1초 수급 · OI 신규계약 레인 · 호가 히트맵(체결 테이프와 래스터를 ETH 만 수집합니다). HYPE 는 바이낸스 현물 상장이 없어 현물 기반 지표가 제한됩니다.">
               <button type="button" class="asset-tab active" data-asset="eth">ETH</button>
               <button type="button" class="asset-tab" data-asset="btc">BTC</button>
@@ -247,6 +209,13 @@
               <button type="button" class="asset-tab" data-asset="xrp">XRP</button>
               <button type="button" class="asset-tab" data-asset="hype">HYPE</button>
               <button type="button" class="asset-tab" data-asset="sndk">SNDK</button>   <!-- 2026-11-01 Binance TradFi 주식 선물 · 서버 DASHBOARD_ASSETS 에 없으면 _hide_off_assets 가 hidden -->
+            </div>
+            <!-- 2026-11-02 사용자 «A 드롭다운»: 칩에는 고정한 것(+지금 보는 것)만, 나머지는 «전체 ▾» 팝오버(검색·코인/주식 그룹·★ 고정). 칩 = 위 #snapshotAssetTabs 버튼 중 고른 것(app.js renderSnapshotAssetTabs). -->
+            <button type="button" id="assetMore" class="asset-more" aria-haspopup="dialog" aria-expanded="false" aria-controls="assetPop"><span class="am-t">전체 </span><b id="assetMoreN"></b> ▾</button>
+            <div id="assetPop" class="asset-pop" role="dialog" aria-label="코인·주식 선택" hidden>
+              <input id="assetSearch" class="asset-search" type="search" placeholder="코인·주식 검색 (예: nv, sol)" autocomplete="off" aria-label="코인·주식 검색">
+              <div id="assetPopBody"></div>
+            </div>
             </div>
             <!-- 2026-10-28 사용자 «모바일도 데스크탑처럼»: 휴대폰 머리 마지막 줄 = [· | 롱 숏 | 지표 N] -- app.js 가 #fpLineBtn·#fpLineSwitch 를 여기로 옮긴다(넓은 화면은 차트 위 줄) -->
             <div id="fpMobRow" class="fp-mob-row" hidden><span aria-hidden="true"></span></div>
@@ -369,6 +338,7 @@
           </div>
         </div>
         <div id="snapAcctPosition" class="ops-health-list"></div>
+        <p id="snapAcctWarn" class="acct-warn" role="status" hidden></p>   <!-- 2026-11-02 체결 조회 실패·잘림 심볼 경고(app.js renderSnapshotAccountCore) -->
         <!-- 2026-09-12 수동 진입 1단계. **크기를 화면이 정한다** -- 재량 사이징이 실계좌 손실의
              출처였다(크기–수익 상관 −0.494, 한 건 −548.88 이 이익 합 전부보다 컸다).
              지금은 미리보기 전용: 서버 게이트 DASHBOARD_MANUAL_EXEC_ENABLED 가 닫혀 있어
@@ -389,7 +359,7 @@
              🔴버튼 모양은 진입과 계속 가른다(.exit-row 는 채움, 진입은 아웃라인). 색만으로
                가르면 롱 진입과 롱 청산이 둘 다 녹색이라 오클릭이 실돈 사고가 된다. -->
         <!-- 2026-09-22 시안 B(사용자 선택): 「닫기」와 「더 넣기」를 **나란히** 세운다.
-             둘은 약속 모델이 다르다 -- 닫기는 0.4초 뒤 확인 버튼이 30초 뜨고, 넣기는 0.4초가
+             둘은 약속 모델이 다르다 -- 닫기는 꾹 누른 뒤(HOLD_FIRE_MS) 확인 버튼이 30초 뜨고, 넣기는 꾹 누르는 시간이
              곧 확인이다(manualHoldStart: 진입에 확인 버튼을 띄우면 같은 주문이 두 번 나갈
              길이 생긴다). 세로로 쌓여 있으면 그 차이가 문구로만 남는데, 나란히 두면 각 레인의
              발 밑에 제 약속이 적혀 배치가 그걸 말한다.
@@ -436,7 +406,7 @@
             <!-- 2026-09-14 «지금 닫으면 얼마인가»를 누르기 **전에** 보여준다. 계좌 payload 의
                  진입가·마크가로 화면이 바로 계산한다(≈ 표시: 체결가·수수료는 빠진 근사다). -->
             <span id="snapExitNow" class="exit-now"></span>
-            <p class="lane-pact"><span class="pact-mouse"><b>0.4초</b> 누르고 있으면 <b>바로 나갑니다</b> — 떼면 취소.</span><span
+            <p class="lane-pact"><span class="pact-mouse"><b>1.5초</b> 누르고 있으면 <b>바로 나갑니다</b> — 떼면 취소.</span><span
               class="pact-touch">누르면 <b>미리보기</b> → 확인 버튼을 <b>한 번 더</b> 눌러야 나갑니다(30초).</span></p>
           </div>
           <!-- 2026-09-22 사용자 «청산과 진입이 한 줄에 같이 있는 거였어 · 포지션이 없어도».
@@ -539,7 +509,7 @@
               <i class="hold-fill" aria-hidden="true"></i><span>숏 진입</span></button>
           </div>
           <!-- 2026-09-26 비평: 진입 레인에는 약속 문구가 없었다. 청산과 같은 규칙이다(마우스 = 바로, 터치·키보드 = 확인). -->
-          <p class="lane-pact"><span class="pact-mouse"><b>0.4초</b> 누르고 있으면 <b>바로 나갑니다</b> — 떼면 취소.</span><span
+          <p class="lane-pact"><span class="pact-mouse"><b>1.5초</b> 누르고 있으면 <b>바로 나갑니다</b> — 떼면 취소.</span><span
             class="pact-touch">누르면 <b>미리보기</b> → 확인 버튼을 <b>한 번 더</b> 눌러야 나갑니다(30초).</span></p>
           </details>
           <!-- 2026-09-12 계좌 카드와 **같은 타일**로 그린다(사용자 요청) -- 미리보기가 말 그대로
@@ -574,13 +544,13 @@
     </section>
 
   </main>
-  <!-- 2026-09-30 카드 이동 레일(사용자 지시 «점만 남기고 글자는 제거»). 넓은 화면·스냅샷 탭에서만. app.js setupCardRail -->
+  <!-- 2026-11-02 아이콘 = 선 그림(시안 C: 선택은 왼쪽 막대) · 왼쪽 세로 내비로 바꿈(사용자 «B안 왼쪽 세로 내비 · 오른쪽 레일 제거»; 점+글자 없음 → 아이콘+글자). 2026-09-30 카드 이동 레일(사용자 지시 «점만 남기고 글자는 제거»). 넓은 화면·스냅샷 탭에서만. app.js setupCardRail -->
   <nav id="cardRail" class="card-rail" aria-label="카드 이동" hidden>
-    <button type="button" data-go="fpCard" aria-label="Footprint 카드로" title="Footprint"></button>
-    <button type="button" data-go="mtCard" aria-label="Macro Trend 카드로" title="Macro Trend"></button>
-    <button type="button" data-go="newsCard" aria-label="뉴스 카드로" title="뉴스"></button>
-    <button type="button" data-go="optCard" aria-label="Option 카드로" title="Option"></button>
-    <button type="button" data-go="acctCard" aria-label="계좌 카드로" title="계좌"></button>
+    <button type="button" data-go="fpCard" aria-label="Footprint 카드로" title="Footprint"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="7" width="4" height="7" rx="1"/><rect x="15" y="8" width="4" height="7" rx="1"/><path d="M7 4v3M7 14v4M17 5v3M17 15v4"/></svg><span>풋프린트</span></button>
+    <button type="button" data-go="mtCard" aria-label="Macro Trend 카드로" title="Macro Trend"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg><span>매크로</span></button>
+    <button type="button" data-go="newsCard" aria-label="뉴스 카드로" title="뉴스"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 9h8M8 12h8M8 15h5"/></svg><span>뉴스</span></button>
+    <button type="button" data-go="optCard" aria-label="Option 카드로" title="Option"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16"/><path d="M5 15h7l7-9"/></svg><span>옵션</span></button>
+    <button type="button" data-go="acctCard" aria-label="계좌 카드로" title="계좌"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8a2 2 0 0 1 2-2h12v2"/><rect x="4" y="8" width="16" height="11" rx="2"/><circle cx="16" cy="13.5" r="1.2"/></svg><span>계좌</span></button>
   </nav>
   <!-- 2026-09-25 떠다니는 주문 버튼(사용자 지시). 손잡이(⠿)로만 끈다 -- 주문 버튼이 «길게 누르기»라
        끌기와 한 표면을 쓰면 옮기다 손이 멈춘 순간 주문이 나갈 수 있다. 펼치면 계좌 카드의 주문
@@ -613,7 +583,7 @@
   </div>
   <button type="button" id="ofabTab" class="ofab-tab" hidden aria-label="주문 버튼 꺼내기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg><i aria-hidden="true"></i><b>주문</b></button>
-  <script src="./app.js?v=20261101-tab4"></script>
+  <script src="./app.js?v=20261102-profile5-js"></script>
   <script src="./fp_daily.js?v=20261031-btc"></script>
   <script src="./liq_profile.js?v=20261015-align"></script>
   <script src="./bubble_map.js?v=20261016-minitop"></script>

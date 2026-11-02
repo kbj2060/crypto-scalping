@@ -190,7 +190,9 @@ def _fold(fills: list[dict[str, Any]], position_side: str = "BOTH", end_qty: flo
             for trip in trips:
                 if trip["entry_time"] <= int(fills[cut]["time"]):
                     trip["truncated_open"] = True
-            kept = [t for t in trips if t["entry_time"] <= int(fills[cut]["time"])]
+            # 🔴2026-11-02 열린 조각(closed=False)은 **버린다** -- 창 앞 포지션의 파편이라 «진행 중 왕복»이 아니다. 남기면 평탄 뒤에 다시 접은
+            #   진짜 열린 왕복과 둘이 돼 계좌 카드에 «ETH 롱 순환» 이 2개 뜨고, 포지션의 entry_at 도 파편의 이른 시각이 됐다(사용자 «롱 순환 2개»).
+            kept = [t for t in trips if t["entry_time"] <= int(fills[cut]["time"]) and t["closed"]]
             return kept + _fold(fills[cut + 1:], position_side, None)
         for trip in trips:
             trip["truncated_open"] = True
@@ -346,9 +348,13 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
     open_qty = {(p["symbol"], p.get("positionSide")): abs(float(p["positionAmt"])) for p in risk if p.get("positionSide") in ("LONG", "SHORT")}
     trips: list[dict[str, Any]] = []
     truncated: list[str] = []
+    failed: list[str] = []   # 2026-11-02 체결 조회가 실패한 심볼 -- «거래 없음»이 아니라 «모름»(화면이 경고한다)
     for symbol in symbols:
         fills = await _get(session, "/fapi/v1/userTrades", {"symbol": symbol, "limit": trade_limit}, key, secret, offset)
-        if isinstance(fills, dict) or not fills:
+        if isinstance(fills, dict):
+            failed.append(symbol)
+            continue
+        if not fills:
             continue
         # 정확히 limit개면 그 앞이 잘렸다는 뜻 -- 창 밖에서 열린 포지션은 중간부터 접히므로
         # 가장 오래된 왕복 하나는 진입가/방향이 틀릴 수 있다. 숨기지 말고 알린다.
@@ -365,7 +371,12 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
 
     # An open position's entry time: the still-open round trip for that symbol knows the first fill,
     # which positionRisk's updateTime does not (that moves on every scale-in and funding settlement).
-    open_entry = {(t["symbol"], t["side"]): t["entry_at"] for t in trips if not t["closed"]}
+    # 🔴2026-11-02 trips 는 entry_time 내림차순이라 dict 컴프리헨션은 **오래된 쪽이 덮어썼다** -- 잘리지 않은 열린 왕복을 먼저, 없으면 잘린 것(setdefault).
+    open_entry: dict[tuple[str, str], str] = {}
+    for cut_pass in (False, True):
+        for t in trips:
+            if not t["closed"] and bool(t.get("truncated_open")) == cut_pass:
+                open_entry.setdefault((t["symbol"], t["side"]), t["entry_at"])
     for position in positions:
         position["entry_at"] = open_entry.get((position["symbol"], position["side"])) or position["updated_at"]
 
@@ -400,6 +411,7 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
         "leverage_by_symbol": leverage_by_symbol,
         "trades": trips,
         "trades_truncated": truncated,
+        "trades_failed": failed,
     }
 
 
