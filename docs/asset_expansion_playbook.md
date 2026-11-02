@@ -75,7 +75,7 @@
 - **대시보드 연결(11-01 SNDK, 사용자 «SNDK 선물 풋프린트만 있어도 돼»)**: §2-A 표에서 건드린 곳 = `scripts/coin_config.py` `COIN_CONFIG`(워커 없는 키는 «파일 없음 = 빈 응답») · `dashboard/live/index.html` **탭 버튼 `data-asset`**(🔴탭은 정적 HTML — 빠뜨리면 서버 목록에 있어도 안 보인다. 11-01 SNDK 가 실제로 이렇게 안 보였다) · `dashboard/server.py` `DASHBOARD_ASSETS` 기본값·`HL_LIQ_BY_ASSET`(없는 파일) · `dashboard/coin_flow.py` `FLOW_SPECS`(칸 $0.2 = 테이프 칸 0.05의 4배 · `spot=False`) · `app.js` `ASSET_CONFIG`·`FLOW_ASSETS`·`SNAPSHOT_ASSET_KEYS`. 예측 기능 Set(DIR4H·BOX·VOL4H 등)과 주문 표는 넣지 않았다 → 칸이 꺼지고 주문은 막힌다.
   - 🔴`MARKET_SYMBOLS`(orders.py)는 **건드리지 않는다** — 계좌 조회가 심볼마다 `userTrades`·`openOrders` 를 더 부른다(실계좌 경로). `server.py` 가 import 한 사본에만 `"sndk"` 를 더했다.
   - 현물이 없는 종목은 `FlowSpec.spot_url=None` — `collect_spot_flow` 를 아예 띄우지 않는다(없으면 존재하지 않는 스트림에 재접속을 반복).
-  - 미연결: 일봉·4h 풋프린트(`footprint_daily.py` `ASSETS`, 소급 빌드 필요) · HL · 옵션 칸.
+  - 미연결: HL(해당 없음). 일봉 풋프린트는 11-03 연결(SNDK 2026-04-07~·SOXL 2026-05-15~, `build_footprint_daily_asset.py` 의 `FP_SYM=SNDKUSDT|SOXLUSDT`, OI 는 패널 없이 metrics 아카이브만 · 칸 SNDK $0.5 · SOXL $0.03) · 4h 풋프린트는 수집기 이력(10-31·11-02~)만 · 옵션 칸은 CBOE(11-01~).
 
 - **SOXL(11-02, 사용자 «soxlusdt 선물 대시보드에 추가»)**: SNDK 와 같은 자리에 한 줄씩(위 목록 + `live_okx_trade_tape` `BUCKETS`·`CT_VALS` + 테이프 `BUCKETS`·`SIZE_BANDS_USD` + `multicoin_collectors` `COINS`·`TRADFI` + ctx `OI_SLOW`·`MARK`). 칸 $0.02(테이프 0.01의 2배) · 크기 구간 잠정 $3.9k/$36k(aggTrades 6,000건·0.74h) -- 평일에 다시 잰다 · 깊은 호가 diff 는 SNDK 만(`DEPTH_TRADFI`) · 옵션 카드는 11-02 연결(CBOE 체인 SOXL 2,872계약 수신 확인 · `write_state` 를 종목별 병합으로 고침 · cron 인자 `SNDK SOXL` · app.js `optData` 표).
 

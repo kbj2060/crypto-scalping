@@ -28,7 +28,8 @@ ROOT = Path(__file__).resolve().parents[1]
 HIST_DIR = ROOT / "data" / "footprint_daily"
 # 코인 -> (선물 심볼, 테이프 칸 = 수집기 BUCKETS, 일봉 칸 CELL, 응답 가격 자릿수)
 ASSETS = {"eth": ("ETHUSDT", 0.1, 1.0, 4), "xrp": ("XRPUSDT", 0.0001, 0.0005, 6),
-          "btc": ("BTCUSDT", 1.0, 30.0, 2)}   # 2026-10-31 BTC $30 ≈ 3.9bp @ $77.5k(ETH $1 ≈ 4bp 와 같은 상대 폭) · 테이프 칸 1.0 의 30배
+          "btc": ("BTCUSDT", 1.0, 30.0, 2),
+          "sndk": ("SNDKUSDT", 0.05, 0.5, 2), "soxl": ("SOXLUSDT", 0.01, 0.03, 2)}   # 2026-11-03 주식 선물 -- 칸 ≈ 4bp(SNDK $1,130 → $0.5 · SOXL $78 → $0.03)   # 2026-10-31 BTC $30 ≈ 3.9bp @ $77.5k(ETH $1 ≈ 4bp 와 같은 상대 폭) · 테이프 칸 1.0 의 30배
 _ASSET = globals().get("_ASSET", "eth")      # for_asset 가 사본에 미리 심는다
 SYMBOL, TAPE_BUCKET, CELL, PRICE_DP = ASSETS[_ASSET]
 COIN, TAPE_PER_CELL = SYMBOL[:-4], round(CELL / TAPE_BUCKET)
@@ -563,11 +564,12 @@ def selftest() -> None:
     s, (b, bu, se) = day_from_tape(sec, pb, bq, sq)
     assert abs(s["open"] - 20004.5 * u) < 1e-9 and abs(s["close"] - 19995 * u) < 1e-9 and s["high"] == 20015 * u and s["low"] == 19995 * u
     want = {"ETH": ([1999, 2000, 2001], [0, 1, 2], [3, 1, 0]), "XRP": ([3999, 4000, 4001, 4003], [0, 1, 0, 2], [3, 0, 1, 0]),
-            "BTC": ([666, 667], [1, 2], [4, 0])}[COIN]
+            "BTC": ([666, 667], [1, 2], [4, 0]),
+            "SNDK": ([1999, 2000, 2001], [0, 1, 2], [3, 1, 0]), "SOXL": ([6665, 6666, 6669, 6671], [0, 1, 0, 2], [3, 0, 1, 0])}[COIN]   # SNDK 칸 = 테이프 칸 10개(ETH 와 같음) · SOXL 3개
     assert (list(b), list(bu), list(se)) == want, (list(b), list(bu), list(se))
     assert abs(s["buy_quote"] - (20000 + 2 * 20015) * u) < 1e-6
     _, (b2, _, _) = day_from_tape(np.array([1]), np.array([20010]), np.array([1.0]), np.array([0.0]))
-    assert list(b2) == [{"ETH": 2001, "XRP": 4002, "BTC": 667}[COIN]]   # 칸 하한 정확히(ETH 2001.0 · XRP 2.0010) 은 그 칸
+    assert list(b2) == [{"ETH": 2001, "XRP": 4002, "BTC": 667, "SNDK": 2001, "SOXL": 6670}[COIN]]   # 칸 하한 정확히(ETH 2001.0 · XRP 2.0010) 은 그 칸
     lo, bb, ss = rebin(np.array([1999, 2000, 2004, 2006]), np.array([1, 2, 3, 4.0]), np.array([0, 1, 0, 1.0]), 5)
     assert lo == round(1995 * CELL, PRICE_DP) and bb == [1, 5, 4] and ss == [0, 1, 1], (lo, bb, ss)
     assert rebin_heat(np.array([1999.5 * CELL, 2004.9 * CELL]), np.array([0.2, 1.0]), 5)[:2] == [round(1995 * CELL, PRICE_DP), [0.2, 1.0]]
