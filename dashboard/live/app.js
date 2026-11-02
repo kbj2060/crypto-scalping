@@ -3748,6 +3748,8 @@ const OPT_TIPS = {
   exp: "Deribit 만기(매일·매주 금·월말·분기말 08:00 UTC = 17:00 KST). 시각은 모두 KST. 규모 = 콜+풋 미결제 × 지수 = 명목 달러(실제 옵션 값어치인 프리미엄은 그 0.2% 안팎). max pain = 만기에 보유자에게 줄 내재가치 합이 가장 작은 결제가(프리미엄 무시 · 누가 보유했는지 모른 채 미결제만으로 계산). 차트·사다리의 max pain 선은 늘 «가까운 만기» 하나이고, 그 만기 미결제는 보통 전체의 2% 안팎이다(라벨에 비중). P/C = 풋÷콜 미결제 수량 — 심리 지표가 아니다: 풋 매도는 강세·풋 매수는 헤지일 수 있고, 정의마다 값이 크게 다르다(가까운 만기 1.5 · 7일 1.0 · 전 만기 0.6 · 프리미엄 0.2).\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52, 표본 밖 1년 동전). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.\n시간축 그림은 풋프린트 카드 맨 아래 왼쪽 «옵션 만기».",
   mood: "리버설·버터플라이는 «7일 고정만기»로 잰다: 만기마다 외가격 옵션의 델타로 보간해 정확히 델타 ±0.25 의 IV 를 구하고, 7일 양옆 두 만기를 시간으로 보간한다(30일 값은 괄호). 2026-10-01 까지는 가까운 만기(늘 24시간 미만) 최근접 행사가로 쟀는데 실제 델타가 0.15~0.31 이고 1시간에 평균 3.6pt 흔들려 잡음이었다(7일 고정만기는 0.58pt). 단위 pt = IV %포인트(가격 % 아님), IV 는 Deribit 평가값(mark_iv).\n25Δ 리스크 리버설 = 델타 +0.25 콜 IV − 델타 −0.25 풋 IV(지금가에서 위아래 비슷한 거리). 음수로 깊으면(−5pt 쯤 아래) 하락 방어 풋 수요 = 공포 · 양수면 상승 콜에 웃돈 · ±1pt 안은 중립.\n버터플라이 = (25Δ 콜 IV + 25Δ 풋 IV)/2 − ATM IV = 스마일이 휜 정도. 클수록 «방향은 몰라도 크게 튈» 꼬리에 값이 붙음. 작은 양수가 평상시.\n기간 구조 = 7·30·60일 고정만기 ATM IV(연율 %, 양옆 만기의 총분산 보간). 가까운 일간 만기는 남은 시간에 미국장이 드느냐에 따라 7일 대비 0.71~0.92배로 출렁여 뺐다(만기별 값은 «옵션 만기» 시간축 선). 뒤로 갈수록 높으면 정상(콘탱고) · 앞이 더 높으면(역전) «지금 당장» 큰 움직임을 값에 넣는 스트레스(급락·이벤트 직전). IV 41 ≈ 하루 1σ ±2.1%(41/√365).\n블록 거래 = 장외에서 합의해 거래소에 올린 큰 거래(원자료 다리 그대로, 전략 이름 추정 안 함).\n우리 검정: 아직 없음 — 스큐는 과거분을 살 수 없어 2026-09-28 부터 쌓는 중. 예측력 모름 → 매매 신호 말고 «분위기가 바뀌었나»(리버설 급락·기간 구조 역전) 확인용.\n기간 구조 기울기 = 고정만기 ATM IV 의 1일−7일 · 7일−30일. 1일이 7일보다 높으면 «역전»(주황). ✅검증: 역전이면 다음 24시간 실현 변동성이 DVOL 예상의 약 1.38배(45일, DVOL·최근 실현 통제 후에도 남음 · 겹치지 않는 하루 1표본 33일로는 경계선). 7일−30일도 같은 방향.\nATM 호가 폭 = 7일 근처 만기 ATM 옵션 매도−매수 호가를 IV 포인트로 — 넓으면 마켓메이커가 위험을 피한다. ⏳검정 불가(과거 호가 없음) — 10-01부터 쌓는 중, 나중에 검증.\n옵션 선도 − 지수 = 같은 스냅샷의 Deribit 가까운 만기 선도가와 Deribit 지수 차(bp). 대개 ±3bp 안이고 10분 변화 SD 1.9bp — 그 정도는 잡음. ⏳검정 불가(과거 Deribit 지수 없음, 09-28부터 쌓는 중) — «콜 수요면 +» 같은 해석은 아직 근거가 없다, 나중에 검증.\n(2026-10-02 의미 검증 뒤 남긴 옵션 정보 — 크기·국면만 말하고 방향은 말하지 않는다. 뺀 줄(검증 결과): 옵션 내재 폭(DVOL 과 동률) · 위험중립 왜도·첨도(왜도는 반대 방향, 늘 음수·늘 3 초과) · 변동성 순매수(이후 24h 예측력 없음) · 블록 요청자(순베가 = 블록 몫과 중복 · 순델타 방향 정보 없음) · O/S(높을수록 오히려 조용) · 정산 창(07~08 UTC 는 평소의 0.8배로 조용 · 미결제 크기와 무관) · 이벤트 예상 폭(공식이 0 으로 잘림).)",
   ladder: "행사가 사다리: 세로 = 행사가(지수 ±6%, 위 = 비쌈 · 풋프린트와 같은 방향). 왼쪽 빨강 = 풋 미결제, 오른쪽 초록 = 콜 미결제(달러). 흰 점선 = 지금 가격, 주황 점선 = 가까운 만기 max pain. 칩으로 범위(내일 만기 · 7일 안 만기 합 · 전 만기)를 바꾼다.\n우리 검정: «미결제가 큰 행사가로 가격이 끌린다(자석)»는 1년 표본 밖에서 동전 — 벽·지지저항으로 읽지 말고 «계약이 어디에 쌓였나»로만.\n청록 선 = 가까운 만기 전에 한 번이라도 닿을 확률 50%(실선)·25%·10%(점선), 옅은 띠 = 50% 안쪽. Deribit 행사가별 IV 로 역산한 위험중립 확률이고 «닿음 ≈ 2×그 가격을 넘어 끝날 확률» 근사다(ETH·BTC·XRP — XRP 는 USDC 선형옵션). 주황 실선 = 내 청산가, 초록·빨강 점선 = 내 지정가 매수·매도. 참고 표시 — 방향 신호가 아니다.",
+  eqflow2: "오늘 콜·풋 체결 명목의 누적 곡선(CBOE 지연 시세). 수집기가 10분마다 «지금까지 오늘 거래량 × 마지막 체결가 × 100»을 한 점씩 쌓은 것이라 시작 직후에는 점이 적다(CBOE 가 이력을 주지 않는다). 곡선이 아래로 꺾이면 새 장이 시작된 것. 매수/매도 방향은 모른다.\n우리 검정 없음 — 참고로만.",
+  eqflow: "주식·ETF 옵션 오늘 체결 요약(CBOE 지연 시세): 콜·풋 오늘 거래량(계약)과 명목(= 거래량 × 마지막 체결가 × 100, 하루 중 가격이 달라 근사). 한 줄 = 오늘 명목이 큰 계약(시각 = 그 계약의 마지막 체결). 체결 한 건씩·블록·매수/매도 방향은 CBOE 가 주지 않아 모른다(Deribit 처럼 블록 거래를 못 본다).\n우리 검정 없음 — 참고로만.",
   blocks: "Deribit 블록 거래(장외에서 맞춘 큰 옵션 거래, 지난 24시간): 한 줄 = 시각 · 명목 금액 · 다리별 매수/매도 만기 행사가 ×수량. 방향은 테이커 기준(RFQ 는 요청자 · 직접 거래는 수락자). 줄 머리 = 다리 구조로 분류한 전략 이름(Deribit 자체 구조 코드와 313/313 일치) · «+ 선물 헤지» = 같은 블록에 선물 다리가 붙음(보통 델타 중립 패키지) · 델타/베가 롱·숏 = 요청자 쪽 순델타·순베가 부호(체결 IV 로 계산, 총량의 10% 미만이면 중립). 단일 다리 블록은 다른 곳 헤지의 일부일 수 있어 의도를 모른다. 신규/청산·신원은 모른다. 금액 = 다리별 명목 합(스프레드면 두 다리가 다 더해진다).\n우리 검정 없음 — 참고로만.",
   lane: "옵션 만기(지금 ~ +120시간, 블록 거래는 가운데 «블록 거래» 칸): 시각 KST. 막대 = 다가올 만기 규모(콜+풋 미결제 × 지수 = 명목 달러) · pain = max pain(그 만기 미결제만으로 계산) · P/C = 풋÷콜 미결제 수량(심리 지표 아님) · 청록 선 = 만기별 ATM IV(가까운 만기는 남은 시간이 짧아 시간대에 따라 출렁인다).\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.",
   flow: "옵션 순매수 흐름(지난 24시간, 정시 버킷): 초록 = 콜 매수−매도, 빨강 = 풋 매수−매도(위 = 순매수 · 아래 = 순매도, 기초자산 수량). 청록 선 = 테이커 체결 순델타 누적(콜 매수·풋 매도 +, 콜 매도·풋 매수 −) — «옵션 시장을 통해 테이커가 롱으로 얼마나 기울었나».\n방향은 Deribit 공개 체결의 테이커 방향(블록 포함). «신규 약 N%» = 그 시간 새로 열린 계약의 비율(체결량 V · 미결제 변화 ΔOI 로 (V+ΔOI)/2V, 매수·매도 양쪽 몫 기준) — 이 비율은 정확하지만 테이커와 메이커 중 누가 열었는지는 모른다(테이커 몫은 약 70% 만 확정). 예: 순매수가 0 근처여도 미결제가 크게 늘면 롱과 숏이 양쪽으로 새로 쌓인 것. «강제청산» = 테이커가 강제청산된 체결(Deribit 표시, 매시 history 로 대조). 만기로 사라지는 계약은 미결제 변화에서 뺀다. 검정 전 — 참고.",
@@ -4045,6 +4047,16 @@ function optBlkHtml(blocks, n24, phone, sum24 = null, max24 = null) {
   return `<div class="opt-blk-sum"><span>블록 24h <b>${n24 ?? blocks.length}건 · ${optUsd(tot)}</b> · 최대 ${optUsd(mx.notional_usd || 0)} ${optKst(mx.ts_ms, false)}</span>`
     + (phone ? `<button type="button" class="opt-blk-btn" aria-expanded="${optBlkOpen}">${optBlkOpen ? "접기 ▴" : "목록 ▾"}</button>` : "") + `</div>` + (open ? `<div class="opt-blk-list">${rows}</div>` : "");
 }
+// 2026-11-03 주식(SNDK·SOXL) «블록 거래» 자리 = 오늘 체결 요약(CBOE 는 체결 한 건씩을 안 준다 -- 계약별 오늘 거래량·마지막 체결가). 방향은 모른다.
+function optFlowTodayHtml(o, phone) {
+  const f = o.flow_today;
+  if (!f || (!f.call[0] && !f.put[0])) return `<div class="opt-blk-sum"><span>오늘 체결 <b>없음</b> (장외·휴장)</span></div>`;
+  const pc = f.call[1] > 0 ? (f.put[1] / f.call[1]).toFixed(2) : "-", open = !phone || optBlkOpen;
+  const rows = (f.top || []).slice(0, 5).map((r) =>
+    `<div class="opt-blk-row"><span class="t">${r[0] ? optKst(r[0], false) : "-"}</span><b>${optUsd(r[1])}</b><span class="legs">${new Date(r[2] - 16 * 3600e3).toISOString().slice(5, 10)} 만기 ${r[3] === "C" ? "콜" : "풋"} ${r[4]} · ${Math.round(r[5]).toLocaleString()}계약 · 마지막 $${Number(r[6]).toFixed(2)}</span></div>`).join("");
+  return `<div class="opt-blk-sum"><span>오늘 <b class="opt-good">콜 ${f.call[0].toLocaleString()}계약 ${optUsd(f.call[1])}</b> · <b class="opt-bad">풋 ${f.put[0].toLocaleString()}계약 ${optUsd(f.put[1])}</b> · 풋/콜(명목) ${pc}</span>`
+    + (phone ? `<button type="button" class="opt-blk-btn" aria-expanded="${optBlkOpen}">${optBlkOpen ? "접기 ▴" : "목록 ▾"}</button>` : "") + `</div>` + (open ? `<div class="opt-blk-list">${rows}</div>` : "");
+}
 const optClick = (e) => {
   if (e.target.closest(".opt-blk-btn")) {
     optBlkOpen = !optBlkOpen;
@@ -4151,9 +4163,9 @@ function renderOptions() {
       + `<span class="opt-lane-legend">${legend}</span></div>`;
     laneBody.innerHTML = head("lane", "옵션 만기 · 지금 ~ +120h", `<b class="opt-warn">막대</b> 만기 규모(명목) · pain · P/C(미결제) · <b class="opt-c">선</b> 만기별 ATM IV · KST`)
       + optLaneSvg(o, lw);   // 2026-09-29 블록 점 제거(사용자 지시) -- 블록은 옵션 카드 «블록 거래» 칸만
-    flowBody.innerHTML = (fl.length ? head("flow", "옵션 순매수 흐름 · 지난 24시간", `<b class="opt-good">콜</b> · <b class="opt-bad">풋</b> 매수−매도(${escapeHtml(cur)}) · <b class="opt-c">선</b> 체결 순델타(24h) 누적 · 테이커 기준${optNewTxt(fl.slice(0, -1)).replace(" · 미결제", " · 24h 미결제")}${fl.some((b) => b.liq > 0) ? ` · 강제청산 ${fmtNum(fl.reduce((a, b) => a + (b.liq || 0), 0), 0)}` : ""}`) + optFlowSvg(fl, fw) : "");
+    flowBody.innerHTML = (fl.length ? head("flow", "옵션 순매수 흐름 · 지난 24시간", `<b class="opt-good">콜</b> · <b class="opt-bad">풋</b> 매수−매도(${escapeHtml(cur)}) · <b class="opt-c">선</b> 체결 순델타(24h) 누적 · 테이커 기준${optNewTxt(fl.slice(0, -1)).replace(" · 미결제", " · 24h 미결제")}${fl.some((b) => b.liq > 0) ? ` · 강제청산 ${fmtNum(fl.reduce((a, b) => a + (b.liq || 0), 0), 0)}` : ""}`) + optFlowSvg(fl, fw) : o.src ? head("eqflow2", "오늘 체결 누적 · 콜·풋", `<b class="opt-good">콜</b> · <b class="opt-bad">풋</b> 명목(CBOE 지연)`) + optEqFlowSvg(o.flow_series, fw) : "");
     const bt = (latestGex || {}).block_trades || {};
-    if (blkBody) blkBody.innerHTML = o.src ? "" : head("blocks", "블록 거래 · 지난 24시간", "")
+    if (blkBody) blkBody.innerHTML = o.src ? head("eqflow", "오늘 체결 · CBOE 지연", "") + optFlowTodayHtml(o, window.matchMedia("(max-width: 720px)").matches) : head("blocks", "블록 거래 · 지난 24시간", "")
       + (bt.available === false ? `<div class="opt-note opt-warn">블록 수집 지연 — 아래 목록은 마지막으로 받은 값</div>` : "")
       // 🔴`?.[` 는 CI 문법 검사(esprima)가 못 읽는다(2026-09-30 배포 막힘) -- `(x || {})[k]` 로 쓴다.
       + optBlkHtml(blocks, (bt.n_by_coin || {})[cur], window.matchMedia("(max-width: 720px)").matches,
@@ -4162,6 +4174,18 @@ function renderOptions() {
 }
 
 
+// 2026-11-03 주식 «순매수 흐름» 자리 = 오늘 콜·풋 체결 누적(명목). 점은 수집기가 10분마다 한 점씩 쌓은 것 -- 방향(매수/매도)은 모른다. 값이 줄면 새 장이 시작된 것.
+function optEqFlowSvg(series, W) {
+  const s = (series || []).filter((p) => p && p.length === 3);
+  if (s.length < 2) return `<div class="opt-note">체결 곡선은 10분마다 한 점씩 쌓입니다 — 아직 ${s.length}점</div>`;
+  const H = 150, x0 = 56, x1 = W - 16, y0 = 14, y1 = H - 22, t0 = s[0][0], t1 = s[s.length - 1][0], mx = Math.max(1, ...s.map((p) => Math.max(p[1], p[2])));
+  const X = (t) => x0 + ((t - t0) / Math.max(1, t1 - t0)) * (x1 - x0), Y = (v) => y1 - (v / mx) * (y1 - y0);
+  const line = (k, col) => `<polyline fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" points="${s.map((p) => `${X(p[0]).toFixed(1)},${Y(p[k]).toFixed(1)}`).join(" ")}"/>`;
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="오늘 콜·풋 체결 누적"><line x1="${x0}" x2="${x1}" y1="${y1}" y2="${y1}" stroke="var(--line)"/>`
+    + `<text x="${x0 - 6}" y="${y0 + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${optUsd(mx)}</text><text x="${x0 - 6}" y="${y1 + 4}" text-anchor="end" font-size="11" fill="var(--muted)">0</text>`
+    + line(1, "var(--good)") + line(2, "var(--bad)")
+    + `<text x="${x0}" y="${H - 6}" font-size="11" fill="var(--muted)">${optKst(t0, false)}</text><text x="${x1}" y="${H - 6}" text-anchor="end" font-size="11" fill="var(--muted)">${optKst(t1, false)} KST</text></svg>`;
+}
 async function refreshGex() {
   if (activePageTab !== "snapshot" || document.hidden) return;
   const now = Date.now();

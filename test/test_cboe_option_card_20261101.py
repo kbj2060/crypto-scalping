@@ -25,4 +25,4 @@ def test_gex_payload_merges_sndk(tmp_path, monkeypatch):
 
 
 def test_app_knows_sndk_option_coin():
-    assert 'sndk: "SNDK" }[activeSnapshotAsset]' in (ROOT / "dashboard/live/app.js").read_text(encoding="utf-8")
+    assert 'sndk: "SNDK", soxl: "SOXL" }[activeSnapshotAsset]' in (ROOT / "dashboard/live/app.js").read_text(encoding="utf-8")

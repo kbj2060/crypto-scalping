@@ -15,6 +15,7 @@ import os
 import re
 import sys
 import time
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -46,6 +47,58 @@ def chain_frame(options: list[dict], now: float) -> pd.DataFrame:
                      "strike": int(m[3]) / 1000, "mark_iv": float(o["iv"]) * 100, "bid_price": float(o["bid"]),
                      "ask_price": float(o["ask"]), "open_interest": float(o["open_interest"]), "days_to_expiry": days})
     return pd.DataFrame(rows)
+
+
+def flow_today(options: list[dict]) -> dict:
+    """오늘 체결 요약 -- CBOE 는 체결 한 건씩은 안 주고 계약별 «오늘 거래량 · 마지막 체결가»만 준다(블록 거래 대신 이걸 보인다).
+    명목 = 거래량 × 마지막 체결가(없으면 호가 중간) × 100 -- 근사다(체결가가 하루 중 달라졌다). 방향(매수/매도)은 모른다."""
+    rows, tot = [], {"C": [0.0, 0.0], "P": [0.0, 0.0]}
+    for o in options:
+        m, vol = OPT_RE.match(o["option"]), float(o.get("volume") or 0)
+        if not m or vol <= 0:
+            continue
+        px = float(o.get("last_trade_price") or 0) or (float(o["bid"]) + float(o["ask"])) / 2
+        usd = vol * px * MULT
+        tot[m[2]][0] += vol
+        tot[m[2]][1] += usd
+        exp = datetime.strptime(m[1], "%y%m%d").replace(hour=16, tzinfo=ET)
+        t = o.get("last_trade_time")
+        rows.append([int(datetime.strptime(t, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=ET).timestamp() * 1000) if t else None, round(usd),
+                     int(exp.timestamp() * 1000), m[2], int(m[3]) / 1000, vol, px])
+    rows.sort(key=lambda r: -r[1])
+    return {"call": [round(tot["C"][0]), round(tot["C"][1])], "put": [round(tot["P"][0]), round(tot["P"][1])], "top": rows[:6]}
+
+
+RV_CACHE = ROOT / "data" / "live" / "cboe_rv7_cache.json"
+
+
+def realized_vol_7d(sym: str, cache: Path = RV_CACHE, now: float | None = None) -> float | None:
+    """실현 7일 변동성(%) = 바이낸스 TradFi 선물 1시간봉 수익 제곱평균 × √(24·365). 주식 정규장이 아니라 선물(주말 포함) 기준이다.
+    6시간 재사용 · 실패하면 24시간 안의 직전 값 · 그래도 없으면 None(화면 «-»). 서버 cron 에서만 부른다(로컬 바이낸스 REST 금지).
+    ponytail: 정규장만의 실현변동성이 아니다 -- 필요하면 CBOE 일봉으로 바꾼다."""
+    now = now if now is not None else time.time()
+    try:
+        hit = json.loads(cache.read_text(encoding="utf-8")).get(sym)
+    except (OSError, ValueError):
+        hit = None
+    if hit and now - hit[0] < 6 * 3600:
+        return hit[1]
+    try:
+        url = f"https://fapi.binance.com/fapi/v1/klines?symbol={sym}USDT&interval=1h&limit=169"
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "crypto-scalping-collector/1.0"}), timeout=20) as r:
+            cl = [float(k[4]) for k in json.loads(r.read())]
+        rets = [b / a - 1 for a, b in zip(cl, cl[1:])]      # ponytail: 단순수익 ≈ 로그수익(1시간 폭에서 차이 무시)
+        v = (sum(x * x for x in rets) / len(rets) * 24 * 365) ** 0.5 * 100 if len(rets) > 24 else None
+    except Exception:  # noqa: BLE001 -- 부가 값: 실패해도 요약은 계속
+        return hit[1] if hit and now - hit[0] < 24 * 3600 else None
+    if v is not None:
+        try:
+            cur = json.loads(cache.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            cur = {}
+        cur[sym] = [now, v]
+        cache.write_text(json.dumps(cur), encoding="utf-8")
+    return v
 
 
 def summarize(data: dict, now: float | None = None) -> dict:
@@ -85,6 +138,7 @@ def summarize(data: dict, now: float | None = None) -> dict:
     for e in exps:
         e.pop("_g"); e.pop("_yrs")
     out["expiries"] = exps[:8]
+    out["flow_today"] = flow_today(data["options"])
     out["cm"] = {str(d): D._const_maturity(exps, d) for d in (1, 7, 30, 60)}
     band = ch[(ch["strike"] >= S * 0.92) & (ch["strike"] <= S * 1.08)]
     usd_oi = band["open_interest"] * MULT * S
@@ -108,14 +162,22 @@ def _clean(x):
     return None if isinstance(x, float) and x != x or x in (float("inf"), float("-inf")) else x
 
 
-def write_state(snapshot: Path, state: Path = STATE) -> None:
+def write_state(snapshot: Path, state: Path = STATE, rv7: bool = True) -> None:
     """종목 하나의 요약을 상태 파일에 **합친다** -- 다른 종목 항목은 그대로 둔다(예전엔 파일을 통째로 써서 둘째 종목이 첫째를 덮었다)."""
     data = json.loads(gzip.decompress(snapshot.read_bytes()))["data"]
-    opt = _clean(summarize(data))
+    opt = summarize(data)
+    if rv7:
+        opt["rv7"] = realized_vol_7d(data["symbol"])      # 2026-11-03 «IV−실현» 칸 -- 전엔 늘 «-» 였다
+    opt = _clean(opt)
     try:
         cur = json.loads(state.read_text(encoding="utf-8"))["currencies"]
     except (OSError, ValueError, KeyError):
         cur = {}                  # 파일이 없거나 깨졌으면 이 종목부터 다시 쌓는다
+    # 오늘 체결 누적 곡선 -- 10분마다 «지금까지 콜·풋 명목»을 한 점씩 쌓는다(CBOE 는 이력을 안 준다 -- 이 점들이 곧 이력이다). 24시간만 · 하루 거래량은 장 시작에 0 으로 돌아간다.
+    prev = ((cur.get(data["symbol"]) or {}).get("options") or {}).get("flow_series") or []
+    ft, tm = opt["flow_today"], int(datetime.strptime(data["last_trade_time"], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=ET).timestamp() * 1000)
+    pts = [p for p in prev if p[0] > tm - 24 * 3600e3 and p[0] != tm] + [[tm, ft["call"][1], ft["put"][1]]]
+    opt["flow_series"] = sorted(pts)
     cur[data["symbol"]] = {"opt_hist": {}, "options": opt, "recorded_at_utc": opt["recorded_at_utc"], "spot_price": opt["index"]}
     body = {"generated_at": datetime.now(timezone.utc).isoformat(), "currencies": cur}
     tmp = state.with_name(f"{state.name}.{os.getpid()}.tmp")
@@ -138,6 +200,16 @@ def _selftest() -> None:
     assert out["strikes"]["front"] and out["strikes"]["all"] and out["cm"]["30"] is not None
     assert out["recorded_at_utc"].startswith("2026-10-30T19:59:59"), out["recorded_at_utc"]   # EDT 15:59:59 = 19:59:59Z
     assert _clean({"a": [float("nan"), 1.0]}) == {"a": [None, 1.0]}
+    assert out["flow_today"]["call"] == [0, 0] and out["flow_today"]["top"] == []      # 거래량 0 이면 비어 있다
+    ops2 = [dict(o, volume=(5.0 if o["option"].endswith("C00100000") else 2.0 if o["option"].endswith("P00090000") else 0.0),
+                 last_trade_price=3.0, last_trade_time="2026-10-30T15:00:00") for o in ops]
+    ft = summarize({"symbol": "SNDK", "current_price": 100.0, "iv30": 70.0, "last_trade_time": "2026-10-30T15:59:59", "options": ops2}, now)["flow_today"]
+    assert ft["call"][0] == 15 and ft["put"][0] == 6 and ft["top"][0][1] == 5 * 3.0 * 100 and ft["top"][0][3] == "C", ft   # 만기 셋 × 5 · 셋 × 2
+    import tempfile as _t
+    with _t.TemporaryDirectory() as td:       # 6시간 안의 캐시는 네트워크 없이 그대로
+        c = Path(td) / "rv.json"
+        c.write_text(json.dumps({"SNDK": [now, 77.7]}))
+        assert realized_vol_7d("SNDK", c, now + 3600) == 77.7
     import tempfile
     from gzip import compress
     with tempfile.TemporaryDirectory() as td:       # 두 종목을 차례로 써도 서로 덮지 않는다
@@ -145,8 +217,10 @@ def _selftest() -> None:
         for sym in ("SNDK", "SOXL"):
             snap = Path(td) / f"{sym}.json.gz"
             snap.write_bytes(compress(json.dumps({"data": {"symbol": sym, "current_price": 100.0, "iv30": 70.0, "last_trade_time": "2026-10-30T15:59:59", "options": ops}}).encode()))
-            write_state(snap, st)
+            write_state(snap, st, rv7=False)
         assert set(json.loads(st.read_text())["currencies"]) == {"SNDK", "SOXL"}
+        write_state(snap, st, rv7=False)         # 같은 스냅샷을 또 써도 점이 겹쳐 쌓이지 않는다
+        assert len(json.loads(st.read_text())["currencies"]["SOXL"]["options"]["flow_series"]) == 1
     print("selftest OK")
 
 
