@@ -280,9 +280,9 @@ async def _ws_loop(session, inst: str, args: list, store: "ContextStore",
     wrote = 0
     while True:
         try:
-            async with session.ws_connect(WS_URL, heartbeat=20) as ws:
+            async with await _tape._bn.ws_open(session, WS_URL, heartbeat=20) as ws:
                 await ws.send_json({"op": "subscribe", "args": args})
-                store.record_gap("all", down_from, int(time.time() * 1000), "reconnect")
+                await asyncio.to_thread(store.record_gap, "all", down_from, int(time.time() * 1000), "reconnect")   # 동기 SQLite(락 대기 최대 30초)가 7심볼 이벤트 루프를 세우지 않게
                 log("스트림 연결됨")
                 while True:
                     msg = await ws.receive(timeout=RECV_TIMEOUT)
