@@ -4899,7 +4899,7 @@ function renderMarketCtx() {
   const body = el("mcBody");
   if (!body) return;
   const A = activeSnapshotAsset, eth = A === "eth", U = coinUnit();   // 2026-10-04 코인별(SOL·XRP)
-  const ratesOff = () => { const f = el("fpRates"); if (f && !f.hidden) { f.hidden = true; f.innerHTML = ""; } };   // 10-17 리뷰: 아래 두 return 에서 머리 칸이 마지막 값으로 멈춰 있었다
+  const ratesOff = () => { const f = el("fpRates"); if (f && !f.hidden) { f.hidden = true; f.innerHTML = ""; } setH("macroSpikeChips", ""); };   // 10-17 리뷰: 아래 두 return 에서 머리 칸이 마지막 값으로 멈춰 있었다
   if (!flowOn()) { body.innerHTML = ""; body._mcHtml = null; ratesOff(); return; }
   const d = latestMarketCtx && latestMarketCtx.asset === A ? latestMarketCtx : null;   // 다른 코인 응답은 «불러오는 중»
   if (!d || !d.available) {
@@ -5068,7 +5068,8 @@ function renderMarketCtx() {
       + `</div>` + fcHtml];
     // 2026-10-28 사용자 «풋프린트 상단 나스닥/2년물/10년물 차트 자리에 Macro Trend 요약»(시안 H1) -- 나스닥·10년은 Macro Trend 카드 «오늘» 칸으로 옮겼다.
     //   급변 칩(5분 |z|≥4, 10-14)은 그대로 끝에 둔다.
-    setH("fpRates", mtHeadHtml() + `<span class="mc-spk">${macroSpikeChips(chip)}</span>`);
+    setH("fpRates", mtHeadHtml());
+    setH("macroSpikeChips", macroSpikeChips(chip));   // 2026-11-03 급변 칩은 상단바 «발표 변동성 주의» 옆(머리 오른쪽에서 겹쳤다)
     el("fpRates") && (el("fpRates").hidden = false);
   } else { htmlB.push(wallHtml0 + fcHtml); ratesOff(); }
   // 2026-10-13 좁은 화면 시장 맥락 끝 모의 판도 뺐다(사용자 «모의판은 제거»)

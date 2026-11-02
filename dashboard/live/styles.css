@@ -3435,3 +3435,9 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
   .app { padding-bottom: calc(28px + env(safe-area-inset-bottom)); }   /* 홈 바 밑 여백(viewport-fit=cover) */
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea { font-size: 16px; }   /* iOS 는 16px 미만 입력칸에 포커스하면 화면을 확대한다 */
 }
+
+/* 2026-11-03 급변 칩(나스닥·금리) = 상단바 «발표 변동성 주의» 옆(사용자: 풋프린트 카드 머리 오른쪽에서 코인 이름·매크로와 겹침). 칩 모양은 .mc-chip 그대로. */
+.mc-spk { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.mc-spk:empty { display: none; }
+.mc-spk > i { font: 700 10px/1 var(--font-sans); letter-spacing: .12em; color: var(--muted); font-style: normal; }
+@media (max-width: 720px) { .session-alert-center { flex-wrap: wrap; } }
