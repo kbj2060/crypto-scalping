@@ -2892,7 +2892,7 @@ function macroSpikeChips(chip) {   // 종목마다 가장 최근 급변 1개 · 
     const e = g[0][1], a = Math.min(...g.map(([, x]) => ago(x)));
     out.push([a, chip(e[2] < 0 ? "bad" : "good", `${g.map(([k]) => SPIKE_NM[k].replace("년", "")).join("·")}년 금리${e[2] < 0 ? "↑" : "↓"} · ${a}분`, g.map(([k, x]) => tipOf(k, x)).join("\n") + NOTE)]);
   });
-  return out.length ? `<i>급변</i>${out.sort((x, y) => x[0] - y[0]).map((x) => x[1]).join("")}` : "";   // 최근 것부터 -- 좁으면 오래된 쪽이 잘린다
+  return out.length ? `${out.sort((x, y) => x[0] - y[0]).map((x) => x[1]).join("")}` : "";   // 최근 것부터 -- 좁으면 오래된 쪽이 잘린다
 }
 
 function newsAgo(ms, now) {
@@ -5069,7 +5069,7 @@ function renderMarketCtx() {
     // 2026-10-28 사용자 «풋프린트 상단 나스닥/2년물/10년물 차트 자리에 Macro Trend 요약»(시안 H1) -- 나스닥·10년은 Macro Trend 카드 «오늘» 칸으로 옮겼다.
     //   급변 칩(5분 |z|≥4, 10-14)은 그대로 끝에 둔다.
     setH("fpRates", mtHeadHtml());
-    setH("macroSpikeChips", macroSpikeChips(chip));   // 2026-11-03 급변 칩은 상단바 «발표 변동성 주의» 옆(머리 오른쪽에서 겹쳤다)
+    setH("macroSpikeChips", macroSpikeChips((cls, txt, tip = "") => `<span class="ops-badge ${cls}"${tip ? ` title="${escapeHtml(tip)}"` : ""}>${txt}</span>`));   // 2026-11-03 «발표 변동성 주의» 와 같은 배지 모양(색 = 방향)   // 2026-11-03 급변 칩은 상단바 «발표 변동성 주의» 옆(머리 오른쪽에서 겹쳤다)
     el("fpRates") && (el("fpRates").hidden = false);
   } else { htmlB.push(wallHtml0 + fcHtml); ratesOff(); }
   // 2026-10-13 좁은 화면 시장 맥락 끝 모의 판도 뺐다(사용자 «모의판은 제거»)

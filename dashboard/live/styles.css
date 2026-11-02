@@ -3439,5 +3439,5 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
 /* 2026-11-03 급변 칩(나스닥·금리) = 상단바 «발표 변동성 주의» 옆(사용자: 풋프린트 카드 머리 오른쪽에서 코인 이름·매크로와 겹침). 칩 모양은 .mc-chip 그대로. */
 .mc-spk { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .mc-spk:empty { display: none; }
-.mc-spk > i { font: 700 10px/1 var(--font-sans); letter-spacing: .12em; color: var(--muted); font-style: normal; }
+.mc-spk .ops-badge { animation: none; }   /* 초록 배지의 맥박은 «정상 상태» 표시용 -- 급변 칩은 가만히 */
 @media (max-width: 720px) { .session-alert-center { flex-wrap: wrap; } }
