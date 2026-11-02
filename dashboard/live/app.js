@@ -457,8 +457,9 @@ function lineToolEl(box) {
     linePt = e.pointerType;
     const tag = e.target.closest(".lt-tx") ? null : e.target.closest(".lt-tag[data-k]"), go = e.target.closest(".lt-go");
     if (tag && lineTool) { lineDrag = { k: tag.dataset.k, id: e.pointerId }; tag.setPointerCapture(e.pointerId); e.preventDefault(); }
-    if (go && e.pointerType === "mouse" && !go.disabled) {   // 마우스 = 1.5초 꾹(떠 있는 버튼과 같은 규약)
-      go.classList.add("hold"); lineHold = setTimeout(() => { go.classList.remove("hold"); lineFire(); }, HOLD_FIRE_MS);
+    if (go && e.pointerType === "mouse" && !go.disabled) {   // 마우스 = 누르면 바로(HOLD_FIRE_MS = 0)
+      if (!HOLD_FIRE_MS) lineFire();   // 즉시 모드
+      else { go.classList.add("hold"); lineHold = setTimeout(() => { go.classList.remove("hold"); lineFire(); }, HOLD_FIRE_MS); }
     }
   });
   h.addEventListener("pointermove", (e) => {
@@ -709,7 +710,7 @@ function renderLineTool() {
   go.classList.toggle("short", side === "SHORT"); go.classList.toggle("armed", armed);   // className 을 덮으면 꾹 채움(hold)이 매초 지워진다
   go.innerHTML = t.placed ? `✓ ${side === "LONG" ? "롱" : "숏"} 지정가 대기 중`
     : armed ? `확인: ${side === "LONG" ? "롱" : "숏"} ${qty} ${unit} ${lim ? "지정가 " + lineFmt(ref) : "주문"}`
-    : `${side || "진입"} ${lim ? "지정가 대기" : "진입 · peg"} <small>${matchMedia("(pointer: coarse)").matches ? (mob ? "두 번" : "두 번 눌러 확인") : "1.5초 꾹"}</small>`;
+    : `${side || "진입"} ${lim ? "지정가 대기" : "진입 · peg"} <small>${matchMedia("(pointer: coarse)").matches ? (mob ? "두 번" : "두 번 눌러 확인") : "누르면 바로"}</small>`;
   const lx = h.querySelector(".lt-x"); lx.setAttribute("aria-label", t.placed ? (t.busy ? "취소 중…" : "주문 취소") : "닫기 (선 지우기)"); lx.disabled = !!t.busy;
 }
 // ── 2026-10-29 사용자 «SLTP 선주문에서 이미 들어간 주문은 풋프린트에 선과 띠를 계속 · 선을 움직이면 움직인 대로 주문 수정»
@@ -846,7 +847,7 @@ function entryPopOpen(x, y) {
     + `<dt>미실현</dt><dd class="${up >= 0 ? "good" : "bad"}">${sg(up)}$${Math.abs(up).toFixed(2)}</dd>`
     + `<dt>청산가</dt><dd>${liq > 0 ? `${lineFmt(liq)}${dist != null ? ` · ${dist.toFixed(1)}% 남음` : ""}` : "없음"}</dd></dl>`
     + `<div class="ep-btns">${[25, 50, 100].map((v) => `<button type="button" data-pct="${v}" aria-label="${v}% 청산"><i class="hold-fill" aria-hidden="true"></i><span>${v}%</span></button>`).join("")}</div>`
-    + `<small>꾹 누르면 게이지가 차고 다 차면 청산 주문이 나갑니다 · 터치는 탭 → 확인</small>`;
+    + `<small>누르면 바로 청산 주문이 나갑니다 · 터치는 탭 → 확인</small>`;
   document.body.appendChild(d);
   const r = d.getBoundingClientRect();
   d.style.left = Math.max(8, Math.min(innerWidth - r.width - 8, x - r.width - 12)) + "px";
@@ -11062,7 +11063,9 @@ function syncAllRangeFills(root) {
 // (없으면 모바일에서 누른 채 스크롤하다 발주된다).
 // 2026-11-02 사용자 «꾹 누르면 주문 들어가는 버튼을 모두 플로팅 버튼 방식으로 통일»: **한 곳**에서 정한다 -- 계좌 카드 진입·청산·스위칭(manualHoldStart) · 청산 팝업 25/50/100% ·
 //   떠 있는 LONG·SHORT·«주문» · 선 주문의 진입 버튼 전부 같은 시간(1.5초)·같은 게이지(왼쪽→오른쪽 · 버튼 전체 · 방향색 30% · linear). 시간은 CSS 변수 --hold-ms 로도 내려간다.
-const HOLD_FIRE_MS = 1500;
+// 2026-11-02 사용자 «꾹 누르는 걸 없애고 누르면 바로 진입·청산» -> 0 = 마우스는 누르는 즉시 발주(미리보기가 오면 바로 나간다). 터치는 원래 꾹 발주가 없고(탭 → 확인 버튼) 그대로다.
+//   게이지·꾹 누르기 코드는 이 값 하나로 «즉시»가 되도록 남겼다 -- 되돌리려면 1500. 서버의 confirm=1·게이트·상한·409(이미 진행 중) 검사는 그대로다.
+const HOLD_FIRE_MS = 0;
 document.documentElement.style.setProperty("--hold-ms", `${HOLD_FIRE_MS}ms`);
 let manualPreviewInFlight = false;
 let manualFireOnPreview = false;
@@ -11107,9 +11110,14 @@ function manualHoldStart(btn, side, kind, ov = null) {
   manualHoldFire = true;
   // 청산은 **계좌부터 새로 읽는다**(manualExitPreview) -- 닫으려는 수량이 낡으면 안 된다.
   if (kind === "exit") manualExitPreview(side, ov); else manualEntryPreview(side, "entry");
+  if (!HOLD_FIRE_MS) {   // 즉시 모드 -- 타이머를 거치지 않는다(빠른 클릭의 pointerup 이 타이머를 지워 발주가 사라지는 것을 막는다). 미리보기가 오는 즉시 발주
+    manualHoldFire = false;
+    if (manualPreviewInFlight) manualFireOnPreview = true;
+    return;
+  }
   const t0 = performance.now();
   const step = () => {
-    const r = Math.min(1, (performance.now() - t0) / HOLD_FIRE_MS);
+    const r = HOLD_FIRE_MS ? Math.min(1, (performance.now() - t0) / HOLD_FIRE_MS) : 1;
     manualHoldPaint(btn, r);
     if (r < 1) manualHoldRaf = requestAnimationFrame(step);
   };
@@ -11485,13 +11493,13 @@ function renderOfabRule(bal, live) {
         const part = (t, c) => Object.assign(document.createElement("span"), { textContent: t, className: c || "" });
         sm.replaceChildren(part(first), part(" · ", "sep"), part(stop));
       }
-      b.title = `1.5초 꾹 = ${dir} 자동 진입 — 손절 시 순자산 −${Math.round(100 * lEff * cr.sd)}%: 왕복 상한 순자산 × ${lEff.toFixed(2)}(첫 진입 그 1/3 · 물타기 권장 첫 진입가 ${side === "LONG" ? "−" : "+"}0.75%에 나머지), 손절 첫 진입가 ${side === "LONG" ? "−" : "+"}${100 * cr.sd}%(거래소 스탑), 익절 없음`;
+      b.title = `누르면 바로 ${dir} 자동 진입 — 손절 시 순자산 −${Math.round(100 * lEff * cr.sd)}%: 왕복 상한 순자산 × ${lEff.toFixed(2)}(첫 진입 그 1/3 · 물타기 권장 첫 진입가 ${side === "LONG" ? "−" : "+"}0.75%에 나머지), 손절 첫 진입가 ${side === "LONG" ? "−" : "+"}${100 * cr.sd}%(거래소 스탑), 익절 없음`;
     } else if (r) {
       setT(sm.id || id + "Frac", "자동 — 변동성 대기");
       b.title = `${dir} 자동 진입 — 권장 배수(직전 24시간 변동성)나 잔고가 아직 없습니다`;
     } else {
       setT(sm.id || id + "Frac", "5%");
-      b.title = `1.5초 꾹 = ${dir} 5% 진입 — 손절 첫 진입가 ${side === "LONG" ? "−" : "+"}5%(거래소 스탑, 물타기해도 안 물러남) · 익절 없음`;
+      b.title = `누르면 바로 ${dir} 5% 진입 — 손절 첫 진입가 ${side === "LONG" ? "−" : "+"}5%(거래소 스탑, 물타기해도 안 물러남) · 익절 없음`;
     }
   }
   ofabTrendTags();
@@ -11579,6 +11587,7 @@ setInterval(renderOfab, 3000);
       // 🔴2026-09-28 사용자 지시 «모바일에서는 넣으면 안돼» -- 터치는 꾹 누르기 발주가 없다(짧게 = 펼치기만).
       //   진입 버튼과 같은 판정(이벤트마다 pointerType) -- 터치 노트북의 마우스는 그대로 된다.
       if (e.pointerType === "touch" || btn.disabled) return;
+      if (!OFAB_HOLD_MS) { held = true; fire(); return; }   // 즉시 모드(HOLD_FIRE_MS = 0) -- 누르는 순간 발주(click 의 펼치기는 held 로 막는다)
       hold = { x: e.clientX, y: e.clientY, t: setTimeout(() => { hold = null; held = true; btn.classList.remove("holding"); fire(); }, OFAB_HOLD_MS) };
       btn.classList.add("holding");
     });
@@ -11591,7 +11600,7 @@ setInterval(renderOfab, 3000);
   //   두 번 누르게 된 건 1.5초 전에 떼서 «짧게 = 펼치기»로 갔을 때다. 마우스는 짧게 눌러도 창을 열지 않고 꾹 누르라고 말한다(상세는 옆 펼치기 버튼).
   //   🔴터치는 꾹 발주가 없으므로(09-28 «모바일에서는 넣으면 안돼») 짧게 = 펼치기 그대로 -- 안 그러면 휴대폰에서 주문할 길이 없어진다.
   const dirTap = (side) => (ptype) => (ptype === "touch" ? ofabSetOpen(!ofab.open)
-    : ofabSay(escapeHtml(`${side === "LONG" ? "롱" : "숏"} ${manualRule() ? "자동" : "5%"} 진입은 1.5초 꾹 누르세요 — 상세 주문은 옆 펼치기 버튼`)));
+    : ofabSay(escapeHtml(`${side === "LONG" ? "롱" : "숏"} ${manualRule() ? "자동" : "5%"} 진입은 누르면 바로 나갑니다 — 상세 주문은 옆 펼치기 버튼`)));
   ofabHold(tgl, ofabQuickAdd);
   ofabHold(el("ofabLong"), () => ofabQuickEntry("LONG", false), dirTap("LONG"));
   ofabHold(el("ofabShort"), () => ofabQuickEntry("SHORT", false), dirTap("SHORT"));
