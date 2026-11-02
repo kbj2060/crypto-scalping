@@ -98,4 +98,12 @@ COIN_CONFIG: dict[str, dict] = {
         "tail_risk_db_path": ROOT / "data" / "live" / "tail_risk_sndk.duckdb",
         "tail_risk_table": "tail_risk_1m_sndk",
     },
+    "soxl": {
+        "binance_symbol": "SOXLUSDT",
+        # 2026-11-02 Binance TradFi ETF 선물(SOXL, 반도체 3배). sndk 와 같은 사정 -- 전용 워커 없음·현물 없음.
+        "microstructure_db_path": ROOT / "data" / "live" / "microstructure_soxl.duckdb",
+        "microstructure_table": "microstructure_1m_soxl",
+        "tail_risk_db_path": ROOT / "data" / "live" / "tail_risk_soxl.duckdb",
+        "tail_risk_table": "tail_risk_1m_soxl",
+    },
 }

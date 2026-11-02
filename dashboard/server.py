@@ -172,7 +172,7 @@ from dashboard import orders  # noqa: E402
 from dashboard.orders import MARKET_SYMBOLS, MANUAL_EXEC_SYMBOLS, ACCOUNT_TRIP_RECORD_SECONDS  # noqa: E402 -- MARKET_SYMBOLS 는 주문 심볼 기본값도 써서 정의는 orders 한 곳
 # 2026-11-01 SNDK(Binance TradFi 주식 선물): 화면·시세 전용이라 **여기 사본에만** 넣는다. orders.MARKET_SYMBOLS 에 넣으면 계좌 조회가
 #   심볼마다 userTrades·openOrders 를 더 부른다(실계좌 경로). 주문은 MANUAL_EXEC_SYMBOLS 에 없어 그대로 막힌다.
-MARKET_SYMBOLS = {**MARKET_SYMBOLS, "sndk": "SNDKUSDT"}
+MARKET_SYMBOLS = {**MARKET_SYMBOLS, "sndk": "SNDKUSDT", "soxl": "SOXLUSDT"}
 # 2026-09-04: PWA 웹푸시. 사용자가 "다른 작업 중이라 신호를 계속 놓친다"고 해서 추가했다.
 # 이 파일은 구독 등록/해지/테스트발송만 담당하고, 실제로 무엇을 언제 보낼지 판단하는 것은
 # scripts/live_push_notifier_20260904.py(별도 데몬)다 -- 대시보드 서버는 조회가 있을 때만
@@ -406,7 +406,7 @@ def forming_kline(raw: list, now_ms: float, bar_s: int = 300) -> dict[str, Any] 
 # 2026-09-26 사용자 지시: SOL·XRP 도 ETH 와 같은 구성(풋프린트·1초 수급·OI·호가) -- 기본값을 eth,sol,xrp 로.
 # 2026-10-31 사용자 «비트코인도 대시보드에 추가 · 이더리움과 똑같은 로직» -- eth,btc,sol,xrp. 주문은 그대로 막힘(MANUAL_EXEC_SYMBOLS 에 btc 없음).
 #   켜진 코인마다 흐름 엔진(make_coin_flow)이 WS 3개(바이낸스 체결·현물, OKX)와 OI 1초 폴링(가중치 1)을 쓴다.
-DASHBOARD_ASSETS = [a.strip().lower() for a in os.getenv("DASHBOARD_ASSETS", "eth,btc,sol,xrp,sndk").split(",")
+DASHBOARD_ASSETS = [a.strip().lower() for a in os.getenv("DASHBOARD_ASSETS", "eth,btc,sol,xrp,sndk,soxl").split(",")
                     if a.strip().lower() in MARKET_SYMBOLS] or ["eth"]
 DASHBOARD_TICKER_SYMBOLS = {a: MARKET_SYMBOLS[a] for a in DASHBOARD_ASSETS}
 # 코인별 흐름 엔진(make_coin_flow)과 그것이 쓰는 상수·읽기 함수는 dashboard/coin_flow.py 로 옮겼다(2026-10-19, 내용 그대로).
@@ -481,7 +481,8 @@ HL_POS_SOLXRP_DB_PATH = REPO_ROOT / "data" / "hot" / "hl_positions_sol_xrp.sqlit
 # 2026-10-31 BTC: 서버에 BTC 포지션 수집기가 아직 없다(Pi 복제본만) -- `HL_POS_COINS=BTC` 로 띄우면 쓸 파일 이름. 없으면 HL 칸만 빈다.
 HL_LIQ_BY_ASSET = {"eth": HL_POS_DB_PATH, "sol": HL_POS_SOLXRP_DB_PATH, "xrp": HL_POS_SOLXRP_DB_PATH,
                    "btc": REPO_ROOT / "data" / "hot" / "hl_positions_btc.sqlite",
-                   "sndk": REPO_ROOT / "data" / "hot" / "hl_positions_sndk.sqlite"}   # 11-01 HL 에 SNDK 없음 -- 파일이 없어 HL 칸만 빈다
+                   "sndk": REPO_ROOT / "data" / "hot" / "hl_positions_sndk.sqlite",
+                   "soxl": REPO_ROOT / "data" / "hot" / "hl_positions_soxl.sqlite"}   # 11-01 HL 에 SNDK 없음 -- 파일이 없어 HL 칸만 빈다
 
 
 def hl_whale_liq_events(since_ms: int, db: Path = HL_POS_DB_PATH, coin: str = "ETH") -> list[tuple[int, float, bool, str]]:

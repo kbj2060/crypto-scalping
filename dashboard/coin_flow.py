@@ -261,7 +261,9 @@ FLOW_SPECS = {"eth": _flow_spec("eth", FOOTPRINT_BUCKET, 2),
               # 2026-10-31 BTC: $15 = ETH 0.5 칸과 같은 상대 폭(10-31 BTC $77.5k ≈ 1.9bp vs ETH $2,244 ≈ 2.2bp) · 테이프 칸 1.0(바이낸스·OKX·Bybit)의 15배
               "btc": _flow_spec("btc", 15.0, 0),
               # 2026-11-01 SNDK(TradFi 주식 선물): 칸 $0.2 = ETH 와 같은 상대 폭(~1.7bp, 11-01 $1,152) · 테이프 칸 0.05(바이낸스·OKX)의 4배 · 현물 없음
-              "sndk": _flow_spec("sndk", 0.2, 2, spot=False)}
+              "sndk": _flow_spec("sndk", 0.2, 2, spot=False),
+              # 2026-11-02 SOXL(TradFi ETF 선물): 칸 $0.02 = ETH 와 같은 상대 폭(~2.5bp, $80.8) · 테이프 칸 0.01(바이낸스·OKX)의 2배 · 현물 없음
+              "soxl": _flow_spec("soxl", 0.02, 2, spot=False)}
 assert FLOW_SPECS["eth"].snapshot_path == FOOTPRINT_SNAPSHOT_PATH and FLOW_SPECS["eth"].spot_url == SPOT_WS_URL
 
 

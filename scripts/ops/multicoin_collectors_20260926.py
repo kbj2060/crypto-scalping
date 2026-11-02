@@ -54,11 +54,12 @@ if str(ROOT) not in sys.path:
 LIVE = ROOT / "data" / "live"
 MANIFEST = LIVE / "multicoin_collectors.json"
 OPS = "scripts/ops"
-COINS = ("BTC", "SOL", "XRP", "HYPE", "ZEC", "SNDK")
+COINS = ("BTC", "SOL", "XRP", "HYPE", "ZEC", "SNDK", "SOXL")
 # 2026-10-31 디스크 정책: 깊은 호가(depthdiff 하루 ~0.2~0.5GB/코인)·래스터·HL 체결/호가는 여기 있는 코인만 쌓는다.
 # 새 코인은 COINS 에만 넣으면 가벼운 단계(체결 테이프·OKX 컨텍스트·HL 맥락·경보기)만 켜진다 -- 깊은 쪽이 필요하면 DEEP 에도 넣는다.
 DEEP = ("BTC", "SOL", "XRP", "HYPE")
-TRADFI = ("SNDK",)        # 2026-11-01 바이낸스 TradFi 주식 선물 -- HL 맥락 없음 · 깊은 호가는 diff 만(저유동 파일 크기 실측용) · 야간 거래가 얇아 신선도 기준을 넓힌다
+TRADFI = ("SNDK", "SOXL")        # 2026-11-01 바이낸스 TradFi 주식 선물 -- HL 맥락 없음 · 깊은 호가는 diff 만(저유동 파일 크기 실측용) · 야간 거래가 얇아 신선도 기준을 넓힌다
+DEPTH_TRADFI = ("SNDK",)   # TradFi 중 깊은 호가 diff 를 쌓는 종목. SOXL 은 대시보드 풋프린트만이라 뺀다(거래대금이 커서 파일이 크다)
 BO_OK = ("SOL", "XRP")      # 추세 전환 경보기 검정을 통과한 코인(ETH 는 늘 포함)
 # 수집기별 RSS(MB) 추정 -- 2026-09-26 이 세션 실측(x86_64, 네트워크 없이 기동 후 15초). duckdb 를 import
 # 하는 수집기는 그것만으로 ~150MB 다. 래스터는 북이 차면 도크스트링 실측 67MB 까지 는다.
@@ -94,7 +95,7 @@ def specs(coins: list[str], phases: set[int]) -> list[dict]:
         sym, lc, inst = f"{c}USDT", c.lower(), f"{c}-USDT-SWAP"
         of = "data/live/orderflow"
         deep = c in DEEP
-        (deep or c in TRADFI) and add("bn_depthdiff", lc, 1, "supervisor_depth_diff.sh", "live_depth_diff_collector_20260915.py",
+        (deep or c in DEPTH_TRADFI) and add("bn_depthdiff", lc, 1, "supervisor_depth_diff.sh", "live_depth_diff_collector_20260915.py",
             {"DD_SYMBOL": sym.lower()}, [_dir(f"bn_depthdiff_{lc}", f"{of}/depthdiff/{sym}")],
             eth=f"{of}/depthdiff/ETHUSDT")
         deep and add("hl_trades", lc, 1, "supervisor_hyperliquid_trades.sh", "live_hyperliquid_trade_collector_20260916.py",

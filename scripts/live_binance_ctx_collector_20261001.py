@@ -34,9 +34,9 @@ OI_URL = "https://fapi.binance.com/fapi/v1/openInterest"
 OI_POLL_S = 0.5     # 2026-11-01 0.25 -> 0.5: 네 코인 OI 폴링이 분당 960 가중치로 IP 한도(2,400)의 4할을 먹었다. 서버 hot 3시간 실측 갱신 간격: 0.5초 미만 2.7~3.6%(ZEC·SNDK 1% 미만) 중앙 4초
 OI_SLOW_POLL_S = 5.0     # 2026-11-01 ZEC·SNDK -- 0.25초면 분당 240 가중치씩 더해 IP 한도(2,400)를 먹는다. 거래소 OI 는 5~10초마다 갱신된다
 OI_SYMBOLS = [s.strip().upper() for s in os.getenv("BN_CTX_OI_SYMBOLS", "ETHUSDT,BTCUSDT,SOLUSDT,XRPUSDT").split(",") if s.strip()]
-OI_SLOW_SYMBOLS = [s.strip().upper() for s in os.getenv("BN_CTX_OI_SLOW_SYMBOLS", "ZECUSDT,SNDKUSDT").split(",") if s.strip()]
+OI_SLOW_SYMBOLS = [s.strip().upper() for s in os.getenv("BN_CTX_OI_SLOW_SYMBOLS", "ZECUSDT,SNDKUSDT,SOXLUSDT").split(",") if s.strip()]
 # 2026-10-31 BTC 도(사용자 «BTC 도 ETH 와 같은 대시보드») -- OI 1초 레인·마크
-MARK_SYMBOLS = [s.strip().lower() for s in os.getenv("BN_CTX_MARK_SYMBOLS", "ethusdt,btcusdt,solusdt,xrpusdt,zecusdt,sndkusdt").split(",") if s.strip()]
+MARK_SYMBOLS = [s.strip().lower() for s in os.getenv("BN_CTX_MARK_SYMBOLS", "ethusdt,btcusdt,solusdt,xrpusdt,zecusdt,sndkusdt,soxlusdt").split(",") if s.strip()]
 WS_BASE = "wss://fstream.binance.com/market/ws/"
 LIQ_SYMBOLS = {c["binance_symbol"] for c in COIN_CONFIG.values()} | set(OI_SLOW_SYMBOLS)   # TradFi 청산이 오는지 평일에 확인
 FLUSH_S = 10.0
