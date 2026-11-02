@@ -86,6 +86,16 @@ def _rest_timeout():
     return ClientTimeout(total=REST_TIMEOUT_S)
 
 
+WS_CONNECT_S = 15.0
+
+
+async def ws_open(session, *a, **kw):
+    """ws_connect 에 접속 시한을 단다. 세션이 total=None 이면 TCP 는 받고 HTTP 응답은 안 주는 반쯤 열린 접속에서 영원히 안 끝난다
+    (로컬 재현 11-02) -- 예외도 로그도 없이 그 심볼 수신이 멎는다(11-01 테이프 둘 · 11-02 10:04 OKX 컨텍스트 7심볼 동시).
+    시간 초과는 TimeoutError -> 호출부의 기존 재연결 경로가 로그를 남기고 다시 건다. `async with await ws_open(...) as ws`."""
+    return await asyncio.wait_for(session.ws_connect(*a, **kw), WS_CONNECT_S)
+
+
 BACKFILL_SECONDS = 60.0   # 복구 주기. 한 주기에 몇 분을 받을지는 거래소별 per_cycle
 BACKFILL_MAX_ATTEMPTS = 3
 BACKFILL_LOOKBACK_S = 7 * 86400        # 기본(OKX history-trades 는 수개월 가능)
@@ -895,7 +905,7 @@ async def collect(symbol: str, db_path: Path, market: str = "futures") -> None:
         flushed_at = verified_at = time.monotonic()
         while True:
             try:
-                async with session.ws_connect(ws_url.format(symbol=symbol), heartbeat=30) as ws:
+                async with await ws_open(session, ws_url.format(symbol=symbol), heartbeat=30) as ws:
                     first = True
                     async for msg in ws:
                         if msg.type is not WSMsgType.TEXT:

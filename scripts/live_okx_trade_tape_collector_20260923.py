@@ -336,7 +336,7 @@ async def collect(inst: str, db_path: Path) -> None:
         flushed_at = verified_at = time.monotonic()
         while True:
             try:
-                async with session.ws_connect(WS_URL, heartbeat=20) as ws:
+                async with await _bn.ws_open(session, WS_URL, heartbeat=20) as ws:
                     await ws.send_json({"op": "subscribe",
                                         "args": [{"channel": "trades", "instId": inst}]})
                     first = True

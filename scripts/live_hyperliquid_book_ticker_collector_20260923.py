@@ -173,7 +173,7 @@ async def run(coin: str, root: Path, ctx_db: Path) -> None:
         flushed_at = time.monotonic()
         while True:
             try:
-                async with session.ws_connect(WS_URL, heartbeat=25, max_msg_size=0) as ws:
+                async with await asyncio.wait_for(session.ws_connect(WS_URL, heartbeat=25, max_msg_size=0), 15.0) as ws:   # 접속 시한(반쯤 열린 접속에서 영원히 대기 방지)
                     for kind in (("activeAssetCtx",) if CTX_ONLY else ("bbo", "activeAssetCtx")):
                         await ws.send_json({"method": "subscribe",
                                             "subscription": {"type": kind, "coin": coin}})

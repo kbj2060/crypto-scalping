@@ -153,7 +153,7 @@ async def ws_loop(session, url: str, table: str, parse, pend: Pending) -> None:
     from aiohttp import WSMsgType
     while True:
         try:
-            async with session.ws_connect(url, heartbeat=30) as ws:
+            async with await asyncio.wait_for(session.ws_connect(url, heartbeat=30), 15.0) as ws:   # 접속 시한 -- tape 수집기 ws_open 과 같은 이유
                 log(f"{table} ws connected")
                 async for msg in ws:
                     if msg.type is not WSMsgType.TEXT:

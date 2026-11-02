@@ -212,7 +212,7 @@ async def run() -> None:
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
         while True:
             try:
-                async with session.ws_connect(WS, heartbeat=None, max_msg_size=2**22) as ws:
+                async with await _bn.ws_open(session, WS, heartbeat=None, max_msg_size=2**22) as ws:
                     await ws.send_json({"op": "subscribe", "args": [f"publicTrade.{s}" for s in SYMBOLS] + [f"tickers.{s}" for s in SYMBOLS]})
                     log(f"구독 {','.join(SYMBOLS)} → {TAPE_DB.name} · {CTX_DB.name}")
                     first = set(SYMBOLS)
