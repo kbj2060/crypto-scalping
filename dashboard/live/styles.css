@@ -3441,3 +3441,8 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
 .mc-spk:empty { display: none; }
 .mc-spk .ops-badge { animation: none; }   /* 초록 배지의 맥박은 «정상 상태» 표시용 -- 급변 칩은 가만히 */
 @media (max-width: 720px) { .session-alert-center { flex-wrap: wrap; } }
+
+/* 2026-11-03 SLTP 선 주문 꼬리표 소형(사용자 «라벨이 커서 청산 프로파일이 안 보인다», 시안 B): 알약 · 금액/포지션만 */
+.lt-tag.lt-mini { padding: 2px 7px 2px 5px; gap: 3px; border-radius: 999px; font: 700 11.5px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; }
+.lt-tag.lt-mini .lt-grip { width: 4px; height: 8px; }
+.lt-tag.en.lt-mini { transform: translateY(-50%); width: auto; }

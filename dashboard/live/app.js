@@ -665,20 +665,24 @@ function renderLineTool() {
     const y = Y(v), off = y < top ? "↑ " : y > bot ? "↓ " : "", d = v / ref - 1;
     set(`.lt-ln.${k}`, { left: L + "px", width: R - L + "px", top: clampY(y) + "px", opacity: off ? "0" : "" });
     const tag = set(`.lt-tag.${k}`, { left: cx + "px", top: clampY(y) + "px" });
-    const pnl = qShow ? ` <span class="lt-s">${qty ? "" : "≈"}${d * sgn >= 0 ? "+" : "−"}$${Math.abs(d * ref * qShow).toFixed(1)}</span>` : "";
-    tag.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${off}${k === "tp" ? "익절" : "손절"} ${lineFmt(v)} <span>${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%</span>${mob ? "" : pnl}`;
+    // 2026-11-03 사용자 «라벨이 커서 청산 프로파일이 안 보인다 · short +$1 처럼 포지션·수익금만»(시안 B): 금액만(수량을 아직 모르면 %). 가격·%는 선 위치·가격축·툴팁이 말한다.
+    const amt = qShow ? `${qty ? "" : "≈"}${d * sgn >= 0 ? "+" : "−"}$${Math.abs(d * ref * qShow).toFixed(1)}` : `${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%`;
+    tag.classList.add("lt-mini");
+    tag.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${off}${amt}`;
+    tag.title = `${k === "tp" ? "익절" : "손절"} ${lineFmt(v)} (${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%)`;
     tag.setAttribute("aria-label", `${k === "tp" ? "익절" : "손절"}선 ${lineFmt(v)} — 위아래로 끌어 옮기기`);
   });
   set(".lt-ln.en", { left: x0 + "px", width: w + "px", top: yP + "px" });
   set(".lt-ln.now", { left: x0 + "px", width: w + "px", top: yNow + "px", display: lim ? "" : "none" });   // 지정가일 때만 지금가 기준선을 따로 보인다
   const en = set(".lt-tag.en", { left: x0 + 6 + "px", top: yP + "px" });
   en.classList.toggle("lim", lim);
-  en.title = lim && t.px ? `차트(USDT) 선 ${lineFmt(ref)} — 실제 주문가(USDC) ${lineFmt(t.px)} · 접수 때 USDC/USDT 차이(basis)를 곱해 걸었습니다` : "";
-  en.innerHTML = lim ? `<span class="lt-grip" aria-hidden="true"></span>${t.placed ? "대기" : "지정가"} ${lineFmt(ref)}`
-      + (t.placed ? `<span class="lt-tx" role="button" tabindex="0" aria-label="지정가 주문 취소" title="주문 취소">✕</span>` : "")
-    : `<span class="lt-grip" aria-hidden="true"></span>진입 peg ${lineFmt(p)} <span class="lt-s">끌면 지정가</span>`;
+  en.title = lim ? (t.px ? `차트(USDT) 선 ${lineFmt(ref)} — 실제 주문가(USDC) ${lineFmt(t.px)} · 접수 때 USDC/USDT 차이(basis)를 곱해 걸었습니다` : `지정가 ${lineFmt(ref)}`)
+    : `진입 peg ${lineFmt(p)} — 끌면 지정가`;
+  // 2026-11-03 시안 B: 진입 꼬리표 = 포지션만(작은 알약, 진입선 왼쪽 끝). 체결 기둥·청산 프로파일 칸(lane)으로 안 들어간다. 대기 중이면 «대기»와 취소 ✕ 는 그대로.
+  en.classList.add("lt-mini"); en.classList.remove("lane"); en.style.width = "";
+  en.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${side === "SHORT" ? "SHORT" : "LONG"}${lim && t.placed ? " 대기" : ""}`
+    + (lim && t.placed ? `<span class="lt-tx" role="button" tabindex="0" aria-label="지정가 주문 취소" title="주문 취소">✕</span>` : "");
   en.setAttribute("aria-label", lim ? `지정가 진입선 ${lineFmt(ref)} — 위아래로 끌어 옮기기` : "지금가 peg 진입선 — 끌어서 지정가로 바꾸기");
-  ltLanePlace(en, yP, R, X, top, bot, mob, svg, box);
   h.classList.toggle("short", side === "SHORT");
   // 표는 플롯 왼쪽 -- 두 꼬리표의 높이 띠(±22px)를 피한 빈 구간 중 표가 들어가는 첫 곳(위부터, 대개 두 선 사이). 없으면 가장 넓은 곳.
   const tk = h.querySelector(".lt-tk"), th = tk.offsetHeight + 8, ys = [yT, yS].sort((a, b) => a - b);
