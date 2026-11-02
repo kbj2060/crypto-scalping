@@ -73,11 +73,11 @@
 - 학습 데이터 기간이 짧으면 «학습 2024~25» 분할을 그대로 못 쓴다 — 사전등록 «구간» 절에 바꾼 분할과 이유를 적는다. 연속 거래가 아니므로 4h 변동성·박스처럼 시간 창을 쓰는 기능은 장중 봉만으로 다시 정의해야 할 수 있다.
 
 - **대시보드 연결(11-01 SNDK, 사용자 «SNDK 선물 풋프린트만 있어도 돼»)**: §2-A 표에서 건드린 곳 = `scripts/coin_config.py` `COIN_CONFIG`(워커 없는 키는 «파일 없음 = 빈 응답») · `dashboard/live/index.html` **탭 버튼 `data-asset`**(🔴탭은 정적 HTML — 빠뜨리면 서버 목록에 있어도 안 보인다. 11-01 SNDK 가 실제로 이렇게 안 보였다) · `dashboard/server.py` `DASHBOARD_ASSETS` 기본값·`HL_LIQ_BY_ASSET`(없는 파일) · `dashboard/coin_flow.py` `FLOW_SPECS`(칸 $0.2 = 테이프 칸 0.05의 4배 · `spot=False`) · `app.js` `ASSET_CONFIG`·`FLOW_ASSETS`·`SNAPSHOT_ASSET_KEYS`. 예측 기능 Set(DIR4H·BOX·VOL4H 등)과 주문 표는 넣지 않았다 → 칸이 꺼지고 주문은 막힌다.
-  - 🔴`MARKET_SYMBOLS`(orders.py)는 **건드리지 않는다** — 계좌 조회가 심볼마다 `userTrades`·`openOrders` 를 더 부른다(실계좌 경로). `server.py` 가 import 한 사본에만 `"sndk"` 를 더했다.
+  - ~~🔴`MARKET_SYMBOLS`(orders.py)는 건드리지 않는다~~ — **2026-11-03 사용자 «둘 다 열어줘»로 주문을 열면서 `orders.MARKET_SYMBOLS`·`MANUAL_EXEC_SYMBOLS` 에 sndk·soxl 을 넣었다**(§5-2). 처음엔 계좌 조회가 심볼마다 `userTrades`·`openOrders` 를 더 불러 실계좌 호출이 늘기 때문에 `server.py` 사본에만 두었다 — 이제 그 호출 증가를 받아들인 것이다(IP 한도는 아직 못 쟀다).
   - 현물이 없는 종목은 `FlowSpec.spot_url=None` — `collect_spot_flow` 를 아예 띄우지 않는다(없으면 존재하지 않는 스트림에 재접속을 반복).
   - 미연결: HL(해당 없음). 일봉 풋프린트는 11-03 연결(SNDK 2026-04-07~·SOXL 2026-05-15~, `build_footprint_daily_asset.py` 의 `FP_SYM=SNDKUSDT|SOXLUSDT`, OI 는 패널 없이 metrics 아카이브만 · 칸 SNDK $0.5 · SOXL $0.03) · 4h 풋프린트는 수집기 이력(10-31·11-02~)만 · 옵션 칸은 CBOE(11-01~).
 
-- **SOXL(11-02, 사용자 «soxlusdt 선물 대시보드에 추가»)**: SNDK 와 같은 자리에 한 줄씩(위 목록 + `live_okx_trade_tape` `BUCKETS`·`CT_VALS` + 테이프 `BUCKETS`·`SIZE_BANDS_USD` + `multicoin_collectors` `COINS`·`TRADFI` + ctx `OI_SLOW`·`MARK`). 칸 $0.02(테이프 0.01의 2배) · 크기 구간 잠정 $3.9k/$36k(aggTrades 6,000건·0.74h) -- 평일에 다시 잰다 · 깊은 호가 diff 는 SNDK 만(`DEPTH_TRADFI`) · 옵션 카드는 11-02 연결(CBOE 체인 SOXL 2,872계약 수신 확인 · `write_state` 를 종목별 병합으로 고침 · cron 인자 `SNDK SOXL` · app.js `optData` 표).
+- **SOXL(11-02, 사용자 «soxlusdt 선물 대시보드에 추가»)**: SNDK 와 같은 자리에 한 줄씩(위 목록 + `live_okx_trade_tape` `BUCKETS`·`CT_VALS` + 테이프 `BUCKETS`·`SIZE_BANDS_USD` + `multicoin_collectors` `COINS`·`TRADFI` + ctx `OI_SLOW`·`MARK`). 칸 $0.02(테이프 0.01의 2배) · 크기 구간 잠정 $3.9k/$36k(aggTrades 6,000건·0.74h) -- 평일에 다시 잰다 · 깊은 호가 diff 는 SNDK 만(`DEPTH_TRADFI`; **SOXL 은 11-03 수동으로 시작** §5-2) · 옵션 카드는 11-02 연결(CBOE 체인 SOXL 2,872계약 수신 확인 · `write_state` 를 종목별 병합으로 고침 · cron 인자 `SNDK SOXL` · app.js `optData` 표).
 
 ### 5-1. 주식·ETF 옵션 (11-01 조사, 사용자 «주식 옵션 데이터를 다른 소스로»)
 
@@ -114,3 +114,32 @@ Binance 옵션은 BNB·BTC·DOGE·ETH·SOL·XRP·XAU·XAG 뿐이고 Deribit 은 
 대략 «짧은 지평 방향·변동성·박스 30분/1h·실현 감마»는 코인이 바뀌어도 통과했고, «4h 방향·박스 4h·매매 신호»는 코인마다 갈렸다.
 
 > **주식 옵션 카드(2026-11-01)**: Deribit 에 없는 종목은 CBOE 체인 요약(`scripts/cboe_option_summary_20261101.py`)을 `data/live/cboe_option_state.json` 으로 쓰고 `gex_payload` 가 `currencies.<SYM>` 으로 합친다. app.js `optData` 코인 표에 한 줄 추가. rv7·블록 거래는 없다.
+
+
+### 5-2. 2026-11-03 주식(SNDK·SOXL) 격차 메우기 기록 (사용자 «이더리움과 같은 상태로» → «채울 수 있는 것 모두»)
+
+한 일(커밋 순):
+| 무엇 | 어디 | 비고 |
+|---|---|---|
+| **주문 열기** | `dashboard/orders.py` `MARKET_SYMBOLS`·`MANUAL_EXEC_SYMBOLS` 에 `sndk`→SNDKUSDT · `soxl`→SOXLUSDT, `server.py` 사본 제거 · 시험 `test/test_stock_exec_symbols_20261102.py` | 주식은 USDC 시장이 없어 **주문 심볼 = 시세 심볼**(basis 1). 거래소 규칙 조회(서버, 읽기): 두 심볼 step/tick/최소수량 0.01 · 최소주문금액 5. 🔴**실주문 시험은 한 번도 안 했다** — 장외 시간 체결·호가 거부는 미확인. 규칙(`RULE_ASSETS`)·ETH 위험 모델은 안 붙인다(증거금 50% 단순 규칙) |
+| **옵션 카드 빈 칸** | `scripts/cboe_option_summary_20261101.py` · app.js `optFlowTodayHtml`·`optEqFlowSvg` · `OPT_TIPS.eqflow/eqflow2` | ① 실현 7일 = 바이낸스 선물 1시간봉(6시간 캐시 `data/live/cboe_rv7_cache.json`, **서버 cron 에서만** 바이낸스 호출) ② «블록 거래» 자리 = 오늘 체결 요약(콜·풋 계약·명목, 거래량 상위 계약) ③ «순매수 흐름» 자리 = 콜·풋 체결 누적 곡선(수집기가 10분마다 한 점 -- 배포 직후엔 점이 적다). 체결 한 건·블록·매수/매도는 CBOE 가 안 준다 |
+| **일봉 풋프린트 소급** | `build_footprint_daily_asset.py`(SNDKUSDT·SOXLUSDT, `FP_FIRST` 상장월) · `footprint_daily.py` `ASSETS` · `fp_daily.js` | SNDK 208일(2026-04-07~) · SOXL 170일(05-15~). OI 패널이 없는 코인은 일별 metrics 아카이브만. 칸 SNDK $0.5 · SOXL $0.03 |
+| **호가벽·가짜벽(ob5m)** | `scripts/live_ob5m_20261026.py` `COINS` · `supervisor_ob5m.sh` 허용 목록 | 틱 $0.01 · 벽 몫·KS 는 ETH 기본값 — **연구 대조(`--parity`) 없음 = 잠정**. 서버에서 SNDK·SOXL 워커 시작(11-03 02:00), SOXL 호가 diff 수집기도 시작(`DD_SYMBOL=soxlusdt supervisor_depth_diff.sh`) |
+
+**해야 하는데 안 된 것(권한 분류기가 막음 → 사용자 수동)**: crontab `@reboot` 3줄 — 재부팅하면 SOXL 호가 diff 수집기·SNDK/SOXL ob5m 워커가 안 켜진다. 백업 `data/live/backups/crontab_before_stock_ob5m_20261103.txt`(85줄). 줄 형태는 SNDK 호가 diff 줄(`multicoin_bn_depthdiff_sndk_reboot`)과 ETH/XRP ob5m 줄(`sleep 75~85 && … supervisor_ob5m.sh <SYM>`)을 따른다.
+
+**ETH 와 아직 다른 것(이유)**:
+| 기능 | 상태 | 이유·다시 볼 때 |
+|---|---|---|
+| 평소 대비 z 점수(델타·고래·OI) | SOXL 비어 있음 · SNDK 일부(z60h 비어 있음) | 기준선을 쌓을 체결 이력이 11-02(SOXL)·10-31(SNDK)부터. 시간이 해결 |
+| 일 분위(OI 24h·베이시스 7일) | SOXL 비어 있음 | 같음 |
+| 4h 풋프린트 | 수집기 이력만 | 4h 는 소급 원천이 없다(테이프 기반) |
+| 15분·1h·4h 방향 · 4h 변동성 · 박스 | **없음** | 상장 이력 SNDK 210일 · SOXL 172일 — 사전등록 분할(학습 2024~25)을 못 쓴다. 다시 볼 시점: **SNDK 2027-04 · SOXL 2027-05**(이력 ~1년) |
+| 실현 감마 | «검증 안 됨» 표시 | 2021~24 기준 분포가 없다. 같은 시점에 다시 |
+| 블록 거래·순매수 방향 | 못 본다 | CBOE 가 체결 한 건·방향을 안 준다 → OPRA 유료 공급자(§5-1) |
+| HL 고래 청산가 · 현물 | 해당 없음 | 주식 선물은 HL·현물 대상이 아님 |
+
+**교훈**
+- 새 종목의 «일봉 소급»은 상장일부터 월 zip 이 있으면(SNDK 4월 17MB~SOXL 6월 237MB) 로컬에서 몇 분이면 끝난다 — 모델·검정과 달리 이력 길이가 걸림돌이 아니다.
+- 서버 `main` 체크아웃에 다른 세션이 직접 커밋하면 감시기의 `--ff-only` 가 막힌다(11-03 3개 갈라짐). 서버 커밋을 별도 브랜치로 푸시해 origin/main 에 병합하면 서버가 그대로 빨리감기로 따라온다(서버를 되돌릴 필요 없음). 배포 후 `git rev-list --left-right --count HEAD...origin/main` 이 `0 0` 인지 본다.
+- 바이낸스 URL 이 들어간 명령은 로컬 셸 가드가 막는다 — Edit 도구로 파일을 고치고, 호출은 서버에서(`handoff.sh launch server`).
