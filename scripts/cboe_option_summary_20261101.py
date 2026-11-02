@@ -109,10 +109,15 @@ def _clean(x):
 
 
 def write_state(snapshot: Path, state: Path = STATE) -> None:
+    """종목 하나의 요약을 상태 파일에 **합친다** -- 다른 종목 항목은 그대로 둔다(예전엔 파일을 통째로 써서 둘째 종목이 첫째를 덮었다)."""
     data = json.loads(gzip.decompress(snapshot.read_bytes()))["data"]
     opt = _clean(summarize(data))
-    body = {"generated_at": datetime.now(timezone.utc).isoformat(),
-            "currencies": {data["symbol"]: {"opt_hist": {}, "options": opt, "recorded_at_utc": opt["recorded_at_utc"], "spot_price": opt["index"]}}}
+    try:
+        cur = json.loads(state.read_text(encoding="utf-8"))["currencies"]
+    except (OSError, ValueError, KeyError):
+        cur = {}                  # 파일이 없거나 깨졌으면 이 종목부터 다시 쌓는다
+    cur[data["symbol"]] = {"opt_hist": {}, "options": opt, "recorded_at_utc": opt["recorded_at_utc"], "spot_price": opt["index"]}
+    body = {"generated_at": datetime.now(timezone.utc).isoformat(), "currencies": cur}
     tmp = state.with_name(f"{state.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
     tmp.replace(state)
@@ -133,6 +138,15 @@ def _selftest() -> None:
     assert out["strikes"]["front"] and out["strikes"]["all"] and out["cm"]["30"] is not None
     assert out["recorded_at_utc"].startswith("2026-10-30T19:59:59"), out["recorded_at_utc"]   # EDT 15:59:59 = 19:59:59Z
     assert _clean({"a": [float("nan"), 1.0]}) == {"a": [None, 1.0]}
+    import tempfile
+    from gzip import compress
+    with tempfile.TemporaryDirectory() as td:       # 두 종목을 차례로 써도 서로 덮지 않는다
+        st = Path(td) / "s.json"
+        for sym in ("SNDK", "SOXL"):
+            snap = Path(td) / f"{sym}.json.gz"
+            snap.write_bytes(compress(json.dumps({"data": {"symbol": sym, "current_price": 100.0, "iv30": 70.0, "last_trade_time": "2026-10-30T15:59:59", "options": ops}}).encode()))
+            write_state(snap, st)
+        assert set(json.loads(st.read_text())["currencies"]) == {"SNDK", "SOXL"}
     print("selftest OK")
 
 
