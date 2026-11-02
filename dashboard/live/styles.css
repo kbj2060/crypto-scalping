@@ -3410,3 +3410,28 @@ html.lg-on .ofab-bar { background: rgba(255, 255, 255, 0.4); }
   background: var(--pop-bg); backdrop-filter: none; -webkit-backdrop-filter: none;
 }
 [data-theme="light"] .chart-tooltip.visible { background: #2d333d; }
+
+/* 2026-11-02 모바일 최적화(사용자 «내비를 왼쪽 아이콘으로, 평소엔 접힘 + 나머지 전체 최적화»).
+   내비(#cardRail): 접힘 = 지금 보는 카드의 아이콘 하나만 왼쪽 가장자리에 · 누르면 펼쳐 아이콘+글자 · 카드를 고르거나 바깥을 누르면 접힘(app.js setupCardRail).
+   본문은 밀지 않는다(왼쪽 72px 여백·고정 앱바는 넓은 화면 전용이라 여기서 되돌린다). */
+@media (max-width: 720px) {
+  body:has(.card-rail:not([hidden])) { padding-left: 0; }
+  body:has(.card-rail:not([hidden])) .app { padding-top: 10px; }
+  body:has(.card-rail:not([hidden])) header.top { position: static; margin-bottom: 8px; padding: 0; background: none; }
+  .card-rail:not([hidden]) { display: grid; top: 42%; bottom: auto; left: 0; width: auto; padding: 4px; gap: 2px; z-index: 850;
+    border: 1px solid var(--line); border-left: 0; border-radius: 0 14px 14px 0; box-shadow: 0 6px 20px rgb(var(--shadow) / .28);
+    background: var(--pop-bg); padding-left: env(safe-area-inset-left); }
+  .card-rail button { width: 100%; min-width: 44px; min-height: 44px; padding: 6px 12px; grid-auto-flow: column; justify-content: start; align-items: center; gap: 10px; font-size: 13px; }
+  .card-rail button.on::before { left: 0; top: 8px; bottom: 8px; }
+  .card-rail:not(.open) button:not(.on) { display: none; }
+  .card-rail:not(.open) button span { display: none; }
+  .card-rail:not(.open) { opacity: .8; }
+  .card-rail:not(.open) button { padding: 6px 10px; }
+}
+/* 모바일 공통: 탭 반응·확대·노치 */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
+button, [role="button"], select, summary, label { touch-action: manipulation; }   /* 더블탭 확대 지연(300ms) 제거 -- 주문 버튼 반응이 그만큼 빨라진다 */
+@media (max-width: 720px) {
+  .app { padding-bottom: calc(28px + env(safe-area-inset-bottom)); }   /* 홈 바 밑 여백(viewport-fit=cover) */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea { font-size: 16px; }   /* iOS 는 16px 미만 입력칸에 포커스하면 화면을 확대한다 */
+}

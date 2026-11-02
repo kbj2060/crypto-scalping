@@ -3134,7 +3134,14 @@ function setupCardRail() {
   fitApplyCached();
   const rail = el("cardRail");
   if (!rail) return;
-  rail.addEventListener("click", (e) => { const b = e.target.closest("[data-go]"); if (b) el(b.dataset.go)?.scrollIntoView({ behavior: "smooth", block: "start" }); });
+  const mob = matchMedia("(max-width: 720px)");   // 2026-11-02 모바일: 접힘(지금 카드 아이콘 하나) -- 그 아이콘을 누르면 펼치고, 카드를 고르거나 바깥을 누르면 접는다
+  rail.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-go]"); if (!b) return;
+    if (mob.matches && !rail.classList.contains("open")) { rail.classList.add("open"); return; }
+    rail.classList.remove("open");
+    el(b.dataset.go)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  document.addEventListener("pointerdown", (e) => { if (!rail.contains(e.target)) rail.classList.remove("open"); });
   addEventListener("scroll", () => requestAnimationFrame(cardRailSync), { passive: true });
   cardRailSync();
   addEventListener("resize", () => requestAnimationFrame(fitLayout));
