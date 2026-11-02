@@ -1,6 +1,6 @@
 {
-  "name": "trading room",
-  "short_name": "trading room",
+  "name": "트레이딩룸",
+  "short_name": "트레이딩룸",
   "description": "ETH/BTC/XRP 신호·레짐·섀도우 원장 실시간 모니터",
   "start_url": "/dashboard/live/",
   "scope": "/dashboard/live/",
