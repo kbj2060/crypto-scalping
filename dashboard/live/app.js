@@ -7394,7 +7394,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         dt.forEach((a, k) => {
           const yTop = Math.max(pTop, pyAt(rowLo(k + 1))), yBot = Math.min(pBot, pyAt(rowLo(k)));
           if (yBot - yTop < 1) return;
-          const hh = Math.max(1, yBot - yTop - 1), ow = tot > 0 ? (DW / 2 - 1) * a[2] / tot : 0, dw = tot > 0 ? (DW / 2 - 1) * Math.abs(a[0]) / tot : 0, tw = DT_W * a[1] / tMax;   // 윤곽(체결 총량)과 델타는 같은 눈금 -- 칠한 몫이 윤곽의 몇 %인지 읽힌다
+          const hh = Math.max(1, yBot - yTop - 1), ow = tot > 0 ? (DW / 2 - 1) * a[2] / tot : 0, dw = dMax > 0 ? (DW / 2 - 1) * Math.abs(a[0]) / dMax : 0, tw = DT_W * a[1] / tMax;   // 델타는 델타 최대값 기준(주인공) · 윤곽은 체결 최대값 기준 -- 눈금이 달라 길이끼리 비교하진 않는다(사용자 선택 안 B)
           if (ow > 0.5) { const o = mkR(dMid - ow, yTop + 0.5, 2 * ow, hh, "none", 1); o.setAttribute("stroke", "var(--amber)"); o.setAttribute("stroke-width", k === totK ? "1.6" : "1"); o.setAttribute("stroke-opacity", "0.75"); }
           if (dw > 0.5) mkR(a[0] >= 0 ? dMid : dMid - dw, yTop + 0.5, dw, hh, a[0] >= 0 ? "var(--good)" : "var(--bad)", 0.85);
           const inVa = k >= dn && k <= up;
