@@ -248,6 +248,8 @@ def run_c(res, H=12):
                 "lo10": float(np.percentile(delta_b, 10)), "placebo_p90": float(np.percentile(pl, 90)), "placebo_p95": float(np.percentile(pl, 95)),
                 "acc_M_side": float(((zm[bt] > 0) == yb).mean()), "acc_G_side": float(((zg[bt] > 0) == yb).mean()), "acc_nearer_edge_rule": float(N_rule),
                 "acc_M_top10conf": float(((zm[bt][top] > 0) == yb[top]).mean()), "n_top10": int(top.sum()),
+                "acc_G_top10conf": float(((zg[bt][np.abs(zg[bt]) >= np.quantile(np.abs(zg[bt]), 0.9)] > 0) == yb[np.abs(zg[bt]) >= np.quantile(np.abs(zg[bt]), 0.9)]).mean()),
+                "acc_nearer_on_M_top10": float(((te.dR < te.dS).to_numpy()[bt][top] == yb[top]).mean()),
                 "logloss_M": float(log_loss(te.cls, Pm, labels=[0, 1, 2])), "logloss_G": float(log_loss(te.cls, Pg, labels=[0, 1, 2])),
                 "byc": {c: float(roc_auc_score(yb[te.coin.to_numpy()[bt] == c], zm[bt][te.coin.to_numpy()[bt] == c]) - roc_auc_score(yb[te.coin.to_numpy()[bt] == c], zg[bt][te.coin.to_numpy()[bt] == c])) for c in rf.COINS}}
     print("C 시험:", json.dumps(res["C"], ensure_ascii=False, indent=1))
