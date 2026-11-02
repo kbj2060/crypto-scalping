@@ -7301,7 +7301,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       ln.setAttribute("stroke", "var(--soft-line)"); g.appendChild(ln);
       svg.appendChild(g);
     }
-    if (!liqOn || TRADE_W) {
+    if ((!liqOn || TRADE_W) && !(TRADE_W && !PROF)) {   // 2026-11-02 데스크톱은 체결 칸을 따로 그리지 않는다 -- 아래 델타 칸에 윤곽으로 합쳤다(사용자 선택 안 A)
       const tr = new Map();   // 행 키 -> [총, 고래, 리테일, 매수, 매도]
       candles.forEach((c) => (footprint.byTime.get(c.time) || []).forEach((l) => {
         const k = rowOf(l[0]), a = tr.get(k) || [0, 0, 0, 0, 0];
@@ -7361,18 +7361,19 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       }
     }
     if (TRADE_W && !PROF) {   // 2026-11-02 델타·TPO 칸(사용자 선택 시안 3) -- 체결 기둥과 같은 행 격자·같은 보이는 봉. 참고용이며 지지·저항 신호가 아니다
-      const dt = new Map();   // 행 키 -> [델타(매수−매도), TPO(그 가격에 체결이 있던 봉 수)]
+      const dt = new Map();   // 행 키 -> [델타(매수−매도), TPO(그 가격에 체결이 있던 봉 수), 체결 총량, 고래, 리테일]
       candles.forEach((c) => {
         const seen = new Set();
         (footprint.byTime.get(c.time) || []).forEach((l) => {
-          const k = rowOf(l[0]), a = dt.get(k) || [0, 0];
-          a[0] += (+l[1] || 0) - (+l[2] || 0);
+          const k = rowOf(l[0]), a = dt.get(k) || [0, 0, 0, 0, 0];
+          a[0] += (+l[1] || 0) - (+l[2] || 0); a[2] += (+l[1] || 0) + (+l[2] || 0);
+          a[3] += (+l[3] || 0) + (+l[4] || 0); a[4] += (+l[5] || 0) + (+l[6] || 0);
           if (!seen.has(k)) { seen.add(k); a[1]++; }
           dt.set(k, a);
         });
       });
-      let dMax = 0, tMax = 0, tK = null, tSum = 0, kLo = Infinity, kHi = -Infinity;
-      dt.forEach((a, k) => { dMax = Math.max(dMax, Math.abs(a[0])); tSum += a[1]; if (a[1] > tMax) { tMax = a[1]; tK = k; } kLo = Math.min(kLo, k); kHi = Math.max(kHi, k); });
+      let dMax = 0, tMax = 0, tK = null, tSum = 0, kLo = Infinity, kHi = -Infinity, tot = 0, totK = null;
+      dt.forEach((a, k) => { dMax = Math.max(dMax, Math.abs(a[0])); if (a[2] > tot) { tot = a[2]; totK = k; } tSum += a[1]; if (a[1] > tMax) { tMax = a[1]; tK = k; } kLo = Math.min(kLo, k); kHi = Math.max(kHi, k); });
       if (tMax > 0) {
         // 가치 영역 = TPO 최다 행에서 위·아래 중 큰 쪽을 붙여 가며 전체 TPO 의 70% 까지
         let up = tK, dn = tK, acc = tMax;
@@ -7380,8 +7381,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           const u = up < kHi ? (dt.get(up + 1) || [0, 0])[1] : -1, d = dn > kLo ? (dt.get(dn - 1) || [0, 0])[1] : -1;
           if (u >= d) { up++; acc += Math.max(u, 0); } else { dn--; acc += Math.max(d, 0); }
         }
-        const dX0 = cDel, tX0 = cTpo, dMid = dX0 + DT_W / 2;
-        dtInfo = { rows: dt, rowSize, off, x0: dX0, x1: tX0 + DT_W, dX1: dX0 + DT_W, nBars: candles.length, tK, vaLo: dn, vaHi: up, dMax, tMax };
+        const dX0 = tAnc - TRADE_W, tX0 = cTpo, DW = cDel + DT_W - dX0, dMid = dX0 + DW / 2;   // 델타 칸 = 옛 체결 칸 + 델타 칸
+        dtInfo = { rows: dt, rowSize, off, x0: dX0, x1: tX0 + DT_W, dX1: dX0 + DW, nBars: candles.length, tK, totK, vaLo: dn, vaHi: up, dMax, tMax };
         const g = document.createElementNS(NS, "g");
         const mkR = (x, y, wd, hh, fill, op) => {
           const r = document.createElementNS(NS, "rect");
@@ -7393,7 +7394,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         dt.forEach((a, k) => {
           const yTop = Math.max(pTop, pyAt(rowLo(k + 1))), yBot = Math.min(pBot, pyAt(rowLo(k)));
           if (yBot - yTop < 1) return;
-          const hh = Math.max(1, yBot - yTop - 1), dw = dMax > 0 ? (DT_W / 2 - 1) * Math.abs(a[0]) / dMax : 0, tw = DT_W * a[1] / tMax;
+          const hh = Math.max(1, yBot - yTop - 1), ow = tot > 0 ? (DW / 2 - 1) * a[2] / tot : 0, dw = tot > 0 ? (DW / 2 - 1) * Math.abs(a[0]) / tot : 0, tw = DT_W * a[1] / tMax;   // 윤곽(체결 총량)과 델타는 같은 눈금 -- 칠한 몫이 윤곽의 몇 %인지 읽힌다
+          if (ow > 0.5) { const o = mkR(dMid - ow, yTop + 0.5, 2 * ow, hh, "none", 1); o.setAttribute("stroke", "var(--amber)"); o.setAttribute("stroke-width", k === totK ? "1.6" : "1"); o.setAttribute("stroke-opacity", "0.75"); }
           if (dw > 0.5) mkR(a[0] >= 0 ? dMid : dMid - dw, yTop + 0.5, dw, hh, a[0] >= 0 ? "var(--good)" : "var(--bad)", 0.85);
           const inVa = k >= dn && k <= up;
           mkR(tX0, yTop + 0.5, tw, hh, "var(--accent)", inVa ? 0.55 : 0.28);
@@ -7402,7 +7404,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         });
         const ax = document.createElementNS(NS, "line");   // 델타 0 선
         ax.setAttribute("x1", dMid); ax.setAttribute("x2", dMid); ax.setAttribute("y1", pTop); ax.setAttribute("y2", pBot); ax.setAttribute("stroke", "var(--soft-line)"); g.appendChild(ax);
-        [[colX0, "청산"], [tAnc - TRADE_W, "체결"], [dX0, "델타"], [tX0, "TPO"], [cBook, "호가"]].forEach(([x, s]) => {
+        [[colX0, "청산"], [dX0, "델타 · 체결"], [tX0, "TPO"], [cBook, "호가"]].forEach(([x, s]) => {
           const t = document.createElementNS(NS, "text");
           t.setAttribute("x", x); t.setAttribute("y", pTop - 4); t.setAttribute("font-size", "9"); t.setAttribute("font-weight", "700"); t.setAttribute("fill", "var(--muted)");
           t.setAttribute("paint-order", "stroke"); t.setAttribute("stroke", "var(--chart-bg)"); t.setAttribute("stroke-width", "3"); t.textContent = s; g.appendChild(t);
@@ -8719,6 +8721,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       showTooltip(evt.pageX, evt.pageY, `<div style="white-space:normal;max-width:min(360px,calc(100vw - 24px))">`
         + `${(k * rs - o).toFixed(dp)}–${((k + 1) * rs - o).toFixed(dp)}`
         + `<br><span style="color:${a[0] >= 0 ? "var(--good)" : "var(--bad)"};font-weight:700">델타 ${a[0] >= 0 ? "+" : "−"}${fq(Math.abs(a[0]))} ${coinUnit()}</span> (${a[0] >= 0 ? "매수" : "매도"} 우위 · 테이커 기준)`
+        + `<br><span style="color:var(--amber);font-weight:700">체결 ${fq(a[2])} ${coinUnit()}</span> (윤곽) · 고래 ${Math.round(100 * a[3] / Math.max(a[2], 1e-9))}% · 리테일 ${Math.round(100 * a[4] / Math.max(a[2], 1e-9))}%${k === dtInfo.totK ? " · 최다 체결" : ""}`
         + `<br><span style="font-weight:700">TPO ${a[1]}/${dtInfo.nBars}봉</span> — 이 가격에 체결이 있던 봉 수`
         + (k === dtInfo.tK ? ` · 최다(POC)` : "") + (k >= dtInfo.vaLo && k <= dtInfo.vaHi ? ` · 가치 영역(70%) 안` : ` · 가치 영역 밖`) + (a[1] === 1 ? ` · 한 번만 지난 가격` : "")
         + `<br><span style="opacity:.7">보이는 봉 ${dtInfo.nBars}개 합 · 30분 문자표 TPO 가 아니라 5분봉 수 · 참고, 신호 아님</span></div>`);
