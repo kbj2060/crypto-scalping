@@ -77,6 +77,8 @@
   - 현물이 없는 종목은 `FlowSpec.spot_url=None` — `collect_spot_flow` 를 아예 띄우지 않는다(없으면 존재하지 않는 스트림에 재접속을 반복).
   - 미연결: 일봉·4h 풋프린트(`footprint_daily.py` `ASSETS`, 소급 빌드 필요) · HL · 옵션 칸.
 
+- **SOXL(11-02, 사용자 «soxlusdt 선물 대시보드에 추가»)**: SNDK 와 같은 자리에 한 줄씩(위 목록 + `live_okx_trade_tape` `BUCKETS`·`CT_VALS` + 테이프 `BUCKETS`·`SIZE_BANDS_USD` + `multicoin_collectors` `COINS`·`TRADFI` + ctx `OI_SLOW`·`MARK`). 칸 $0.02(테이프 0.01의 2배) · 크기 구간 잠정 $3.9k/$36k(aggTrades 6,000건·0.74h) -- 평일에 다시 잰다 · 깊은 호가 diff 는 SNDK 만(`DEPTH_TRADFI`) · 옵션 카드 미연결(`write_state` 가 종목 하나만 파일에 써서 둘째 종목이 첫째를 덮는다).
+
 ### 5-1. 주식·ETF 옵션 (11-01 조사, 사용자 «주식 옵션 데이터를 다른 소스로»)
 
 Binance 옵션은 BNB·BTC·DOGE·ETH·SOL·XRP·XAU·XAG 뿐이고 Deribit 은 ETH·BTC 뿐이라 **주식·ETF 옵션은 미국 거래소(OPRA)** 에서 받는다. ETH 의 Deribit 수집(체결 전체 + 체인 10분 + 요약)과 비교한 현황:

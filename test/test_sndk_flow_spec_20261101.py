@@ -24,3 +24,11 @@ def test_every_flow_asset_has_a_tab_button():
     html = Path("dashboard/live/index.html").read_text(encoding="utf-8")
     buttons = set(re.findall(r'<button[^>]*\bdata-asset="([a-z]+)"', html))
     assert set(FLOW_SPECS) <= buttons, set(FLOW_SPECS) - buttons
+
+
+def test_soxl_flow_spec():
+    s = FLOW_SPECS["soxl"]
+    assert s.symbol == "SOXLUSDT" and s.okx_inst == "SOXL-USDT-SWAP" and s.spot_url is None
+    for tape in (BN_BUCKETS["soxlusdt"], OKX_BUCKETS["SOXL-USDT-SWAP"]):
+        assert abs(s.bucket / tape - round(s.bucket / tape)) < 1e-9, (s.bucket, tape)
+    assert COIN_CONFIG["soxl"]["binance_symbol"] == "SOXLUSDT" and set(COIN_CONFIG["soxl"]) == set(COIN_CONFIG["xrp"])

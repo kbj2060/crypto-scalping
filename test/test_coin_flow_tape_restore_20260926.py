@@ -69,7 +69,7 @@ def test_non_eth_restores_from_tape_not_rest(tmp_path, monkeypatch):
 def test_coin_specs_are_usdt_data_markets():
     for a, sp in srv.FLOW_SPECS.items():
         assert sp.symbol == f"{a.upper()}USDT" and sp.okx_inst.endswith("-USDT-SWAP"), sp
-        assert a == "sndk" or sp.spot_url.endswith(f"/{a}usdt@aggTrade"), sp     # SNDK(TradFi 주식 선물)는 현물이 없다
+        assert a in ("sndk", "soxl") or sp.spot_url.endswith(f"/{a}usdt@aggTrade"), sp     # SNDK(TradFi 주식 선물)는 현물이 없다
         assert "USDC" not in f"{sp.symbol}{sp.okx_inst}{sp.spot_url or ''}".upper(), "데이터에 USDC 시장이 섞였다"
         tape = srv.TAPE_BUCKETS[sp.symbol.lower()]
         assert abs(sp.bucket / tape - round(sp.bucket / tape)) < 1e-9, "풋프린트 칸이 테이프 칸의 정수배가 아니다"
