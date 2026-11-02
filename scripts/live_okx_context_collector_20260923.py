@@ -230,6 +230,7 @@ class ContextStore:
                         marks = ",".join("?" * INSERTS[table])
                         con.executemany(f"INSERT INTO {table} VALUES ({marks})", rows)
                 con.execute("COMMIT")
+            _tape._bn._WD["write"] = time.monotonic()   # run_all 정지 감시의 «쓰기 성공» 박동(2026-11-02 10:04 이 수집기가 감시 없이 멈췄다)
             return None
         except Exception as exc:  # noqa: BLE001 -- 대개 읽는 쪽이 잡고 있는 락이다
             return exc
@@ -380,7 +381,9 @@ def selftest() -> None:
             st = ContextStore(Path(td) / name)
             st.set_meta([("k:ETH", "1"), ("k:ETH", "2")])
             st.stage({**oi, **mk})
+            _tape._bn._WD["write"] = 0.0
             assert _aio.run(st.aflush()) == len(oi["okx_oi"]) + len(mk["okx_mark"]) and not st.pending, name
+            assert _tape._bn._WD["write"] > 0, "쓰기 성공이 정지 감시 박동을 갱신해야 한다"
             st.record_gap("mark-price", 0, 5000, "test")
             with st._connect() as con:
                 assert con.execute("SELECT count(*) FROM okx_mark").fetchone()[0] == len(mk["okx_mark"]), name
