@@ -1143,6 +1143,12 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         finally:
             lap[name] = lap.get(name, 0) + int((time.perf_counter() - t) * 1000)
 
+    def _val(x):
+        """gather(return_exceptions=True) 결과를 쓰는 자리에서 예외를 다시 던진다 -- 직렬일 때 그 줄에서 터지던 것과 같은 지점·같은 종류로 실패한다."""
+        if isinstance(x, BaseException):
+            raise x
+        return x
+
     def plan_log(kind: str, lap: dict, t0: float) -> None:
         print(f"plan_timing {kind} total={int((time.perf_counter() - t0) * 1000)}ms " + " ".join(f"{k}={v}ms" for k, v in lap.items()), flush=True)
 
@@ -1159,19 +1165,29 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         lap, t0 = {}, time.perf_counter()
         symbol = MANUAL_EXEC_SYMBOLS[asset]   # 2026-09-19 차트 심볼과 분리(위 상수 주석) · 09-26 코인별
         try:
+            # 2026-11-02 서로 독립인 조회(사이징·계좌·호가·필터·변동성·펀딩·수수료율)를 **한꺼번에** 보낸다(옛 판은 한 줄씩 기다렸다 -- 발주 전 서버 지연의 대부분).
+            #   값·검사 순서는 그대로다: 결과는 옛 줄 자리에서 _val 로 꺼내므로 사이징 없음(503) → 계좌 못 읽음(503) → 호가·필터 실패 순서가 같다.
             # 🔴SOL·XRP 는 ETH 위험 모델(보유시간·안전 역행폭·권고 수량)을 쓰지 않는다 -- ETH 로 학습된 값이다.
             #   빈 사이징을 넘겨 모델 상한·권고가 «없음»으로 흐르게 하고, 상한은 아래 증거금 50% 하나만 남긴다.
-            sizing = (await timed(lap, "sizing", asyncio.to_thread(position_sizing_payload)) if asset == "eth"
-                      else dict(SIMPLE_SIZING))
+            # 2026-10-05 fresh=1(떠 있는 버튼 «스위칭»의 반대 진입): 방금 닫은 포지션이 30초 캐시에 남아 노출로 잡히면
+            #   증거금 50% 상한이 반대 진입을 깎는다 -- 청산(assemble_exit_plan fresh)처럼 계좌를 새로 읽는다.
+            _r = await asyncio.gather(
+                timed(lap, "sizing", asyncio.to_thread(position_sizing_payload)) if asset == "eth" else asyncio.sleep(0, dict(SIMPLE_SIZING)),
+                timed(lap, "account_fresh", produce_account()) if fresh else
+                swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS, produce_account, max_stale=STALE_GRACE_SECONDS,
+                           cache=binance_account_cache),   # 계좌 카드와 같은 캐시 -- 없으면 두 벌을 따로 받는다
+                timed(lap, "book", fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
+                                                      {"symbol": symbol}, error_reason="book_ticker_failed")),
+                timed(lap, "filters", load_filters(binance_session(), symbol)),
+                timed(lap, "vol", realized_vol_now(symbol)),
+                timed(lap, "funding", funding_now(symbol)),
+                timed(lap, "fees", commission_bp(binance_session(), symbol)),
+                return_exceptions=True)
+            sizing = _val(_r[0])
             if not sizing.get("available"):
                 return None, {}, {}, ({"error": "sizing_unavailable",
                                        "detail": sizing.get("error")}, 503)
-            # 2026-10-05 fresh=1(떠 있는 버튼 «스위칭»의 반대 진입): 방금 닫은 포지션이 30초 캐시에 남아 노출로 잡히면
-            #   증거금 50% 상한이 반대 진입을 깎는다 -- 청산(assemble_exit_plan fresh)처럼 계좌를 새로 읽는다.
-            account = (await timed(lap, "account_fresh", produce_account()) if fresh else
-                       await swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS,
-                                        produce_account, max_stale=STALE_GRACE_SECONDS,
-                                        cache=binance_account_cache))   # 계좌 카드와 같은 캐시 -- 없으면 두 벌을 따로 받는다
+            account = _val(_r[1])
             if not account.get("ok"):   # 못 읽은 계좌로 상한(합산 노출)을 계산하면 상한이 헐거워진다
                 return None, {}, {}, ({"error": "account_unavailable",
                                        "detail": f"계좌 조회 실패: {account.get('error')}"}, 503)
@@ -1198,9 +1214,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             # «증거금 얼마»를 말할 수 있다(교차 마진에서 증거금 = 명목/레버리지).
             leverage = (max((float(p.get("leverage") or 0.0) for p in positions), default=0.0)
                         or float((account.get("leverage_by_symbol") or {}).get(symbol) or 0.0))
-            book = await timed(lap, "book", fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
-                                            {"symbol": symbol}, error_reason="book_ticker_failed"))
-            filters = await timed(lap, "filters", load_filters(binance_session(), symbol))
+            book = _val(_r[2])
+            filters = _val(_r[3])
             cap = dict(sizing.get("cap") or {})
             # 두 상한의 **작은 쪽**. 순자산 연동은 원장이 자라도 안 변하고 자산이 줄면 같이
             # 줄어든다 -- 소급 초과가 생기지 않는다. 어느 쪽이 묶었는지 화면에 남긴다.
@@ -1354,12 +1369,12 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 side=side, equity=equity, existing_notional=exposure,
                 unrealized_pnl=same_unrealized,
                 risk_table=sizing.get("risk_mae") or {},
-                vol_bpm=await timed(lap, "vol", realized_vol_now(symbol)),
+                vol_bpm=_val(_r[4]),
                 cap_x=(cap_notional / equity) if cap_notional and equity > 0 else SIZING_CAP_EQUITY_X,
                 atr_pct=sizing.get("atr_pct"), hold_min=hold_min,
                 policy_cap_x=policy_cap_x,
-                funding_bp_8h=await timed(lap, "funding", funding_now(symbol)),
-                fees=await timed(lap, "fees", commission_bp(binance_session(), symbol)))   # 표시용 예상 비용만 -- 크기·손절은 표준 상수
+                funding_bp_8h=_val(_r[5]),
+                fees=_val(_r[6]))   # 표시용 예상 비용만 -- 크기·손절은 표준 상수
             # 집행기는 계획 dict 하나만 받는다. 처방 깊숙이 손을 넣게 하지 않고 여기서 꺼내 준다.
             _rx = (plan["trade_plan"] or {}).get("prescription") or {}
             _lv = (_rx.get("exchange_leverage") or {}) if _rx.get("available") else {}
@@ -1671,8 +1686,11 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         return pct / 100.0 if 0.0 < pct <= 100.0 else None
 
     async def assemble_exit_plan(position_side: str, fraction: float = 1.0,
-                                 fresh: bool = False, asset: str = "eth", market: bool = False):
+                                 fresh: bool = False, asset: str = "eth", market: bool = False, for_order: bool = False):
         """청산 계획 조립. 진입과 같은 이유로 **여기 한 곳뿐**이다.
+
+        for_order=True(실주문 제출 경로) = 화면 해설용 펀딩률·수수료율 조회를 건너뛴다(trade_plan 의 비용 칸만 비고 수량·가격·시장가 판단은 그대로).
+        미리보기(for_order=False)는 예전처럼 다 채운다.
 
         수량은 반드시 **방금 읽은 포지션**에서 온다 -- 헤지 모드라 reduceOnly 를 못 써서
         (-1106) 과청산을 막는 게 수량밖에 없다. 캐시된 값을 쓰면 이미 닫힌 포지션을
@@ -1686,10 +1704,14 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         try:
             # 🔴실주문(fresh=True)은 30초 캐시를 **우회**한다. 헤지 모드라 reduceOnly 가 없어
             # 과청산 방어가 수량뿐인데, 그 수량이 30초 묵으면 방어가 30초 묵는다.
-            account = (await timed(lap, "account_fresh", produce_account()) if fresh else
-                       await swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS,
-                                        produce_account, max_stale=STALE_GRACE_SECONDS,
-                                        cache=binance_account_cache))
+            # 2026-11-02 계좌와 사이징은 서로 독립 -- 같이 보낸다(사이징은 아래 옛 자리에서 _val 로 꺼낸다: 포지션 없음(400)이 사이징 실패보다 먼저인 순서 그대로).
+            _acct, _sz = await asyncio.gather(
+                timed(lap, "account_fresh", produce_account()) if fresh else
+                swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS, produce_account, max_stale=STALE_GRACE_SECONDS,
+                           cache=binance_account_cache),
+                timed(lap, "sizing", asyncio.to_thread(position_sizing_payload)),
+                return_exceptions=True)
+            account = _val(_acct)
             # 결정 규칙과 자체점검은 live_manual_peg_entry 모듈에 있다(85/85).
             if not account.get("ok"):
                 # 🔴«못 읽음»을 no_position 으로 돌려주면 브래킷 감시가 정리(=익절·비상 스탑 삭제)로 간다.
@@ -1700,10 +1722,16 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             if position is None:
                 return None, ({"error": "no_position",
                                "detail": f"{position_side} 포지션이 없습니다"}, 400)
-            book = await timed(lap, "book", fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
-                                            {"symbol": symbol}, error_reason="book_ticker_failed"))
-            filters = await timed(lap, "filters", load_filters(binance_session(), symbol))
-            vol_bpm = await timed(lap, "vol", realized_vol_now(symbol))
+            # 포지션 심볼이 정해졌으니 이 다섯 조회도 서로 독립 -- 한꺼번에(옛 판은 한 줄씩).
+            _b = await asyncio.gather(
+                timed(lap, "book", fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
+                                                      {"symbol": symbol}, error_reason="book_ticker_failed")),
+                timed(lap, "filters", load_filters(binance_session(), symbol)),
+                timed(lap, "vol", realized_vol_now(symbol)),
+                asyncio.sleep(0, None) if for_order else timed(lap, "funding", funding_now(symbol)),
+                asyncio.sleep(0, None) if for_order else timed(lap, "fees", commission_bp(binance_session(), symbol)),   # 청산은 실제 포지션 심볼의 요율
+                return_exceptions=True)
+            book, filters, vol_bpm = _val(_b[0]), _val(_b[1]), _val(_b[2])
             plan = build_exit_plan(
                 position_side=position_side, position_qty=float(position.get("qty") or 0.0),
                 best_bid=float(book["bidPrice"]), best_ask=float(book["askPrice"]),
@@ -1727,7 +1755,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             cur_notional = sum(abs(float(p.get("notional") or 0.0))
                                for p in (account.get("positions") or [])
                                if p.get("symbol") == symbol)
-            sz = await timed(lap, "sizing", asyncio.to_thread(position_sizing_payload))
+            sz = _val(_sz)
             # 🔴지평을 고를 정책 천장은 **지평과 무관**해야 순환이 끊긴다(진입과 같은 구조).
             # safe_mae_pct=None 이면 effective_cap 이 모델 후보를 빼고 원장∧순자산만 본다.
             policy_n, _, _ = effective_cap(sz, eq, None)
@@ -1771,8 +1799,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 risk_table=sz.get("risk_mae") or {}, vol_bpm=vol_bpm,
                 cap_x=eff_x, atr_pct=sz.get("atr_pct"), hold_min=hold_min,
                 policy_cap_x=policy_cap_x or SIZING_CAP_EQUITY_X,
-                funding_bp_8h=await timed(lap, "funding", funding_now(symbol)),
-                fees=await timed(lap, "fees", commission_bp(binance_session(), symbol)))   # 청산은 실제 포지션 심볼의 요율
+                funding_bp_8h=_val(_b[3]),
+                fees=_val(_b[4]))
         except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
             return None, ({"error": f"{type(exc).__name__}: {exc}"}, 502)
         plan_log("exit", lap, t0)
@@ -1846,7 +1874,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         # 줄었으면 그만큼 줄어든 수량이 나간다(프런트가 계산한 수량을 받지 않는 이유).
         # 2026-10-10 사용자 결정: 스위칭은 즉시 체결(청산·반대 진입 둘 다 시장가) -- 떨어지는 장에서 매도 지정가가 따라가기만 했다.
         plan, error = await assemble_exit_plan(side, frac, fresh=True, asset=query_asset(request),
-                                               market=bool(sw) or ex == "market")
+                                               market=bool(sw) or ex == "market", for_order=True)
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):
@@ -1905,7 +1933,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             if st is None:
                 r.update(error="already_working", detail="이 코인 주문이 진행 중입니다 — 끝난 뒤 다시 누르세요")
                 continue
-            plan, error = await assemble_exit_plan(side, 1.0, fresh=True, asset=asset, market=ex == "market")
+            plan, error = await assemble_exit_plan(side, 1.0, fresh=True, asset=asset, market=ex == "market", for_order=True)
             if error:
                 r.update(**error[0])
                 continue

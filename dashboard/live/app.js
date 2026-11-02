@@ -434,9 +434,10 @@ function lineFire() {   // 미리보기 → 오는 즉시 발주(manualFireOnPre
   const t = lineTool, p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), side = t && lineSide(t, p);
   if (!side || manualOrderBusy || manualPreviewInFlight) return;
   const lim = t.entry > 0;   // 지정가 = 접수가 확인될 때까지 선을 둔다(manualEntrySubmit 이 placed 로) · peg = 현행대로 바로 지운다
-  ofabWatchResult(); ofabSay(escapeHtml(`${side === "LONG" ? "롱" : "숏"} ${lim ? "지정가 " : ""}선 주문 — 미리보기 받는 중…`));
-  manualFireOnPreview = true;
-  manualEntryPreview(side, "entry", { rule: "", pct: linePct, tp: linePx(t.tp), sl: linePx(t.sl), fresh: true, limit: lim ? linePx(t.entry) : "" });
+  ofabWatchResult(); ofabSay(escapeHtml(`${side === "LONG" ? "롱" : "숏"} ${lim ? "지정가 " : ""}선 주문 — ${HOLD_FIRE_MS ? "미리보기 받는 중…" : "주문 전송 중…"}`));
+  const ov = { rule: "", pct: linePct, tp: linePx(t.tp), sl: linePx(t.sl), fresh: true, limit: lim ? linePx(t.entry) : "" };
+  if (!HOLD_FIRE_MS) manualFireNow(side, "entry", ov);   // 즉시 모드 -- 미리보기 없이 바로
+  else { manualFireOnPreview = true; manualEntryPreview(side, "entry", ov); }
   if (!lim) { lineTool = null; renderLineTool(); }
 }
 function lineToolEl(box) {
@@ -11103,18 +11104,27 @@ function manualHoldCancel(btn) {
   manualHoldPaint(btn, 0);
   if (manualHoldFire) { manualHoldFire = false; manualEntryClearConfirm(); }
 }
+// 2026-11-02 즉시 발주(HOLD_FIRE_MS = 0): 서버가 발주 때 계획을 **처음부터 다시** 조립하므로(assemble_*_plan · 계좌·호가·상한 전부) 미리보기 GET 은 발주에 필요 없다 --
+//   건너뛰고 바로 POST 한다(왕복 한 번·계획 계산 한 번·청산의 계좌 새로고침 한 번이 빠진다). 대기 파라미터는 manualEntryArmConfirm 이 만들던 것과 같다.
+//   막힘·게이트 꺼짐·포지션 없음은 서버가 같은 사유로 거절하고 manualEntrySubmit 이 «주문 실패: 사유»로 보여 준다.
+function manualFireNow(side, kind = "entry", ov = null) {
+  if (manualOrderBusy || manualPreviewInFlight) return;
+  manualEntryClearConfirm();
+  manualEntryPending = { side, kind, pct: ov?.pct ?? (kind === "exit" ? manualExitPct() : manualEntryPct()), asset: activeSnapshotAsset,
+                         lev: ov?.lev ?? manualLevEffective(),
+                         rule: kind === "exit" ? "" : (ov?.rule ?? manualRule()),
+                         fresh: !!ov?.fresh, sw: ov?.switch || null, tp: ov?.tp || "", sl: ov?.sl || "", limit: ov?.limit || "",
+                         exec: kind === "exit" ? exitExecQuery(ov) : (ov?.limit ? "&mode=limit" : ov?.tp ? "" : manualExecQuery()) };
+  manualEntrySubmit();
+}
 function manualHoldStart(btn, side, kind, ov = null) {
   if (manualOrderBusy || btn.disabled) return;
   manualHoldCancel(btn);
   manualHoldBtn = btn;
+  if (!HOLD_FIRE_MS) { manualFireNow(side, kind, ov); return; }
   manualHoldFire = true;
   // 청산은 **계좌부터 새로 읽는다**(manualExitPreview) -- 닫으려는 수량이 낡으면 안 된다.
   if (kind === "exit") manualExitPreview(side, ov); else manualEntryPreview(side, "entry");
-  if (!HOLD_FIRE_MS) {   // 즉시 모드 -- 타이머를 거치지 않는다(빠른 클릭의 pointerup 이 타이머를 지워 발주가 사라지는 것을 막는다). 미리보기가 오는 즉시 발주
-    manualHoldFire = false;
-    if (manualPreviewInFlight) manualFireOnPreview = true;
-    return;
-  }
   const t0 = performance.now();
   const step = () => {
     const r = HOLD_FIRE_MS ? Math.min(1, (performance.now() - t0) / HOLD_FIRE_MS) : 1;
@@ -11403,8 +11413,9 @@ function ofabQuickEntry(side, add) {
   ofabApplyDefaults();
   if (manualOrderBusy || manualPreviewInFlight) return ofabSay(escapeHtml(`${what} 안 함 — 진행 중인 주문·미리보기가 있습니다.`), "bad");
   ofabWatchResult();
-  ofabSay(escapeHtml(`${what} — 미리보기 받는 중…`));
+  ofabSay(escapeHtml(`${what} — ${HOLD_FIRE_MS ? "미리보기 받는 중…" : "주문 전송 중…"}`));
   clearTimeout(entrySizeDebounce);   // 기본값이 건 크기 재조회는 필요 없다(미리보기가 같은 값을 받는다)
+  if (!HOLD_FIRE_MS) return manualFireNow(side, "entry");   // 즉시 모드 -- 미리보기 없이 바로
   manualFireOnPreview = true;
   manualEntryPreview(side, "entry");
 }
