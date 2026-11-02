@@ -330,7 +330,7 @@ const API_POSITION_PROFILE_URL = "/api/position-profile";
 let latestPositionProfile = null, posProfileFetchAt = 0, posProfileInflight = false;
 // 2026-10-28 펜 메모 «체결/청산(왼쪽)과 포지션/호가(오른쪽)를 버튼으로»: 기둥 둘을 따로 고른다 -- 옛 fpCol(trade|pos|liq) 저장값을 이어받는다
 const fpColLoad = (key, old, alt, dflt) => { try { const v = localStorage.getItem(key) || (localStorage.getItem("fpCol") === old ? alt : dflt); return v === alt ? alt : dflt; } catch (e) { return dflt; } };
-let fpColL = fpColLoad("fpColL", "liq", "liq", "trade"), fpColR = fpColLoad("fpColR", "pos", "pos", "book");
+let fpColL = fpColLoad("fpColL", "liq", "liq", "trade"), fpColR = "book";   // 2026-11-02 사용자 «포지션은 비활성화» -- 포지션 기둥은 꺼 둔다(저장값 무시 · 버튼 숨김). 되살리려면 fpColLoad("fpColR", "pos", "pos", "book")
 let fpPosWin = (() => { try { const v = Number(localStorage.getItem("fpPosWin")); return v === 1 || v === 30 ? v : 7; } catch (e) { return 7; } })();
 // 2026-10-27 «청산» 기둥 기간 -- 옛 청산맵 보기의 1d·7d·30d 저장값(liqDays)을 그대로 잇는다
 let fpLiqWin = (() => { try { const v = Number(localStorage.getItem("liqDays")); return v === 7 || v === 30 ? v : 1; } catch (e) { return 1; } })();
@@ -344,7 +344,7 @@ function fpColTogEl(svg) {
   const wins = (side) => [1, 7, 30].map((d) => `<button type="button" data-win="${d}" data-side="${side}">${d}d</button>`).join("");
   el.innerHTML = `<span class="fp-col-seg fp-col-win l" role="group" aria-label="청산 기간">${wins("l")}</span>`
     + '<span class="fp-col-seg" role="group" aria-label="왼쪽 기둥"><button type="button" data-col="trade">체결</button><button type="button" data-col="liq">청산</button></span>'
-    + '<span class="fp-col-seg" role="group" aria-label="오른쪽 기둥"><button type="button" data-col="pos">포지션</button><button type="button" data-col="book">호가</button></span>'
+    + '<span class="fp-col-seg" role="group" aria-label="오른쪽 기둥"><button type="button" data-col="book">호가</button></span>'
     + `<span class="fp-col-seg fp-col-win r" role="group" aria-label="포지션 기간">${wins("r")}</span>`
     + '<span class="fp-col-seg" role="group" aria-label="SLTP 선 주문"><button type="button" data-lines="LONG" title="LONG SLTP — 익절선 위·손절선 아래로 놓고 peg 메이커로 진입(증거금 % 직접)">LONG</button>'
     + '<button type="button" data-lines="SHORT" title="SHORT SLTP — 익절선 아래·손절선 위로 놓고 peg 메이커로 진입(증거금 % 직접)">SHORT</button></span>';
@@ -359,14 +359,15 @@ function fpColTogEl(svg) {
   svg.parentElement.appendChild(el);
   return el;
 }
-function placeFpColTog(svg, xr, yTop, show) {   // xr·yTop = viewBox 좌표(체결 기둥 오른쪽 끝 · 머리 줄 위)
+function placeFpColTog(svg, xr, yTop, show, five) {   // xr·yTop = viewBox 좌표(체결 기둥 오른쪽 끝 · 머리 줄 위)
   const el = fpColTogEl(svg);
   if (!el) return;
   if (el.hidden !== !show) el.hidden = !show;
   if (!show) return;
   el.querySelectorAll("[data-col]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.col === fpColL || b.dataset.col === fpColR)));
   el.querySelectorAll("[data-win]").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.win) === (b.dataset.side === "l" ? fpLiqWin : fpPosWin))));
-  el.querySelector(".fp-col-win.l").hidden = fpColL !== "liq"; el.querySelector(".fp-col-win.r").hidden = fpColR !== "pos";
+  el.querySelector(".fp-col-win.l").hidden = !five && fpColL !== "liq"; el.querySelector(".fp-col-win.r").hidden = fpColR !== "pos";
+  el.querySelectorAll('[aria-label="왼쪽 기둥"], [aria-label="오른쪽 기둥"]').forEach((g) => { g.hidden = !!five; });   // 2026-11-02 데스크톱 5칸은 칸 전환이 없다(청산 기간 1·7·30d 와 LONG/SHORT 만)
   const m = svg.getScreenCTM(), pr = el.parentElement.getBoundingClientRect();
   if (!m) return;
   const L = Math.round(m.a * xr + m.e - pr.left) + "px", T = Math.round(m.d * yTop + m.f - pr.top) + "px";
@@ -6615,18 +6616,24 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   이름이 같아도 값이 다르다. 툴팁에 창을 적는다.
   // 2026-09-27 풋프린트 오른쪽 «실시간 호가 띠»(사용자 지시) -- 캔들 폭에서 띠 폭을 뗀다(데스크톱 70 · 모바일 40).
   // 2026-09-27 넓혔다(사용자 «호가 너비를 키워줘») -- 오른쪽 배지 자리(86px)를 띠에 줬다: 70 -> 148 · 모바일 40 -> 56.
-  const BOOK_W = footprint ? (mobileChart ? (PROF_H ? 0 : 56) : 104) : 0;   // 2026-10-29 140 -> 104(펜 메모 «차트를 오른쪽으로 키우고 박스 오른쪽 너비는 줄여») · 2026-09-30 148 -> 112 -> 140(꼬리표 칸을 없애 돌려줌)(사용자 «차트·프로파일을 조금 줄여도 데이터가 다 보이게»)   // 모바일은 수량 글자 없이
+  const PS = w >= 1000 ? 1 : 0.76;   // 2026-11-02 5칸(시안 3) -- 좁은 창은 칸을 줄인다
+  const BOOK_W = footprint ? (mobileChart ? (PROF_H ? 0 : 56) : Math.round(84 * PS)) : 0;   // 2026-10-29 140 -> 104(펜 메모 «차트를 오른쪽으로 키우고 박스 오른쪽 너비는 줄여») · 2026-09-30 148 -> 112 -> 140(꼬리표 칸을 없애 돌려줌)(사용자 «차트·프로파일을 조금 줄여도 데이터가 다 보이게»)   // 모바일은 수량 글자 없이
   // 2026-09-28 체결 기둥(사용자 선택 시안 B) -- 풋프린트와 호가 띠 사이 150px. 모바일은 기둥 없이 셀 뒤에 깐다(시안 A).
-  const TRADE_W = footprint && !mobileChart ? 104 : 0;   // 2026-10-29 140 -> 104(같은 펜 메모 -- 캔들 칸 +72px) · 2026-09-30 150 -> 112 -> 140
+  const TRADE_W = footprint && !mobileChart ? Math.round(88 * PS) : 0;   // 2026-10-29 140 -> 104(같은 펜 메모 -- 캔들 칸 +72px) · 2026-09-30 150 -> 112 -> 140
   // 2026-09-30 가격 꼬리표 칸(사용자 «왼쪽 라벨을 오른쪽으로, 겹치지 않게»): 캔들 칸과 체결 기둥 사이 120px.
   //   가격 선·레벨의 이름+가격을 여기 세로로 쌓고(겹침 회피) 실제 가격 행까지 지시선을 긋는다. 오른쪽 끝 30px 는 행사가 감마 막대.
   // 2026-09-30 가격 이름 = 시안 C(사용자 선택): 꼬리표 칸을 없애(폭은 체결·호가 띠로) 플롯 안 오른쪽 끝에 **짧은 약어**(R1·S1·MP·1h·5m·VW·ΓF·HL롱),
   //   이름·가격은 마우스를 올리면. 현재가는 상자 없이 **숫자만** 크게(바탕 외곽선).
   const LBL = "C";
-  const cw = w - ml - mr - BOOK_W - TRADE_W;
-  const tradeX0 = ml + cw;   // 체결 기둥 왼쪽 끝
+  // 2026-11-02 사용자 «시안 3» -- 데스크톱 프로파일 5칸 한 줄: [캔들][청산][체결][델타][TPO][호가]. 체결은 오른쪽 바닥선에서 왼쪽으로, 호가·TPO 는 왼쪽 바닥선에서 오른쪽으로 자란다.
+  const LIQ_C = TRADE_W ? Math.round(72 * PS) : 0, DT_W = TRADE_W ? Math.round(64 * PS) : 0, DT_G = 6;
+  const REG_W = TRADE_W ? LIQ_C + TRADE_W + 2 * DT_W + BOOK_W + 4 * DT_G + 2 : BOOK_W;   // 프로파일 영역 전체 폭
+  const cw = w - ml - mr - REG_W;
+  const tradeX0 = ml + cw;   // 프로파일 영역 왼쪽 끝(캔들 플롯 오른쪽 끝)
+  const cBook = w - mr - BOOK_W + 6, cTpo = cBook - DT_G - DT_W, cDel = cTpo - DT_G - DT_W, tAnc = cDel - DT_G;   // 호가·TPO·델타 왼쪽 끝 · 체결 바닥선(데스크톱)
   fpProfileSpan = TRADE_W ? [tradeX0, w - mr] : null;   // 아래 옵션 줄 가운데 칸이 이 폭·x 를 따른다(optRowCols)
   let tradeInfo = null;       // 체결 행(호버가 읽는다) -- 풋프린트 블록이 채운다
+  let dtInfo = null;          // 2026-11-02 델타·TPO 행(호버가 읽는다)
   let stackItem = null, liqLive = null, cellTip = () => "";   // 2026-10-20 형성 봉 갱신(fpCv.live)이 다시 부르는 봉별 칠하기 · 칸 호버 줄
   let posInfo = null;         // 2026-10-10 포지션 행(호버가 읽는다) -- 포지션 보기일 때 체결 대신
   let liqInfo = null;         // 2026-10-27 청산 행(호버가 읽는다) -- 청산 보기일 때 체결 대신
@@ -7088,13 +7095,13 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     //   풋프린트 가격 폭이 좁아 대부분이 화면 밖이다 -- 위·아래 끝에 «화면 밖 몫», 기둥 왼쪽 10px 에 창 전체 미니맵 + 보이는 범위 괄호.
     //   🔴지도다. 덩어리 저항·재방문·고통 지수는 매매 검정 불통과(= VWAP 평균회귀 재표현, 2026-10-09).
     //   2026-10-27 휴대폰(사용자 «모바일도 체결/포지션/청산 프로파일»): 같은 기둥을 아래 칸(PROF) 왼쪽 절반에 -- colX0·colW·pTop·pBot·pyAt 이 그 자리다.
-    const colX0 = PROF ? ml + 2 : tradeX0, colW = PROF ? PROF.cx - PROF_GAP - 4 - colX0 : TRADE_W;
+    const colX0 = PROF ? ml + 2 : tradeX0 + 4, colW = PROF ? PROF.cx - PROF_GAP - 4 - colX0 : LIQ_C;   // 데스크톱 = 5칸 맨 왼쪽 청산 칸
     //   2026-10-28 펜 메모: 왼쪽 기둥(colX0·colW) = 체결|청산 · 오른쪽(호가 띠 자리 bkX0·bkW) = 포지션|호가 -- 포지션 그림은 자리만 바꿔 같은 코드
-    const bkX0 = PROF ? PROF.cx + PROF_GAP : tradeX0 + TRADE_W + 6, bkW = PROF ? w - mr - bkX0 - 8 : BOOK_W - 10;   // = 아래 bookInfo 의 x0·L
-    const posOn = !!((TRADE_W || PROF) && (BOOK_W || PROF) && fpColR === "pos" && flowOn()), liqOn = !!((TRADE_W || PROF) && fpColL === "liq" && flowOn());
-    post.push(() => placeFpColTog(svg, w - mr, PROF ? h + SUB_GAP + 2 : mt - 16, !!((TRADE_W || PROF) && flowOn()
+    const bkX0 = PROF ? PROF.cx + PROF_GAP : TRADE_W ? cBook : tradeX0 + TRADE_W + 6, bkW = PROF ? w - mr - bkX0 - 8 : BOOK_W - 10;   // = 아래 bookInfo 의 x0·L
+    const posOn = !!((TRADE_W || PROF) && (BOOK_W || PROF) && fpColR === "pos" && flowOn()), liqOn = !!((TRADE_W || (PROF && fpColL === "liq")) && flowOn());
+    post.push(() => placeFpColTog(svg, TRADE_W && !PROF ? colX0 - 2 : w - mr, PROF ? h + SUB_GAP + 2 : mt - 16, !!((TRADE_W || PROF) && flowOn()
       && !(typeof window.fpBubbleActive === "function" && window.fpBubbleActive())
-      && !(typeof window.fpDailyActive === "function" && window.fpDailyActive()))));   // 버블·일봉이 덮을 땐 숨김 · 화면 상자를 재므로 끝에서(post)
+      && !(typeof window.fpDailyActive === "function" && window.fpDailyActive())), !!TRADE_W && !PROF));   // 버블·일봉이 덮을 땐 숨김 · 화면 상자를 재므로 끝에서(post)
     if (posOn) {
       const colX0 = bkX0, colW = bkW;   // 오른쪽 기둥(호가 자리)에 -- 바닥선 = 기둥 오른쪽 끝, 왼쪽으로 자란다
       const P = latestPositionProfile, W = P && P.win && P.win[String(fpPosWin)];
@@ -7291,7 +7298,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       ln.setAttribute("stroke", "var(--soft-line)"); g.appendChild(ln);
       svg.appendChild(g);
     }
-    if (!liqOn) {
+    if (!liqOn || TRADE_W) {
       const tr = new Map();   // 행 키 -> [총, 고래, 리테일, 매수, 매도]
       candles.forEach((c) => (footprint.byTime.get(c.time) || []).forEach((l) => {
         const k = rowOf(l[0]), a = tr.get(k) || [0, 0, 0, 0, 0];
@@ -7302,9 +7309,9 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       let tmax = 0, pocK = null;
       tr.forEach((a, k) => { if (a[0] > tmax) { tmax = a[0]; pocK = k; } });
       if (tmax > 0) {
-        const anchor = PROF ? PROF.cx - PROF_GAP : TRADE_W ? tradeX0 + TRADE_W + 4 : ml - 2;   // 데스크톱 = 호가 띠 바닥선 2px 앞 · 모바일 = 아래 칸 등뼈 왼쪽(왼쪽으로 자란다)
+        const anchor = PROF ? PROF.cx - PROF_GAP : TRADE_W ? tAnc : ml - 2;   // 데스크톱 = 호가 띠 바닥선 2px 앞 · 모바일 = 아래 칸 등뼈 왼쪽(왼쪽으로 자란다)
         const L = PROF ? anchor - ml - 2 : TRADE_W ? TRADE_W - 10 : TRADE_L - 6, alpha = 1;
-        tradeInfo = { rows: tr, rowSize, off, max: tmax, pocK, x0: PROF ? ml : TRADE_W ? tradeX0 : ml - TRADE_L, x1: anchor };
+        tradeInfo = { rows: tr, rowSize, off, max: tmax, pocK, x0: PROF ? ml : TRADE_W ? tAnc - TRADE_W : ml - TRADE_L, x1: anchor };
         const g = document.createElementNS(NS, "g");
         tr.forEach((a, k) => {
           const yTop = Math.max(pTop, pyAt(rowLo(k + 1))), yBot = Math.min(pBot, pyAt(rowLo(k)));
@@ -7348,6 +7355,56 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           g.appendChild(ln);
         }
         svg.appendChild(g);                        // 셀보다 먼저
+      }
+    }
+    if (TRADE_W && !PROF) {   // 2026-11-02 델타·TPO 칸(사용자 선택 시안 3) -- 체결 기둥과 같은 행 격자·같은 보이는 봉. 참고용이며 지지·저항 신호가 아니다
+      const dt = new Map();   // 행 키 -> [델타(매수−매도), TPO(그 가격에 체결이 있던 봉 수)]
+      candles.forEach((c) => {
+        const seen = new Set();
+        (footprint.byTime.get(c.time) || []).forEach((l) => {
+          const k = rowOf(l[0]), a = dt.get(k) || [0, 0];
+          a[0] += (+l[1] || 0) - (+l[2] || 0);
+          if (!seen.has(k)) { seen.add(k); a[1]++; }
+          dt.set(k, a);
+        });
+      });
+      let dMax = 0, tMax = 0, tK = null, tSum = 0, kLo = Infinity, kHi = -Infinity;
+      dt.forEach((a, k) => { dMax = Math.max(dMax, Math.abs(a[0])); tSum += a[1]; if (a[1] > tMax) { tMax = a[1]; tK = k; } kLo = Math.min(kLo, k); kHi = Math.max(kHi, k); });
+      if (tMax > 0) {
+        // 가치 영역 = TPO 최다 행에서 위·아래 중 큰 쪽을 붙여 가며 전체 TPO 의 70% 까지
+        let up = tK, dn = tK, acc = tMax;
+        while (acc < 0.7 * tSum && (up < kHi || dn > kLo)) {
+          const u = up < kHi ? (dt.get(up + 1) || [0, 0])[1] : -1, d = dn > kLo ? (dt.get(dn - 1) || [0, 0])[1] : -1;
+          if (u >= d) { up++; acc += Math.max(u, 0); } else { dn--; acc += Math.max(d, 0); }
+        }
+        const dX0 = cDel, tX0 = cTpo, dMid = dX0 + DT_W / 2;
+        dtInfo = { rows: dt, rowSize, off, x0: dX0, x1: tX0 + DT_W, dX1: dX0 + DT_W, nBars: candles.length, tK, vaLo: dn, vaHi: up, dMax, tMax };
+        const g = document.createElementNS(NS, "g");
+        const mkR = (x, y, wd, hh, fill, op) => {
+          const r = document.createElementNS(NS, "rect");
+          r.setAttribute("x", x); r.setAttribute("y", y); r.setAttribute("width", wd); r.setAttribute("height", hh);
+          r.setAttribute("fill", fill); r.setAttribute("fill-opacity", op); g.appendChild(r); return r;
+        };
+        const vaT = Math.max(pTop, pyAt(rowLo(up + 1))), vaB = Math.min(pBot, pyAt(rowLo(dn)));
+        if (vaB > vaT) mkR(dX0, vaT, tX0 + DT_W - dX0, vaB - vaT, "var(--accent)", 0.07);
+        dt.forEach((a, k) => {
+          const yTop = Math.max(pTop, pyAt(rowLo(k + 1))), yBot = Math.min(pBot, pyAt(rowLo(k)));
+          if (yBot - yTop < 1) return;
+          const hh = Math.max(1, yBot - yTop - 1), dw = dMax > 0 ? (DT_W / 2 - 1) * Math.abs(a[0]) / dMax : 0, tw = DT_W * a[1] / tMax;
+          if (dw > 0.5) mkR(a[0] >= 0 ? dMid : dMid - dw, yTop + 0.5, dw, hh, a[0] >= 0 ? "var(--good)" : "var(--bad)", 0.85);
+          const inVa = k >= dn && k <= up;
+          mkR(tX0, yTop + 0.5, tw, hh, "var(--accent)", inVa ? 0.55 : 0.28);
+          if (k === tK) { const o = mkR(tX0, yTop + 0.5, tw, hh, "none", 1); o.setAttribute("stroke", "var(--ink)"); o.setAttribute("stroke-width", "1.2"); o.setAttribute("stroke-opacity", "0.9"); }
+          if (a[1] === 1) { const c1 = document.createElementNS(NS, "circle"); c1.setAttribute("cx", tX0 + tw + 4); c1.setAttribute("cy", (yTop + yBot) / 2); c1.setAttribute("r", 1.8); c1.setAttribute("fill", "var(--accent)"); g.appendChild(c1); }
+        });
+        const ax = document.createElementNS(NS, "line");   // 델타 0 선
+        ax.setAttribute("x1", dMid); ax.setAttribute("x2", dMid); ax.setAttribute("y1", pTop); ax.setAttribute("y2", pBot); ax.setAttribute("stroke", "var(--soft-line)"); g.appendChild(ax);
+        [[colX0, "청산"], [tAnc - TRADE_W, "체결"], [dX0, "델타"], [tX0, "TPO"], [cBook, "호가"]].forEach(([x, s]) => {
+          const t = document.createElementNS(NS, "text");
+          t.setAttribute("x", x); t.setAttribute("y", pTop - 4); t.setAttribute("font-size", "9"); t.setAttribute("font-weight", "700"); t.setAttribute("fill", "var(--muted)");
+          t.setAttribute("paint-order", "stroke"); t.setAttribute("stroke", "var(--chart-bg)"); t.setAttribute("stroke-width", "3"); t.textContent = s; g.appendChild(t);
+        });
+        svg.appendChild(g);
       }
     }
     if (PROF) {   // 아래 프로파일 칸 가운데 등뼈 = 위·아래 끝 가격 + 현재가 점선(차트와 같은 범위라 높이로 맞대 읽는다)
@@ -8649,6 +8706,21 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         + `<br><span style="opacity:.7">추정 청산맵(최근 ${liqInfo.win}일 · 가격이 지나간 칸은 지움) · 실측 아님 · 지도로만</span></div>`);
       return;
     }
+    // 2026-11-02 델타·TPO 칸 위면 그 가격 행의 풀이
+    if (dtInfo && !PROF && mx > dtInfo.x0 && mx < dtInfo.x1) {
+      vLine.style.display = "none";
+      const k = Math.floor((priceAtY + dtInfo.off) / dtInfo.rowSize), a = dtInfo.rows.get(k);
+      if (!a) { hideTooltip(); return; }
+      const fq = (q) => (Math.abs(q) >= 1000 ? (q / 1000).toFixed(1) + "k" : Math.abs(q) >= 10 ? q.toFixed(0) : q.toFixed(1));
+      const rs = dtInfo.rowSize, o = dtInfo.off, dp = Math.max(pxDp(), (String(o).split(".")[1] || "").length);
+      showTooltip(evt.pageX, evt.pageY, `<div style="white-space:normal;max-width:min(360px,calc(100vw - 24px))">`
+        + `${(k * rs - o).toFixed(dp)}–${((k + 1) * rs - o).toFixed(dp)}`
+        + `<br><span style="color:${a[0] >= 0 ? "var(--good)" : "var(--bad)"};font-weight:700">델타 ${a[0] >= 0 ? "+" : "−"}${fq(Math.abs(a[0]))} ${coinUnit()}</span> (${a[0] >= 0 ? "매수" : "매도"} 우위 · 테이커 기준)`
+        + `<br><span style="font-weight:700">TPO ${a[1]}/${dtInfo.nBars}봉</span> — 이 가격에 체결이 있던 봉 수`
+        + (k === dtInfo.tK ? ` · 최다(POC)` : "") + (k >= dtInfo.vaLo && k <= dtInfo.vaHi ? ` · 가치 영역(70%) 안` : ` · 가치 영역 밖`) + (a[1] === 1 ? ` · 한 번만 지난 가격` : "")
+        + `<br><span style="opacity:.7">보이는 봉 ${dtInfo.nBars}개 합 · 30분 문자표 TPO 가 아니라 5분봉 수 · 참고, 신호 아님</span></div>`);
+      return;
+    }
     // 2026-09-28 체결 기둥 위면 그 가격 행의 체결 풀이(데스크톱 기둥 · 모바일 왼쪽 띠).
     if (tradeInfo && (inProf ? mx < PROF.cx : !PROF && mx > tradeInfo.x0 && mx < tradeInfo.x1 + 2)) {   // 휴대폰 tradeInfo.x 는 아래 칸 자리
       vLine.style.display = "none";
@@ -8669,7 +8741,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       return;
     }
     // 2026-09-27 호가 띠 위면 봉 툴팁 대신 **호가 해석** -- 커서 가격의 칸(없으면 가장 가까운 칸).
-    if (bookInfo && !bookHidden && (inProf ? mx >= PROF.cx : mx > tradeX0 && mx <= w - mr)) {
+    if (bookInfo && !bookHidden && (inProf ? mx >= PROF.cx : (TRADE_W ? mx >= cBook - 4 : mx > tradeX0) && mx <= w - mr)) {
       vLine.style.display = "none";
       const priceAt = priceAtY;
       let best = null;
@@ -8677,7 +8749,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       if (best && Math.abs(best.p - priceAt) <= bookInfo.bs) { showTooltip(evt.pageX, evt.pageY, bookTipHtml(best)); return; }
       hideTooltip(); return;
     }
-    if (inProf || mx < ml || mx > w - mr || (!PROF && TRADE_W && mx > tradeX0)) { vLine.style.display = "none"; hideTooltip(); return; }   // 10-28 기둥 칸 빈 곳 = 봉 툴팁 아님
+    if (inProf || mx < ml || mx > w - mr || (!PROF && TRADE_W && mx > ml + cw)) { vLine.style.display = "none"; hideTooltip(); return; }   // 10-28 기둥 칸 빈 곳 = 봉 툴팁 아님
 
     const idx = Math.min(candles.length - 1, Math.max(0, Math.floor((mx - ml) / slot - X0)));
     const c = candles[idx];
@@ -8742,7 +8814,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     // 2026-09-28 호가 칸을 **풋프린트(체결 기둥)와 같은 행**으로 묶는다(사용자 «y축이 벌어지면 막대가 작아진다») --
     //   0.5달러 칸 그대로면 창이 넓을 때 한 칸이 2~3px 로 눌렸다. 행 안에서 수량·버틴 양·재깔림(refill·peak)은 더하고,
     //   매수·매도가 한 행에 섞이면(현재가 행) 큰 쪽으로 칠한다. ○(접근행동)는 행 안 **가장 얇아진** 값(approachAt).
-    const bin = book.bin_size, bs = Math.max(bin, fpRowSize || bin), x0 = PROF ? PROF.cx + PROF_GAP : tradeX0 + TRADE_W + 6, L = PROF ? w - mr - x0 - 8 : BOOK_W - 10;   // 휴대폰 = 아래 칸 등뼈 오른쪽(◌ 자리 8)
+    const bin = book.bin_size, bs = Math.max(bin, fpRowSize || bin), x0 = PROF ? PROF.cx + PROF_GAP : TRADE_W ? cBook : tradeX0 + TRADE_W + 6, L = PROF ? w - mr - x0 - 8 : BOOK_W - 10;   // 휴대폰 = 아래 칸 등뼈 오른쪽(◌ 자리 8)
     const accAt = (key, p) => {               // 축적 통계는 창 전체를 접은 행 배열이라 제 격자(bin_lo) -- 가격으로 찾는다
       if (!acc || !acc[key] || !(acc.bin_size > 0)) return 0;
       const i = Math.round(p / acc.bin_size) - acc.bin_lo;
@@ -8786,7 +8858,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // 네 막대 계기 자리(그림과 호버가 같이 쓴다). 데스크톱 = 기둥 머리(체결 기둥 왼쪽 끝 ~ 오른쪽 여백), 모바일 = 풋프린트 위 한 줄.
   const statsGeo = bookInfo && !(TRADE_W && splitR && flowOn()) ? (() => {   // 2026-09-30 넓은 화면은 ④로 옮겼다(2026-10-04 SOL·XRP 도)
     if (TRADE_W && !splitR) {   // 2026-10-30 1단 데스크톱: 기둥 머리(체결·청산|포지션·호가 토글)와 같은 자리에 겹쳤다 → 캔들 칸 오른쪽 위
-      const rm = Math.round(Math.min(280, (tradeX0 - ml) * 0.3)), sx1 = tradeX0 - 12 - rm;
+      const rm = Math.round(Math.min(280, (tradeX0 - ml) * 0.3)), sx1 = tradeX0 - 12 - rm - 100;   // 2026-11-02 -100 = 청산 기간 버튼(1d 7d 30d)이 청산 칸 왼쪽 위에 앉는 자리
       return { sx: sx1, slotW: rm / 4, labY: mt - 14, barY: mt - 11, y0: mt - 24, y1: mt - 2 };
     }
     const sx = TRADE_W ? tradeX0 + 6 : ml, room = (TRADE_W ? w - mr : PROF ? w - mr - 60 : bookInfo.x0 - 8) - sx;   // 휴대폰 아래 칸이면 오른쪽 끝 60 = 맨 위 레벨 꼬리표(max pain 등) 자리
@@ -9205,7 +9277,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       const v = bh >= 60 ? `${bh}px` : "0px"; if (mcBubbleEl.style.height !== v) mcBubbleEl.style.height = v; mcBubbleEl.hidden = bh < 60; }
     post.push(() => mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1Hd + 12, w: subW - 16, h: floorY - (sub1sY + s1Hd + 12) } : null,
             mcSplit && TRADE_W ? (() => { const y = plotBottom + 12;   // 2026-10-01(4) 프로파일 아래 = 2026-10-04 모의 판(renderPaper 가 채운다)
-              return { x: ml + cw + 4, y, w: TRADE_W + BOOK_W - 8, h: floorY - y }; })() : null));   // 10-26 레인 값 칸(옛 LANE_VAL_W 144)을 빼 지지/저항 칸이 제자리로
+              return { x: tradeX0 + 4, y, w: REG_W - 8, h: floorY - y }; })() : null));   // 10-26 레인 값 칸(옛 LANE_VAL_W 144)을 빼 지지/저항 칸이 제자리로
     supply1sSubBox = {
       svg: subSvg("s1", subX, sub1sY, subW, s1Hd, sub1sKey(subW, s1Hd),
                   (g) => renderSupply1s({ svg: g, w: subW, h: s1Hd })),
