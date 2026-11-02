@@ -3446,3 +3446,6 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
 .lt-tag.lt-mini { padding: 2px 7px 2px 5px; gap: 3px; border-radius: 999px; font: 700 11.5px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; }
 .lt-tag.lt-mini .lt-grip { width: 4px; height: 8px; }
 .lt-tag.en.lt-mini { transform: translateY(-50%); width: auto; }
+
+/* 2026-11-03 SLTP 추가 진입(기존 익절·손절선 그대로): 도구 쪽 선·꼬리표·띠·손익비 버튼은 숨긴다 -- 들어간 선(#lineArmed)이 이미 그린다 */
+.lt.lt-add .lt-zone, .lt.lt-add .lt-ln.tp, .lt.lt-add .lt-ln.sl, .lt.lt-add .lt-tag.tp, .lt.lt-add .lt-tag.sl, .lt.lt-add .lt-rrb { display: none; }

@@ -1381,9 +1381,16 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             _lv = (_rx.get("exchange_leverage") or {}) if _rx.get("available") else {}
             plan["bracket"] = stop_bracket
             if lines:   # 2026-10-28 차트 선(익절, 손절 · USDT): 거래소 스탑 없이 익절 = post-only 지정가 · 손절 = 1초 체결가 닿음 → peg 청산
+                add_lines = False
                 if same:
-                    return None, {}, {}, ({"error": "lines_has_position",
-                                           "detail": "같은 쪽 포지션이 이미 있어 선 진입을 막습니다 — 그 포지션의 손절을 바꾸지 않게(닫은 뒤 다시)"}, 409)
+                    # 2026-11-03 사용자 «SLTP 로 추가 진입 -- 손절/익절 라인은 그대로 유지»: 같은 쪽 **선 포지션**이면 크기만 늘린다. 보낸 선은 무시하고 무장된 선(레벨·주문가)을 그대로 쓴다.
+                    #   체결되면 place_bracket 이 옛 익절 지정가를 지우고 같은 가격으로 **합친 전량**에 다시 건다(물타기와 같은 길). 선 없는 포지션(규칙·앱)·손절 해제·청산 진행 중이면 예전처럼 막는다.
+                    ok_prev = bool(prev and prev.get("lines") and prev.get("tp_level") and prev.get("sl_level") and prev.get("tp_price") and prev.get("sl_price")
+                                   and not prev.get("sl_off") and not prev.get("fired") and bracket_key(symbol, side) not in bracket_exiting)
+                    if not ok_prev:
+                        return None, {}, {}, ({"error": "lines_has_position",
+                                               "detail": "같은 쪽 포지션이 이미 있어 선 진입을 막습니다 — 선 주문으로 연 포지션만 크기를 늘릴 수 있습니다(손절 해제·청산 진행 중이면 불가). 닫은 뒤 다시"}, 409)
+                    lines, add_lines = (float(prev["tp_level"]), float(prev["sl_level"])), True
                 if sec_prices(asset) is None:
                     return None, {}, {}, ({"error": "lines_no_feed", "detail": "이 코인은 1초 체결가가 없어 선 손절을 감시할 수 없습니다"}, 400)
                 b_ = await timed(lap, "basis", basis_for(book, asset))
@@ -1391,7 +1398,13 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                     plan["bracket"] = line_bracket(position_side=side, ref_level=limit_usdt or p_in / b_, tp_level=lines[0], sl_level=lines[1],
                                                    basis=b_, filters=filters)
                 except ValueError as exc:
-                    return None, {}, {}, ({"error": "bad_lines", "detail": str(exc)}, 400)
+                    return None, {}, {}, ({"error": "bad_lines" if not add_lines else "add_lines_out_of_range",
+                                           "detail": str(exc) if not add_lines else f"기존 선이 지금가 기준으로 맞지 않아 추가 진입을 막습니다 — {exc}"}, 400)
+                if add_lines:   # 검사만 새 지금가로 했다 -- 걸리는 가격은 처음 무장한 값 그대로(basis 가 움직여도 선이 안 밀린다)
+                    plan["bracket"].update(tp_price=prev["tp_price"], sl_price=prev["sl_price"], tp_level=prev["tp_level"], sl_level=prev["sl_level"],
+                                           sl_name=prev.get("sl_name") or plan["bracket"].get("sl_name"))
+                    plan["add_lines"] = True
+                    plan["notes"] = [*plan.get("notes", []), "추가 진입 — 기존 익절·손절선 그대로, 합친 전량에 익절 지정가를 다시 겁니다"]
                 if limit_usdt:   # 2026-10-31 지정가 진입: 주문가 = 진입선(USDT) × basis · 롱은 내림 · 숏은 올림(메이커 쪽) · 호가를 넘으면(= 지금 체결) 막는다 · 명목은 지금가 크기 그대로 유지(수량만 가격비로 재계산)
                     tick, step = filters.get("tick") or 0.01, filters["step"]
                     lp = round((math.floor(limit_usdt * b_ / tick + 1e-9) if side == "LONG" else math.ceil(limit_usdt * b_ / tick - 1e-9)) * tick, 8)

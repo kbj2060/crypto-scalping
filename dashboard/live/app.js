@@ -405,7 +405,13 @@ function lineToolToggle(want) {   // 2026-10-30 사용자 «롱만 나오고 숏
   if (lineTool && lineTool.placed) return;   // 대기 주문이 걸린 동안은 «주문 취소»로만 끈다
   if (lineTool && cur === want) { lineTool = null; renderLineTool(); return; }   // 같은 쪽을 다시 누르면 끈다
   if (!G || !(G.ymax > G.ymin) || !(p > 0)) return;
-  if (cur) Object.assign(lineTool, { tp: Math.max(0.01, 2 * p - lineTool.tp), sl: Math.max(0.01, 2 * p - lineTool.sl), entry: lineTool.entry ? Math.max(0.01, 2 * p - lineTool.entry) : null, plan: null, err: "", arm: 0 });   // 반대쪽 = 지금가 기준 거울(거리 그대로)
+  if (lineTool && lineTool.add) lineTool = null;   // 추가 진입 도구에서 반대쪽을 누르면 새 선 도구로(기존 선은 거울로 못 옮긴다)
+  const arm = armedLinesNow();
+  if (!lineTool && arm && arm.side === want) {   // 2026-11-03 사용자 «SLTP 로 추가 진입 · 손절/익절 라인은 그대로»: 같은 쪽 선 포지션이면 무장된 선을 그대로 잡고 크기만 늘린다(서버도 보낸 선을 무시하고 무장된 선을 쓴다)
+    lineTool = { tp: arm.b.tp_level, sl: arm.b.sl_level, plan: null, err: "", asset: activeSnapshotAsset, add: true };
+    renderLineTool(); linePreview(); return;
+  }
+  if (cur && lineTool) Object.assign(lineTool, { tp: Math.max(0.01, 2 * p - lineTool.tp), sl: Math.max(0.01, 2 * p - lineTool.sl), entry: lineTool.entry ? Math.max(0.01, 2 * p - lineTool.entry) : null, plan: null, err: "", arm: 0 });   // 반대쪽 = 지금가 기준 거울(거리 그대로)
   else {
     const up = p + 0.6 * (G.ymax - p), dn = p - 0.6 * (p - G.ymin), sh = want === "SHORT";
     lineTool = { tp: sh ? dn : up, sl: sh ? up : dn, plan: null, err: "", asset: activeSnapshotAsset };
@@ -648,6 +654,8 @@ function renderLineTool() {
   h.hidden = !show;
   if (!show) return;
   const t = lineTool, pr = box.getBoundingClientRect(), mob = isMobileChartMode();
+  if (t.add && !armedLinesNow()) t.add = false;   // 추가할 포지션이 사라졌으면(청산) 보통 선 도구로
+  h.classList.toggle("lt-add", !!t.add);   // 추가 진입: 익절·손절선은 기존 것 그대로라 도구 쪽 선·꼬리표·손익비 버튼은 숨긴다(들어간 선 오버레이가 이미 그린다)
   const X = (x) => m.a * x + m.e - pr.left, Yv = (v) => G.mt + (G.ymax - v) * (G.pb - G.mt) / (G.ymax - G.ymin);
   const top = m.d * G.mt + m.f - pr.top, bot = m.d * G.pb + m.f - pr.top, Y = (v) => m.d * Yv(v) + m.f - pr.top;
   const clampY = (y) => Math.min(bot, Math.max(top, y));
@@ -680,7 +688,7 @@ function renderLineTool() {
     : `진입 peg ${lineFmt(p)} — 끌면 지정가`;
   // 2026-11-03 시안 B: 진입 꼬리표 = 포지션만(작은 알약, 진입선 왼쪽 끝). 체결 기둥·청산 프로파일 칸(lane)으로 안 들어간다. 대기 중이면 «대기»와 취소 ✕ 는 그대로.
   en.classList.add("lt-mini"); en.classList.remove("lane"); en.style.width = "";
-  en.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${side === "SHORT" ? "SHORT" : "LONG"}${lim && t.placed ? " 대기" : ""}`
+  en.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${side === "SHORT" ? "SHORT" : "LONG"}${t.add ? " 추가" : ""}${lim && t.placed ? " 대기" : ""}`
     + (lim && t.placed ? `<span class="lt-tx" role="button" tabindex="0" aria-label="지정가 주문 취소" title="주문 취소">✕</span>` : "");
   en.setAttribute("aria-label", lim ? `지정가 진입선 ${lineFmt(ref)} — 위아래로 끌어 옮기기` : "지금가 peg 진입선 — 끌어서 지정가로 바꾸기");
   h.classList.toggle("short", side === "SHORT");
@@ -691,7 +699,7 @@ function renderLineTool() {
   Object.assign(tk.style, { left: L + 8 + "px", top: Math.max(top + 8, Math.min(g[0], bot - th)) + "px" });
   const sd = h.querySelector(".lt-side");
   const levNow = Number(t.plan?.target_leverage) || Number(manualLevEffective()) || 0;
-  sd.textContent = side ? `${side === "SHORT" ? "숏" : "롱"}${levNow ? ` · ${levNow}×` : ""}` : "방향 없음"; sd.className = `lt-side ${side === "SHORT" ? "bad" : side ? "good" : ""}`;
+  sd.textContent = side ? `${side === "SHORT" ? "숏" : "롱"}${t.add ? " 추가" : ""}${levNow ? ` · ${levNow}×` : ""}` : "방향 없음"; sd.className = `lt-side ${side === "SHORT" ? "bad" : side ? "good" : ""}`;
   h.querySelector(".lt-qty").textContent = side && !t.err ? (qty ? `${qty} ${unit}` : "크기 계산 중…") : "";
   const rr = side ? Math.abs((t.tp - ref) / (t.sl - ref)) : 0, rrEl = h.querySelector(".lt-rr");
   h.querySelectorAll("[data-rr]").forEach((b) => b.setAttribute("aria-pressed", String(!!side && Math.abs(rr - Number(b.dataset.rr)) < 0.05)));   // 지금가가 움직이면 비율도 조금씩 변한다(peg 진입가 = 그때 지금가)
@@ -709,14 +717,14 @@ function renderLineTool() {
   if (!rk.hidden) rk.innerHTML = `손절 시 −$${loss.toFixed(1)}${eq > 0 ? ` <span>= 순자산</span> −${(100 * loss / eq).toFixed(2)}%` : ""}`;
   const szParts = !side || t.err || !pl ? [] : [`레버리지 ${levNow ? levNow + "×" : "-"}`, ...(eq > 0 ? [`명목 ${(nt / eq).toFixed(2)}×`] : [])];   // 항목 단위로만 줄바꿈(숫자뿐)
   h.querySelector(".lt-sz").innerHTML = szParts.map((x) => `<span>${x}</span>`).join("");
-  rrEl.textContent = t.err || (side ? `손익비 ${rr.toFixed(2)} : 1` : "");
+  rrEl.textContent = t.err || (t.add ? "기존 익절·손절선 그대로 · 크기만 늘림" : side ? `손익비 ${rr.toFixed(2)} : 1` : "");
   rrEl.classList.toggle("bad", !!t.err);
   const go = h.querySelector(".lt-go"), armed = Date.now() < (t.arm || 0);
   go.disabled = !side || !!t.err || !qty || !!t.placed;
   go.classList.toggle("short", side === "SHORT"); go.classList.toggle("armed", armed);   // className 을 덮으면 꾹 채움(hold)이 매초 지워진다
   go.innerHTML = t.placed ? `✓ ${side === "LONG" ? "롱" : "숏"} 지정가 대기 중`
     : armed ? `확인: ${side === "LONG" ? "롱" : "숏"} ${qty} ${unit} ${lim ? "지정가 " + lineFmt(ref) : "주문"}`
-    : `${side || "진입"} ${lim ? "지정가 대기" : "진입 · peg"} <small>${matchMedia("(pointer: coarse)").matches ? (mob ? "두 번" : "두 번 눌러 확인") : "누르면 바로"}</small>`;
+    : `${side || "진입"} ${t.add ? "추가 " : ""}${lim ? "지정가 대기" : "진입 · peg"} <small>${matchMedia("(pointer: coarse)").matches ? (mob ? "두 번" : "두 번 눌러 확인") : "누르면 바로"}</small>`;
   const lx = h.querySelector(".lt-x"); lx.setAttribute("aria-label", t.placed ? (t.busy ? "취소 중…" : "주문 취소") : "닫기 (선 지우기)"); lx.disabled = !!t.busy;
 }
 // ── 2026-10-29 사용자 «SLTP 선주문에서 이미 들어간 주문은 풋프린트에 선과 띠를 계속 · 선을 움직이면 움직인 대로 주문 수정»

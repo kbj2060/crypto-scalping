@@ -152,6 +152,68 @@ class LinesArmedGuardTest(ChartLinesTest):
         self._run(fn, acct=POS)   # place_stop = _boom -- 거래소 스탑을 걸려 하면 실패
 
 
+class LinesAddSizeTest(LinesArmedGuardTest):
+    """2026-11-03 사용자 «SLTP 로 추가 진입 -- 손절/익절 라인은 그대로»: 같은 쪽 선 포지션에 크기만 늘리고 무장된 선(레벨·주문가)을 그대로 쓴다. 실주문 0(전부 가짜)."""
+    SAVED = {"tp_price": 2550.4, "sl_price": 2479.6, "sl_name": "선 손절 2480.00"}
+
+    def test_preview_uses_armed_lines_not_the_sent_ones(self) -> None:
+        async def fn(c):
+            self._armed(self.SAVED)
+            r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10&tp=2600&sl=2400")   # 보낸 선(2600/2400)은 무시된다
+            b = await r.json()
+            self.assertEqual(r.status, 200, b)
+            br = b["plan"]["bracket"]
+            self.assertEqual((br["tp_level"], br["sl_level"], br["tp_price"], br["sl_price"]), (2550.0, 2480.0, 2550.4, 2479.6), br)
+            self.assertTrue(b["plan"].get("add_lines"), "추가 진입 표시")
+            self.assertTrue(br["lines"] and br["backstop_price"] is None, br)
+        self._run(fn, acct=POS)
+
+    def test_refused_when_stop_off_fired_or_not_lines(self) -> None:
+        async def fn(c):
+            for extra in ({"sl_off": {"at": 1.0}}, {"fired": True}):
+                self._armed({**self.SAVED, **extra})
+                r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10&tp=2550&sl=2480")
+                self.assertEqual(r.status, 409, extra); self.assertEqual((await r.json())["error"], "lines_has_position")
+            self._armed({**self.SAVED, "lines": False})                                         # 선 없는 포지션(규칙·앱)은 예전처럼 막는다
+            r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10&tp=2550&sl=2480")
+            self.assertEqual(r.status, 409)
+        self._run(fn, acct=POS)
+
+    def test_armed_lines_outside_current_price_are_refused(self) -> None:
+        async def fn(c):
+            self._armed({**self.SAVED, "tp_level": 2490.0})                                      # 익절선이 지금가(≈2500) 아래 = 이미 지난 선
+            r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10&tp=2550&sl=2480")
+            self.assertEqual(r.status, 400, await r.json()); self.assertEqual((await r.json())["error"], "add_lines_out_of_range")
+        self._run(fn, acct=POS)
+
+    def test_fill_rearms_same_lines_on_whole_position(self) -> None:
+        calls = []
+
+        async def fake_entry(_s, plan, state):
+            state.update(phase="filled_maker", filled=float(plan["quantity"]), quantity=float(plan["quantity"]))
+            return state
+
+        async def fake_bracket(_s, b, symbol, pside):
+            calls.append(dict(b))
+            return {"placed": True, "tp": {"placed": True, "price": b["tp_price"]}}
+
+        async def fn(c):
+            self._armed(self.SAVED)
+            body = await (await c.post("/api/manual-entry/submit?side=LONG&confirm=1&lev=20&pct=10&tp=2600&sl=2400")).json()
+            self.assertTrue(body.get("ok"), body)
+            for _ in range(60):
+                await asyncio.sleep(0.02)
+                if calls:
+                    break
+            self.assertEqual(len(calls), 1, calls)
+            self.assertEqual((calls[0]["tp_price"], calls[0]["sl_price"], calls[0]["tp_level"], calls[0]["sl_level"]), (2550.4, 2479.6, 2550.0, 2480.0), calls[0])
+            await asyncio.sleep(0.1)
+            armed = json.loads((server.LIVE_DIR / "manual_bracket_state.json").read_text("utf-8"))[f"{SYM}:LONG"]
+            self.assertTrue(armed["lines"] and armed["tp_resting"], armed)
+            self.assertEqual((armed["sl_level"], armed["tp_level"], armed["sl_price"], armed["tp_price"]), (2480.0, 2550.0, 2479.6, 2550.4))
+        self._run(fn, acct=POS, run_entry=fake_entry, place_bracket=fake_bracket)
+
+
 class LineTickTest(unittest.TestCase):
     """감시 한 틱 -- register 를 가짜 의존성으로 직접 만든다(앱의 수집기·네트워크 없이)."""
 
