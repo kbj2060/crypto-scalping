@@ -6713,7 +6713,10 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   const yRangeOf = (minP, maxP) => {
     const pad = (maxP - minP) * padPct || 1;
     let yMin = minP - pad, yMax = maxP + pad;
-    if (footprint && currentPrice > 0 && !panned) {
+    // 2026-11-02 사용자 «바이낸스는 봉이 길고 급등락이 커 보이는데 우리는 아니다» 시안 1번: 현재가 중앙 고정(먼 쪽 기준 대칭)을 풀고
+    //   보이는 봉의 고저(+여백)에 맞춘다 -- 풋프린트 칸 단위로만 반올림(yMin/yMax 가 층 캐시 서명에 들어 있다). 봉이 25~30% 길어진다.
+    if (footprint && fpQ > 0 && !panned) { yMin = Math.floor(yMin / fpQ) * fpQ; yMax = Math.ceil(yMax / fpQ) * fpQ; }
+    else if (footprint && currentPrice > 0 && !panned) {
       const c = fc.c;
       let half = Math.max(yMax - c, c - yMin);
       if (fpQ > 0) half = Math.ceil(half / (2 * fpQ)) * 2 * fpQ;
