@@ -4538,6 +4538,49 @@ async function refreshRegimeBand() {
     if (res.ok) latestRegimeBand = await res.json();
   } catch (error) { /* 다음 주기에 다시 -- 받아 둔 값은 그대로 */ }
 }
+// 2026-11-03 사용자 «아래 띠 B로 · 상대 강도는 x·y 축 반대로 · 적중 기록은 나머지 예측들도»: ⑤ 예측 줄 아래 «적중 기록»(15분·1시간·4시간 방향 + 횡보·추세)과
+//   «4h 상대 강도»(x = 코인, y = 평균 대비 지난 4h 수익 bp 세로 막대). 값은 서버가 예측을 낼 때마다 쌓은 기록(/api/pred-record = dashboard/pred_record.py) -- 화면은 계산 안 함.
+//   적중 = 그 순간 화면이 신호(분위 ≥80 롱 · ≤20 숏 · 4h 문턱 밖)로 보여 준 결정이 지평 뒤 종가로 맞았나. 연구: docs/experiments/dashboard_candidates_forward_20261103.md
+const PRED_RECORD_POLL_MS = 60000;
+let latestPredRecord = null, predRecordLastFetchAt = 0;
+async function refreshPredRecord() {
+  if (activePageTab !== "snapshot" || document.hidden) return;
+  const now = Date.now();
+  if (now - predRecordLastFetchAt < PRED_RECORD_POLL_MS) return;
+  predRecordLastFetchAt = now;
+  try {
+    const res = await fetch("/api/pred-record", { cache: "no-cache" });
+    if (res.ok) latestPredRecord = await res.json();
+  } catch (error) { /* 다음 주기에 다시 -- 받아 둔 값은 그대로 */ }
+}
+function predRecordStrip() {
+  const pr = latestPredRecord && latestPredRecord.ok ? latestPredRecord : null;
+  if (!pr) return "";
+  const c = (pr.coins || {})[activeSnapshotAsset] || {}, note = DIRSHORT_NOTE[activeSnapshotAsset];
+  const pct = (h, n) => Math.round((100 * h) / n);
+  const row = (nm, r, ref, tip) => {
+    if (!r || !(r.n || r.hit != null)) return "";
+    const days = r.daily || [];
+    const bars = days.map(([d, n, h]) => `<i class="${h / n > 0.5 ? "u" : h / n < 0.5 ? "d" : ""}" style="height:${Math.max(3, Math.round((16 * h) / n))}px" title="${d} ${h}/${n}"></i>`).join("");
+    const base = r.base != null ? ` · 다수 쪽만 찍으면 ${Math.round(100 * r.base)}%` : ref ? ` · 표본 밖 ${ref}%` : "";
+    const body = r.n ? `<b class="${r.hit / r.n >= 0.55 ? "up" : r.hit / r.n <= 0.45 ? "dn" : ""}">${pct(r.hit, r.n)}%</b> ${r.hit}/${r.n}${base}${r.pending ? ` · 대기 ${r.pending}` : ""}` : `쌓는 중 · 대기 ${r.pending}`;
+    return `<div class="pr-row" title="${escapeHtml(tip)}"><b>${nm}</b><span class="pr-sp">${bars}</span><span class="n">${body}</span></div>`;
+  };
+  const hdr = "적중 기록 · 신호였던 결정만 · 일별 막대(점선 = 50%)";
+  const rows = row("15분", c["15m"], note && note[1][0], "15분 예측이 상위/하위 20% 밖(신호)이었던 결정 중 15분 뒤 방향이 맞은 비율")
+    + row("1시간", c["1h"], note && note[2][0], "1시간 예측이 상위/하위 20% 밖(신호)이었던 결정 중 1시간 뒤 방향이 맞은 비율")
+    + row("4시간", c["4h"], null, "4h 예측이 학습 문턱 밖(신호)이었던 결정 중 4시간 뒤 방향이 맞은 비율")
+    + row("횡보·추세", c.band, null, "횡보·추세 판정이 4시간 뒤 실제(띠 이탈 여부)와 맞은 비율 · 서버 크론이 매 시 채점");
+  const xs = pr.xsec && pr.xsec.latest && pr.xsec.latest.rel_bp ? Object.entries(pr.xsec.latest.rel_bp).sort((a, b) => b[1] - a[1]) : [];
+  const sc = Math.max(30, ...xs.map(([, v]) => Math.abs(v)));
+  const cols = xs.map(([k, v]) => `<div class="xs-c${k.toLowerCase() === activeSnapshotAsset ? " me" : ""}" title="${k} ${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(0)}bp (9코인 평균 대비 지난 4h)">`
+    + `<i class="${v >= 0 ? "p" : "n"}" style="height:${Math.max(1, Math.abs(v) / sc * 40).toFixed(0)}px"></i><span class="xv">${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(0)}</span><span class="xk">${k}</span></div>`).join("");
+  const ic = pr.xsec && pr.xsec.n ? `기록 전진 IC ${pr.xsec.ic >= 0 ? "+" : "−"}${Math.abs(pr.xsec.ic).toFixed(2)}(${pr.xsec.n}회)` : "전진 기록 쌓는 중";
+  if (!rows && !cols) return "";
+  return `<div class="pr-strip">${rows ? `<div class="pr-h">${hdr}</div>${rows}` : ""}`
+    + (cols ? `<div class="pr-h">4h 상대 강도 · 9코인 평균 대비 지난 4h 수익(bp)</div><div class="xs-row">${cols}</div>`
+      + `<div class="pr-note">반전 쪽: 높은 코인이 이후 4h 약세 쪽 · 연구 IC −.03(전진 70일) · ${ic} — 약한 경향, 비용 후 매매 근거 아님</div>` : "") + `</div>`;
+}
 // ⑤ 예측 줄(시장 맥락 판 아래, 사용자 시안 B): 지금 추세 → 15분·1시간 예측(10-28) → 4h 예측(+변동성) → 7일(4~13주는 10-28 Macro Trend 카드로). sec = renderMarketCtx 의 판 틀(? 설명).
 function fcRowHtml(sec) {
   const t = latestTrend && latestTrend.ok ? latestTrend : null, ds = latestDirSig && latestDirSig.ok ? latestDirSig : {};
@@ -4634,7 +4677,7 @@ function fcRowHtml(sec) {
     + sCell("15m", "15분", 3, 1) + sCell("1h", "1시간", 12, 2)
     + cell("4h 예측", g4 && !old4 ? cls(g4.signal) : "flat", g4 ? word(g4.signal) : "-", d4Sub, d4Tip, d4Gauge + volLine)
     + rbCell
-    + `</div></div>`;   // 2026-10-28 사용자 «4~13주 예측은 Macro Trend 카드로 대체» -- z91 칸 뺌(서버 계산·전진 판정 2027-06 은 그대로)
+    + `</div>${predRecordStrip()}</div>`;   // 2026-10-28 사용자 «4~13주 예측은 Macro Trend 카드로 대체» -- z91 칸 뺌(서버 계산·전진 판정 2027-06 은 그대로)
 }
 
 async function refreshDirSig() {
@@ -9485,6 +9528,7 @@ async function tick() {
       refreshTrend();                // 2026-09-28 30분 카드 추세 칸 (60초, 일봉)
       refreshIceberg();              // 2026-10-16 풋프린트 칸별 아이스버그 (30초, ETH · 검증 중 · 신호 아님)
       refreshDirSig();               // 2026-10-15 지평 사다리 7일·4~13주 (10분, 서버 1시간 캐시)
+      refreshPredRecord();           // 2026-11-03 ⑤ 예측 줄 아래 적중 기록·4h 상대 강도 (1분, 서버가 쌓은 기록)
       refreshRegimeBand();           // 2026-11-02 ⑤ 예측 줄 «횡보·추세» (5분, 서버 크론이 매 시 쌓은 마지막 행 · ETH·BTC·SOL·XRP)
       refreshVol4h();                // 2026-10-15 ⑤ 예측 판 4h 변동성 (5분, ETH)
       refreshDir4h();                // 2026-10-15 ⑤ 예측 판 4h 방향 (2분, ETH·SOL·XRP · 서버 5분 캐시)

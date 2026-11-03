@@ -137,6 +137,7 @@ from dashboard import situation as sit  # noqa: E402
 from dashboard import flow_read as fr  # noqa: E402
 from dashboard.trend_rule import trend_payload  # noqa: E402 -- 30분 카드 추세 칸(2026-09-28)
 from dashboard.dir_signals import dir_signals_payload, vol4h_from_klines, open_rev_from_klines  # noqa: E402 -- 풋프린트 머리 지평 사다리·⑤ 예측 판(2026-10-15)
+from dashboard import pred_record  # noqa: E402 -- ⑤ 예측 줄 아래 «적중 기록»·«4h 상대 강도»(2026-11-03)
 from dashboard.regime_band import regime_band_payload  # noqa: E402 -- ⑤ 예측 줄 «횡보·추세» 칸(2026-11-02, 전진 기록 크론이 쌓은 마지막 행)
 from dashboard.box_hold import BUNDLES as box_hold_bundles, payload as box_hold_payload, with_qx4i as box_hold_with_qx4i  # noqa: E402 -- 박스 유지 확률(2026-10-16, 방향 아님 · 10-20 XRP)
 from scripts.live_push_notifier_20260904 import PUSH_KINDS  # noqa: E402 -- 알림 센터 «무엇을 보내나»(2026-10-05)
@@ -1993,6 +1994,7 @@ def make_app() -> web.Application:
         app["micro_ref_tasks"].append(asyncio.create_task(collect_force_orders(app)))
         app["micro_ref_tasks"].append(asyncio.create_task(chip_score_loop()))
         app["micro_ref_tasks"].append(asyncio.create_task(sr_break_loop()))
+        app["micro_ref_tasks"].append(asyncio.create_task(pred_record_loop()))   # 2026-11-03 예측 기록(모델 파일 없으면 바로 끝)
 
     async def stop_micro_ref(app: web.Application) -> None:
         for t in app["micro_ref_tasks"]:
@@ -2581,15 +2583,50 @@ def make_app() -> web.Application:
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
         return web.json_response(payload, headers=NOCACHE)
 
+    def pred_record_safe(fn, coin: str, payload: dict, d4mod) -> None:
+        """예측을 낸 직후 그 순간의 신호를 기록(2026-11-03). 기록 실패가 서빙을 깨면 안 된다 -- 삼키고 로그만."""
+        try:
+            k = d4mod._CACHE.get(f"{coin}_k")   # live_payload 가 방금 REST 로 채운 그 코인 5분봉
+            if k is not None:
+                fn(coin, payload, k.set_index("timestamp").close)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[pred_record] {fn.__name__} {coin}: {type(exc).__name__}: {exc}", flush=True)
+
+    async def pred_record_loop() -> None:
+        """5분 봉이 닫힌 직후(+20초) 4코인 예측을 한 번씩 내게 해(= 화면이 안 열려 있어도 기록) 9코인 종가로 상대 강도도 쌓는다.
+        모델 파일은 서버에만 있다 -- 없으면(로컬 실행) REST 를 부르지 않고 끝낸다. ponytail: 코인 순차 호출(코인당 REST ~20회), 늘리면 한 벌 공유."""
+        from scripts import live_eth_dir4h_20261015 as d4
+        from scripts import live_eth_dir_short_20261028 as ds
+        if not ds.art_paths("ETH")[0].exists():
+            return
+        while True:
+            await asyncio.sleep(300 - time.time() % 300 + 20)
+            for coin in ("ETH", "BTC", "SOL", "XRP"):
+                await asyncio.sleep(3)   # 재기동 직후 첫 호출은 코인마다 31일치 REST -- 한꺼번에 몰리지 않게 띄운다
+                for fn in (dir_short_cached,) + ((dir4h_cached,) if coin in d4.ARTIFACTS else ()):
+                    try:
+                        await fn(coin)
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"[pred_record_loop] {fn.__name__} {coin}: {type(exc).__name__}: {exc}", flush=True)
+            try:
+                def tick() -> None:
+                    now_ms = int(time.time() * 1000)
+                    pred_record.xsec_record({c: d4._klines(c, 60, now_ms).set_index("timestamp").close for c in pred_record.X_COINS})
+                await asyncio.to_thread(tick)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[pred_record_loop] xsec: {type(exc).__name__}: {exc}", flush=True)
+
+    async def api_pred_record(request: web.Request) -> web.Response:   # 2026-11-03 ⑤ 예측 줄 아래 «적중 기록»·«4h 상대 강도» -- 쌓인 기록을 읽어 채점(요청 때 REST 안 부른다)
+        try:
+            payload = await swr_cached("pred_record", 30.0, lambda: asyncio.to_thread(pred_record.summary, int(time.time() * 1000)), max_stale=600.0)
+        except Exception as exc:  # noqa: BLE001
+            payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
+        return web.json_response(payload, headers=NOCACHE)
+
     dir4h_art: dict = {}   # 코인 -> {mtime, art}
 
-    async def api_dir4h(request: web.Request) -> web.Response:   # 2026-10-15 ⑤ 예측 판 «4h 방향»(scripts/live_eth_dir4h_20261015) · 10-31 SOL·XRP
-        """매달 재학습 HGB(65피쳐) -- 바이낸스 REST 를 vision 형식으로(첫 호출 그 코인 31일, 다음부터 꼬리만) · 5분 캐시.
-        아티팩트(data/live/{coin}_dir4h_model.joblib)는 매달 cron 이 바꾼다 -- 바뀌면 다시 읽는다."""
+    async def dir4h_cached(coin: str) -> dict[str, Any]:   # 화면 요청·기록 루프 공용(2026-11-03). coin 은 d4.ARTIFACTS 안 -- 호출부가 검증
         from scripts import live_eth_dir4h_20261015 as d4
-        coin = str(request.query.get("asset") or "eth").upper()
-        if coin not in d4.ARTIFACTS:   # 신뢰경계: 지원 코인 표(d4.ARM) -- 파일 이름·REST 심볼에 들어간다
-            return web.json_response({"ok": False, "reason": "unsupported_asset"}, headers=NOCACHE)
         path = d4.ARTIFACTS[coin]
 
         def produce_sync() -> dict[str, Any]:
@@ -2599,22 +2636,28 @@ def make_app() -> web.Application:
             if da.get("mtime") != mt:
                 import joblib
                 da.update(mtime=mt, art=joblib.load(path))
-            return d4.live_payload(da["art"])
+            payload = d4.live_payload(da["art"])
+            pred_record_safe(pred_record.record_h4, coin, payload, d4)
+            return payload
+        return await swr_cached(f"dir4h:{coin.lower()}", 300.0, lambda: asyncio.to_thread(produce_sync), max_stale=1800.0)
+
+    async def api_dir4h(request: web.Request) -> web.Response:   # 2026-10-15 ⑤ 예측 판 «4h 방향»(scripts/live_eth_dir4h_20261015) · 10-31 SOL·XRP
+        """매달 재학습 HGB(65피쳐) -- 바이낸스 REST 를 vision 형식으로(첫 호출 그 코인 31일, 다음부터 꼬리만) · 5분 캐시.
+        아티팩트(data/live/{coin}_dir4h_model.joblib)는 매달 cron 이 바꾼다 -- 바뀌면 다시 읽는다."""
+        from scripts import live_eth_dir4h_20261015 as d4
+        coin = str(request.query.get("asset") or "eth").upper()
+        if coin not in d4.ARTIFACTS:   # 신뢰경계: 지원 코인 표(d4.ARM) -- 파일 이름·REST 심볼에 들어간다
+            return web.json_response({"ok": False, "reason": "unsupported_asset"}, headers=NOCACHE)
         try:
-            payload = await swr_cached(f"dir4h:{coin.lower()}", 300.0, lambda: asyncio.to_thread(produce_sync), max_stale=1800.0)
+            payload = await dir4h_cached(coin)
         except Exception as exc:  # noqa: BLE001
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
         return web.json_response(payload, headers=NOCACHE)
 
     dirshort_art: dict = {}   # 코인 -> {mtime, art}
 
-    async def api_dir_short(request: web.Request) -> web.Response:   # 2026-10-28 ⑤ 예측 판 «15분·1시간 예측»(ETH, scripts/live_eth_dir_short_20261028) · 10-31 BTC·SOL·XRP
-        """매달 재학습 LightGBM(ETH = 65피쳐 + 호가 깊이 10열 · BTC·SOL·XRP = 65피쳐판) -- 4h 와 같은 REST 경로(+ ETH 는 호가 깊이 워커 sqlite) · 5분 캐시.
-        ponytail: rest_frames 를 4h 와 따로 부른다(5분에 REST 한 벌 더) -- 늘리면 두 판을 한 produce 로 묶는다."""
+    async def dir_short_cached(coin: str) -> dict[str, Any]:   # 화면 요청·기록 루프 공용(2026-11-03). coin 은 ETH 또는 ds.TABLE 안 -- 호출부가 검증
         from scripts import live_eth_dir_short_20261028 as ds
-        coin = str(request.query.get("asset") or "eth").upper()
-        if coin != "ETH" and coin not in ds.TABLE:   # 신뢰경계: 지원 코인 표 -- 파일 이름·REST 심볼에 들어간다
-            return web.json_response({"ok": False, "reason": "unsupported_asset"}, headers=NOCACHE)
 
         def produce_sync() -> dict[str, Any]:
             paths = ds.art_paths(coin)
@@ -2623,9 +2666,20 @@ def make_app() -> web.Application:
             mt, da = tuple(p.stat().st_mtime for p in paths), dirshort_art.setdefault(coin, {})
             if da.get("mtime") != mt:
                 da.update(mtime=mt, art=ds.load_art(coin))
-            return ds.live_payload(da["art"])
+            payload = ds.live_payload(da["art"])
+            pred_record_safe(pred_record.record_short, coin, payload, ds.d4)
+            return payload
+        return await swr_cached(f"dir_short:{coin.lower()}", 300.0, lambda: asyncio.to_thread(produce_sync), max_stale=1800.0)
+
+    async def api_dir_short(request: web.Request) -> web.Response:   # 2026-10-28 ⑤ 예측 판 «15분·1시간 예측»(ETH, scripts/live_eth_dir_short_20261028) · 10-31 BTC·SOL·XRP
+        """매달 재학습 LightGBM(ETH = 65피쳐 + 호가 깊이 10열 · BTC·SOL·XRP = 65피쳐판) -- 4h 와 같은 REST 경로(+ ETH 는 호가 깊이 워커 sqlite) · 5분 캐시.
+        ponytail: rest_frames 를 4h 와 따로 부른다(5분에 REST 한 벌 더) -- 늘리면 두 판을 한 produce 로 묶는다."""
+        from scripts import live_eth_dir_short_20261028 as ds
+        coin = str(request.query.get("asset") or "eth").upper()
+        if coin != "ETH" and coin not in ds.TABLE:   # 신뢰경계: 지원 코인 표 -- 파일 이름·REST 심볼에 들어간다
+            return web.json_response({"ok": False, "reason": "unsupported_asset"}, headers=NOCACHE)
         try:
-            payload = await swr_cached(f"dir_short:{coin.lower()}", 300.0, lambda: asyncio.to_thread(produce_sync), max_stale=1800.0)
+            payload = await dir_short_cached(coin)
         except Exception as exc:  # noqa: BLE001
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
         return web.json_response(payload, headers=NOCACHE)
@@ -4503,6 +4557,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/vol-forecast", api_vol_forecast)
     app.router.add_get("/api/dir4h", api_dir4h)
     app.router.add_get("/api/dir-short", api_dir_short)
+    app.router.add_get("/api/pred-record", api_pred_record)
     app.router.add_get("/api/box-hold", api_box_hold)
     app.router.add_get("/api/open-rev", api_open_rev)
     app.router.add_get("/api/iceberg", api_iceberg)

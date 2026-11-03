@@ -3449,3 +3449,26 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
 
 /* 2026-11-03 SLTP 추가 진입(기존 익절·손절선 그대로): 도구 쪽 선·꼬리표·띠·손익비 버튼은 숨긴다 -- 들어간 선(#lineArmed)이 이미 그린다 */
 .lt.lt-add .lt-zone, .lt.lt-add .lt-ln.tp, .lt.lt-add .lt-ln.sl, .lt.lt-add .lt-tag.tp, .lt.lt-add .lt-tag.sl, .lt.lt-add .lt-rrb { display: none; }
+
+/* 2026-11-03 ⑤ 예측 줄 아래 «적중 기록»(일별 막대 + 적중률) · «4h 상대 강도»(x = 코인, y = bp 세로 막대) -- 시안 B */
+.pr-strip { margin-top: 4px; }
+.pr-h { display: flex; align-items: center; gap: 8px; margin: 8px 0 3px; font-size: 10.5px; font-weight: 700; color: var(--muted); }
+.pr-h::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.pr-row { display: grid; grid-template-columns: 54px 1fr auto; align-items: center; gap: 10px; padding: 3px 0; font-size: 11.5px; cursor: help; }
+.pr-row > b { font-weight: 800; white-space: nowrap; }
+.pr-row .n { color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pr-row .n b { color: var(--text); font-weight: 800; } .pr-row .n b.up { color: var(--good); } .pr-row .n b.dn { color: var(--bad); }   /* 55% 이상 초록 · 45% 이하 빨강 · 사이는 중립(동전 던지기와 구분 안 됨) */
+.pr-sp { position: relative; display: inline-flex; align-items: flex-end; gap: 2px; height: 18px; min-width: 0; overflow: hidden; }
+.pr-sp::before { content: ""; position: absolute; left: 0; right: 0; bottom: 8px; border-top: 1px dashed var(--line); }
+.pr-sp i { position: relative; width: 7px; flex: none; border-radius: 1px; background: color-mix(in srgb, var(--muted) 45%, transparent); }
+.pr-sp i.u { background: color-mix(in srgb, var(--good) 70%, transparent); } .pr-sp i.d { background: color-mix(in srgb, var(--bad) 70%, transparent); }
+.xs-row { display: flex; height: 112px; }
+.xs-c { position: relative; flex: 1; min-width: 0; }
+.xs-c::before { content: ""; position: absolute; left: 0; right: 0; top: 44px; border-top: 1px solid var(--line); }   /* y = 0 -- 위 40px 은 +, 아래 40px 은 −, 맨 아래 두 줄은 값·코인 */
+.xs-c i { position: absolute; left: 22%; right: 22%; border-radius: 2px; }
+.xs-c i.p { bottom: 68px; background: color-mix(in srgb, var(--good) 55%, transparent); }
+.xs-c i.n { top: 44px; background: color-mix(in srgb, var(--bad) 55%, transparent); }
+.xs-c.me i { filter: brightness(1.45); }
+.xs-c .xv, .xs-c .xk { position: absolute; left: 0; right: 0; text-align: center; font-size: 9.5px; line-height: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.xs-c .xv { bottom: 12px; } .xs-c .xk { bottom: 0; font-weight: 700; } .xs-c.me .xk { color: var(--text); font-weight: 800; }
+.pr-note { font-size: 10px; color: var(--muted); margin-top: 3px; line-height: 1.35; }

@@ -115,6 +115,7 @@ def t3():
         s = a.sum(0); u, d_ = parts(full)
         res[name] = {"days": len(a), "rows": int(s[0]), "top_hit": f"{int(s[4])}/{int(s[3])}", "top_base_up": s[1] / s[0], "bot_hit": f"{int(s[6])}/{int(s[5])}",
                      "bot_base_dn": s[2] / s[0], "pooled_excess": (u + d_) / 2, "lo90": float(np.quantile(bs, .10)),
+                     "daily": [[str(d)[:10], int(r[3]), int(r[4]), int(r[5]), int(r[6])] for d, r in zip(days, rows)],   # 일, 상위 건수·적중, 하위 건수·적중
                      "verdict": "통과" if np.quantile(bs, .10) > 0 else "판정 불가(표본 짧음·하한 ≤ 0)"}
     return res
 
