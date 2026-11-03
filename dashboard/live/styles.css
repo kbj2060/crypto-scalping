@@ -3126,24 +3126,26 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 
 /* 2026-10-15 ⑤ 예측 줄(사용자 시안 B): 지금 추세 → 4h(+변동성) → 7일 → 4~13주. 가로 선 = 시간축, 칸 = 지평. 휴대폰은 2×2 */
 .mc-fc { border-top: 1px solid var(--soft-line); padding-top: 8px; }
-/* 2026-11-04 펜 메모 «예측 줄과 적중 기록을 정보 빠지는 것 없이 융합»: 칸(가로 5) → 행(세로 5). 윗줄 = 이름 · 판정 · 분위 · 게이지, 아랫줄(.fz-r) = 덧붙임(σ·5표) + 적중 기록(일별 막대 · 적중률 · 분모) */
+/* 2026-11-04 펜 메모: 예측 줄 = 행. 윗줄 = 이름 · 판정 · 분위 문구 / 아랫줄 = 게이지(판정 아래) · 적중 기록(막대 · 적중률 · 분모) · 덧붙임(σ · 5표).
+   간격 4 · 8 단계, 글자 = DESIGN.md label/note 11px · 판정 15px. */
 .fc-row { display: grid; grid-template-columns: minmax(0, 1fr); }
-.fc-c { --fc: var(--muted); display: grid; grid-template-columns: 54px 64px minmax(0, 1fr) minmax(88px, 124px); column-gap: 8px; row-gap: 2px; align-items: center; padding: 6px 4px 5px; min-width: 0; cursor: help; }
+.fc-c { --fc: var(--muted); display: grid; grid-template-columns: 56px 144px minmax(0, 1fr); grid-template-areas: "hz main sub" ". gauge rest";
+  column-gap: 8px; row-gap: 4px; align-items: center; padding: 8px 4px; min-width: 0; cursor: help; }
 .fc-c + .fc-c { border-top: 1px dashed var(--soft-line); }
 .fc-c.up { --fc: var(--good); } .fc-c.dn { --fc: var(--bad); }
 .fc-c.trd { --fc: var(--warn); }   /* 2026-11-02 «횡보·추세»: 추세(띠 이탈 예상) = 주황 -- 방향이 아니라 초록/빨강을 쓰지 않는다 */
-.fc-c .hz { font-size: 10.5px; font-weight: 700; color: var(--muted); white-space: nowrap; }
-.fc-c > b { font-size: 14px; font-weight: 800; color: var(--fc); line-height: 1.2; white-space: nowrap; }
+.fc-c .hz { grid-area: hz; font: 700 11px/1.2 var(--font-sans); color: var(--muted); white-space: nowrap; }
+.fc-c > b { grid-area: main; font: 700 15px/1.1 var(--font-sans); color: var(--fc); white-space: nowrap; }
 .fc-c.now > b { font-size: 13px; }
-.fc-c .sub { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; min-width: 0; }
-.fc-c > .d4g { margin: 0; }                                   /* 게이지 = 윗줄 오른쪽 칸 */
-.fz-r { grid-column: 3 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; }
+.fc-c.now { grid-template-areas: "hz main sub" ". rest rest"; }   /* 지금 추세 = 게이지 없음 -- 5표 칩·설명이 판정 바로 아래부터 */
+.fc-c .sub { grid-area: sub; font: 500 11px/1.2 var(--font-sans); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; min-width: 0; }
+.fc-c > .d4g { grid-area: gauge; margin: 0 4px 0 0; }       /* 게이지 = 판정(하락·보류·상승) 바로 아래 */
+.fz-r { grid-area: rest; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
 .fz-r .fc-tl { flex: 0 1 150px; } .fz-r > .sub { flex: none; }
-.fz-r .fc-vol { order: 2; }                                   /* σ 줄은 적중 글자 뒤 */
-.fz-r .pr-sp { order: 0; flex: none; } .fz-r .pr-n { order: 1; }
-.pr-n { color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fz-r .pr-sp { order: 0; flex: none; } .fz-r .pr-n { order: 1; } .fz-r .fc-vol { order: 2; }   /* 막대 · 적중 글자 · σ 줄 */
+.pr-n { font: 500 11px/1.2 var(--font-sans); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pr-n b { color: var(--text); font-weight: 800; } .pr-n b.up { color: var(--good); } .pr-n b.dn { color: var(--bad); }   /* 55% 이상 초록 · 45% 이하 빨강 · 사이는 중립(동전 던지기와 구분 안 됨) */
-@media (max-width: 420px) { .fc-c { grid-template-columns: 50px 58px minmax(0, 1fr) 84px; column-gap: 6px; } .pr-n { white-space: normal; } }
+@media (max-width: 420px) { .fc-c { grid-template-columns: 48px 112px minmax(0, 1fr); } .pr-n { white-space: normal; } }
 .mc-state .mc-q1 { margin-left: auto; flex: none; }   /* 2026-10-15 ①②④ 제목 대신 상태 줄 끝 «?» */
 .fc-c .sub.fc-vol { color: var(--warn); font-weight: 700; }
 /* 2026-10-16 시안 ②③ ⑤ 제목 줄 오른쪽 «종합»(세 부품 칩) · ④ 4h 문턱 눈금. 좁으면 종합이 제목 아래 줄로 */
@@ -3472,9 +3474,13 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
 .xs-c .xv, .xs-c .xk { position: absolute; left: 0; right: 0; text-align: center; font-size: 9.5px; line-height: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
 .xs-c .xv { bottom: 12px; } .xs-c .xk { bottom: 0; font-weight: 700; } .xs-c.me .xk { color: var(--text); font-weight: 800; }
 .pr-note { font-size: 10px; color: var(--muted); margin-top: 3px; line-height: 1.35; }
-/* 2026-11-04 펜 메모: 넓은 화면 프로파일 아래 칸(#mcWall) = ① 레버리지 · ② 누가 밀고 있나 (호가벽은 뺐고 지지/저항은 차트 안으로) */
-#mcWall .mc-strip.mc-strip-wall { grid-template-columns: 1fr 1fr; flex: 1; min-height: 0; padding-top: 6px; }
-#mcWall .mc-strip.mc-strip-wall .mc-sec { padding: 2px 0 0; }
-#mcWall .mc-strip.mc-strip-wall .mc-gk { height: 19px; }                                  /* 한 줄(이름 · 게이지 · 값) -- 칸 높이 108px 안에 상태 칩 + 네 줄 */
-#mcWall .mc-strip.mc-strip-wall .mc-state { min-height: 18px; margin: 0 0 3px; }
-#mcWall .mc-strip.mc-strip-wall .mc-rows { gap: 1px; justify-content: flex-start; }
+/* 2026-11-04 펜 메모: 넓은 화면 프로파일 아래 칸(#mcWall) = ① 레버리지 · ② 누가 밀고 있나. 호가벽·칩·«?» 는 뺐고 지지/저항은 차트 안으로.
+   네 줄이 칸 높이(= 가격 플롯 아래 레인 높이 + 20)를 똑같이 나눠 가져 두 타일의 줄이 가로로 맞는다 -- 4분면(2×2)은 넷째 줄 높이 */
+#mcWall .mc-strip.mc-strip-wall { grid-template-columns: 1fr 1fr; flex: 1; min-height: 0; column-gap: 12px; }
+#mcWall .mc-strip.mc-strip-wall .mc-sec { padding: 0; }
+#mcWall .mc-strip.mc-strip-wall .mc-rows { display: grid; grid-template-rows: repeat(4, 1fr); gap: 0; }
+#mcWall .mc-strip.mc-strip-wall .mc-gk { height: auto; min-height: 0; align-self: stretch; }
+#mcWall .mc-strip.mc-strip-wall .mc-gk > span { font: 500 11px/1 var(--font-sans); }
+#mcWall .mc-strip.mc-strip-wall .mc-gk:not(.v) { display: block; }                                  /* 4분면(2×2 · 이름 글자 들어 있음) = 타일 폭 전체 */
+#mcWall .mc-strip.mc-strip-wall .mc-gk:not(.v) > span { display: none; }
+#mcWall .mc-strip.mc-strip-wall .mc-gk:not(.v) > .mc-svg { width: 100%; height: 100%; }

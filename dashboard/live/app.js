@@ -4790,15 +4790,16 @@ const mcGfx = {
       + (prev ? `<line x1="${X(prev)}" x2="${X(now)}" y1="8" y2="8" stroke="var(--muted)"/><circle cx="${X(prev)}" cy="8" r="4" fill="var(--panel)" stroke="var(--muted)"/>` : "")
       + `<circle cx="${X(now)}" cy="8" r="5" fill="var(--text)"/></svg>`;
   },
-  seg4(key, w = mcGfx.gw || 130) {   // 2026-09-30 가격×OI 사분면 한 줄: 네 칸 중 지금 칸만 채움(small·없음 = 전부 빈 칸)
+  seg4(key, w = mcGfx.gw || 130, two = false) {   // 2026-09-30 가격×OI 사분면 한 줄: 네 칸 중 지금 칸만 채움(small·없음 = 전부 빈 칸)
     // 2026-10-21 사용자 «신규 롱/숏커버는 초록불, 신규 숏/롱정리는 빨간불 -- 표시등으로»: 칸마다 등(●)+이름 · 지금 칸만 불이 켜짐(등·옅은 바탕·글자 밝게) · 오른쪽 «보류» 값 없음(다 꺼짐 = 보류)
-    const cells = [["up_up", "신규 롱"], ["up_dn", "숏커버"], ["dn_up", "신규 숏"], ["dn_dn", "롱정리"]], cw = (w - 6) / 4, txt = cw >= 44;
-    return `<svg class="mc-svg" width="${w}" height="16" viewBox="0 0 ${w} 16" aria-hidden="true">` + cells.map(([k, t], i) => {
-      const on = k === key, col = k.startsWith("up") ? "var(--good)" : "var(--bad)", x = i * (cw + 2), dx = txt ? x + 9 : x + cw / 2;
-      return `<rect x="${x.toFixed(1)}" y="1" width="${cw.toFixed(1)}" height="14" rx="3" fill="${on ? col : "rgb(var(--lift) / .06)"}" fill-opacity="${on ? 0.16 : 1}"${on ? ` stroke="${col}" stroke-opacity=".55"` : ""}/>`
-        + `<circle cx="${dx.toFixed(1)}" cy="8" r="3.5" fill="${col}" fill-opacity="${on ? 1 : 0.22}"/>`
-        + (on ? `<circle cx="${dx.toFixed(1)}" cy="8" r="6" fill="${col}" fill-opacity=".25"/>` : "")
-        + (txt ? `<text x="${(x + 17).toFixed(1)}" y="11.5" font-size="9.5" font-weight="${on ? 700 : 500}" fill="${on ? "var(--text)" : "var(--muted)"}" fill-opacity="${on ? 1 : 0.7}">${t}</text>` : "");
+    // 2026-11-04 펜 메모 «4분면에 글씨가 나오게 2줄로»: two = 2×2(윗줄 신규 롱·숏커버 / 아랫줄 신규 숏·롱정리) -- 칸이 넓어져 이름이 항상 보인다
+    const cells = [["up_up", "신규 롱"], ["up_dn", "숏커버"], ["dn_up", "신규 숏"], ["dn_dn", "롱정리"]], cw = two ? (w - 2) / 2 : (w - 6) / 4, txt = two || cw >= 44, H = two ? 32 : 16;
+    return `<svg class="mc-svg" width="${w}" height="${H}" viewBox="0 0 ${w} ${H}" aria-hidden="true">` + cells.map(([k, t], i) => {
+      const on = k === key, col = k.startsWith("up") ? "var(--good)" : "var(--bad)", gx = two ? i % 2 : i, y0 = two ? Math.floor(i / 2) * 16 : 0, x = gx * (cw + 2), dx = txt ? x + 9 : x + cw / 2;
+      return `<rect x="${x.toFixed(1)}" y="${1 + y0}" width="${cw.toFixed(1)}" height="14" rx="3" fill="${on ? col : "rgb(var(--lift) / .06)"}" fill-opacity="${on ? 0.16 : 1}"${on ? ` stroke="${col}" stroke-opacity=".55"` : ""}/>`
+        + `<circle cx="${dx.toFixed(1)}" cy="${8 + y0}" r="3.5" fill="${col}" fill-opacity="${on ? 1 : 0.22}"/>`
+        + (on ? `<circle cx="${dx.toFixed(1)}" cy="${8 + y0}" r="6" fill="${col}" fill-opacity=".25"/>` : "")
+        + (txt ? `<text x="${(x + 17).toFixed(1)}" y="${11.5 + y0}" font-size="${two ? 11 : 9.5}" font-weight="${on ? 700 : 500}" fill="${on ? "var(--text)" : "var(--muted)"}" fill-opacity="${on ? 1 : 0.7}">${t}</text>` : "");
     }).join("") + `</svg>`;
   },
   quad(move, oiPct, w = mcGfx.qw || 96) {   // 가격(x, 1시간 bp ±60) × OI(y, 1시간 % ±1) -- 가운데 원 = «이동 작음, 판정 보류»
@@ -5140,28 +5141,29 @@ function renderMarketCtx() {
     const gk = (k, vis, tip = "", val = null, cls = "") => `<div class="mc-gk${val == null ? "" : " v"}"${tip ? ` title="${escapeHtml(tip)}"` : ""}><span>${k}</span>${vis}${val == null ? "" : `<b class="${cls}">${val}</b>`}</div>`;   // val = 오른쪽 값(2026-10-13 사용자 «라벨 되돌려»)
     const gv = gw;   // 2026-10-13 «값도 게이지 아래로» -- 값이 아래 줄로 가서 그림은 칸 폭 전체
     // 2026-10-15 사용자 «①②④ 제목 제거»: 판 이름은 «?» 의 title·aria 로만 -- 설명은 팝업 제목으로도 쓴다(helpOpen)
-    const tile = (key, title, chipHtml, rows, cls = "") => `<div class="mc-sec${cls}" aria-label="${escapeHtml(title)}"><div class="mc-state">${chipHtml || ""}`
-      + `<button type="button" class="mc-q mc-q1" ${helpAttrs(key)} title="${escapeHtml(title)} — 설명" aria-label="${escapeHtml(title)} 설명"><span aria-hidden="true">?</span></button></div>`
+    // bare = 상태 줄(칩 · «?») 없이 줄만 -- 2026-11-04 펜 메모: 아래 칸(#mcWall)은 칩을 빼고 그 높이까지 줄이 채운다
+    const tile = (key, title, chipHtml, rows, cls = "", bare = false) => `<div class="mc-sec${cls}" aria-label="${escapeHtml(title)}">`
+      + (bare ? "" : `<div class="mc-state">${chipHtml || ""}`
+        + `<button type="button" class="mc-q mc-q1" ${helpAttrs(key)} title="${escapeHtml(title)} — 설명" aria-label="${escapeHtml(title)} 설명"><span aria-hidden="true">?</span></button></div>`)
       + `<div class="mc-rows">${rows}</div></div>`;
     const cvd = fl.cvd30_all_z ?? fl.cvd30_z;
-    const mkTiles = (gv) => tile("q_lev", "① 레버리지 과열?", levChip.trim(),
+    const mkTiles = (gv, wallTile = false) => tile("q_lev", "① 레버리지 과열?", levChip.trim(),
           gk("펀딩", G.pct(f.bn_at_base ? null : f.bn_pct180, gv), f.bn_at_base ? "펀딩 기본값(0.01%)" : `펀딩 분위 ${Math.round((f.bn_pct180 ?? 0) * 100)}% · 바이낸스 예상 ${fr(f.bn)}`,
              f.bn_at_base ? "기본" : `${Math.round((f.bn_pct180 ?? 0) * 100)}%`)
           + gk("베이시스", G.pct(b.pct7d, gv), `베이시스 ${sg(b.bp, 1, "bp")} · 7일 ${Math.round((b.pct7d ?? 0) * 100)}분위`, sg(b.bp, 1, "bp"))
           // 2026-10-26 사용자 «델타와 OI 는 펀딩·베이시스 쪽으로 · 밸런스»: ① = 펀딩·베이시스·델타(30분 CVD)·OI(1시간) 4줄 · ② = 고래·중형·리테일+가격×OI
           + gk("델타", G.sig(cvd, gv), `델타 = 30분 CVD(테이커 매수−매도 누적) ${sg(cvd, 1, "σ")} · 풋프린트 아래 «델타» 줄과 같은 데이터`, sg(cvd, 1, "σ"), tone(cvd))
-          + gk("OI", G.sig(OI.z30m, gv), `OI 30분 ${sg(OI.z30m, 1, "σ")} · ${oiA ? venTxt(oiA.venues) : "바이낸스만"} · ${sg(OI.d30m_pct, 2, "%")} · 풋프린트 아래 «신규계약» 줄과 같은 데이터(30분 변화)`, sg(OI.z30m, 1, "σ"), tone(OI.z30m, 1.5)))
+          + gk("OI", G.sig(OI.z30m, gv), `OI 30분 ${sg(OI.z30m, 1, "σ")} · ${oiA ? venTxt(oiA.venues) : "바이낸스만"} · ${sg(OI.d30m_pct, 2, "%")} · 풋프린트 아래 «신규계약» 줄과 같은 데이터(30분 변화)`, sg(OI.z30m, 1, "σ"), tone(OI.z30m, 1.5)), "", wallTile)
       + tile("q_flow", "② 누가 밀고 있나", "",
           gk("고래", G.sig(z.whale, gv), `고래 30분 ${sg(z.whale, 1, "σ")} · ${flowVen}`, sg(z.whale, 1, "σ"), tone(z.whale))
           + gk("중형", G.sig(z.mid, gv), `중형 30분 ${sg(z.mid, 1, "σ")}`, sg(z.mid, 1, "σ"), tone(z.mid))
           + gk("리테일", G.sig(z.retail, gv), `리테일 30분 ${sg(z.retail, 1, "σ")}`, sg(z.retail, 1, "σ"), tone(z.retail))
           // 2026-10-22 아티팩트 펜 메모 «이 텍스트를 제거해줘»: 줄 이름 «가격×OI» 글자 빼고(표시등 네 칸 이름이 이미 말한다) 이름은 툴팁 첫머리로
-          + gk("", G.seg4(d.quad ? d.quad.key : null, gv), `가격×OI 1시간 · 네 칸 = 신규 롱 · 숏커버 · 신규 숏 · 롱정리 (초록 = 가격↑ · 빨강 = 가격↓ · 다 비면 보류)\n` + (d.quad ? `지금 ${({ up_up: "새 롱", up_dn: "숏 커버", dn_up: "새 숏", dn_dn: "롱 정리", small: "보류" })[d.quad.key] || "-"} · ${d.quad.label} · 1시간 ${sg(d.move60, 0, "bp")}` : "가격×OI 1시간 -"), ""))
-;
+          + gk("", G.seg4(d.quad ? d.quad.key : null, wallTile ? gv + 96 : gv, wallTile), `가격×OI 1시간 · 네 칸 = 신규 롱 · 숏커버 · 신규 숏 · 롱정리 (초록 = 가격↑ · 빨강 = 가격↓ · 다 비면 보류)\n` + (d.quad ? `지금 ${({ up_up: "새 롱", up_dn: "숏 커버", dn_up: "새 숏", dn_dn: "롱 정리", small: "보류" })[d.quad.key] || "-"} · ${d.quad.label} · 1시간 ${sg(d.move60, 0, "bp")}` : "가격×OI 1시간 -"), wallTile ? null : ""), "", wallTile);   // 벽 칸은 값 칸(.v) 없이 타일 폭 전체를 쓴다
     // 2026-11-04 펜 메모 «호가벽은 제거 · 나머지 2개(①②)를 아래 박스 친 지지/저항 자리로»: 넓은 화면 ①② = #mcWall(프로파일 아래), ④ 호가 벽 칸은 뺐다
     //   (좁은 화면은 그대로 ④ 가 있다). 칸 폭에 맞춘 게이지 폭으로 다시 만든다.
-    const wallPx = (el("mcWall") && el("mcWall").clientWidth) || 400, gwWall = Math.max(40, Math.floor((wallPx - 12) / 2) - 96);   // 한 줄 배치: 이름 44 + 값 40 + 간격 8 을 뺀 게이지 폭
-    mcWallTiles = `<div class="mc-strip mc-strip-wall">${mkTiles(gwWall)}</div>`;
+    const wallPx = parseFloat(el("mcWall") && el("mcWall").style.width) || 400, gwWall = Math.max(40, Math.floor((wallPx - 12) / 2) - 96);   // 한 줄 배치: 이름 44 + 값 40 + 간격 8 을 뺀 게이지 폭
+    mcWallTiles = `<div class="mc-strip mc-strip-wall">${mkTiles(gwWall, true)}</div>`;
     htmlB = [fcHtml];
     // 2026-10-28 사용자 «풋프린트 상단 나스닥/2년물/10년물 차트 자리에 Macro Trend 요약»(시안 H1) -- 나스닥·10년은 Macro Trend 카드 «오늘» 칸으로 옮겼다.
     //   급변 칩(5분 |z|≥4, 10-14)은 그대로 끝에 둔다.
@@ -5285,7 +5287,7 @@ function trendFlipLevels(footprint, candles) {
 // 2026-10-15 사용자 «풋프린트 카드의 추세와 예측 칩 제거»: 머리 칩(#sitChips·renderSituation)을 지웠다 -- 같은 값은 시장 맥락 ⑤ 예측 줄에 있다(latestTrend·latestDirSig).
 // 2026-10-14 아티팩트 댓글 «풋프린트 상단이 청산맵·체결 버블 상단과 크기가 안 맞아 -- 통일»: 넓은 화면 풋프린트의 그래프 상단을 그 둘(캔버스 위 여백 22)과
 //   같은 높이로 내리고(FP_TOP_ALIGN), 청산 밀도 범례를 .lqp-legend 와 같은 11px·카드 왼쪽 17px 로 둔다.
-const FP_TOP_ALIGN = 26;
+const FP_TOP_ALIGN = 6;   // 2026-11-04 펜 메모 «윗박스 공간을 줄이고 아랫박스 공간을 늘려줘»: 26 → 6(-20) · 아래 칸 QUAD_H 88 → 108(+20) -- 가격 플롯 크기는 그대로, 위로 20px 올라가고 아래 칸이 그만큼 커진다
 // 2026-10-15 아티팩트 댓글 «풋프린트를 크기 그대로 왼쪽 ‹청산 밀도› 글자 위치까지 옮기고 그만큼 오른쪽 정보를 크게»: 넓은 화면 왼쪽 여백 36 → 1, 오른쪽 칸 +35.
 const FP_LEFT_SHIFT = 35;
 
@@ -6702,7 +6704,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   🔴데스크톱 거래대금 줄은 24 → 54px: 넓은 화면은 프로파일 아래 지지/저항 칸(#mcWall, 7줄 · 바닥 = 플롯 바닥 + 12)이 이 높이를 같이 쓴다 --
   //     58 로 줄이면 칸이 216 → 78px, 줄이 10px 라 글자가 겹쳤다(실측). 88 이면 108px · 줄 ~15px.
   //   막대 밑 글자 칸(QUAD_TXT)·모바일 «레인 아래 한 줄»(ROW_H)도 같이 뺐다 -- 다섯 줄 높이 몫이었다.
-  const QUAD_H = fpBars.length ? (mobileChart ? 42 : 88) : 0;
+  const QUAD_H = fpBars.length ? (mobileChart ? 42 : 108) : 0;   // 2026-11-04 88 → 108 (위 여백 -20 과 맞교환 · #mcWall 높이 = QUAD_H + 20)
   const CUM_H = fpBars.length ? (mobileChart ? 104 : 160) : 0;
   // 2026-09-27 데스크톱은 누적 CVD·OI 를 사분면 막대 **뒤에** 흐리게 깐다(사용자 선택 A) -- 제 줄(160+6)을 풋프린트에 준다.
   //   가격 플롯 400 -> 566. 모바일은 제 줄 그대로(사용자 «모바일은 지금대로»).
