@@ -712,7 +712,7 @@ function renderLineTool() {
   //   마우스를 누른 사이 새 노드로 바뀐다 -- 클릭이 ✕ 가 아닌 부모로 가 취소가 안 나갔다(하네스 재현: 누름~뗌 사이 다시 그리기 1번 = 취소 0). 글이 바뀔 때만 쓴다.
   const tkArmed = Date.now() < (t.tkArm || 0);
   const enH = `<span class="lt-grip" aria-hidden="true"></span>${side === "SHORT" ? "SHORT" : "LONG"}${t.add ? " 추가" : ""}${lim && t.placed ? " 대기" : ""}`
-    + (lim && t.placed ? `<span class="lt-tkr${tkArmed ? " arm" : ""}" role="button" tabindex="0" aria-label="${tkArmed ? "한 번 더 누르면 시장가로 진입" : "지금 시장가로 진입(taker)"}" title="걸린 지정가를 취소하고 남은 수량을 시장가(테이커 4bp)로 진입 — 두 번 눌러 확인">${t.busy ? "…" : tkArmed ? "한 번 더 · 시장가" : "TAKER"}</span>`
+    + (lim && t.placed ? `<span class="lt-tkr${tkArmed ? " arm" : ""}" role="button" tabindex="0" aria-label="${tkArmed ? "빨간색 = 한 번 더 누르면 시장가로 진입" : "지금 시장가로 진입(taker)"}" title="걸린 지정가를 취소하고 남은 수량을 시장가(테이커 4bp)로 진입 — 두 번 눌러 확인(첫 클릭 = 빨간색, 5초)">${t.busy ? "…" : "TAKER"}</span>`
       + `<span class="lt-tx" role="button" tabindex="0" aria-label="지정가 주문 취소" title="주문 취소">✕</span>` : "");
   if (en._h !== enH) { en.innerHTML = enH; en._h = enH; }
   en.setAttribute("aria-label", lim ? `지정가 진입선 ${lineFmt(ref)} — 위아래로 끌어 옮기기` : "지금가 peg 진입선 — 끌어서 지정가로 바꾸기");
@@ -849,7 +849,7 @@ function renderArmedLines() {
   set(".lt-ln.en", { left: x0 + "px", width: w + "px", top: yE + "px" });
   const pNow = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), upnl = pNow > 0 ? (pNow - en) * qty * sgn : 0, lv = Number(a.p.leverage) || 0;
   const im = lv > 0 ? qty * en / lv : 0, sg = (v) => (v >= 0 ? "+" : "−");   // 증거금 = 명목 ÷ 레버(거래소 ROE 분모)
-  const enTag = set(".lt-tag.en", { left: x0 + 6 + "px", top: yE + "px" });
+  const enTag = set(".lt-tag.en", { left: (mob ? x0 + 6 : R + MARKER_W * m.a + 4) + "px", top: yE + "px" });   // 2026-11-04 펜 메모 «진입한 뒤 포지션 라벨을 SLTP 박스 안 말고 진입 주황 삼각형 옆에»: 삼각형(플롯 오른쪽 끝) 바로 오른쪽
   // 2026-11-02 레인 칩은 줄을 의도대로 나눈다(방향·진입 / 가격 / 손익 / 증거금 %) -- 글자 흐름대로 접히면 «증거/금»처럼 단어 중간에서 끊겼다. 레인이 아니면 예전과 같은 한 줄.
   const pc = upnl >= 0 ? "good" : "bad";
   // 2026-11-03 사용자 «진입 라벨이 큰 박스로 청산 프로파일을 가린다 · short +$1 처럼 포지션이랑 수익금만»: 한 줄 작은 알약 «SHORT +$10.52» -- 진입가·증거금 수익률은 툴팁.
@@ -5898,14 +5898,14 @@ function renderSupply1s(box) {
     const items = [["선물 " + sgn(acc), "var(--ink)", { color: "var(--ink)", width: 1.8, op: 0.9 }]];
     if (spotOn) items.push(["현물 " + sgn(spotAcc), "var(--spot)", { color: "var(--spot)", width: 1.6, op: 0.95 }]);
     items.push(["OI " + (oiEnd == null ? "—" : sgn(oiEnd)), "var(--warn)", { color: "var(--warn)", width: 1.8, op: 0.95 }]);
-    const { y0: cvdY0, zc, hh } = laneFrame(0, "CVD · OI", items);
-    let headEnd = 6 + measureTextW("CVD · OI", `700 ${narrow ? 12 : 13}px Pretendard Variable, Pretendard, 'Noto Sans KR', sans-serif`) + 10;   // 머리 띠의 시각 꼬리표는 이름(·청산 급증 배지) 뒤부터
+    const { y0: cvdY0, zc, hh } = laneFrame(0, "", items);   // 2026-11-04 펜 메모 «CVD · OI / 고래 · 중형 · 리테일 텍스트 제거» -- 줄 이름은 안 그린다(견본·값이 줄을 말한다)
+    let headEnd = 6;   // 머리 띠의 시각 꼬리표는 (청산 급증 배지 뒤) 왼쪽 끝부터
     { // 2026-10-04 청산 급증 배지(사용자 지시 -- 계좌 카드 말고 이 차트). 판정 = 시장 맥락과 같은 mcLiqBurstSide.
       const bu = latestMarketCtx && latestMarketCtx.burst, side = activeSnapshotAsset === "eth" ? mcLiqBurstSide(bu) : null;
       if (side) {
         const fsz = narrow ? 10.5 : 11, ff = "Pretendard Variable, Pretendard, 'Noto Sans KR', sans-serif";
         const t1 = `${side === "long" ? "롱" : "숏"} 청산 급증 ${fmtUsdCompact((side === "long" ? bu.long_usd_60s : bu.short_usd_60s) || 0)}/60초`, t2 = " · 시장가 청산 주의";
-        const bx = 6 + measureTextW("CVD · OI", `700 ${narrow ? 12 : 13}px ${ff}`) + 10, bw = measureTextW(t1, `700 ${fsz}px ${ff}`) + measureTextW(t2, `600 ${fsz}px ${ff}`) + 18, bh = fsz + 9;
+        const bx = 6, bw = measureTextW(t1, `700 ${fsz}px ${ff}`) + measureTextW(t2, `600 ${fsz}px ${ff}`) + 18, bh = fsz + 9;
         const g = document.createElementNS(NS, "g"), r = document.createElementNS(NS, "rect"), tt = document.createElementNS(NS, "title");
         // 2026-10-04 문구를 근거만큼만(사용자 «청산 급증 배지 문제도 고쳐줘»): «대개 되돌아온다»는 일반 시점에서 약하다(15분 +6.6bp, CI 하한 +0.03)
         tt.textContent = `직전 60초 ${side === "long" ? "롱" : "숏"} 청산이 큰 버스트(롱 ${fmtUsdCompact(bu.thr[0])} · 숏 ${fmtUsdCompact(bu.thr[1])} 초과, 학습 7일 상위 0.5%)입니다.\n`
@@ -5971,7 +5971,7 @@ function renderSupply1s(box) {
     series.forEach((sr) => { sr.end = sr.rows.length ? sr.rows[sr.rows.length - 1].v : 0; });
     const items = series.map((sr) => [sr.name + " " + sgn(sr.end), sr.end >= 0 ? "var(--good)" : "var(--bad)",
                                       { color: "var(--ink)", width: sr.width, op: sr.op, dash: sr.dash }]);
-    const { zc, hh } = laneFrame(1, "고래 · 중형 · 리테일", items);
+    const { zc, hh } = laneFrame(1, "", items);
     const cs = Math.max(1e-9, ...series.flatMap((sr) => sr.rows.map((r) => Math.abs(r.v))));
     series.forEach((sr) => { if (sr.rows.length >= 2) line(pathOf(sr.rows, scaled(sr.rows, zc, hh, cs)), "var(--ink)", sr.width, sr.op, sr.dash); });
   }
