@@ -16,6 +16,7 @@ from pathlib import Path
 import pandas as pd
 
 DIR = Path(__file__).resolve().parents[1] / "data" / "live" / "pred_record"
+BACKFILL = Path(__file__).resolve().parents[1] / "data" / "live" / "pred_record_backfill"   # 실시간 기록 시작(11-03 15시 UTC) 전 구간을 같은 모델로 다시 계산한 재구성 기록 -- 읽기 전용, 실시간 기록이 같은 결정(k, t)에 우선
 BAND_SCORED = Path(__file__).resolve().parents[1] / "data" / "live" / "regime_band_forward_scored.jsonl"
 X_COINS = ["ETH", "BTC", "SOL", "XRP", "ADA", "AVAX", "BNB", "DOGE", "LINK"]
 BAR = 300_000
@@ -43,6 +44,15 @@ def _tail(path: Path) -> list[dict]:
         except ValueError:
             continue                                  # 깨진 줄은 건너뛴다
     return out
+
+
+def _rows(name: str, d: Path, bf: Path | None) -> list[dict]:
+    """실시간 기록 + (있으면) 재구성 기록. 같은 (k, t) 는 실시간이 이긴다."""
+    rows = _tail(d / f"{name}.jsonl")
+    if bf is not None and (bf / f"{name}.jsonl").exists():
+        have = {(r.get("k"), r.get("t")) for r in rows}
+        rows += [r for r in _tail(bf / f"{name}.jsonl") if (r.get("k"), r.get("t")) not in have]
+    return rows
 
 
 def _append(path: Path, kind: str, rows: list[dict]) -> int:
@@ -153,9 +163,9 @@ def xsec_record(px_by_coin: dict, d: Path = DIR) -> int:
     return _append(d / "xsec.jsonl", "x", rows)
 
 
-def _xsec(d: Path = DIR, now_ms: int | None = None) -> dict:
+def _xsec(d: Path = DIR, now_ms: int | None = None, bf: Path | None = None) -> dict:
     """전진 IC: 격자 행 t 마다 (직전 4h 상대 수익) 와 (다음 4h 상대 수익) 의 스피어만 순위상관 평균. now_ms 가 있고 스냅숏이 20분 넘게 묵었으면 latest 는 비운다."""
-    rows = {r["t"]: r["px"] for r in _tail(d / "xsec.jsonl") if r.get("k") == "x"}
+    rows = {r["t"]: r["px"] for r in _rows("xsec", d, bf) if r.get("k") == "x"}
     step, ics = 4 * 3600 * 1000, []
     for t, now in sorted(rows.items()):
         a, b = rows.get(t - step), rows.get(t + step)
@@ -170,18 +180,17 @@ def _xsec(d: Path = DIR, now_ms: int | None = None) -> dict:
     return {"n": len(ics), "ic": float(sum(ics) / len(ics)) if ics else None, "latest": dict(_xs_latest) if fresh else None}
 
 
-def summary(now_ms: int, d: Path = DIR, band: Path = BAND_SCORED) -> dict:
+def summary(now_ms: int, d: Path = DIR, band: Path = BAND_SCORED, bf: Path | None = BACKFILL) -> dict:
     coins = {}
-    for p in sorted(d.glob("*.jsonl")) if d.exists() else []:
-        if p.stem == "xsec":
-            continue
-        rows = [r for r in _tail(p) if r["t"] >= now_ms - (DAYS + 1) * 86_400_000]
-        coins[p.stem.lower()] = _score(rows, now_ms)
+    names = {p.stem for g in (d, bf) if g is not None and g.exists() for p in g.glob("*.jsonl")} - {"xsec"}
+    for name in sorted(names):
+        rows = [r for r in _rows(name, d, bf) if r["t"] >= now_ms - (DAYS + 1) * 86_400_000]
+        coins[name.lower()] = _score(rows, now_ms)
     for c in set(coins) | {"eth", "btc", "sol", "xrp"}:
         b = _band(c, band)
         if b:
             coins.setdefault(c, {})["band"] = b
-    xs = _xsec(d, now_ms)
+    xs = _xsec(d, now_ms, bf)
     return {"ok": bool(coins) or bool(xs["latest"]), "asof_ms": now_ms, "coins": coins, "xsec": xs}
 
 
@@ -194,11 +203,11 @@ def _selftest() -> None:
     assert record_short("ETH", {"ok": True, "hist": hist}, closes, d) == 60
     assert record_short("ETH", {"ok": True, "hist": hist}, closes, d) == 0         # 같은 결정은 두 번 안 쓴다
     assert record_h4("ETH", {"ok": True, "lo": -1, "hi": 1, "hist": [[t0 + i * BAR, 2.0] for i in range(60)]}, closes, d) == 60
-    s = summary(t0 + 65 * BAR, d, d / "none")["coins"]["eth"]
+    s = summary(t0 + 65 * BAR, d, d / "none", None)["coins"]["eth"]
     assert (s["15m"]["n"], s["15m"]["hit"], s["15m"]["pending"]) == (29, 29, 1), s["15m"]      # 짝수 i 30개 중 i=58 만 지평 뒤 종가 없음
     assert (s["1h"]["n"], s["1h"]["hit"], s["1h"]["pending"]) == (48, 0, 12), s["1h"]         # 상승장 숏 신호는 전부 실패
     assert (s["4h"]["n"], s["4h"]["hit"], s["4h"]["pending"]) == (12, 12, 48), s["4h"]
-    g = summary(t0 + 500 * BAR, d, d / "none")["coins"]["eth"]                        # 한참 뒤에도 종가가 없는 결정 = 구멍 -> 대기로 세지 않는다
+    g = summary(t0 + 500 * BAR, d, d / "none", None)["coins"]["eth"]                        # 한참 뒤에도 종가가 없는 결정 = 구멍 -> 대기로 세지 않는다
     assert all(v["pending"] == 0 for v in g.values()), g
     # 상대 강도: 직전 4h 에 오른 코인이 다음 4h 에 지는 반전 시장 -> IC < 0
     step = 4 * 3600 * 1000
@@ -222,6 +231,14 @@ def _selftest() -> None:
     flat = {"k": "x", "t": 0, "px": {c: 100.0 for c in X_COINS}}
     (p2 / "xsec.jsonl").write_text("".join(json.dumps(dict(flat, t=i * 4 * 3600 * 1000)) + "\n" for i in range(3)))
     assert _xsec(p2)["ic"] is None                                                   # 전부 같은 가격 -> NaN 대신 None
+    # 재구성 기록: 같은 (k, t) 는 실시간이 이기고, 겹치지 않는 결정은 합쳐 채점
+    live, bfd = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
+    (live / "ETH.jsonl").write_text(json.dumps({"k": "s", "t": t0, "px": 100.0, "a": 95.0, "b": 50.0}) + "\n" + json.dumps({"k": "s", "t": t0 + 3 * BAR, "px": 101.0, "a": 50.0, "b": 50.0}) + "\n")
+    (bfd / "ETH.jsonl").write_text(json.dumps({"k": "s", "t": t0, "px": 1.0, "a": 5.0, "b": 50.0, "bf": 1}) + "\n"           # 같은 결정 -> 무시돼야 함(실시간 a=95 롱)
+                                   + json.dumps({"k": "s", "t": t0 - 10 * BAR, "px": 100.0, "a": 5.0, "b": 50.0, "bf": 1}) + "\n"   # 재구성 숏 -> px 가 없는 t-7봉이라 대기가 아니라 구멍
+                                   + json.dumps({"k": "s", "t": t0 - 3 * BAR, "px": 99.0, "a": 95.0, "b": 50.0, "bf": 1}) + "\n")  # 재구성 롱: 종료가 = t0 의 px 100 -> 적중
+    m = summary(t0 + 100 * BAR, live, live / "none", bfd)["coins"]["eth"]["15m"]
+    assert (m["n"], m["hit"], m["pending"]) == (2, 2, 0), m   # 실시간 t0(롱·종료가 101 적중) + 재구성 t0-3봉(롱·종료가 100 적중). 재구성 t0 는 무시, t0-10봉 숏은 종료가가 없어 구멍
     print("selftest OK")
 
 
