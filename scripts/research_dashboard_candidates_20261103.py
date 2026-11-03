@@ -55,7 +55,8 @@ def t3():
     k = load("eth"); res = {}
     start_eval = seed.index[0] + pd.Timedelta(days=14)
     for name, col, h in [("P6_15m", "p15m", 3), ("P7_1h", "p1h", 12)]:
-        ret = (k.close.shift(-h) / k.close - 1).reindex(seed.index)
+        # 씨앗 ts = 결정 시각(봉 마감) → 결정가 = 직전 봉(시작 ts-5분) 종가, 종료가 = h봉 뒤 종가. 11-03 정정: 처음엔 ts 를 봉 시작으로 읽어 라벨이 1봉 늦었다.
+        ret = (k.close.shift(-(h - 1)) / k.close.shift(1) - 1).reindex(seed.index)
         p = seed[col]; day = p.index.normalize()
         thr_hi = pd.Series(np.nan, index=p.index); thr_lo = thr_hi.copy()
         for d in np.unique(day[day >= start_eval.normalize()]):  # 인과: 그 날 0시 이전 예측만
@@ -129,12 +130,22 @@ def t2():
 
 
 # ---------------------------------------------------------------- T1
-def feats():
+def feats(k=None):
+    if k is None:
+        k = load_eth_with_metrics()
+    return feats_from(k)
+
+
+def load_eth_with_metrics():
     k = load("eth")
     m = pd.read_csv(DATA / "TOTAL_ETHUSDT_metrics_2024_2026.csv", parse_dates=["create_time"])
     m["t"] = m.create_time - pd.Timedelta(minutes=5)  # 버킷 종료 라벨 → 봉 시작시각
     m = m.drop_duplicates("t").set_index("t")[["sum_open_interest", "sum_toptrader_long_short_ratio"]]
-    k = k.join(m)
+    return k.join(m)
+
+
+def feats_from(k):
+    """k: high·low·close·volume·taker_buy_base·sum_open_interest·sum_toptrader_long_short_ratio (봉 시작 시각 인덱스)."""
     c, h, l, v = k.close, k.high, k.low, k.volume
     z = lambda s: (s - s.rolling(2016).mean()) / s.rolling(2016).std()
     rv = np.log(np.sqrt((np.log(c).diff() ** 2).rolling(288).sum()))
