@@ -570,13 +570,36 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                     self.assertEqual(cap["binding"], "margin", cap)
                     self.assertAlmostEqual(cap["cap_notional_usdt"], 1000.0 * 20 * 0.5, places=2)
                     self.assertIsNone(cap.get("cap_model_usdt"), "SOL 에 ETH 위험 모델 상한이 들어갔다")
-                    bad = await client.get("/api/manual-entry/preview?side=LONG&asset=btc")
+                    bad = await client.get("/api/manual-entry/preview?side=LONG&asset=hype")   # 주문 심볼이 없는 코인(2026-11-04 BTC 는 열렸다)
                     self.assertEqual(bad.status, 400)
                     x = await client.get("/api/manual-exit/preview?side=LONG&asset=sol")
                     self.assertEqual(x.status, 400)
                     self.assertEqual((await x.json())["error"], "no_position", "SOL 청산이 ETH 포지션을 잡았다")
                     e = await (await client.get("/api/manual-exit/preview?side=LONG&asset=eth")).json()
                     self.assertTrue(e.get("ok"), e)     # 대조군: ETH 탭은 그 포지션을 닫는다
+                finally:
+                    await client.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
+
+    def test_btc_order_uses_btcusdc_margin_cap_only(self) -> None:
+        """2026-11-04 사용자 «BTC도 주문 열어줘»: SOL·XRP 와 같은 단순 규칙 -- 주문 심볼 BTCUSDC · 상한은 증거금 50% 하나 · ETH 위험 모델 없음.
+        🔴BTC 탭의 청산은 ETH 포지션을 못 건드린다(가짜 계좌엔 ETHUSDT LONG 만 있다 -> no_position)."""
+        async def exercise() -> None:
+            with mock.patch.object(orders, "SIZING_MARGIN_CAP_PCT", 50.0):
+                client = TestClient(TestServer(offline_app(server)))
+                await client.start_server()
+                try:
+                    b = await (await client.get("/api/manual-entry/preview?side=LONG&asset=btc&lev=20")).json()
+                    self.assertTrue(b.get("ok"), b)
+                    plan, cap = b["plan"], b["cap"]
+                    self.assertEqual((plan["symbol"], plan["positionSide"]), ("BTCUSDC", "LONG"), plan)
+                    self.assertEqual(cap["binding"], "margin", cap)
+                    self.assertAlmostEqual(cap["cap_notional_usdt"], 1000.0 * 20 * 0.5, places=2)
+                    self.assertIsNone(cap.get("cap_model_usdt"), "BTC 에 ETH 위험 모델 상한이 들어갔다")
+                    x = await client.get("/api/manual-exit/preview?side=LONG&asset=btc")
+                    self.assertEqual((x.status, (await x.json())["error"]), (400, "no_position"), "BTC 청산이 ETH 포지션을 잡았다")
                 finally:
                     await client.close()
 

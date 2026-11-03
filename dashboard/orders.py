@@ -343,7 +343,7 @@ MANUAL_EXEC_SYMBOL = (os.getenv("DASHBOARD_MANUAL_EXEC_SYMBOL", "").strip().uppe
 # 2026-09-26 SOL·XRP 주문(사용자 지시, 단순 규칙). 🔴데이터는 USDT · 주문만 USDC -- SOLUSDC·XRPUSDC 는 계정 요율
 #   메이커 0bp·테이커 4bp(ETHUSDC 와 같음, 09-26 commissionRate 조회). SOL·XRP 는 ETH 위험 모델을 안 쓰고
 #   상한은 증거금 50% 하나뿐이다(assemble_entry_plan 의 asset 분기).
-MANUAL_EXEC_SYMBOLS = {"eth": MANUAL_EXEC_SYMBOL, "sol": "SOLUSDC", "xrp": "XRPUSDC",
+MANUAL_EXEC_SYMBOLS = {"eth": MANUAL_EXEC_SYMBOL, "sol": "SOLUSDC", "xrp": "XRPUSDC", "btc": "BTCUSDC",   # 2026-11-04 사용자 «BTC도 주문 열어줘» -- SOL·XRP 와 같은 단순 규칙(증거금 50% 상한 하나 · ETH 위험 모델 없음) · BTCUSDC 요율 ETHUSDC 와 같다(docs/usdc_maker_zero_fee_axis_revival_survey_20260916.md)
                         "sndk": "SNDKUSDT", "soxl": "SOXLUSDT"}   # 2026-11-02 사용자 «둘 다 열어줘» -- 주식은 USDT 하나(basis 1)
 
 

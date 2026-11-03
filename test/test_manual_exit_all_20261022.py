@@ -1,6 +1,6 @@
 """«전체 청산»(2026-10-22 사용자 «코인 여러 개를 한꺼번에 청산 -- 지금은 다른 청산을 기다려야 한다»).
 
-(a) ETH 숏 + XRP 롱 + 대시보드 밖 BTC → 한 번 접수에 ETH·XRP 청산이 **동시에** 돈다(ETH 가 끝나기 전에 XRP 도 나감), BTC 는 unknown_symbol
+(a) ETH 숏 + XRP 롱 + 대시보드 밖 HYPE(주문 심볼 없는 코인; 2026-11-04 BTC 는 주문이 열려 예시를 바꿨다) → 한 번 접수에 ETH·XRP 청산이 **동시에** 돈다(ETH 가 끝나기 전에 XRP 도 나감), HYPE 는 unknown_symbol
 (b) 돌고 있는 동안 다시 누르면 둘 다 already_working(두 번 나가지 않는다)
 (c) confirm 없음 400 · GET 405 · 게이트 꺼짐 403 · 포지션 없음 400 · exec=market 이면 계획이 MARKET
 🔴실주문 0 -- run_exit 를 가짜로, run_entry·place_bracket 은 불리면 실패. 바이낸스 GET 은 _isolated_dirs 의 가짜 응답.
@@ -27,7 +27,7 @@ from test_rec_rule_entry_20261009 import SYM, account, long_pos  # noqa: E402   
 
 ETH_SHORT = {**long_pos(0.943, 2447.0), "side": "SHORT"}
 XRP_LONG = {**long_pos(1904.8, 1.29), "symbol": "XRPUSDC", "mark_price": 1.30, "notional": 2476.0}
-BTC_LONG = {**long_pos(0.01, 60000.0), "symbol": "BTCUSDT"}
+HYPE_LONG = {**long_pos(0.01, 60000.0), "symbol": "HYPEUSDT"}
 
 
 class ExitAllTest(unittest.TestCase):
@@ -77,7 +77,7 @@ class ExitAllTest(unittest.TestCase):
             self.assertEqual(r.status, 200, body)
             by = {x["symbol"]: x for x in body["results"]}
             self.assertTrue(by[SYM]["ok"] and by["XRPUSDC"]["ok"], body)
-            self.assertEqual(by["BTCUSDT"]["error"], "unknown_symbol")
+            self.assertEqual(by["HYPEUSDT"]["error"], "unknown_symbol")
             await asyncio.sleep(0.05)
             self.assertEqual(sorted(p["symbol"] for p in rec["exits"]), sorted([SYM, "XRPUSDC"]))   # ETH 가 안 끝났는데 XRP 도 나갔다
             self.assertEqual({p["positionSide"] for p in rec["exits"]}, {"SHORT", "LONG"})
@@ -87,9 +87,9 @@ class ExitAllTest(unittest.TestCase):
             again = await client.post("/api/manual-exit/submit-all?confirm=1")
             b2 = await again.json()
             self.assertEqual(again.status, 409, b2)
-            self.assertEqual({x["error"] for x in b2["results"] if x["symbol"] != "BTCUSDT"}, {"already_working"})
+            self.assertEqual({x["error"] for x in b2["results"] if x["symbol"] != "HYPEUSDT"}, {"already_working"})
             self.assertEqual(len(rec["exits"]), 2)                                        # 두 번 나가지 않았다
-        self._run([ETH_SHORT, XRP_LONG, BTC_LONG], fn)
+        self._run([ETH_SHORT, XRP_LONG, HYPE_LONG], fn)
 
     def test_guards(self) -> None:
         async def fn(client, rec):

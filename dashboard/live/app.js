@@ -29,7 +29,7 @@ const ASSET_CONFIG = {
   soxl: { label: "SOXL", symbol: "SOXLUSDT", dp: 2 },   // 2026-11-02 Binance TradFi ETF 선물(주문 불가)
 };
 // 풋프린트·1초 수급·OI·호가 히트맵을 서버가 실시간으로 만드는 코인(server.py FLOW_SPECS 와 같은 목록).
-const FLOW_ASSETS = new Set(["eth", "btc", "sol", "xrp", "sndk", "soxl"]);   // 2026-10-31 BTC 추가(주문은 그대로 막힘 -- 서버 주문 심볼 없음)
+const FLOW_ASSETS = new Set(["eth", "btc", "sol", "xrp", "sndk", "soxl"]);   // 2026-10-31 BTC 추가(주문은 11-04 부터 열림 -- 서버 MANUAL_EXEC_SYMBOLS btc→BTCUSDC)
 const flowOn = () => FLOW_ASSETS.has(activeSnapshotAsset);
 const coinUnit = () => (ASSET_CONFIG[activeSnapshotAsset] || {}).label || String(activeSnapshotAsset).toUpperCase();
 const pxDp = () => { const d = (ASSET_CONFIG[activeSnapshotAsset] || {}).dp; return Number.isFinite(d) ? d : 1; };
@@ -1685,7 +1685,7 @@ function acctMarginUsed(b) {
     : Math.max(0, (Number(b.margin) || 0) - (Number(b.available) || 0));
   return { used, equity, pct: equity > 0 ? used / equity * 100 : 0 };
 }
-// 2026-09-26 코인별 주문 심볼(서버 MANUAL_EXEC_SYMBOLS: eth→ETHUSDC · sol→SOLUSDC · xrp→XRPUSDC). 표에 없는 코인은 ""(주문 불가).
+// 2026-09-26 코인별 주문 심볼(서버 MANUAL_EXEC_SYMBOLS: eth→ETHUSDC · sol→SOLUSDC · xrp→XRPUSDC · btc→BTCUSDC). 표에 없는 코인은 ""(주문 불가).
 function execSymbolFor(asset) {
   const acc = latestBinanceAccount || lastGoodAccount || {};
   return String((acc.exec_symbols || {})[asset] || (asset === "eth" ? acc.exec_symbol || "" : "")).toUpperCase();
