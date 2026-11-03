@@ -3472,3 +3472,4 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
 .xs-c .xv, .xs-c .xk { position: absolute; left: 0; right: 0; text-align: center; font-size: 9.5px; line-height: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
 .xs-c .xv { bottom: 12px; } .xs-c .xk { bottom: 0; font-weight: 700; } .xs-c.me .xk { color: var(--text); font-weight: 800; }
 .pr-note { font-size: 10px; color: var(--muted); margin-top: 3px; line-height: 1.35; }
+@media (max-width: 380px) { .pr-row { grid-template-columns: 54px 1fr; } .pr-row .n { grid-column: 1 / -1; white-space: normal; } }   /* 좁은 폰: 결과 글자를 아래 줄로(가로 넘침 방지) */

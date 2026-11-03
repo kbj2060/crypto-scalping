@@ -22,6 +22,7 @@ BAR = 300_000
 H = {"15m": 3, "1h": 12, "4h": 48}   # 지평(봉)
 TAIL_BYTES = 8_000_000
 DAYS = 14
+STALE_MS = 20 * 60_000                # 상대 강도 스냅숏이 이보다 묵으면 화면에 안 낸다(5분 루프가 멈췄다는 뜻)
 _seen: dict = {}                      # (파일, k) -> 이미 쓴 t 집합 (프로세스 안)
 _xs_latest: dict = {}                 # 마지막 상대 강도 스냅숏 {t, rel_bp}
 
@@ -45,7 +46,9 @@ def _tail(path: Path) -> list[dict]:
 
 def _append(path: Path, kind: str, rows: list[dict]) -> int:
     key = (str(path), kind)
-    seen = _seen.setdefault(key, {r["t"] for r in _tail(path) if r.get("k") == kind})
+    if key not in _seen:   # setdefault(key, <set>) 는 기본값을 매번 만들어 8MB 꼬리를 매번 읽는다
+        _seen[key] = {r["t"] for r in _tail(path) if r.get("k") == kind}
+    seen = _seen[key]
     new = [r for r in rows if r["t"] not in seen]
     if new:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -60,11 +63,18 @@ def _px(closes: pd.Series, t_ms: int):
     return None if v is None or pd.isna(v) else float(v)
 
 
+def _settled(payload: dict) -> list:
+    """hist 에서 «피쳐가 온전한» 봉만. 최신 봉에 빈 피쳐(nan_feats: 봉 마감 직후 OI·롱숏비 REST 가 아직 안 올라옴)가 있으면 그 봉은 뺀다 --
+    기록은 첫 값이 고정(dedupe)이라 NaN 이 섞인 예측이 신호로 박힐 수 있다. 뺀 봉은 다음 실행(5분 뒤)의 hist 에 다시 들어온다."""
+    hist = payload.get("hist") or []
+    return [h for h in hist if h[0] != payload.get("decided_at_ms")] if payload.get("nan_feats") else hist
+
+
 def record_short(coin: str, payload: dict, closes: pd.Series, d: Path = DIR) -> int:
     """/api/dir-short 응답의 hist [[결정 ms, 15분 분위, 1시간 분위], …] 를 쌓는다."""
     if not (payload and payload.get("ok")):
         return 0
-    rows = [{"k": "s", "t": int(t), "px": _px(closes, int(t)), "a": a, "b": b} for t, a, b in payload.get("hist") or []]
+    rows = [{"k": "s", "t": int(t), "px": _px(closes, int(t)), "a": a, "b": b} for t, a, b in _settled(payload)]
     return _append(d / f"{coin.upper()}.jsonl", "s", [r for r in rows if r["px"] is not None])
 
 
@@ -73,7 +83,7 @@ def record_h4(coin: str, payload: dict, closes: pd.Series, d: Path = DIR) -> int
     if not (payload and payload.get("ok")):
         return 0
     lo, hi = payload["lo"], payload["hi"]
-    rows = [{"k": "4", "t": int(t), "px": _px(closes, int(t)), "d": v, "s": 1 if v >= hi else -1 if v <= lo else 0} for t, v in payload.get("hist") or []]
+    rows = [{"k": "4", "t": int(t), "px": _px(closes, int(t)), "d": v, "s": 1 if v >= hi else -1 if v <= lo else 0} for t, v in _settled(payload)]
     return _append(d / f"{coin.upper()}.jsonl", "4", [r for r in rows if r["px"] is not None])
 
 
@@ -84,7 +94,6 @@ def _score(rows: list[dict], now_ms: int) -> dict:
     for name, ks, sig in (("15m", "s", lambda r: _s80(r.get("a"))), ("1h", "s", lambda r: _s80(r.get("b"))), ("4h", "4", lambda r: r.get("s"))):
         n = hit = pend = 0
         day: dict = {}
-        first = None
         for r in rows:
             if r.get("k") != ks:
                 continue
@@ -104,7 +113,6 @@ def _score(rows: list[dict], now_ms: int) -> dict:
             c[1] += int(ret * s > 0)
             n += 1
             hit += int(ret * s > 0)
-            first = first or d
         if n or pend:
             out[name] = {"n": n, "hit": hit, "pending": pend, "daily": [[d, a, b] for d, (a, b) in sorted(day.items())][-DAYS:]}
     return out
@@ -133,6 +141,8 @@ def xsec_record(px_by_coin: dict, d: Path = DIR) -> int:
     frame = pd.DataFrame({c: s for c, s in px_by_coin.items() if len(s)}).dropna()
     if frame.shape[1] < len(X_COINS) or len(frame) < 49:
         return 0
+    if frame.index[-1] - frame.index[-49] != pd.Timedelta(minutes=240):   # 결측 봉이 있으면 «49번째 앞»이 4h 앞이 아니다 -- 스냅숏을 갱신하지 않는다
+        return 0
     last = frame.index[-1]
     rel = (frame.iloc[-1] / frame.iloc[-49] - 1)
     _xs_latest.update(t=int(pd.Timestamp(last).value // 10**6) + BAR, rel_bp={c: round(float(v) * 1e4, 1) for c, v in (rel - rel.mean()).items()})
@@ -141,8 +151,8 @@ def xsec_record(px_by_coin: dict, d: Path = DIR) -> int:
     return _append(d / "xsec.jsonl", "x", rows)
 
 
-def _xsec(d: Path = DIR) -> dict:
-    """전진 IC: 격자 행 t 마다 (직전 4h 상대 수익) 와 (다음 4h 상대 수익) 의 스피어만 순위상관 평균."""
+def _xsec(d: Path = DIR, now_ms: int | None = None) -> dict:
+    """전진 IC: 격자 행 t 마다 (직전 4h 상대 수익) 와 (다음 4h 상대 수익) 의 스피어만 순위상관 평균. now_ms 가 있고 스냅숏이 20분 넘게 묵었으면 latest 는 비운다."""
     rows = {r["t"]: r["px"] for r in _tail(d / "xsec.jsonl") if r.get("k") == "x"}
     step, ics = 4 * 3600 * 1000, []
     for t, now in sorted(rows.items()):
@@ -153,7 +163,9 @@ def _xsec(d: Path = DIR) -> dict:
         past = pd.Series({c: now[c] / a[c] - 1 for c in cs})
         nxt = pd.Series({c: b[c] / now[c] - 1 for c in cs})
         ics.append(float(past.rank().corr(nxt.rank())))
-    return {"n": len(ics), "ic": float(sum(ics) / len(ics)) if ics else None, "latest": dict(_xs_latest) or None}
+    ics = [x for x in ics if x == x]   # 가격이 안 변한 코인뿐이면 NaN -- JSON 에 NaN 이 나가면 브라우저가 응답 전체를 못 읽는다
+    fresh = _xs_latest and (now_ms is None or now_ms - _xs_latest["t"] <= STALE_MS)
+    return {"n": len(ics), "ic": float(sum(ics) / len(ics)) if ics else None, "latest": dict(_xs_latest) if fresh else None}
 
 
 def summary(now_ms: int, d: Path = DIR, band: Path = BAND_SCORED) -> dict:
@@ -167,7 +179,8 @@ def summary(now_ms: int, d: Path = DIR, band: Path = BAND_SCORED) -> dict:
         b = _band(c, band)
         if b:
             coins.setdefault(c, {})["band"] = b
-    return {"ok": bool(coins), "asof_ms": now_ms, "coins": coins, "xsec": _xsec(d)}
+    xs = _xsec(d, now_ms)
+    return {"ok": bool(coins) or bool(xs["latest"]), "asof_ms": now_ms, "coins": coins, "xsec": xs}
 
 
 def _selftest() -> None:
@@ -191,6 +204,20 @@ def _selftest() -> None:
     (d / "xsec.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     x = _xsec(d)
     assert x["n"] == 3 and x["ic"] < -0.9, x
+    # 2026-11-03 서브 에이전트 검증 반영
+    p2 = Path(tempfile.mkdtemp())
+    ca = pd.Series(100.0, index=idx)
+    nanp = {"ok": True, "decided_at_ms": t0 + 2 * BAR, "nan_feats": ["X_oi"], "hist": [[t0 + i * BAR, 95.0, 95.0] for i in range(3)]}
+    assert record_short("ETH", nanp, ca, p2) == 2                                    # 빈 피쳐가 있는 최신 봉(i=2)은 뺀다
+    assert record_short("ETH", dict(nanp, nan_feats=[]), ca, p2) == 1               # 다음 실행에서 온전해지면 그 봉이 들어온다
+    gap = {c: pd.Series(100.0, index=idx).drop(idx[-10]) for c in X_COINS}                          # 결측 봉 1개
+    _xs_latest.clear()
+    assert xsec_record(gap, p2) == 0 and not _xs_latest                              # 결측이 있으면 스냅숏을 안 만든다
+    _xs_latest.update(t=1_000_000, rel_bp={"ETH": 1.0})
+    assert _xsec(p2, 1_000_000 + STALE_MS + 1)["latest"] is None and _xsec(p2, 1_000_000 + 1000)["latest"]   # 20분 넘게 묵으면 비운다
+    flat = {"k": "x", "t": 0, "px": {c: 100.0 for c in X_COINS}}
+    (p2 / "xsec.jsonl").write_text("".join(json.dumps(dict(flat, t=i * 4 * 3600 * 1000)) + "\n" for i in range(3)))
+    assert _xsec(p2)["ic"] is None                                                   # 전부 같은 가격 -> NaN 대신 None
     print("selftest OK")
 
 

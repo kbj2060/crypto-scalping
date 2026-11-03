@@ -2605,7 +2605,7 @@ def make_app() -> web.Application:
                 await asyncio.sleep(3)   # 재기동 직후 첫 호출은 코인마다 31일치 REST -- 한꺼번에 몰리지 않게 띄운다
                 for fn in (dir_short_cached,) + ((dir4h_cached,) if coin in d4.ARTIFACTS else ()):
                     try:
-                        await fn(coin)
+                        await fn(coin, ttl=240.0, max_stale=0.0)   # 직전 생산(5분 전 + 걸린 시간)이 «신선»으로 읽혀 건너뛰지 않게 -- 5분 루프가 정말 5분마다 계산·기록한다
                     except Exception as exc:  # noqa: BLE001
                         print(f"[pred_record_loop] {fn.__name__} {coin}: {type(exc).__name__}: {exc}", flush=True)
             try:
@@ -2625,7 +2625,7 @@ def make_app() -> web.Application:
 
     dir4h_art: dict = {}   # 코인 -> {mtime, art}
 
-    async def dir4h_cached(coin: str) -> dict[str, Any]:   # 화면 요청·기록 루프 공용(2026-11-03). coin 은 d4.ARTIFACTS 안 -- 호출부가 검증
+    async def dir4h_cached(coin: str, ttl: float = 300.0, max_stale: float = 1800.0) -> dict[str, Any]:   # 화면 요청·기록 루프 공용(2026-11-03). coin 은 d4.ARTIFACTS 안 -- 호출부가 검증
         from scripts import live_eth_dir4h_20261015 as d4
         path = d4.ARTIFACTS[coin]
 
@@ -2639,7 +2639,7 @@ def make_app() -> web.Application:
             payload = d4.live_payload(da["art"])
             pred_record_safe(pred_record.record_h4, coin, payload, d4)
             return payload
-        return await swr_cached(f"dir4h:{coin.lower()}", 300.0, lambda: asyncio.to_thread(produce_sync), max_stale=1800.0)
+        return await swr_cached(f"dir4h:{coin.lower()}", ttl, lambda: asyncio.to_thread(produce_sync), max_stale=max_stale)
 
     async def api_dir4h(request: web.Request) -> web.Response:   # 2026-10-15 ⑤ 예측 판 «4h 방향»(scripts/live_eth_dir4h_20261015) · 10-31 SOL·XRP
         """매달 재학습 HGB(65피쳐) -- 바이낸스 REST 를 vision 형식으로(첫 호출 그 코인 31일, 다음부터 꼬리만) · 5분 캐시.
@@ -2656,7 +2656,7 @@ def make_app() -> web.Application:
 
     dirshort_art: dict = {}   # 코인 -> {mtime, art}
 
-    async def dir_short_cached(coin: str) -> dict[str, Any]:   # 화면 요청·기록 루프 공용(2026-11-03). coin 은 ETH 또는 ds.TABLE 안 -- 호출부가 검증
+    async def dir_short_cached(coin: str, ttl: float = 300.0, max_stale: float = 1800.0) -> dict[str, Any]:   # 화면 요청·기록 루프 공용(2026-11-03). coin 은 ETH 또는 ds.TABLE 안 -- 호출부가 검증
         from scripts import live_eth_dir_short_20261028 as ds
 
         def produce_sync() -> dict[str, Any]:
@@ -2669,7 +2669,7 @@ def make_app() -> web.Application:
             payload = ds.live_payload(da["art"])
             pred_record_safe(pred_record.record_short, coin, payload, ds.d4)
             return payload
-        return await swr_cached(f"dir_short:{coin.lower()}", 300.0, lambda: asyncio.to_thread(produce_sync), max_stale=1800.0)
+        return await swr_cached(f"dir_short:{coin.lower()}", ttl, lambda: asyncio.to_thread(produce_sync), max_stale=max_stale)
 
     async def api_dir_short(request: web.Request) -> web.Response:   # 2026-10-28 ⑤ 예측 판 «15분·1시간 예측»(ETH, scripts/live_eth_dir_short_20261028) · 10-31 BTC·SOL·XRP
         """매달 재학습 LightGBM(ETH = 65피쳐 + 호가 깊이 10열 · BTC·SOL·XRP = 65피쳐판) -- 4h 와 같은 REST 경로(+ ETH 는 호가 깊이 워커 sqlite) · 5분 캐시.

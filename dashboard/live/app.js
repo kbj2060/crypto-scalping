@@ -4564,7 +4564,7 @@ function predRecordStrip() {
     const bars = days.map(([d, n, h]) => `<i class="${h / n > 0.5 ? "u" : h / n < 0.5 ? "d" : ""}" style="height:${Math.max(3, Math.round((16 * h) / n))}px" title="${d} ${h}/${n}"></i>`).join("");
     const base = r.base != null ? ` · 다수 쪽만 찍으면 ${Math.round(100 * r.base)}%` : ref ? ` · 표본 밖 ${ref}%` : "";
     const body = r.n ? `<b class="${r.hit / r.n >= 0.55 ? "up" : r.hit / r.n <= 0.45 ? "dn" : ""}">${pct(r.hit, r.n)}%</b> ${r.hit}/${r.n}${base}${r.pending ? ` · 대기 ${r.pending}` : ""}` : `쌓는 중 · 대기 ${r.pending}`;
-    return `<div class="pr-row" title="${escapeHtml(tip)}"><b>${nm}</b><span class="pr-sp">${bars}</span><span class="n">${body}</span></div>`;
+    return `<div class="pr-row" title="${escapeHtml(tip + " · 연속 봉의 신호는 겹쳐 세므로 독립 표본은 이보다 훨씬 적다")}"><b>${nm}</b><span class="pr-sp">${bars}</span><span class="n">${body}</span></div>`;
   };
   const hdr = "적중 기록 · 신호였던 결정만 · 일별 막대(점선 = 50%)";
   const rows = row("15분", c["15m"], note && note[1][0], "15분 예측이 상위/하위 20% 밖(신호)이었던 결정 중 15분 뒤 방향이 맞은 비율")
