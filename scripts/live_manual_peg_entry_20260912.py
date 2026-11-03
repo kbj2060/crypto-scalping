@@ -362,8 +362,9 @@ def line_bracket(*, position_side: str, ref_level: float, tp_level: float, sl_le
     long_side = position_side == "LONG"
     if not ((sl_level < ref_level < tp_level) if long_side else (tp_level < ref_level < sl_level)):
         raise ValueError("롱은 익절선이 현재가 위·손절선이 아래, 숏은 반대여야 합니다")
-    # 🔴손절 상한 = 규칙 손절폭(RULE_STOP_PCT) -- 자동 2× 크기가 그 폭에서 손실 한도를 맞춘다(10-28 검증: 15% 면 한도의 3배)
-    for name, lv, hi in (("익절", tp_level, LINE_MAX_PCT), ("손절", sl_level, RULE_STOP_PCT)):
+    # 2026-11-04 사용자 «규칙 손절폭 5% 를 SLTP 로 주문할 경우 제거»: 손절 상한이 규칙 손절폭(5%)이던 것을 익절과 같은 오조작 방지 범위(0.05~15%)로.
+    #   🔴자동 2× 크기가 맞춰 준 «손절 시 손실 한도»는 이제 선 거리만큼 커진다(2× 크기에 손절 10% 면 계좌 −20%).
+    for name, lv, hi in (("익절", tp_level, LINE_MAX_PCT), ("손절", sl_level, LINE_MAX_PCT)):
         d = abs(lv / ref_level - 1)
         if not LINE_MIN_PCT <= d <= hi:
             raise ValueError(f"{name}선이 현재가에서 {100 * d:.2f}% — {100 * LINE_MIN_PCT:g}~{100 * hi:g}% 사이여야 합니다")

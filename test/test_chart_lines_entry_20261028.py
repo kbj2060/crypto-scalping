@@ -78,6 +78,8 @@ class ChartLinesTest(unittest.TestCase):
             self.assertEqual((await get("&tp=2550"))[0], 400)                # 하나만
             self.assertEqual((await get("&tp=abc&sl=2480"))[0], 400)
             self.assertEqual((await get("&tp=2500.5&sl=2480"))[0], 400)      # 0.05% 안쪽
+            self.assertEqual((await get("&tp=2550&sl=2300"))[0], 200)        # 2026-11-04 손절 8% -- 규칙 손절폭 5% 한도를 뺐다
+            self.assertEqual((await get("&tp=2550&sl=2100"))[0], 400)        # 지금가에서 16% > 15% (오조작 방지 범위는 익절과 같다)
         self._run(fn)
 
     def test_direct_pct_lines(self) -> None:   # 2026-10-30 SLTP = 직접(증거금 %) -- rule 없이 선만, 계좌 2× 규칙 상한 없음
@@ -369,8 +371,8 @@ class LineModifyTest(ChartLinesTest):
         self.assertEqual(self._mod("&tp=2450&sl=2480")["status"], 400)                       # 롱인데 익절이 지금가 아래
         self.assertEqual(self._mod("&tp=2550")["status"], 400)                                # 하나만
         far = {**POS, "positions": [{**POS["positions"][0], "entry_price": 2600.0}]}
-        o = self._mod("&tp=2550&sl=2440", acct=far)                                          # 지금가에서 2.4% · 진입가에서 6.2% > 5%
-        self.assertEqual((o["status"], o["body"]["error"]), (400, "sl_too_far"), o["body"])
+        o = self._mod("&tp=2550&sl=2440", acct=far)                                          # 지금가에서 2.4% · 진입가에서 6.2% -- 2026-11-04 규칙 손절폭 한도를 뺐다
+        self.assertNotEqual(o["body"].get("error"), "sl_too_far", o["body"])
         self.assertEqual(self._mod("&tp=2560&sl=2490", armed={"fired": True})["status"], 409)
         self.assertEqual(self._mod("&tp=2560&sl=2490", armed={"lines": False})["status"], 409)
         self.assertEqual(self._mod("&tp=2560&sl=2490", acct=FLAT)["status"], 409)             # 포지션 없음

@@ -2045,7 +2045,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
     async def api_manual_bracket_modify(request: web.Request) -> web.Response:
         """2026-10-29 사용자 «이미 들어간 SLTP 선은 풋프린트에 계속 · 선을 끌면 그대로 주문 수정». 선 무장(lines)만 -- 일반 진입의 −5% 거래소 스탑은 안 건드린다.
         익절 = 우리 post-only 지정가를 지우고 새 가격·포지션 전량으로 다시(place_bracket, 비상 스탑 없음) · 손절 = 서버 감시 레벨만(거래소 주문 없음).
-        검사 = 진입 때와 같은 line_bracket(지금가 기준 방향·거리) + 손절은 **진입가**에서 규칙 손절폭(RULE_STOP_PCT)보다 멀게 못 옮긴다(자동 2× 크기의 손실 한도).
+        검사 = 진입 때와 같은 line_bracket(지금가 기준 방향·거리 0.05~15%) -- 2026-11-04 진입가 기준 규칙 손절폭(5%) 한도는 뺐다.
         🔴익절 지우기가 실패하면 아무것도 안 바꾼다 · 지운 뒤 새 지정가를 못 걸면 tp_resting False(서버가 1초 닿음으로 닫는다 -- 무방비 아님) ·
         이미 쏜(fired) 무장은 거절 · watch_from = 지금(옮기기 전 지나간 가격으로 바로 닫지 않게). 방어 = 진입과 같다(POST + confirm=1 + 게이트 + 주문 잠금 busy_or)."""
         if request.query.get("confirm") != "1":
@@ -2081,11 +2081,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             return web.json_response({"ok": False, "error": "bad_lines", "detail": str(exc)}, status=400)
         except Exception as exc:  # noqa: BLE001 -- 시세·필터를 못 읽으면 아무것도 안 바꾼다
             return web.json_response({"ok": False, "error": "quote_failed", "detail": f"{type(exc).__name__}: {exc}"}, status=502)
-        entry_lv = float(pos["entry_price"]) / basis
-        far = (1 - lines[1] / entry_lv) if side == "LONG" else (lines[1] / entry_lv - 1)
-        if far > RULE_STOP_PCT + 1e-9:
-            return web.json_response({"ok": False, "error": "sl_too_far",
-                                      "detail": f"손절선이 진입가에서 {100 * far:.2f}% — 규칙 손절폭 {100 * RULE_STOP_PCT:g}% 보다 멀게 못 옮깁니다(손실 한도)"}, status=400)
+        # 2026-11-04 사용자 «규칙 손절폭 5% 를 SLTP 로 주문할 경우 제거»: 진입가 기준 5% 한도 검사를 뺐다(선 거리 범위는 위 line_bracket 이 지금가 기준으로 본다)
         # 익절 레벨(USDT)이 그대로면 지정가를 안 건드린다 -- 주문가(USDC)끼리 비교하면 basis 가 1틱만 움직여도 손절만 옮긴 게 익절 재발주가 됐다(검토 F3)
         tp_moved, tp_res, warn = abs(nb["tp_level"] - float(b.get("tp_level") or 0)) > 1e-9, None, None
         if not tp_moved:
