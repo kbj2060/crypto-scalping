@@ -1165,9 +1165,9 @@ svg {
 /* ── 2026-10-14 Account = 오늘 성과 + 과거 기록(사용자 시안 C) ─────────────────────────
    주문 조작부(.acct-lanes)는 플로팅 버튼(#ofab)이 옮겨 쓰므로 DOM 에 남기고 **카드 안에서만** 숨긴다(펼치면 #ofabPanel 로 옮겨가 보인다). */
 #acctCard > .acct-lanes, #acctCard > #ofabAway { display: none !important; }
-.acct-figure.good, #snapAcctPosition .good, #snapAcctPerf .good { color: var(--good); }   /* 머리 요약 알약(.ops-health-summary.good)은 건드리지 않는다 */
-.acct-figure.bad, #snapAcctPosition .bad, #snapAcctPerf .bad { color: var(--bad); }
-#snapAcctPosition .warn, #snapAcctPerf .warn { color: var(--warn); }
+.acct-figure.good, #snapAcctPosition .good, #snapAcctPerf .good, #snapAcctCurve .good { color: var(--good); }   /* 머리 요약 알약(.ops-health-summary.good)은 건드리지 않는다 */
+.acct-figure.bad, #snapAcctPosition .bad, #snapAcctPerf .bad, #snapAcctCurve .bad { color: var(--bad); }
+#snapAcctPosition .warn, #snapAcctPerf .warn, #snapAcctCurve .warn { color: var(--warn); }
 .acct-posline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; padding: 9px 12px; border-radius: var(--radius-sm);
   background: var(--glass); font-size: 12.5px; color: var(--muted); }
 .acct-posline b { color: var(--ink); font-family: var(--font-mono); font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -1184,7 +1184,7 @@ svg {
 .acct-side { font: 700 12px/1 var(--font-sans); padding: 4px 8px; border-radius: 6px; background: color-mix(in srgb, currentColor 16%, transparent); }
 .acct-side.neutral { color: var(--muted); }
 .acct-pv { margin-left: auto; border-left: 1px solid var(--soft-line); padding-left: 12px; }
-.acct-today { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1fr); gap: 20px; align-items: start;
+.acct-today { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 20px; align-items: start;
   padding: 14px 16px; border-radius: var(--radius-sm); background: var(--glass); }
 .acct-today-hero { display: grid; gap: 4px; }
 .acct-today-pct { font: 700 13px/1.3 var(--font-mono); font-variant-numeric: tabular-nums; }
@@ -1195,12 +1195,6 @@ svg {
 .acct-today-kv .acct-kv-sub { font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .acct-bar-note { display: block; margin-top: 2px; font-size: 11px; }
 .acct-today-svg, #acctCard .acct-plot svg { display: block; width: 100%; height: auto; }
-.acct-today-trips ol { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; font-size: 12.5px; }
-.acct-today-trips li { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; }
-.acct-today-trips li.muted { display: block; }   /* 2026-10-26 «닫힌 거래 없음» 한 줄이 44px 시각 칸에 갇혀 «닫힌 거 / 래 없음»으로 꺾였다(데스크톱도) */
-.acct-today-trips time { font: 500 11.5px/1 var(--font-mono); color: var(--muted); }
-.acct-today-trips li > b { font: 700 12.5px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
-.acct-today-trips em { font-style: normal; }
 .acct-hist { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; padding-top: 4px; }
 .acct-cal-box, .acct-curve-box { display: grid; gap: 10px; align-content: start; min-width: 0; }
 .acct-cal-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
@@ -1217,8 +1211,6 @@ svg {
 .acct-cal button.d:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .acct-cal .d.sel { box-shadow: inset 0 0 0 2px var(--amber); }
 .acct-cal .d.sel i { color: var(--amber); font-weight: 700; }
-.acct-day-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.acct-today-past { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 45%, transparent); }
 .acct-cal .d i { font-style: normal; font-size: 10px; color: var(--muted); }
 .acct-cal .d b, .acct-cal .wk { font: 700 10.5px/1 var(--font-mono); text-align: right; white-space: nowrap; letter-spacing: -0.02em; }
 /* 2026-10-20 지갑 대비 % -- 금액 아래 한 줄 작게(같은 색, 조금 옅게) */
@@ -1239,6 +1231,34 @@ svg {
 .acct-stat { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--soft-line); font-size: 12.5px; }
 .acct-stat span { color: var(--muted); }
 .acct-stat b { font: 700 14px/1.1 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* 2026-11-04 펜 메모: 위 줄 = 포지션·오늘 손익 | 자산 곡선(절반씩) · 아래 줄 = 달력 | 고른 날 거래 상세 + 메모장 */
+.acct-top { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; padding: 12px 18px 14px; }
+#snapAcctCurve { min-width: 0; }
+.acct-day-box { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.acct-day-box[hidden] { display: none; }
+#snapAcctDay { display: grid; gap: 8px; min-width: 0; }
+.acct-day-ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; max-height: 232px; overflow-y: auto; font-size: 12.5px; }
+.acct-day-ol li { display: grid; grid-template-columns: 104px minmax(0, .8fr) minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 10px; align-items: baseline; padding: 4px 6px; border-radius: 6px; }
+.acct-day-ol li:nth-child(odd) { background: color-mix(in srgb, var(--ink) 3%, transparent); }
+.acct-day-ol li.muted { display: block; }
+.acct-day-ol time, .acct-day-ol .px { font: 500 11.5px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; }
+.acct-day-ol time { color: var(--muted); }
+.acct-day-ol li > b { font: 700 12.5px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; }
+.acct-day-ol em { font-style: normal; }
+.acct-day-sum { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; font-size: 12.5px; }
+.acct-day-sum b { font: 700 18px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.acct-note { display: grid; gap: 6px; min-width: 0; }
+.acct-note-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12.5px; }
+.acct-note-head label { font-weight: 700; }
+.acct-note-head .muted { font-size: 11.5px; }
+.acct-note-head .muted.warn { color: var(--warn); }
+.acct-note textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 84px; padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--soft-line);
+  background: var(--glass); color: var(--text); font: 13px/1.5 var(--font-sans); }
+.acct-note textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.acct-note textarea:disabled { opacity: .55; }
+.acct-note-foot { display: flex; justify-content: flex-end; }
+.acct-note-foot .notify-btn { min-height: 32px; padding: 6px 16px; font-size: 12.5px; }
+@media (max-width: 900px) { .acct-note-foot .notify-btn { min-height: 40px; } }
 /* 2026-10-22 진행 중 순환(시안 A) -- 달력 아래 · 열린 포지션마다 */
 .cy-box { border-top: 1px solid var(--soft-line); margin-top: 14px; padding-top: 14px; min-width: 0; }
 .cy-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -1263,7 +1283,9 @@ svg {
 .cy-fills em { font-style: normal; margin-left: 4px; }
 .cy-note { font-size: 12px; color: var(--muted); margin: 8px 2px 0; line-height: 1.5; }
 @media (max-width: 900px) {
-  .acct-today, .acct-hist { grid-template-columns: minmax(0, 1fr); }
+  .acct-today, .acct-hist, .acct-top { grid-template-columns: minmax(0, 1fr); }
+  .acct-day-ol li { grid-template-columns: 96px minmax(0, 1fr) auto; }
+  .acct-day-ol .px, .acct-day-ol .hold { display: none; }
   .cy-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .acct-pv { margin-left: 0; border-left: 0; padding-left: 0; }
 }
@@ -1286,10 +1308,9 @@ svg {
 /* 숨은 확인 버튼만 든 행이 flex gap 을 두 번 먹어 버튼과 «약속» 사이에 빈 60px 가 남는다.
    확인 버튼은 미리보기 뒤에만 잠깐 뜨므로 이 빈칸이 **평소 모습**이다. */
 .manual-entry-row:has(> [hidden]:only-child) { display: none; }
-#snapAcctPerf { display: block; padding: 0 18px 4px; }
-#snapAcctPerf:empty { display: none; }
+#snapAcctPerf { padding: 0 18px 4px; }
 
-#snapAcctPerf .acct-plot svg { max-height: 320px; }
+#acctCard .acct-plot svg { max-height: 320px; }
 /* 각 레인의 «약속». 두 행동은 확인 방식이 다르고, 그 차이가 이 화면에서 가장 비싼 오해다. */
 @media (max-width: 720px) {
   .acct-lanes { grid-template-columns: 1fr; margin-left: -14px; margin-right: -14px; }
@@ -2302,7 +2323,7 @@ html.fit1 #snapshotTabPanel > .panel { scroll-margin-top: var(--apph, 64px); }  
   /* 2026-10-01 계좌: 성과 차트를 늘 펼치고(접기 숨김) 남는 높이를 fitLayout 이 --acctplot 으로 준다 */
   html.fit1 #acctCard > :not(.ops-health-head) { zoom: var(--acctz, 1); }   /* 2026-10-05 넘치면 본문만 비율로(제목 줄은 다른 카드와 같게) -- app.js fitLayout 이 --acctz */
 
-  html.fit1 #snapAcctPerf .acct-plot svg { height: var(--acctplot, 240px); max-height: none; }   /* 2026-10-01 줄을 위로 -- 남는 칸을 app.js fitLayout 이 재서 사다리에 준다 */   /* 고정 -- 일정 받기 전 안내 줄로 174px 였다가 113px 로 줄며 차트가 늘었다 */
+  html.fit1 #snapAcctCurve .acct-plot svg { height: var(--acctplot, 240px); max-height: none; }   /* 2026-10-01 줄을 위로 -- 남는 칸을 app.js fitLayout 이 재서 사다리에 준다 */   /* 고정 -- 일정 받기 전 안내 줄로 174px 였다가 113px 로 줄며 차트가 늘었다 */
   html.fit1 #fpCard > .ops-health-head, html.fit1 #liquidationMapList { flex: none; }
 }
 /* 2026-11-02 왼쪽 세로 내비(사용자 «B안: 왼쪽 세로 내비 · 오른쪽 점 레일 제거»). 마크업·동작(app.js setupCardRail/cardRailSync)은 점 레일 그대로 -- 겉만 바꿨다. */
@@ -2349,8 +2370,8 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 @media (pointer: coarse) {
   .asset-tabs .asset-tab, .snap-head .push-toggle { min-height: 40px; }   /* 2026-10-06 알림 버튼도(전엔 테마만 40, 알림 32) */
   /* 2026-10-17 «?» 제목(19px)·작은 칩(24~26px)은 모양은 두고 누르는 자리만 40px 로 -- 투명 ::after 가 위아래로 넓힌다 */
-  .mc-q, .opt-q, .opt-chip-btn, .opt-blk-btn, #snapAcctPerf .chip { position: relative; }
-  .mc-q::after, .opt-q::after, .opt-chip-btn::after, .opt-blk-btn::after, #snapAcctPerf .chip::after {
+  .mc-q, .opt-q, .opt-chip-btn, .opt-blk-btn, #snapAcctPerf .chip, #snapAcctCurve .chip { position: relative; }
+  .mc-q::after, .opt-q::after, .opt-chip-btn::after, .opt-blk-btn::after, #snapAcctPerf .chip::after, #snapAcctCurve .chip::after {
     content: ""; position: absolute; left: 50%; top: 50%; width: max(100% + 4px, 40px); height: 40px; transform: translate(-50%, -50%); }
 }
 

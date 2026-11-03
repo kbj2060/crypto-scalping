@@ -137,6 +137,7 @@ from dashboard import situation as sit  # noqa: E402
 from dashboard import flow_read as fr  # noqa: E402
 from dashboard.trend_rule import trend_payload  # noqa: E402 -- 30분 카드 추세 칸(2026-09-28)
 from dashboard.dir_signals import dir_signals_payload, vol4h_from_klines, open_rev_from_klines  # noqa: E402 -- 풋프린트 머리 지평 사다리·⑤ 예측 판(2026-10-15)
+from dashboard import acct_notes  # noqa: E402 -- 계좌 카드 날짜별 메모(2026-11-04)
 from dashboard import pred_record  # noqa: E402 -- ⑤ 예측 줄 아래 «적중 기록»·«4h 상대 강도»(2026-11-03)
 from dashboard.regime_band import regime_band_payload  # noqa: E402 -- ⑤ 예측 줄 «횡보·추세» 칸(2026-11-02, 전진 기록 크론이 쌓은 마지막 행)
 from dashboard.box_hold import BUNDLES as box_hold_bundles, payload as box_hold_payload, with_qx4i as box_hold_with_qx4i  # noqa: E402 -- 박스 유지 확률(2026-10-16, 방향 아님 · 10-20 XRP)
@@ -2616,6 +2617,18 @@ def make_app() -> web.Application:
             except Exception as exc:  # noqa: BLE001
                 print(f"[pred_record_loop] xsec: {type(exc).__name__}: {exc}", flush=True)
 
+    ACCT_NOTES_PATH = LIVE_DIR / "acct_notes.json"
+
+    async def api_acct_notes(request: web.Request) -> web.Response:   # 2026-11-04 계좌 카드 날짜별 메모 읽기
+        return web.json_response({"notes": acct_notes.load(ACCT_NOTES_PATH)}, headers=NOCACHE)
+
+    async def api_acct_notes_save(request: web.Request) -> web.Response:   # 저장 = {date: "YYYY-MM-DD"(KST), text} · 빈 글은 그 날 메모 삭제
+        try:
+            body = await request.json()
+            return web.json_response(acct_notes.save(ACCT_NOTES_PATH, body.get("date"), body.get("text")), headers=NOCACHE)
+        except (ValueError, AttributeError) as exc:
+            raise web.HTTPBadRequest(text=str(exc))
+
     async def api_pred_record(request: web.Request) -> web.Response:   # 2026-11-03 ⑤ 예측 줄 아래 «적중 기록»·«4h 상대 강도» -- 쌓인 기록을 읽어 채점(요청 때 REST 안 부른다)
         try:
             payload = await swr_cached("pred_record", 30.0, lambda: asyncio.to_thread(pred_record.summary, int(time.time() * 1000)), max_stale=600.0)
@@ -4558,6 +4571,8 @@ def make_app() -> web.Application:
     app.router.add_get("/api/dir4h", api_dir4h)
     app.router.add_get("/api/dir-short", api_dir_short)
     app.router.add_get("/api/pred-record", api_pred_record)
+    app.router.add_get("/api/acct-notes", api_acct_notes)
+    app.router.add_post("/api/acct-notes", api_acct_notes_save)
     app.router.add_get("/api/box-hold", api_box_hold)
     app.router.add_get("/api/open-rev", api_open_rev)
     app.router.add_get("/api/iceberg", api_iceberg)

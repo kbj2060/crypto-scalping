@@ -339,7 +339,8 @@
             <button type="button" id="snapAcctRefresh" class="acct-refresh" title="계좌 강제 조회" aria-label="계좌 강제 조회"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"></path><path d="M20.5 4.5V10h-5.5"></path></svg></button>
           </div>
         </div>
-        <div id="snapAcctPosition" class="ops-health-list"></div>
+        <!-- 2026-11-04 펜 메모: 포지션·오늘 손익 | 자산 곡선을 한 줄에 절반씩 -->
+        <div class="acct-top"><div id="snapAcctPosition" class="ops-health-list"></div><div id="snapAcctCurve"></div></div>
         <p id="snapAcctWarn" class="acct-warn" role="status" hidden></p>   <!-- 2026-11-02 체결 조회 실패·잘림 심볼 경고(app.js renderSnapshotAccountCore) -->
         <!-- 2026-09-12 수동 진입 1단계. **크기를 화면이 정한다** -- 재량 사이징이 실계좌 손실의
              출처였다(크기–수익 상관 −0.494, 한 건 −548.88 이 이익 합 전부보다 컸다).
@@ -536,7 +537,18 @@
         <!-- 2026-09-22 시안 B: 자산 곡선을 레인 **아래 전폭**으로 내렸다(사용자 선택).
              전에는 카드 오른쪽 절반을 먹어 레일이 «척추»가 될 폭이 없었다. 곡선은 «역사»라
              조작보다 아래가 맞다 -- 이 카드의 일은 «지금 무엇을 할까»다. -->
-        <div id="snapAcctPerf"></div>
+        <!-- 2026-11-04 펜 메모: 아래 줄 = 달력 | 고른 날 거래 상세 + 메모장. 메모 칸(textarea)은 매 폴링 다시 그리는 영역 밖에 둔다 -- 한글 입력 중 칸이 교체되면 조합이 끊긴다 -->
+        <div id="snapAcctPerf" class="acct-hist">
+          <div id="snapAcctCal"></div>
+          <div id="acctDayBox" class="acct-day-box" hidden>
+            <div id="snapAcctDay"></div>
+            <div class="acct-note">
+              <div class="acct-note-head"><label for="acctNoteTa" id="acctNoteLab">메모</label><span id="acctNoteSt" class="muted" role="status"></span></div>
+              <textarea id="acctNoteTa" rows="4" maxlength="4000" placeholder="이 날의 복기·메모 -- 저장을 누르면 서버에 남습니다"></textarea>
+              <div class="acct-note-foot"><button type="button" class="notify-btn primary" id="acctNoteSave">저장</button></div>
+            </div>
+          </div>
+        </div>
         <div id="snapAcctCycle"></div>   <!-- 2026-10-22 진행 중 순환(시안 A) -- 열린 포지션이 있을 때만 -->
       </section>
 

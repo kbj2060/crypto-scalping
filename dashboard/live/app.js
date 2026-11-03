@@ -1705,7 +1705,9 @@ const ACCT_SPANS = [["오늘", 0], ["1주", 7], ["1개월", 30], ["전체", -1]]
 const ACCT_DAY = 86400000, ACCT_KST = 9 * 3600000;
 let acctSpanIdx = (() => { try { const raw = localStorage.getItem("acctSpanIdx"), v = Number(raw); return raw !== null && raw !== "" && v >= 0 && v < ACCT_SPANS.length ? v : 2; } catch (e) { return 2; } })();   // 🔴Number(null) = 0 = «오늘» 함정(옛 acctSpanDays 와 같은 것) -- 저장값이 없으면 1개월
 let acctCalBack = 0;   // 달력: 0 = 이번 달, 1 = 지난달 …
-let acctSelDay = null;   // 2026-10-20 사용자 «달력에서 날을 누르면 위 0~24시 차트로 그날 손익»: KST 날짜 키 · null = 오늘
+let acctSelDay = null;   // 2026-10-20 사용자 «달력에서 날을 누르면…» → 2026-11-04 펜 메모로 오른쪽 아래 상세 칸(거래내역 + 메모장): KST 날짜 키 · null = 오늘
+let acctNotes = null, acctNotesAt = 0, acctNoteBusy = "";   // 서버 날짜별 메모 {날짜: {text, at}} · null = 아직 못 받음 · acctNoteBusy: "" | saving | fail
+const acctDraft = {};   // 저장 전 글 {날짜: text} -- 날을 옮겨도 쓰던 글이 남는다
 const acctKey = (ms) => new Date(ms + ACCT_KST).toISOString().slice(0, 10);   // KST 날짜(서버 day_start 와 같은 경계)
 const acctDay0 = (key) => Date.parse(key + "T00:00:00+09:00");
 const acctHm = (ms) => new Date(ms + ACCT_KST).toISOString().slice(11, 16);
@@ -1728,14 +1730,66 @@ function acctTripTip(t) {
 // 기간 칩·달 넘김 -- 카드는 폴링마다 통째로 다시 그려지므로 위임으로 한 번만 붙인다.
 document.addEventListener("click", (e) => {
   const s = e.target.closest("#acctCard [data-acct-span]"), m = e.target.closest("#acctCard [data-acct-month]");
-  const dy = e.target.closest("#acctCard [data-acct-day]"), back = e.target.closest("#acctCard [data-acct-today]");
-  if (dy || back) {   // 같은 날을 다시 누르거나 오늘을 누르면 오늘로
-    const k = dy ? dy.dataset.acctDay : null;
-    acctSelDay = !k || k === acctSelDay || k === acctKey(Date.now()) ? null : k;
+  const dy = e.target.closest("#acctCard [data-acct-day]");
+  if (dy) {   // 같은 날을 다시 누르거나 오늘을 누르면 오늘로
+    const k = dy.dataset.acctDay;
+    acctSelDay = k === acctSelDay || k === acctKey(Date.now()) ? null : k;
     renderSnapshotAccount();
   }
+  if (e.target.closest("#acctNoteSave")) acctNoteSave();
   if (s) { acctSpanIdx = Number(s.dataset.acctSpan); try { localStorage.setItem("acctSpanIdx", String(acctSpanIdx)); } catch (err) { /* 기억은 편의 */ } renderSnapshotAccount(); }
   if (m) { acctCalBack = Math.max(0, acctCalBack + Number(m.dataset.acctMonth)); renderSnapshotAccount(); }
+});
+
+// 2026-11-04 펜 메모 «날을 누르면 상세 거래내역과 메모장 · 저장하면 서버에 계속»: /api/acct-notes (data/live/acct_notes.json).
+//   textarea 는 index.html 에 고정(카드를 다시 그려도 안 바뀐다 -- 한글 조합 중 교체되면 입력이 끊긴다). 여기선 값·글자만 맞춘다.
+async function acctNotesLoad() {
+  acctNotesAt = Date.now();   // 실패해도 30초에 한 번만 다시(폴링마다 부르지 않는다)
+  try {
+    const r = await fetch("/api/acct-notes", { cache: "no-store" });
+    if (r.ok) { acctNotes = (await r.json()).notes || {}; renderSnapshotAccount(); }
+  } catch (err) { /* acctNotes 가 null 이면 칸이 «못 불러옴» 을 말한다 */ }
+}
+const acctNoteSaved = (k) => (acctNotes && acctNotes[k] ? acctNotes[k].text : "");
+function acctNoteStatus() {
+  const ta = el("acctNoteTa"), st = el("acctNoteSt");
+  if (!ta || !st) return;
+  const k = ta.dataset.day, dirty = ta.value !== acctNoteSaved(k);
+  const at = acctNotes && acctNotes[k] ? acctNotes[k].at : 0;
+  st.className = `muted${dirty || acctNoteBusy === "fail" ? " warn" : ""}`;
+  st.textContent = acctNotes === null ? "서버 메모를 불러오지 못했습니다 — 잠시 뒤 다시 시도합니다"
+    : acctNoteBusy === "saving" ? "저장 중…" : acctNoteBusy === "fail" ? "저장 실패 — 저장을 다시 눌러 주세요"
+    : dirty ? "저장 안 됨" : at ? `저장됨 · ${acctMd(at)} ${acctHm(at)}` : "아직 메모 없음";
+  ta.disabled = acctNotes === null; el("acctNoteSave").disabled = acctNotes === null || acctNoteBusy === "saving" || !dirty;
+}
+function acctNoteSync(k, lab) {
+  const ta = el("acctNoteTa");
+  if (!ta) return;
+  el("acctNoteLab").textContent = `메모 · ${lab}`;
+  if (ta.dataset.day !== k || ta.dataset.loaded !== String(acctNotes !== null)) {   // 날이 바뀌었거나 서버 메모가 방금 도착 -- 쓰던 글(draft)이 있으면 그것을 보인다
+    ta.dataset.day = k; ta.dataset.loaded = String(acctNotes !== null);
+    ta.value = acctDraft[k] ?? acctNoteSaved(k);
+  }
+  acctNoteStatus();
+}
+async function acctNoteSave() {
+  const ta = el("acctNoteTa");
+  if (!ta || acctNotes === null || acctNoteBusy === "saving") return;
+  const k = ta.dataset.day, text = ta.value;
+  acctNoteBusy = "saving"; acctNoteStatus();
+  try {
+    const r = await fetch("/api/acct-notes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date: k, text }) });
+    if (!r.ok) throw new Error(r.status);
+    const j = await r.json();
+    if (text.trim()) acctNotes[k] = { text, at: j.at }; else delete acctNotes[k];
+    delete acctDraft[k]; acctNoteBusy = "";
+  } catch (err) { acctNoteBusy = "fail"; }
+  acctNoteStatus();
+}
+document.addEventListener("input", (e) => {
+  if (e.target.id !== "acctNoteTa") return;
+  acctDraft[e.target.dataset.day] = e.target.value; if (acctNoteBusy === "fail") acctNoteBusy = "";
+  acctNoteStatus();
 });
 
 // 오늘 0~24시: 닫힌 왕복 = 그 시각 막대(손익만큼) · 누적 = 계단선 · 지금 포지션 = 빗금 막대
@@ -1864,7 +1918,7 @@ function renderSnapshotAccountCore() {
     if (summary) { summary.textContent = "데이터 없음"; summary.className = "ops-health-summary neutral"; }
     setT("snapAcctBalance", "-");
     setH("snapAcctPosition", `<p class="muted">계좌를 불러오지 못했습니다.${lastAccountError ? ` (${escapeHtml(lastAccountError)})` : ""}</p>`);
-    setH("snapAcctPerf", "");
+    setH("snapAcctCurve", ""); setH("snapAcctCal", ""); setH("snapAcctDay", ""); el("acctDayBox").hidden = true;
     setH("snapAcctCycle", "");
     if (warn) warn.hidden = true;
     return;
@@ -1928,32 +1982,20 @@ function renderSnapshotAccountCore() {
 
   // SVG 는 칸의 실제 폭(·한 화면 모드면 fitLayout 이 준 높이)으로 1:1 로 그린다 -- 고정 viewBox 를 늘리면 글자가 커지거나 가운데로 찌그러진다.
   const narrowCard = matchMedia("(max-width: 900px)").matches;
-  const posW = (el("snapAcctPosition").clientWidth || 1200) - 32, perfW = (el("snapAcctPerf").clientWidth || 1200) - 36;
-  const todayW = Math.max(280, Math.round(narrowCard ? posW : (posW - 40) * 1.2 / 3.2));
-  const curveW = Math.max(300, Math.round(narrowCard ? perfW : (perfW - 20) / 2));
+  const posW = (el("snapAcctPosition").clientWidth || 600) - 32;
+  const todayW = Math.max(240, Math.round(narrowCard ? posW : (posW - 20) * 1.3 / 2.3));   // 오늘 띠 = 숫자 1 : 흐름 1.3 (위 줄은 절반 폭)
+  const curveW = Math.max(300, el("snapAcctCurve").clientWidth || 600);
   const curveH = document.documentElement.classList.contains("fit1") && fitAcctPlotH > 0 ? fitAcctPlotH : 280;
-  // ── 오늘 띠(달력에서 고른 날이면 그날 0~24시 -- 실현만, 그날 미실현·펀딩은 원장에 없다) ──
-  const selKey = acctSelDay && acctSelDay < todayKey ? acctSelDay : null, s0 = selKey ? acctDay0(selKey) : t0;
+  // ── 위 줄 «오늘 띠»(늘 오늘) · 아래 줄 상세 칸(달력에서 고른 날 -- 2026-11-04 펜 메모: 거래내역 + 메모장) ──
+  const selKey = acctSelDay && acctSelDay < todayKey ? acctSelDay : null, dKey = selKey || todayKey, s0 = acctDay0(dKey);
+  const labOf = (k) => `${k.slice(5).replace("-", "/")}(${"일월화수목금토"[new Date(acctDay0(k) + ACCT_KST).getUTCDay()]})`;
   const vT = selKey ? T.filter((t) => t.exit_time >= s0 && t.exit_time < s0 + ACCT_DAY) : tT, vReal = vT.reduce((x, t) => x + (Number(t.net_pnl) || 0), 0);
-  const incV = selKey && incOn(selKey) ? inc[selKey] || {} : null, vFig = incV ? Number(incV.pnl) || 0 : vReal;
+  const incV = incOn(dKey) ? inc[dKey] || {} : null, vFig = incV ? Number(incV.pnl) || 0 : vReal;
   // 막대 = 그날 닫힌 왕복의 전체 손익 -- 숫자(그날 지갑 입금)와 다르면 한 줄로 밝힌다
-  const barNote = (fig, sum) => (vT.length && Math.abs(fig - sum) >= 0.01 ? `<span class="acct-bar-note muted">막대 = 그날 닫힌 왕복 전체 손익(합 ${acctSu(sum)} · 다른 날 실현분 포함)</span>` : "");
-  const wins = vT.filter((t) => t.net_pnl > 0).length;
-  const dow = "일월화수목금토"[new Date(s0 + ACCT_KST).getUTCDay()];
-  const trips = vT.length ? vT.map((t) => `<li title="${escapeHtml(acctTripTip(t))}"><time>${acctHm(t.exit_time)}</time><span>${acctCoin(t.symbol)} ${t.side === "LONG" ? "롱" : "숏"} · ${acctDur(t.exit_time - t.entry_time)}${t.adds ? ` · 추가 ${t.adds}회` : ""}${t.peak_x > 6 ? ` · <em class="warn">${t.peak_x}배</em>` : ""}</span><b class="${acctTone(t.net_pnl)}">${acctSu(Number(t.net_pnl) || 0)}</b></li>`).join("")
-    : `<li class="muted">닫힌 거래 없음</li>`;
-  const dayLab = `${(selKey || todayKey).slice(5).replace("-", "/")}(${dow})`;
-  const todayHtml = selKey ? `<div class="acct-today acct-today-past">
-      <div class="acct-today-hero">
-        <span class="acct-day-head"><span class="acct-eyebrow">손익 · ${dayLab}</span><span class="chipset"><button type="button" class="chip" data-acct-today>오늘로</button></span></span>
-        <div class="acct-figline"><div class="acct-figure ${acctTone(vFig)}"${incV ? ` title="${escapeHtml(acctIncTip(incV))}"` : ""}>${acctSu(vFig)}</div><span class="acct-figpct ${acctTone(vFig)}" title="그날 시작 지갑(${incV ? "" : "추정 "}${fmtUsd(walletAt(s0, s0 + ACCT_DAY))}${walletAt(s0, s0 + ACCT_DAY) !== walletAt(s0) ? " · 그날 입금 포함" : ""}) 대비">${acctPct(walletAt(s0, s0 + ACCT_DAY) > 0 ? vFig / walletAt(s0, s0 + ACCT_DAY) : null)}</span></div>
-        <span class="acct-today-pct"><span class="muted">${incV ? `그날 지갑에 들어온 실현+펀딩+수수료 · 지갑 ${fmtUsd(walletAt(s0))} 대비(그날 시작)` : `그날 닫힌 거래의 실현 손익 · 지갑 ${fmtUsd(walletAt(s0))} 대비(그날 시작, 추정) · 미실현·펀딩 빠짐`}</span></span>
-        <dl class="acct-today-kv">${incV ? `<dt>실현 <span class="acct-kv-sub">· 펀딩·수수료 포함</span></dt><dd class="${acctTone(vFig)}" title="${escapeHtml(acctIncTip(incV))}">${acctSu(vFig)}</dd>`
-          : `<dt>실현 · ${vT.length}건${vT.length ? ` (승 ${wins} 패 ${vT.length - wins})` : ""}</dt><dd class="${acctTone(vReal)}">${acctSu(vReal)}</dd>`}</dl>
-      </div>
-      <div class="acct-today-flow">${acctTodaySvg(vT, 0, false, s0, s0 + ACCT_DAY, todayW, 120)}${incV ? barNote(vFig, vReal) : ""}</div>
-      <div class="acct-today-trips"><span class="acct-eyebrow">그날 닫힌 거래${vT.length ? ` · ${vT.length}건 (승 ${wins} 패 ${vT.length - wins})` : ""}</span><ol>${trips}</ol></div>
-    </div>` : `<div class="acct-today">
+  const barNote = (fig, sum) => (tT.length && Math.abs(fig - sum) >= 0.01 ? `<span class="acct-bar-note muted">막대 = 그날 닫힌 왕복 전체 손익(합 ${acctSu(sum)} · 다른 날 실현분 포함)</span>` : "");
+  const wins = tT.filter((t) => t.net_pnl > 0).length, vWins = vT.filter((t) => t.net_pnl > 0).length;
+  const dayLab = labOf(todayKey);
+  const todayHtml = `<div class="acct-today">
       <div class="acct-today-hero">
         <span class="acct-eyebrow">오늘 손익 · ${dayLab}</span>
         <div class="acct-figline"><div class="acct-figure ${acctTone(net)}" title="${escapeHtml(startTip)}">${acctSu(net)}</div><span class="acct-figpct ${acctTone(net)}" title="${escapeHtml(startTip)}">${acctPct(pct)}</span></div>
@@ -1964,8 +2006,14 @@ function renderSnapshotAccountCore() {
           <dt>미실현${positions.length ? ` · ${positions.map((p) => `${p.side === "LONG" ? "롱" : "숏"} ${Number(p.qty)}`).join(", ")}` : ""}</dt><dd class="${acctTone(unreal)}">${acctSu(unreal)}</dd>`}</dl>
       </div>
       <div class="acct-today-flow">${acctTodaySvg(tT, unreal, positions.length > 0, t0, now, todayW, 120)}${incT ? barNote(realT, real) : ""}</div>
-      <div class="acct-today-trips"><span class="acct-eyebrow">오늘 닫힌 거래${incT && tT.length ? ` · ${tT.length}건 (승 ${wins} 패 ${tT.length - wins})` : ""}</span><ol>${trips}</ol></div>
     </div>`;
+  const wBase = walletAt(s0, s0 + ACCT_DAY);
+  const hm2 = (t) => `${acctKey(t.entry_time) === acctKey(t.exit_time) ? "" : `${acctMd(t.entry_time)} `}${acctHm(t.entry_time)}→${acctHm(t.exit_time)}`;
+  const dayRows = vT.length ? vT.map((t) => `<li title="${escapeHtml(acctTripTip(t))}"><time>${hm2(t)}</time><span>${acctCoin(t.symbol)} ${t.side === "LONG" ? "롱" : "숏"} <b>${+Number(t.max_qty).toFixed(4)}</b></span><span class="px">${acctPx(t.entry_price)} → ${acctPx(t.exit_price)}</span><span class="hold muted">${acctDur(t.exit_time - t.entry_time)}${t.adds ? ` · 추가 ${t.adds}회` : ""}${t.peak_x > 6 ? ` · <em class="warn">${t.peak_x}배</em>` : ""}</span><b class="${acctTone(t.net_pnl)}">${acctSu(Number(t.net_pnl) || 0)}</b></li>`).join("")
+    : `<li class="muted">닫힌 거래 없음</li>`;
+  const dayHtml = `<div class="acct-day-sum"><b class="${acctTone(vFig)}"${incV ? ` title="${escapeHtml(acctIncTip(incV))}"` : ""}>${acctSu(vFig)}</b>`
+    + `<span class="acct-figpct ${acctTone(vFig)}" title="그날 시작 지갑(${incV ? "" : "추정 "}${fmtUsd(wBase)}) 대비">${acctPct(wBase > 0 ? vFig / wBase : null)}</span>`
+    + `<span class="muted">${labOf(dKey)}${selKey ? "" : " · 오늘"} · 닫힌 거래 ${vT.length}건${vT.length ? ` (승 ${vWins} 패 ${vT.length - vWins})` : ""}${incV ? " · 펀딩·수수료 포함" : ""}</span></div><ol class="acct-day-ol">${dayRows}</ol>`;
   // 리뷰: 카드를 통째로 다시 쓰면(포지션이 있으면 폴링마다 -- 미실현이 바뀐다) 키보드로 고른 날·칩의 포커스가 <body> 로 떨어졌다 -- 같은 칸에 되돌린다
   const fa = document.activeElement, fAt = fa && fa.closest && fa.closest("#acctCard")
     ? ["day", "month", "span"].map((k) => (fa.hasAttribute(`data-acct-${k}`) ? `#acctCard [data-acct-${k}="${fa.getAttribute(`data-acct-${k}`)}"]` : "")).find(Boolean) : "";
@@ -2002,7 +2050,9 @@ function renderSnapshotAccountCore() {
       <div class="acct-plot">${plot}</div>
       ${a.length ? `<div class="acct-stats">${acctStatsHtml(a)}</div>` : ""}
     </div>`;
-  setH("snapAcctPerf", `<div class="acct-hist">${calHtml}${curveHtml}</div>`);
+  setH("snapAcctCal", calHtml); setH("snapAcctCurve", curveHtml); setH("snapAcctDay", dayHtml);
+  el("acctDayBox").hidden = false; acctNoteSync(dKey, labOf(dKey));
+  if (acctNotes === null && Date.now() - acctNotesAt > 30000) acctNotesLoad();
   renderCycleCard(A, positions, equity);
   if (fAt && !fa.isConnected) document.querySelector(fAt)?.focus();
 }
@@ -3105,7 +3155,7 @@ function fitLayout() {
     }
   }
   // 2026-10-01 계좌 카드: 한 화면 모드면 성과 차트를 펼쳐 남는 높이를 그 차트에 준다(사용자 «내 계좌도 화면에 가득»)
-  const plot = on && acct && acct.offsetParent && inView(acct) ? acct.querySelector("#snapAcctPerf .acct-plot svg") : null;
+  const plot = on && acct && acct.offsetParent && inView(acct) ? acct.querySelector("#snapAcctCurve .acct-plot svg") : null;
   if (plot) {
     // 2026-10-05 성과 차트를 최소(120)로 줄여도 넘치면 카드 전체를 비율로 줄인다(사용자 «비율을 줄여서 전체 화면에 딱») --
     //   1080p 모니터의 실제 창(~950px)에서 30px 넘쳤다. 원래 크기(zoom 1)에서 재고, 같은 작업 안에서 다시 입혀 깜빡임이 없다.
