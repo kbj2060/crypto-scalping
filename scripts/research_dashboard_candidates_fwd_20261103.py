@@ -52,6 +52,11 @@ def t1():
     # 재현 점검: 원 시험 구간 ΔAUC 가 원 결과(+.0211)와 같아야 한다
     te0 = ok & (ix >= R.TE[0]) & (ix <= R.TE[1]); y0, p0 = score(Bf, Xf, dd, te0)
     repro = roc_auc_score(y0, p0["F"]) - roc_auc_score(y0, p0["B"])
+    # 한 봉 밀기 점검(사전등록에서 구현 누락 -- 11-03 감사 반영): 원 시험 구간에서 X 를 k봉 밀어 같은 동결 모형으로 ΔAUC. k=+1 은 한 봉 과거 X, k=-1 은 한 봉 미래 X(참고).
+    xcols, shifted = list(Xf.columns), {}
+    for k in (1, 0, -1):
+        Xs = Xf.shift(k); okk = ok & np.isfinite(Xs).all(axis=1); tek = okk & (ix >= R.TE[0]) & (ix <= R.TE[1])
+        yk, pk = score(Bf, Xs, dd, tek); shifted[f"shift{k:+d}"] = float(roc_auc_score(yk, pk["F"]) - roc_auc_score(yk, pk["B"]))
     # 전진: 패널 ETH
     k = pan("eth"); B2, X2, dd2 = R.feats_from(k); ix2 = B2.index
     fw = fin(B2, X2, dd2) & (ix2 >= F1[0]) & (ix2 <= F1[1])
@@ -64,7 +69,7 @@ def t1():
         if y[ii].min() != y[ii].max(): bs.append(roc_auc_score(y[ii], p["F"][ii]) - roc_auc_score(y[ii], p["B"][ii]))
     lo90 = float(np.quantile(bs, .10))
     st = "보류(검정력)" if ev_days < 10 else ("통과" if (lo90 > 0 and d_ll > 0) else "불통과")
-    return {"repro_dAUC_orig_test(+.0211 기대)": float(repro), "threshold": thr, "rows": int(fw.sum()), "days": len(ud), "events": int(y.sum()),
+    return {"repro_dAUC_orig_test(+.0211 기대)": float(repro), "orig_test_dAUC_with_X_shifted": shifted, "threshold": thr, "rows": int(fw.sum()), "days": len(ud), "events": int(y.sum()),
             "event_days": ev_days, "base_rate": float(y.mean()), "auc_base": float(roc_auc_score(y, p["B"])), "auc_full": float(roc_auc_score(y, p["F"])),
             "dAUC": float(d_auc), "dAUC_lo90": lo90, "dLogLoss": float(d_ll), "P1": st}
 
