@@ -230,6 +230,10 @@ def sr_breaks(sup: list[float], res: list[float], prev: float, lo: float, hi: fl
         nxt = next((p for p in shown if p not in crossed), None)
         out += [(f"{name}{i + 1}", p, nxt) for i, p in enumerate(shown[:n]) if p in crossed]
     return out
+def sr_watch_view(sup: list[float], res: list[float], px: float, broken: set, n: int = 3) -> dict:
+    """2026-11-04 지지·저항 «가까워짐» 알림 워커용 보기. 화면 srLevelsLive 와 같은 목록(현재가 쪽 · 안 쓸린(broken 밖) · 가까운 순 n개)을 그대로 준다 --
+    워커가 레벨을 따로 계산하지 않는다(알림 숫자 = 화면 숫자)."""
+    return {"sup": [p for p in sup if p not in broken and p < px][:n], "res": [p for p in res if p not in broken and p > px][:n]}
 # 2026-10-10 포지션 프로파일(풋프린트 «포지션» 보기) 1초 -- REST 는 처음 30일 한 번 + 새 5분봉이 닫힐 때만, 형성 봉은 흐름 엔진 메모리.
 POSITION_PROFILE_CACHE_SECONDS = 1.0
 MACRO_CALENDAR_CACHE_SECONDS = 6 * 3600  # calendar dates change at most once/day -- no reason to
@@ -1897,6 +1901,11 @@ def make_app() -> web.Application:
             except Exception as exc:  # noqa: BLE001 -- 기록기 하나로 서버가 죽으면 안 된다
                 print(f"chip score: {type(exc).__name__}: {exc}", flush=True)
 
+    sr_watch: dict[str, dict] = {}   # 코인 -> {px, t(1초 마지막 체결 시각), dp, ku, sup[], res[]} -- sr_break_loop 이 10초마다 채운다
+
+    async def api_sr_watch(request: web.Request) -> web.Response:   # 2026-11-04 지지·저항 가까워짐 텔레그램 워커(scripts/live_sr_proximity_alert_20261104.py)가 읽는다 -- 읽기 전용·계산 0
+        return web.json_response({"now": time.time(), "assets": sr_watch}, headers=NOCACHE)
+
     async def sr_break_loop() -> None:
         """지지·저항 뚫림 텔레그램(2026-10-25 사용자 «지지와 저항라인들을 뚫었을 때마다 텔레그램»). 화면이 안 열려 있어도 돈다.
         10초마다 코인별로 지난번 이후 1초 마지막 체결가 범위가 화면의 지지1~3·저항1~3(sr_breaks)에 닿았나 본다.
@@ -1924,8 +1933,9 @@ def make_app() -> web.Application:
                     if prev is None:
                         continue
                     lo, hi = min(p for _, p in pts), max(p for _, p in pts)
-                    hits = sr_breaks([float(lv["price"]) for lv in m.get("support_levels") or []],
-                                     [float(lv["price"]) for lv in m.get("resistance_levels") or []], prev, lo, hi, s["broken"])
+                    sup, res = [float(lv["price"]) for lv in m.get("support_levels") or []], [float(lv["price"]) for lv in m.get("resistance_levels") or []]
+                    hits = sr_breaks(sup, res, prev, lo, hi, s["broken"])
+                    sr_watch[asset] = {"px": s["px"], "t": s["sec"], "dp": f.spec.price_dp, "ku": ku, **sr_watch_view(sup, res, s["px"], s["broken"])}   # 2026-11-04 /api/sr-watch(가까워짐 워커)
                     if not hits:
                         continue
                     dp, px = f.spec.price_dp, s["px"]
@@ -4559,6 +4569,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/chart-markers", api_chart_markers)
     app.router.add_get("/api/liquidation-5m-signal", api_liquidation_5m_signal)
     app.router.add_get("/api/liquidation-map", api_liquidation_map)
+    app.router.add_get("/api/sr-watch", api_sr_watch)
     app.router.add_get("/api/liquidation-map/tiers", api_liquidation_tiers)
     app.router.add_get("/api/position-profile", api_position_profile)
     app.router.add_get("/api/cycle-path", api_cycle_path)   # 2026-10-22 계좌 카드 진행 중 순환
