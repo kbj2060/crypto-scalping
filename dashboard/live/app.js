@@ -455,15 +455,15 @@ function lineToolEl(box) {
     + '<button type="button" class="lt-tag tp" data-k="tp"></button><button type="button" class="lt-tag sl" data-k="sl"></button><button type="button" class="lt-tag en" data-k="en"></button>'
     + '<div class="lt-tk"><div class="lt-row"><b class="lt-side"></b><span class="lt-qty"></span></div>'
     + '<div class="lt-mg"><div class="lt-mg-hd"><span>증거금</span><b class="lt-mg-v"></b></div>'
-    + '<input type="range" class="lt-mg-r" min="1" max="50" step="1" aria-label="진입 증거금 (순자산 대비 %)"><div class="lt-mg-risk"></div></div>'
-    + '<div class="lt-sz"></div><div class="lt-row lt-rr"></div>'
+    + '<input type="range" class="lt-mg-r" min="1" max="50" step="1" aria-label="진입 증거금 (순자산 대비 %)"></div>'
+    + '<div class="lt-row lt-rr"></div>'
     + `<div class="lt-rrb" role="group" aria-label="손익비로 익절선 맞추기 (손절선은 그대로)">${LINE_RR.map((r) => `<button type="button" data-rr="${r}">1:${r}</button>`).join("")}</div>`
     + '<button type="button" class="lt-go"></button>'
     + '<button type="button" class="lt-x" aria-label="닫기">✕</button></div>';
   h.addEventListener("pointerdown", (e) => {
     e.stopPropagation();   // 차트 끌기로 번지지 않게
     linePt = e.pointerType;
-    const tag = e.target.closest(".lt-tx") ? null : e.target.closest(".lt-tag[data-k]"), go = e.target.closest(".lt-go");
+    const tag = e.target.closest(".lt-tx, .lt-tkr") ? null : e.target.closest(".lt-tag[data-k]"), go = e.target.closest(".lt-go");
     if (tag && lineTool) { lineDrag = { k: tag.dataset.k, id: e.pointerId }; tag.setPointerCapture(e.pointerId); e.preventDefault(); }
     if (go && e.pointerType === "mouse" && !go.disabled) {   // 마우스 = 누르면 바로(HOLD_FIRE_MS = 0)
       if (!HOLD_FIRE_MS) lineFire();   // 즉시 모드
@@ -495,6 +495,7 @@ function lineToolEl(box) {
   });
   h.addEventListener("click", (e) => {
     e.stopPropagation();
+    if (e.target.closest(".lt-tkr")) { lineTakerClick(e); return; }
     if (e.target.closest(".lt-x, .lt-tx")) { if (lineTool?.placed) { lineTool.busy = true; manualWaitAction("cancel").then(() => setTimeout(() => { if (lineTool?.busy) { lineTool.busy = false; renderLineTool(); } }, 8000)); renderLineTool(); return; } lineTool = null; renderLineTool(); return; }   // 대기 주문 = 서버 취소(≤3초 뒤 선이 사라진다)
     const rb = e.target.closest("[data-rr]");
     if (rb && lineTool && !lineTool.placed) {   // 2026-10-29 사용자 «SLTP 비율 1:1·1:2 버튼 → 칸 자동» -- 손절선은 그대로, 익절선만 비율만큼(방향 = 손절선의 반대쪽)
@@ -513,6 +514,24 @@ function lineToolEl(box) {
   });
   box.appendChild(h);
   return h;
+}
+// 2026-11-04 사용자 «대기 라벨에 taker 버튼 -- 여차하면 바로 시장가로 진입»: 대기 중인 지정가를 취소 확인한 뒤 남은 수량만 시장가(서버 run_entry_limit action=market).
+//   테이커 주문이라 두 번: 첫 클릭 = 5초 무장(글자가 «한 번 더»로) · 그 안에 한 번 더 = 전송(더블클릭은 무시). 서버가 익절·손절선이 지금 호가 기준으로 아직 맞는지 다시 본다(맞지 않으면 거절 사유를 손익비 줄에).
+const TAKER_ARM_MS = 5000;
+async function lineTakerClick(e) {
+  const t = lineTool;
+  if (!t || !t.placed || t.busy || !(t.entry > 0)) return;
+  const now = Date.now();
+  if (!(now < (t.tkArm || 0))) { t.tkArm = now + TAKER_ARM_MS; t.tkAt = now; t.err = ""; renderLineTool(); setTimeout(renderLineTool, TAKER_ARM_MS + 50); return; }
+  if (e.detail > 1 || now - (t.tkAt || 0) < 400) return;   // 더블클릭·같은 탭이 두 번으로 읽히는 것은 확인이 아니다
+  t.tkArm = 0; t.busy = true; t.err = ""; renderLineTool();
+  let msg = "";
+  try {
+    const r = await (await fetch("/api/manual-entry/wait-action?action=market&confirm=1", { method: "POST", cache: "no-cache" })).json();
+    if (!r.ok) msg = r.detail || r.error || "시장가 요청 실패";
+  } catch (err) { msg = "서버에 닿지 못했습니다"; }
+  if (lineTool === t) { t.busy = false; t.err = msg; renderLineTool(); }
+  manualWaitPoll();
 }
 // 2026-10-31 대기 지정가 = 서버가 진실. 놓는 순간 /limit-amend(진입·익절·손절 한 번에) · 실패하면 다음 상태 조회가 서버 값으로 되돌린다.
 async function lineAmend() {
@@ -682,14 +701,20 @@ function renderLineTool() {
   });
   set(".lt-ln.en", { left: x0 + "px", width: w + "px", top: yP + "px" });
   set(".lt-ln.now", { left: x0 + "px", width: w + "px", top: yNow + "px", display: lim ? "" : "none" });   // 지정가일 때만 지금가 기준선을 따로 보인다
-  const en = set(".lt-tag.en", { left: x0 + 6 + "px", top: yP + "px" });
-  en.classList.toggle("lim", lim);
+  const waitC = lim && !!t.placed;   // 2026-11-04 펜 메모: 지정가 대기 라벨 = 왼쪽 끝 → 가운데(익절·손절 꼬리표와 같은 세로줄)
+  const en = set(".lt-tag.en", { left: (waitC ? cx : x0 + 6) + "px", top: yP + "px" });
+  en.classList.toggle("lim", lim); en.classList.toggle("wait-c", waitC);
   en.title = lim ? (t.px ? `차트(USDT) 선 ${lineFmt(ref)} — 실제 주문가(USDC) ${lineFmt(t.px)} · 접수 때 USDC/USDT 차이(basis)를 곱해 걸었습니다` : `지정가 ${lineFmt(ref)}`)
     : `진입 peg ${lineFmt(p)} — 끌면 지정가`;
   // 2026-11-03 시안 B: 진입 꼬리표 = 포지션만(작은 알약, 진입선 왼쪽 끝). 체결 기둥·청산 프로파일 칸(lane)으로 안 들어간다. 대기 중이면 «대기»와 취소 ✕ 는 그대로.
   en.classList.add("lt-mini"); en.classList.remove("lane"); en.style.width = "";
-  en.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${side === "SHORT" ? "SHORT" : "LONG"}${t.add ? " 추가" : ""}${lim && t.placed ? " 대기" : ""}`
-    + (lim && t.placed ? `<span class="lt-tx" role="button" tabindex="0" aria-label="지정가 주문 취소" title="주문 취소">✕</span>` : "");
+  // 🔴2026-11-04 펜 메모 «✕ 를 눌러도 한 번에 취소가 안 된다 · 여러 번 눌러야»: 가격이 틱마다 이 함수를 부르고, 같은 글을 innerHTML 로 다시 쓰면 ✕ 노드가 갈려
+  //   마우스를 누른 사이 새 노드로 바뀐다 -- 클릭이 ✕ 가 아닌 부모로 가 취소가 안 나갔다(하네스 재현: 누름~뗌 사이 다시 그리기 1번 = 취소 0). 글이 바뀔 때만 쓴다.
+  const tkArmed = Date.now() < (t.tkArm || 0);
+  const enH = `<span class="lt-grip" aria-hidden="true"></span>${side === "SHORT" ? "SHORT" : "LONG"}${t.add ? " 추가" : ""}${lim && t.placed ? " 대기" : ""}`
+    + (lim && t.placed ? `<span class="lt-tkr${tkArmed ? " arm" : ""}" role="button" tabindex="0" aria-label="${tkArmed ? "한 번 더 누르면 시장가로 진입" : "지금 시장가로 진입(taker)"}" title="걸린 지정가를 취소하고 남은 수량을 시장가(테이커 4bp)로 진입 — 두 번 눌러 확인">${t.busy ? "…" : tkArmed ? "한 번 더 · 시장가" : "TAKER"}</span>`
+      + `<span class="lt-tx" role="button" tabindex="0" aria-label="지정가 주문 취소" title="주문 취소">✕</span>` : "");
+  if (en._h !== enH) { en.innerHTML = enH; en._h = enH; }
   en.setAttribute("aria-label", lim ? `지정가 진입선 ${lineFmt(ref)} — 위아래로 끌어 옮기기` : "지금가 peg 진입선 — 끌어서 지정가로 바꾸기");
   h.classList.toggle("short", side === "SHORT");
   // 표는 플롯 왼쪽 -- 두 꼬리표의 높이 띠(±22px)를 피한 빈 구간 중 표가 들어가는 첫 곳(위부터, 대개 두 선 사이). 없으면 가장 넓은 곳.
@@ -703,20 +728,14 @@ function renderLineTool() {
   h.querySelector(".lt-qty").textContent = side && !t.err ? (qty ? `${qty} ${unit}` : "크기 계산 중…") : "";
   const rr = side ? Math.abs((t.tp - ref) / (t.sl - ref)) : 0, rrEl = h.querySelector(".lt-rr");
   h.querySelectorAll("[data-rr]").forEach((b) => b.setAttribute("aria-pressed", String(!!side && Math.abs(rr - Number(b.dataset.rr)) < 0.05)));   // 지금가가 움직이면 비율도 조금씩 변한다(peg 진입가 = 그때 지금가)
-  // 2026-10-30 시안 C: 증거금 슬라이더(순자산 %) + 손절 시 손실(= 순자산 몇 %). 크기 줄 = 서버 미리보기 그대로(레버리지 · 명목 = 순자산 몇 배).
-  //   손실 = 미리보기 수량 × |지금가 − 손절|, 미리보기 전(끄는 중)엔 순자산 × % × 레버 ÷ 지금가로 어림(서버가 상한으로 줄이면 미리보기 뒤 그 값).
-  const pl = t.plan, eq = Number(pl?.projection?.equity_usdt) || Number(latestBinanceAccount?.balance?.margin) || 0, nt = Number(pl?.notional_usdt) || 0;
+  // 2026-10-30 시안 C: 증거금 슬라이더(순자산 %). 2026-11-04 펜 메모로 손절 손실·레버리지·명목 줄은 뺐다.
+  const pl = t.plan, eq = Number(pl?.projection?.equity_usdt) || Number(latestBinanceAccount?.balance?.margin) || 0;
   const rg = h.querySelector(".lt-mg-r");
   const mxPct = lineMaxPct(); rg.max = String(mxPct); if (linePct > mxPct && !t.placed) linePct = mxPct;   // 가용이 줄었으면 값도 상한으로
   if (Number(rg.value) !== linePct) rg.value = String(linePct);
   rg.disabled = !!t.placed; h.querySelectorAll("[data-rr]").forEach((b) => { b.disabled = !!t.placed; });
   h.querySelector(".lt-mg-v").innerHTML = `${linePct}%${eq > 0 ? `<small>$${Math.round(eq * linePct / 100).toLocaleString()}</small>` : ""}`;   // 숫자뿐
-  const qEst = qty || (eq > 0 && levNow > 0 ? eq * linePct / 100 * levNow / ref : 0), loss = qEst * Math.abs(ref - t.sl);
-  const rk = h.querySelector(".lt-mg-risk");
-  rk.hidden = !side || !!t.err || !(loss > 0);
-  if (!rk.hidden) rk.innerHTML = `손절 시 −$${loss.toFixed(1)}${eq > 0 ? ` <span>= 순자산</span> −${(100 * loss / eq).toFixed(2)}%` : ""}`;
-  const szParts = !side || t.err || !pl ? [] : [`레버리지 ${levNow ? levNow + "×" : "-"}`, ...(eq > 0 ? [`명목 ${(nt / eq).toFixed(2)}×`] : [])];   // 항목 단위로만 줄바꿈(숫자뿐)
-  h.querySelector(".lt-sz").innerHTML = szParts.map((x) => `<span>${x}</span>`).join("");
+  // 2026-11-04 펜 메모: 팝업의 «손절 시 −$ = 순자산 −%» · «레버리지 N× · 명목 N×» 줄은 뺐다(크기 줄 위쪽 «롱 · 10× / 수량» 과 증거금 숫자만 남긴다)
   rrEl.textContent = t.err || (t.add ? "기존 익절·손절선 그대로 · 크기만 늘림" : side ? `손익비 ${rr.toFixed(2)} : 1` : "");
   rrEl.classList.toggle("bad", !!t.err);
   const go = h.querySelector(".lt-go"), armed = Date.now() < (t.arm || 0);

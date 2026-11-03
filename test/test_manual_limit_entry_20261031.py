@@ -260,6 +260,59 @@ class LimitEntry(unittest.TestCase):
         st = run(fx, drive=drive, on_fill=cb)
         self.assertEqual((n, st["phase"], st["filled"]), ([1], "cancelled", 0.4))   # 든 몫은 그대로 -- 손절은 on_fill 이 걸었다
 
+    # ── 2026-11-04 «대기 라벨 taker 버튼»: action="market" = 걸린 지정가를 취소 **확인한 뒤** 남은 수량만 시장가 ──
+    def test_market_action_cancels_resting_then_buys_remainder_at_market(self):
+        fx = Fake()
+
+        async def drive(st):
+            await asyncio.sleep(0.1)
+            st["action"] = "market"
+        st = run(fx, drive=drive)
+        self.assertEqual((st["phase"], st["filled"], st["taker_qty"], st["taker_reason"]), ("filled_taker", 1.0, 1.0, "지금 시장가(사용자)"))
+        self.assertEqual((len(fx.limits), len(fx.deletes), len(fx.markets)), (1, 1, 1))
+        self.assertEqual((fx.markets[0]["quantity"], fx.markets[0]["side"]), (1.0, "BUY"))
+        self.assertEqual(fx.status, "CANCELED")   # 시장가 전에 걸린 주문이 닫혀 있었다(겹치지 않는다)
+
+    def test_market_action_after_partial_fill_buys_only_the_rest(self):
+        fx = Fake(partial=0.4)
+        n = []
+
+        async def cb():
+            n.append(1)
+
+        async def drive(st):
+            await asyncio.sleep(0.15)
+            st["action"] = "market"
+        st = run(fx, drive=drive, on_fill=cb)
+        self.assertEqual((st["phase"], st["filled"], st["taker_qty"], n), ("filled_taker", 1.0, 0.6, [1]))
+        self.assertEqual(fx.markets[0]["quantity"], 0.6)   # 이미 체결된 0.4 는 다시 사지 않는다
+
+    def test_market_action_failure_keeps_filled_part_and_reports(self):
+        fx = Fake(partial=0.4)
+        orig = fx.signed
+
+        async def failing(s, method, path, params, *a):
+            if method == "POST" and params.get("type") == "MARKET":
+                return {"__error__": "400 [-2019] Margin is insufficient"}
+            return await orig(s, method, path, params, *a)
+        fx.signed = failing
+
+        async def drive(st):
+            await asyncio.sleep(0.15)
+            st["action"] = "market"
+        st = run(fx, drive=drive)
+        self.assertEqual((st["phase"], st["filled"], st["taker_qty"]), ("taker_failed", 0.4, 0.0))   # 든 몫(0.4)은 남고 호출부가 손절을 건다
+        self.assertIn("-2019", st["error"])
+
+    def test_market_action_not_sent_when_exchange_already_cancelled(self):
+        fx = Fake(kill_at=2)
+
+        async def drive(st):
+            await asyncio.sleep(0.06)
+            st["action"] = "market"
+        st = run(fx, max_sec=2, drive=drive)
+        self.assertEqual((fx.markets, st["phase"]), ([], "cancelled"))   # 사람이 앱에서 취소했으면 몰래 시장가로 채우지 않는다
+
 
 if __name__ == "__main__":
     unittest.main()

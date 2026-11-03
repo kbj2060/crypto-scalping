@@ -581,6 +581,7 @@ REPRICE_SEC, REPRICE_MIN_REL, REPRICE_MAX = 20.0, 1e-4, 50   # 자동 재조정:
 async def run_entry_limit(session, plan: dict, state: dict, max_sec: float = LIMIT_MAX_SEC, on_fill=None, reprice=None) -> dict:
     """2026-10-31 사용자 «현재가 peg 말고 가격선을 정해 limit 으로 기다리기 · 선을 끌면 주문 수정».
     GTX(post-only)를 **사용자가 정한 가격**에 걸고 기다린다. 따라가지도(리페그) 시장가로 넘기지도 않는다 -- 안 닿으면 안 들어가는 게 지정가의 뜻이다.
+    (예외 1개: 사용자가 대기 라벨의 TAKER 를 두 번 눌러 state["action"]="market" 을 넣으면 취소 확인 뒤 남은 수량만 시장가 -- 2026-11-04.)
     -5022(지금 걸면 체결)는 새 호가로 다시 걸지 않고 거부로 끝낸다(가격이 호가를 넘은 것 = 사용자가 정한 가격이 아니다).
     밖에서 state["action"]="cancel" → 다음 조회(≤3초)에 취소 확인 뒤 멈춤 · state["amend"]={"price": p} → 걸린 주문을 취소 **확인** 뒤 남은 수량으로 새 가격에 다시 건다.
     reprice = async () -> 새 주문가|None: 차트선(USDT)은 그대로인데 USDC/USDT 차이(basis)가 움직여 주문가가 선에서 벗어나면 같은 «수정» 경로(취소 확인 → 다시 걸기)로 따라간다. 체결이 시작되면 멈춘다.
@@ -683,6 +684,16 @@ async def run_entry_limit(session, plan: dict, state: dict, max_sec: float = LIM
     remaining = round(total - done, 8)
     if remaining <= 0:
         state.update(phase="filled_maker", taker_qty=0.0, done_at=now_iso())
+    elif state.get("action") == "market" and not outside:
+        # 2026-11-04 사용자 «대기 라벨에 taker 버튼 -- 여차하면 바로 시장가로 진입»: 걸린 지정가를 **취소 확인한 뒤**(위 ensure_closed) 남은 수량만 시장가.
+        #   취소를 확인하지 못했으면 위에서 이미 error 로 끝났다(살아 있는 주문 위에 시장가를 또 내지 않는다). 밖에서 사람이 취소한 경우(outside)는 시장가 없음.
+        taker = await signed(session, "POST", "/fapi/v1/order", {**common, "type": "MARKET", "quantity": remaining}, key, secret, offset)
+        if "__error__" in taker:
+            state.update(phase="taker_failed", taker_qty=0.0, error=taker["__error__"], done_at=now_iso())   # 체결분(done)이 있으면 호출부가 익절·손절을 건다
+        else:
+            tq = executed_qty(taker) or remaining
+            state.update(phase="filled_taker", taker_qty=tq, filled=round(done + tq, 8), taker_order_id=taker.get("orderId"),
+                         taker_reason="지금 시장가(사용자)", done_at=now_iso())
     else:
         state.update(phase="cancelled", taker_qty=0.0, done_at=now_iso(),
                      cancel_reason=(state.get("action_reason") or "사용자 취소") if state.get("action") else ("거래소에서 취소됨" if outside else "대기 시간 만료"))

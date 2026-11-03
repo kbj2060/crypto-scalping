@@ -89,8 +89,6 @@ class LimitServerTest(ChartLinesTest):
             st = (await (await c.get("/api/manual-entry/status")).json())["wait"]
             self.assertEqual((st["amend"]["price"], st["plan"]["bracket"]["tp_level"], st["plan"]["bracket"]["sl_level"]), (2470.0, 2560.0, 2440.0))
             self.assertAlmostEqual(st["amend"]["qty"], seen[0]["quantity"] * 2480 / 2470, delta=seen[0]["quantity"] * 0.01)   # 검증 D1: 접수 때 레버리지(lev=20)로 다시 잰다 -- 모델 기본값으로 떨어지면 수량이 달라진다
-            r = await c.post("/api/manual-entry/wait-action?action=market&confirm=1")   # 검증 D5: 지정가 대기는 시장가 전환 없음
-            self.assertEqual((r.status, (await r.json())["error"]), (400, "limit_no_market"))
             r = await c.post(f"/api/manual-entry/limit-amend?{Q}&tp=2565&sl=2440&limit=2470&confirm=1")   # 앞 수정이 아직 반영 전
             self.assertEqual((r.status, (await r.json())["error"]), (409, "amend_pending"))
             flags["consume"] = True
@@ -110,6 +108,41 @@ class LimitServerTest(ChartLinesTest):
             self.assertEqual((await (await c.get("/api/manual-entry/status")).json())["wait"]["phase"], "cancelled")
             self.assertFalse((server.LIVE_DIR / "manual_limit_wait.json").exists())   # 정상 종료하면 지운다
         self._run(fn, run_entry_limit=fake_limit)
+
+    # ── 2026-11-04 사용자 «대기 라벨에 taker 버튼»: 지정가 대기에서 «지금 시장가» ───────────────────────────────
+    def _market_flow(self, tp: int, expect: tuple) -> list:
+        seen = []
+
+        async def fake_limit(_s, plan, state, max_sec=0, on_fill=None, reprice=None):
+            state.update(phase="working", mode="limit", order_id=5, filled=0.0, limit_price=plan["price"])
+            while not state.get("action"):
+                await asyncio.sleep(0.01)
+            seen.append(state["action"])
+            state.update(phase="filled_taker" if state["action"] == "market" else "cancelled")
+            return state
+
+        async def fn(c):
+            r = await c.post(f"/api/manual-entry/submit?side=LONG&{Q}&tp={tp}&sl=2450&limit=2480&mode=limit&confirm=1")
+            self.assertEqual(r.status, 200, await r.json())
+            await asyncio.sleep(0.1)
+            r = await c.post("/api/manual-entry/wait-action?action=market")   # confirm 없음
+            self.assertEqual(r.status, 400)
+            r = await c.post("/api/manual-entry/wait-action?action=market&confirm=1")
+            b = await r.json()
+            self.assertEqual((r.status, b.get("error")), expect, b)
+            if r.status != 200:   # 거절이면 주문은 그대로 살아 있다 -- 취소로 끝낸다
+                self.assertNotIn("action", (await (await c.get("/api/manual-entry/status")).json())["wait"])
+                await c.post("/api/manual-entry/wait-action?action=cancel&confirm=1")
+            await asyncio.sleep(0.1)
+        self._run(fn, run_entry_limit=fake_limit)
+        return seen
+
+    def test_market_now_on_limit_wait_passes_action_to_loop(self) -> None:
+        self.assertEqual(self._market_flow(2550, (200, None)), ["market"])   # 선이 지금 호가(2500.01) 기준으로 맞으면 집행 루프에 market 을 넘긴다
+
+    def test_market_now_refused_when_lines_no_longer_fit_current_quote(self) -> None:
+        # 익절 2490 은 지정가 2480 위라 접수는 되지만, 지금 호가(2500.01)는 이미 익절선 위 -- 시장가로 사면 익절이 지금 체결된다 → 거절 · 주문 유지
+        self.assertEqual(self._market_flow(2490, (409, "lines_off")), ["cancel"])
 
     def test_reprice_callback_ignores_unread_basis_and_never_crosses(self) -> None:
         got = []
