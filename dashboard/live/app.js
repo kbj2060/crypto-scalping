@@ -4558,19 +4558,20 @@ function predRecordStrip() {
   if (!pr) return "";
   const c = (pr.coins || {})[activeSnapshotAsset] || {}, note = DIRSHORT_NOTE[activeSnapshotAsset];
   const pct = (h, n) => Math.round((100 * h) / n);
-  const row = (nm, r, ref, tip) => {
-    if (!r || !(r.n || r.hit != null)) return "";
+  const bf = activeSnapshotAsset === "eth" ? " · ETH 10-24~11-01 은 서빙 모델을 같은 입력으로 다시 계산한 재구성 기록(실시간 기록은 11-03 15시 UTC 부터)" : "";
+  const row = (nm, r, ref, tip, live = false) => {
+    if (!r || !(r.n || r.hit != null)) return `<div class="pr-row" title="${escapeHtml(tip)}"><b>${nm}</b><span class="pr-sp"></span><span class="n">신호 대기 · 기록 쌓는 중</span></div>`;
     const days = r.daily || [];
     const bars = days.map(([d, n, h]) => `<i class="${h / n > 0.5 ? "u" : h / n < 0.5 ? "d" : ""}" style="height:${Math.max(3, Math.round((16 * h) / n))}px" title="${d} ${h}/${n}"></i>`).join("");
     const base = r.base != null ? ` · 다수 쪽만 찍으면 ${Math.round(100 * r.base)}%` : ref ? ` · 표본 밖 ${ref}%` : "";
     const body = r.n ? `<b class="${r.hit / r.n >= 0.55 ? "up" : r.hit / r.n <= 0.45 ? "dn" : ""}">${pct(r.hit, r.n)}%</b> ${r.hit}/${r.n}${base}${r.pending ? ` · 대기 ${r.pending}` : ""}` : `쌓는 중 · 대기 ${r.pending}`;
-    return `<div class="pr-row" title="${escapeHtml(tip + " · 연속 봉의 신호는 겹쳐 세므로 독립 표본은 이보다 훨씬 적다")}"><b>${nm}</b><span class="pr-sp">${bars}</span><span class="n">${body}</span></div>`;
+    return `<div class="pr-row" title="${escapeHtml(tip + " · 연속 봉의 신호는 겹쳐 세므로 독립 표본은 이보다 훨씬 적다" + (live ? "" : bf))}"><b>${nm}</b><span class="pr-sp">${bars}</span><span class="n">${body}</span></div>`;
   };
   const hdr = "적중 기록 · 신호였던 결정만 · 일별 막대(점선 = 50%)";
   const rows = row("15분", c["15m"], note && note[1][0], "15분 예측이 상위/하위 20% 밖(신호)이었던 결정 중 15분 뒤 방향이 맞은 비율")
     + row("1시간", c["1h"], note && note[2][0], "1시간 예측이 상위/하위 20% 밖(신호)이었던 결정 중 1시간 뒤 방향이 맞은 비율")
-    + row("4시간", c["4h"], null, "4h 예측이 학습 문턱 밖(신호)이었던 결정 중 4시간 뒤 방향이 맞은 비율")
-    + row("횡보·추세", c.band, null, "횡보·추세 판정이 4시간 뒤 실제(띠 이탈 여부)와 맞은 비율 · 서버 크론이 매 시 채점");
+    + (DIR4H_ASSETS.has(activeSnapshotAsset) ? row("4시간", c["4h"], null, "4h 예측이 학습 문턱 밖(신호)이었던 결정 중 4시간 뒤 방향이 맞은 비율") : "")
+    + row("횡보·추세", c.band, null, "횡보·추세 판정이 4시간 뒤 실제(띠 이탈 여부)와 맞은 비율 · 서버 크론이 매 시 채점", true);
   const xs = pr.xsec && pr.xsec.latest && pr.xsec.latest.rel_bp ? Object.entries(pr.xsec.latest.rel_bp).sort((a, b) => b[1] - a[1]) : [];
   const sc = Math.max(30, ...xs.map(([, v]) => Math.abs(v)));
   const cols = xs.map(([k, v]) => `<div class="xs-c${k.toLowerCase() === activeSnapshotAsset ? " me" : ""}" title="${k} ${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(0)}bp (9코인 평균 대비 지난 4h)">`

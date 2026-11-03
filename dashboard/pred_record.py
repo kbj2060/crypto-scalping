@@ -22,6 +22,7 @@ BAR = 300_000
 H = {"15m": 3, "1h": 12, "4h": 48}   # 지평(봉)
 TAIL_BYTES = 8_000_000
 DAYS = 14
+GAP_MS = 30 * 60_000                  # 지평 뒤 종가가 이만큼 지나도 없으면 «대기»가 아니라 기록 구멍(재시작·수집 공백)
 STALE_MS = 20 * 60_000                # 상대 강도 스냅숏이 이보다 묵으면 화면에 안 낸다(5분 루프가 멈췄다는 뜻)
 _seen: dict = {}                      # (파일, k) -> 이미 쓴 t 집합 (프로세스 안)
 _xs_latest: dict = {}                 # 마지막 상대 강도 스냅숏 {t, rel_bp}
@@ -102,7 +103,8 @@ def _score(rows: list[dict], now_ms: int) -> dict:
                 continue
             end = px.get(r["t"] + H[name] * BAR)
             if end is None:
-                pend += 1
+                if now_ms - (r["t"] + H[name] * BAR) < GAP_MS:   # 지평이 막 지났거나 아직 안 지남 = 대기. 한참 지났는데도 종가가 없으면 기록 구멍 -- 세지 않는다
+                    pend += 1
                 continue
             ret = end / r["px"] - 1
             if ret == 0:
@@ -192,10 +194,12 @@ def _selftest() -> None:
     assert record_short("ETH", {"ok": True, "hist": hist}, closes, d) == 60
     assert record_short("ETH", {"ok": True, "hist": hist}, closes, d) == 0         # 같은 결정은 두 번 안 쓴다
     assert record_h4("ETH", {"ok": True, "lo": -1, "hi": 1, "hist": [[t0 + i * BAR, 2.0] for i in range(60)]}, closes, d) == 60
-    s = summary(t0 + 100 * BAR, d, d / "none")["coins"]["eth"]
+    s = summary(t0 + 65 * BAR, d, d / "none")["coins"]["eth"]
     assert (s["15m"]["n"], s["15m"]["hit"], s["15m"]["pending"]) == (29, 29, 1), s["15m"]      # 짝수 i 30개 중 i=58 만 지평 뒤 종가 없음
     assert (s["1h"]["n"], s["1h"]["hit"], s["1h"]["pending"]) == (48, 0, 12), s["1h"]         # 상승장 숏 신호는 전부 실패
     assert (s["4h"]["n"], s["4h"]["hit"], s["4h"]["pending"]) == (12, 12, 48), s["4h"]
+    g = summary(t0 + 500 * BAR, d, d / "none")["coins"]["eth"]                        # 한참 뒤에도 종가가 없는 결정 = 구멍 -> 대기로 세지 않는다
+    assert all(v["pending"] == 0 for v in g.values()), g
     # 상대 강도: 직전 4h 에 오른 코인이 다음 4h 에 지는 반전 시장 -> IC < 0
     step = 4 * 3600 * 1000
     base = 1_793_000_000_000 // step * step
