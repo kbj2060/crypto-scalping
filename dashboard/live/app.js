@@ -4578,11 +4578,12 @@ function predXsecHtml() {
   const xs = pr.xsec && pr.xsec.latest && pr.xsec.latest.rel_bp ? Object.entries(pr.xsec.latest.rel_bp).sort((a, b) => b[1] - a[1]) : [];
   if (!xs.length) return "";
   const sc = Math.max(30, ...xs.map(([, v]) => Math.abs(v)));
+  // 2026-11-04 펜 메모 «이 박스 높이를 줄이고 수급·버블 차트를 키워줘»: 막대 ±24px · 이름과 값을 한 줄로(좁은 화면은 두 줄)
   const cols = xs.map(([k, v]) => `<div class="xs-c${k.toLowerCase() === activeSnapshotAsset ? " me" : ""}" title="${k} ${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(0)}bp (9코인 평균 대비 지난 4h)">`
-    + `<i class="${v >= 0 ? "p" : "n"}" style="height:${Math.max(1, Math.abs(v) / sc * 40).toFixed(0)}px"></i><span class="xv">${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(0)}</span><span class="xk">${k}</span></div>`).join("");
+    + `<i class="${v >= 0 ? "p" : "n"}" style="height:${Math.max(1, Math.abs(v) / sc * 24).toFixed(0)}px"></i><span class="xl"><b>${k}</b> ${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(0)}</span></div>`).join("");
   const ic = pr.xsec && pr.xsec.n ? `기록 전진 IC ${pr.xsec.ic >= 0 ? "+" : "−"}${Math.abs(pr.xsec.ic).toFixed(2)}(${pr.xsec.n}회)` : "전진 기록 쌓는 중";
   return `<div class="pr-strip"><div class="pr-h">4h 상대 강도 · 9코인 평균 대비 지난 4h 수익(bp)</div><div class="xs-row">${cols}</div>`
-    + `<div class="pr-note">반전 쪽: 높은 코인이 이후 4h 약세 쪽 · 연구 IC −.03(전진 70일) · ${ic} — 약한 경향, 비용 후 매매 근거 아님</div></div>`;
+    + `<div class="pr-note" title="반전 쪽: 높은 코인이 이후 4h 약세 쪽 · 연구 IC −.03(전진 70일) · ${ic} — 약한 경향, 비용 후 매매 근거 아님">반전 쪽: 높은 코인이 이후 4h 약세 쪽 · 연구 IC −.03 · ${ic} · 약한 경향</div></div>`;
 }
 // ⑤ 예측 줄(시장 맥락 판 아래, 사용자 시안 B): 지금 추세 → 15분·1시간 예측(10-28) → 4h 예측(+변동성) → 7일(4~13주는 10-28 Macro Trend 카드로). sec = renderMarketCtx 의 판 틀(? 설명).
 function fcRowHtml(sec) {
@@ -4964,7 +4965,7 @@ function mcUsSession(nowMs = Date.now()) {
 let mcNeedH = FIT0.mc || 0;   // 시장 맥락(좁은 칸) 내용 높이 -- renderMarketCtx 가 재고 renderCandleSvg 가 1초 수급 몫을 정할 때 쓴다
 // 2026-10-30 펜 메모 «이전 미니 체결 버블 실시간 차트를 같은 자리(1초 수급 아래)에 · 수급 차트 말고 아래 것들 높이를 줄이고 바닥을 왼쪽 지지·저항 바닥에 맞춰» --
 //   bubble_map.js 가 #mcBubble 에 최근 90초를 그린다(10-24 «지금 들어가면» 가격 자로 바꿨다가 10-28 가격 자를 지운 자리). 높이 = 칸 − 아래 두 줄(시장 맥락·⑤) 내용 → 바닥이 지지·저항 칸 바닥과 같은 선.
-const MC_BUBBLE_H = 160;   // 1초 수급 몫에서 빼는 버블 자리 = 아래 두 줄을 줄여 생긴 높이(그래서 수급 차트 높이는 그대로)
+const MC_BUBBLE_H = 176;   // 2026-11-04 160 → 176: 상대 강도 박스를 ~42px 줄여 생긴 높이를 버블(+16)과 1초 수급(+26)이 나눠 갖는다(펜 메모)   // 1초 수급 몫에서 빼는 버블 자리 = 아래 두 줄을 줄여 생긴 높이(그래서 수급 차트 높이는 그대로)
 let mcBubbleEl = null;
 const mcBubbleCanvas = () => mcBubbleEl || (mcBubbleEl = Object.assign(document.createElement("canvas"), { id: "mcBubble", className: "mc-bubble", tabIndex: 0,
   title: "체결 버블(최근 90초 · 실시간) · 휠 = 확대·축소 · 끌기 = 이동 · 더블클릭 = 실시간" }));

@@ -3464,16 +3464,19 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
 .pr-sp::before { content: ""; position: absolute; left: 0; right: 0; bottom: 8px; border-top: 1px dashed var(--line); }
 .pr-sp i { position: relative; width: 7px; flex: none; border-radius: 1px; background: color-mix(in srgb, var(--muted) 45%, transparent); }
 .pr-sp i.u { background: color-mix(in srgb, var(--good) 70%, transparent); } .pr-sp i.d { background: color-mix(in srgb, var(--bad) 70%, transparent); }
-.xs-row { display: flex; height: 112px; }
+/* 2026-11-04 펜 메모: 상대 강도 박스 높이 줄임(113 → ~70 + 머리·한 줄 노트) -- 막대 ±24px · 이름+값 한 줄 */
+.pr-h { margin: 6px 0 4px; }
+.xs-row { display: flex; height: 70px; }
 .xs-c { position: relative; flex: 1; min-width: 0; }
-.xs-c::before { content: ""; position: absolute; left: 0; right: 0; top: 44px; border-top: 1px solid var(--line); }   /* y = 0 -- 위 40px 은 +, 아래 40px 은 −, 맨 아래 두 줄은 값·코인 */
+.xs-c::before { content: ""; position: absolute; left: 0; right: 0; top: 26px; border-top: 1px solid var(--line); }   /* y = 0 -- 위 24px 은 +, 아래 24px 은 −, 맨 아래 한 줄은 이름·값 */
 .xs-c i { position: absolute; left: 22%; right: 22%; border-radius: 2px; }
-.xs-c i.p { bottom: 68px; background: color-mix(in srgb, var(--good) 55%, transparent); }
-.xs-c i.n { top: 44px; background: color-mix(in srgb, var(--bad) 55%, transparent); }
+.xs-c i.p { bottom: 44px; background: color-mix(in srgb, var(--good) 55%, transparent); }
+.xs-c i.n { top: 26px; background: color-mix(in srgb, var(--bad) 55%, transparent); }
 .xs-c.me i { filter: brightness(1.45); }
-.xs-c .xv, .xs-c .xk { position: absolute; left: 0; right: 0; text-align: center; font-size: 9.5px; line-height: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
-.xs-c .xv { bottom: 12px; } .xs-c .xk { bottom: 0; font-weight: 700; } .xs-c.me .xk { color: var(--text); font-weight: 800; }
-.pr-note { font-size: 10px; color: var(--muted); margin-top: 3px; line-height: 1.35; }
+.xs-c .xl { position: absolute; left: 0; right: 0; bottom: 0; text-align: center; font: 500 11px/14px var(--font-sans); font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.xs-c .xl b { font-weight: 700; } .xs-c.me .xl, .xs-c.me .xl b { color: var(--text); font-weight: 800; }
+@media (max-width: 520px) { .xs-row { height: 84px; } .xs-c .xl { line-height: 12px; white-space: normal; } .xs-c .xl b { display: block; } }   /* 좁은 화면: 열이 좁아 이름 · 값 두 줄 */
+.pr-note { font: 500 11px/1.35 var(--font-sans); color: var(--muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 2026-11-04 펜 메모: 넓은 화면 프로파일 아래 칸(#mcWall) = ① 레버리지 · ② 누가 밀고 있나. 호가벽·칩·«?» 는 뺐고 지지/저항은 차트 안으로.
    네 줄이 칸 높이(= 가격 플롯 아래 레인 높이 + 20)를 똑같이 나눠 가져 두 타일의 줄이 가로로 맞는다 -- 4분면(2×2)은 넷째 줄 높이 */
 #mcWall .mc-strip.mc-strip-wall { grid-template-columns: 1fr 1fr; flex: 1; min-height: 0; column-gap: 12px; }
