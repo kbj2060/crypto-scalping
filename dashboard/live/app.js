@@ -9434,7 +9434,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           fs.style.top = y; fs.style.right = `${Math.round(c.width - colR)}px`;
           if (pan) { pan.style.top = y; pan.style.left = `${Math.round(colL + pan.offsetWidth / 2)}px`; }   // 2026-10-28 펜 메모: 미니맵 = 옛 청산 밀도 자리(왼쪽 끝)
           const lb = fpLineBtnEl(card);   // 2026-10-28 펜 메모 «주문은 풋프린트 바로 위 가운데에 버튼으로 크게»
-          lb.style.top = y; lb.style.left = `${Math.round((colL + colR) / 2)}px`;
+          lb.style.top = y; lb.style.left = `${Math.round(a.left - c.left + chartGeo.ml + chartGeo.cw / 2)}px`;   // 2026-11-04 펜 메모 «롱/숏 버튼을 풋프린트 차트 중앙에» -- 옛 = 왼쪽 칸 전체(체결·호가 기둥 포함) 가운데
         }); else if (pan) { pan.style.top = pan.style.left = ""; }
         card.classList.toggle("fp-toprow", on);   // 이 줄이 있으면 체결 기둥 토글의 작은 «선 주문»은 숨긴다(큰 버튼 하나)
         fpMobRowSet(!on && mobileChart && flowOn() && !fpAltOn(), card, fs);   // 2026-10-28 휴대폰 = 머리 마지막 줄 [· | SLTP | 지표]
