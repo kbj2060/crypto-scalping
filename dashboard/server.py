@@ -375,7 +375,7 @@ BLOCK_TRADES_MAX_AGE_MIN = 3.0
 #   기본 executor 를 물면 같은 풀을 쓰는 다른 핸들러가 같이 막히고, 이벤트루프에서 읽으면
 #   SSE 가 멈춘다(설계서 dashboard_orderflow_footprint_heatmap_design_20260914 P2).
 # 🔴symbol 은 **파일 경로로 들어간다**. 화이트리스트로만 받는다(`../` 탈출 차단).
-HEATMAP_SYMBOLS = {"ethusdt", "btcusdt", "solusdt", "xrpusdt"}   # 래스터 수집기가 있는 심볼(USDT)
+HEATMAP_SYMBOLS = {"ethusdt", "btcusdt", "solusdt", "xrpusdt", "sndkusdt", "soxlusdt"}   # 래스터 수집기가 있는 심볼(USDT)
 HEATMAP_MAX_COLS = 900          # 캔버스 폭 상한 -- 이보다 넓게 그릴 화면이 없다
 HEATMAP_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=2,
                                                          thread_name_prefix="heatmap")

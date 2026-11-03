@@ -32,6 +32,7 @@
 | HL 청산 묶음 | `dashboard/server.py` `HL_LIQ_BY_ASSET` | 빠지면 시장 맥락 KeyError. 파일이 없으면 칸만 빈다 |
 | 일봉·4h 풋프린트 | `dashboard/footprint_daily.py` `ASSETS` · `dashboard/live/fp_daily.js` 코인 설정 · 소급 빌드 `scripts/build_footprint_daily_asset.py`(`FP_SYM=… FP_MEM=2GB FP_THREADS=3`) | 칸 = ETH $1 ≈ 4bp와 같은 상대 폭(BTC $30). 소급본 `data/footprint_daily/<SYM>_*.parquet` 은 git 밖 → `handoff.sh push`. BTC 2020~ 아카이브 55GB를 한 달씩 받고 지웠다 |
 | 호가벽·가짜벽(ob5m) | `scripts/live_ob5m_20261026.py` `COINS`(틱·벽 몫·KS·idx 상한) · `scripts/ops/supervisor_ob5m.sh` 코인 목록 | 연구 `COIN_CFG`(SOL .098·5/12/25, XRP .097·8/20/40, 그 밖 ETH 기본값). `--symbol X --parity <날>`로 연구 bars 대조 불일치 0 확인 후 서버에서 `bash scripts/ops/supervisor_ob5m.sh XUSDT` + crontab `@reboot` |
+| 호가 히트맵·호가 유동성(±25/50/100bp) | 🔴ob5m 과 **별개 수집기**: `scripts/live_orderflow_raster_collector_20260914.py` (`OF_SYMBOL`·`OF_BIN_SIZE`) · `multicoin_collectors_20260926.py` `DEEP`/`RASTER_TRADFI` · `dashboard/server.py` `HEATMAP_SYMBOLS` | 빈 폭 = ETH 와 같은 상대 폭(`plan` 이 계산해 crontab 줄에 고정). 과거는 재구성 불가 — 켠 시점부터 쌓인다. **호가 데이터 «3종» 점검표**: ① depth-diff(호가벽 원천) ② ob5m(기울기·벽·표식) ③ 래스터(히트맵·유동성). 코인을 열 때 셋을 따로 확인한다 |
 | 주문 | `dashboard/orders.py` `MANUAL_EXEC_SYMBOLS` · app.js `RULE_ASSETS`·`VOLM_BY` | 🔴돈 걸림 — 사용자 결정. 자동 규칙 상수는 §3 검정 뒤 |
 
 ### B. 예측 기능 (검정 통과 시에만)
@@ -125,8 +126,9 @@ Binance 옵션은 BNB·BTC·DOGE·ETH·SOL·XRP·XAU·XAG 뿐이고 Deribit 은 
 | **옵션 카드 빈 칸** | `scripts/cboe_option_summary_20261101.py` · app.js `optFlowTodayHtml`·`optEqFlowSvg` · `OPT_TIPS.eqflow/eqflow2` | ① 실현 7일 = 바이낸스 선물 1시간봉(6시간 캐시 `data/live/cboe_rv7_cache.json`, **서버 cron 에서만** 바이낸스 호출) ② «블록 거래» 자리 = 오늘 체결 요약(콜·풋 계약·명목, 거래량 상위 계약) ③ «순매수 흐름» 자리 = 콜·풋 체결 누적 곡선(수집기가 10분마다 한 점 -- 배포 직후엔 점이 적다). 체결 한 건·블록·매수/매도는 CBOE 가 안 준다 |
 | **일봉 풋프린트 소급** | `build_footprint_daily_asset.py`(SNDKUSDT·SOXLUSDT, `FP_FIRST` 상장월) · `footprint_daily.py` `ASSETS` · `fp_daily.js` | SNDK 208일(2026-04-07~) · SOXL 170일(05-15~). OI 패널이 없는 코인은 일별 metrics 아카이브만. 칸 SNDK $0.5 · SOXL $0.03 |
 | **호가벽·가짜벽(ob5m)** | `scripts/live_ob5m_20261026.py` `COINS` · `supervisor_ob5m.sh` 허용 목록 | 틱 $0.01 · 벽 몫·KS 는 ETH 기본값 — **연구 대조(`--parity`) 없음 = 잠정**. 서버에서 SNDK·SOXL 워커 시작(11-03 02:00), SOXL 호가 diff 수집기도 시작(`DD_SYMBOL=soxlusdt supervisor_depth_diff.sh`) |
+| **호가 히트맵·호가 유동성(래스터)** | `multicoin_collectors_20260926.py` `RASTER_TRADFI=(SNDK,SOXL)` · `server.py` `HEATMAP_SYMBOLS` | 11-03 19:38 서버 기동(`start --phase 2 --coins SNDK,SOXL`, install-cron 없이). 빈 폭 SNDK $0.25 · SOXL $0.02. 🔴**11-03 사용자 «SOXL 은 왜 호가 데이터를 수집하지 않지?»** — 처음 채울 때 depth-diff·ob5m 만 켜고 이 수집기를 빠뜨렸다(호가벽은 이미 나왔고 히트맵·유동성 카드만 빈 것이었다). 원인 진단 순서: 프로세스 → `/api/ob5m` 봉 수 → `HEATMAP_SYMBOLS` |
 
-**해야 하는데 안 된 것(권한 분류기가 막음 → 사용자 수동)**: crontab `@reboot` 3줄 — 재부팅하면 SOXL 호가 diff 수집기·SNDK/SOXL ob5m 워커가 안 켜진다. 백업 `data/live/backups/crontab_before_stock_ob5m_20261103.txt`(85줄). 줄 형태는 SNDK 호가 diff 줄(`multicoin_bn_depthdiff_sndk_reboot`)과 ETH/XRP ob5m 줄(`sleep 75~85 && … supervisor_ob5m.sh <SYM>`)을 따른다.
+**해야 하는데 안 된 것(권한 분류기가 막음 → 사용자 수동)**: crontab `@reboot` — ① SOXL 호가 diff 수집기·SNDK/SOXL ob5m 워커 3줄은 11-03 사용자가 추가함 ② **래스터 SNDK·SOXL 2줄은 아직** (`multicoin_collectors_20260926.py plan --phase 2 --coins SNDK,SOXL` 이 출력하는 줄 그대로) — 재부팅하면 래스터 둘이 안 켜진다. 백업 `data/live/backups/crontab_before_stock_ob5m_20261103.txt`(85줄). 줄 형태는 SNDK 호가 diff 줄(`multicoin_bn_depthdiff_sndk_reboot`)과 ETH/XRP ob5m 줄(`sleep 75~85 && … supervisor_ob5m.sh <SYM>`)을 따른다.
 
 **ETH 와 아직 다른 것(이유)**:
 | 기능 | 상태 | 이유·다시 볼 때 |

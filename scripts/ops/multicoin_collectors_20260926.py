@@ -59,6 +59,7 @@ COINS = ("BTC", "SOL", "XRP", "HYPE", "ZEC", "SNDK", "SOXL")
 # 새 코인은 COINS 에만 넣으면 가벼운 단계(체결 테이프·OKX 컨텍스트·HL 맥락·경보기)만 켜진다 -- 깊은 쪽이 필요하면 DEEP 에도 넣는다.
 DEEP = ("BTC", "SOL", "XRP", "HYPE")
 TRADFI = ("SNDK", "SOXL")        # 2026-11-01 바이낸스 TradFi 주식 선물 -- HL 맥락 없음 · 깊은 호가는 diff 만(저유동 파일 크기 실측용) · 야간 거래가 얇아 신선도 기준을 넓힌다
+RASTER_TRADFI = ("SNDK", "SOXL")   # 2026-11-03 호가 히트맵·호가 유동성 카드용 래스터 -- 깊은 호가 diff 와 별개로 TradFi 도 켠다(과거는 재구성 불가)
 DEPTH_TRADFI = ("SNDK",)   # TradFi 중 깊은 호가 diff 를 쌓는 종목. SOXL 은 대시보드 풋프린트만이라 뺀다(거래대금이 커서 파일이 크다)
 BO_OK = ("SOL", "XRP")      # 추세 전환 경보기 검정을 통과한 코인(ETH 는 늘 포함)
 # 수집기별 RSS(MB) 추정 -- 2026-09-26 이 세션 실측(x86_64, 네트워크 없이 기동 후 15초). duckdb 를 import
@@ -112,7 +113,7 @@ def specs(coins: list[str], phases: set[int]) -> list[dict]:
             "live_hyperliquid_book_ticker_collector_20260923.py", {"HL_BT_COIN": c, "HL_BT_CTX_ONLY": "1"},
             [_db(f"hl_ctx_{lc}", "data/hot/hl_ctx.sqlite", f"hl_asset_ctx WHERE coin = '{c}'",
                  "datetime(max(recv_ms) / 1000, 'unixepoch', 'localtime')")])
-        deep and add("bn_raster", lc, 2, "supervisor_orderflow_raster.sh", "live_orderflow_raster_collector_20260914.py",
+        (deep or c in RASTER_TRADFI) and add("bn_raster", lc, 2, "supervisor_orderflow_raster.sh", "live_orderflow_raster_collector_20260914.py",
             {"OF_SYMBOL": sym.lower()}, [_dir(f"bn_raster_{lc}", f"{of}/raster/{sym}", glob="*.f32")],
             eth=f"{of}/raster/ETHUSDT")
     # 2026-10-31 체결 테이프는 코인마다 프로세스를 띄우지 않고 한 프로세스에 심볼 목록을 준다(ETH 포함 -- ETH 도 같은 프로세스)
