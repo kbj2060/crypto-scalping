@@ -4063,6 +4063,7 @@ function optLadderSvg(o, W, Hfit = null) {
     + `<line x1="${mid}" x2="${mid}" y1="${y0 - 4}" y2="${y1}" stroke="var(--line)"/>`;
   const cur = optData().cur, tm = optTouchModel(cur, px);   // 2026-10-08 닿음 등고선 -- 막대 뒤에 먼저 깐다
   s += optTouchBack(tm, Y, W, lo, hi);
+  const chipYs = tm ? [0.5, 0.25, 0.1].flatMap((t) => [tm.level(t, true), tm.level(t, false)]).filter((p) => p >= lo && p <= hi).map(Y) : [];   // 닿을 확률 칩(오른쪽 끝) 높이들 -- 값 글자가 같은 높이면 피한다
   vis.forEach(([k, c, p]) => {
     const y = Y(k), pw = (half * p) / mx, cwid = (half * c) / mx;
     s += `<g><title>${optQ(k)} · 콜 ${optUsd(c)} · 풋 ${optUsd(p)}</title>`
@@ -4070,9 +4071,10 @@ function optLadderSvg(o, W, Hfit = null) {
       + `<rect x="${mid}" y="${(y - bh / 2).toFixed(1)}" width="${cwid.toFixed(1)}" height="${bh.toFixed(1)}" fill="var(--good)" fill-opacity=".75"/>` + `</g>`;
     if (top.includes(k)) {   // 2026-09-30 큰 막대 값은 막대 **안**(사용자 지시) -- 막대 끝에서 안쪽으로, 글자가 안 들어가면 예전처럼 옆에
       const lab = optUsd(c + p), bw = c >= p ? cwid : pw, fit = bw >= lab.length * fsz * 0.62 + 8;
-      const x = mid + (c >= p ? (fit ? cwid - 4 : cwid + 4) : (fit ? -pw + 4 : -pw - 4));
+      let x = mid + (c >= p ? (fit ? cwid - 4 : cwid + 4) : (fit ? -pw + 4 : -pw - 4)), anc = (c >= p) === fit ? "end" : "start";
+      if (fit && chipYs.some((cy) => Math.abs(cy - y) < 10)) { x = mid + (c >= p ? 6 : -6); anc = c >= p ? "start" : "end"; }   // 2026-11-04 모바일 최적화: 막대 끝 값 «$22.1M» 이 같은 높이의 «10% 2400» 칩과 겹쳤다 -- 막대 안쪽(가운데선) 쪽으로
       s += `<text x="${x.toFixed(1)}" y="${(y + fsz * 0.36).toFixed(1)}" font-size="${fsz.toFixed(1)}" font-weight="800" fill="${fit ? "var(--chart-bg)" : "var(--text)"}"`
-        + ` text-anchor="${(c >= p) === fit ? "end" : "start"}">${lab}</text>`;
+        + ` text-anchor="${anc}">${lab}</text>`;
     }
   });
   const lab = (v, y) => `<text x="0" y="${(y + 3.5).toFixed(1)}" font-size="9.5" fill="var(--muted)">${optQ(v)}</text>`;
@@ -8280,7 +8282,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         } else if (gutOn) {
           fpNotes.push({ val: f.pain, label: "max pain", color: "var(--warn)", title: lab });
         } else {
-          add("text", { x: ml + cw - 10, y: y < mt ? mt + 2 * fs + 8 : plotBottom - fs - 8, "font-size": fs, "font-weight": 700, fill: "var(--warn)", "text-anchor": "end" },   // 10-30 왼쪽 위 VWAP 이름과 겹쳐 오른쪽 끝으로
+          add("text", { x: ml + cw - 10, y: y < mt ? mt + 2 * fs + 8 : plotBottom - fs - (mobileChart ? 24 : 8), "font-size": fs, "font-weight": 700, fill: "var(--warn)", "text-anchor": "end" },   // 10-30 왼쪽 위 VWAP 이름과 겹쳐 오른쪽 끝으로
               `${mobileChart ? `max pain ${optQ(f.pain)}` : lab} ${y < mt ? "↑" : "↓"} (${f.pain >= px ? "+" : "−"}${optQ(Math.abs(f.pain - px))}$)`);
         }
       }

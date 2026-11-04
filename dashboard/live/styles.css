@@ -2942,7 +2942,7 @@ html.fit1 #newsBody .nw-sum { min-height: 0; overflow-y: auto; scrollbar-width: 
   #chartWindowTabs, #snapshotAssetTabs { flex: var(--seg-n, 3) 1 0; min-width: 0; }
   #chartWindowTabs .asset-tab, #snapshotAssetTabs .asset-tab { padding-left: 0; padding-right: 0; }
   #snapshotAssetTabs { display: grid; order: 0; }
-  #chartWindowTabs { order: 1; }
+  #chartWindowTabs { order: 1; flex: 1 1 100%; }   /* 2026-11-04 모바일 최적화: 430 폭에서 창 탭이 ETH 버튼·포지션 칸 옆에 끼여 «5m 30m 1h» 글자가 한 덩어리로 겹쳤다 -- 어느 폭에서나 제 줄(전폭) */
 }
 
 /* 2026-10-07 ⑤ 다음 24시간 = 뉴스 목록 바로 아래·같은 폭(사용자 «뉴스 리스트 바닥을 올려서 그 아래 · 카드 크기 유지», impeccable).
