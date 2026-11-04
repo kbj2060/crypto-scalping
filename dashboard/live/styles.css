@@ -3537,3 +3537,14 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
   #mcBody > .mc-sec[data-fold].mc-open > .mc-sum { display: none; }
   #mcBody > .mc-sec[data-fold]:not(.mc-open) > :not(h4):not(.mc-sum) { display: none; }
 }
+
+/* 2026-11-04 모바일 최적화 ⑤(시안 A): Account 접기 막대 -- 넓은 화면은 숨김 · 닫힌 막대 바로 다음 칸을 숨긴다 */
+.afold-bar { display: none; }
+@media (max-width: 720px) {
+  .afold-bar { display: flex; flex-direction: column; gap: 4px; width: 100%; min-height: 44px; padding: 14px 4px; border: 0; border-top: 1px solid var(--soft-line); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .afold-bar .af-t { display: flex; justify-content: space-between; align-items: center; }
+  .afold-bar b { font: 800 14px var(--font-sans); color: var(--ink); }
+  .afold-bar i { font: 700 12px var(--font-sans); font-style: normal; color: var(--muted); }
+  .afold-bar .af-s { font: 500 12.5px/1.4 var(--font-sans); color: var(--muted); }
+  .afold-bar:not(.open) + * { display: none !important; }
+}

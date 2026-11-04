@@ -5320,6 +5320,47 @@ el("mcBody")?.addEventListener("click", (e) => {
   try { localStorage.setItem("mcFold", JSON.stringify(mcFold)); } catch (err) { /* 기억은 편의 */ }
 });
 
+// 2026-11-04 모바일 최적화 ⑤(사용자 시안 A): Account 의 성과 통계 · 손익 달력 · 오늘 거래·메모 · 코인별 순환 카드는 휴대폰에서 기본 접힘 + 한 줄 요약(막대를 누르면 펼침).
+//   카드가 몇 초마다 DOM 을 새로 쓰므로 MutationObserver 가 막대를 다시 붙인다(막대가 있으면 아무것도 안 바꾼다 -- 무한 루프 없음) · 펼침 상태만 기억(localStorage acctFold).
+//   접힌 본문은 CSS 가 «닫힌 막대 바로 다음 칸»을 숨긴다(새 노드도 바로 숨겨진다) · 넓은 화면은 막대가 display:none.
+let acctFold = (() => { try { const v = JSON.parse(localStorage.getItem("acctFold")); if (v && typeof v === "object") return v; } catch (e) { /* 기억은 편의 */ } return {}; })();   // {키: true = 펼침}
+const acctFoldText = (e, sel) => (e.querySelector(sel)?.textContent || "").replace(/\s+/g, " ").trim();
+function acctFoldApply() {
+  const card = el("acctCard");
+  if (!card) return;
+  const stat = (box, name) => [...box.querySelectorAll(".acct-stat")].find((r) => r.querySelector("span")?.textContent.trim() === name)?.querySelector("b")?.textContent.trim() || "";
+  const defs = [], st = card.querySelector(".acct-stats"), cal = el("snapAcctCal"), ch = cal?.querySelector(".acct-cal-head"), day = el("acctDayBox"), ds = day?.querySelector(".acct-day-sum");
+  if (st) defs.push(["stats", st, "성과 통계", `누적 실현 ${stat(st, "누적 실현")} · ${stat(st, "왕복 · 승률").replace(" · ", "건 · 승률 ")} · 최대 낙폭 ${stat(st, "최대 낙폭")}`]);
+  if (ch) defs.push(["cal", cal, "손익 달력", `${acctFoldText(ch, "b")} · ${acctFoldText(ch, ".muted")}`]);
+  if (day && !day.hidden && ds) defs.push(["day", day, "오늘 거래 · 메모", [acctFoldText(ds, "b"), acctFoldText(ds, ".muted").replace(" · 펀딩·수수료 포함", ""), acctFoldText(day, "#acctNoteSt")].filter(Boolean).join(" · ")]);
+  card.querySelectorAll("#snapAcctCycle .cy-box").forEach((b) => {
+    const title = acctFoldText(b, ".cy-title"), tot = [...b.querySelectorAll(".cy-tiles > div")].find((d) => d.querySelector("i")?.textContent.trim() === "합계");
+    defs.push(["cy:" + title, b, title, [acctFoldText(b, ".cy-live"), tot ? `합계 ${tot.querySelector("b").textContent.replace(/\s+/g, " ").trim()}` : "", acctFoldText(b, ".cy-head .muted").split(" · ").slice(0, 2).join(" · ")].filter(Boolean).join(" · ")]);
+  });
+  defs.forEach(([k, t, title, sum]) => {
+    let bar = t.previousElementSibling;
+    if (!bar || !bar.classList.contains("afold-bar")) { bar = document.createElement("button"); bar.type = "button"; bar.className = "afold-bar"; t.before(bar); }
+    const open = !!acctFold[k], html = `<span class="af-t"><b>${escapeHtml(title)}</b><i>${open ? "접기 ▴" : "펼치기 ▾"}</i></span>${open ? "" : `<span class="af-s">${escapeHtml(sum)}</span>`}`;
+    bar.dataset.k = k;
+    if (bar._h !== html) { bar.innerHTML = html; bar._h = html; }
+    bar.classList.toggle("open", open); bar.setAttribute("aria-expanded", String(open));
+  });
+}
+{
+  const card = el("acctCard");
+  if (card) {
+    let q = 0;
+    new MutationObserver(() => { if (!q) q = requestAnimationFrame(() => { q = 0; acctFoldApply(); }); }).observe(card, { childList: true, subtree: true });
+    card.addEventListener("click", (e) => {
+      const b = e.target.closest(".afold-bar");
+      if (!b) return;
+      acctFold[b.dataset.k] = !acctFold[b.dataset.k];
+      try { localStorage.setItem("acctFold", JSON.stringify(acctFold)); } catch (err) { /* 기억은 편의 */ }
+      acctFoldApply();
+    });
+  }
+}
+
 // 2026-10-26 사용자 «? 를 누르면 칸이 늘어나는 게 아니라 팝업창 · 대시보드 전체»: «?»(.mc-q 시장 맥락 · .opt-q 옵션) = 공유 설명 팝업 하나.
 //   <dialog> 는 body 끝(매초 다시 그리는 칸 밖)이라 다시 그려도 안 닫히고 포커스도 안 뺏긴다 · 제목 = 단추 title(«— 설명» 뺀) 또는 글자 · 본문 = 같은 설명(줄바꿈 유지)
 //   ✕·Esc·바깥 클릭(= ::backdrop 클릭은 dialog 자신이 받는다 -- 그래서 dialog 안쪽 여백 0)으로 닫고, 포커스는 «?» 로(그새 다시 그려졌으면 같은 data-tip 단추로).
