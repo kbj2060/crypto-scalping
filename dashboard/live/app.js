@@ -3535,7 +3535,7 @@ function updateLivePriceFast(price) {
   if (lab && lab.dataset.withPrice) lab.textContent = (lab.dataset.withPrice === "num" ? "" : "현재 ") + fmtNum(price, pxDp());   // 2026-09-27 풋프린트: 가격이 왼쪽 글자 안
   if (labBg && lab) {
     labBg.setAttribute("y", labelY - 9);
-    try { const bw1 = lab.getComputedTextLength() + 10; labBg.setAttribute("width", bw1); if (labBg.dataset.right) labBg.setAttribute("x", Number(labBg.dataset.right) - bw1); } catch (e) { /* 비렌더 */ }
+    try { const bw1 = lab.getComputedTextLength() + (labBg.dataset.pill ? 18 : 10); labBg.setAttribute("width", bw1); if (labBg.dataset.right) labBg.setAttribute("x", Number(labBg.dataset.right) - bw1); } catch (e) { /* 비렌더 */ }
   }
   // 2026-09-22 모바일에는 배지가 없다(값은 플롯 아래 한 줄에 있다). 옛 판은 box/txt 가
   //   없으면 **여기서 return** 해서 화살표까지 같이 멈췄다 -- 전체 렌더(1초)까지 어긋난다.
@@ -8610,7 +8610,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     //   시작해 필요하면 플롯 안으로 조금 들어간다(가격 태그 관례). 빠른 갱신(updateLivePriceFast)이 글자·폭·높이를 같이 옮긴다.
     const nowTag = p.label === "현재" && !!footprint && !!txt;
     const gutTag = gutOn && !!txt;   // 2026-09-30 꼬리표 칸: 모든 가격 이름이 상자(현재 = 채움 · 나머지 = 테두리)
-    const tagBg = (nowTag || gutTag) && !(nowTag && gutTag) ? document.createElementNS(NS, "rect") : null;   // 풋프린트 현재가는 상자 없이 숫자만
+    const pill = nowTag && gutTag;   // 2026-11-04 펜 메모 시안 A «현재가 라벨 = 축 태그»: 데스크톱 풋프린트 현재가 = 채운 알약(밝은 바탕 + 어두운 숫자) · 셀·막대 위에서도 읽힌다
+    const tagBg = nowTag || gutTag ? document.createElementNS(NS, "rect") : null;
     if (gutTag && (!inR || Math.abs(labelY - p.realY) > 2)) {
       const lead = document.createElementNS(NS, "path");
       // 2026-10-01 가격 이름은 프로파일 오른쪽 끝 -- 밀렸으면 그 끝에서 세로로 짧게 잇는다(선은 이미 전폭이다)
@@ -8621,18 +8622,18 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     if (tagBg) {
       tagBg.setAttribute("x", gutTag ? tagX : 2); tagBg.setAttribute("y", labelY - 9); tagBg.setAttribute("height", 18);
       tagBg.setAttribute("rx", 3);
-      if (nowTag) tagBg.setAttribute("fill", p.color);
+      if (pill) { tagBg.setAttribute("fill", "var(--ink)"); tagBg.setAttribute("rx", 9); tagBg.dataset.pill = "1"; }
+      else if (nowTag) tagBg.setAttribute("fill", p.color);
       else { tagBg.setAttribute("fill", "var(--chart-bg)"); tagBg.setAttribute("stroke", p.color); tagBg.setAttribute("stroke-width", "1"); }
       svg.appendChild(tagBg);
     }
     if (txt) {
-      txt.setAttribute("x", gutTag ? (inR ? xRR - 5 : tagX + 5) : nowTag ? 7 : ml - TRADE_L - 5); txt.setAttribute("y", labelY + (nowTag ? 4.5 : 4));
+      txt.setAttribute("x", gutTag ? (inR ? xRR - (pill ? 9 : 5) : tagX + (pill ? 9 : 5)) : nowTag ? 7 : ml - TRADE_L - 5); txt.setAttribute("y", labelY + (nowTag ? 4.5 : 4));
       txt.setAttribute("text-anchor", gutTag ? (inR ? "end" : "start") : nowTag ? "start" : "end");
       txt.setAttribute("font-size", nowTag ? (mobileChart ? "12" : "13") : gutTag ? "10.5" : "10");   // 2026-10-01 차트 글씨 상한 10.5(DESIGN 차트 예외)
       txt.setAttribute("font-weight", "bold"); txt.setAttribute("fill", nowTag && !gutTag ? inkOnFill() : p.color);
-      if (nowTag && gutTag) {   // 숫자만: 14px · 굵게 · 바탕색 외곽선으로 셀 위에서도 읽힌다
-        txt.setAttribute("font-size", "14"); txt.setAttribute("font-weight", "800");
-        txt.setAttribute("stroke", "var(--chart-bg)"); txt.setAttribute("stroke-width", "4"); txt.setAttribute("paint-order", "stroke");
+      if (pill) {   // 알약 안 숫자: 14px · 굵게 · 차트 바탕색 글자
+        txt.setAttribute("font-size", "14"); txt.setAttribute("font-weight", "800"); txt.setAttribute("fill", "var(--chart-bg)");
         txt.setAttribute("style", "font-variant-numeric: tabular-nums");
       }
       txt.textContent = `${leftName}${p.offTop ? "↑" : p.offBottom ? "↓" : ""}`;
@@ -8651,10 +8652,11 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         txt.textContent = `${name} ${fmtNum(p.val, pxDp())}`;
         try { if (textW(txt) > (gutTag ? 84 : ml - TRADE_L - 7)) txt.textContent = `${name} ${fmtNum(p.val, Math.max(0, pxDp() - 1))}`; } catch (e) { /* 비렌더 */ }
       }
+      if (pill) post.push(() => { svg.appendChild(tagBg); svg.appendChild(txt); });   // 호가 막대 층이 나중에 쌓여 알약 왼쪽을 덮었다 -- 맨 위로(빠른 갱신은 data-live 로 찾으니 순서와 무관)
       if (tagBg) {
         let tw = 0;
         try { tw = textW(txt); } catch (e) { /* 비렌더 */ }
-        const bw0 = (tw > 0 ? tw : txt.textContent.length * 7.5) + 10;
+        const bw0 = (tw > 0 ? tw : txt.textContent.length * 7.5) + (pill ? 18 : 10);
         tagBg.setAttribute("width", bw0);
         if (gutTag && inR) { tagBg.setAttribute("x", xRR - bw0); tagBg.dataset.right = String(xRR); }   // 오른쪽 정렬(빠른 갱신도 이 오른쪽 끝을 지킨다)
       }
