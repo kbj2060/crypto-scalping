@@ -1159,7 +1159,7 @@ function renderAssetPop() {
   const cell = (x) => `<div class="asset-cell${x.key === activeSnapshotAsset ? " on" : ""}"><button type="button" class="ac-pick" data-pick="${x.key}">${escapeHtml(x.label)}</button>`
     + `<button type="button" class="ac-pin${pins.has(x.key) ? " on" : ""}" data-pin="${x.key}" aria-pressed="${pins.has(x.key)}" title="${pins.has(x.key) ? "고정 해제" : "칩으로 고정"}">★</button></div>`;
   const sec = (t, l) => l.length ? `<div class="asset-grp">${t}</div><div class="asset-grid">${l.map(cell).join("")}</div>` : "";
-  body.innerHTML = sec("고정", items.filter((x) => pins.has(x.key))) + sec("코인", items.filter((x) => !STOCK_ASSETS.has(x.key))) + sec("주식", items.filter((x) => STOCK_ASSETS.has(x.key)))
+  body.innerHTML = (isMobileChartMode() ? "" : sec("고정", items.filter((x) => pins.has(x.key)))) + sec("코인", items.filter((x) => !STOCK_ASSETS.has(x.key))) + sec("주식", items.filter((x) => STOCK_ASSETS.has(x.key)))
     || '<p class="muted" style="padding:8px 4px">찾는 코인·주식이 없습니다.</p>';
 }
 function setupAssetPop() {
@@ -1201,8 +1201,9 @@ function renderSnapshotAssetTabs() {
   // 2026-11-02 칩 = 고정한 것 + 지금 보는 것만(나머지는 «전체 ▾» 팝오버) -- off-chip 은 CSS 가 가린다.
   const pins = assetPins();
   document.querySelectorAll("#snapshotAssetTabs .asset-tab").forEach((btn) => btn.classList.toggle("off-chip", !pins.has(btn.dataset.asset) && btn.dataset.asset !== activeSnapshotAsset));
-  const allOn = [...document.querySelectorAll("#snapshotAssetTabs .asset-tab")].filter((b) => !b.hidden), mn = el("assetMoreN");
+  const allOn = [...document.querySelectorAll("#snapshotAssetTabs .asset-tab")].filter((b) => !b.hidden), mn = el("assetMoreN"), mc = el("assetCur");
   if (mn) mn.textContent = String(allOn.length);
+  if (mc) mc.textContent = String(activeSnapshotAsset || "eth").toUpperCase();   // 2026-11-04 모바일: 칩 대신 이 버튼 하나가 지금 코인을 말한다
   // 2026-10-01 코인 탭 = 1h~12h 와 같은 세그먼트(사용자 지시) -- 숨은 코인(BTC·HYPE)은 칸이 아니므로 «보이는 칸» 기준으로 조각 폭·위치를 준다.
   const host = el("snapshotAssetTabs"), vis = allOn.filter((b) => !b.classList.contains("off-chip"));
   if (host) { host.style.setProperty("--seg-n", String(vis.length || 1)); host.style.setProperty("--i", String(Math.max(0, vis.findIndex((b) => b.classList.contains("active"))))); }
@@ -6682,7 +6683,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   const PROF_H = footprint && mobileChart && S1_BELOW && !fpAltOn() ? 260 : 0, PROF_GAP = 28;   // PROF_GAP = 가운데 가격 등뼈 반폭
   const PROF_PANEL = PROF_H ? PROF_H + SUB_GAP : 0;   // 아래 칸 + 간격 -- 본문 바닥 h 와 1초 수급 사이
   const h = S1_BELOW ? hAll - S1_PANEL - SUB_GAP - PROF_PANEL : hAll;
-  const SUB_TOTAL = !subOn ? 0 : splitR ? SUB_LEGEND_H + SUB_GAP : SUB_LEGEND_H + STATS_ROW_H + 10 + SUB_GAP;
+  // 2026-11-04 모바일: 호가 계기 줄(STATS_ROW_H)은 없어졌고 흐름 코인의 밀도 범례 칸(SUB_LEGEND_H)은 머리 HTML 줄(LONG·SHORT·지표)로 옮겨 가 비어 있었다 -- 그 52px 를 가격 플롯이 가져간다.
+  const SUB_TOTAL = !subOn ? 0 : splitR ? SUB_LEGEND_H + SUB_GAP : (mobileChart && flowOn() ? 0 : SUB_LEGEND_H) + (mobileChart ? 0 : STATS_ROW_H) + 10 + SUB_GAP;
   fpCvBegin(svg, box0, wAll, hAll, w, h);   // 2026-10-20 무거운 층은 캔버스 두 장(fpCv 주석) -- bg·fg 칠하기 목록을 아래 블록들이 채우고 끝에서 한 번 칠한다
   const bgI = fpCv.bg.items, fgI = fpCv.fg.items;
   // 🔴상자 높이(styles.css 의 #candleSvgSnapshot/.candle-container)와 위 SUB_* 상수는 두
@@ -9047,7 +9049,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     return { bs, x0, L, mx, cells };
   })();
   // 네 막대 계기 자리(그림과 호버가 같이 쓴다). 데스크톱 = 기둥 머리(체결 기둥 왼쪽 끝 ~ 오른쪽 여백), 모바일 = 풋프린트 위 한 줄.
-  const statsGeo = bookInfo && !(TRADE_W && splitR && flowOn()) ? (() => {   // 2026-09-30 넓은 화면은 ④로 옮겼다(2026-10-04 SOL·XRP 도)
+  const statsGeo = bookInfo && !isMobileChartMode() && !(TRADE_W && splitR && flowOn()) ? (() => {   // 2026-11-04 사용자 «모바일에서 풋프린트 상단의 변동·불균형·지속·이탈 모두 제거»   // 2026-09-30 넓은 화면은 ④로 옮겼다(2026-10-04 SOL·XRP 도)
     if (TRADE_W && !splitR) {   // 2026-10-30 1단 데스크톱: 기둥 머리(체결·청산|포지션·호가 토글)와 같은 자리에 겹쳤다 → 캔들 칸 오른쪽 위
       const rm = Math.round(Math.min(280, (tradeX0 - ml) * 0.3)), sx1 = tradeX0 - 12 - rm - 100;   // 2026-11-02 -100 = 청산 기간 버튼(1d 7d 30d)이 청산 칸 왼쪽 위에 앉는 자리
       return { sx: sx1, slotW: rm / 4, labY: mt - 14, barY: mt - 11, y0: mt - 24, y1: mt - 2 };

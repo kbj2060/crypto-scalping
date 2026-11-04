@@ -3352,7 +3352,15 @@ html.fit1 #mtBody .mt-det { min-height: 0; overflow-y: auto; scrollbar-width: th
 .asset-cell .ac-pin { flex: none; width: 32px; min-height: 38px; color: var(--muted); opacity: .45; }
 .asset-cell .ac-pin.on { color: var(--amber); opacity: 1; }
 .asset-cell:hover:not(.on) { background: rgb(var(--lift) / .09); }
-@media (max-width: 720px) { .asset-more { margin-left: 0; padding: 0 8px; flex: none; } .asset-more .am-t { display: none; } }   /* 휴대폰: 코인 칩 옆 좁은 칸 -- «N ▾» 만 */
+.asset-more .am-cur { display: none; }
+/* 2026-11-04 사용자 «모바일에서는 코인·주식 즐겨찾기 칩을 없애고 버튼 하나로 드롭다운»: 칩 줄을 걷고 «지금 코인 ▾» 한 알약이 목록을 연다(고정 ★ 도 모바일에선 숨김). */
+@media (max-width: 720px) {
+  #snapshotAssetTabs { display: none; }
+  .asset-more { margin-left: 0; height: 40px; min-width: 88px; padding: 0 14px; flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  .asset-more .am-cur { display: inline; font-size: 14px; }
+  .asset-more .am-t, .asset-more #assetMoreN { display: none; }
+  .asset-cell .ac-pin { display: none; }
+}
 
 /* 2026-11-02 사용자 펜 메모 «왼쪽 내비로 옮길 때도 앱바는 항상 위에»: 넓은 화면(내비가 보일 때)은 앱바를 위에 고정한다. 아래 여백은 앱바 안(padding)으로 넣어 비치지 않게. */
 body:has(.card-rail:not([hidden])) .app { padding-top: 0; }
