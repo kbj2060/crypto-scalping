@@ -2372,8 +2372,8 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 @media (pointer: coarse) {
   .asset-tabs .asset-tab, .snap-head .push-toggle { min-height: 40px; }   /* 2026-10-06 알림 버튼도(전엔 테마만 40, 알림 32) */
   /* 2026-10-17 «?» 제목(19px)·작은 칩(24~26px)은 모양은 두고 누르는 자리만 40px 로 -- 투명 ::after 가 위아래로 넓힌다 */
-  .mc-q, .opt-q, .opt-chip-btn, .opt-blk-btn, #snapAcctPerf .chip, #snapAcctCurve .chip { position: relative; }
-  .mc-q::after, .opt-q::after, .opt-chip-btn::after, .opt-blk-btn::after, #snapAcctPerf .chip::after, #snapAcctCurve .chip::after {
+  .mc-q, .opt-q, .mt-q, .opt-chip-btn, .opt-blk-btn, #snapAcctPerf .chip, #snapAcctCurve .chip { position: relative; }   /* 2026-11-04 .mt-q(Macro «?» 18px)도 */
+  .mc-q::after, .opt-q::after, .mt-q::after, .opt-chip-btn::after, .opt-blk-btn::after, #snapAcctPerf .chip::after, #snapAcctCurve .chip::after {
     content: ""; position: absolute; left: 50%; top: 50%; width: max(100% + 4px, 40px); height: 40px; transform: translate(-50%, -50%); }
 }
 
@@ -3547,4 +3547,14 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
   .afold-bar i { font: 700 12px var(--font-sans); font-style: normal; color: var(--muted); }
   .afold-bar .af-s { font: 500 12.5px/1.4 var(--font-sans); color: var(--muted); }
   .afold-bar:not(.open) + * { display: none !important; }
+}
+
+/* 2026-11-04 모바일 최적화 ⑥(사용자 «눈에 안 띄게 바로 수정»): 작은 탭 대상 중 뉴스 링크(28px)는 보이는 모양·줄 높이를 두고 눌림 영역만 44px 로 -- overflow:hidden 이라 ::after 가 잘려 패딩 + 음수 마진 */
+@media (max-width: 720px) {
+  .nw-row a { padding: 15px 0; margin: -15px 0; }
+}
+
+/* 2026-11-04 모바일 최적화 ⑦(사용자 «눈에 안 띄게 바로 수정»): 휴대폰에서 11px 미만이던 기능 글자(머리글·계열 이름·칩·소제목)만 11px 로 -- 차트·달력 안 라벨과 점(·)은 그대로 */
+@media (max-width: 720px) {
+  .mt-h:not(.grp), .mt-fam, .mt-rtab th, .fc-sum, .fc-sum i, .fp-chip, .pr-h, #newsCard span.h { font-size: 11px; }   /* «지금 국면»·«13주 뒤 편향»(.grp)은 칸이 좁아 11px 면 줄바꿈 -- 그대로 */
 }
