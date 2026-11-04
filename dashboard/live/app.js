@@ -1164,11 +1164,13 @@ function setupAssetPop() {
   const more = el("assetMore"), pop = el("assetPop"), search = el("assetSearch");
   if (!more || !pop) return;
   document.body.appendChild(pop);   // 카드(backdrop-filter)·상단 칸 안에 두면 position:fixed 가 그 상자 기준이 돼 어긋난다 -- body 로 옮긴다
+  let openW = 0;
   const open = () => {
+    openW = innerWidth;
     pop.hidden = false; more.setAttribute("aria-expanded", "true"); if (search) search.value = ""; renderAssetPop();
     const r = more.getBoundingClientRect(), w = Math.min(540, innerWidth - 16);
     pop.style.width = `${w}px`; pop.style.top = `${Math.round(r.bottom + 8)}px`; pop.style.left = `${Math.max(8, Math.min(Math.round(r.left), innerWidth - w - 8))}px`;
-    search?.focus();
+    if (matchMedia("(pointer: fine)").matches) search?.focus();   // 2026-11-04 펜 메모(모바일 «전체» 드롭다운이 떴다 바로 사라짐): 터치 기기는 포커스하면 키보드가 올라와 resize 가 나고 아래 resize 닫기가 바로 닫았다 -- 키보드도 안 띄운다(검색은 탭하면)
   };
   more.addEventListener("click", () => (pop.hidden ? open() : assetPopClose()));
   search?.addEventListener("input", renderAssetPop);
@@ -1180,7 +1182,7 @@ function setupAssetPop() {
   });
   document.addEventListener("pointerdown", (e) => { if (!pop.hidden && !pop.contains(e.target) && !more.contains(e.target)) assetPopClose(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !pop.hidden) { assetPopClose(); more.focus(); } });
-  addEventListener("resize", assetPopClose);
+  addEventListener("resize", () => { if (innerWidth !== openW) assetPopClose(); });   // 폭이 바뀔 때(회전·창 크기)만 닫는다 -- 높이만 바뀌는 키보드·주소창은 그대로
 }
 function renderSnapshotAssetTabs() {
   const cn = el("fpCoinName"); if (cn) cn.textContent = String(activeSnapshotAsset || "eth").toUpperCase();

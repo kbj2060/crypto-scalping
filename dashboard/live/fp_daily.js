@@ -221,7 +221,7 @@
   function layout(cv) {
     var W = cv.clientWidth, H = cv.clientHeight, narrow = W < 560;
     var L = 8, R = narrow ? 52 : 66, axisH = 26, gap = 8;
-    var laneH = Math.round((H - axisH) * (narrow ? 0.095 : 0.1));
+    var laneH = Math.max(30, Math.round((H - axisH) * (narrow ? 0.07 : 0.055)));   // 2026-11-04 펜 메모 «차트 높이가 너무 낮다 -- 아래 막대 높이를 줄이고 차트를 늘려줘»: 레인 0.1 → 0.055(휴대폰 0.095 → 0.07) · 가격 차트 329 → ~500px(776px 상자 실측)
     var priceH = H - axisH - LANES.length * (laneH + gap) - 6;
     var lanes = {}, y = 6 + priceH + gap;
     LANES.forEach(function (l) { lanes[l[0]] = { y: y, h: laneH }; y += laneH + gap; });
