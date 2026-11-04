@@ -1726,19 +1726,17 @@ function entryUsdt(pos, chartPx) {
 
 // 2026-11-04 펜 메모 «풋프린트 머리(창 탭과 코인 이름 사이)에 이 코인의 포지션» 시안 A: 두 줄 -- 방향·진입가 / 지금가·%·손익($). 수량은 뺐다(사용자). 포지션 없으면 숨김.
 function renderFpPos() {
-  const box = el("fpPos"), px = el("fpPx"); if (!box) return;
+  const box = el("fpPos"); if (!box) return;
   const pos = snapshotAccountPosition(), cur = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), qty = Math.abs(Number(pos?.qty));
-  const en = pos ? entryUsdt(pos, cur) : 0, has = qty > 0 && en > 0 && cur > 0;
-  // 2026-11-04 펜 메모 «현재가는 모든 코인·주식에서 · 지금 글자 빼고 · XRP 소수 4자리»: 현재가는 포지션과 상관없이 늘 보인다(lineFmt = 100 이상 2자리 · 아래 4자리)
-  if (px) px.textContent = cur > 0 ? lineFmt(cur) : "";
-  if (!(cur > 0)) { box.hidden = true; return; }
-  const sgn = String(pos?.side).toUpperCase() === "SHORT" ? -1 : 1, pct = has ? (cur - en) / en * 100 * sgn : 0, pnl = has ? (cur - en) * qty * sgn : 0;
+  const en = pos ? entryUsdt(pos, cur) : 0;
+  // 2026-11-04 펜 메모 «현재가는 그냥 제거»: 머리에는 현재가를 안 둔다(차트 현재가 알약이 말한다) -- 포지션이 있을 때만 방향·진입가·손익
+  if (!(qty > 0 && en > 0 && cur > 0)) { box.hidden = true; return; }
+  const sgn = String(pos.side).toUpperCase() === "SHORT" ? -1 : 1, pct = (cur - en) / en * 100 * sgn, pnl = (cur - en) * qty * sgn;
   const sg = (v) => (v >= 0 ? "+" : "−"), cls = pnl >= 0 ? "good" : "bad";
-  box.classList.toggle("nopos", !has);
   // 2026-11-04 펜 메모 «박스 안 배치·텍스트가 안 맞다 · 깔끔하고 통일성 있게»: 두 줄 모두 [이름(흐림) 값(굵게)] 한 문법 · 크기 13 하나 · 방향만 작은 칩 · 색은 손익에만
   const kv = (k, v, c = "") => `<span class="fp-k">${k}</span><b class="${c}">${v}</b>`;
-  box.innerHTML = (has ? `<div><i class="fp-chip ${sgn < 0 ? "bad" : "good"}">${sgn < 0 ? "SHORT" : "LONG"}</i>${kv("진입", lineFmt(en))}</div>` : "")
-    + `<div><b class="fp-pos-now">${lineFmt(cur)}</b>${has ? kv("손익", `${sg(pct)}${Math.abs(pct).toFixed(2)}%`, cls) + `<b class="${cls}">${sg(pnl)}$${lineFmt(Math.abs(pnl))}</b>` : ""}</div>`;
+  box.innerHTML = `<div><i class="fp-chip ${sgn < 0 ? "bad" : "good"}">${sgn < 0 ? "SHORT" : "LONG"}</i>${kv("진입", lineFmt(en))}</div>`
+    + `<div>${kv("손익", `${sg(pct)}${Math.abs(pct).toFixed(2)}%`, cls)}<b class="${cls}">${sg(pnl)}$${lineFmt(Math.abs(pnl))}</b></div>`;
   box.hidden = false;
 }
 

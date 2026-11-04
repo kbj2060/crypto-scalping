@@ -2676,12 +2676,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .fp-k { color: var(--muted); font-weight: 500; margin-right: -3px; }   /* 이름 + 값은 한 덩어리(5px) · 덩어리 사이는 8px */
 .fp-chip { font: 800 10.5px/1 var(--font-sans); font-style: normal; letter-spacing: .08em; padding: 3px 6px; border-radius: 4px; align-self: center; }
 .fp-chip.good { color: var(--good); background: color-mix(in srgb, var(--good) 16%, transparent); } .fp-chip.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }
-/* 2026-11-04 펜 메모 «현재가를 제목(코인 이름) 오른쪽으로 · 지금 글자 빼고 크게 · XRP 소수 4자리»: 넓은 화면 = 이름 바로 오른쪽 · 좁은 화면 = 포지션 칸 안 */
-.fp-px { display: none; }
-@media (min-width: 1700px) {
-  .fp-px { display: block; position: absolute; left: 100%; top: 50%; margin-left: 16px; transform: translateY(-50%); font: 700 24px/1 var(--font-sans); letter-spacing: 0; font-variant-numeric: tabular-nums; color: var(--ink); }
-  .fp-pos-now, .fp-pos.nopos { display: none; }
-}
 @media (min-width: 1700px) {
   #fpCard > .ops-health-head { position: relative; }
   .fp-coin-name { display: block; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none;
