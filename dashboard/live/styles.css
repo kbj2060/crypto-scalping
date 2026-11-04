@@ -3527,3 +3527,13 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
 .lt-dpx { position: absolute; transform: translateY(-50%); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--accent); background: color-mix(in srgb, var(--chart-bg) 90%, transparent);
   color: var(--accent); font: 700 12px/1 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
 .lt-dpx[hidden] { display: none; }
+
+/* 2026-11-04 모바일 최적화 ④(시안 A): ①②④ 구획 접기 -- 제목 줄(h4)이 단추 · 아래 한 줄 요약 · 펼치면 요약이 빠지고 본문 */
+@media (max-width: 720px) {
+  #mcBody > .mc-sec[data-fold] > h4 { display: flex; align-items: center; justify-content: space-between; margin: 0; padding: 12px 0 4px; cursor: pointer; }
+  #mcBody > .mc-sec[data-fold] > h4::after { content: "펼치기 ▾"; font: 700 12px var(--font-sans); color: var(--muted); }
+  #mcBody > .mc-sec[data-fold].mc-open > h4::after { content: "접기 ▴"; }
+  #mcBody > .mc-sec[data-fold] > .mc-sum { padding-bottom: 12px; border-bottom: 1px solid var(--soft-line); font: 500 12.5px/1.4 var(--font-sans); color: var(--muted); }
+  #mcBody > .mc-sec[data-fold].mc-open > .mc-sum { display: none; }
+  #mcBody > .mc-sec[data-fold]:not(.mc-open) > :not(h4):not(.mc-sum) { display: none; }
+}

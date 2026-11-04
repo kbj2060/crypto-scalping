@@ -5283,7 +5283,7 @@ function renderMarketCtx() {
   if (!whenBox) htmlB += `<div class="mc-wide">${whenHtml}</div>`;
   if (body._mcHtml === htmlB) return;     // 같은 내용이면 다시 안 그린다(포커스 유지)
   body._mcHtml = htmlB;
-  keepFocus(body, () => { body.innerHTML = htmlB; if (G.cmpW) body.insertBefore(mcBubbleCanvas(), body.firstChild); });   // 10-30 버블 = 맨 위(1초 수급 바로 아래) · 2026-10-28 펜 메모 «가격 자 제거 · 그 자리에 수급 차트 2개를 키워» -- 맨 위 «지금 들어가면» 가격 자(#mcEntry) 삭제
+  keepFocus(body, () => { body.innerHTML = htmlB; if (G.cmpW) body.insertBefore(mcBubbleCanvas(), body.firstChild); mcFoldApply(body); });   // 10-30 버블 = 맨 위(1초 수급 바로 아래) · 2026-10-28 펜 메모 «가격 자 제거 · 그 자리에 수급 차트 2개를 키워» -- 맨 위 «지금 들어가면» 가격 자(#mcEntry) 삭제
   if (body.classList.contains("mc-cmp")) {   // 내용 높이(칸 높이가 아니라 자식들의 아래 끝) -- 바뀌면 차트를 다시 그려 1초 수급 몫을 조정
     const bb = mcBubbleEl && mcBubbleEl.parentNode === body ? mcBubbleEl.getBoundingClientRect() : null, top = bb ? bb.bottom + 6 : body.getBoundingClientRect().top;   // 버블은 높이 계산에서 뺀다(renderCandleSvg 가 남는 높이를 준다)
     const need = Math.ceil(Math.max(0, ...[...body.children].filter((k) => k !== mcBubbleEl).map((k) => k.getBoundingClientRect().bottom - top)) + 6);
@@ -5292,6 +5292,33 @@ function renderMarketCtx() {
     }
   }
 }
+
+// 2026-11-04 모바일 최적화 ④(사용자 시안 A): 휴대폰에서 ①레버리지 과열 · ②누가 밀고 있나 · ④벽·교차·위치 는 기본 접힘 + 한 줄 요약(제목 줄을 누르면 펼침 · «?» 는 그대로 설명 팝업).
+//   값은 방금 그린 구획 안에서 읽는다(새 계산 없음). 펼침 상태만 기억(localStorage mcFold) -- 매 렌더가 DOM 을 새로 쓰므로 여기서 다시 입힌다.
+const MC_FOLD_KEYS = ["q_lev", "q_flow", "q_wall"];
+let mcFold = (() => { try { const v = JSON.parse(localStorage.getItem("mcFold")); if (v && typeof v === "object") return v; } catch (e) { /* 기억은 편의 */ } return {}; })();   // {키: true = 펼침} · 없으면 접힘
+function mcFoldApply(body) {
+  if (!isMobileChartMode()) return;
+  body.querySelectorAll(":scope > .mc-sec:not(.mc-fc)").forEach((sec) => {
+    const key = sec.querySelector("h4 .mc-q")?.dataset.tip;
+    if (!MC_FOLD_KEYS.includes(key)) return;
+    const gs = [...sec.querySelectorAll(".mc-g")].map((g) => [g.querySelector("span")?.textContent.trim(), g.querySelector("b")?.textContent.trim()]);
+    const pick = (names) => names.map((n) => gs.find((x) => x[0] === n)).filter((x) => x && x[1]).map((x) => `${x[0]} ${x[1]}`);
+    const last = [...sec.children].filter((c) => c.tagName !== "H4" && c.tagName.toLowerCase() !== "svg").pop();
+    const parts = key === "q_lev" ? [sec.querySelector(".mc-chip")?.textContent.trim(), ...pick(["베이시스 분위", "델타 30분"])]
+      : key === "q_flow" ? pick(["고래", "중형", "리테일"]) : [last ? last.textContent.trim() : ""];
+    const sum = document.createElement("div"); sum.className = "mc-sum"; sum.textContent = parts.filter(Boolean).join(" · ");
+    sec.querySelector("h4").after(sum);
+    sec.dataset.fold = key; sec.classList.toggle("mc-open", !!mcFold[key]);
+  });
+}
+el("mcBody")?.addEventListener("click", (e) => {
+  const h = e.target.closest("#mcBody > .mc-sec[data-fold] > h4");
+  if (!h || e.target.closest(".mc-q")) return;
+  const sec = h.parentElement, k = sec.dataset.fold;
+  mcFold[k] = !mcFold[k]; sec.classList.toggle("mc-open", !!mcFold[k]);
+  try { localStorage.setItem("mcFold", JSON.stringify(mcFold)); } catch (err) { /* 기억은 편의 */ }
+});
 
 // 2026-10-26 사용자 «? 를 누르면 칸이 늘어나는 게 아니라 팝업창 · 대시보드 전체»: «?»(.mc-q 시장 맥락 · .opt-q 옵션) = 공유 설명 팝업 하나.
 //   <dialog> 는 body 끝(매초 다시 그리는 칸 밖)이라 다시 그려도 안 닫히고 포커스도 안 뺏긴다 · 제목 = 단추 title(«— 설명» 뺀) 또는 글자 · 본문 = 같은 설명(줄바꿈 유지)
