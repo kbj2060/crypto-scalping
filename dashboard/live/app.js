@@ -679,6 +679,7 @@ function renderLineTool() {
   const top = m.d * G.mt + m.f - pr.top, bot = m.d * G.pb + m.f - pr.top, Y = (v) => m.d * Yv(v) + m.f - pr.top;
   const clampY = (y) => Math.min(bot, Math.max(top, y));
   const L = X(G.ml), R = X(G.ml + G.cw), x0 = L + (R - L) * (mob ? 0.36 : 0.58), w = R - x0, cx = x0 + w / 2;
+  const Rp = !mob && fpProfileSpan ? Math.max(R, X(fpProfileSpan[1])) : R;   // 2026-11-04 펜 메모 «익절·손절·진입 선을 프로파일(델타·TPO·호가 칸)까지 연장»: 가로선만 오른쪽 끝(호가 띠 끝)까지 · 상자·꼬리표 자리는 그대로
   const side = lineSide(t, p), sgn = side === "SHORT" ? -1 : 1, ref = lineRef(t, p), lim = t.entry > 0;   // ref = 진입선 가격(지정가면 그 선 · 아니면 지금가)
   const yP = clampY(Y(ref)), yNow = clampY(Y(p)), yT = clampY(Y(t.tp)), yS = clampY(Y(t.sl));
   const qty = Number(t.plan?.quantity) || 0, unit = coinUnit();
@@ -690,7 +691,7 @@ function renderLineTool() {
   set(".lt-zone.dn", { left: x0 + "px", width: w + "px", top: Math.min(yS, yP) + "px", height: Math.abs(yP - yS) + "px" });
   [["tp", t.tp], ["sl", t.sl]].forEach(([k, v]) => {
     const y = Y(v), off = y < top ? "↑ " : y > bot ? "↓ " : "", d = v / ref - 1;
-    set(`.lt-ln.${k}`, { left: L + "px", width: R - L + "px", top: clampY(y) + "px", opacity: off ? "0" : "" });
+    set(`.lt-ln.${k}`, { left: L + "px", width: Rp - L + "px", top: clampY(y) + "px", opacity: off ? "0" : "" });
     const tag = set(`.lt-tag.${k}`, { left: cx + "px", top: clampY(y) + "px" });
     // 2026-11-03 사용자 «라벨이 커서 청산 프로파일이 안 보인다 · short +$1 처럼 포지션·수익금만»(시안 B): 금액만(수량을 아직 모르면 %). 가격·%는 선 위치·가격축·툴팁이 말한다.
     const amt = qShow ? `${qty ? "" : "≈"}${d * sgn >= 0 ? "+" : "−"}$${Math.abs(d * ref * qShow).toFixed(1)}` : `${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%`;
@@ -699,8 +700,8 @@ function renderLineTool() {
     tag.title = `${k === "tp" ? "익절" : "손절"} ${lineFmt(v)} (${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%)`;
     tag.setAttribute("aria-label", `${k === "tp" ? "익절" : "손절"}선 ${lineFmt(v)} — 위아래로 끌어 옮기기`);
   });
-  set(".lt-ln.en", { left: x0 + "px", width: w + "px", top: yP + "px" });
-  set(".lt-ln.now", { left: x0 + "px", width: w + "px", top: yNow + "px", display: lim ? "" : "none" });   // 지정가일 때만 지금가 기준선을 따로 보인다
+  set(".lt-ln.en", { left: x0 + "px", width: Rp - x0 + "px", top: yP + "px" });
+  set(".lt-ln.now", { left: x0 + "px", width: Rp - x0 + "px", top: yNow + "px", display: lim ? "" : "none" });   // 지정가일 때만 지금가 기준선을 따로 보인다
   const waitC = lim && !!t.placed;   // 2026-11-04 펜 메모: 지정가 대기 라벨 = 왼쪽 끝 → 가운데(익절·손절 꼬리표와 같은 세로줄)
   const en = set(".lt-tag.en", { left: (waitC ? cx : x0 + 6) + "px", top: yP + "px" });
   en.classList.toggle("lim", lim); en.classList.toggle("wait-c", waitC);
@@ -831,6 +832,7 @@ function renderArmedLines() {
   const X = (x) => m.a * x + m.e - pr.left, Yv = (v) => G.mt + (G.ymax - v) * (G.pb - G.mt) / (G.ymax - G.ymin);
   const top = m.d * G.mt + m.f - pr.top, bot = m.d * G.pb + m.f - pr.top, Y = (v) => m.d * Yv(v) + m.f - pr.top, clampY = (y) => Math.min(bot, Math.max(top, y));
   const L = X(G.ml), R = X(G.ml + G.cw), x0 = L + (R - L) * (mob ? 0.36 : 0.58), w = R - x0, cx = x0 + w / 2;
+  const Rp = !mob && fpProfileSpan ? Math.max(R, X(fpProfileSpan[1])) : R;   // 2026-11-04 펜 메모 «익절·손절·진입 선을 프로파일(델타·TPO·호가 칸)까지 연장»: 가로선만 오른쪽 끝(호가 띠 끝)까지 · 상자·꼬리표 자리는 그대로
   const yE = clampY(Y(en)), yT = clampY(Y(tp)), yS = clampY(Y(sl));
   const set = (sel, css) => { const n = h.querySelector(sel); if (n) Object.assign(n.style, css); return n; };
   h.classList.toggle("short", a.side === "SHORT"); h.classList.toggle("busy", !!(armedEdit && armedEdit.busy)); h.classList.toggle("locked", !!lineTool);
@@ -838,7 +840,7 @@ function renderArmedLines() {
   set(".lt-zone.dn", { left: x0 + "px", width: w + "px", top: Math.min(yS, yE) + "px", height: Math.abs(yE - yS) + "px" });
   [["tp", tp], ["sl", sl]].forEach(([k, v]) => {
     const y = Y(v), off = y < top ? "↑ " : y > bot ? "↓ " : "", d = v / en - 1;
-    set(`.lt-ln.${k}`, { left: L + "px", width: R - L + "px", top: clampY(y) + "px", opacity: off ? "0" : "" });
+    set(`.lt-ln.${k}`, { left: L + "px", width: Rp - L + "px", top: clampY(y) + "px", opacity: off ? "0" : "" });
     const tag = set(`.lt-tag.${k}`, { left: cx + "px", top: clampY(y) + "px" });
     // 2026-11-03 사용자 «이미 포지션 있는 진입 라벨이 큰 박스로 청산 프로파일을 가린다»(시안 B와 같은 소형): 금액만 · 가격·%는 툴팁
     const amt = qty ? `${d * sgn >= 0 ? "+" : "−"}$${Math.abs((v - en) * qty).toFixed(1)}` : `${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%`;
@@ -849,7 +851,7 @@ function renderArmedLines() {
     tag.setAttribute("aria-label", `${k === "tp" ? "익절" : "손절"}선 ${lineFmt(v)} — 위아래로 끌어 놓으면 주문이 그 가격으로 바뀝니다`);
     tag.disabled = !!(armedEdit && armedEdit.busy);
   });
-  set(".lt-ln.en", { left: x0 + "px", width: w + "px", top: yE + "px" });
+  set(".lt-ln.en", { left: x0 + "px", width: Rp - x0 + "px", top: yE + "px" });
   const pNow = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), upnl = pNow > 0 ? (pNow - en) * qty * sgn : 0, lv = Number(a.p.leverage) || 0;
   const im = lv > 0 ? qty * en / lv : 0, sg = (v) => (v >= 0 ? "+" : "−");   // 증거금 = 명목 ÷ 레버(거래소 ROE 분모)
   const enTag = set(".lt-tag.en", { left: (mob ? x0 + 6 : R + MARKER_W * m.a + 4) + "px", top: yE + "px" });   // 2026-11-04 펜 메모 «진입한 뒤 포지션 라벨을 SLTP 박스 안 말고 진입 주황 삼각형 옆에»: 삼각형(플롯 오른쪽 끝) 바로 오른쪽
@@ -3500,6 +3502,9 @@ function markerPoints(x, y) {
   return `${x},${y} ${x + MARKER_W},${y - MARKER_H / 2} ${x + MARKER_W},${y + MARKER_H / 2}`;
 }
 
+// 2026-11-04 펜 메모 «현재가 알약 왼쪽이 커졌다 작아졌다»: 알약 폭 = 글자 수별로 본 가장 넓은 폭을 4px 단위로 기억해 쓴다 -- 숫자가 바뀌어도 글자 수가 같으면 폭이 안 흔들린다(전체 그리기·빠른 갱신 공통)
+const pillWMax = {};
+const pillW = (tw, len) => { const w = Math.ceil((tw + 18) / 4) * 4; return (pillWMax[len] = Math.max(w, pillWMax[len] || 0)); };
 function updateLivePriceFast(price) {
   const c = liveLineCtx;
   if (!(price > 0)) return;
@@ -3532,7 +3537,7 @@ function updateLivePriceFast(price) {
   if (lab && lab.dataset.withPrice) lab.textContent = (lab.dataset.withPrice === "num" ? "" : "현재 ") + fmtNum(price, pxDp());   // 2026-09-27 풋프린트: 가격이 왼쪽 글자 안
   if (labBg && lab) {
     labBg.setAttribute("y", labelY - 9);
-    try { const bw1 = lab.getComputedTextLength() + (labBg.dataset.pill ? 18 : 10); labBg.setAttribute("width", bw1); if (labBg.dataset.right) labBg.setAttribute("x", Number(labBg.dataset.right) - bw1); } catch (e) { /* 비렌더 */ }
+    try { const tw1 = lab.getComputedTextLength(), bw1 = labBg.dataset.pill ? pillW(tw1, lab.textContent.length) : tw1 + 10; labBg.setAttribute("width", bw1); if (labBg.dataset.right) labBg.setAttribute("x", Number(labBg.dataset.right) - bw1); } catch (e) { /* 비렌더 */ }
   }
   // 2026-09-22 모바일에는 배지가 없다(값은 플롯 아래 한 줄에 있다). 옛 판은 box/txt 가
   //   없으면 **여기서 return** 해서 화살표까지 같이 멈췄다 -- 전체 렌더(1초)까지 어긋난다.
@@ -8731,8 +8736,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       if (pill) post.push(() => { svg.appendChild(tagBg); svg.appendChild(txt); });   // 호가 막대 층이 나중에 쌓여 알약 왼쪽을 덮었다 -- 맨 위로(빠른 갱신은 data-live 로 찾으니 순서와 무관)
       if (tagBg) {
         let tw = 0;
-        try { tw = textW(txt); } catch (e) { /* 비렌더 */ }
-        const bw0 = (tw > 0 ? tw : txt.textContent.length * 7.5) + (pill ? 18 : 10);
+        try { tw = pill ? txt.getComputedTextLength() : textW(txt); } catch (e) { /* 비렌더 */ }   // 🔴2026-11-04 펜 메모 «현재가 알약 왼쪽이 커졌다 작아졌다»: 전체 그리기는 canvas 폭(textW) · 빠른 갱신은 SVG 폭이라 두 값이 달라 번갈아 흔들렸다 -- 알약은 한 가지 잣대(SVG) + 4px 단위로 맞춘다
+        const bw0 = pill ? pillW(tw, txt.textContent.length) : (tw > 0 ? tw : txt.textContent.length * 7.5) + 10;
         tagBg.setAttribute("width", bw0);
         if (gutTag && inR) { tagBg.setAttribute("x", xRR - bw0); tagBg.dataset.right = String(xRR); }   // 오른쪽 정렬(빠른 갱신도 이 오른쪽 끝을 지킨다)
       }
@@ -11677,7 +11682,7 @@ let ofabSayObs = null, ofabSayTimer = 0;
 function ofabSay(html, tone = "") {
   const b = el("ofabSay");
   if (!b) return;
-  if (ofabHid) ofabHide(false);
+  if (ofabHid) return;   // 2026-11-04 펜 메모 «SLTP 주문 때마다 접혀 있던 플로팅 버튼이 열린다 -- 내가 열지 않는 한 계속 접혀 있게»: 접힌 동안은 말풍선도 안 띄운다(결과는 카드 결과 칸에 그대로)
   b.className = `ofab-say${tone ? " " + tone : ""}`;
   b.innerHTML = html; b.hidden = false;
   ofabClampX(b);
