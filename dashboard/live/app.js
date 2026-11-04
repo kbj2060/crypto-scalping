@@ -5941,7 +5941,7 @@ function renderSupply1s(box) {
       sep.setAttribute("stroke", "var(--line)");
       svg.appendChild(sep);
     }
-    const fs = narrow ? 11 : compact ? 12 : 14, gap = fs + (compact ? 9 : 11);
+    const fs = narrow ? 11 : compact ? 12 : 13, gap = fs + (compact ? 9 : 9);   // 2026-11-04 펜 메모 «글자를 너무 키웠다»: 14/+11 -> 13/+9
     label(6, y0 + 14, name, "var(--text)", null, narrow ? 12 : 13).setAttribute("font-weight", "700");
     if (compact) {   // 이름 아래 한 줄: 견본 + 값을 가로로(넘치면 거기서 멈춘다 -- 잘린 글자를 남기지 않는다)
       let x = 6;
@@ -5981,7 +5981,7 @@ function renderSupply1s(box) {
       const m = /^(\S+) (.+)$/.exec(txt);
       if (!m) { label(sw ? 22 : 6, y, txt, col, null, fs).setAttribute("font-weight", "700"); return; }
       label(sw ? 20 : 6, y, m[1], "var(--muted)", null, 10.5).setAttribute("font-weight", "600");
-      const vt = label(ml - 2, y + 1, m[2], /^[+]/.test(m[2]) ? "var(--good)" : /^[-−]/.test(m[2]) ? "var(--bad)" : "var(--muted)", "end", 16);
+      const vt = label(ml - 2, y + 1, m[2], /^[+]/.test(m[2]) ? "var(--good)" : /^[-−]/.test(m[2]) ? "var(--bad)" : "var(--muted)", "end", 14);
       vt.setAttribute("font-weight", "800"); vt.setAttribute("style", "font-variant-numeric: tabular-nums");
     });
     return { y0, zc, hh: (laneH - HEAD) / 2 - 4 };
@@ -7679,8 +7679,9 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           const yTop = Math.max(pTop, pyAt(rowLo(k + 1))), yBot = Math.min(pBot, pyAt(rowLo(k)));
           if (yBot - yTop < 1) return;
           const hh = Math.max(1, yBot - yTop - 1), ow = tot > 0 ? (DW / 2 - 1) * a[2] / tot : 0, dw = dMax > 0 ? (DW / 2 - 1) * Math.abs(a[0]) / dMax : 0, tw = DT_W * a[1] / tMax;   // 델타는 델타 최대값 기준(주인공) · 윤곽은 체결 최대값 기준 -- 눈금이 달라 길이끼리 비교하진 않는다(사용자 선택 안 B)
-          if (ow > 0.5) { const o = mkR(dMid - ow, yTop + 0.5, 2 * ow, hh, "none", 1); o.setAttribute("stroke", "var(--amber)"); o.setAttribute("stroke-width", k === totK ? "1.6" : "1"); o.setAttribute("stroke-opacity", "0.75"); }
-          if (dw > 0.5) mkR(a[0] >= 0 ? dMid : dMid - dw, yTop + 0.5, dw, hh, a[0] >= 0 ? "var(--good)" : "var(--bad)", 0.85);
+          // 2026-11-04 펜 메모 «델타를 프로파일의 오른쪽 막대 · 체결을 왼쪽 막대로»: 가운데선을 기준으로 왼쪽 = 체결(총량, 주황 채움) · 오른쪽 = 델타(|매수−매도|, 초록 +/빨강 −) -- 옛 그림은 델타가 양쪽으로 갈리고 체결은 양쪽 윤곽선이었다
+          if (ow > 0.5) { const o = mkR(dMid - 1 - ow, yTop + 0.5, ow, hh, "var(--amber)", k === totK ? 0.7 : 0.5); if (k === totK) { o.setAttribute("stroke", "var(--ink)"); o.setAttribute("stroke-width", "1.2"); o.setAttribute("stroke-opacity", "0.9"); } }
+          if (dw > 0.5) mkR(dMid + 1, yTop + 0.5, dw, hh, a[0] >= 0 ? "var(--good)" : "var(--bad)", 0.85);
           const inVa = k >= dn && k <= up;
           mkR(tX0, yTop + 0.5, tw, hh, "var(--accent)", inVa ? 0.55 : 0.28);
           if (k === tK) { const o = mkR(tX0, yTop + 0.5, tw, hh, "none", 1); o.setAttribute("stroke", "var(--ink)"); o.setAttribute("stroke-width", "1.2"); o.setAttribute("stroke-opacity", "0.9"); }
@@ -7688,7 +7689,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         });
         const ax = document.createElementNS(NS, "line");   // 델타 0 선
         ax.setAttribute("x1", dMid); ax.setAttribute("x2", dMid); ax.setAttribute("y1", pTop); ax.setAttribute("y2", pBot); ax.setAttribute("stroke", "var(--soft-line)"); g.appendChild(ax);
-        [[colX0, "청산"], [dX0, "델타 · 체결"], [tX0, "TPO"], [cBook, "호가"]].forEach(([x, s]) => {
+        [[colX0, "청산"], [dX0, "체결 · 델타"], [tX0, "TPO"], [cBook, "호가"]].forEach(([x, s]) => {
           const t = document.createElementNS(NS, "text");
           t.setAttribute("x", x); t.setAttribute("y", pTop - 4); t.setAttribute("font-size", "9"); t.setAttribute("font-weight", "700"); t.setAttribute("fill", "var(--muted)");
           t.setAttribute("paint-order", "stroke"); t.setAttribute("stroke", "var(--chart-bg)"); t.setAttribute("stroke-width", "3"); t.textContent = s; g.appendChild(t);
@@ -9006,8 +9007,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       const rs = dtInfo.rowSize, o = dtInfo.off, dp = Math.max(pxDp(), (String(o).split(".")[1] || "").length);
       showTooltip(evt.pageX, evt.pageY, `<div style="white-space:normal;max-width:min(360px,calc(100vw - 24px))">`
         + `${(k * rs - o).toFixed(dp)}–${((k + 1) * rs - o).toFixed(dp)}`
-        + `<br><span style="color:${a[0] >= 0 ? "var(--good)" : "var(--bad)"};font-weight:700">델타 ${a[0] >= 0 ? "+" : "−"}${fq(Math.abs(a[0]))} ${coinUnit()}</span> (${a[0] >= 0 ? "매수" : "매도"} 우위 · 테이커 기준)`
-        + `<br><span style="color:var(--amber);font-weight:700">체결 ${fq(a[2])} ${coinUnit()}</span> (윤곽) · 고래 ${Math.round(100 * a[3] / Math.max(a[2], 1e-9))}% · 리테일 ${Math.round(100 * a[4] / Math.max(a[2], 1e-9))}%${k === dtInfo.totK ? " · 최다 체결" : ""}`
+        + `<br><span style="color:${a[0] >= 0 ? "var(--good)" : "var(--bad)"};font-weight:700">델타 ${a[0] >= 0 ? "+" : "−"}${fq(Math.abs(a[0]))} ${coinUnit()}</span> (오른쪽 막대 · ${a[0] >= 0 ? "매수" : "매도"} 우위 · 테이커 기준)`
+        + `<br><span style="color:var(--amber);font-weight:700">체결 ${fq(a[2])} ${coinUnit()}</span> (왼쪽 막대) · 고래 ${Math.round(100 * a[3] / Math.max(a[2], 1e-9))}% · 리테일 ${Math.round(100 * a[4] / Math.max(a[2], 1e-9))}%${k === dtInfo.totK ? " · 최다 체결" : ""}`
         + `<br><span style="font-weight:700">TPO ${a[1]}/${dtInfo.nBars}봉</span> — 이 가격에 체결이 있던 봉 수`
         + (k === dtInfo.tK ? ` · 최다(POC)` : "") + (k >= dtInfo.vaLo && k <= dtInfo.vaHi ? ` · 가치 영역(70%) 안` : ` · 가치 영역 밖`) + (a[1] === 1 ? ` · 한 번만 지난 가격` : "")
         + `<br><span style="opacity:.7">보이는 봉 ${dtInfo.nBars}개 합 · 30분 문자표 TPO 가 아니라 5분봉 수 · 참고, 신호 아님</span></div>`);

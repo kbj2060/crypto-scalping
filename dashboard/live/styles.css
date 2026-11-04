@@ -1597,6 +1597,10 @@ svg {
   background: rgba(28, 32, 40, 0.94);
   color: #fff;                                  /* 툴팁만은 어두운 유리 -- 차트 위 대비 */
   border-color: rgba(255, 255, 255, 0.14);
+  /* 2026-11-04 펜 메모 «호버 상세의 거래대금 글자색이 너무 어두워 안 보인다»: 밝은 테마의 의미색은 진해서(거래대금 #1d5590 등) 어두운 툴팁 위에서 안 보였다 --
+     이 툴팁 안에서만 다크 테마의 색 토큰으로 되돌린다 */
+  --text: #eef0f6; --muted: #a6acc1; --good: #5dbf83; --bad: #ef9387; --warn: #e99c57; --amber: var(--warn); --accent: #dfe4ee; --neutral: #cbd1e3;
+  --turnover: #5aa9f5; --spot: #b89cff; --option: #8fd0c8; --position: #8aa2ff; --book-depth: #7dd3fc; --ink: #f5f6fb;
 }
 
 [data-theme="light"] .notify-btn.short { color: var(--bad); }
