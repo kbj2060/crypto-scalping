@@ -1733,10 +1733,11 @@ function renderFpPos() {
   if (!(qty > 0 && en > 0 && cur > 0)) { box.hidden = true; return; }
   const sgn = String(pos.side).toUpperCase() === "SHORT" ? -1 : 1, pct = (cur - en) / en * 100 * sgn, pnl = (cur - en) * qty * sgn;
   const sg = (v) => (v >= 0 ? "+" : "−"), cls = pnl >= 0 ? "good" : "bad";
-  // 2026-11-04 펜 메모 «박스 안 배치·텍스트가 안 맞다 · 깔끔하고 통일성 있게»: 두 줄 모두 [이름(흐림) 값(굵게)] 한 문법 · 크기 13 하나 · 방향만 작은 칩 · 색은 손익에만
-  const kv = (k, v, c = "") => `<span class="fp-k">${k}</span><b class="${c}">${v}</b>`;
-  box.innerHTML = `<div><i class="fp-chip ${sgn < 0 ? "bad" : "good"}">${sgn < 0 ? "SHORT" : "LONG"}</i>${kv("진입", lineFmt(en))}</div>`
-    + `<div>${kv("손익", `${sg(pct)}${Math.abs(pct).toFixed(2)}%`, cls)}<b class="${cls}">${sg(pnl)}$${lineFmt(Math.abs(pnl))}</b></div>`;
+  // 2026-11-04 위계 정리 시안 C: 손익이 머리에서 가장 큰 숫자(26px) · 아래 한 줄 = 수익률(굵게) · 진입가 · 청산까지 거리(%) -- 이름은 작고 흐리게, 색은 손익 부호에만
+  const k = en > 0 ? Number(pos.entry_price) / en : 1, liq = Number(pos.liquidation_price) > 0 ? Number(pos.liquidation_price) / k : 0;
+  const dist = liq > 0 ? Math.abs(cur - liq) / cur * 100 : null;
+  box.innerHTML = `<div class="fp-pnl-row"><i class="fp-chip ${sgn < 0 ? "bad" : "good"}">${sgn < 0 ? "SHORT" : "LONG"}</i><b class="fp-pnl ${cls}">${sg(pnl)}$${lineFmt(Math.abs(pnl))}</b></div>`
+    + `<div class="fp-sub"><b class="${cls}">${sg(pct)}${Math.abs(pct).toFixed(2)}%</b><span>진입 ${lineFmt(en)}</span>${dist != null ? `<span>청산까지 <b>${dist.toFixed(1)}%</b></span>` : ""}</div>`;
   box.hidden = false;
 }
 
@@ -5874,7 +5875,7 @@ function renderSupply1s(box) {
       sep.setAttribute("stroke", "var(--line)");
       svg.appendChild(sep);
     }
-    const fs = narrow ? 11 : 12, gap = fs + 9;
+    const fs = narrow ? 11 : compact ? 12 : 14, gap = fs + (compact ? 9 : 11);
     label(6, y0 + 14, name, "var(--text)", null, narrow ? 12 : 13).setAttribute("font-weight", "700");
     if (compact) {   // 이름 아래 한 줄: 견본 + 값을 가로로(넘치면 거기서 멈춘다 -- 잘린 글자를 남기지 않는다)
       let x = 6;
@@ -5910,7 +5911,12 @@ function renderSupply1s(box) {
         sm.setAttribute("stroke-opacity", sw.op); if (sw.dash) sm.setAttribute("stroke-dasharray", sw.dash);
         svg.appendChild(sm);
       }
-      label(sw ? 22 : 6, y, txt, col, null, fs).setAttribute("font-weight", "700");
+      // 2026-11-04 위계 정리 시안 C: 이름(작고 흐리게) + 값(17px · 굵게 · 부호 색) -- 줄 견본(선 모양)은 그대로라 어느 선인지는 견본이 말한다
+      const m = /^(\S+) (.+)$/.exec(txt);
+      if (!m) { label(sw ? 22 : 6, y, txt, col, null, fs).setAttribute("font-weight", "700"); return; }
+      label(sw ? 20 : 6, y, m[1], "var(--muted)", null, 10.5).setAttribute("font-weight", "600");
+      const vt = label(ml - 2, y + 1, m[2], /^[+]/.test(m[2]) ? "var(--good)" : /^[-−]/.test(m[2]) ? "var(--bad)" : "var(--muted)", "end", 16);
+      vt.setAttribute("font-weight", "800"); vt.setAttribute("style", "font-variant-numeric: tabular-nums");
     });
     return { y0, zc, hh: (laneH - HEAD) / 2 - 4 };
   };

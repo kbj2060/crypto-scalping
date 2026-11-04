@@ -2673,7 +2673,9 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .fp-pos[hidden] { display: none; }
 .fp-pos > div { display: flex; align-items: baseline; gap: 8px; }
 .fp-pos b { font-weight: 700; color: var(--ink); } .fp-pos b.good { color: var(--good); } .fp-pos b.bad { color: var(--bad); }
-.fp-k { color: var(--muted); font-weight: 500; margin-right: -3px; }   /* 이름 + 값은 한 덩어리(5px) · 덩어리 사이는 8px */
+.fp-pnl-row { gap: 10px; }
+.fp-pos .fp-pnl { font: 800 26px/1 var(--font-mono); font-variant-numeric: tabular-nums; }   /* 머리에서 가장 큰 숫자 = 손익(위계 시안 C) */
+.fp-sub { gap: 10px; font: 500 12px/1.2 var(--font-sans); } .fp-sub > b { font-size: 14px; } .fp-sub span b { color: var(--ink); }
 .fp-chip { font: 800 10.5px/1 var(--font-sans); font-style: normal; letter-spacing: .08em; padding: 3px 6px; border-radius: 4px; align-self: center; }
 .fp-chip.good { color: var(--good); background: color-mix(in srgb, var(--good) 16%, transparent); } .fp-chip.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }
 @media (min-width: 1700px) {
