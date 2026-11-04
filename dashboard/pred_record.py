@@ -23,6 +23,7 @@ BAR = 300_000
 H = {"15m": 3, "1h": 12, "4h": 48}   # 지평(봉)
 TAIL_BYTES = 8_000_000
 DAYS = 14
+RECENT = 24                           # 화면 막대 = 마지막으로 채점된 결정 이만큼(최신이 오른쪽)
 GAP_MS = 30 * 60_000                  # 지평 뒤 종가가 이만큼 지나도 없으면 «대기»가 아니라 기록 구멍(재시작·수집 공백)
 STALE_MS = 20 * 60_000                # 상대 강도 스냅숏이 이보다 묵으면 화면에 안 낸다(5분 루프가 멈췄다는 뜻)
 _seen: dict = {}                      # (파일, k) -> 이미 쓴 t 집합 (프로세스 안)
@@ -105,7 +106,8 @@ def _score(rows: list[dict], now_ms: int) -> dict:
     for name, ks, sig in (("15m", "s", lambda r: _s80(r.get("a"))), ("1h", "s", lambda r: _s80(r.get("b"))), ("4h", "4", lambda r: r.get("s"))):
         n = hit = pend = 0
         day: dict = {}
-        for r in rows:
+        seq: list = []   # 채점된 결정 [결정 ms, 적중 0/1] -- 화면은 하루 막대 대신 가장 마지막 검증 가능한 봉부터 보여 준다
+        for r in sorted(rows, key=lambda r: r["t"]):
             if r.get("k") != ks:
                 continue
             s = sig(r)
@@ -123,10 +125,11 @@ def _score(rows: list[dict], now_ms: int) -> dict:
             c = day.setdefault(d, [0, 0])
             c[0] += 1
             c[1] += int(ret * s > 0)
+            seq.append([r["t"], int(ret * s > 0)])
             n += 1
             hit += int(ret * s > 0)
         if n or pend:
-            out[name] = {"n": n, "hit": hit, "pending": pend, "daily": [[d, a, b] for d, (a, b) in sorted(day.items())][-DAYS:]}
+            out[name] = {"n": n, "hit": hit, "pending": pend, "daily": [[d, a, b] for d, (a, b) in sorted(day.items())][-DAYS:], "recent": seq[-RECENT:]}
     return out
 
 
@@ -145,7 +148,8 @@ def _band(coin: str, scored: Path = BAND_SCORED) -> dict | None:
         c = day.setdefault(str(r["ts"])[5:10], [0, 0])
         c[0] += 1
         c[1] += int(r["correct"])
-    return {"n": n, "hit": ok, "base": max(ty, 1 - ty), "daily": [[d, a, b] for d, (a, b) in sorted(day.items())][-DAYS:]}
+    return {"n": n, "hit": ok, "base": max(ty, 1 - ty), "daily": [[d, a, b] for d, (a, b) in sorted(day.items())][-DAYS:],
+            "recent": [[str(r["ts"]), int(r["correct"])] for r in sorted(rows, key=lambda r: str(r["ts"]))][-RECENT:]}
 
 
 def xsec_record(px_by_coin: dict, d: Path = DIR) -> int:
@@ -207,6 +211,7 @@ def _selftest() -> None:
     assert (s["15m"]["n"], s["15m"]["hit"], s["15m"]["pending"]) == (29, 29, 1), s["15m"]      # 짝수 i 30개 중 i=58 만 지평 뒤 종가 없음
     assert (s["1h"]["n"], s["1h"]["hit"], s["1h"]["pending"]) == (48, 0, 12), s["1h"]         # 상승장 숏 신호는 전부 실패
     assert (s["4h"]["n"], s["4h"]["hit"], s["4h"]["pending"]) == (12, 12, 48), s["4h"]
+    assert [x[0] for x in s["15m"]["recent"]] == sorted(x[0] for x in s["15m"]["recent"]) and len(s["15m"]["recent"]) == RECENT and all(x[1] for x in s["15m"]["recent"]), s["15m"]["recent"]   # 최신이 끝 · 채점된 결정만
     g = summary(t0 + 500 * BAR, d, d / "none", None)["coins"]["eth"]                        # 한참 뒤에도 종가가 없는 결정 = 구멍 -> 대기로 세지 않는다
     assert all(v["pending"] == 0 for v in g.values()), g
     # 상대 강도: 직전 4h 에 오른 코인이 다음 4h 에 지는 반전 시장 -> IC < 0

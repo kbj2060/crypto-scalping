@@ -1735,8 +1735,10 @@ function renderFpPos() {
   const sgn = String(pos?.side).toUpperCase() === "SHORT" ? -1 : 1, pct = has ? (cur - en) / en * 100 * sgn : 0, pnl = has ? (cur - en) * qty * sgn : 0;
   const sg = (v) => (v >= 0 ? "+" : "−"), cls = pnl >= 0 ? "good" : "bad";
   box.classList.toggle("nopos", !has);
-  box.innerHTML = (has ? `<div><b class="${sgn < 0 ? "bad" : "good"} fp-pos-side">${sgn < 0 ? "SHORT" : "LONG"}</b> <span>진입 ${lineFmt(en)}</span></div>` : "")
-    + `<div><span class="fp-pos-now">${lineFmt(cur)}</span>${has ? ` <b class="${cls} fp-pos-pct">${sg(pct)}${Math.abs(pct).toFixed(2)}%</b> <b class="${cls}">${sg(pnl)}$${lineFmt(Math.abs(pnl))}</b>` : ""}</div>`;
+  // 2026-11-04 펜 메모 «박스 안 배치·텍스트가 안 맞다 · 깔끔하고 통일성 있게»: 두 줄 모두 [이름(흐림) 값(굵게)] 한 문법 · 크기 13 하나 · 방향만 작은 칩 · 색은 손익에만
+  const kv = (k, v, c = "") => `<span class="fp-k">${k}</span><b class="${c}">${v}</b>`;
+  box.innerHTML = (has ? `<div><i class="fp-chip ${sgn < 0 ? "bad" : "good"}">${sgn < 0 ? "SHORT" : "LONG"}</i>${kv("진입", lineFmt(en))}</div>` : "")
+    + `<div><b class="fp-pos-now">${lineFmt(cur)}</b>${has ? kv("손익", `${sg(pct)}${Math.abs(pct).toFixed(2)}%`, cls) + `<b class="${cls}">${sg(pnl)}$${lineFmt(Math.abs(pnl))}</b>` : ""}</div>`;
   box.hidden = false;
 }
 
@@ -4659,7 +4661,10 @@ function prHit(key) {
     "4h": "4h 예측이 학습 문턱 밖(신호)이었던 결정 중 4시간 뒤 방향이 맞은 비율", band: "횡보·추세 판정이 4시간 뒤 실제(띠 이탈 여부)와 맞은 비율 · 서버 크론이 매 시 채점" })[key]
     + " · 연속 봉의 신호는 겹쳐 세므로 독립 표본은 이보다 훨씬 적다" + bf;
   if (!r || !(r.n || r.hit != null)) return { html: `<span class="pr-n">쌓는 중</span>`, tip };
-  const bars = (r.daily || []).map(([d, n, h]) => `<i class="${h / n > 0.5 ? "u" : h / n < 0.5 ? "d" : ""}" style="height:${Math.max(3, Math.round((16 * h) / n))}px" title="${d} ${h}/${n}"></i>`).join("");
+  // 2026-11-04 펜 메모 «적중 기록을 하루마다 말고 가장 마지막 검증 가능한 5분봉부터»: 막대 하나 = 채점이 끝난 결정 하나(최신이 오른쪽 · 초록 = 적중 · 빨강 = 빗나감). 서버가 recent 를 안 주는 옛 응답은 하루 막대로.
+  const hm = (t) => (typeof t === "number" ? new Date(t + 9 * 3600e3).toISOString().slice(5, 16).replace("T", " ") + " KST" : String(t).slice(5, 16));
+  const bars = r.recent && r.recent.length ? r.recent.map(([t, ok]) => `<i class="${ok ? "u" : "d"}" style="height:${ok ? 16 : 6}px" title="${hm(t)} ${ok ? "적중" : "빗나감"}"></i>`).join("")
+    : (r.daily || []).map(([d, n, h]) => `<i class="${h / n > 0.5 ? "u" : h / n < 0.5 ? "d" : ""}" style="height:${Math.max(3, Math.round((16 * h) / n))}px" title="${d} ${h}/${n}"></i>`).join("");
   const base = r.base != null ? ` · 다수 쪽만 찍으면 ${Math.round(100 * r.base)}%` : ref ? ` · 표본 밖 ${ref}%` : "";
   const body = r.n ? `<b class="${r.hit / r.n >= 0.55 ? "up" : r.hit / r.n <= 0.45 ? "dn" : ""}">${Math.round((100 * r.hit) / r.n)}%</b> ${r.hit}/${r.n}` : `쌓는 중`;
   return { html: `<span class="pr-sp">${bars}</span><span class="pr-n">${body}</span>`, tip: tip + base + (r.pending ? ` · 대기 ${r.pending}` : "") };
@@ -8633,7 +8638,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       txt.setAttribute("font-size", nowTag ? (mobileChart ? "12" : "13") : gutTag ? "10.5" : "10");   // 2026-10-01 차트 글씨 상한 10.5(DESIGN 차트 예외)
       txt.setAttribute("font-weight", "bold"); txt.setAttribute("fill", nowTag && !gutTag ? inkOnFill() : p.color);
       if (pill) {   // 알약 안 숫자: 14px · 굵게 · 차트 바탕색 글자
-        txt.setAttribute("font-size", "14"); txt.setAttribute("font-weight", "800"); txt.setAttribute("fill", "var(--chart-bg)");
+        txt.setAttribute("font-size", "14"); txt.setAttribute("font-weight", "800"); txt.setAttribute("fill", inkOnFill());   // 🔴밝은 테마에서 --chart-bg(반투명 흰색)는 어두운 알약 위에서 안 보였다 -- 채운 면 위 글자 토큰
         txt.setAttribute("style", "font-variant-numeric: tabular-nums");
       }
       txt.textContent = `${leftName}${p.offTop ? "↑" : p.offBottom ? "↓" : ""}`;

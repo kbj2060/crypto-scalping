@@ -2669,10 +2669,13 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 #fpCard .fp-rates .fr-mt { flex: 0 1 auto; justify-content: flex-end; text-align: right; }   /* 2026-11-01 펜 메모: Macro 제목 글자 삭제 · 데이터 오른쪽 정렬 */
 #fpCard .fr-mts { justify-items: end; }
 .fp-coin-name { display: none; }
-.fp-pos { display: flex; flex-direction: column; gap: 3px; font: 12px/1.2 var(--font-sans); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fp-pos { display: flex; flex-direction: column; gap: 4px; font: 500 13px/1.2 var(--font-sans); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .fp-pos[hidden] { display: none; }
-.fp-pos .good { color: var(--good); } .fp-pos .bad { color: var(--bad); }
-.fp-pos-side { letter-spacing: .06em; margin-right: 4px; } .fp-pos-now { color: var(--ink); font: 700 15px/1 var(--font-sans); } .fp-pos-pct { font-size: 15px; margin: 0 4px; }
+.fp-pos > div { display: flex; align-items: baseline; gap: 8px; }
+.fp-pos b { font-weight: 700; color: var(--ink); } .fp-pos b.good { color: var(--good); } .fp-pos b.bad { color: var(--bad); }
+.fp-k { color: var(--muted); font-weight: 500; margin-right: -3px; }   /* 이름 + 값은 한 덩어리(5px) · 덩어리 사이는 8px */
+.fp-chip { font: 800 10.5px/1 var(--font-sans); font-style: normal; letter-spacing: .08em; padding: 3px 6px; border-radius: 4px; align-self: center; }
+.fp-chip.good { color: var(--good); background: color-mix(in srgb, var(--good) 16%, transparent); } .fp-chip.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }
 /* 2026-11-04 펜 메모 «현재가를 제목(코인 이름) 오른쪽으로 · 지금 글자 빼고 크게 · XRP 소수 4자리»: 넓은 화면 = 이름 바로 오른쪽 · 좁은 화면 = 포지션 칸 안 */
 .fp-px { display: none; }
 @media (min-width: 1700px) {
@@ -3160,7 +3163,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 /* 2026-11-04 펜 메모: 예측 줄 = 행. 윗줄 = 이름 · 판정 · 분위 문구 / 아랫줄 = 게이지(판정 아래) · 적중 기록(막대 · 적중률 · 분모) · 덧붙임(σ · 5표).
    간격 4 · 8 단계, 글자 = DESIGN.md label/note 11px · 판정 15px. */
 .fc-row { display: grid; grid-template-columns: minmax(0, 1fr); }
-.fc-c { --fc: var(--muted); display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; padding: 6px 4px; min-width: 0; cursor: help; }
+.fc-c { --fc: var(--muted); display: grid; grid-template-columns: 56px minmax(0, 1fr) minmax(0, 1fr); column-gap: 12px;   /* 2026-11-04 펜 메모: 게이지 칸 = 50% 고정 · 나머지 50% = 적중 기록 */ align-items: center; padding: 6px 4px; min-width: 0; cursor: help; }
 .fc-c + .fc-c { border-top: 1px dashed var(--soft-line); }
 .fc-c.up { --fc: var(--good); } .fc-c.dn { --fc: var(--bad); }
 .fc-c.trd { --fc: var(--warn); }   /* 2026-11-02 «횡보·추세»: 추세(띠 이탈 예상) = 주황 -- 방향이 아니라 초록/빨강을 쓰지 않는다 */
@@ -3173,9 +3176,10 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .fc-c.now .gl { font-size: 13px; }
 .fc-t .fc-tl { max-width: 150px; margin: 4px auto 0; }
 .fz-r { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fz-r .pr-sp { flex: 1 1 0; min-width: 0; }
 .pr-n { font: 500 11px/1.2 var(--font-sans); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pr-n b { color: var(--text); font-weight: 800; } .pr-n b.up { color: var(--good); } .pr-n b.dn { color: var(--bad); }   /* 55% 이상 초록 · 45% 이하 빨강 · 사이는 중립(동전 던지기와 구분 안 됨) */
-@media (max-width: 420px) { .fc-c { grid-template-columns: 44px minmax(0, 1fr) auto; column-gap: 8px; } }
+@media (max-width: 420px) { .fc-c { grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1fr); column-gap: 8px; } }
 .mc-state .mc-q1 { margin-left: auto; flex: none; }   /* 2026-10-15 ①②④ 제목 대신 상태 줄 끝 «?» */
 /* 2026-10-16 시안 ②③ ⑤ 제목 줄 오른쪽 «종합»(세 부품 칩) · ④ 4h 문턱 눈금. 좁으면 종합이 제목 아래 줄로 */
 .mc-fc > h4 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
@@ -3497,9 +3501,9 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
 .pr-strip { margin-top: 4px; }
 .pr-h { display: flex; align-items: center; gap: 8px; margin: 8px 0 3px; font-size: 10.5px; font-weight: 700; color: var(--muted); }
 .pr-h::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-.pr-sp { position: relative; display: inline-flex; align-items: flex-end; gap: 2px; height: 18px; min-width: 0; overflow: hidden; }
+.pr-sp { position: relative; display: inline-flex; align-items: flex-end; justify-content: flex-end; gap: 2px; height: 18px; min-width: 0; overflow: hidden; }
 .pr-sp::before { content: ""; position: absolute; left: 0; right: 0; bottom: 8px; border-top: 1px dashed var(--line); }
-.pr-sp i { position: relative; width: 7px; flex: none; border-radius: 1px; background: color-mix(in srgb, var(--muted) 45%, transparent); }
+.pr-sp i { position: relative; flex: 1 1 0; max-width: 8px; min-width: 2px; border-radius: 1px; background: color-mix(in srgb, var(--muted) 45%, transparent); }
 .pr-sp i.u { background: color-mix(in srgb, var(--good) 70%, transparent); } .pr-sp i.d { background: color-mix(in srgb, var(--bad) 70%, transparent); }
 /* 2026-11-04 펜 메모: 상대 강도 박스 높이 줄임(113 → ~70 + 머리·한 줄 노트) -- 막대 ±24px · 이름+값 한 줄 */
 .pr-h { margin: 6px 0 4px; }
