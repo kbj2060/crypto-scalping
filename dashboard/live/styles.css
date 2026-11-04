@@ -2669,6 +2669,10 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 #fpCard .fp-rates .fr-mt { flex: 0 1 auto; justify-content: flex-end; text-align: right; }   /* 2026-11-01 펜 메모: Macro 제목 글자 삭제 · 데이터 오른쪽 정렬 */
 #fpCard .fr-mts { justify-items: end; }
 .fp-coin-name { display: none; }
+.fp-pos { display: flex; flex-direction: column; gap: 3px; font: 12px/1.2 var(--font-sans); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fp-pos[hidden] { display: none; }
+.fp-pos .good { color: var(--good); } .fp-pos .bad { color: var(--bad); }
+.fp-pos-side { letter-spacing: .06em; margin-right: 4px; } .fp-pos-now { color: var(--ink); } .fp-pos-pct { font-size: 15px; margin: 0 4px; }
 @media (min-width: 1700px) {
   #fpCard > .ops-health-head { position: relative; }
   .fp-coin-name { display: block; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none;

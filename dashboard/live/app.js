@@ -1721,6 +1721,20 @@ function entryUsdt(pos, chartPx) {
   return en / basis;
 }
 
+// 2026-11-04 펜 메모 «풋프린트 머리(창 탭과 코인 이름 사이)에 이 코인의 포지션» 시안 A: 두 줄 -- 방향·진입가 / 지금가·%·손익($). 수량은 뺐다(사용자). 포지션 없으면 숨김.
+function renderFpPos() {
+  const box = el("fpPos"); if (!box) return;
+  const pos = snapshotAccountPosition(), cur = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), qty = Math.abs(Number(pos?.qty));
+  const en = pos ? entryUsdt(pos, cur) : 0;
+  if (!(qty > 0) || !(en > 0) || !(cur > 0)) { box.hidden = true; return; }
+  const sgn = String(pos.side).toUpperCase() === "SHORT" ? -1 : 1, pct = (cur - en) / en * 100 * sgn, pnl = (cur - en) * qty * sgn;
+  const f = (v) => v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), sg = (v) => (v >= 0 ? "+" : "−");
+  const cls = pnl >= 0 ? "good" : "bad";
+  box.innerHTML = `<div><b class="${sgn < 0 ? "bad" : "good"} fp-pos-side">${sgn < 0 ? "SHORT" : "LONG"}</b> <span>진입 ${f(en)}</span></div>`
+    + `<div><span class="fp-pos-now">지금 ${f(cur)}</span> <b class="${cls} fp-pos-pct">${sg(pct)}${Math.abs(pct).toFixed(2)}%</b> <b class="${cls}">${sg(pnl)}$${f(Math.abs(pnl))}</b></div>`;
+  box.hidden = false;
+}
+
 // ── Account 카드 = 오늘 성과 + 과거 기록 (2026-10-14 사용자 시안 C · «주문은 플로팅 버튼이라 카드에서 주문은 최소화») ──
 //   위 = 포지션 한 줄(+ 진입 미리보기 한 마디) · 오늘 띠(손익 · 0~24시 흐름 · 오늘 닫힌 거래)
 //   아래 = 손익 달력(한 달씩) | 자산 곡선 + 낙폭 + 기간 성적. 주문 조작부(.acct-lanes)는 DOM 에 남아 #ofab 가 옮겨 쓴다(카드 안에서는 CSS 로 숨김).
@@ -6485,6 +6499,7 @@ function scheduleFpLiveFrame() {
 }
 function renderSnapshotChart() {
   renderChartPan();
+  renderFpPos();
   const svg = el("candleSvgSnapshot");
   if (!svg) return;
   const fullCandles = chartTfFull();   // 2026-10-20 1주일을 받았으면 그 앞에 붙은 것
