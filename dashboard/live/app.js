@@ -3247,14 +3247,10 @@ function setupCardRail() {
   fitApplyCached();
   const rail = el("cardRail");
   if (!rail) return;
-  const mob = matchMedia("(max-width: 720px)");   // 2026-11-02 모바일: 접힘(지금 카드 아이콘 하나) -- 그 아이콘을 누르면 펼치고, 카드를 고르거나 바깥을 누르면 접는다
-  rail.addEventListener("click", (e) => {
+  rail.addEventListener("click", (e) => {   // 2026-11-04 모바일도 아래 탭바에서 바로 이동(예전 접힘·펼침 알약 없앰)
     const b = e.target.closest("[data-go]"); if (!b) return;
-    if (mob.matches && !rail.classList.contains("open")) { rail.classList.add("open"); return; }
-    rail.classList.remove("open");
     el(b.dataset.go)?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
-  document.addEventListener("pointerdown", (e) => { if (!rail.contains(e.target)) rail.classList.remove("open"); });
   addEventListener("scroll", () => requestAnimationFrame(cardRailSync), { passive: true });
   cardRailSync();
   addEventListener("resize", () => requestAnimationFrame(fitLayout));
@@ -11545,7 +11541,8 @@ function ofabPlace(x, y, save) {
   const w = bar.offsetWidth || 120, h = bar.offsetHeight || 44;
   if (bar.offsetWidth) [ofab.w, ofab.h] = [w, h];   // 숨긴 동안(크기 0) 손잡이 자리를 잡을 때 쓴다
   ofab.x = Math.max(8, Math.min(x, innerWidth - w - 8));
-  ofab.y = Math.max(8, Math.min(y, innerHeight - h - 8));
+  const tabBar = (() => { const r = el("cardRail"); return r && !r.hidden && matchMedia("(max-width: 720px)").matches ? r.offsetHeight : 0; })();   // 모바일 아래 탭바 위로 -- 가리지 않게
+  ofab.y = Math.max(8, Math.min(y, innerHeight - h - 8 - tabBar));
   box.style.left = `${ofab.x}px`;
   box.style.top = `${ofab.y}px`;
   // 패널은 **남은 공간이 넓은 쪽**으로 연다 -- 버튼을 어디에 두든 화면 밖으로 안 나간다.

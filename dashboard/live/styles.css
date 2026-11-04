@@ -3462,15 +3462,13 @@ html.lg-on .ofab-bar { background: rgba(255, 255, 255, 0.4); }
   body:has(.card-rail:not([hidden])) { padding-left: 0; }
   body:has(.card-rail:not([hidden])) .app { padding-top: 10px; }
   body:has(.card-rail:not([hidden])) header.top { position: static; margin-bottom: 8px; padding: 0; background: none; }
-  .card-rail:not([hidden]) { display: grid; top: 42%; bottom: auto; left: 0; width: auto; padding: 4px; gap: 2px; z-index: 850;
-    border: 1px solid var(--line); border-left: 0; border-radius: 0 14px 14px 0; box-shadow: 0 6px 20px rgb(var(--shadow) / .28);
-    background: var(--pop-bg); padding-left: env(safe-area-inset-left); }
-  .card-rail button { width: 100%; min-width: 44px; min-height: 44px; padding: 6px 12px; grid-auto-flow: column; justify-content: start; align-items: center; gap: 10px; font-size: 13px; }
-  .card-rail button.on::before { left: 0; top: 8px; bottom: 8px; }
-  .card-rail:not(.open) button:not(.on) { display: none; }
-  .card-rail:not(.open) button span { display: none; }
-  .card-rail:not(.open) { opacity: .8; }
-  .card-rail:not(.open) button { padding: 6px 10px; }
+  /* 2026-11-04 모바일 내비 시안 B(사용자 «B로 구현»): 왼쪽에 떠서 본문 첫 글자를 가리던 알약 -> 화면 아래 탭바 5칸(아이콘 + 글자 · 지금 카드 = 위쪽 주황 막대). 엄지 영역 · 본문 가림 없음 */
+  .card-rail:not([hidden]) { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; top: auto; bottom: 0; left: 0; right: 0; width: auto; gap: 0; z-index: 850;
+    padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); border: 0; border-top: 1px solid var(--line); border-radius: 0;
+    box-shadow: 0 -6px 20px rgb(var(--shadow) / .22); background: var(--pop-bg); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+  .card-rail button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; width: 100%; min-width: 0; min-height: 54px; padding: 6px 2px; border-radius: 0; font: 600 11px/1 var(--font-sans); }
+  .card-rail button.on::before { left: 28%; right: 28%; top: 0; bottom: auto; width: auto; height: 3px; border-radius: 0 0 3px 3px; }
+  body:has(.card-rail:not([hidden])) { padding-bottom: calc(60px + env(safe-area-inset-bottom)); }   /* 맨 아래 내용이 탭바에 가리지 않게 */
 }
 /* 모바일 공통: 탭 반응·확대·노치 */
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
