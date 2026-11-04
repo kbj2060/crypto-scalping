@@ -5846,7 +5846,7 @@ function renderSupply1s(box) {
   const oiRows = [];
   oiKeys.forEach((x) => { if (x > first) oiRows.push({ s: x, v: S.oi.get(x) - oiBase }); });
   const NL = 2, laneH = flowH / NL;
-  const sgn = (v) => (v >= 0 ? "+" : "-") + qty(v);
+  const sgn = (v) => (v >= 0 ? "+" : "−") + qty(v);   // 2026-11-04 비평 P3: 화면의 다른 숫자(−0.18%·−$32)와 같은 «−»
   // 체결 없는 초(5초 넘게)는 «0» 이 아니라 «모름» -- 판 전체에 흐린 띠.
   let prevSec = null;
   secs.forEach((x) => {
@@ -7786,7 +7786,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       const cellsBottom = Number.isFinite(inf.lowKey) ? yAt(rowLo(inf.lowKey)) : yAt(c.low);
       let dY = Math.min(plotBottom - 3, Math.max(cellsBottom, yAt(c.low)) + 13);
       // 글자 폭 근사(굵은 숫자 ~0.62em) 로 상자를 만들고, 겹치면 아래로 한 줄씩 민다.
-      const label = (delta >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(delta));
+      const label = (delta >= 0 ? "+" : "−") + fmtFootprintQty(Math.abs(delta));
       const halfW = label.length * deltaFont * 0.34 + 2;
       const cxD = xAt(i) + bw / 2, dY0 = dY;
       for (let guard = 0; guard < 6; guard++) {
@@ -9237,7 +9237,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // 🔴OI 모름(null)과 ΔOI 0 을 가른다(2026-09-25) -- 없는 봉에 «신규 롱/숏» 이라는 없는 사실을 안 찍는다.
   const QNAME = (d, o) => (o == null ? (d >= 0 ? "매수 우위" : "매도 우위")
                                      : d >= 0 ? (o >= 0 ? "신규 롱" : "숏 정리") : (o >= 0 ? "신규 숏" : "롱 정리"));
-  const sgnQ = (v) => (v == null ? "—" : (v >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(v)));
+  const sgnQ = (v) => (v == null ? "—" : (v >= 0 ? "+" : "−") + fmtFootprintQty(Math.abs(v)));
   const obAgg = isSnapshotChart && ob5mFor() ? ob5mByTf(ob5mFor()) : null;   // 2026-10-26 5분 호가 요약(tf 봉별) -- 레인 막대·툴팁
   let laneBars = null;
   const laneBarsOf = () => laneBars || (laneBars = (() => {
@@ -10265,7 +10265,7 @@ function manualEntryPlanHtml(data) {
       : entryNote("SL/TP 끔 — 이번 진입에 TP·비상 스탑을 걸지 않고 SL 감시도 하지 않습니다. 이미 걸린 SL/TP 는 그대로 둡니다."));
   } else if (br && br.available) {
     const f = acctPx;
-    const pc = (v) => (v > 0 ? "+" : "") + Number(v).toFixed(1) + "%";
+    const pc = (v) => { const x = Number(v), t = Math.abs(x).toFixed(1); return (t === "0.0" ? "" : x > 0 ? "+" : "−") + t + "%"; };   // «-0.0%» 대신 0.0% · 유니코드 −
     parts.push(entryNote(
       (br.tp_price ? `TP ${br.tp_name} ${f(br.tp_price)} (${pc(br.tp_pct)}) 지정가` : `TP 없음(${br.tp_name} 없음)`)
       + " · "
