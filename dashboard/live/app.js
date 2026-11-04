@@ -886,7 +886,7 @@ function entryPopOpen(x, y) {
     + `<dt>미실현</dt><dd class="${up >= 0 ? "good" : "bad"}">${sg(up)}$${Math.abs(up).toFixed(2)}</dd>`
     + `<dt>청산가</dt><dd>${liq > 0 ? `${lineFmt(liq)}${dist != null ? ` · ${dist.toFixed(1)}% 남음` : ""}` : "없음"}</dd></dl>`
     + `<div class="ep-btns">${[25, 50, 100].map((v) => `<button type="button" data-pct="${v}" aria-label="${v}% 청산"><i class="hold-fill" aria-hidden="true"></i><span>${v}%</span></button>`).join("")}</div>`
-    + `<small>누르면 바로 청산 주문이 나갑니다 · 터치는 탭 → 확인</small>`;
+    + `<small>누르면 바로 청산 주문이 나갑니다</small>`;
   document.body.appendChild(d);
   const r = d.getBoundingClientRect();
   d.style.left = Math.max(8, Math.min(innerWidth - r.width - 8, x - r.width - 12)) + "px";
@@ -908,7 +908,9 @@ function entryPopOpen(x, y) {
   d.addEventListener("click", (e) => {
     const b = e.target.closest("button[data-pct]");
     if (!b || !(touched || e.detail === 0) || manualOrderBusy) return;
-    touched = false; entryPopClose(); ofabSetOpen(true); manualExitPreview(side, ovOf(b));
+    // 2026-11-04 사용자 «모바일에서 청산 50% 가 안 된다(3번 시도)»: 터치는 탭 → 미리보기 → 떠 있는 패널 맨 아래 «확인» 한 번 더였는데 패널이 열리며 가려져 주문이 안 나간 것으로 보였다.
+    //   팝업 버튼 자체가 이미 «진입 라벨 탭 → 퍼센트 탭» 두 번이라 마우스처럼 바로 발주한다(서버 confirm=1·게이트·409 는 그대로). 결과는 열린 패널의 결과 칸이 말한다.
+    touched = false; entryPopClose(); ofabSetOpen(true); manualFireNow(side, "exit", ovOf(b));
   });
 }
 (() => {

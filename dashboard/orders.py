@@ -917,6 +917,38 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             state.update(phase="error", error=f"집행 오류 {type(exc).__name__}: {exc} — 거래소에서 직접 확인하세요",
                          done_at=datetime.now(timezone.utc).isoformat())
 
+    async def partial_exit_rearm_tp(plan: dict, state: dict) -> None:
+        """2026-11-04 사용자 «SLTP 주문 걸린 채 중간 청산 50% 하면 익절 지정가가 사라진다».
+        익절 지정가는 걸 때의 포지션 전량인데(place_bracket) 일부를 닫으면 포지션보다 커져, 거래소가 닫는 쪽 주문을 줄이거나 지운다(헤지 모드).
+        그래서 부분 청산이 끝나면 **남은 포지션 수량**으로 다시 건다(place_bracket 이 옛 우리 주문을 먼저 지우고 포지션을 새로 읽는다).
+        지정가가 원래 안 걸려 있던(tp_resting False · 서버 감시) 무장·청산 진행(fired)·손절 해제 상태는 손대지 않는다. 포지션이 다 닫혔으면 place_bracket 이 «포지션 없음» -- 감시 루프 clear 가 정리한다.
+        ponytail: 규칙 무장(비상 스탑 있음)은 스탑도 같이 다시 걸고, 자동 물타기 지정가(dbad)는 place_bracket 이 지운다 -- 필요하면 손으로."""
+        try:
+            symbol, pside = plan["symbol"], plan["positionSide"]
+            key = bracket_key(symbol, pside)
+            b = bracket_load().get(key) or {}
+            if not (b.get("tp_resting") and b.get("tp_price")) or b.get("fired") or key in bracket_exiting:
+                return
+            spec = {"tp_price": b["tp_price"]}
+            if b.get("backstop_price") and not b.get("sl_off"):
+                spec["backstop_price"] = b["backstop_price"]
+            r = await place_bracket(binance_session(), spec, symbol, pside)
+            state["tp_rearm"] = {k: r.get(k) for k in ("qty", "tp", "backstop", "placed", "reason")}
+            st = bracket_load()
+            if key not in st or st[key].get("armed_at") != b.get("armed_at"):   # 그 사이 새로 무장됐다 -- 남의 상태를 덮지 않는다
+                return
+            if "cleared" in r:   # 키·포지션 조회 실패(아무것도 안 건드림)는 상태를 두고, 지운 뒤 못 걸었으면 서버 감시로 넘긴다
+                st[key]["tp_resting"] = bool((r.get("tp") or {}).get("placed"))
+                st[key]["placed"] = {**(st[key].get("placed") or {}), "tp": r.get("tp")}
+                bracket_save(st)
+            print(f"bracket {pside}: 부분 청산 뒤 익절 지정가 다시 걸음 {r.get('tp')} (남은 수량 {r.get('qty')})", flush=True)
+        except Exception as exc:  # noqa: BLE001 -- 청산 결과는 이미 났다 · 못 걸면 서버가 1초 닿음으로 감시(tp_resting 은 그대로면 다음 선 수정이 바로잡는다)
+            state["tp_rearm"] = {"placed": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+    async def exit_then_rearm(plan: dict, state: dict) -> None:
+        await run_exit(binance_session(), plan, state)
+        await partial_exit_rearm_tp(plan, state)
+
     async def arm_bracket(plan: dict, state: dict, add: bool = True) -> None:
         b, pside = plan.get("bracket") or {}, plan["positionSide"]
         if not b.get("available"):
@@ -1904,7 +1936,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             st["switch"] = {"from": side, "to": sw["to"], "phase": "exit"}
         refresh_tasks["manual_entry" if st is manual_entry_state else f"manual_exit_{query_asset(request)}"] = asyncio.create_task(
             exit_then_switch(plan, st, sw, query_asset(request)) if sw
-            else settle(run_exit(binance_session(), plan, st), st))
+            else settle(exit_then_rearm(plan, st) if frac < 1.0 else run_exit(binance_session(), plan, st), st))
         return web.json_response({"ok": True, "plan": plan, "state": st},
                                  headers=NOCACHE)
 
