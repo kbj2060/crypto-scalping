@@ -1861,8 +1861,9 @@ svg {
 @media (max-width: 720px) {
   /* 2026-10-27 1082 -> 1410(사용자 «프로파일을 차트 아래로 · 차트를 키워»): 가격 플롯 +60 · 아래 [체결·포지션·청산 | 호가] 칸 260 + 간격 8 (app.js PROF_H).
      일봉(4h·1d)이 덮으면 아래 칸을 안 그리므로 그 몫(268)을 뺀다. 버블은 아래 840 그대로. */
-  #candleSvgSnapshot { height: 1410px; }
-  .candle-container { height: 1422px; }
+  /* 2026-11-05 1410 -> 1110(사용자 «모바일 풋프린트 차트 높이 절반»): 가격 플롯(~600px)만 절반 -- 아래 수급·프로파일 칸은 그대로. */
+  #candleSvgSnapshot { height: 1110px; }
+  .candle-container { height: 1122px; }
   #fpCard.fp-alt-on #candleSvgSnapshot { height: 1142px; }
   #fpCard.fp-alt-on .candle-container { height: 1154px; }
   /* 2026-10-10 휴대폰 청산맵(사용자 «너무 길어 핸드폰으로 보기 불편»): 청산맵은 교체 영역(풋프린트~레인 706px)을 통째로 덮어
