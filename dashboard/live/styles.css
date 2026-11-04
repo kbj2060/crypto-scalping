@@ -2672,7 +2672,13 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .fp-pos { display: flex; flex-direction: column; gap: 3px; font: 12px/1.2 var(--font-sans); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .fp-pos[hidden] { display: none; }
 .fp-pos .good { color: var(--good); } .fp-pos .bad { color: var(--bad); }
-.fp-pos-side { letter-spacing: .06em; margin-right: 4px; } .fp-pos-now { color: var(--ink); } .fp-pos-pct { font-size: 15px; margin: 0 4px; }
+.fp-pos-side { letter-spacing: .06em; margin-right: 4px; } .fp-pos-now { color: var(--ink); font: 700 15px/1 var(--font-sans); } .fp-pos-pct { font-size: 15px; margin: 0 4px; }
+/* 2026-11-04 펜 메모 «현재가를 제목(코인 이름) 오른쪽으로 · 지금 글자 빼고 크게 · XRP 소수 4자리»: 넓은 화면 = 이름 바로 오른쪽 · 좁은 화면 = 포지션 칸 안 */
+.fp-px { display: none; }
+@media (min-width: 1700px) {
+  .fp-px { display: block; position: absolute; left: 100%; top: 50%; margin-left: 16px; transform: translateY(-50%); font: 700 24px/1 var(--font-sans); letter-spacing: 0; font-variant-numeric: tabular-nums; color: var(--ink); }
+  .fp-pos-now, .fp-pos.nopos { display: none; }
+}
 @media (min-width: 1700px) {
   #fpCard > .ops-health-head { position: relative; }
   .fp-coin-name { display: block; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none;
@@ -3154,25 +3160,23 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 /* 2026-11-04 펜 메모: 예측 줄 = 행. 윗줄 = 이름 · 판정 · 분위 문구 / 아랫줄 = 게이지(판정 아래) · 적중 기록(막대 · 적중률 · 분모) · 덧붙임(σ · 5표).
    간격 4 · 8 단계, 글자 = DESIGN.md label/note 11px · 판정 15px. */
 .fc-row { display: grid; grid-template-columns: minmax(0, 1fr); }
-.fc-c { --fc: var(--muted); display: grid; grid-template-columns: 56px 144px minmax(0, 1fr); grid-template-areas: "hz main sub" ". gauge rest";
-  column-gap: 8px; row-gap: 4px; align-items: center; padding: 8px 4px; min-width: 0; cursor: help; }
+.fc-c { --fc: var(--muted); display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; padding: 6px 4px; min-width: 0; cursor: help; }
 .fc-c + .fc-c { border-top: 1px dashed var(--soft-line); }
 .fc-c.up { --fc: var(--good); } .fc-c.dn { --fc: var(--bad); }
 .fc-c.trd { --fc: var(--warn); }   /* 2026-11-02 «횡보·추세»: 추세(띠 이탈 예상) = 주황 -- 방향이 아니라 초록/빨강을 쓰지 않는다 */
-.fc-c .hz { grid-area: hz; font: 700 11px/1.2 var(--font-sans); color: var(--muted); white-space: nowrap; }
-.fc-c > b { grid-area: main; font: 700 15px/1.1 var(--font-sans); color: var(--fc); white-space: nowrap; }
-.fc-c.now > b { font-size: 13px; }
-.fc-c.now { grid-template-areas: "hz main sub" ". rest rest"; }   /* 지금 추세 = 게이지 없음 -- 5표 칩·설명이 판정 바로 아래부터 */
-.fc-c .sub { grid-area: sub; font: 500 11px/1.2 var(--font-sans); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; min-width: 0; }
-.fc-c > .d4g { grid-area: gauge; margin: 0 4px 0 0; }       /* 게이지 = 판정(하락·보류·상승) 바로 아래 */
-.fz-r { grid-area: rest; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
-.fz-r .fc-tl { flex: 0 1 150px; } .fz-r > .sub { flex: none; }
-.fz-r .pr-sp { order: 0; flex: none; } .fz-r .pr-n { order: 1; } .fz-r .fc-vol { order: 2; }   /* 막대 · 적중 글자 · σ 줄 */
+.fc-c .hz { font: 700 11px/1.2 var(--font-sans); color: var(--muted); white-space: nowrap; }
+.fc-t { min-width: 0; padding: 0 6px; }
+.fc-t > .d4g { margin: 20px 0 6px; }   /* 위 20px = 점 따라가는 판정 글자 자리 */
+.gl { font: 700 15px/1 var(--font-sans); color: var(--fc); white-space: nowrap; }
+.d4g .gl { position: absolute; bottom: 10px; transform: translateX(calc(var(--x) * -1)); }   /* 점(0~100%) 위 · 0%는 왼끝 · 100%는 오른끝에 붙어 안 잘린다 */
+.gl.c { display: block; text-align: center; }
+.fc-c.now .gl { font-size: 13px; }
+.fc-t .fc-tl { max-width: 150px; margin: 4px auto 0; }
+.fz-r { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .pr-n { font: 500 11px/1.2 var(--font-sans); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pr-n b { color: var(--text); font-weight: 800; } .pr-n b.up { color: var(--good); } .pr-n b.dn { color: var(--bad); }   /* 55% 이상 초록 · 45% 이하 빨강 · 사이는 중립(동전 던지기와 구분 안 됨) */
-@media (max-width: 420px) { .fc-c { grid-template-columns: 48px 112px minmax(0, 1fr); } .pr-n { white-space: normal; } }
+@media (max-width: 420px) { .fc-c { grid-template-columns: 44px minmax(0, 1fr) auto; column-gap: 8px; } }
 .mc-state .mc-q1 { margin-left: auto; flex: none; }   /* 2026-10-15 ①②④ 제목 대신 상태 줄 끝 «?» */
-.fc-c .sub.fc-vol { color: var(--warn); font-weight: 700; }
 /* 2026-10-16 시안 ②③ ⑤ 제목 줄 오른쪽 «종합»(세 부품 칩) · ④ 4h 문턱 눈금. 좁으면 종합이 제목 아래 줄로 */
 .mc-fc > h4 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .fc-sum { --fs: var(--muted); margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 700; color: var(--muted); white-space: nowrap; cursor: help; }
@@ -3520,3 +3524,7 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
 #mcWall .mc-strip.mc-strip-wall .mc-gk:not(.v) { display: block; }                                  /* 4분면(2×2 · 이름 글자 들어 있음) = 타일 폭 전체 */
 #mcWall .mc-strip.mc-strip-wall .mc-gk:not(.v) > span { display: none; }
 #mcWall .mc-strip.mc-strip-wall .mc-gk:not(.v) > .mc-svg { width: 100%; height: 100%; }
+/* 2026-11-04 펜 메모: 지정가 진입선을 끄는 동안 선 오른쪽 끝에 뜨는 진입가 칩 */
+.lt-dpx { position: absolute; transform: translateY(-50%); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--accent); background: color-mix(in srgb, var(--chart-bg) 90%, transparent);
+  color: var(--accent); font: 700 12px/1 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
+.lt-dpx[hidden] { display: none; }

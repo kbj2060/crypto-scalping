@@ -452,7 +452,7 @@ function lineToolEl(box) {
   if (h || !box) return h;
   h = document.createElement("div"); h.id = "lineTool"; h.className = "lt";
   h.innerHTML = '<div class="lt-zone up"></div><div class="lt-zone dn"></div><i class="lt-ln tp"></i><i class="lt-ln sl"></i><i class="lt-ln now"></i><i class="lt-ln en"></i>'
-    + '<button type="button" class="lt-tag tp" data-k="tp"></button><button type="button" class="lt-tag sl" data-k="sl"></button><button type="button" class="lt-tag en" data-k="en"></button>'
+    + '<span class="lt-dpx" hidden></span><button type="button" class="lt-tag tp" data-k="tp"></button><button type="button" class="lt-tag sl" data-k="sl"></button><button type="button" class="lt-tag en" data-k="en"></button>'
     + '<div class="lt-tk"><div class="lt-row"><b class="lt-side"></b><span class="lt-qty"></span></div>'
     + '<div class="lt-mg"><div class="lt-mg-hd"><span>증거금</span><b class="lt-mg-v"></b></div>'
     + '<input type="range" class="lt-mg-r" min="1" max="50" step="1" aria-label="진입 증거금 (순자산 대비 %)"></div>'
@@ -483,7 +483,7 @@ function lineToolEl(box) {
     lineTool.plan = null; lineTool.arm = 0; linePrevSeq++; renderLineTool();
   });
   const end = (e) => {
-    if (lineDrag && e.pointerId === lineDrag.id) { lineDrag = null; if (lineTool?.placed) lineAmend(); else linePreview(); }   // 대기 주문 = 놓는 순간 서버에 주문 수정
+    if (lineDrag && e.pointerId === lineDrag.id) { lineDrag = null; renderLineTool(); if (lineTool?.placed) lineAmend(); else linePreview(); }   // 대기 주문 = 놓는 순간 서버에 주문 수정
     clearTimeout(lineHold); h.querySelector(".lt-go")?.classList.remove("hold");
   };
   h.addEventListener("pointerup", end); h.addEventListener("pointercancel", end); h.addEventListener("pointerleave", end);
@@ -704,6 +704,9 @@ function renderLineTool() {
   const waitC = lim && !!t.placed;   // 2026-11-04 펜 메모: 지정가 대기 라벨 = 왼쪽 끝 → 가운데(익절·손절 꼬리표와 같은 세로줄)
   const en = set(".lt-tag.en", { left: (waitC ? cx : x0 + 6) + "px", top: yP + "px" });
   en.classList.toggle("lim", lim); en.classList.toggle("wait-c", waitC);
+  // 2026-11-04 펜 메모 «지정가 라벨을 끌 때마다 오른쪽에 진입가 · 놓아 확정하면 라벨 안 «대기» 자리에 진입가»: 끄는 동안만 선 오른쪽 끝에 가격 칩
+  const dpx = h.querySelector(".lt-dpx");
+  if (dpx) { const on = lineDrag?.k === "en" && lim; dpx.hidden = !on; if (on) { dpx.textContent = lineFmt(ref); Object.assign(dpx.style, { left: R + 8 + "px", top: yP + "px" }); } }
   en.title = lim ? (t.px ? `차트(USDT) 선 ${lineFmt(ref)} — 실제 주문가(USDC) ${lineFmt(t.px)} · 접수 때 USDC/USDT 차이(basis)를 곱해 걸었습니다` : `지정가 ${lineFmt(ref)}`)
     : `진입 peg ${lineFmt(p)} — 끌면 지정가`;
   // 2026-11-03 시안 B: 진입 꼬리표 = 포지션만(작은 알약, 진입선 왼쪽 끝). 체결 기둥·청산 프로파일 칸(lane)으로 안 들어간다. 대기 중이면 «대기»와 취소 ✕ 는 그대로.
@@ -711,7 +714,7 @@ function renderLineTool() {
   // 🔴2026-11-04 펜 메모 «✕ 를 눌러도 한 번에 취소가 안 된다 · 여러 번 눌러야»: 가격이 틱마다 이 함수를 부르고, 같은 글을 innerHTML 로 다시 쓰면 ✕ 노드가 갈려
   //   마우스를 누른 사이 새 노드로 바뀐다 -- 클릭이 ✕ 가 아닌 부모로 가 취소가 안 나갔다(하네스 재현: 누름~뗌 사이 다시 그리기 1번 = 취소 0). 글이 바뀔 때만 쓴다.
   const tkArmed = Date.now() < (t.tkArm || 0);
-  const enH = `<span class="lt-grip" aria-hidden="true"></span>${side === "SHORT" ? "SHORT" : "LONG"}${t.add ? " 추가" : ""}${lim && t.placed ? " 대기" : ""}`
+  const enH = `<span class="lt-grip" aria-hidden="true"></span>${side === "SHORT" ? "SHORT" : "LONG"}${t.add ? " 추가" : ""}${lim && t.placed ? " " + lineFmt(ref) : ""}`
     + (lim && t.placed ? `<span class="lt-tkr${tkArmed ? " arm" : ""}" role="button" tabindex="0" aria-label="${tkArmed ? "빨간색 = 한 번 더 누르면 시장가로 진입" : "지금 시장가로 진입(taker)"}" title="걸린 지정가를 취소하고 남은 수량을 시장가(테이커 4bp)로 진입 — 두 번 눌러 확인(첫 클릭 = 빨간색, 5초)">${t.busy ? "…" : "TAKER"}</span>`
       + `<span class="lt-tx" role="button" tabindex="0" aria-label="지정가 주문 취소" title="주문 취소">✕</span>` : "");
   if (en._h !== enH) { en.innerHTML = enH; en._h = enH; }
@@ -1187,7 +1190,7 @@ function setupAssetPop() {
   addEventListener("resize", () => { if (innerWidth !== openW) assetPopClose(); });   // 폭이 바뀔 때(회전·창 크기)만 닫는다 -- 높이만 바뀌는 키보드·주소창은 그대로
 }
 function renderSnapshotAssetTabs() {
-  const cn = el("fpCoinName"); if (cn) cn.textContent = String(activeSnapshotAsset || "eth").toUpperCase();
+  const cn = el("fpCoinSym"); if (cn) cn.textContent = String(activeSnapshotAsset || "eth").toUpperCase();
   document.querySelectorAll("#snapshotAssetTabs .asset-tab").forEach((btn) => {
     const on = !enabledAssets || enabledAssets.includes(btn.dataset.asset);
     // 🔴목록을 받기 전(enabledAssets === null)에는 **되살리지 않는다**.
@@ -1723,15 +1726,17 @@ function entryUsdt(pos, chartPx) {
 
 // 2026-11-04 펜 메모 «풋프린트 머리(창 탭과 코인 이름 사이)에 이 코인의 포지션» 시안 A: 두 줄 -- 방향·진입가 / 지금가·%·손익($). 수량은 뺐다(사용자). 포지션 없으면 숨김.
 function renderFpPos() {
-  const box = el("fpPos"); if (!box) return;
+  const box = el("fpPos"), px = el("fpPx"); if (!box) return;
   const pos = snapshotAccountPosition(), cur = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), qty = Math.abs(Number(pos?.qty));
-  const en = pos ? entryUsdt(pos, cur) : 0;
-  if (!(qty > 0) || !(en > 0) || !(cur > 0)) { box.hidden = true; return; }
-  const sgn = String(pos.side).toUpperCase() === "SHORT" ? -1 : 1, pct = (cur - en) / en * 100 * sgn, pnl = (cur - en) * qty * sgn;
-  const f = (v) => v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), sg = (v) => (v >= 0 ? "+" : "−");
-  const cls = pnl >= 0 ? "good" : "bad";
-  box.innerHTML = `<div><b class="${sgn < 0 ? "bad" : "good"} fp-pos-side">${sgn < 0 ? "SHORT" : "LONG"}</b> <span>진입 ${f(en)}</span></div>`
-    + `<div><span class="fp-pos-now">지금 ${f(cur)}</span> <b class="${cls} fp-pos-pct">${sg(pct)}${Math.abs(pct).toFixed(2)}%</b> <b class="${cls}">${sg(pnl)}$${f(Math.abs(pnl))}</b></div>`;
+  const en = pos ? entryUsdt(pos, cur) : 0, has = qty > 0 && en > 0 && cur > 0;
+  // 2026-11-04 펜 메모 «현재가는 모든 코인·주식에서 · 지금 글자 빼고 · XRP 소수 4자리»: 현재가는 포지션과 상관없이 늘 보인다(lineFmt = 100 이상 2자리 · 아래 4자리)
+  if (px) px.textContent = cur > 0 ? lineFmt(cur) : "";
+  if (!(cur > 0)) { box.hidden = true; return; }
+  const sgn = String(pos?.side).toUpperCase() === "SHORT" ? -1 : 1, pct = has ? (cur - en) / en * 100 * sgn : 0, pnl = has ? (cur - en) * qty * sgn : 0;
+  const sg = (v) => (v >= 0 ? "+" : "−"), cls = pnl >= 0 ? "good" : "bad";
+  box.classList.toggle("nopos", !has);
+  box.innerHTML = (has ? `<div><b class="${sgn < 0 ? "bad" : "good"} fp-pos-side">${sgn < 0 ? "SHORT" : "LONG"}</b> <span>진입 ${lineFmt(en)}</span></div>` : "")
+    + `<div><span class="fp-pos-now">${lineFmt(cur)}</span>${has ? ` <b class="${cls} fp-pos-pct">${sg(pct)}${Math.abs(pct).toFixed(2)}%</b> <b class="${cls}">${sg(pnl)}$${lineFmt(Math.abs(pnl))}</b>` : ""}</div>`;
   box.hidden = false;
 }
 
@@ -4606,10 +4611,10 @@ function fcTrendCell(t, cell) {
   const up = t.signal > 0, n = t.votes.length, ups = t.ups;
   const px = (v) => Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 });
   const tags = `<span class="fc-tl">${t.votes.map((x) => `<i class="${x.up ? "u" : ""}" title="${x.L}일 전 종가 ${px(x.ref_now)}보다 ${x.up ? "높게" : "낮게"} 마감">${x.L}</i>`).join("")}</span>`;
-  return cell("지금 추세", `${up ? "up" : "dn"} now`, `${up ? "▲ 상승" : "▼ 하락"} <small class="fc-cnt">${ups}:${n - ups}</small>`, "",
+  return cell("지금 추세", `${up ? "up" : "dn"} now`, `${up ? "▲ 상승" : "▼ 하락"} <small class="fc-cnt">${ups}:${n - ups}</small>`, `위 ${ups} · 아래 ${n - ups} · ${t.age_days}일째 · 매일 09시 마감`,
     `지금 추세 — 예측 아님. 매일 09시(KST) 일봉 종가를 7·14·28·56·90일 전 종가와 비교한 5표 중 다수 · ${t.age_days}일째 같은 방향`
       + (TREND_NOTE[activeSnapshotAsset] || ""), "",
-    tags + `<span class="sub">일 전 종가보다 위 ${ups} · 아래 ${n - ups}</span><span class="sub">${t.age_days}일째 · 매일 09시 마감</span>`).replace('<span class="sub"></span>', "");
+    tags);
 }
 
 // 2026-10-31 ⑤ 툴팁 코인별 실측 -- docs/experiments/xrp_trend_cb7d_20261031.md · «지금 추세» 다음 7일 적중(2024-01~2026-10-23)
@@ -4653,11 +4658,11 @@ function prHit(key) {
   const tip = "적중 기록 — " + ({ "15m": "15분 예측이 상위/하위 20% 밖(신호)이었던 결정 중 15분 뒤 방향이 맞은 비율", "1h": "1시간 예측이 상위/하위 20% 밖(신호)이었던 결정 중 1시간 뒤 방향이 맞은 비율",
     "4h": "4h 예측이 학습 문턱 밖(신호)이었던 결정 중 4시간 뒤 방향이 맞은 비율", band: "횡보·추세 판정이 4시간 뒤 실제(띠 이탈 여부)와 맞은 비율 · 서버 크론이 매 시 채점" })[key]
     + " · 연속 봉의 신호는 겹쳐 세므로 독립 표본은 이보다 훨씬 적다" + bf;
-  if (!r || !(r.n || r.hit != null)) return { html: `<span class="pr-n">적중 기록 · 신호 대기 · 쌓는 중</span>`, tip };
+  if (!r || !(r.n || r.hit != null)) return { html: `<span class="pr-n">쌓는 중</span>`, tip };
   const bars = (r.daily || []).map(([d, n, h]) => `<i class="${h / n > 0.5 ? "u" : h / n < 0.5 ? "d" : ""}" style="height:${Math.max(3, Math.round((16 * h) / n))}px" title="${d} ${h}/${n}"></i>`).join("");
   const base = r.base != null ? ` · 다수 쪽만 찍으면 ${Math.round(100 * r.base)}%` : ref ? ` · 표본 밖 ${ref}%` : "";
-  const body = r.n ? `<b class="${r.hit / r.n >= 0.55 ? "up" : r.hit / r.n <= 0.45 ? "dn" : ""}">${Math.round((100 * r.hit) / r.n)}%</b> ${r.hit}/${r.n}${base}${r.pending ? ` · 대기 ${r.pending}` : ""}` : `쌓는 중 · 대기 ${r.pending}`;
-  return { html: `<span class="pr-sp">${bars}</span><span class="pr-n">${body}</span>`, tip };
+  const body = r.n ? `<b class="${r.hit / r.n >= 0.55 ? "up" : r.hit / r.n <= 0.45 ? "dn" : ""}">${Math.round((100 * r.hit) / r.n)}%</b> ${r.hit}/${r.n}` : `쌓는 중`;
+  return { html: `<span class="pr-sp">${bars}</span><span class="pr-n">${body}</span>`, tip: tip + base + (r.pending ? ` · 대기 ${r.pending}` : "") };
 }
 // 4h 상대 강도(x = 코인, y = 평균 대비 지난 4h 수익 bp 세로 막대) -- 적중 기록은 위 행에 합쳤다
 function predXsecHtml() {
@@ -4670,8 +4675,8 @@ function predXsecHtml() {
   const cols = xs.map(([k, v]) => `<div class="xs-c${k.toLowerCase() === activeSnapshotAsset ? " me" : ""}" title="${k} ${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(0)}bp (9코인 평균 대비 지난 4h)">`
     + `<i class="${v >= 0 ? "p" : "n"}" style="height:${Math.max(1, Math.abs(v) / sc * 24).toFixed(0)}px"></i><span class="xl"><b>${k}</b> ${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(0)}</span></div>`).join("");
   const ic = pr.xsec && pr.xsec.n ? `기록 전진 IC ${pr.xsec.ic >= 0 ? "+" : "−"}${Math.abs(pr.xsec.ic).toFixed(2)}(${pr.xsec.n}회)` : "전진 기록 쌓는 중";
-  return `<div class="pr-strip"><div class="pr-h">4h 상대 강도 · 9코인 평균 대비 지난 4h 수익(bp)</div><div class="xs-row">${cols}</div>`
-    + `<div class="pr-note" title="반전 쪽: 높은 코인이 이후 4h 약세 쪽 · 연구 IC −.03(전진 70일) · ${ic} — 약한 경향, 비용 후 매매 근거 아님">반전 쪽: 높은 코인이 이후 4h 약세 쪽 · 연구 IC −.03 · ${ic} · 약한 경향</div></div>`;
+  return `<div class="pr-strip"><div class="pr-h" title="9코인 평균 대비 지난 4h 수익(bp) · 막대 위 = 평균보다 강함">4h 상대 강도</div><div class="xs-row">${cols}</div>`
+    + `<div class="pr-note" title="반전 쪽: 높은 코인이 이후 4h 약세 쪽 · 연구 IC −.03(전진 70일) · ${ic} — 약한 경향, 비용 후 매매 근거 아님">높은 쪽 → 이후 약세 · ${ic}</div></div>`;
 }
 // ⑤ 예측 줄(시장 맥락 판 아래, 사용자 시안 B): 지금 추세 → 15분·1시간 예측(10-28) → 4h 예측(+변동성) → 7일(4~13주는 10-28 Macro Trend 카드로). sec = renderMarketCtx 의 판 틀(? 설명).
 function fcRowHtml(sec) {
@@ -4681,15 +4686,17 @@ function fcRowHtml(sec) {
   const cls = (s) => (s > 0 ? "up" : s < 0 ? "dn" : "flat"), word = (s) => (s > 0 ? "▲ 상승" : s < 0 ? "▼ 하락" : "보류");
   const zf = (x) => `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(2)}`;
   // 2026-11-04 펜 메모 «예측 줄과 적중 기록을 정보 빠지는 것 없이 융합»: 칸 → 행. 윗줄 = 이름 · 판정 · 분위 · 게이지 / 아랫줄(.fz-r) = 덧붙임(σ·표) + 적중 기록(일별 막대 · 적중률 · 분모)
+  // 2026-11-04 펜 메모 «방향 게이지의 "하락" 글자는 게이지 안 점을 따라가게 · 글자 줄이고 그래프 위주로»: 판정 글자 = 게이지 점 바로 위(점 따라 이동, 끝에서는 안쪽으로 붙는다) ·
+  //   게이지 없는 칸(지금 추세·횡보/추세)은 같은 자리에 가운데 정렬 · 오른쪽 = 적중 기록(막대 · 적중률 · 분모) · 분위·σ·대기 같은 덧붙임은 툴팁.
   const cell = (hz, c, main, sub, tip, gauge = "", rest = "", hitKey = null) => {
-    const h = prHit(hitKey);
-    return `<div class="fc-c ${c}" title="${escapeHtml(tip + (h.tip ? "\n" + h.tip : ""))}"><span class="hz">${hz}</span><b>${main}</b><span class="sub">${sub}</span>${gauge}`
-      + (rest || h.html ? `<div class="fz-r">${rest}${h.html}</div>` : "") + `</div>`;
+    const h = prHit(hitKey), m = /<u style="left:([\d.]+)%"><\/u><\/span>$/.exec(gauge);
+    const lab = m ? `<b class="gl" style="left:${m[1]}%;--x:${m[1]}%">${main}</b>` : `<b class="gl c">${main}</b>`;
+    return `<div class="fc-c ${c}" title="${escapeHtml(tip + (sub ? "\n" + sub.replace(/<[^>]+>/g, "") : "") + (h.tip ? "\n" + h.tip : ""))}"><span class="hz">${hz}</span>`
+      + `<div class="fc-t">${m ? gauge.replace(/<\/span>$/, lab + "</span>") : lab}${m ? "" : rest}</div>${h.html ? `<div class="fz-r">${h.html}</div>` : ""}</div>`;
   };
   const sig = (g, hz, nm) => (!g || !g.ok ? cell(hz, "flat", "-", "데이터 대기", nm)
     : cell(hz, cls(g.state), word(g.state), `${nm.split(" ")[0]} ${zf(g.v)}${g.state ? ` · ${g.run}일째` : ""}`, `${nm} · ${g.date} UTC 종가 · |값| ≥ 1 일 때만 방향`));
   const vTip = v ? `4시간 1σ ±${v.sig4h_pct.toFixed(2)}% (±$${v.sig4h_usd < 10 ? v.sig4h_usd.toFixed(4) : v.sig4h_usd.toFixed(0)}) · 최근 ${v.ref_days}일 평소의 ${v.lvl.toFixed(2)}배 · 직전 4시간의 ${v.x_now.toFixed(2)}배 · 더 커질 확률 ${Math.round(v.p_expand * 100)}%` : "";
-  const volLine = v ? `<span class="sub fc-vol" title="${escapeHtml(vTip)}">σ ±${v.sig4h_pct.toFixed(2)}% · ×${v.lvl.toFixed(2)}</span>` : `<span class="sub">변동 ${VOL4H_ASSETS.has(activeSnapshotAsset) ? "불러오는 중" : `${[...VOL4H_ASSETS].join("·").toUpperCase()} 전용`}</span>`;
   const on4 = DIR4H_ASSETS.has(activeSnapshotAsset), g4 = dir4hNow(), old4 = g4 && Date.now() - g4.decided_at_ms > 15 * 60e3;
   const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(11, 16);
   const d4Tip = g4 ? `4h 방향 예측 — ${DIR4H_NOTE[activeSnapshotAsset][0]} · ${g4.model_month} 모델(학습 ${g4.train_window[0].slice(0, 10)}~${g4.train_window[1].slice(0, 10)})\n`
@@ -4772,7 +4779,7 @@ function fcRowHtml(sec) {
     + (t ? fcTrendCell(t, cell)
          : cell("지금 추세", "flat now", "-", "불러오는 중", "지금 추세"))
     + sCell("15m", "15분", 3, 1) + sCell("1h", "1시간", 12, 2)
-    + cell("4h 예측", g4 && !old4 ? cls(g4.signal) : "flat", g4 ? word(g4.signal) : "-", d4Sub, d4Tip, d4Gauge, volLine, "4h")
+    + cell("4h 예측", g4 && !old4 ? cls(g4.signal) : "flat", g4 ? word(g4.signal) : "-", d4Sub, d4Tip, d4Gauge, "", "4h")
     + rbCell
     + `</div>${predXsecHtml()}</div>`;   // 2026-10-28 사용자 «4~13주 예측은 Macro Trend 카드로 대체» -- z91 칸 뺌(서버 계산·전진 판정 2027-06 은 그대로)
 }
