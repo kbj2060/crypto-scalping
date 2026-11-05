@@ -10,6 +10,7 @@ The fills are folded into round trips locally, so entry/exit timestamps need no 
 from __future__ import annotations
 
 import hashlib
+import asyncio
 import hmac
 import os
 import time
@@ -349,8 +350,10 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
     trips: list[dict[str, Any]] = []
     truncated: list[str] = []
     failed: list[str] = []   # 2026-11-02 체결 조회가 실패한 심볼 -- «거래 없음»이 아니라 «모름»(화면이 경고한다)
-    for symbol in symbols:
-        fills = await _get(session, "/fapi/v1/userTrades", {"symbol": symbol, "limit": trade_limit}, key, secret, offset)
+    # 2026-11-05 사용자 «주문이 대시보드에 반영되기까지 몇 초» -- 심볼 ~13개의 체결·미체결 조회를 한 줄씩 기다리던 것(≈26왕복)을 동시에. 요청 수·무게는 그대로.
+    all_fills = await asyncio.gather(*[_get(session, "/fapi/v1/userTrades", {"symbol": s, "limit": trade_limit}, key, secret, offset) for s in symbols])
+    all_rows = await asyncio.gather(*[_get(session, "/fapi/v1/openOrders", {"symbol": s}, key, secret, offset) for s in symbols])
+    for symbol, fills in zip(symbols, all_fills):
         if isinstance(fills, dict):
             failed.append(symbol)
             continue
@@ -383,8 +386,7 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
     # 2026-10-08 Option 카드 «닿음 등고선»이 내 지정가 선을 그린다(사용자 «지정가 매수가 터치되면 청산가는»).
     #   심볼별 1회(무게 1, 심볼 없는 호출은 무게 40). 못 읽으면 None -- «없음»이 아니라 «모름»(화면은 선을 안 그린다).
     open_orders: list[dict[str, Any]] | None = []
-    for symbol in symbols:
-        rows = await _get(session, "/fapi/v1/openOrders", {"symbol": symbol}, key, secret, offset)
+    for symbol, rows in zip(symbols, all_rows):
         if isinstance(rows, dict):
             open_orders = None
             break

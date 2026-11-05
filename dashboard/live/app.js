@@ -11178,7 +11178,7 @@ async function manualEntryPollStatus() {
       && (!data.state?.bracket || data.state?.add_order?.pending);
     const switching = /^(exit|entry)$/.test(data.state?.switch?.phase || "");   // 2026-10-10 스위칭은 서버가 잇는다 -- 끝날 때까지 본다
     if (phase === "submitting" || phase === "working" || bracketPending || switching) {
-      setTimeout(manualEntryPollStatus, STATUS_POLL_MS);
+      setTimeout(manualEntryPollStatus, 1500);
     } else {
       manualOrderBusy = false;
       manualButtonsDisabled(false);
@@ -11244,7 +11244,7 @@ async function manualEntrySubmit() {
     box.innerHTML = entryResultHtml(data.state, "live");
     if (pending.tp && !pending.limit && lineTool) { lineTool = null; renderLineTool(); }   // peg 선 주문 접수 = 선을 거둔다(체결분은 포지션 선이 이어받는다)
     if (pending.kind === "exit" && pending.sw) ofabWatchResult();   // 말풍선이 서버 스위칭 상태(결과 칸)를 따라 말한다
-    setTimeout(manualEntryPollStatus, STATUS_POLL_MS);
+    setTimeout(manualEntryPollStatus, 800);   // 2026-11-05 첫 상태 조회는 0.8초 뒤(시장가는 보통 1초 안에 끝난다) -- 3초를 통째로 기다리지 않는다. 이후는 STATUS_POLL_MS
   } catch (err) {
     box.innerHTML = entryNote(`주문 실패: ${err && err.message ? err.message : err}`, "bad");
     lineSubmitFail(pending, `주문 실패: ${err && err.message ? err.message : err}`);
