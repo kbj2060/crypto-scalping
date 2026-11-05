@@ -446,7 +446,8 @@ function linePreview() {   // 크기는 서버 미리보기(증거금 linePct %)
 }
 function lineFire() {   // 미리보기 → 오는 즉시 발주(manualFireOnPreview) -- 진입 버튼과 같은 길(상한·게이트·확인 서버 검사 그대로)
   const t = lineTool, p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), side = t && lineSide(t, p);
-  if (!side || manualOrderBusy || manualPreviewInFlight) return;
+  if (!side) return;
+  if (manualOrderBusy || manualPreviewInFlight) { ofabSay(escapeHtml(manualOrderBusy ? "이전 주문을 처리하는 중이라 이번 누름은 무시됐습니다 — 끝나면 다시 눌러 주세요" : "다른 미리보기를 받는 중이라 이번 누름은 무시됐습니다 — 잠시 뒤 다시 눌러 주세요")); return; }   // 2026-11-05 사용자 «주문 버튼이 씹힌다» -- 조용히 무시하던 자리에 사유를 띄운다
   const lim = t.entry > 0;   // 지정가 = 접수가 확인될 때까지 선을 둔다(manualEntrySubmit 이 placed 로) · peg = 현행대로 바로 지운다
   ofabWatchResult(); ofabSay(escapeHtml(`${side === "LONG" ? "롱" : "숏"} ${lim ? "지정가 " : ""}선 주문 — ${HOLD_FIRE_MS ? "미리보기 받는 중…" : "주문 전송 중…"}`));
   const ov = { rule: "", pct: linePct, tp: linePx(t.tp), sl: linePx(t.sl), fresh: true, limit: lim ? linePx(t.entry) : "" };
