@@ -3565,3 +3565,29 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
 @media (max-width: 720px) {
   .mt-h:not(.grp), .mt-fam, .mt-rtab th, .fc-sum, .fc-sum i, .fp-chip, .pr-h, #newsCard span.h { font-size: 11px; }   /* «지금 국면»·«13주 뒤 편향»(.grp)은 칸이 좁아 11px 면 줄바꿈 -- 그대로 */
 }
+
+/* ── 2026-11-06 계좌 카드 «자산 구성» (순자산 머리 + USDC/USDT 합산·비중) ──
+   색 3계약 안에서: 풀 구분은 밝기(p0 밝음 · p1 중간)와 막대 위 글자로만 한다. */
+#snapAcctBalance { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin: 0; }
+.aw-headnum { font: 600 26px/1 var(--font-sans); letter-spacing: -0.02em; color: var(--ink); font-variant-numeric: tabular-nums; }
+.aw-headlab, .aw-headsub { font-size: 12px; color: var(--muted); }
+.aw { --p0: var(--accent); --p1: color-mix(in srgb, var(--accent) 38%, transparent);
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 12px 18px 14px; border-bottom: 1px solid var(--soft-line); font-variant-numeric: tabular-nums; }
+.aw .p0 { background: var(--p0); color: var(--on-fill); }
+.aw .p1 { background: var(--p1); color: var(--ink); }
+.aw-dot { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 6px; }
+.aw .muted, .aw dt { color: var(--muted); }
+/* A */
+.aw-bar { display: flex; gap: 3px; height: 30px; }
+.aw-bar span { display: flex; align-items: center; padding: 0 10px; border-radius: 8px; font: 600 12px/1 var(--font-sans); white-space: nowrap; overflow: hidden; }
+.aw-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; }
+.aw-colhead { display: flex; align-items: center; gap: 6px; font-size: 13px; } .aw-colhead .muted { font-size: 12px; margin-left: auto; }
+.aw-num { font: 600 24px/1.1 var(--font-sans); letter-spacing: -0.02em; color: var(--ink); margin: 4px 0 8px; }
+.aw-meter { height: 6px; border-radius: 3px; background: var(--soft-line); overflow: hidden; margin-bottom: 8px; }
+.aw-meter span { display: block; height: 100%; background: var(--warn); border-radius: 3px; }
+.aw-kv { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 3px 10px; margin: 0; font-size: 12.5px; }
+.aw-kv dd { margin: 0; text-align: right; color: var(--text); }
+@media (max-width: 720px) {
+  .aw { padding-inline: 14px; }
+  .aw-kv { grid-template-columns: auto 1fr auto 1fr; }
+}

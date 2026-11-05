@@ -1682,6 +1682,37 @@ function balanceAssetNote() {
   return ` (${used})${tail}`;
 }
 
+// 2026-11-06 사용자 «지갑·순자산이 안 보인다 -- USDC/USDT 합산과 비중을 그림으로»: 풀(USDC·USDT)별 순자산·증거금·노출 + 합산.
+//   단일자산 모드는 두 풀이 따로 돈다(A.balances 또는 A.assets). 통합(멀티에셋) 모드는 풀이 하나라 «통합» 한 줄.
+//   색은 3색 계약 안에서 -- 풀 구분은 밝기(USDC 밝음 · USDT 중간)와 막대 위 글자로만 한다.
+function acctPools(A) {
+  const raw = A.multi_assets_margin ? { "통합": A.balance || {} } : Object.fromEntries(["USDC", "USDT"].map((q) => [q, (A.balances || {})[q] || (A.assets || []).find((x) => x.asset === q)]).filter(([, v]) => v));
+  const live = (A.positions || []).filter((p) => Math.abs(Number(p.qty) || 0) > 0);
+  const pools = Object.entries(raw).map(([name, b], i) => {
+    const wallet = Number(b.wallet) || 0, unreal = Number(b.unrealized) || 0, equity = Number(b.margin) || wallet + unreal, avail = Number(b.available) || 0;
+    const used = b.initial_margin != null && Number.isFinite(Number(b.initial_margin)) ? Number(b.initial_margin) : Math.max(0, equity - avail);
+    const ps = name === "통합" ? live : live.filter((p) => String(p.symbol).endsWith(name));
+    const notional = ps.reduce((x, p) => x + Math.abs(Number(p.notional) || 0), 0);
+    return { name, i, wallet, unreal, equity, avail, used, usedPct: equity > 0 ? used / equity * 100 : 0, n: ps.length, notional, x: equity > 0 ? notional / equity : 0,
+      pos: ps.map((p) => `${String(p.symbol).replace(/USD[CT]$/, "")} ${p.side === "LONG" ? "롱" : "숏"}`).join(" · ") };
+  }).filter((p) => p.equity > 0 || p.n);
+  const total = pools.reduce((x, p) => x + p.equity, 0) || 0;
+  pools.forEach((p) => { p.share = total > 0 ? p.equity / total * 100 : 0; });
+  return { pools, total, wallet: pools.reduce((x, p) => x + p.wallet, 0), unreal: pools.reduce((x, p) => x + p.unreal, 0), avail: pools.reduce((x, p) => x + p.avail, 0), used: pools.reduce((x, p) => x + p.used, 0) };
+}
+function acctWealthHtml(A) {
+  const W = acctPools(A), pct = (v) => `${v.toFixed(v >= 10 || v === 0 ? 0 : 1)}%`;
+  if (!W.pools.length) return "";
+  const sw = (p) => `<i class="aw-dot p${p.i}" aria-hidden="true"></i>`;
+  const body = `<div class="aw-bar" role="img" aria-label="풀별 비중">${W.pools.map((p) => `<span class="p${p.i}" style="flex:${Math.max(p.share, 4)}">${p.name} ${pct(p.share)}</span>`).join("")}</div>
+      <div class="aw-cols">${W.pools.map((p) => `<div class="aw-col">
+        <div class="aw-colhead">${sw(p)}<b>${p.name}</b><span class="muted">${p.n ? p.pos : "포지션 없음"}</span></div>
+        <div class="aw-num">${fmtUsd(p.equity)}</div>
+        <div class="aw-meter" title="사용 증거금 ${fmtUsd(p.used)} / 순자산 ${fmtUsd(p.equity)}"><span style="width:${Math.min(100, p.usedPct)}%"></span></div>
+        <dl class="aw-kv"><dt>증거금 사용</dt><dd>${pct(p.usedPct)}</dd><dt>가용</dt><dd>${fmtUsd(p.avail)}</dd><dt>지갑</dt><dd>${fmtUsd(p.wallet)}</dd><dt>미실현</dt><dd class="${acctTone(p.unreal)}">${acctSu(p.unreal)}</dd></dl></div>`).join("")}</div>`;
+  return `<div class="aw">${body}</div>`;
+}
+
 // 스냅샷 탭이 보고 있는 코인의 포지션 하나. 없으면 null.
 // ASSET_CONFIG 는 eth/sol/btc 만 담고 있어 xrp/hype 는 관례대로 <TICKER>USDT 로 만든다.
 // 🔴같은 코인이라도 **심볼이 둘**일 수 있다: 화면·봇은 ETHUSDT 인데 수동 주문은 ETHUSDC 로
@@ -1986,7 +2017,9 @@ function renderSnapshotAccountCore() {
   const positions = (A.positions || []).filter((p) => Math.abs(Number(p.qty) || 0) > 0);
   const unreal = positions.reduce((x, p) => x + (Number(p.unrealized_pnl) || 0), 0), equity = wallet + unreal;
   const mine = snapshotAccountPosition();
-  setT("snapAcctBalance", `지갑 ${fmtUsd(wallet)} · 순자산 ${fmtUsd(equity)} · 가용 ${fmtUsd(b.available)}${balanceAssetNote()}`);
+  const W = acctPools(A), eqAll = W.pools.length ? W.total : equity;   // 머리 = 풀 합산 순자산(USDC+USDT) -- 아래 «자산 구성»이 풀별로 쪼갠다
+  setH("snapAcctBalance", `<b class="aw-headnum">${fmtUsd(eqAll)}</b><span class="aw-headlab">순자산</span>${W.pools.length > 1 ? `<span class="aw-headsub">${W.pools.map((p) => `${p.name} ${p.share.toFixed(0)}%`).join(" · ")}</span>` : ""}`);
+  setH("snapAcctWealth", acctWealthHtml(A));
   if (summary) {
     summary.textContent = mine ? (mine.side === "LONG" ? "롱 보유" : "숏 보유") : "포지션 없음";
     summary.className = `ops-health-summary ${mine ? (mine.side === "LONG" ? "good" : "bad") : "neutral"}`;
