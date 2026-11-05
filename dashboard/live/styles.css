@@ -1229,6 +1229,13 @@ svg {
 .acct-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 16px; }
 .acct-stat { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--soft-line); font-size: 12.5px; }
 .acct-stat span { color: var(--muted); }
+.acct-stats:has(.acct-stats-t) { display: block; }
+.acct-stats-t { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.acct-stats-t th, .acct-stats-t td { padding: 6px 4px; text-align: right; border-bottom: 1px solid var(--soft-line); white-space: nowrap; }
+.acct-stats-t thead th { color: var(--ink); font-weight: 600; font-size: 12px; }
+.acct-stats-t tbody th { text-align: left; font-weight: 400; color: var(--muted); }
+.acct-stats-t td { font: 700 13.5px/1.1 var(--font-mono); } .acct-stats-t small { font: 400 11px var(--font-sans); color: var(--muted); }
+.acct-stats-t td.bad { color: var(--bad); } .acct-stats-t td.good { color: var(--good); }
 .acct-stat b { font: 700 14px/1.1 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* 2026-11-04 펜 메모: 위 줄 = 포지션·오늘 손익 | 자산 곡선(절반씩) · 아래 줄 = 달력 | 고른 날 거래 상세 + 메모장 */
 .acct-top { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; padding: 12px 18px 14px; }

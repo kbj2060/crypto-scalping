@@ -1928,10 +1928,15 @@ function acctCalendar(days, ym, todayKey, selKey, walletAt) {
 
 // 자산 곡선(누적 실현 계단) + 아래 «직전 최고점 대비 낙폭» + 최악 3건 표시
 function acctCurveSvg(a, unreal, hasPos, now, w, h) {
-  const ml = 54, mr = 10, top = 10, mid = Math.round(h * 0.66), bot = h - 18;
+  // 2026-11-06 펜 메모 «이 차트를 usdt, usdc 모두 반영»: 원장은 두 풀(USDC·USDT) 왕복이 섞여 있어 한 줄로만 그리면 어느 풀이 벌고 잃는지 안 보였다 -> 합산(굵게) + 풀별 선(오른쪽 끝에 이름·값)
+  const qOf = (t) => (/USDC$/.test(t.symbol) ? "USDC" : "USDT"), split = new Set(a.map(qOf)).size > 1;
+  const poolUn = Object.fromEntries(acctPools(latestBinanceAccount || {}).pools.map((q) => [q.name, q.unreal]));
+  const ml = 54, mr = split ? 84 : 10, top = 10, mid = Math.round(h * 0.66), bot = h - 18;
   const ts = a[0].entry_time, X = (t) => ml + (t - ts) / Math.max(1, now - ts) * (w - ml - mr);
-  let c = 0, peak = 0; const pts = a.map((t) => { c += Number(t.net_pnl) || 0; peak = Math.max(peak, c); return { t: t.exit_time, c, dd: c - peak, trip: t }; });
-  const endC = c + unreal, lo = Math.min(0, ...pts.map((p) => p.c), endC), hi = Math.max(0, ...pts.map((p) => p.c), endC);
+  let c = 0, peak = 0; const cum = { USDC: 0, USDT: 0 };
+  const pts = a.map((t) => { const v = Number(t.net_pnl) || 0; c += v; cum[qOf(t)] += v; peak = Math.max(peak, c); return { t: t.exit_time, c, dd: c - peak, trip: t, u: cum.USDC, v: cum.USDT }; });
+  const endC = c + unreal, endP = { USDC: cum.USDC + (poolUn.USDC || 0), USDT: cum.USDT + (poolUn.USDT || 0) };
+  const lo = Math.min(0, ...pts.map((p) => p.c), endC, ...(split ? [...pts.map((p) => Math.min(p.u, p.v)), endP.USDC, endP.USDT] : [])), hi = Math.max(0, ...pts.map((p) => p.c), endC, ...(split ? [...pts.map((p) => Math.max(p.u, p.v)), endP.USDC, endP.USDT] : []));
   const Y = (v) => mid - (v - lo) / Math.max(1e-9, hi - lo) * (mid - top);
   const ddMin = Math.min(-1e-9, ...pts.map((p) => p.dd)), YD = (v) => mid + 16 + (v / ddMin) * (bot - mid - 16);
   let s = `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="누적 실현 손익과 최고점 대비 낙폭">`;
@@ -1940,6 +1945,17 @@ function acctCurveSvg(a, unreal, hasPos, now, w, h) {
   pts.forEach((p) => { d += ` H${X(p.t).toFixed(1)} V${Y(p.c).toFixed(1)}`; dd += ` H${X(p.t).toFixed(1)} V${YD(p.dd).toFixed(1)}`; });
   d += ` H${X(now).toFixed(1)}`; dd += ` H${X(now).toFixed(1)}`;
   s += `<path d="${d} V${Y(0)} H${ml} Z" fill="var(--ink)" fill-opacity=".05"/><path d="${d}" fill="none" stroke="var(--ink)" stroke-opacity=".85" stroke-width="1.6"/>`;
+  if (split) {   // 풀별 선 -- 합산보다 가늘게: USDC 실선 · USDT 점선(색 대신 모양+이름표로 가른다)
+    const lines = [["USDC", "u", "", 0.7], ["USDT", "v", "5 3", 0.55]], ends = [];
+    lines.forEach(([q, k, dash, op]) => {
+      let dq = `M${ml} ${Y(0)}`; pts.forEach((p) => { dq += ` H${X(p.t).toFixed(1)} V${Y(p[k]).toFixed(1)}`; }); dq += ` H${X(now).toFixed(1)} V${Y(endP[q]).toFixed(1)}`;
+      s += `<path d="${dq}" fill="none" stroke="var(--ink)" stroke-opacity="${op}" stroke-width="1.2"${dash ? ` stroke-dasharray="${dash}"` : ""}><title>${q} 누적 ${acctSu(endP[q])}</title></path>`;
+      ends.push({ q, y: Y(endP[q]), v: endP[q] });
+    });
+    ends.push({ q: "합산", y: Y(endC), v: endC });
+    ends.sort((x, y) => x.y - y.y).forEach((e, i, arr) => { e.ly = i && e.y < arr[i - 1].ly + 12 ? arr[i - 1].ly + 12 : e.y; });   // 이름표 12px 이상 띄움
+    ends.forEach((e) => { s += `<text x="${w - mr + 5}" y="${e.ly + 3.5}" font-size="10.5" fill="${e.q === "합산" ? "var(--ink)" : "var(--muted)"}" font-weight="${e.q === "합산" ? 700 : 500}">${e.q} ${acctSuc(e.v)}</text>`; });
+  }
   if (hasPos) s += `<line x1="${X(now)}" x2="${X(now)}" y1="${Y(c)}" y2="${Y(endC)}" stroke="var(--${unreal >= 0 ? "good" : "bad"})" stroke-width="3" stroke-dasharray="3 2"><title>지금 미실현 ${acctSu(unreal)}</title></line>`;
   s += `<text x="${ml}" y="${mid + 12}" font-size="10" fill="var(--muted)">낙폭(직전 최고점 대비)</text><path d="${dd} V${YD(0)} H${ml} Z" fill="var(--bad)" fill-opacity=".2"/><path d="${dd}" fill="none" stroke="var(--bad)" stroke-opacity=".7"/>`
     + `<text x="${ml - 6}" y="${YD(ddMin) + 4}" font-size="10" fill="var(--bad)" text-anchor="end">${acctSuc(ddMin)}</text>`;
@@ -1956,20 +1972,29 @@ function acctCurveSvg(a, unreal, hasPos, now, w, h) {
   return s + "</svg>";
 }
 
+// 2026-11-06 펜 메모 «박스 친 부분들을 더 도움이 되는 것들로»: 한 풀로 합친 9칸(승률·평균·최악 비중 …)은 «어느 풀이 돈을 버나»를 못 말했다 -> 합산 | USDC | USDT 열 비교 표.
+//   «최악 1건 비중»·«평균 이익/손실»은 손익비·최악 1건에 이미 담겨 뺐고, 지금 미실현(풀별)을 더했다.
 function acctStatsHtml(a) {
-  const sum = (r) => r.reduce((x, t) => x + (Number(t.net_pnl) || 0), 0);
-  const W = a.filter((t) => t.net_pnl > 0), L = a.filter((t) => t.net_pnl <= 0), tot = sum(a);
-  const aw = W.length ? sum(W) / W.length : 0, al = L.length ? sum(L) / L.length : 0;
-  let c = 0, pk = 0, mdd = 0; a.forEach((t) => { c += Number(t.net_pnl) || 0; pk = Math.max(pk, c); mdd = Math.min(mdd, c - pk); });
-  const worst = a.reduce((x, t) => (t.net_pnl < x.net_pnl ? t : x)), lossSum = sum(L), last = a[a.length - 1];
-  let st = 0; for (let i = a.length - 1; i >= 0 && (a[i].net_pnl > 0) === (last.net_pnl > 0); i--) st++;
-  const row = (k, v, tone, tip) => `<div class="acct-stat"${tip ? ` title="${escapeHtml(tip)}"` : ""}><span>${k}</span><b class="${tone || ""}">${v}</b></div>`;
-  return row("누적 실현", acctSu(tot), acctTone(tot)) + row("왕복 · 승률", `${a.length} · ${Math.round(W.length / a.length * 100)}%`)
-    + row("평균 이익/손실", `${acctSuc(aw)} / ${acctSuc(al)}`) + row("손익비", al ? (aw / Math.abs(al)).toFixed(2) : "—", "", "평균 이익 ÷ |평균 손실|")
-    + row("건당 기대값", acctSu(tot / a.length), acctTone(tot)) + row("최대 낙폭", acctSu(mdd), "bad", "누적 실현의 직전 최고점 대비 가장 깊은 골")
-    + row("최악 1건", `${acctSu(worst.net_pnl)} (${acctMd(worst.exit_time)})`, worst.net_pnl < 0 ? "bad" : "")
-    + row("최악 1건 비중", lossSum < 0 && worst.net_pnl < 0 ? `${Math.round(worst.net_pnl / lossSum * 100)}%` : "—", "warn", "모든 손실 합에서 최악 1건이 차지하는 비율 — 꼬리 한 번이 결과를 정한다")
-    + row("지금 연속", `${last.net_pnl > 0 ? "승" : "패"} ${st}`, last.net_pnl > 0 ? "good" : "bad");
+  const sum = (r) => r.reduce((x, t) => x + (Number(t.net_pnl) || 0), 0), qOf = (t) => (/USDC$/.test(t.symbol) ? "USDC" : "USDT");
+  const P = acctPools(latestBinanceAccount || {}), un = Object.fromEntries(P.pools.map((q) => [q.name, q.unreal]));
+  const cols = [["합산", a, P.unreal]].concat(["USDC", "USDT"].map((q) => [q, a.filter((t) => qOf(t) === q), un[q]])).filter(([k, g]) => k === "합산" || g.length);
+  const one = cols.length === 2 ? [cols[0]] : cols;   // 한 풀만 거래했으면 합산 한 열
+  const m = ([, g, u]) => {
+    if (!g.length) return null;
+    const W = g.filter((t) => t.net_pnl > 0), L = g.filter((t) => t.net_pnl <= 0), tot = sum(g), aw = W.length ? sum(W) / W.length : 0, al = L.length ? sum(L) / L.length : 0;
+    let c = 0, pk = 0, mdd = 0; g.forEach((t) => { c += Number(t.net_pnl) || 0; pk = Math.max(pk, c); mdd = Math.min(mdd, c - pk); });
+    const worst = g.reduce((x, t) => (t.net_pnl < x.net_pnl ? t : x)), last = g[g.length - 1]; let st = 0;
+    for (let i = g.length - 1; i >= 0 && (g[i].net_pnl > 0) === (last.net_pnl > 0); i--) st++;
+    return { tot, n: g.length, win: Math.round(W.length / g.length * 100), pf: al ? (aw / Math.abs(al)).toFixed(2) : "—", ev: tot / g.length, mdd, worst, win1: last.net_pnl > 0, st, u };
+  };
+  const M = one.map(m), td = (v, tone) => `<td class="${tone || ""}">${v}</td>`;
+  const row = (k, f, tip) => `<tr${tip ? ` title="${escapeHtml(tip)}"` : ""}><th>${k}</th>${M.map((x) => (x ? f(x) : "<td>—</td>")).join("")}</tr>`;
+  return `<table class="acct-stats-t"><thead><tr><th></th>${one.map(([k]) => `<th>${k}</th>`).join("")}</tr></thead><tbody>`
+    + row("누적 실현", (x) => td(acctSu(x.tot), acctTone(x.tot))) + row("지금 미실현", (x) => td(x.u == null ? "—" : acctSu(x.u), x.u == null ? "" : acctTone(x.u)), "열려 있는 포지션의 평가손익(풀별)")
+    + row("왕복 · 승률", (x) => td(`${x.n} · ${x.win}%`)) + row("손익비", (x) => td(x.pf), "평균 이익 ÷ |평균 손실|")
+    + row("건당 기대값", (x) => td(acctSu(x.ev), acctTone(x.ev))) + row("최대 낙폭", (x) => td(acctSu(x.mdd), "bad"), "누적 실현의 직전 최고점 대비 가장 깊은 골")
+    + row("최악 1건", (x) => td(`${acctSu(x.worst.net_pnl)} <small>${acctMd(x.worst.exit_time)}</small>`, x.worst.net_pnl < 0 ? "bad" : ""))
+    + row("지금 연속", (x) => td(`${x.win1 ? "승" : "패"} ${x.st}`, x.win1 ? "good" : "bad")) + `</tbody></table>`;
 }
 
 // 2026-09-22 진입 미리보기(/api/manual-entry/preview)가 받아 둔 계획 -- 카드 포지션 줄의 «넣으면 →» 한 마디가 읽는다.
@@ -5372,7 +5397,7 @@ const acctFoldText = (e, sel) => (e.querySelector(sel)?.textContent || "").repla
 function acctFoldApply() {
   const card = el("acctCard");
   if (!card) return;
-  const stat = (box, name) => [...box.querySelectorAll(".acct-stat")].find((r) => r.querySelector("span")?.textContent.trim() === name)?.querySelector("b")?.textContent.trim() || "";
+  const stat = (box, name) => [...box.querySelectorAll(".acct-stats-t tbody tr")].find((r) => r.querySelector("th")?.textContent.trim() === name)?.querySelector("td")?.textContent.trim() || "";   // 표의 첫 열 = 합산
   const defs = [], st = card.querySelector(".acct-stats"), cal = el("snapAcctCal"), ch = cal?.querySelector(".acct-cal-head"), day = el("acctDayBox"), ds = day?.querySelector(".acct-day-sum");
   if (st) defs.push(["stats", st, "성과 통계", `누적 실현 ${stat(st, "누적 실현")} · ${stat(st, "왕복 · 승률").replace(" · ", "건 · 승률 ")} · 최대 낙폭 ${stat(st, "최대 낙폭")}`]);
   if (ch) defs.push(["cal", cal, "손익 달력", `${acctFoldText(ch, "b")} · ${acctFoldText(ch, ".muted")}`]);
