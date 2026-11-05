@@ -500,6 +500,23 @@ def notional_sum(positions: list[dict[str, Any]] | None, symbol: str | None = No
                if symbol is None or p.get("symbol") == symbol)
 
 
+def quote_of(symbol: str) -> str:
+    return "USDC" if str(symbol).endswith("USDC") else "USDT"
+
+
+def pool_balance(account: dict, symbol: str) -> dict:
+    """이 심볼 주문이 증거금을 먹는 풀의 잔고. 단일자산 모드는 USDC·USDT 풀이 따로라 SOXLUSDT 에 USDC 순자산을 쓰면 크기·상한이 어긋난다(2026-11-05).
+    `balances` 가 없는(옛) 응답은 기존 balance 그대로 · 있는데 그 풀이 없으면 {} (= 그 지갑 0)."""
+    bals = account.get("balances")
+    return (account.get("balance") or {}) if bals is None else (bals.get(quote_of(symbol)) or {})
+
+
+def pool_positions(account: dict, symbol: str) -> list:
+    """같은 증거금 풀의 포지션만(멀티에셋 모드는 풀이 하나라 전부)."""
+    ps = account.get("positions") or []
+    return ps if account.get("multi_assets_margin") or account.get("balances") is None else [p for p in ps if quote_of(p.get("symbol")) == quote_of(symbol)]
+
+
 def entry_projection(plan: dict, account: dict, positions: list, existing: float,
                      equity: float) -> dict[str, Any]:
     """«이 주문을 넣으면 계좌 카드가 어떻게 바뀌나» -- 사용자 요청(2026-09-12).
@@ -1233,16 +1250,16 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             #   나가므로(2026-09-19 MANUAL_EXEC_SYMBOL) 심볼 하나만 세면 봇 포지션이 열려 있는
             #   동안 상한이 그만큼 헐거워진다. 위 `existing`(이 심볼)은 아래 청산거리 투영에만
             #   쓴다 -- 그 계산은 심볼 안에서만 성립한다(liq_after = liq_before × existing/total).
-            exposure = notional_sum(account.get("positions"))
+            exposure = notional_sum(pool_positions(account, symbol))   # 2026-11-05 같은 증거금 풀만(ETHUSDC 숏이 SOXLUSDT 상한을 깎지 않는다)
             # 2026-10-20 두 코인 보유: **다른 심볼**에 걸린 늘리는 지정가(자동 물타기 dbad 등, reduce-only 아님)는 체결되면 같은 증거금을 먹는다 --
             #   상한 여유에서 미리 뺀다(10-20 감사: ETH 물타기 지정가 ~$7.4k 가 XRP 진입 뒤에도 그 크기로 남았다).
             #   ponytail: clientOrderId 없이 심볼로만 가른다 -- 같은 심볼의 걸린 지정가는 새 진입의 place_bracket 이 지우는 몫이라 뺀다.
             exposure += sum(abs(float(o.get("price") or 0) * float(o.get("qty") or 0)) for o in account.get("open_orders") or []
-                            if o.get("symbol") != symbol and not o.get("reduce_only"))
+                            if o.get("symbol") != symbol and not o.get("reduce_only") and quote_of(o.get("symbol")) == quote_of(symbol))
             # 추가 진입 맥락은 **같은 방향**만 본다 -- 헤지 모드에서 반대 다리는 다른 결정이다.
             same = [p for p in positions if p.get("side") == side]
             same_unrealized = sum(float(p.get("unrealized_pnl") or 0.0) for p in same)
-            equity = float((account.get("balance") or {}).get("margin") or 0.0)
+            equity = float(pool_balance(account, symbol).get("margin") or 0.0)
             # 포지션이 없으면 positions 가 비어 있다 -- 그때도 설정 레버리지는 알아야
             # «증거금 얼마»를 말할 수 있다(교차 마진에서 증거금 = 명목/레버리지).
             leverage = (max((float(p.get("leverage") or 0.0) for p in positions), default=0.0)
@@ -1396,7 +1413,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                            "rule_shared": f"자동 규칙 포지션이 있어 계좌 상한(순자산 {COMMIT_CAP_X:g}배)"}.get(who, "상한"))
             plan["recommended_source"] = rec_src
             plan["recommended_qty"] = round(rec_qty, 8)
-            plan["projection"] = entry_projection(plan, account, positions, existing, equity)
+            plan["projection"] = entry_projection(plan, {**account, "balance": pool_balance(account, symbol)}, positions, existing, equity)
             # 2026-09-13 «지금 상황» 플랜: 보유시간 권고·집행·분할·예산 사다리. 상한은 적용된 실효 배수.
             plan["trade_plan"] = plan_now(
                 side=side, equity=equity, existing_notional=exposure,
@@ -1797,7 +1814,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             # 🔴위에서 읽은 **그 계좌**를 쓴다(2026-09-13 병합). 같은 함수 안에서 캐시를 또
             # 조회하면 fresh=True(실주문)일 때 수량은 새 값인데 순자산·명목은 30초 묵은 값이
             # 되어, 청산 한도가 실제와 어긋난 채로 «최소 몇 % 닫아라»가 나간다.
-            eq = float((account.get("balance") or {}).get("margin") or 0.0)
+            eq = float(pool_balance(account, symbol).get("margin") or 0.0)
             cur_notional = sum(abs(float(p.get("notional") or 0.0))
                                for p in (account.get("positions") or [])
                                if p.get("symbol") == symbol)

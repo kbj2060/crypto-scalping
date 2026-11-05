@@ -425,8 +425,13 @@ function lineToolReveal() {   // 2026-11-05 모바일: 플롯 아래 주문 상�
   const r = tk.getBoundingClientRect(), rail = el("cardRail"), tb = rail && !rail.hidden ? rail.offsetHeight : 0, over = r.bottom - (innerHeight - tb - 72);
   if (over > 0) scrollBy({ top: Math.min(over, Math.max(0, r.top - 400)), behavior: "smooth" });
 }
+// 2026-11-05 사용자 «SOXL 주문인데 계좌·SLTP 가능 금액이 안 맞는다» -- 단일자산 모드는 USDC·USDT 증거금 풀이 따로다: 이 코인 주문 심볼의 견적 자산 풀을 쓴다(서버 balances). 옛 응답(balances 없음)은 balance 그대로.
+function assetBalance() {
+  const a = latestBinanceAccount, q = /USDC$/.test(execSymbolFor(activeSnapshotAsset) || "") ? "USDC" : "USDT";
+  return a?.balances ? a.balances[q] || {} : a?.balance;
+}
 function lineMaxPct() {   // 2026-11-01 사용자 «진입비율 최대 50% → 현재 남은 증거금에서 최대» -- 슬라이더 상한 = 가용 ÷ 순자산(%). 계좌를 못 읽으면 예전 50
-  const b = latestBinanceAccount?.balance, eq = Number(b?.margin) || 0, av = Number(b?.available) || 0;
+  const b = assetBalance(), eq = Number(b?.margin) || 0, av = Number(b?.available) || 0;
   return eq > 0 && av > 0 ? Math.max(1, Math.min(100, Math.floor(100 * av / eq))) : 50;
 }
 function linePreview() {   // 크기는 서버 미리보기(증거금 linePct %)가 정한다 -- 끌기를 멈추고 0.5초 뒤 한 번
@@ -692,7 +697,7 @@ function renderLineTool() {
   const yP = clampY(Y(ref)), yNow = clampY(Y(p)), yT = clampY(Y(t.tp)), yS = clampY(Y(t.sl));
   const qty = Number(t.plan?.quantity) || 0, unit = coinUnit();
   // 🔴2026-11-02 사용자 «익절·손절을 끌 때마다 가격·%·금액이 맞게 변하게»: 끄는 동안 plan=null 이라 qty=0 이 되어 **금액이 사라졌다**. 서버 수량이 없으면 어림 수량으로 계속 보인다(«≈»).
-  const eq0 = Number(t.plan?.projection?.equity_usdt) || Number(latestBinanceAccount?.balance?.margin) || 0, lev0 = Number(t.plan?.target_leverage) || Number(manualLevEffective()) || 0;
+  const eq0 = Number(t.plan?.projection?.equity_usdt) || Number(assetBalance()?.margin) || 0, lev0 = Number(t.plan?.target_leverage) || Number(manualLevEffective()) || 0;
   const qShow = qty || (eq0 > 0 && lev0 > 0 && ref > 0 ? eq0 * linePct / 100 * lev0 / ref : 0);
   const set = (sel, css) => { const n = h.querySelector(sel); if (n) Object.assign(n.style, css); return n; };
   set(".lt-zone.up", { left: x0 + "px", width: w + "px", top: Math.min(yT, yP) + "px", height: Math.abs(yP - yT) + "px" });
@@ -742,7 +747,7 @@ function renderLineTool() {
   const rr = side ? Math.abs((t.tp - ref) / (t.sl - ref)) : 0, rrEl = h.querySelector(".lt-rr");
   h.querySelectorAll("[data-rr]").forEach((b) => b.setAttribute("aria-pressed", String(!!side && Math.abs(rr - Number(b.dataset.rr)) < 0.05)));   // 지금가가 움직이면 비율도 조금씩 변한다(peg 진입가 = 그때 지금가)
   // 2026-10-30 시안 C: 증거금 슬라이더(순자산 %). 2026-11-04 펜 메모로 손절 손실·레버리지·명목 줄은 뺐다.
-  const pl = t.plan, eq = Number(pl?.projection?.equity_usdt) || Number(latestBinanceAccount?.balance?.margin) || 0;
+  const pl = t.plan, eq = Number(pl?.projection?.equity_usdt) || Number(assetBalance()?.margin) || 0;
   const rg = h.querySelector(".lt-mg-r");
   const mxPct = lineMaxPct(); rg.max = String(mxPct); if (linePct > mxPct && !t.placed) linePct = mxPct;   // 가용이 줄었으면 값도 상한으로
   if (Number(rg.value) !== linePct) rg.value = String(linePct);
@@ -11479,7 +11484,7 @@ function manualHoldStart(btn, side, kind, ov = null) {
 function switchPlan(side) {
   const p = lastExitPositions.get(side);
   const qty = Number(p?.qty) || 0, mark = Number(p?.mark_price) || 0, lev = Number(p?.leverage) || manualLevEffective() || 0;
-  const eq = acctMarginUsed(latestBinanceAccount?.balance).equity;
+  const eq = acctMarginUsed(assetBalance()).equity;
   if (!(qty > 0 && mark > 0 && lev > 0 && eq > 0)) return null;
   const pct = Math.min(100, Math.max(0.01, Math.round(qty * mark / lev / eq * 10000) / 100));
   // 2026-10-10 사용자 결정: 반대 진입엔 SL/TP 체크와 무관하게 손절이 걸린다(서버가 강제) -- sltp 를 보내지 않는다
@@ -11754,7 +11759,7 @@ function renderOfab() {
   // 🔴2026-10-01 비율도 수익금과 **같은 3초 시세**로(사용자 «업데이트 주기가 비율과 수익금이 안 맞는다») -- 전엔 비율만 30초 계좌 조회값이라
   //   수익금이 움직이는 동안 비율이 멈춰 있다 조회 때 한꺼번에 튀었다. 교차증거금 사용 = 명목 ÷ 레버리지 → 시세 비율만큼, 순자산 = 지갑 + 미실현(같은 3초 값).
   //   ponytail: 사용 증거금 전체를 이 코인 시세 비율로 민다 -- 다른 코인 포지션이 같이 열려 있으면 근사(지금은 ETH 하나), 다음 계좌 조회가 오면 거래소 값으로 돌아간다.
-  const bal = latestBinanceAccount?.balance || {}, m = acctMarginUsed(bal), live = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
+  const bal = assetBalance() || {}, m = acctMarginUsed(bal), live = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
   const k = qty && live > 0 && ofabPnlRef.price > 0 ? live / ofabPnlRef.price : 1;
   const eqLive = (Number(bal.wallet) || 0) + (Number(bal.unrealized) || 0) + (pnl - (Number(p?.unrealized_pnl) || 0));
   // 🔴2026-10-06 사용자 «실제 계좌와 다르다 -- 진입 비율이 23% 가 아니야»: 계좌 전체 사용 증거금(거래소 totalInitialMargin)은 **미체결 주문이 묶은

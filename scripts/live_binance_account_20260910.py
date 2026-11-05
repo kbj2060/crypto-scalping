@@ -403,6 +403,9 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
         # 대시보드가 이걸 "증거금 사용"으로 읽어 98.6%(실제 39.6%)를 띄웠다.
         # 사용/유지 증거금은 별도 필드라 이름 그대로 싣는다(pick_balance 참조).
         "balance": chosen,
+        # 2026-11-05 단일자산 모드는 견적 자산마다 증거금 풀이 따로다 -- USDT 심볼(SOXL 등) 주문은 USDC 풀이 아니라 USDT 풀을 먹는다. 풀이 있는 것만 싣는다.
+        "balances": {q: pick_balance(balance, q)[0] for q in ("USDC", "USDT")
+                     if balance.get("multiAssetsMargin") or any(x.get("asset") == q for x in (balance.get("assets") or []))},
         "balance_asset": quote_asset if not balance.get("multiAssetsMargin") else None,
         "multi_assets_margin": bool(balance.get("multiAssetsMargin")),
         "assets": listed,
