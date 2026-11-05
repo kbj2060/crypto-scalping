@@ -1235,11 +1235,11 @@ svg {
 .as-card { display: grid; gap: 9px; align-content: start; padding: 10px 0 2px; border-top: 1px solid var(--soft-line); }
 .as-ch { display: flex; align-items: baseline; gap: 8px; font-size: 13px; } .as-ch .muted { font-size: 12px; }
 .as i.good { background: var(--good); } .as i.bad { background: var(--bad); }
-.as-dots { display: flex; flex-wrap: wrap; gap: 3px; } .as-dots i { width: 8px; height: 8px; border-radius: 50%; } .as-dots i.cur { box-shadow: 0 0 0 2px var(--panel-bg, #232932), 0 0 0 3.5px var(--ink); margin: 0 1.5px; }
-.as-bf { display: grid; grid-template-columns: 1fr 1fr; gap: 0; } .as-bl, .as-br { display: flex; align-items: center; gap: 6px; height: 16px; }
-.as-bl { flex-direction: row-reverse; border-right: 1px solid var(--line); padding-right: 6px; } .as-bl i, .as-br i { height: 12px; border-radius: 2px; min-width: 2px; } .as-br { padding-left: 6px; }
-.as-bl b, .as-br b { font: 700 12px/1 var(--font-mono); white-space: nowrap; }
-.as-net { font: 700 13px/1 var(--font-mono); } .as-foot { margin: 0; font-size: 11.5px; }
+.as-r { display: grid; grid-template-columns: 74px minmax(0, 1fr) 54px; align-items: center; gap: 8px; font-size: 12px; }
+.as-r > span:first-child { color: var(--muted); } .as-r > b { text-align: right; font: 700 12.5px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.as-div, .as-wl { position: relative; display: flex; height: 12px; border-radius: 3px; background: var(--soft-line); overflow: hidden; }
+.as-div i { position: absolute; top: 0; bottom: 0; } .as-div::after { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--line); }
+.as-card .as-r:last-child .as-div::after { display: none; }
 .acct-stat b { font: 700 14px/1.1 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* 2026-11-04 펜 메모: 위 줄 = 포지션·오늘 손익 | 자산 곡선(절반씩) · 아래 줄 = 달력 | 고른 날 거래 상세 + 메모장 */
 .acct-top { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; padding: 12px 18px 14px; }

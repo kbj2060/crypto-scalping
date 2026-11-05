@@ -1972,7 +1972,7 @@ function acctCurveSvg(a, unreal, hasPos, now, w, h) {
   return s + "</svg>";
 }
 
-// 2026-11-06 펜 메모 «글자가 너무 많다 -- 그래프·그림으로» 시안 C 확정(11-06 «왼쪽 섹션으로 옮겨줘»): 표였던 «합산|USDC|USDT» 비교를 점 줄 + 총이익/총손실 막대로.
+// 2026-11-06 펜 메모 «글자가 너무 많다 -- 그래프·그림으로» 시안 A 확정(11-06): 표였던 «합산|USDC|USDT» 비교를 풀별 막대 카드로.
 function acctStatsHtml(a) {
   const qOf = (t) => (/USDC$/.test(t.symbol) ? "USDC" : "USDT"), sum = (r) => r.reduce((x, t) => x + (Number(t.net_pnl) || 0), 0);
   const P = acctPools(latestBinanceAccount || {}), un = Object.fromEntries(P.pools.map((q) => [q.name, q.unreal]));
@@ -1983,13 +1983,14 @@ function acctStatsHtml(a) {
     return { ...x, W, L, tot, gw, gl, aw: W.length ? gw / W.length : 0, al: L.length ? gl / L.length : 0, mdd, win: Math.round(W.length / x.g.length * 100), worst: x.g.reduce((m, t) => (t.net_pnl < m.net_pnl ? t : m)) };
   });
   const all = G[0], pct = (v, m) => `${Math.max(0, Math.min(100, m > 0 ? v / m * 100 : 0)).toFixed(1)}%`;
-  // 점 줄(왕복마다 점 하나, 초록·빨강) + 총이익 vs 총손실 나비 막대
-  const mxg = Math.max(...G.map((x) => Math.max(x.gw, Math.abs(x.gl))), 1);
-  const body = `<div class="as-cards c">${G.map((x) => `<div class="as-card"><div class="as-ch"><b>${x.q}</b><span class="muted">승 ${x.W.length} · 패 ${x.L.length}</span></div>
-      <div class="as-dots" role="img" aria-label="${x.q} 왕복 결과 점 줄">${x.g.map((t, i) => `<i class="${t.net_pnl > 0 ? "good" : "bad"}${i >= x.g.length - (() => { let s = 0; for (let k = x.g.length - 1; k >= 0 && (x.g[k].net_pnl > 0) === (x.g[x.g.length - 1].net_pnl > 0); k--) s++; return s; })() ? " cur" : ""}" title="${escapeHtml(acctTripTip(t))}"></i>`).join("")}</div>
-      <div class="as-bf"><span class="as-bl"><i class="bad" style="width:${pct(Math.abs(x.gl), mxg)}"></i><b class="bad">${acctSuc(x.gl)}</b></span><span class="as-br"><i class="good" style="width:${pct(x.gw, mxg)}"></i><b class="good">${acctSuc(x.gw)}</b></span></div>
-      <div class="as-net ${acctTone(x.tot)}">순 ${acctSu(x.tot)}</div></div>`).join("")}</div>
-      <p class="muted as-foot">점 = 왕복 하나(오래된 → 최근) · 테두리 있는 점 = 지금 연속 · 막대 = 총이익(오른쪽) vs 총손실(왼쪽)</p>`;
+  // 풀별 카드: 부호 있는 막대 넷(누적 실현 · 승/패 · 건당 이익 vs 손실 · 최대 낙폭) -- 숫자는 막대 끝에 하나씩
+  const mx = Math.max(...G.map((x) => Math.abs(x.tot)), 1), mxa = Math.max(...G.map((x) => Math.max(x.aw, Math.abs(x.al))), 1), mxd = Math.max(...G.map((x) => Math.abs(x.mdd)), 1);
+  const half = (v, m) => `${(m > 0 ? Math.min(100, Math.abs(v) / m * 100) / 2 : 0).toFixed(1)}%`, div = (v, m, tone) => `<span class="as-div"><i class="${tone}" style="${v < 0 ? "right" : "left"}:50%;width:${half(v, m)}"></i></span>`;
+  const body = `<div class="as-cards">${G.map((x) => `<div class="as-card"><div class="as-ch"><b>${x.q}</b><span class="muted">${x.g.length}건</span></div>
+      <div class="as-r"><span>누적 실현</span>${div(x.tot, mx, x.tot >= 0 ? "good" : "bad")}<b class="${acctTone(x.tot)}">${acctSuc(x.tot)}</b></div>
+      <div class="as-r"><span>승 · 패</span><span class="as-wl"><i class="good" style="flex:${x.W.length || 0.001}"></i><i class="bad" style="flex:${x.L.length || 0.001}"></i></span><b>${x.win}%</b></div>
+      <div class="as-r"><span>건당 이익 · 손실</span><span class="as-div"><i class="good" style="left:50%;width:${half(x.aw, mxa)}"></i><i class="bad" style="right:50%;width:${half(x.al, mxa)}"></i></span><b>${x.al ? (x.aw / Math.abs(x.al)).toFixed(2) : "—"}</b></div>
+      <div class="as-r"><span>최대 낙폭</span><span class="as-div"><i class="bad" style="left:0;width:${pct(Math.abs(x.mdd), mxd)}"></i></span><b class="bad">${acctSuc(x.mdd)}</b></div></div>`).join("")}</div>`;
   return `<div class="as" data-sum="누적 실현 ${acctSu(all.tot)} · ${all.g.length}건 · 승률 ${all.win}% · 최대 낙폭 ${acctSu(all.mdd)}">${body}</div>`;
 }
 
