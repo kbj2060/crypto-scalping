@@ -1229,13 +1229,17 @@ svg {
 .acct-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 16px; }
 .acct-stat { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--soft-line); font-size: 12.5px; }
 .acct-stat span { color: var(--muted); }
-.acct-stats:has(.acct-stats-t) { display: block; }
-.acct-stats-t { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
-.acct-stats-t th, .acct-stats-t td { padding: 6px 4px; text-align: right; border-bottom: 1px solid var(--soft-line); white-space: nowrap; }
-.acct-stats-t thead th { color: var(--ink); font-weight: 600; font-size: 12px; }
-.acct-stats-t tbody th { text-align: left; font-weight: 400; color: var(--muted); }
-.acct-stats-t td { font: 700 13.5px/1.1 var(--font-mono); } .acct-stats-t small { font: 400 11px var(--font-sans); color: var(--muted); }
-.acct-stats-t td.bad { color: var(--bad); } .acct-stats-t td.good { color: var(--good); }
+.acct-stats:has(.as) { display: block; }
+.as { display: grid; gap: 10px; }
+.as-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.as-card { display: grid; gap: 9px; align-content: start; padding: 10px 0 2px; border-top: 1px solid var(--soft-line); }
+.as-ch { display: flex; align-items: baseline; gap: 8px; font-size: 13px; } .as-ch .muted { font-size: 12px; }
+.as i.good { background: var(--good); } .as i.bad { background: var(--bad); }
+.as-dots { display: flex; flex-wrap: wrap; gap: 3px; } .as-dots i { width: 8px; height: 8px; border-radius: 50%; } .as-dots i.cur { box-shadow: 0 0 0 2px var(--panel-bg, #232932), 0 0 0 3.5px var(--ink); margin: 0 1.5px; }
+.as-bf { display: grid; grid-template-columns: 1fr 1fr; gap: 0; } .as-bl, .as-br { display: flex; align-items: center; gap: 6px; height: 16px; }
+.as-bl { flex-direction: row-reverse; border-right: 1px solid var(--line); padding-right: 6px; } .as-bl i, .as-br i { height: 12px; border-radius: 2px; min-width: 2px; } .as-br { padding-left: 6px; }
+.as-bl b, .as-br b { font: 700 12px/1 var(--font-mono); white-space: nowrap; }
+.as-net { font: 700 13px/1 var(--font-mono); } .as-foot { margin: 0; font-size: 11.5px; }
 .acct-stat b { font: 700 14px/1.1 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* 2026-11-04 펜 메모: 위 줄 = 포지션·오늘 손익 | 자산 곡선(절반씩) · 아래 줄 = 달력 | 고른 날 거래 상세 + 메모장 */
 .acct-top { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; padding: 12px 18px 14px; }
@@ -1319,7 +1323,7 @@ svg {
 .manual-entry-row:has(> [hidden]:only-child) { display: none; }
 #snapAcctPerf { padding: 0 18px 4px; }
 
-#acctCard .acct-plot svg { max-height: 320px; }
+#acctCard .acct-plot svg { max-height: none; }
 /* 각 레인의 «약속». 두 행동은 확인 방식이 다르고, 그 차이가 이 화면에서 가장 비싼 오해다. */
 @media (max-width: 720px) {
   .acct-lanes { grid-template-columns: 1fr; margin-left: -14px; margin-right: -14px; }
@@ -2335,7 +2339,7 @@ html.fit1 #snapshotTabPanel > .panel { scroll-margin-top: var(--apph, 64px); }  
   /* 2026-10-01 계좌: 성과 차트를 늘 펼치고(접기 숨김) 남는 높이를 fitLayout 이 --acctplot 으로 준다 */
   html.fit1 #acctCard > :not(.ops-health-head) { zoom: var(--acctz, 1); }   /* 2026-10-05 넘치면 본문만 비율로(제목 줄은 다른 카드와 같게) -- app.js fitLayout 이 --acctz */
 
-  html.fit1 #snapAcctCurve .acct-plot svg { height: var(--acctplot, 240px); max-height: none; }   /* 2026-10-01 줄을 위로 -- 남는 칸을 app.js fitLayout 이 재서 사다리에 준다 */   /* 고정 -- 일정 받기 전 안내 줄로 174px 였다가 113px 로 줄며 차트가 늘었다 */
+  html.fit1 #snapAcctCurve .acct-plot svg { height: auto; max-height: none; }   /* 2026-11-06 곡선 높이는 왼쪽 열을 따른다(app.js lag) -- 한 화면 맞춤은 카드가 한 화면을 넘어 120 으로 눌렸다 */   /* 2026-10-01 줄을 위로 -- 남는 칸을 app.js fitLayout 이 재서 사다리에 준다 */   /* 고정 -- 일정 받기 전 안내 줄로 174px 였다가 113px 로 줄며 차트가 늘었다 */
   html.fit1 #fpCard > .ops-health-head, html.fit1 #liquidationMapList { flex: none; }
 }
 /* 2026-11-02 왼쪽 세로 내비(사용자 «B안: 왼쪽 세로 내비 · 오른쪽 점 레일 제거»). 마크업·동작(app.js setupCardRail/cardRailSync)은 점 레일 그대로 -- 겉만 바꿨다. */

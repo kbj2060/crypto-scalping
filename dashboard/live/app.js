@@ -1972,29 +1972,25 @@ function acctCurveSvg(a, unreal, hasPos, now, w, h) {
   return s + "</svg>";
 }
 
-// 2026-11-06 펜 메모 «박스 친 부분들을 더 도움이 되는 것들로»: 한 풀로 합친 9칸(승률·평균·최악 비중 …)은 «어느 풀이 돈을 버나»를 못 말했다 -> 합산 | USDC | USDT 열 비교 표.
-//   «최악 1건 비중»·«평균 이익/손실»은 손익비·최악 1건에 이미 담겨 뺐고, 지금 미실현(풀별)을 더했다.
+// 2026-11-06 펜 메모 «글자가 너무 많다 -- 그래프·그림으로» 시안 C 확정(11-06 «왼쪽 섹션으로 옮겨줘»): 표였던 «합산|USDC|USDT» 비교를 점 줄 + 총이익/총손실 막대로.
 function acctStatsHtml(a) {
-  const sum = (r) => r.reduce((x, t) => x + (Number(t.net_pnl) || 0), 0), qOf = (t) => (/USDC$/.test(t.symbol) ? "USDC" : "USDT");
+  const qOf = (t) => (/USDC$/.test(t.symbol) ? "USDC" : "USDT"), sum = (r) => r.reduce((x, t) => x + (Number(t.net_pnl) || 0), 0);
   const P = acctPools(latestBinanceAccount || {}), un = Object.fromEntries(P.pools.map((q) => [q.name, q.unreal]));
-  const cols = [["합산", a, P.unreal]].concat(["USDC", "USDT"].map((q) => [q, a.filter((t) => qOf(t) === q), un[q]])).filter(([k, g]) => k === "합산" || g.length);
-  const one = cols.length === 2 ? [cols[0]] : cols;   // 한 풀만 거래했으면 합산 한 열
-  const m = ([, g, u]) => {
-    if (!g.length) return null;
-    const W = g.filter((t) => t.net_pnl > 0), L = g.filter((t) => t.net_pnl <= 0), tot = sum(g), aw = W.length ? sum(W) / W.length : 0, al = L.length ? sum(L) / L.length : 0;
-    let c = 0, pk = 0, mdd = 0; g.forEach((t) => { c += Number(t.net_pnl) || 0; pk = Math.max(pk, c); mdd = Math.min(mdd, c - pk); });
-    const worst = g.reduce((x, t) => (t.net_pnl < x.net_pnl ? t : x)), last = g[g.length - 1]; let st = 0;
-    for (let i = g.length - 1; i >= 0 && (g[i].net_pnl > 0) === (last.net_pnl > 0); i--) st++;
-    return { tot, n: g.length, win: Math.round(W.length / g.length * 100), pf: al ? (aw / Math.abs(al)).toFixed(2) : "—", ev: tot / g.length, mdd, worst, win1: last.net_pnl > 0, st, u };
-  };
-  const M = one.map(m), td = (v, tone) => `<td class="${tone || ""}">${v}</td>`;
-  const row = (k, f, tip) => `<tr${tip ? ` title="${escapeHtml(tip)}"` : ""}><th>${k}</th>${M.map((x) => (x ? f(x) : "<td>—</td>")).join("")}</tr>`;
-  return `<table class="acct-stats-t"><thead><tr><th></th>${one.map(([k]) => `<th>${k}</th>`).join("")}</tr></thead><tbody>`
-    + row("누적 실현", (x) => td(acctSu(x.tot), acctTone(x.tot))) + row("지금 미실현", (x) => td(x.u == null ? "—" : acctSu(x.u), x.u == null ? "" : acctTone(x.u)), "열려 있는 포지션의 평가손익(풀별)")
-    + row("왕복 · 승률", (x) => td(`${x.n} · ${x.win}%`)) + row("손익비", (x) => td(x.pf), "평균 이익 ÷ |평균 손실|")
-    + row("건당 기대값", (x) => td(acctSu(x.ev), acctTone(x.ev))) + row("최대 낙폭", (x) => td(acctSu(x.mdd), "bad"), "누적 실현의 직전 최고점 대비 가장 깊은 골")
-    + row("최악 1건", (x) => td(`${acctSu(x.worst.net_pnl)} <small>${acctMd(x.worst.exit_time)}</small>`, x.worst.net_pnl < 0 ? "bad" : ""))
-    + row("지금 연속", (x) => td(`${x.win1 ? "승" : "패"} ${x.st}`, x.win1 ? "good" : "bad")) + `</tbody></table>`;
+  const pools = ["USDC", "USDT"].map((q) => ({ q, g: a.filter((t) => qOf(t) === q), u: un[q] })).filter((x) => x.g.length);
+  const G = (pools.length > 1 ? [{ q: "합산", g: a, u: P.unreal }, ...pools] : [{ q: pools[0]?.q || "합산", g: a, u: P.unreal }]).map((x) => {
+    const W = x.g.filter((t) => t.net_pnl > 0), L = x.g.filter((t) => t.net_pnl <= 0), tot = sum(x.g), gw = sum(W), gl = sum(L);
+    let c = 0, pk = 0, mdd = 0; x.g.forEach((t) => { c += Number(t.net_pnl) || 0; pk = Math.max(pk, c); mdd = Math.min(mdd, c - pk); });
+    return { ...x, W, L, tot, gw, gl, aw: W.length ? gw / W.length : 0, al: L.length ? gl / L.length : 0, mdd, win: Math.round(W.length / x.g.length * 100), worst: x.g.reduce((m, t) => (t.net_pnl < m.net_pnl ? t : m)) };
+  });
+  const all = G[0], pct = (v, m) => `${Math.max(0, Math.min(100, m > 0 ? v / m * 100 : 0)).toFixed(1)}%`;
+  // 점 줄(왕복마다 점 하나, 초록·빨강) + 총이익 vs 총손실 나비 막대
+  const mxg = Math.max(...G.map((x) => Math.max(x.gw, Math.abs(x.gl))), 1);
+  const body = `<div class="as-cards c">${G.map((x) => `<div class="as-card"><div class="as-ch"><b>${x.q}</b><span class="muted">승 ${x.W.length} · 패 ${x.L.length}</span></div>
+      <div class="as-dots" role="img" aria-label="${x.q} 왕복 결과 점 줄">${x.g.map((t, i) => `<i class="${t.net_pnl > 0 ? "good" : "bad"}${i >= x.g.length - (() => { let s = 0; for (let k = x.g.length - 1; k >= 0 && (x.g[k].net_pnl > 0) === (x.g[x.g.length - 1].net_pnl > 0); k--) s++; return s; })() ? " cur" : ""}" title="${escapeHtml(acctTripTip(t))}"></i>`).join("")}</div>
+      <div class="as-bf"><span class="as-bl"><i class="bad" style="width:${pct(Math.abs(x.gl), mxg)}"></i><b class="bad">${acctSuc(x.gl)}</b></span><span class="as-br"><i class="good" style="width:${pct(x.gw, mxg)}"></i><b class="good">${acctSuc(x.gw)}</b></span></div>
+      <div class="as-net ${acctTone(x.tot)}">순 ${acctSu(x.tot)}</div></div>`).join("")}</div>
+      <p class="muted as-foot">점 = 왕복 하나(오래된 → 최근) · 테두리 있는 점 = 지금 연속 · 막대 = 총이익(오른쪽) vs 총손실(왼쪽)</p>`;
+  return `<div class="as" data-sum="누적 실현 ${acctSu(all.tot)} · ${all.g.length}건 · 승률 ${all.win}% · 최대 낙폭 ${acctSu(all.mdd)}">${body}</div>`;
 }
 
 // 2026-09-22 진입 미리보기(/api/manual-entry/preview)가 받아 둔 계획 -- 카드 포지션 줄의 «넣으면 →» 한 마디가 읽는다.
@@ -2080,12 +2076,10 @@ function renderSnapshotAccountCore() {
     const liqD = mk > 0 && liq > 0 ? (long ? mk - liq : liq - mk) / mk * 100 : null;
     const oo = (A.open_orders || []).filter((o) => o.symbol === p.symbol);
     return `<div class="acct-posline"><span class="acct-side ${long ? "good" : "bad"}">${long ? "롱" : "숏"} ×${Number(p.leverage) || "?"}</span>
-      <span>${escapeHtml(p.symbol)} <b>${Number(p.qty)}</b></span><span>진입 <b>${acctPx(p.entry_price)}</b> → <b>${acctPx(mk)}</b></span>
+      <span><b>${escapeHtml(acctCoin(p.symbol))}</b></span>
       ${(A.unprotected || []).includes(`${p.symbol}:${String(p.side).toUpperCase()}`) ? `<span class="bad" title="거래소 스탑도 서버 5분봉 감시도 없습니다">🔴손절 없음</span>` : ""}
       ${liqD != null ? `<span>청산 <b>${acctPx(liq)}</b> <em class="${liqD < 3 ? "bad" : liqD < 6 ? "warn" : ""}">(${liqD.toFixed(1)}% 남음)</em></span>` : ""}
       <span>노출 <b>${equity > 0 ? (Math.abs(Number(p.notional) || 0) / equity).toFixed(1) : "—"}배</b></span>
-      <span>미실현 <b class="${acctTone(Number(p.unrealized_pnl))}">${acctSu(Number(p.unrealized_pnl) || 0)}</b></span>
-      ${p.entry_at ? `<span>보유 <b>${acctDur(now - Date.parse(p.entry_at))}</b></span>` : ""}
       ${oo.length ? `<span>걸린 주문 ${oo.map((o) => `${o.side === "BUY" ? "매수" : "매도"} ${acctPx(o.price)}×${o.qty}`).join(", ")}</span>` : ""}
       ${p === mine ? pvNote : ""}</div>`;
   }).join("") : `<div class="acct-posline"><span class="acct-side neutral">포지션 없음</span>${pvNote}</div>`;
@@ -2095,7 +2089,7 @@ function renderSnapshotAccountCore() {
   const posW = (el("snapAcctPosition").clientWidth || 600) - 32;
   const todayW = Math.max(240, Math.round(narrowCard ? posW : (posW - 20) * 1.3 / 2.3));   // 오늘 띠 = 숫자 1 : 흐름 1.3 (위 줄은 절반 폭)
   const curveW = Math.max(300, el("snapAcctCurve").clientWidth || 600);
-  const curveH = document.documentElement.classList.contains("fit1") && fitAcctPlotH > 0 ? fitAcctPlotH : 280;
+  const curveH = 280;   // 2026-11-06 한 화면 모드(fitAcctPlotH)로는 안 정한다 -- 카드가 한 화면을 훌쩍 넘어 곡선이 최소 120 으로 눌렸다. 높이는 왼쪽 열을 따른다(아래 lag)
   // ── 위 줄 «오늘 띠»(늘 오늘) · 아래 줄 상세 칸(달력에서 고른 날 -- 2026-11-04 펜 메모: 거래내역 + 메모장) ──
   const selKey = acctSelDay && acctSelDay < todayKey ? acctSelDay : null, dKey = selKey || todayKey, s0 = acctDay0(dKey);
   const labOf = (k) => `${k.slice(5).replace("-", "/")}(${"일월화수목금토"[new Date(acctDay0(k) + ACCT_KST).getUTCDay()]})`;
@@ -2131,7 +2125,9 @@ function renderSnapshotAccountCore() {
   //   서버가 코인별 청산 칸으로 동시에 보낸다(/api/manual-exit/submit-all). 두 번 눌러야 나간다 · 체결 방식은 플로팅 패널의 청산 방식(지정가/즉시)을 따른다.
   const closeAllRow = positions.length >= 2 || closeAllMsg ? `<div class="acct-posline acct-closeall">${positions.length >= 2
     ? `<button type="button" class="acct-closeall-btn${closeAllArmed ? " arm" : ""}" data-close-all="${positions.length}"${closeAllBusy ? " disabled" : ""}>${closeAllLabel(positions.length)}</button>` : ""}${closeAllMsg ? `<span>${escapeHtml(closeAllMsg)}</span>` : ""}</div>` : "";
-  setH("snapAcctPosition", posLine + closeAllRow + todayHtml);
+  // 2026-11-06 펜 메모 «통계 박스를 왼쪽 섹션으로 옮기고 바로 위 차트 높이를 늘려줘»: 왼쪽 열 아래가 비어 있었다 -- 기간 칩은 곡선과 한 쌍이라 그대로 오른쪽
+  const spanA = T.filter((t) => t.exit_time >= (ACCT_SPANS[acctSpanIdx][1] === 0 ? t0 : ACCT_SPANS[acctSpanIdx][1] > 0 ? now - ACCT_SPANS[acctSpanIdx][1] * ACCT_DAY : 0));
+  setH("snapAcctPosition", posLine + closeAllRow + todayHtml + (spanA.length ? `<div class="acct-stats">${acctStatsHtml(spanA)}</div>` : ""));
 
   // ── 아래: 달력 | 자산 곡선 ──
   const days = new Map();
@@ -2153,14 +2149,15 @@ function renderSnapshotAccountCore() {
   const spanDays = ACCT_SPANS[acctSpanIdx][1];
   const from = spanDays === 0 ? t0 : spanDays > 0 ? now - spanDays * ACCT_DAY : 0;
   const a = T.filter((t) => t.exit_time >= from);
-  const plot = spanDays === 0 ? acctTodaySvg(tT, unreal, positions.length > 0, t0, now, curveW, curveH)
-    : a.length ? acctCurveSvg(a, unreal, positions.length > 0, now, curveW, curveH) : `<p class="acct-empty">이 기간에 닫힌 왕복이 없습니다.</p>`;
-  const curveHtml = `<div class="acct-curve-box">
+  const plotAt = (ch) => (spanDays === 0 ? acctTodaySvg(tT, unreal, positions.length > 0, t0, now, curveW, ch)
+    : a.length ? acctCurveSvg(a, unreal, positions.length > 0, now, curveW, ch) : `<p class="acct-empty">이 기간에 닫힌 왕복이 없습니다.</p>`);
+  const curveAt = (ch) => `<div class="acct-curve-box">
       <div class="chipset" role="group" aria-label="자산 곡선 기간">${ACCT_SPANS.map(([lab], i) => `<button type="button" class="chip${i === acctSpanIdx ? " on" : ""}" data-acct-span="${i}" aria-pressed="${i === acctSpanIdx}">${lab}</button>`).join("")}</div>
-      <div class="acct-plot">${plot}</div>
-      ${a.length ? `<div class="acct-stats">${acctStatsHtml(a)}</div>` : ""}
+      <div class="acct-plot">${plotAt(ch)}</div>
     </div>`;
-  setH("snapAcctCal", calHtml); setH("snapAcctCurve", curveHtml); setH("snapAcctDay", dayHtml);
+  setH("snapAcctCal", calHtml); setH("snapAcctCurve", curveAt(curveH)); setH("snapAcctDay", dayHtml);
+  // 2026-11-06 펜 메모 «바로 위 차트 높이를 늘려줘»: 왼쪽 열(포지션·오늘 손익·통계)이 오른쪽보다 길면 그 차이만큼 곡선을 키워 두 열 바닥을 맞춘다
+  if (!narrowCard) { const lag = el("snapAcctPosition").offsetHeight - el("snapAcctCurve").offsetHeight; if (lag > 6) setH("snapAcctCurve", curveAt(Math.min(900, curveH + lag))); }
   el("acctDayBox").hidden = false; acctNoteSync(dKey, labOf(dKey));
   if (acctNotes === null && Date.now() - acctNotesAt > 30000) acctNotesLoad();
   renderCycleCard(A, positions, equity);
@@ -5397,9 +5394,9 @@ const acctFoldText = (e, sel) => (e.querySelector(sel)?.textContent || "").repla
 function acctFoldApply() {
   const card = el("acctCard");
   if (!card) return;
-  const stat = (box, name) => [...box.querySelectorAll(".acct-stats-t tbody tr")].find((r) => r.querySelector("th")?.textContent.trim() === name)?.querySelector("td")?.textContent.trim() || "";   // 표의 첫 열 = 합산
+  const sumOf = (box) => box.querySelector("[data-sum]")?.dataset.sum || "";
   const defs = [], st = card.querySelector(".acct-stats"), cal = el("snapAcctCal"), ch = cal?.querySelector(".acct-cal-head"), day = el("acctDayBox"), ds = day?.querySelector(".acct-day-sum");
-  if (st) defs.push(["stats", st, "성과 통계", `누적 실현 ${stat(st, "누적 실현")} · ${stat(st, "왕복 · 승률").replace(" · ", "건 · 승률 ")} · 최대 낙폭 ${stat(st, "최대 낙폭")}`]);
+  if (st) defs.push(["stats", st, "성과 통계", sumOf(st)]);
   if (ch) defs.push(["cal", cal, "손익 달력", `${acctFoldText(ch, "b")} · ${acctFoldText(ch, ".muted")}`]);
   if (day && !day.hidden && ds) defs.push(["day", day, "오늘 거래 · 메모", [acctFoldText(ds, "b"), acctFoldText(ds, ".muted").replace(" · 펀딩·수수료 포함", ""), acctFoldText(day, "#acctNoteSt")].filter(Boolean).join(" · ")]);
   card.querySelectorAll("#snapAcctCycle .cy-box").forEach((b) => {
