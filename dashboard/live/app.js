@@ -447,13 +447,13 @@ function linePreview() {   // 크기는 서버 미리보기(증거금 linePct %)
 function lineFire() {   // 미리보기 → 오는 즉시 발주(manualFireOnPreview) -- 진입 버튼과 같은 길(상한·게이트·확인 서버 검사 그대로)
   const t = lineTool, p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), side = t && lineSide(t, p);
   if (!side) return;
-  if (manualOrderBusy || manualPreviewInFlight) { ofabSay(escapeHtml(manualOrderBusy ? "이전 주문을 처리하는 중이라 이번 누름은 무시됐습니다 — 끝나면 다시 눌러 주세요" : "다른 미리보기를 받는 중이라 이번 누름은 무시됐습니다 — 잠시 뒤 다시 눌러 주세요")); return; }   // 2026-11-05 사용자 «주문 버튼이 씹힌다» -- 조용히 무시하던 자리에 사유를 띄운다
-  const lim = t.entry > 0;   // 지정가 = 접수가 확인될 때까지 선을 둔다(manualEntrySubmit 이 placed 로) · peg = 현행대로 바로 지운다
+  if (manualOrderBusy || manualPreviewInFlight) { t.fail = manualOrderBusy ? "이전 주문 처리 중 -- 끝나면 다시 누르세요" : "미리보기 받는 중 -- 잠시 뒤 다시 누르세요"; renderLineTool(); ofabSay(escapeHtml(manualOrderBusy ? "이전 주문을 처리하는 중이라 이번 누름은 무시됐습니다 — 끝나면 다시 눌러 주세요" : "다른 미리보기를 받는 중이라 이번 누름은 무시됐습니다 — 잠시 뒤 다시 눌러 주세요")); return; }   // 2026-11-05 사용자 «주문 버튼이 씹힌다» -- 조용히 무시하던 자리에 사유를 띄운다
+  t.fail = ""; const lim = t.entry > 0;   // 지정가 = 접수가 확인될 때까지 선을 둔다(manualEntrySubmit 이 placed 로) · peg = 현행대로 바로 지운다
   ofabWatchResult(); ofabSay(escapeHtml(`${side === "LONG" ? "롱" : "숏"} ${lim ? "지정가 " : ""}선 주문 — ${HOLD_FIRE_MS ? "미리보기 받는 중…" : "주문 전송 중…"}`));
   const ov = { rule: "", pct: linePct, tp: linePx(t.tp), sl: linePx(t.sl), fresh: true, limit: lim ? linePx(t.entry) : "" };
   if (!HOLD_FIRE_MS) manualFireNow(side, "entry", ov);   // 즉시 모드 -- 미리보기 없이 바로
   else { manualFireOnPreview = true; manualEntryPreview(side, "entry", ov); }
-  if (!lim) { lineTool = null; renderLineTool(); }
+  renderLineTool();   // peg 도 선은 서버가 받았다고 한 뒤(manualEntrySubmit)에 거둔다 -- 거절되면 사유를 이 팝업에 남긴다
 }
 function lineToolEl(box) {
   let h = document.getElementById("lineTool");
@@ -749,8 +749,8 @@ function renderLineTool() {
   rg.disabled = !!t.placed; h.querySelectorAll("[data-rr]").forEach((b) => { b.disabled = !!t.placed; });
   h.querySelector(".lt-mg-v").innerHTML = `${linePct}%${eq > 0 ? `<small>$${Math.round(eq * linePct / 100).toLocaleString()}</small>` : ""}`;   // 숫자뿐
   // 2026-11-04 펜 메모: 팝업의 «손절 시 −$ = 순자산 −%» · «레버리지 N× · 명목 N×» 줄은 뺐다(크기 줄 위쪽 «롱 · 10× / 수량» 과 증거금 숫자만 남긴다)
-  rrEl.textContent = t.err || (t.add ? "기존 익절·손절선 그대로 · 크기만 늘림" : side ? `손익비 ${rr.toFixed(2)} : 1` : "");
-  rrEl.classList.toggle("bad", !!t.err);
+  rrEl.textContent = t.err || t.fail || (t.add ? "기존 익절·손절선 그대로 · 크기만 늘림" : side ? `손익비 ${rr.toFixed(2)} : 1` : "");
+  rrEl.classList.toggle("bad", !!(t.err || t.fail));
   const go = h.querySelector(".lt-go"), armed = Date.now() < (t.arm || 0);
   go.disabled = !side || !!t.err || !qty || !!t.placed;
   go.classList.toggle("short", side === "SHORT"); go.classList.toggle("armed", armed);   // className 을 덮으면 꾹 채움(hold)이 매초 지워진다
@@ -11188,6 +11188,8 @@ async function manualEntryPollStatus() {
   }
 }
 
+// 선 주문이 서버에서 거절·실패하면 그 사유를 SLTP 팝업 줄에 남긴다 -- 플로팅 버튼이 접혀 있으면 말풍선·카드 결과 칸이 안 보여 «씹힌 것»처럼 보였다(2026-11-05).
+function lineSubmitFail(pending, msg) { if (pending?.tp && lineTool) { lineTool.fail = msg.replace(/already_working$/, "이 코인 주문이 진행 중입니다 -- 끝난 뒤 다시"); renderLineTool(); } }
 async function manualEntrySubmit() {
   const pending = manualEntryPending;
   const box = el("snapEntryResult");
@@ -11220,6 +11222,7 @@ async function manualEntrySubmit() {
     const data = await res.json();
     if (!data.ok) {
       box.innerHTML = entryNote(`주문 실패: ${data.detail || data.error || res.status}`, "bad");
+      lineSubmitFail(pending, `주문 실패: ${data.detail || data.error || res.status}`);
       manualOrderBusy = false;
       manualButtonsDisabled(false);
       return;
@@ -11234,10 +11237,12 @@ async function manualEntrySubmit() {
       return;
     }
     box.innerHTML = entryResultHtml(data.state, "live");
+    if (pending.tp && !pending.limit && lineTool) { lineTool = null; renderLineTool(); }   // peg 선 주문 접수 = 선을 거둔다(체결분은 포지션 선이 이어받는다)
     if (pending.kind === "exit" && pending.sw) ofabWatchResult();   // 말풍선이 서버 스위칭 상태(결과 칸)를 따라 말한다
     setTimeout(manualEntryPollStatus, STATUS_POLL_MS);
   } catch (err) {
     box.innerHTML = entryNote(`주문 실패: ${err && err.message ? err.message : err}`, "bad");
+    lineSubmitFail(pending, `주문 실패: ${err && err.message ? err.message : err}`);
     manualOrderBusy = false;
     manualButtonsDisabled(false);
   }
