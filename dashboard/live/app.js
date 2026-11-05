@@ -1400,14 +1400,6 @@ function renderChartWindowTabs() {
     host.style.setProperty("--i", String(idx));
     host.classList.toggle("zoomed", !daily && fpZoomed());   // 넓힌 창 = 어느 칸도 켜지 않는다(1h 를 누르면 풋프린트로)
   }
-  const note = el("fpZoomNote");
-  if (note) {
-    const on = !daily && fpZoomed();
-    note.hidden = !on;
-    const min = chartWindowBars * 5 * chartTfK;
-    // 2026-10-20 연속 줌: 창이 아무 폭이라 반올림(«2.4시간») · «캔들»은 박스를 실제로 뺐을 때만(fpBoxesOff -- 렌더가 바뀔 때 이 함수를 다시 부른다)
-    if (on) note.textContent = `${min >= 1440 ? `${+(min / 1440).toFixed(1)}일` : `${+(min / 60).toFixed(1)}시간`}${fpBoxesOff ? " · 캔들" : ""}`;
-  }
 }
 
 function setupSnapshotAssetTabs() {
