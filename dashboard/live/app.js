@@ -409,14 +409,21 @@ function lineToolToggle(want) {   // 2026-10-30 사용자 «롱만 나오고 숏
   const arm = armedLinesNow();
   if (!lineTool && arm && arm.side === want) {   // 2026-11-03 사용자 «SLTP 로 추가 진입 · 손절/익절 라인은 그대로»: 같은 쪽 선 포지션이면 무장된 선을 그대로 잡고 크기만 늘린다(서버도 보낸 선을 무시하고 무장된 선을 쓴다)
     lineTool = { tp: arm.b.tp_level, sl: arm.b.sl_level, plan: null, err: "", asset: activeSnapshotAsset, add: true };
-    renderLineTool(); linePreview(); return;
+    renderLineTool(); linePreview(); lineToolReveal(); return;
   }
   if (cur && lineTool) Object.assign(lineTool, { tp: Math.max(0.01, 2 * p - lineTool.tp), sl: Math.max(0.01, 2 * p - lineTool.sl), entry: lineTool.entry ? Math.max(0.01, 2 * p - lineTool.entry) : null, plan: null, err: "", arm: 0 });   // 반대쪽 = 지금가 기준 거울(거리 그대로)
   else {
     const up = p + 0.6 * (G.ymax - p), dn = p - 0.6 * (p - G.ymin), sh = want === "SHORT";
     lineTool = { tp: sh ? dn : up, sl: sh ? up : dn, plan: null, err: "", asset: activeSnapshotAsset };
   }
-  renderLineTool(); linePreview();
+  renderLineTool(); linePreview(); lineToolReveal();
+}
+function lineToolReveal() {   // 2026-11-05 모바일: 플롯 아래 주문 상자가 탭바·플로팅 버튼 뒤로 밀리면 그만큼만 올려 보인다(플롯은 화면에 남긴다)
+  if (!isMobileChartMode()) return;
+  const tk = document.querySelector("#lineTool:not([hidden]) .lt-tk");
+  if (!tk) return;
+  const r = tk.getBoundingClientRect(), rail = el("cardRail"), tb = rail && !rail.hidden ? rail.offsetHeight : 0, over = r.bottom - (innerHeight - tb - 72);
+  if (over > 0) scrollBy({ top: Math.min(over, Math.max(0, r.top - 400)), behavior: "smooth" });
 }
 function lineMaxPct() {   // 2026-11-01 사용자 «진입비율 최대 50% → 현재 남은 증거금에서 최대» -- 슬라이더 상한 = 가용 ÷ 순자산(%). 계좌를 못 읽으면 예전 50
   const b = latestBinanceAccount?.balance, eq = Number(b?.margin) || 0, av = Number(b?.available) || 0;
@@ -725,7 +732,8 @@ function renderLineTool() {
   const tk = h.querySelector(".lt-tk"), th = tk.offsetHeight + 8, ys = [yT, yS].sort((a, b) => a - b);
   const gaps = [[top + 8, ys[0] - 22], [ys[0] + 22, ys[1] - 22], [ys[1] + 22, bot - 8]];
   const g = gaps.find(([a, b]) => b - a >= th) || gaps.reduce((x, y) => (y[1] - y[0] > x[1] - x[0] ? y : x));
-  Object.assign(tk.style, { left: L + 8 + "px", top: Math.max(top + 8, Math.min(g[0], bot - th)) + "px" });
+  // 2026-11-05 사용자 «모바일 SLTP 팝업이 차트를 다 가려 선·지정가를 못 만진다»: 휴대폰은 플롯 밖(바로 아래 레인 자리)에 가로로 깔아 플롯은 손에 남긴다.
+  Object.assign(tk.style, mob ? { left: L + "px", width: R - L + "px", top: bot + 6 + "px" } : { left: L + 8 + "px", width: "", top: Math.max(top + 8, Math.min(g[0], bot - th)) + "px" });
   const sd = h.querySelector(".lt-side");
   const levNow = Number(t.plan?.target_leverage) || Number(manualLevEffective()) || 0;
   sd.textContent = side ? `${side === "SHORT" ? "숏" : "롱"}${t.add ? " 추가" : ""}${levNow ? ` · ${levNow}×` : ""}` : "방향 없음"; sd.className = `lt-side ${side === "SHORT" ? "bad" : side ? "good" : ""}`;

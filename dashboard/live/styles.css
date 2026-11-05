@@ -3109,7 +3109,11 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .lt-am-note { position: absolute; transform: translateY(-50%); font: 600 11px/1.2 var(--font-sans); color: var(--muted); white-space: nowrap; pointer-events: none; }
 .lt-am-note.bad { color: var(--bad); white-space: normal; max-width: 60%; }
 @media (max-width: 720px) {
-  .lt-tk { width: 200px; padding: 9px 10px; }
+  /* 2026-11-05 플롯 아래 가로 3줄: [크기 | 증거금+슬라이더] · [손익비 | 1:1~1:3] · [진입]. ✕ 는 윗변 모서리에 걸친다. */
+  .lt-tk { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); grid-template-areas: "row mg" "rr rrb" "go go"; gap: 6px 12px; padding: 9px 10px; box-sizing: border-box; }
+  .lt-tk > .lt-row { grid-area: row; align-self: center; flex-direction: column; align-items: flex-start; gap: 2px; }
+  .lt-tk > .lt-mg { grid-area: mg; } .lt-tk > .lt-rr { grid-area: rr; align-self: center; } .lt-tk > .lt-rrb { grid-area: rrb; } .lt-tk > .lt-go { grid-area: go; }
+  .lt-tk > .lt-x { position: absolute; top: -13px; right: 10px; width: 40px; height: 26px; margin: 0; border: 1px solid var(--line); background: var(--panel-strong); }
   .lt-tag { padding: 7px 10px 7px 8px; }   /* 손가락 -- 높이 ~30px */
   .lt-go { height: 42px; }
 }
