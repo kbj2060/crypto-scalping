@@ -150,7 +150,7 @@ def xs_rank(a: np.ndarray, valid: np.ndarray) -> np.ndarray:
     return out
 
 
-def build(shift: int = 0, src=None, idx=None, first="2020-07-01") -> dict:
+def build(shift: int = 0, src=None, idx=None, first="2020-07-31") -> dict:   # 사전등록: 첫 결정은 σ720 이 생기는 07-31. 첫 행(pos=0)이면 pos-1 이 끝 행으로 감긴다
     """shift=1 이면 피쳐를 1시간봉 하나 미래로 민 판(트립와이어 전용). src·idx·first = 전진 판정용 원천·격자·첫 결정."""
     idx, lc, sig, F, CH = build_hourly_frames(src, idx)
     pos = np.where((idx.hour % 4 == 0) & (idx >= pd.Timestamp(first)))[0]

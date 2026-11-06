@@ -4,10 +4,11 @@
     python scripts/research_xsec_maker_execution_20261107.py --checks   # 재현·트립와이어 (채점 안 함)
     python scripts/research_xsec_maker_execution_20261107.py --judge    # 1회만
 """
-import hashlib, json, sys
+import hashlib, json, os, sys
 from pathlib import Path
 import numpy as np, pandas as pd
 
+os.environ.pop("OMP_NUM_THREADS", None)   # 리지 재현: float32 적합은 스레드 수에 따라 3e-5 달라진다(기본 12 스레드에서 저장본과 차 0.0, 11-07 실측)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import research_xsec_dl_20coin_20261026 as X  # noqa: E402
 
