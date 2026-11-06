@@ -2213,7 +2213,7 @@ function renderSnapshotAccountCore() {
 //   첫 체결부터 지금·미실현·실현·합계·그냥 보유·순환 효과 + 가격선 위 체결가(×수량) + 체결 칩. 체결 = 서버 왕복 legs
 //   [시각ms, 가격, 수량, 늘림, 메이커, 실현, 수수료] · 가격선 = /api/cycle-path(체결 심볼 1m/5m/15m 종가). 청산하면 왕복이 닫혀 사라진다.
 const cyclePaths = {};   // "심볼|쪽|첫 체결ms" -> {at, rows}
-let cycleArgs = null;
+let cycleArgs = null, cycleTab = "";   // cycleTab: 고른 순환 «심볼|쪽» (열린 포지션이 둘 이상일 때 탭으로 하나씩)
 const cycleQ = (v) => (+Number(v).toFixed(4)).toLocaleString("en-US", { maximumFractionDigits: 4 });
 function cycleSvg(t, pos, rows, now, W) {
   const H = 250, L = 8, R = 104, T = 10, B = 22, legs = t.legs, long = t.side === "LONG";
@@ -2258,6 +2258,10 @@ function cycleSvg(t, pos, rows, now, W) {
   labs.forEach(([y, txt, col]) => { y = Math.max(y, prev + 12); prev = y; s += `<text x="${W - R + 6}" y="${(y + 4).toFixed(1)}" class="cy-ax" fill="var(--${col})">${txt}</text>`; });
   return s + `<text x="${L}" y="${H - 6}" class="cy-ax" fill="var(--muted)">${acctHm(x0)}</text><text x="${W - R}" y="${H - 6}" class="cy-ax" fill="var(--muted)" text-anchor="end">${acctHm(now)} KST</text></svg>`;
 }
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-cy-tab]");
+  if (b) { cycleTab = b.dataset.cyTab; if (cycleArgs) renderCycleCard(...cycleArgs); }
+});
 function renderCycleCard(A, positions, equity) {
   cycleArgs = [A, positions, equity];
   // 2026-11-02 사용자 «순환 섹션 너비를 절반으로 -- 현재 높이에 2개가 들어가게»: 넓은 화면에서 #snapAcctCycle 이 2열 격자(CSS) -- 차트 폭도 한 열 폭으로 그린다.
@@ -2272,7 +2276,10 @@ function renderCycleCard(A, positions, equity) {
     if (!cur || (!!cur.truncated_open && !t.truncated_open) || (!!cur.truncated_open === !!t.truncated_open && t.entry_time > cur.entry_time)) pick.set(k, t);
   }
   const open = [...pick.values()].map((t) => [t, positions.find((p) => p.symbol === t.symbol && p.side === t.side)]).filter(([, p]) => p);
-  setH("snapAcctCycle", open.map(([t, pos]) => {
+  // 2026-11-06 펜 메모 «포지션이 늘수록 박스가 늘어나니 하나의 박스에 탭 전환»: 한 번에 하나만 그린다(탭 = 열린 순환마다)
+  const ck = ([t]) => `${t.symbol}|${t.side}`, shown = open.find((o) => ck(o) === cycleTab) || open[0];
+  const tabs = open.length > 1 ? `<div class="chipset cy-tabs" role="group" aria-label="진행 중 순환 고르기">${open.map((o) => `<button type="button" class="chip${o === shown ? " on" : ""}" data-cy-tab="${ck(o)}" aria-pressed="${o === shown}">${acctCoin(o[0].symbol)} ${o[0].side === "LONG" ? "롱" : "숏"}</button>`).join("")}</div>` : "";
+  setH("snapAcctCycle", (shown ? [shown] : []).map(([t, pos]) => {
     const key = `${t.symbol}|${t.side}|${t.entry_time}`, c = cyclePaths[key] || (cyclePaths[key] = { at: 0, rows: [] });
     if (now - c.at > 60000) {
       c.at = now;
@@ -2295,7 +2302,7 @@ function renderCycleCard(A, positions, equity) {
     const withPct = (usd, r) => `${usd} <small>${pct2(r)}</small>`;
     const chips = legs.map(([ms, p, qty, inc, mk, rp]) => { const b = inc ? long : !long;
       return `<span class="${b ? "b" : "s"}"><i>${hm(ms)}</i>${b ? "매수" : "매도"} <b>${acctPx(p)}</b> ×${cycleQ(qty)}${mk ? "" : " · 테이커"}${rp ? ` <em class="${acctTone(rp)}">${acctSu(rp)}</em>` : ""}</span>`; }).join("");
-    return `<div class="cy-box">
+    return `<div class="cy-box">${tabs}
       <div class="cy-head"><span class="cy-live">진행 중</span><b class="cy-title">${coin} ${long ? "롱" : "숏"} 순환</b>
         <span class="muted">${hm(legs[0][0])} 시작 · ${acctDur(now - legs[0][0])} · ${long ? "매수" : "매도"} ${nIn} · ${long ? "매도" : "매수"} ${legs.length - nIn}</span></div>
       <div class="cy-tiles">
@@ -2879,20 +2886,18 @@ function mtTodayCell(n) {   // 표 «오늘» 칸
   return `<span class="mt-td" title="${tip} · 13주 판정과 원천·시점이 달라 오늘 맥락만">${mtDayChart(k, 64, 20, 0)}<b style="color:${mtDayColK(k, v)}">${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}%</b></span>`;
 }
 // 2026-10-28 사용자 «풋프린트 상단 나스닥·2년물·10년물 차트 자리에 Macro Trend 요약»(시안 H1) -- renderMarketCtx 가 #fpRates 에 넣는다.
-//   개수 = /api/macro-trend summary 그대로(카드 머리 합계와 같다) · 감시 이탈 · 다음 주요 발표 · 누르면 2번째 카드(Macro Trend)로.
+//   개수 = /api/macro-trend summary 그대로(카드 머리 합계와 같다) · 다음 주요 발표(2026-11-06 펜 메모: «감시 이탈» 칸 제거) · 누르면 2번째 카드(Macro Trend)로.
 function mtHeadHtml() {
   const p = latestMacroTrend;
   if (!p || !p.ok) return `<button type="button" class="fr-mt" data-mt-go><span class="fr-mtt">Macro<small>${p ? "불러오지 못함" : "불러오는 중…"}</small></span></button>`;
   const s = p.summary || {}, week = p.rows.map((r) => r.live && r.live.week).filter(Boolean).sort().pop() || "–";
   const row = (a) => { const x = s[a] || {}; return `<span class="fr-c">${a}</span><span>지금 <b class="opt-good">${MTI(1)}${x.co_up || 0}</b> <b class="opt-bad">${MTI(-1)}${x.co_dn || 0}</b></span>`
     + `<span>13주 뒤 <b class="opt-good">${MTI(1)}${x.lead_up || 0}</b> <b class="opt-bad">${MTI(-1)}${x.lead_dn || 0}</b> <span class="muted">· 중립 ${x.neutral || 0} · 안 셈 ${x.excluded || 0}</span></span>`; };
-  const off = [...new Set(p.rows.flatMap((r) => Object.entries((r.live || {}).assets || {}).filter(([, c]) => c.state === "off").map(([a]) => `${r.name}→${a}`)))];
   const nx = (latestMacroEvents || []).filter((e) => e.importance === "high" || e.category === "fomc").map((e) => ({ t: Date.parse(e.time_utc), nm: e.title_ko || e.title || "지표" }))
     .filter((e) => e.t > Date.now()).sort((a, b) => a.t - b.t)[0];
   const left = nx ? nx.t - Date.now() : 0;
   return `<button type="button" class="fr-mt" data-mt-go title="Macro Trend 카드로 -- ETF 이후 13주 매크로 추세(기준 주 ${week.slice(5)} · 표본내 연구, 신호 아님)">`
     + `<span class="fr-mtg">${row("BTC")}${row("ETH")}</span>`
-    + `<span class="fr-sep"></span><span class="fr-mts"><small>감시</small><span class="${off.length ? "mt-warn" : ""}">이탈 ${off.length}${off.length ? ` · ${escapeHtml(off.join(", "))}` : ""}</span></span>`
     + (nx ? `<span class="fr-sep"></span><span class="fr-mts"><small>다음 발표</small><b class="fr-ev">${escapeHtml(nx.nm)} ${Math.floor(left / 3600e3)}:${String(Math.floor((left % 3600e3) / 60e3)).padStart(2, "0")} 뒤</b></span>` : "")
     + `</button>`;   // 2026-10-30 펜 메모 «박스 부분은 제거»: 오른쪽 끝 «Macro Trend ›» 글자 삭제(누르면 카드로 가는 건 그대로 · title)
 }
