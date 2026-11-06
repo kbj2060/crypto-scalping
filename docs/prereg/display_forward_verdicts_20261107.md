@@ -61,3 +61,6 @@
 
 ## 참고
 - `docs/prereg/dashboard_candidates_forward_20261103.md`(판정 형식) · `docs/prereg/regime_acc_20261102.md`(M9 기준선) · `docs/deploy_queue_regime_band_20261102.md`(M9 문턱 첫 제안).
+
+## 수정 1 (2026-11-07, 구간 시작 전)
+보조 추가(판정 아님): 15분·1시간 분위 ≥ 90 롱만의 평균 수익과 전체 결정 평균. 사후 진단에서 나온 가설을 전진으로 보기 위한 기록이다(`dir_top_decile_long_20261107.md`).

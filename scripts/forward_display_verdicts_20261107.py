@@ -160,6 +160,23 @@ def score_xrev(rows, t0, t1):
     return res | {"ic": float(a[:, 1].mean()), "upper90": up, "p": one_sided_p(b, "upper"), "verdict": "통과" if up < 0 else "불통과"}
 
 
+def top_long_aux(rows, key, h, t0, t1):
+    """보조(판정 아님): 분위 ≥ 90 롱만 -- 평균 수익 bp 와 전체 결정 평균 대비 초과. 사전 등록 dir_top_decile_long_20261107."""
+    px = {r["t"]: r["px"] for r in rows}
+    all_r, top = [], []
+    for r in rows:
+        if r.get("k") != "s" or not (t0 <= r["t"] < t1) or r.get(key) is None:
+            continue
+        end = px.get(r["t"] + h * BAR)
+        if end is None:
+            continue
+        v = (end / r["px"] - 1) * 1e4
+        all_r.append(v)
+        if r[key] >= 90:
+            top.append(v)
+    return {"n_top": len(top), "n_all": len(all_r), "top_mean_bp": float(np.mean(top)) if top else None, "all_mean_bp": float(np.mean(all_r)) if all_r else None}
+
+
 def holm(ps):
     order = sorted(ps, key=ps.get)
     out, cur = {}, 0.0
@@ -192,11 +209,12 @@ def run(today):
     if today < SHORT_VERDICT:
         raise SystemExit(f"판정일 전이라 거절: {SHORT_VERDICT.date()} 부터")
     t0, t1 = ms(START), ms(SHORT_END)
-    rep = {"prereg": "docs/prereg/display_forward_verdicts_20261107.md", "window": [str(START), str(SHORT_END)], "direction": {}, "aux_dir4h": {}}
+    rep = {"prereg": "docs/prereg/display_forward_verdicts_20261107.md", "window": [str(START), str(SHORT_END)], "direction": {}, "aux_dir4h": {}, "aux_top_long": {}}
     for c in COINS:
         rows = read(LIVE / "pred_record" / f"{c}.jsonl")
         for name, (key, h) in H.items():
             rep["direction"][f"{c}_{name}"] = score_direction(rows, key, h, t0, t1)
+            rep["aux_top_long"][f"{c}_{name}"] = top_long_aux(rows, key, h, t0, t1)
         if c != "BTC":
             rep["aux_dir4h"][c] = score_direction(rows, None, 48, t0, t1, kind="4")
     ps = {k: v["p"] for k, v in rep["direction"].items() if "p" in v}
@@ -269,6 +287,8 @@ def selftest():
     else:
         raise AssertionError("판정일 전 거절 실패")
     assert holm({"a": .01, "b": .02, "c": .5}) == {"a": .03, "b": .04, "c": .5}
+    aux = top_long_aux([{"k": "s", "t": t0 + i * BAR, "px": 100.0 + i, "a": 95.0 if i == 0 else 50.0} for i in range(10)], "a", 3, t0, t1)
+    assert aux["n_top"] == 1 and abs(aux["top_mean_bp"] - 300) < 1e-9 and aux["n_all"] == 7, aux
     print("selftest OK")
 
 
