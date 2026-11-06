@@ -129,7 +129,7 @@ def facts_deploy() -> dict:
 
 def facts_disk() -> dict:
     out = {}
-    for name, p in (("root", "/"), ("D_drive", "/mnt/d")):
+    for name, p in (("root", "/"), ("C_drive", "/mnt/c"), ("D_drive", "/mnt/d"), ("data2", "/mnt/data2")):
         if Path(p).exists():
             u = shutil.disk_usage(p)
             out[name] = {"free_gb": round(u.free / 2**30, 1), "used_pct": round(u.used / u.total * 100, 1)}

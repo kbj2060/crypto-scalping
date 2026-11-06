@@ -1,5 +1,7 @@
 # 실시간 수집 데이터 인벤토리 (2026-09-16)
 
+> ⚠️ **이 문서는 2026-09-16 기준이고 지금과 다르다.** 10-01 hot·lake 재설계, 10-31 수집기 통합, 11-07 6TB 이전 뒤의 기준은 [`data_storage_map_20261107.md`](data_storage_map_20261107.md) 와 서버 `data/live/ops_watchdog/data_map.md` 다. 용량 전망(«약 2.4년»)은 틀렸다(실측 소진 7~8GB/일).
+
 서버(`server` 호스트, `/home/llewyn/crypto-scalping`)에서 **지금 쌓이고 있는** 데이터 전수.
 프로세스 목록 · crontab · 파일 mtime · duckdb 행수를 읽기전용으로 직접 대조해 만들었다.
 기준 시각 **2026-09-16 19:58 KST**. 숫자는 그 시점 실측이다.

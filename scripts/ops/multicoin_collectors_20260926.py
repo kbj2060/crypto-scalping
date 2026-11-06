@@ -64,7 +64,7 @@ DEPTH_TRADFI = ("SNDK",)   # TradFi 중 깊은 호가 diff 를 쌓는 종목. SO
 BO_OK = ("SOL", "XRP")      # 추세 전환 경보기 검정을 통과한 코인(ETH 는 늘 포함)
 # 수집기별 RSS(MB) 추정 -- 2026-09-26 이 세션 실측(x86_64, 네트워크 없이 기동 후 15초). duckdb 를 import
 # 하는 수집기는 그것만으로 ~150MB 다. 래스터는 북이 차면 도크스트링 실측 67MB 까지 는다.
-RSS_MB = {"bn_depthdiff": 26, "bn_raster": 67, "bn_tape": 155, "hl_trades": 64,
+RSS_MB = {"bn_bookticker": 26, "bn_depthdiff": 26, "bn_raster": 67, "bn_tape": 155, "hl_trades": 64,
           "hl_bbo": 151, "hl_ctx": 151, "bo": 250, "hl_positions": 151, "okx_ctx": 155, "okx_tape": 156}
 MEM_FLOOR_MB = 512
 DISK_FLOOR_GB = 100       # 09-16 인벤토리의 재검토선
@@ -96,6 +96,10 @@ def specs(coins: list[str], phases: set[int]) -> list[dict]:
         sym, lc, inst = f"{c}USDT", c.lower(), f"{c}-USDT-SWAP"
         of = "data/live/orderflow"
         deep = c in DEEP
+        # 2026-11-07 Pi -> 서버(사용자 «Pi 수집기도 서버로 가져와서 바로 6TB»). 10-31 에 디스크 때문에 뺐던 bookTicker 를 되살린다 -- 저장은 6TB.
+        deep and add("bn_bookticker", lc, 1, "supervisor_book_ticker.sh", "live_book_ticker_collector_20260914.py",
+            {"BT_SYMBOL": sym.lower()}, [_dir(f"bn_bookticker_{lc}", f"{of}/bookticker/{sym}")],
+            eth=f"{of}/bookticker/ETHUSDT")
         (deep or c in DEPTH_TRADFI) and add("bn_depthdiff", lc, 1, "supervisor_depth_diff.sh", "live_depth_diff_collector_20260915.py",
             {"DD_SYMBOL": sym.lower()}, [_dir(f"bn_depthdiff_{lc}", f"{of}/depthdiff/{sym}")],
             eth=f"{of}/depthdiff/ETHUSDT")
@@ -105,8 +109,8 @@ def specs(coins: list[str], phases: set[int]) -> list[dict]:
         deep and add("hl_bbo", lc, 1, "supervisor_hyperliquid_book_ticker.sh",
             "live_hyperliquid_book_ticker_collector_20260923.py", {"HL_BT_COIN": c},
             [_dir(f"hl_bbo_{lc}", f"{of}/hyperliquid_bookticker/{c}"),
-             _db(f"hl_ctx_{lc}", f"data/live/hyperliquid_context_{lc}.duckdb", "hl_asset_ctx",
-                 "to_timestamp(recv_ms / 1000)")],
+             _db(f"hl_ctx_{lc}", "data/hot/hl_ctx.sqlite", f"hl_asset_ctx WHERE coin = '{c}'",
+                 "datetime(max(recv_ms) / 1000, 'unixepoch', 'localtime')")],
             eth=f"{of}/hyperliquid_bookticker/ETH")
         # 2026-10-04 서버 hot(hl_ctx.sqlite)에 SOL·XRP 맥락 -- 대시보드 시장 맥락의 HL 펀딩·OI·프리미엄·가격차
         c not in TRADFI and add("hl_ctx", lc, 3, "supervisor_hyperliquid_book_ticker.sh",
@@ -139,8 +143,8 @@ def specs(coins: list[str], phases: set[int]) -> list[dict]:
     tag = "_".join(c.lower() for c in hl)
     hl and add("hl_positions", tag, 1, "supervisor_hyperliquid_positions.sh",
         "live_hyperliquid_positions_collector_20260924.py", {"HL_POS_COINS": ",".join(hl)},
-        [_db(f"hl_positions_{tag}", f"data/live/hyperliquid_positions_{tag}.duckdb", "hl_cycles",
-             "to_timestamp(ts_ms / 1000)", 30, 60)], grace=30)
+        [_db(f"hl_positions_{tag}", f"data/hot/hl_positions_{tag}.sqlite", "hl_cycles",
+             "datetime(max(ts_ms) / 1000, 'unixepoch', 'localtime')", 30, 60)], grace=30)
     return out
 
 

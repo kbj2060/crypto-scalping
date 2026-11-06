@@ -726,7 +726,8 @@ class TapeStore:
 
 async def verify_recent(store: TapeStore, session, klines_url: str = KLINES_URL) -> None:
     """직전 분들을 kline volume 과 대조해 verify_1m 에 남긴다. 실패해도 수집은 계속한다."""
-    minutes = store.unverified_minutes()
+    # 🔴스레드로: 2026-11-05 이 조회가 이벤트 루프 안에서 122~129초 걸려 정지 감시가 8분마다 프로세스를 죽였다(7회 반복).
+    minutes = await asyncio.to_thread(store.unverified_minutes)
     if not minutes:
         return
     params = {"symbol": store.symbol.upper(), "interval": "1m",
@@ -737,7 +738,7 @@ async def verify_recent(store: TapeStore, session, klines_url: str = KLINES_URL)
             return
         klines = await response.json()
     kvol = {int(k[0]) // 1000: float(k[5]) for k in klines}
-    results = store.verify(kvol, minutes)
+    results = await asyncio.to_thread(store.verify, kvol, minutes)
     ok = [r for r in results if abs(r[1]) <= VERIFY_TOLERANCE]
     # 성공도 한 줄 남긴다 -- 아무 말이 없으면 «검사가 도는지» 자체를 알 수 없다(그 상태로
     # 조용히 꺼져 있던 게 2026-09-16 의 INT32 오버플로였다).

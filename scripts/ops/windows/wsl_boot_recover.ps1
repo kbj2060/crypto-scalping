@@ -3,8 +3,10 @@
 # Run by the scheduled task "CryptoWSLBootRecover" (install_boot_task.ps1). Idempotent; safe to run any time.
 #   1) LAN profile Public -> Private   2) start WSL and keep it alive   3) portproxy 0.0.0.0:2222 -> <WSL IP>:22
 #   then re-check every 60 s (WSL IP changes on every WSL start).
+#   4) 2026-11-07: attach and mount the 6TB USB data disk (/mnt/data2, fstab has it by UUID).
+#      -MountOnly does just that once and exits (manual recovery, also how this was tested).
 # ASCII only on purpose: Windows PowerShell 5.1 reads BOM-less UTF-8 as ANSI.
-param([string]$Distro = "Ubuntu", [int]$ListenPort = 2222, [int]$WslSshPort = 22)
+param([string]$Distro = "Ubuntu", [int]$ListenPort = 2222, [int]$WslSshPort = 22, [switch]$MountOnly)
 $ErrorActionPreference = "Continue"
 $Log = Join-Path $PSScriptRoot "boot_recover.log"
 $Wsl = "$env:WINDIR\System32\wsl.exe"
@@ -40,6 +42,23 @@ function Start-KeepAlive {
     return $p
 }
 
+function Fix-DataDisk {
+    # wsl --mount acts on the calling user's WSL VM, so this must run here (kbj20, elevated), not as SYSTEM.
+    # The disk is picked by size, not number: PHYSICALDRIVE numbers change when a disk is added.
+    & $Wsl -d $Distro -u root -e findmnt -n /mnt/data2 *> $null
+    if ($LASTEXITCODE -eq 0) { return }
+    $d = @(Get-Disk | Where-Object { $_.BusType -eq 'USB' -and $_.Size -gt 5TB })
+    if ($d.Count -ne 1) { Log "data disk: want exactly 1 USB disk over 5TB, found $($d.Count)"; return }
+    & $Wsl --mount "\\.\PHYSICALDRIVE$($d[0].Number)" --bare *> $null   # already attached is an error here, and harmless
+    Start-Sleep -Seconds 2
+    & $Wsl -d $Distro -u root -e mount /mnt/data2 *> $null
+    & $Wsl -d $Distro -u root -e findmnt -n /mnt/data2 *> $null
+    if ($LASTEXITCODE -eq 0) { Log "data disk mounted: PHYSICALDRIVE$($d[0].Number) -> /mnt/data2" }
+    else { Log "data disk mount FAILED (PHYSICALDRIVE$($d[0].Number))" }
+}
+
+if ($MountOnly) { Fix-DataDisk; return }
+
 Log "start as $env:USERNAME"
 for ($i = 0; $i -lt 36; $i++) {   # wait up to 3 min for the network
     if (Test-Connection -ComputerName 1.1.1.1 -Count 1 -Quiet) { break }
@@ -51,6 +70,7 @@ while ($true) {
     $ip = Get-WslIp
     if ($ip) { Fix-PortProxy $ip } else { Log "WSL IP unavailable (WSL not up yet?)" }
     if ($keep.HasExited) { $keep = Start-KeepAlive }
+    Fix-DataDisk
     Fix-NetworkProfile
     Start-Sleep -Seconds 60
 }

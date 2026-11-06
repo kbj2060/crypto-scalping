@@ -193,7 +193,7 @@ async def verify_recent(store, session, inst: str) -> None:
       뜨고, 진짜 유실과 구별이 안 된다.
     ⭐물량은 `volCcy`(ETH)를 쓴다 -- `vol` 은 계약 수다. 2026-09-23 실측에서 5개 봉 전부
       `vol * 0.1 == volCcy` 로 정확히 일치했다."""
-    minutes = store.unverified_minutes()
+    minutes = await asyncio.to_thread(store.unverified_minutes)   # 스레드로: 바이낸스 쪽과 같은 이유(2026-11-07)
     if not minutes:
         return
     # 🔴`candles` 는 최근 100분뿐이라 밀린 분을 영영 못 봤다 -> 과거용 history-candles(요청당 100분).
@@ -221,7 +221,7 @@ async def verify_recent(store, session, inst: str) -> None:
         await asyncio.sleep(0.12)
     if not kvol:
         return
-    results = store.verify(kvol, minutes)
+    results = await asyncio.to_thread(store.verify, kvol, minutes)
     ok = [r for r in results if abs(r[1]) <= VERIFY_TOLERANCE]
     if ok:
         log(f"완전성 OK {len(ok)}분 "
