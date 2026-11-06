@@ -1165,9 +1165,9 @@ svg {
 /* ── 2026-10-14 Account = 오늘 성과 + 과거 기록(사용자 시안 C) ─────────────────────────
    주문 조작부(.acct-lanes)는 플로팅 버튼(#ofab)이 옮겨 쓰므로 DOM 에 남기고 **카드 안에서만** 숨긴다(펼치면 #ofabPanel 로 옮겨가 보인다). */
 #acctCard > .acct-lanes, #acctCard > #ofabAway { display: none !important; }
-.acct-figure.good, #snapAcctPosition .good, #snapAcctPerf .good, #snapAcctCurve .good { color: var(--good); }   /* 머리 요약 알약(.ops-health-summary.good)은 건드리지 않는다 */
-.acct-figure.bad, #snapAcctPosition .bad, #snapAcctPerf .bad, #snapAcctCurve .bad { color: var(--bad); }
-#snapAcctPosition .warn, #snapAcctPerf .warn, #snapAcctCurve .warn { color: var(--warn); }
+.acct-figure.good, #snapAcctPosition .good, #snapAcctToday .good, #snapAcctStats .good, #snapAcctKpi .good, #snapAcctPerf .good, #snapAcctCurve .good { color: var(--good); }   /* 머리 요약 알약(.ops-health-summary.good)은 건드리지 않는다 */
+.acct-figure.bad, #snapAcctPosition .bad, #snapAcctToday .bad, #snapAcctStats .bad, #snapAcctKpi .bad, #snapAcctPerf .bad, #snapAcctCurve .bad { color: var(--bad); }
+#snapAcctPosition .warn, #snapAcctToday .warn, #snapAcctStats .warn, #snapAcctKpi .warn, #snapAcctPerf .warn, #snapAcctCurve .warn { color: var(--warn); }
 .acct-posline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; padding: 9px 0; font-size: 12.5px; color: var(--muted); }   /* 2026-11-04 펜 메모 «백그라운드 색을 다른 섹션과 통일» -- 달력·곡선·상세처럼 바탕 상자 없이 */
 .acct-posline b { color: var(--ink); font-family: var(--font-mono); font-weight: 700; font-variant-numeric: tabular-nums; }
 .acct-posline em { font-style: normal; }
@@ -1241,9 +1241,29 @@ svg {
 .as-div i { position: absolute; top: 0; bottom: 0; } .as-div::after { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--line); }
 .as-card .as-r:last-child .as-div::after { display: none; }
 .acct-stat b { font: 700 14px/1.1 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
-/* 2026-11-04 펜 메모: 위 줄 = 포지션·오늘 손익 | 자산 곡선(절반씩) · 아래 줄 = 달력 | 고른 날 거래 상세 + 메모장 */
-.acct-top { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; padding: 12px 18px 14px; }
-#snapAcctCurve { min-width: 0; }
+/* 2026-11-06 계좌 카드 시안 C(사용자 «전체 리디자인 · 한 화면»): 핵심 지표 6칸 · 큰 곡선 | 증거금 풀 + 포지션 · 아래 탭 한 칸. 색은 기존 토큰(--glass·--soft-line·--muted)만. */
+.acct-kpi { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; padding: 12px 18px 0; }
+.acct-kpi > div { display: grid; gap: 3px; min-width: 0; padding: 10px 14px; background: var(--glass); border-radius: 12px; }
+.acct-kpi i { font-style: normal; font-size: 11.5px; color: var(--muted); }
+.acct-kpi b { font: 800 22px/1.1 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.acct-kpi b small { font-size: 13px; font-weight: 700; opacity: .85; margin-left: 4px; }
+.acct-kpi s { text-decoration: none; font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-mid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; padding: 12px 18px 0; min-height: 0; }
+.acct-pn { background: var(--glass); border-radius: 12px; padding: 12px 14px; min-width: 0; min-height: 0; }
+.acct-pn-curve { position: relative; height: 340px; }
+#snapAcctCurve { position: absolute; inset: 12px 14px; min-width: 0; }   /* 칸 크기는 CSS 가 정하고 곡선이 거기에 맞춰 그려진다 -- 그림이 칸 높이를 밀지 않는다 */
+.acct-side { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 12px; min-width: 0; min-height: 0; }
+.acct-side .aw { padding: 0; border: 0; gap: 8px; }
+.acct-side .aw-bar { height: 24px; }
+.acct-pn-pos { overflow: auto; scrollbar-width: thin; }
+.acct-bot { display: flex; flex-direction: column; gap: 10px; margin: 12px 18px 18px; }
+.acct-tabs { flex-wrap: wrap; }
+.acct-bot-body { min-height: 0; overflow: auto; scrollbar-width: thin; }
+.acct-ap { min-width: 0; }
+.acct-bot .cy-box { border-top: 0; margin-top: 0; padding-top: 0; }
+#acctCard > .acct-warn { margin: 8px 18px 0; }
+.acct-ap[hidden] { display: none; }
+#snapAcctPerf { padding: 0; }
 .acct-day-box { display: flex; flex-direction: column; gap: 12px; min-width: 0; align-self: stretch; min-height: 300px; }   /* 2026-11-04 펜 메모: 메모장은 아래 고정 · 내역만 길어지면 스크롤(달력 줄 높이에 맞춰 늘어난다) */
 .acct-day-box[hidden] { display: none; }
 #snapAcctDay { display: flex; flex: 1 1 0; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
@@ -1269,8 +1289,6 @@ svg {
 .acct-note-head .notify-btn { min-height: 28px; padding: 4px 14px; font-size: 12.5px; }
 @media (max-width: 900px) { .acct-note-head .notify-btn { min-height: 40px; } }
 /* 2026-11-06 오답노트 탭(시안 A) -- 색은 기존 칩·입력칸 토큰만 쓴다(--glass·--soft-line·--muted·--amber) */
-.acct-note-pane { display: grid; gap: 6px; min-width: 0; }
-.acct-note-pane[hidden] { display: none; }
 .acct-wrong-add { display: flex; gap: 6px; min-width: 0; }
 .acct-wrong-add input, .acct-wrong-add select { min-width: 0; box-sizing: border-box; padding: 7px 10px; border-radius: var(--radius-sm); border: 1px solid var(--soft-line);
   background: var(--glass); color: var(--text); font: 13px/1.4 var(--font-sans); }
@@ -1313,7 +1331,10 @@ svg {
 .cy-fills em { font-style: normal; margin-left: 4px; }
 .cy-note { font-size: 12px; color: var(--muted); margin: 8px 2px 0; line-height: 1.5; }
 @media (max-width: 900px) {
-  .acct-today, .acct-hist, .acct-top { grid-template-columns: minmax(0, 1fr); }
+  .acct-today, .acct-hist, .acct-mid { grid-template-columns: minmax(0, 1fr); }
+  .acct-kpi { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .acct-kpi b { font-size: 19px; }
+  .acct-pn-curve { height: 300px; }
   .acct-day-box { min-height: 0; }
   #snapAcctDay, .acct-day-ol { flex: none; }
   .acct-day-ol { max-height: 232px; }
@@ -1341,7 +1362,6 @@ svg {
 /* 숨은 확인 버튼만 든 행이 flex gap 을 두 번 먹어 버튼과 «약속» 사이에 빈 60px 가 남는다.
    확인 버튼은 미리보기 뒤에만 잠깐 뜨므로 이 빈칸이 **평소 모습**이다. */
 .manual-entry-row:has(> [hidden]:only-child) { display: none; }
-#snapAcctPerf { padding: 0 18px 4px; }
 
 #acctCard .acct-plot svg { max-height: none; }
 /* 각 레인의 «약속». 두 행동은 확인 방식이 다르고, 그 차이가 이 화면에서 가장 비싼 오해다. */
@@ -2356,10 +2376,14 @@ html.fit1 #snapshotTabPanel > .panel { scroll-margin-top: var(--apph, 64px); }  
   html.fit1 #mcWhen { height: 116px; overflow: hidden; flex: none; }
   html.fit1 #optCard { align-content: start; }
   html.fit1 #optCard .opt-sec:has([data-tip="mood"]) .opt-kv { max-height: none; }   /* 2026-10-01 심리 세 줄이 셋째 줄(블록 거래 높이)을 고르게 나눠 채운다 */
-  /* 2026-10-01 계좌: 성과 차트를 늘 펼치고(접기 숨김) 남는 높이를 fitLayout 이 --acctplot 으로 준다 */
-  html.fit1 #acctCard > :not(.ops-health-head) { zoom: var(--acctz, 1); }   /* 2026-10-05 넘치면 본문만 비율로(제목 줄은 다른 카드와 같게) -- app.js fitLayout 이 --acctz */
-
-  html.fit1 #snapAcctCurve .acct-plot svg { height: auto; max-height: none; }   /* 2026-11-06 곡선 높이는 왼쪽 열을 따른다(app.js lag) -- 한 화면 맞춤은 카드가 한 화면을 넘어 120 으로 눌렸다 */   /* 2026-10-01 줄을 위로 -- 남는 칸을 app.js fitLayout 이 재서 사다리에 준다 */   /* 고정 -- 일정 받기 전 안내 줄로 174px 였다가 113px 로 줄며 차트가 늘었다 */
+  /* 2026-11-06 계좌 카드 = 창 높이(시안 C): 곡선 칸·탭 칸이 남는 높이를 나눠 갖고 넘치면 칸 안에서만 스크롤 -- 위아래로 길게 늘어나지 않는다 */
+  html.fit1 #acctCard { height: calc(100vh - var(--apph, 64px) - 10px); display: flex; flex-direction: column; overflow: hidden; }
+  html.fit1 #acctCard > .ops-health-head, html.fit1 #acctCard > .acct-kpi, html.fit1 #acctCard > .acct-warn { flex: none; }
+  html.fit1 #acctCard > .acct-mid { flex: 1.1 1 0; }
+  html.fit1 .acct-pn-curve { height: auto; }
+  html.fit1 #acctCard > .acct-bot { flex: 1.15 1 0; min-height: 0; }
+  html.fit1 .acct-bot .cy-note { display: none; }   /* 그림 높이를 위해 범례 줄을 뺀다 */
+  html.fit1 .acct-bot-body { flex: 1 1 0; }
   html.fit1 #fpCard > .ops-health-head, html.fit1 #liquidationMapList { flex: none; }
 }
 /* 2026-11-02 왼쪽 세로 내비(사용자 «B안: 왼쪽 세로 내비 · 오른쪽 점 레일 제거»). 마크업·동작(app.js setupCardRail/cardRailSync)은 점 레일 그대로 -- 겉만 바꿨다. */
@@ -3568,17 +3592,6 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
   #mcBody > .mc-sec[data-fold] > .mc-sum { padding-bottom: 12px; border-bottom: 1px solid var(--soft-line); font: 500 12.5px/1.4 var(--font-sans); color: var(--muted); }
   #mcBody > .mc-sec[data-fold].mc-open > .mc-sum { display: none; }
   #mcBody > .mc-sec[data-fold]:not(.mc-open) > :not(h4):not(.mc-sum) { display: none; }
-}
-
-/* 2026-11-04 모바일 최적화 ⑤(시안 A): Account 접기 막대 -- 넓은 화면은 숨김 · 닫힌 막대 바로 다음 칸을 숨긴다 */
-.afold-bar { display: none; }
-@media (max-width: 720px) {
-  .afold-bar { display: flex; flex-direction: column; gap: 4px; width: 100%; min-height: 44px; padding: 14px 4px; border: 0; border-top: 1px solid var(--soft-line); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-  .afold-bar .af-t { display: flex; justify-content: space-between; align-items: center; }
-  .afold-bar b { font: 800 14px var(--font-sans); color: var(--ink); }
-  .afold-bar i { font: 700 12px var(--font-sans); font-style: normal; color: var(--muted); }
-  .afold-bar .af-s { font: 500 12.5px/1.4 var(--font-sans); color: var(--muted); }
-  .afold-bar:not(.open) + * { display: none !important; }
 }
 
 /* 2026-11-04 모바일 최적화 ⑥(사용자 «눈에 안 띄게 바로 수정»): 작은 탭 대상 중 뉴스 링크(28px)는 보이는 모양·줄 높이를 두고 눌림 영역만 44px 로 -- overflow:hidden 이라 ::after 가 잘려 패딩 + 음수 마진 */

@@ -340,9 +340,15 @@
             <button type="button" id="snapAcctRefresh" class="acct-refresh" title="계좌 강제 조회" aria-label="계좌 강제 조회"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"></path><path d="M20.5 4.5V10h-5.5"></path></svg></button>
           </div>
         </div>
-        <div id="snapAcctWealth"></div>   <!-- 2026-11-06 사용자: 순자산·USDC/USDT 합산·비중 (app.js acctWealthHtml) -->
-        <!-- 2026-11-04 펜 메모: 포지션·오늘 손익 | 자산 곡선을 한 줄에 절반씩 -->
-        <div class="acct-top"><div id="snapAcctPosition" class="ops-health-list"></div><div id="snapAcctCurve"></div></div>
+        <!-- 2026-11-06 사용자 «계좌 카드 전체 리디자인 · 시안 C»(한 화면 벤토): 핵심 지표 6칸 · 큰 곡선 | 증거금 풀 + 포지션 · 아래 탭 한 칸(순환·성과·달력·오늘·오답) -- app.js renderSnapshotAccountCore -->
+        <div id="snapAcctKpi" class="acct-kpi"></div>
+        <div class="acct-mid">
+          <div class="acct-pn acct-pn-curve"><div id="snapAcctCurve"></div></div>
+          <div class="acct-side">
+            <div class="acct-pn"><div id="snapAcctWealth"></div></div>
+            <div class="acct-pn acct-pn-pos"><div id="snapAcctPosition" class="ops-health-list"></div></div>
+          </div>
+        </div>
         <p id="snapAcctWarn" class="acct-warn" role="status" hidden></p>   <!-- 2026-11-02 체결 조회 실패·잘림 심볼 경고(app.js renderSnapshotAccountCore) -->
         <!-- 2026-09-12 수동 진입 1단계. **크기를 화면이 정한다** -- 재량 사이징이 실계좌 손실의
              출처였다(크기–수익 상관 −0.494, 한 건 −548.88 이 이익 합 전부보다 컸다).
@@ -539,27 +545,33 @@
         <!-- 2026-09-22 시안 B: 자산 곡선을 레인 **아래 전폭**으로 내렸다(사용자 선택).
              전에는 카드 오른쪽 절반을 먹어 레일이 «척추»가 될 폭이 없었다. 곡선은 «역사»라
              조작보다 아래가 맞다 -- 이 카드의 일은 «지금 무엇을 할까»다. -->
-        <!-- 2026-11-04 펜 메모: 아래 줄 = 달력 | 고른 날 거래 상세 + 메모장. 메모 칸(textarea)은 매 폴링 다시 그리는 영역 밖에 둔다 -- 한글 입력 중 칸이 교체되면 조합이 끊긴다 -->
-        <div id="snapAcctPerf" class="acct-hist">
-          <div id="snapAcctCal"></div>
-          <div id="acctDayBox" class="acct-day-box" hidden>
-            <div id="snapAcctDay"></div>
-            <div class="acct-note">
-              <!-- 2026-11-06 펜 메모 «메모장·오답노트 리디자인» 시안 A: 같은 자리를 탭으로 나눈다(오답노트 = 한 줄씩 쌓는 목록, /api/acct-wrong). 칸은 폴링이 다시 그리지 않는다 -->
-              <div class="chipset" role="group" aria-label="메모장·오답노트"><button type="button" class="chip on" data-nt="memo" aria-pressed="true">메모</button><button type="button" class="chip" data-nt="wrong" aria-pressed="false">오답노트 <span id="acctWrongN"></span></button></div>
-              <div id="acctNoteMemo" class="acct-note-pane">
-                <div class="acct-note-head"><label for="acctNoteTa" id="acctNoteLab">메모</label><span id="acctNoteSt" class="muted" role="status"></span><button type="button" class="notify-btn primary" id="acctNoteSave">저장</button></div>
-                <textarea id="acctNoteTa" rows="3" maxlength="4000" placeholder="이 날의 복기·메모 -- 저장을 누르면 서버에 남습니다"></textarea>
+        <div class="acct-pn acct-bot">
+          <div class="chipset acct-tabs" role="group" aria-label="계좌 상세"><button type="button" class="chip on" data-at="cy" aria-pressed="true">진행 중 순환 <span id="acctCyN"></span></button><button type="button" class="chip" data-at="st" aria-pressed="false">성과 통계</button><button type="button" class="chip" data-at="cal" aria-pressed="false">달력·복기</button><button type="button" class="chip" data-at="td" aria-pressed="false">오늘 손익</button><button type="button" class="chip" data-at="wr" aria-pressed="false">오답노트 <span id="acctWrongN"></span></button></div>
+          <div id="acctBotBody" class="acct-bot-body">
+            <div class="acct-ap" data-ap="cy"><div id="snapAcctCycle"></div></div>   <!-- 2026-10-22 진행 중 순환(시안 A) -- 열린 포지션이 있을 때만 -->
+            <div class="acct-ap" data-ap="st" hidden><div id="snapAcctStats"></div></div>
+            <!-- 2026-11-04 펜 메모: 달력 | 고른 날 거래 상세 + 메모장. 메모 칸(textarea)은 매 폴링 다시 그리는 영역 밖에 둔다 -- 한글 입력 중 칸이 교체되면 조합이 끊긴다 -->
+            <div class="acct-ap" data-ap="cal" hidden>
+              <div id="snapAcctPerf" class="acct-hist">
+                <div id="snapAcctCal"></div>
+                <div id="acctDayBox" class="acct-day-box" hidden>
+                  <div id="snapAcctDay"></div>
+                  <div class="acct-note">
+                    <div class="acct-note-head"><label for="acctNoteTa" id="acctNoteLab">메모</label><span id="acctNoteSt" class="muted" role="status"></span><button type="button" class="notify-btn primary" id="acctNoteSave">저장</button></div>
+                    <textarea id="acctNoteTa" rows="3" maxlength="4000" placeholder="이 날의 복기·메모 -- 저장을 누르면 서버에 남습니다"></textarea>
+                  </div>
+                </div>
               </div>
-              <div id="acctNoteWrong" class="acct-note-pane" hidden>
-                <div class="acct-wrong-add"><input id="acctWrongIn" maxlength="300" placeholder="틀린 점 한 줄 — 엔터로 추가" aria-label="오답 한 줄"><select id="acctWrongTag" aria-label="원인"><option value="">원인</option><option>진입 성급</option><option>원칙 위반</option><option>가짜 돌파</option><option>사이징</option><option>기타</option></select><button type="button" class="notify-btn primary" id="acctWrongAdd">추가</button></div>
-                <div id="acctWrongSt" class="muted" role="status"></div>
-                <ul id="acctWrongList" class="acct-wrong-list"></ul>
-              </div>
+            </div>
+            <div class="acct-ap" data-ap="td" hidden><div id="snapAcctToday"></div></div>
+            <!-- 2026-11-06 오답노트: 한 줄씩 쌓는 목록(/api/acct-wrong). 칸은 폴링이 다시 그리지 않는다 -->
+            <div id="acctNoteWrong" class="acct-ap" data-ap="wr" hidden>
+              <div class="acct-wrong-add"><input id="acctWrongIn" maxlength="300" placeholder="틀린 점 한 줄 — 엔터로 추가" aria-label="오답 한 줄"><select id="acctWrongTag" aria-label="원인"><option value="">원인</option><option>진입 성급</option><option>원칙 위반</option><option>가짜 돌파</option><option>사이징</option><option>기타</option></select><button type="button" class="notify-btn primary" id="acctWrongAdd">추가</button></div>
+              <div id="acctWrongSt" class="muted" role="status"></div>
+              <ul id="acctWrongList" class="acct-wrong-list"></ul>
             </div>
           </div>
         </div>
-        <div id="snapAcctCycle"></div>   <!-- 2026-10-22 진행 중 순환(시안 A) -- 열린 포지션이 있을 때만 -->
       </section>
 
 
