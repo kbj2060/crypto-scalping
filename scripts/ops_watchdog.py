@@ -545,6 +545,7 @@ def check_runtime_resources() -> Check:
 
 
 DATA2 = Path(os.getenv("WATCHDOG_DATA2", "/mnt/data2"))
+FAST = Path(os.getenv("WATCHDOG_FAST", "/mnt/nvme"))      # C: 의 VHDX -- data/hot·data/live·logs 가 여기 있다
 # (이름, 경로, warn GiB, critical GiB)
 HOST_DISKS = (("C_drive", Path("/mnt/c"), 50, 20), ("D_drive", Path("/mnt/d"), 50, 20))
 
@@ -562,7 +563,7 @@ def _probe_write(path: Path, seconds: float = 10.0) -> str | None:
     return f"write hung over {seconds:.0f}s"
 
 
-def check_host_disks(disks=HOST_DISKS, data2: Path = DATA2, data2_warn: float = 200, data2_crit: float = 50) -> Check:
+def check_host_disks(disks=HOST_DISKS, data2: Path = DATA2, data2_warn: float = 200, data2_crit: float = 50, fast: Path | None = FAST) -> Check:
     """Windows 쪽 실제 여유 · 6TB 가 붙어 있고 써지는지.
 
     `check_runtime_resources` 의 여유는 sparse vhdx 의 가상 크기라 실제 한계가 아니다 -- 2026-11-07 D: 가 102GB(하루 7~8GB
@@ -577,6 +578,14 @@ def check_host_disks(disks=HOST_DISKS, data2: Path = DATA2, data2_warn: float = 
         details[f"{name}_free_gib"] = round(free, 1)
         if free < warn:
             problems.append(("CRITICAL" if free < crit else "WARN", f"{name} {free:.0f}GiB"))
+    if fast is not None:
+        if not os.path.ismount(fast):
+            problems.append(("CRITICAL", f"{fast} not mounted"))
+        else:
+            free = shutil.disk_usage(fast).free / 2**30
+            details["fast_free_gib"] = round(free, 1)
+            if free < 30:
+                problems.append(("CRITICAL" if free < 10 else "WARN", f"fast {free:.0f}GiB"))
     if not os.path.ismount(data2):      # 안 붙은 폴더의 여유는 루트 디스크 값이라 재면 안 된다
         problems.append(("CRITICAL", f"{data2} not mounted"))
     else:

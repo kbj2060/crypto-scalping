@@ -21,16 +21,16 @@ def _tmp() -> Path:
 
 # ── 감시기 ───────────────────────────────────────────────────────────
 def test_unmounted_data2_is_critical():
-    c = w.check_host_disks(disks=(), data2=_tmp())
+    c = w.check_host_disks(disks=(), data2=_tmp(), fast=None)
     assert c.status == "CRITICAL" and "not mounted" in c.summary
 
 
 def test_real_disk_thresholds_not_wsl_virtual_free():
     d = _tmp()
     with mock.patch.object(w.os.path, "ismount", return_value=True):
-        ok = w.check_host_disks(disks=(("X", d, 0.001, 0.0001),), data2=d, data2_warn=0.001, data2_crit=0.0001)
-        warn = w.check_host_disks(disks=(("X", d, 1e12, 0.0001),), data2=d, data2_warn=0.001, data2_crit=0.0001)
-        crit = w.check_host_disks(disks=(("X", d, 1e12, 1e12),), data2=d, data2_warn=0.001, data2_crit=0.0001)
+        ok = w.check_host_disks(disks=(("X", d, 0.001, 0.0001),), data2=d, data2_warn=0.001, data2_crit=0.0001, fast=None)
+        warn = w.check_host_disks(disks=(("X", d, 1e12, 0.0001),), data2=d, data2_warn=0.001, data2_crit=0.0001, fast=None)
+        crit = w.check_host_disks(disks=(("X", d, 1e12, 1e12),), data2=d, data2_warn=0.001, data2_crit=0.0001, fast=None)
     assert (ok.status, warn.status, crit.status) == ("OK", "WARN", "CRITICAL")
 
 
@@ -66,6 +66,13 @@ def test_backup_check():
     assert w.check_backup(_status(d, 1), r).status == "WARN"
 
 
+def test_fast_disk_missing_is_critical():
+    d = _tmp()
+    with mock.patch.object(w.os.path, "ismount", side_effect=lambda p: Path(p) == d):
+        c = w.check_host_disks(disks=(), data2=d, data2_warn=0.001, data2_crit=0.0001, fast=_tmp())
+    assert c.status == "CRITICAL" and "not mounted" in c.summary
+
+
 # ── 백업 스크립트 ─────────────────────────────────────────────────────
 def _repo() -> Path:
     r = _tmp() / "repo"
@@ -92,6 +99,19 @@ def test_backup_never_writes_into_unmounted_data2():
     rc, st = _backup(r, BACKUP_DATA2=str(data2), BACKUP_VHDX_PATH="/nonexistent")
     assert rc != 0 and st["targets"]["hot_6tb"] == 1
     assert not list(data2.iterdir()), "안 붙은 6TB 폴더에 쓰면 루트 디스크가 찬다"
+
+
+def test_backup_follows_live_symlink_to_nvme():
+    r, data2, nvme = _repo(), _tmp(), _tmp()
+    shutil.move(str(r / "data/live"), str(nvme / "live"))
+    os.symlink(nvme / "live", r / "data/live")          # 11-07 전환 뒤의 모양
+    os.symlink(_tmp(), nvme / "live/orderflow/depthdiff")
+    rc, st = _backup(r, BACKUP_DATA2=str(data2), BACKUP_SKIP_MOUNT_CHECK="1", BACKUP_VHDX_PATH="/nonexistent",
+                     BACKUP_COLD_DEST=str(_tmp() / "cold"))
+    dest = data2 / "crypto-scalping-backups/data"
+    assert st["targets"]["hot_6tb"] == 0 and (dest / "live/state.json").is_file(), "링크라고 data/live 를 건너뛰면 안 된다"
+    assert not (dest / "live").is_symlink() and not (dest / "live/orderflow/raster").exists()
+    assert not (dest / "live/orderflow/depthdiff").exists(), "6TB 링크는 cold 단계가 실물로 보낸다"
 
 
 def test_backup_scope_excludes_and_skips_d_while_vhdx_there():

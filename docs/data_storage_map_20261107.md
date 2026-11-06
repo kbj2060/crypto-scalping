@@ -75,8 +75,9 @@
 
 ## 수집기 위치
 
-2026-11-07 부터 전 수집기가 서버에 있다. 목록은 `data_map.md` 의 매니페스트 표와 서버 crontab(`data/live/backups/crontab_latest.txt`).
-Pi 를 쓰지 않으므로 **서버가 멈추면 그 시간의 호가는 빈다**.
+대시보드가 쓰는 수집기는 전부 서버에 있다. 목록은 `data_map.md` 의 매니페스트 표와 서버 crontab(`data/live/backups/crontab_latest.txt`).
+Pi 에는 호가 diff 4개(ETH·BTC·SOL·XRP)와 HL 체결 2개(ETH·BTC)만 남겼다. 서버와 중복이고, WSL 본체 이전 때 호가 공백을 막는 용도다. 이전이 끝나면 끈다.
+그 뒤로는 **서버가 멈추면 그 시간의 호가는 빈다**.
 
 Pi 에서 옮긴 기준(사용자 «대시보드에 사용하지 않는 것들은 제거»):
 
