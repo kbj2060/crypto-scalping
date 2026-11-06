@@ -1831,6 +1831,7 @@ async function acctNotesLoad() {
   try {
     const r = await fetch("/api/acct-notes", { cache: "no-store" });
     if (r.ok) { acctNotes = (await r.json()).notes || {}; renderSnapshotAccount(); }
+    if (acctWrong === null) acctWrongLoad();   // 탭 숫자도 보이게 같이 받는다
   } catch (err) { /* acctNotes 가 null 이면 칸이 «못 불러옴» 을 말한다 */ }
 }
 const acctNoteSaved = (k) => (acctNotes && acctNotes[k] ? acctNotes[k].text : "");
@@ -1874,6 +1875,48 @@ document.addEventListener("input", (e) => {
   acctDraft[e.target.dataset.day] = e.target.value; if (acctNoteBusy === "fail") acctNoteBusy = "";
   acctNoteStatus();
 });
+
+// 2026-11-06 오답노트(시안 A): 메모 칸과 같은 자리의 탭 · 한 줄씩 /api/acct-wrong 에 쌓는다(최신이 위). 목록은 이 함수들이 직접 그린다 -- 카드 폴링은 건드리지 않는다.
+let acctWrong = null, acctWrongBusy = false;
+const acctWrongSt = (msg) => { el("acctWrongSt").textContent = msg || ""; };
+function acctWrongRender() {
+  const ul = el("acctWrongList");
+  if (!ul) return;
+  el("acctWrongN").textContent = acctWrong ? acctWrong.length : "";
+  ul.innerHTML = (acctWrong || []).slice().reverse().map((r) => `<li><time>${r.date.slice(5)}</time><span class="wt">${escapeHtml(r.text)}</span>${r.tag ? `<span class="wg">${escapeHtml(r.tag)}</span>` : "<span></span>"}<button type="button" class="wx" data-wrong-del="${r.id}" aria-label="이 줄 지우기">✕</button></li>`).join("");
+  acctWrongSt(acctWrong === null ? "오답노트를 불러오지 못했습니다 — 잠시 뒤 다시 시도합니다" : acctWrong.length ? "" : "아직 쌓인 오답이 없습니다.");
+}
+async function acctWrongLoad() {
+  try { const r = await fetch("/api/acct-wrong", { cache: "no-store" }); if (r.ok) { acctWrong = (await r.json()).rows || []; acctWrongRender(); } } catch (err) { /* null 이면 칸이 말한다 */ }
+}
+async function acctWrongPost(body) {
+  if (acctWrongBusy) return false;
+  acctWrongBusy = true;
+  try {
+    const r = await fetch("/api/acct-wrong", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error(r.status);
+    return await r.json();
+  } catch (err) { acctWrongSt("저장 실패 — 다시 눌러 주세요"); return false; } finally { acctWrongBusy = false; }
+}
+async function acctWrongAdd() {
+  const inp = el("acctWrongIn"), text = inp.value.trim();
+  if (!text || acctWrong === null) return;
+  const row = await acctWrongPost({ date: acctSelDay || acctKey(Date.now()), text, tag: el("acctWrongTag").value });
+  if (!row) return;
+  acctWrong.push(row); inp.value = ""; acctWrongRender(); inp.focus();
+}
+function acctNoteTab(k) {
+  for (const b of document.querySelectorAll("#acctCard [data-nt]")) { b.classList.toggle("on", b.dataset.nt === k); b.setAttribute("aria-pressed", String(b.dataset.nt === k)); }
+  el("acctNoteMemo").hidden = k !== "memo"; el("acctNoteWrong").hidden = k !== "wrong";
+  if (k === "wrong" && acctWrong === null) acctWrongLoad();
+}
+document.addEventListener("click", async (e) => {
+  const t = e.target.closest("[data-nt]"), d = e.target.closest("[data-wrong-del]");
+  if (t) acctNoteTab(t.dataset.nt);
+  if (e.target.closest("#acctWrongAdd")) acctWrongAdd();
+  if (d && await acctWrongPost({ del: Number(d.dataset.wrongDel) })) { acctWrong = acctWrong.filter((r) => r.id !== Number(d.dataset.wrongDel)); acctWrongRender(); }
+});
+document.addEventListener("keydown", (e) => { if (e.target.id === "acctWrongIn" && e.key === "Enter" && !e.isComposing) { e.preventDefault(); acctWrongAdd(); } });   // 한글 조합 중 엔터는 글자 확정 -- 추가가 아니다
 
 // 오늘 0~24시: 닫힌 왕복 = 그 시각 막대(손익만큼) · 누적 = 계단선 · 지금 포지션 = 빗금 막대
 function acctTodaySvg(tT, unreal, hasPos, t0, now, w, h) {

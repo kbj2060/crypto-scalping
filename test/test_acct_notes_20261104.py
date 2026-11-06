@@ -36,5 +36,18 @@ class AcctNotes(unittest.TestCase):
         self.assertEqual(acct_notes.load(self.p)["2026-11-04"]["text"], "복구")
 
 
+    def test_wrong_notebook(self):
+        r1 = acct_notes.wrong_add(self.p, "2026-11-05", "추격  진입\n물탐", "원칙 위반", 5)
+        r2 = acct_notes.wrong_add(self.p, "2026-11-05", "가짜 돌파", "", 5)   # 같은 ms 라도 id 가 겹치지 않는다
+        self.assertEqual(r1["text"], "추격 진입 물탐")
+        self.assertNotEqual(r1["id"], r2["id"])
+        acct_notes.wrong_del(self.p, r1["id"])
+        self.assertEqual([r["text"] for r in acct_notes.wrong_load(self.p)], ["가짜 돌파"])
+        for d, x, g in (("11/05", "x", ""), ("2026-11-05", "  ", ""), ("2026-11-05", "x", "없는태그"), ("2026-11-05", "가" * 301, "")):
+            with self.assertRaises(ValueError):
+                acct_notes.wrong_add(self.p, d, x, g)
+        self.assertEqual(len(acct_notes.wrong_load(self.p)), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

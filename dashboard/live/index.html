@@ -545,8 +545,17 @@
           <div id="acctDayBox" class="acct-day-box" hidden>
             <div id="snapAcctDay"></div>
             <div class="acct-note">
-              <div class="acct-note-head"><label for="acctNoteTa" id="acctNoteLab">메모</label><span id="acctNoteSt" class="muted" role="status"></span><button type="button" class="notify-btn primary" id="acctNoteSave">저장</button></div>
-              <textarea id="acctNoteTa" rows="3" maxlength="4000" placeholder="이 날의 복기·메모 -- 저장을 누르면 서버에 남습니다"></textarea>
+              <!-- 2026-11-06 펜 메모 «메모장·오답노트 리디자인» 시안 A: 같은 자리를 탭으로 나눈다(오답노트 = 한 줄씩 쌓는 목록, /api/acct-wrong). 칸은 폴링이 다시 그리지 않는다 -->
+              <div class="chipset" role="group" aria-label="메모장·오답노트"><button type="button" class="chip on" data-nt="memo" aria-pressed="true">메모</button><button type="button" class="chip" data-nt="wrong" aria-pressed="false">오답노트 <span id="acctWrongN"></span></button></div>
+              <div id="acctNoteMemo" class="acct-note-pane">
+                <div class="acct-note-head"><label for="acctNoteTa" id="acctNoteLab">메모</label><span id="acctNoteSt" class="muted" role="status"></span><button type="button" class="notify-btn primary" id="acctNoteSave">저장</button></div>
+                <textarea id="acctNoteTa" rows="3" maxlength="4000" placeholder="이 날의 복기·메모 -- 저장을 누르면 서버에 남습니다"></textarea>
+              </div>
+              <div id="acctNoteWrong" class="acct-note-pane" hidden>
+                <div class="acct-wrong-add"><input id="acctWrongIn" maxlength="300" placeholder="틀린 점 한 줄 — 엔터로 추가" aria-label="오답 한 줄"><select id="acctWrongTag" aria-label="원인"><option value="">원인</option><option>진입 성급</option><option>원칙 위반</option><option>가짜 돌파</option><option>사이징</option><option>기타</option></select><button type="button" class="notify-btn primary" id="acctWrongAdd">추가</button></div>
+                <div id="acctWrongSt" class="muted" role="status"></div>
+                <ul id="acctWrongList" class="acct-wrong-list"></ul>
+              </div>
             </div>
           </div>
         </div>

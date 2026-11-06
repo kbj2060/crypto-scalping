@@ -1268,6 +1268,26 @@ svg {
 .acct-note textarea:disabled { opacity: .55; }
 .acct-note-head .notify-btn { min-height: 28px; padding: 4px 14px; font-size: 12.5px; }
 @media (max-width: 900px) { .acct-note-head .notify-btn { min-height: 40px; } }
+/* 2026-11-06 오답노트 탭(시안 A) -- 색은 기존 칩·입력칸 토큰만 쓴다(--glass·--soft-line·--muted·--amber) */
+.acct-note-pane { display: grid; gap: 6px; min-width: 0; }
+.acct-note-pane[hidden] { display: none; }
+.acct-wrong-add { display: flex; gap: 6px; min-width: 0; }
+.acct-wrong-add input, .acct-wrong-add select { min-width: 0; box-sizing: border-box; padding: 7px 10px; border-radius: var(--radius-sm); border: 1px solid var(--soft-line);
+  background: var(--glass); color: var(--text); font: 13px/1.4 var(--font-sans); }
+.acct-wrong-add input { flex: 1; }
+.acct-wrong-add input:focus-visible, .acct-wrong-add select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.acct-wrong-add .notify-btn { min-height: 28px; padding: 4px 14px; font-size: 12.5px; }
+#acctWrongSt:empty { display: none; }
+#acctWrongSt { font-size: 11.5px; }
+.acct-wrong-list { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow-y: auto; }
+.acct-wrong-list li { display: grid; grid-template-columns: auto 1fr auto auto; gap: 8px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--soft-line); font-size: 13px; }
+.acct-wrong-list li:last-child { border-bottom: 0; }
+.acct-wrong-list time { color: var(--muted); font: 11.5px var(--font-mono); font-variant-numeric: tabular-nums; }
+.acct-wrong-list .wt { overflow-wrap: anywhere; }
+.acct-wrong-list .wg { color: var(--muted); font-size: 11.5px; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--soft-line); white-space: nowrap; }
+.acct-wrong-list .wx { background: none; border: 0; color: var(--muted); cursor: pointer; min-width: 24px; min-height: 24px; font-size: 12px; }
+.acct-wrong-list .wx:hover { color: var(--text); }
+@media (max-width: 900px) { .acct-wrong-add .notify-btn, .acct-wrong-add select, .acct-wrong-add input { min-height: 40px; } .acct-wrong-list .wx { min-width: 40px; min-height: 40px; } }
 /* 2026-10-22 진행 중 순환(시안 A) -- 달력 아래 · 열린 포지션마다 */
 .cy-box { border-top: 1px solid var(--soft-line); margin-top: 14px; padding-top: 14px; min-width: 0; }
 .cy-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }

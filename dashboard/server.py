@@ -2639,6 +2639,20 @@ def make_app() -> web.Application:
         except (ValueError, AttributeError) as exc:
             raise web.HTTPBadRequest(text=str(exc))
 
+    ACCT_WRONG_PATH = LIVE_DIR / "acct_wrong.json"
+
+    async def api_acct_wrong(request: web.Request) -> web.Response:   # 2026-11-06 오답노트 읽기
+        return web.json_response({"rows": acct_notes.wrong_load(ACCT_WRONG_PATH)}, headers=NOCACHE)
+
+    async def api_acct_wrong_save(request: web.Request) -> web.Response:   # 추가 = {date, text, tag} · 삭제 = {del: id}
+        try:
+            body = await request.json()
+            if "del" in body:
+                return web.json_response(acct_notes.wrong_del(ACCT_WRONG_PATH, body["del"]), headers=NOCACHE)
+            return web.json_response(acct_notes.wrong_add(ACCT_WRONG_PATH, body.get("date"), body.get("text"), body.get("tag", "")), headers=NOCACHE)
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise web.HTTPBadRequest(text=str(exc))
+
     async def api_pred_record(request: web.Request) -> web.Response:   # 2026-11-03 ⑤ 예측 줄 아래 «적중 기록»·«4h 상대 강도» -- 쌓인 기록을 읽어 채점(요청 때 REST 안 부른다)
         try:
             payload = await swr_cached("pred_record", 30.0, lambda: asyncio.to_thread(pred_record.summary, int(time.time() * 1000)), max_stale=600.0)
@@ -4584,6 +4598,8 @@ def make_app() -> web.Application:
     app.router.add_get("/api/pred-record", api_pred_record)
     app.router.add_get("/api/acct-notes", api_acct_notes)
     app.router.add_post("/api/acct-notes", api_acct_notes_save)
+    app.router.add_get("/api/acct-wrong", api_acct_wrong)
+    app.router.add_post("/api/acct-wrong", api_acct_wrong_save)
     app.router.add_get("/api/box-hold", api_box_hold)
     app.router.add_get("/api/open-rev", api_open_rev)
     app.router.add_get("/api/iceberg", api_iceberg)
