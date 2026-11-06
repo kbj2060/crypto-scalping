@@ -391,6 +391,16 @@
    "what": "전진 IC CI 하한 > 0 · 메이커 뒤 CI 하한 > 0. 1차 열람 1회(10-16: 30일 4h IC +.055[−.064,+.179])를 판정 때 함께 적는다",
    "how": "python scripts/research_eth_deep_features_2024sel_20261016.py --forward  (로컬 메인 체크아웃 · tmp/deep_features_2024sel_20261016 · 11-07 워크트리에서 옮김)",
    "doc": "docs/prereg/eth_deep_features_2024sel_frozen_20261016.json"
+  },
+  {
+   "id": "soxl_own_iv",
+   "date": "2027-02-01",
+   "kind": "심사 여부",
+   "approx": true,
+   "title": "SOXL 자체 IV30 → 5거래일 변동성 — 사전등록 시점",
+   "what": "11-02 부터 쌓인 CBOE 체인 iv30 약 60거래일. 대리 IV 검정은 11-07 불통과(상한 +.019, 20주). 같은 형식으로 새 사전등록 후 채점",
+   "how": "data/live/options_equity/cboe/SOXL 일별 마지막 스냅숏 iv30 + 무기한 5분 RV · scripts/research_soxl_option_hypotheses_20261107.py 형식 재사용",
+   "doc": "docs/experiments/soxl_option_hypotheses_20261107.md"
   }
  ]
 }
