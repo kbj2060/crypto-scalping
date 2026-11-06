@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-DISKS = (("C:", Path("/mnt/c")), ("D:", Path("/mnt/d")), ("6TB", Path("/mnt/data2")), ("WSL 루트(가상 크기 -- 한계 아님)", Path("/")))
+DISKS = (("C:", Path("/mnt/c")), ("D:", Path("/mnt/d")), ("6TB", Path("/mnt/data2")), ("NVMe VHDX", Path("/mnt/nvme")), ("WSL 루트(가상 크기 -- 한계 아님)", Path("/")))
 
 
 def _gb(n: float) -> str:

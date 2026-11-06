@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Daily backup. 🔴규칙: 원본과 사본은 항상 다른 디스크(2026-11-07 재설계, docs/data_storage_map_20261107.md).
 #
-#   hot  = 루트 디스크의 data/ 전체(제외 목록 아래) -> 6TB + dev
+#   hot  = NVMe(data/hot·data/live)와 루트 디스크의 data/ 전체(제외 목록 아래) -> 6TB + dev
 #   cold = 6TB 가 원본인 orderflow·lake·splits      -> D: + dev
 #
 # D: 사본은 서버 ext4.vhdx 가 D: 를 떠난 뒤부터 돈다. 그 전에는 D: 공간이 곧 서버 디스크의 한계라 쓰지 않는다
@@ -28,14 +28,20 @@ log() { echo "[$(date -Iseconds)] $*"; }
 # 🔴*.wal 은 보내지 않는다 -- --delete 가 없어 원본이 체크포인트로 지운 옛 wal 이 새 본체 옆에 남고, 그 사본을
 #   열면 옛 wal 이 **조용히 재생돼 행이 중복**된다(2026-10-16 D: 에 16개 실측·재현).
 # --no-links: data/ 안의 6TB 심볼릭 링크(orderflow/*·lake·splits)는 아래 cold 단계가 실물로 보낸다.
-HOT_RSYNC=(-a --no-links --exclude '*.tmp' --exclude '*.wal' --exclude '.snap_*'
-           --exclude '/hot/' --exclude '/hot_backup/' --exclude '/tmp/' --exclude '/test/'
-           --exclude '/binance_vision/' --exclude '/live/orderflow/raster/')
+HOT_RSYNC=(-a --no-links --exclude '*.tmp' --exclude '*.wal' --exclude '.snap_*' --exclude '*.moved')
 # 진행 중 시각 파일(.bt·.jsonl)은 다음날 .gz 가 되므로 보내면 부분 사본만 남는다(ETH 만 57개 795MB 쌓였었다).
 COLD_RSYNC=(-a --exclude '*.tmp' --exclude '*.wal' --exclude '.snap_*' --exclude '*.bt' --exclude '*.jsonl')
 COLD_MAP=("orderflow:data/live/orderflow" "lake:data/lake" "splits:data/splits")
 
 rs() { rsync "$@"; local r=$?; [[ $r -eq 24 ]] && r=0; return $r; }   # 24 = 전송 중 사라짐(시각 파일 gzip 교체) -- 정상
+
+send_hot() {    # send_hot <받는 쪽 접두어> [rsync 옵션...]  data/live 는 NVMe 링크라 따로(--no-links 가 건너뛴다)
+  local prefix="$1" rc=0; shift
+  rs "${HOT_RSYNC[@]}" --exclude '/hot/' --exclude '/hot_backup/' --exclude '/live/' --exclude '/tmp/' --exclude '/test/' \
+     --exclude '/binance_vision/' --exclude '/orderflow_hdd/' "$@" "$ROOT/data/" "$prefix/data/" || rc=1
+  rs "${HOT_RSYNC[@]}" --exclude '/orderflow/raster/' "$@" "$ROOT/data/live/" "$prefix/data/live/" || rc=1
+  return $rc
+}
 
 send_cold() {   # send_cold <받는 쪽 접두어> [rsync 옵션...]
   local prefix="$1" rc=0 m; shift
@@ -65,7 +71,7 @@ s = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True, timeout=60); d = sq
 s.backup(d); d.close(); s.close()' "$f" "$dst.tmp" && mv "$dst.tmp" "$dst" \
       || { log "🔴 hot backup failed: $f"; hot_6tb=1; }
   done
-  rs "${HOT_RSYNC[@]}" "$ROOT/data/" "$DEST/data/" || hot_6tb=1
+  send_hot "$DEST" || hot_6tb=1
   log "backup done rc=$hot_6tb"
 else
   log "🔴 $DATA2 not mounted -- 6TB 단계와 cold 단계를 건너뛴다"
@@ -97,7 +103,7 @@ if [[ -n "${DEV_SSH:-}" ]]; then
   log "dev backup starting -> $DEV_HOST:$DEV_DEST"
   rc=0
   "${SSH[@]}" "$DEV_HOST" "mkdir -p '$DEV_DEST/data/live/orderflow' '$DEV_DEST/data/lake' '$DEV_DEST/data/splits' '$DEV_DEST/data/hot_backup'" || rc=1
-  rs "${HOT_RSYNC[@]}" -e "${SSH[*]}" "$ROOT/data/" "$DEV_HOST:$DEV_DEST/data/" || rc=1
+  send_hot "$DEV_HOST:$DEV_DEST" -e "${SSH[*]}" || rc=1
   if mountpoint -q "$DATA2"; then
     send_cold "$DEV_HOST:$DEV_DEST" -e "${SSH[*]}" || rc=1
     rs -a --exclude '*.tmp' -e "${SSH[*]}" "$DEST/data/hot_backup/" "$DEV_HOST:$DEV_DEST/data/hot_backup/" || rc=1

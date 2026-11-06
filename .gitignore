@@ -47,6 +47,7 @@ __pycache__/
 venv*/
 /venv
 /venv_kronos
+/logs
 env/
 ENV/
 

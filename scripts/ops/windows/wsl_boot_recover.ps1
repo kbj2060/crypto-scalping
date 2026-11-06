@@ -3,13 +3,14 @@
 # Run by the scheduled task "CryptoWSLBootRecover" (install_boot_task.ps1). Idempotent; safe to run any time.
 #   1) LAN profile Public -> Private   2) start WSL and keep it alive   3) portproxy 0.0.0.0:2222 -> <WSL IP>:22
 #   then re-check every 60 s (WSL IP changes on every WSL start).
-#   4) 2026-11-07: attach and mount the 6TB USB data disk (/mnt/data2, fstab has it by UUID).
+#   4) 2026-11-07: attach and mount the NVMe VHDX (/mnt/nvme) and the 6TB USB disk (/mnt/data2); fstab has both by UUID.
 #      -MountOnly does just that once and exits (manual recovery, also how this was tested).
 # ASCII only on purpose: Windows PowerShell 5.1 reads BOM-less UTF-8 as ANSI.
 param([string]$Distro = "Ubuntu", [int]$ListenPort = 2222, [int]$WslSshPort = 22, [switch]$MountOnly)
 $ErrorActionPreference = "Continue"
 $Log = Join-Path $PSScriptRoot "boot_recover.log"
 $Wsl = "$env:WINDIR\System32\wsl.exe"
+$FastVhd = "C:\wsl\fast\fast.vhdx"
 function Log([string]$m) { "$(Get-Date -Format s) $m" | Add-Content -Path $Log -Encoding UTF8 }
 
 function Fix-NetworkProfile {
@@ -42,19 +43,31 @@ function Start-KeepAlive {
     return $p
 }
 
-function Fix-DataDisk {
+function Test-Mounted([string]$mp) {
+    & $Wsl -d $Distro -u root -e findmnt -n $mp *> $null
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Mount-Target([string]$mp, [string[]]$attach, [string]$what) {
     # wsl --mount acts on the calling user's WSL VM, so this must run here (kbj20, elevated), not as SYSTEM.
-    # The disk is picked by size, not number: PHYSICALDRIVE numbers change when a disk is added.
-    & $Wsl -d $Distro -u root -e findmnt -n /mnt/data2 *> $null
-    if ($LASTEXITCODE -eq 0) { return }
-    $d = @(Get-Disk | Where-Object { $_.BusType -eq 'USB' -and $_.Size -gt 5TB })
-    if ($d.Count -ne 1) { Log "data disk: want exactly 1 USB disk over 5TB, found $($d.Count)"; return }
-    & $Wsl --mount "\\.\PHYSICALDRIVE$($d[0].Number)" --bare *> $null   # already attached is an error here, and harmless
+    & $Wsl @attach *> $null          # already attached is an error here, and harmless
     Start-Sleep -Seconds 2
-    & $Wsl -d $Distro -u root -e mount /mnt/data2 *> $null
-    & $Wsl -d $Distro -u root -e findmnt -n /mnt/data2 *> $null
-    if ($LASTEXITCODE -eq 0) { Log "data disk mounted: PHYSICALDRIVE$($d[0].Number) -> /mnt/data2" }
-    else { Log "data disk mount FAILED (PHYSICALDRIVE$($d[0].Number))" }
+    & $Wsl -d $Distro -u root -e mount $mp *> $null
+    if (Test-Mounted $mp) { Log "$what mounted -> $mp" } else { Log "$what mount FAILED -> $mp" }
+}
+
+function Fix-DataDisk {
+    # 2026-11-07 /mnt/nvme = VHDX on C: holding data/hot, data/live and logs. cron waits for it at boot (see docs/data_storage_map_20261107.md).
+    if (-not (Test-Mounted /mnt/nvme)) {
+        if (Test-Path $FastVhd) { Mount-Target /mnt/nvme @("--mount", "--vhd", $FastVhd, "--bare") "fast vhd" }
+        else { Log "fast vhd missing: $FastVhd" }
+    }
+    # /mnt/data2 = 6TB USB. Picked by size, not number: PHYSICALDRIVE numbers change when a disk is added.
+    if (-not (Test-Mounted /mnt/data2)) {
+        $d = @(Get-Disk | Where-Object { $_.BusType -eq 'USB' -and $_.Size -gt 5TB })
+        if ($d.Count -ne 1) { Log "data disk: want exactly 1 USB disk over 5TB, found $($d.Count)"; return }
+        Mount-Target /mnt/data2 @("--mount", "\\.\PHYSICALDRIVE$($d[0].Number)", "--bare") "6TB data disk"
+    }
 }
 
 if ($MountOnly) { Fix-DataDisk; return }
