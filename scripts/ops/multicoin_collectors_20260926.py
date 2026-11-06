@@ -301,7 +301,7 @@ def cmd_plan_or_start(a, start: bool) -> int:
         return 2
     phases = {1, 2} if a.phase == "all" else {int(a.phase)}
     todo = specs(coins, phases)
-    if a.only:     # 2026-11-07 BTC: 호가 diff·HL 체결·포지션만, HL 원시 호가(.bt)는 안 읽어서 안 띄운다
+    if getattr(a, "only", ""):     # 2026-11-07 BTC: 호가 diff·HL 체결·포지션만, HL 원시 호가(.bt)는 안 읽어서 안 띄운다
         only = set(a.only.split(","))
         todo = [s for s in todo if s["key"] in only]
     py = os.getenv("PYTHON_BIN") or sys.executable
