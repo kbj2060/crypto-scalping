@@ -5,7 +5,7 @@
     python scripts/research_new_sources_20261107.py fetch_cm  # 로컬, 커뮤니티 API
     python scripts/research_new_sources_20261107.py n1|n2|n3  # 로컬, 각 1회
 """
-import json, sqlite3, sys, urllib.request
+import hashlib, json, sqlite3, sys, urllib.request
 from pathlib import Path
 import numpy as np, pandas as pd
 
@@ -15,6 +15,7 @@ BOOT, SEED = 2000, 20261107
 
 def write_once(name, rep):
     f = OUT / f"{name}_verdict.json"
+    rep["input_sha256"] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()[:16] for p in sorted(OUT.glob("*.csv"))}
     if f.exists():
         sys.exit(f"판정은 1회만 -- {f}")
     f.write_text(json.dumps(rep, ensure_ascii=False, indent=1, default=float))
@@ -64,7 +65,9 @@ def news_frame(rv, x):
     f = f[f.rv > 0]
     lr = np.log(f.rv)
     f["a1"], f["a24"], f["a168"] = lr, np.log(f.rv.rolling(24).mean()), np.log(f.rv.rolling(168, min_periods=120).mean())
-    f["seas"] = lr.groupby(f.index.hour).transform(lambda s: s.rolling(14, min_periods=7).mean())
+    # 수정 1: 표적 시각(H+1)의 직전 14일 평균. H−23 = 어제 같은 표적 시각이 행 H 에서 쓸 수 있는 가장 최근 값
+    f["seas"] = lr.shift(23).groupby((f.index + pd.Timedelta("1h")).hour).transform(lambda s: s.rolling(14, min_periods=7).mean())
+    f["wknd"] = ((f.index + pd.Timedelta("1h")).dayofweek >= 5).astype(float)   # 수정 1: 뉴스 건수가 요일 대리가 되지 않게
     f["y"] = lr.shift(-1)
     f["x"] = x.reindex(f.index)
     return f
@@ -81,7 +84,7 @@ def walk_mse(f, cols, min_fit=14 * 24):
     return pd.Series(out)
 
 
-BASE = ["a1", "a24", "a168", "seas"]
+BASE = ["a1", "a24", "a168", "seas", "wknd"]
 
 
 def n1_stat(rv, x):
@@ -101,23 +104,34 @@ def n1():
     px = pd.read_parquet("data/live/dirshort_panel/ETHUSDT.parquet", columns=["timestamp", "close"]).set_index("timestamp").close.sort_index()
     rv = hourly_rv(px[px.index >= "2026-09-01"])
     news = pd.read_csv(OUT / "news.csv")
-    news = news[news.backfill == 0]
+    news = news[news["backfill"] == 0]
     t = pd.to_datetime(news.first_seen_ms, unit="ms").dt.floor("h")
     cnt = t.value_counts().sort_index().reindex(pd.date_range("2026-10-05", rv.index.max(), freq="1h")).fillna(0)
     x = np.log1p(cnt)
     d, a, b = n1_stat(rv, x)
     q = boot_days(d)
     up = float(np.quantile(q, .90))
-    pl = [float(n1_stat(rv, np.log1p(cnt.shift(24 * k).dropna()))[0].mean()) for k in range(1, 10)]
-    beat = sum(d.mean() < v for v in pl)
+    # 수정 1: k 마다 실제 판도 같은 시작점으로 잘라 비교(평가·적합 행 일치). k=7 은 요일 위상이 같은 판이라 반드시 이겨야 한다
+    pl, wins = [], {}
+    for k in range(1, 10):
+        xk = x[x.index >= x.index[24 * k]]
+        real_k = float(n1_stat(rv, xk)[0].mean())
+        plk = float(n1_stat(rv, np.log1p(cnt.shift(24 * k).dropna()))[0].mean())
+        pl.append({"k": k, "real": real_k, "placebo": plk})
+        wins[k] = real_k < plk
+    beat = sum(wins.values())
     half = len(d) // 2
     rep = {"n_hours": len(d), "n_days": int(d.index.floor("D").nunique()), "news_items": int(len(news)), "mse_A": float(a.reindex(d.index).mean()), "mse_B": float(b.reindex(d.index).mean()), "dmse": float(d.mean()), "upper90": up,
-           "p": float((q >= 0).mean()), "placebo": pl, "placebo_beaten": f"{beat}/9", "halves": [float(d.iloc[:half].mean()), float(d.iloc[half:].mean())], "verdict": "통과" if up < 0 and beat >= 8 else "불통과"}
+           "p": float((q >= 0).mean()), "placebo": pl, "placebo_beaten": f"{beat}/9", "k7_win": wins[7], "halves": [float(d.iloc[:half].mean()), float(d.iloc[half:].mean())], "verdict": "통과" if up < 0 and beat >= 8 and wins[7] else "불통과"}
     j = pd.read_csv(OUT / "judg.csv")
     jt = pd.to_datetime(j.judged_ms, unit="ms").dt.floor("h")
-    imp = pd.to_numeric(j.impact, errors="coerce").fillna(0).groupby(jt).sum().reindex(cnt.index).fillna(0)
-    d2, _, _ = n1_stat(rv, np.log1p(imp))
-    rep["aux_llm_impact"] = {"dmse": float(d2.mean()), "n_hours": len(d2)}
+    imp = pd.to_numeric(j.impact, errors="coerce").groupby(jt).sum().reindex(cnt.index).fillna(0)
+    imp = imp[imp.index <= jt.max()]      # 수정 1: 판정 정지(10-27) 뒤를 가짜 0 으로 채우지 않는다
+    try:
+        d2, _, _ = n1_stat(rv, np.log1p(imp.clip(lower=0)))
+        rep["aux_llm_impact"] = {"dmse": float(d2.mean()), "n_hours": len(d2), "note": "판정 정지 전까지"}
+    except ValueError:
+        rep["aux_llm_impact"] = {"note": "적합 최소 행 미달로 표본 없음"}
     pb = pd.read_parquet("data/live/dirshort_panel/BTCUSDT.parquet", columns=["timestamp", "close"]).set_index("timestamp").close.sort_index()
     d3, _, _ = n1_stat(hourly_rv(pb[pb.index >= "2026-09-01"]), x)
     rep["aux_btc"] = {"dmse": float(d3.mean()), "upper90": float(np.quantile(boot_days(d3), .90))}
@@ -170,9 +184,14 @@ def n2_one(coin):
     tr = n2_trades(ev, ms, px)
     rep = {"events": len(ev), "n": len(tr), "days": int(len(np.unique(tr[:, 0]))) if len(tr) else 0, "gross_bp": float(tr[:, 1].mean()) if len(tr) else None, "net_bp": float(tr[:, 2].mean()) if len(tr) else None,
            "ci95_net": cluster_ci(tr[:, 0], tr[:, 2]) if len(tr) >= 10 else None}
-    rep["flip_gross_bp"] = float(n2_trades([(t, -s) for t, s in ev], ms, px)[:, 1].mean())
+    if len(tr):
+        day_means = pd.Series(tr[:, 2]).groupby(tr[:, 0]).mean()
+        rep["days_positive_net"] = f"{int((day_means > 0).sum())}/{len(day_means)}"
+    if len(tr) < 10:
+        return rep | {"note": "표본 없음"}
     rep["aux"] = {f"delay{dl}_hold{hd}": float(n2_trades(ev, ms, px, dl, hd)[:, 1].mean()) for dl, hd in ((0, 30), (1, 30), (5, 30), (2, 10), (2, 60))}
     rep["pos_control_gross_before_event"] = float(n2_trades(ev, ms, px, -7, 30)[:, 1].mean())   # 사건 전 mid 로 진입(미래를 앎)
+    assert rep["pos_control_gross_before_event"] > rep["gross_bp"] + 1, ("양성 대조 실패", rep)
     return rep
 
 
@@ -201,7 +220,7 @@ def n3_one(d, a="2024-01-01", b=None, sig=None):
     g, ic = n3_ic(sig, fwd, a, b)
     n = len(g)
     rng = np.random.default_rng(SEED)
-    st = rng.integers(0, n - 7, size=(BOOT, n // 7 + 1))
+    st = rng.integers(0, n - 6, size=(BOOT, n // 7 + 1))
     S, F = g.s.to_numpy(), g.f.to_numpy()
     bs = []
     for row in st:
@@ -240,6 +259,17 @@ def selftest():
     f2 = f.copy(); f2.iloc[-2, f2.columns.get_loc("y")] = 99.0
     e1 = walk_mse(f2, BASE)
     assert np.allclose(e0.iloc[:-2], e1.iloc[:-2]), "미래 표적이 적합에 들어감"
+    # 수정 1: 중간 행 표적을 망가뜨려도 그 행 앞뒤 오차는 그대로여야(그 뒤 첫 행 적합은 j−1 까지 -- X[:i+1] 변이를 잡는다)
+    g_ = f.dropna(subset=BASE + ["y"])
+    j_ = 24 * 20
+    f3 = g_.copy(); f3.iloc[j_, f3.columns.get_loc("y")] = 99.0
+    a0, a3 = walk_mse(g_, BASE), walk_mse(f3, BASE)
+    pos = a0.index.get_loc(g_.index[j_])
+    assert abs(a0.iloc[pos - 1] - a3.iloc[pos - 1]) < 1e-12 and abs(a0.iloc[pos + 1] - a3.iloc[pos + 1]) < 1e-12, "적합 경계 오류"
+    # 수정 1: seas 는 표적 시각의 값만·행 H 의 값은 안 쓴다
+    r2 = rv.copy(); r2.iloc[500] *= 1000
+    fs, fs2 = news_frame(rv, x), news_frame(r2, x)
+    assert fs.seas.iloc[500] == fs2.seas.iloc[500] and fs.seas.iloc[522] == fs2.seas.iloc[522] and fs.seas.iloc[523] != fs2.seas.iloc[523], "seas 시각 오류"
     # 양성·음성: 표적을 담은 x 는 크게 개선, 난수는 ~0 이상
     ff = np.log(rv).shift(-1)
     assert n1_stat(rv, ff)[0].mean() < -.1 and n1_stat(rv, x)[0].mean() > -.01
