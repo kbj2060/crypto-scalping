@@ -434,6 +434,7 @@ def _init_sqlite(path: Path) -> None:
 
 _SQLITE: dict = {}
 _SQLITE_G = threading.Lock()
+_SQLITE_INIT = threading.Lock()
 
 
 @contextmanager
@@ -487,7 +488,8 @@ class TapeStore:
         self.pending: list[tuple] = []
         self._lock = threading.Lock()   # 쓰기 스레드와 복구 태스크가 같은 파일을 동시에 연다
         if self.sqlite:
-            _init_sqlite(db_path)       # 기본키·타입·인덱스. 아래 DuckDB DDL 은 SQLite 에선 전부 «이미 있음»으로 지나간다
+            with _SQLITE_INIT:      # 2026-11-07 기동을 스레드로 옮기자 심볼들이 같은 파일을 동시에 초기화해 database is locked 로 죽었다
+                _init_sqlite(db_path)       # 기본키·타입·인덱스. 아래 DuckDB DDL 은 SQLite 에선 전부 «이미 있음»으로 지나간다
         with self._connect() as con:
             con.execute("""
                 CREATE TABLE IF NOT EXISTS trade_tape_1s(
