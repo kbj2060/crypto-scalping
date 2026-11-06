@@ -188,15 +188,18 @@ def selftest():
     n = 30
     idx = pd.date_range("2026-01-01", periods=n, freq="5min")
     c = np.full(n, 100.0); c[3:] = 101.0
-    d = pd.DataFrame({"o": np.r_[100, c[:-1]], "high": c + 1, "low": c - 1, "close": c}, index=idx)
+    d = pd.DataFrame({"o": np.r_[100, c[:-1]], "high": c + 2, "low": c - 2, "close": c}, index=idx)   # 꼬리 2 -- 다음 봉이 항상 관통
     set_cost(STRICT)
     x = np.zeros(n, int); x[[0, 1, 2, 3, 4]] = 1
     t = trades(d, x)
     assert sorted(t.i.tolist()) == [0, 1, 2, 3, 4], t
     one = np.zeros(n, int); one[1] = 1
     t1 = trades(d, one)
-    # 지정가 100, 봉 2 저가 99 체결, 봉 3 종가 101 청산 지정가, 봉 4 고가 102 > 101 체결 → gross 100bp, net 96
+    # 지정가 100, 봉 2 저가 98 체결, 봉 3 종가 101 청산 지정가, 봉 4 고가 103 > 101 체결 → gross 100bp, net 96
     assert abs(t1.gross[0] - 100) < 1e-9 and abs(t1.net[0] - 96) < 1e-9, t1
+    # 관통 경계: 저가 = 지정가면 미체결
+    d2 = d.copy(); d2.loc[idx[2], "low"] = 100.0
+    assert len(trades(d2, one)) == 0
     PHASES, HOLD = ph0, h0
     print("selftest OK")
 
