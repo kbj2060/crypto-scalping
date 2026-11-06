@@ -1,5 +1,5 @@
 {
- "_doc": "2026-10-05 알림 센터 «판정 예정일». 사전등록 판정일 목록 — 대시보드(/api/notify-center)와 푸시 데몬(scripts/live_push_notifier_20260904.py, 그날 09:00 KST 한 번)이 같이 읽는다. date = 판정을 처음 돌려도 되는 날(UTC). approx=true 는 건수 기준이라 날짜가 추정이다. 판정이 끝나면 done 에 결과 한 줄. 호가 아이디어(orderbook_strategy_ideas) 문서·스크립트는 10-05 현재 워크트리 eth-orderflow-analysis-system 에만 있다(main 미병합).",
+ "_doc": "2026-10-05 알림 센터 «판정 예정일». 사전등록 판정일 목록 — 대시보드(/api/notify-center)와 푸시 데몬(scripts/live_push_notifier_20260904.py, 그날 09:00 KST 한 번)이 같이 읽는다. date = 판정을 처음 돌려도 되는 날(UTC). approx=true 는 건수 기준이라 날짜가 추정이다. 판정이 끝나면 done 에 결과 한 줄.",
  "items": [
   {
    "id": "news_rss_lag",
@@ -196,7 +196,7 @@
    "kind": "최종",
    "title": "4h 변동성 QX4 — 전진 60일(10-24~12-22) · 지금 화면에 배포된 모형",
    "what": "QX4 가 옛 배포 HGB(M3)·HAR(M0)보다 QLIKE 가 낮은가(사전등록 «전진 판정» 절). 불통과면 서버 data/live/vol4h_qx4.joblib 를 지워 HGB 로 되돌린다",
-   "how": "python3 scripts/forward_verdicts_20261025.py vol  (로컬 · 연구 브랜치 claude/chart-indicators-tuning-ecfa25)",
+   "how": "python3 scripts/forward_verdicts_20261025.py vol  (로컬 메인 체크아웃 · 최신화 후 · 동결 파일 tmp/vol4h_qx4 md5 확인 11-07)",
    "doc": "docs/prereg/vol4h_forecast_horserace_20261025.md"
   },
   {
@@ -205,7 +205,7 @@
    "kind": "최종",
    "title": "박스 유지 보정 — 30분·1h R2a · 4h 27칸+Platt180·VA180 vs 배포",
    "what": "4h 후보(배포 대기 C1)를 배포할지 · 1h 굴림 Platt90(배포됨)도 같은 창에서 확인",
-   "how": "python3 scripts/forward_verdicts_20261025.py box  (로컬 · 연구 브랜치)",
+   "how": "python3 scripts/forward_verdicts_20261025.py box  (로컬 메인 체크아웃 · tmp/box_improve_20261016/events.json 필요)",
    "doc": "docs/eth_box_hold_calibration_drift_prereg_20261025.md"
   },
   {
@@ -223,7 +223,7 @@
    "kind": "최종",
    "title": "4h 변동성 QX4I(QX4 + 옵션 ATM IV 보정) vs QX4 — 90일",
    "what": "ETH QLIKE(QX4I) − QLIKE(QX4) 일 블록 CI 상한 < 0 이면 IV 보정 서빙(배포 대기 B1) 추가 후보",
-   "how": "python3 scripts/forward_verdicts_20261025.py voliv  (로컬 · 연구 브랜치)",
+   "how": "python3 scripts/forward_verdicts_20261025.py voliv  (로컬 메인 체크아웃)",
    "doc": "docs/prereg/vol4h_round12_iv_forward_20261025.md"
   },
   {
@@ -232,7 +232,7 @@
    "kind": "1차 점검",
    "title": "추세 (b) 현재 규칙 + pv — 90일",
    "what": "사전등록 «전진 판정» 절 1차 점검(최종 2027-04-22)",
-   "how": "python3 scripts/forward_verdicts_20261025.py trend90  (로컬 · 연구 브랜치)",
+   "how": "python3 scripts/forward_verdicts_20261025.py trend90  (로컬 메인 체크아웃)",
    "doc": "docs/prereg/trend_portfolio_lit_20261025.md"
   },
   {
@@ -241,7 +241,7 @@
    "kind": "기록",
    "title": "RL v3.1 동결 앙상블 — 90일(기록용)",
    "what": "관문 G1~G4 그대로 · 무작위 400 시드 95분위",
-   "how": "python3 scripts/forward_verdicts_20261025.py rl  (로컬 · 연구 브랜치)",
+   "how": "python3 scripts/forward_verdicts_20261025.py rl  (로컬 메인 체크아웃 · 동결 RL 5개 md5 확인 11-07)",
    "doc": "docs/prereg/rl_v31_tcn_ensemble_20261025.md"
   },
   {
@@ -259,7 +259,7 @@
    "kind": "최종",
    "title": "추세 (b) 현재 규칙 + pv — 180일",
    "what": "사전등록 «전진 판정» 절 최종",
-   "how": "python3 scripts/forward_verdicts_20261025.py trend180  (로컬 · 연구 브랜치)",
+   "how": "python3 scripts/forward_verdicts_20261025.py trend180  (로컬 메인 체크아웃)",
    "doc": "docs/prereg/trend_portfolio_lit_20261025.md"
   },
   {
@@ -268,7 +268,7 @@
    "kind": "최종",
    "title": "변동성 크기 30일 TSMOM 규칙 — 180일(10-26~)",
    "what": "F1 샤프 > 같은 창 항상 롱 1배 · F2 명목 원형이동 귀무 95분위 초과. 🔴서버 5-01 재학습 뒤 실행",
-   "how": "python3 scripts/forward_verdicts_20261025.py tsmom  (로컬 · 브랜치 claude/forward-tsmom-rlv19-20261026)",
+   "how": "python3 scripts/forward_verdicts_20261025.py tsmom  (로컬 메인 체크아웃)",
    "doc": "docs/prereg/tsmom_volsized_forward_20261026.md"
   },
   {
@@ -277,7 +277,7 @@
    "kind": "최종",
    "title": "RL v19 매매 에이전트(TSMOM 위 조정, 10시드) — 180일",
    "what": "W1 RL 샤프 > T3 TSMOM · W2 조정 원형이동 > 90분위. 메이커 비용에선 방향 모델 규칙에 졌던 것(2.39 < 2.82) 함께 볼 것",
-   "how": "python3 scripts/forward_verdicts_20261025.py rlv19  (로컬 · 브랜치 claude/forward-tsmom-rlv19-20261026 · 서버 5-01 재학습 뒤)",
+   "how": "python3 scripts/forward_verdicts_20261025.py rlv19  (로컬 메인 체크아웃 · 서버 5-01 재학습 뒤 · 동결 10개 md5 확인 11-07)",
    "doc": "docs/prereg/rl_v19_forward_20261026.md"
   },
   {
@@ -286,7 +286,7 @@
    "kind": "최종",
    "title": "20코인 4h 상대 수익 딥러닝 롱숏 — 180일",
    "what": "Z1 DL 4bp 순 샤프 > 0 · Z2 DL > 리지 · Z3 횡단면 IC 평균 > 0 셋 다. tmp/xsec_dl_20261026 파일 보존",
-   "how": "python3 scripts/forward_verdicts_20261025.py xsec  (로컬 · 브랜치 claude/forward-xsec-20261026 · 실행 코드는 판정일 전 추가)",
+   "how": "python3 scripts/forward_verdicts_20261025.py xsec  (로컬 메인 체크아웃 · 동결 파일 md5 확인 11-07)",
    "doc": "docs/prereg/xsec_dl_forward_20261026.md"
   },
   {
@@ -297,6 +297,99 @@
    "what": "서버 data/live/box_hold_events_20261016.json 은 2026-12-31 까지. 2027-02-01 월간 적합 전에 2027 일정으로 다시 만들어 교체(안 하면 1월 사건 피쳐가 비어 보정이 어긋남)",
    "how": "로컬 tmp/box_improve_20261016/events.json 생성 스크립트 재실행 → handoff push → 서버 같은 경로로 복사",
    "doc": "docs/eth_box_hold_calibration_drift_prereg_20261025.md"
+  },
+  {
+   "id": "fwd_dirshort",
+   "date": "2027-01-08",
+   "kind": "최종",
+   "title": "15분·1시간 방향 칸 4코인 — 전진 60일(11-08~01-06)",
+   "what": "ETH·BTC·SOL·XRP × 15분·1시간 평균 초과 적중 일 블록 단측 90% 하한 > 0. 불통과면 그 칸을 끌지 사용자에게 올린다. 표본 조건 미달은 보류",
+   "how": "python scripts/forward_display_verdicts_20261107.py run  (서버 · 읽기 전용)",
+   "doc": "docs/prereg/display_forward_verdicts_20261107.md"
+  },
+  {
+   "id": "fwd_band",
+   "date": "2027-01-08",
+   "kind": "최종",
+   "title": "띠 안·이탈 칸 — 전진 60일(11-08~01-06)",
+   "what": "4코인 합침 정확도 ≥ 64.8% · 다수결 대비 일 블록 단측 90% 하한 > 0 · 확신 0.6↑ 정확도 ≥ 80% 셋 다. 모델 md5 f62774c6 기록",
+   "how": "python scripts/forward_display_verdicts_20261107.py run  (서버 · 방향 칸과 같은 실행)",
+   "doc": "docs/prereg/display_forward_verdicts_20261107.md"
+  },
+  {
+   "id": "fwd_c8c9",
+   "date": "2027-01-22",
+   "kind": "최종",
+   "title": "박스 1h + 테이커 불균형 분산 덮개(C8) · 호가 깊이 → 박스 30분·4h·닿음(C9)",
+   "what": "C8 = 배포 A1 대비·굴림 재적합·위약 95분위 관문 · C9 = 팔 동결·같은 지표·위약 규칙. 2027 박스 발표 일정 갱신본이 먼저 필요(box_events_renew)",
+   "how": "서버 tmp/fwd_0122_20261029/fwd_0122_c8_c9_20261029.py build → c8 → c9  (코드 원본 브랜치 claude/liquidity-strategy-research-7bfd99 · 패널 LIQLAB_END=2027-01-21 먼저)",
+   "doc": "docs/prereg/liqlab_liquidity_arms_20261028.md §14·§15 · docs/prereg/depth_incr_dashboard_models_20261028.md §10 (브랜치 claude/liquidity-strategy-research-7bfd99)"
+  },
+  {
+   "id": "fwd_xrev",
+   "date": "2027-02-07",
+   "kind": "최종",
+   "title": "4h 코인 간 반전 — 전진 90일(11-08~02-05)",
+   "what": "9코인 4h 격자, 직전·다음 4h 수익 순위 상관 평균의 일 블록 단측 90% 상한 < 0. 참값 −.030 일 때 검정력 ≈ 70%라 점추정을 같이 본다",
+   "how": "python scripts/forward_display_verdicts_20261107.py run  (서버 · 02-07 부터 코인 간 포함)",
+   "doc": "docs/prereg/display_forward_verdicts_20261107.md"
+  },
+  {
+   "id": "fwd_t1_nagel",
+   "date": "2027-04-24",
+   "kind": "최종",
+   "title": "Nagel 상태 조건 1h 반전 · 메이커(C5) — 180일(10-24~04-23)",
+   "what": "F1 후보 유지 = 평균 > 0 · 코인 절반 이상 · 무작위 ≥ 50분위 / F2 엄격. 상위 5건 집중도를 같이 본다(시험 84%)",
+   "how": "LIQLAB_END=2027-04-23 LIQLAB_OUT=data/liqlab_fwd python tmp/liqlab_20261028/liqlab_data_20261028.py 4 → LIQLAB_D=data/liqlab_fwd python tmp/liqlab_20261028/liqlab_run_20261028.py --forward  (서버)",
+   "doc": "docs/prereg/liqlab_liquidity_arms_20261028.md §13 (브랜치 claude/liquidity-strategy-research-7bfd99)"
+  },
+  {
+   "id": "fwd_c10",
+   "date": "2027-04-29",
+   "kind": "최종",
+   "approx": true,
+   "title": "4h 방향 8위상 + EMA20 지정가 진입(C10) — 🔴판정 코드 미작성",
+   "what": "제안 창 10-29~04-28 · 같은 후보/엄격 관문. 사전등록이 전진 창을 확정하지 않았고 코드도 없다 — 쓸 계획이면 코드부터, 아니면 닫는다",
+   "how": "미작성",
+   "doc": "docs/prereg/ema_vwap_session_rules_r3_20261029.md"
+  },
+  {
+   "id": "fwd_dollar_z",
+   "date": "2027-06-01",
+   "kind": "최종",
+   "approx": true,
+   "title": "달러·순유동성 Z 중·장기 방향 규칙",
+   "what": "10-15 이후 k=1.0 결정일 ≥ 180일 + 56일 라벨 확정 뒤. ETH·BTC 56일 적중 각 ≥ 60% · 56일 블록 95% 하한 > 50%. 공개 원천이라 기록기 없이 사후 계산",
+   "how": "scripts/research_trend_mid_long_20261015.py --liq 로 재계산  (판정 전용 함수 없음 — 판정일 전 추가 필요)",
+   "doc": "docs/prereg/liq_dollar_netliq_rule_frozen_20261015.json"
+  },
+  {
+   "id": "fwd_cb_premium",
+   "date": "2027-12-18",
+   "kind": "최종",
+   "approx": true,
+   "title": "코인베이스 프리미엄 7일 변화 → 7일 방향",
+   "what": "10-15 이후 예측일 ≥ 120일(예측 비중 28% 가정으로 날짜 추정). BTC·ETH ≥ 60% · CI 하한 > 50%. 공개 원천이라 사후 계산",
+   "how": "scripts/research_short_fresh_20261015.py --signal 로 재계산  (cb_BTC.csv·bn_BTC.csv 삭제 후 · 판정 전용 함수 없음 — 판정일 전 추가 필요)",
+   "doc": "docs/prereg/short_fresh_coinbase_premium_frozen_20261015.json"
+  },
+  {
+   "id": "fwd_macro_regime",
+   "date": "2028-10-28",
+   "kind": "최종",
+   "title": "매크로 국면 Z_A + 추세·거시 합의 필터 — 104주",
+   "what": "국면 전진 판정과, 추세 규칙에 «엇갈리면 ×0.5» 필터의 양측 95% 판정. 4주 방향 편향 B 는 이미 불통과 확정",
+   "how": "data/live/macro_bias_forward.jsonl(서버 cron 주말 10:30 KST) + 가격으로 사후 계산",
+   "doc": "docs/prereg/macro_regime_bias_r2_20261028.md · docs/prereg/trend_macro_agree_filter_20261028.md"
+  },
+  {
+   "id": "fwd_deepfeat",
+   "date": "2027-03-14",
+   "kind": "최종",
+   "title": "딥피쳐 2024~ 재선택 4h 3개 — 180일(09-15~)",
+   "what": "전진 IC CI 하한 > 0 · 메이커 뒤 CI 하한 > 0. 1차 열람 1회(10-16: 30일 4h IC +.055[−.064,+.179])를 판정 때 함께 적는다",
+   "how": "python scripts/research_eth_deep_features_2024sel_20261016.py --forward  (로컬 메인 체크아웃 · tmp/deep_features_2024sel_20261016 · 11-07 워크트리에서 옮김)",
+   "doc": "docs/prereg/eth_deep_features_2024sel_frozen_20261016.json"
   }
  ]
 }
