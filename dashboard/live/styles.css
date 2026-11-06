@@ -1335,6 +1335,11 @@ svg {
   .acct-kpi { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .acct-kpi b { font-size: 19px; }
   .acct-pn-curve { height: 300px; }
+  .acct-side { order: -1; }   /* 폰: 포지션·증거금이 곡선보다 먼저(지금 행동에 필요한 것) */
+  .acct-kpi s { white-space: normal; }
+  .acct-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }   /* 탭 다섯 개는 한 줄로 옆으로 밀어 본다(두 줄로 접히면 본문이 밀린다) */
+  .acct-tabs .chip { flex: none; }
+  .acct-day-ol { min-height: 0; }
   .acct-day-box { min-height: 0; }
   #snapAcctDay, .acct-day-ol { flex: none; }
   .acct-day-ol { max-height: 232px; }

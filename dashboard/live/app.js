@@ -3351,13 +3351,29 @@ function fitApplyCached() {
   fitOptLadderH = FIT0.lad || fitLadderFormula();   // 지난번에 잰 값(같은 창 높이) -- 새로고침 첫 그림부터 맞는다
   const oc = el("optCard"); if (oc) oc.style.minHeight = `${innerHeight - appBarH() - 10}px`;
 }
+// 2026-11-07 사용자 «폰에서 계좌를 누르면 옵션까지밖에 못 간다»: 폰은 화면 밖 패널이 content-visibility:auto 라 처음 가까워질 때 실제 크기로 커진다(Option 76 → 1705px).
+//   클릭 때 잰 목표 위치는 그 뒤 낡아 부드러운 스크롤이 «옵션 한가운데»에서 멈췄다. 스크롤이 멈추면 목표와 어긋난 만큼 다시 맞춘다(사용자가 만지면 그만둔다).
+function railGo(id) {
+  const t = el(id);
+  if (!t) return;
+  t.scrollIntoView({ behavior: "smooth", block: "start" });
+  let n = 0, prev = NaN, calm = 0;
+  const stop = () => clearInterval(iv);
+  const iv = setInterval(() => {
+    const d = t.getBoundingClientRect().top - (parseFloat(getComputedStyle(t).scrollMarginTop) || 0), moving = Math.abs(scrollY - prev) > 1;
+    prev = scrollY;
+    if (!moving && Math.abs(d) > 4) { scrollBy({ top: d, behavior: "auto" }); calm = 0; }
+    else if (!moving && ++calm >= 3) stop();
+    if (++n > 40) stop();
+  }, 150);
+  for (const ev of ["touchstart", "wheel", "keydown"]) addEventListener(ev, stop, { once: true, passive: true });
+}
 function setupCardRail() {
   fitApplyCached();
   const rail = el("cardRail");
   if (!rail) return;
   rail.addEventListener("click", (e) => {   // 2026-11-04 모바일도 아래 탭바에서 바로 이동(예전 접힘·펼침 알약 없앰)
-    const b = e.target.closest("[data-go]"); if (!b) return;
-    el(b.dataset.go)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const b = e.target.closest("[data-go]"); if (b) railGo(b.dataset.go);
   });
   addEventListener("scroll", () => requestAnimationFrame(cardRailSync), { passive: true });
   cardRailSync();
