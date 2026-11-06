@@ -550,8 +550,9 @@ FAST = Path(os.getenv("WATCHDOG_FAST", "/mnt/nvme"))      # C: 의 VHDX -- data/
 HOST_DISKS = (("C_drive", Path("/mnt/c"), 50, 20), ("D_drive", Path("/mnt/d"), 50, 20))
 
 
-def _probe_write(path: Path, seconds: float = 10.0) -> str | None:
-    """쓰기 시험. 멈춘 USB 는 D 상태라 kill 도 안 듣는다 -- 기다리지 않고 «멈춤»을 돌려준다(감시기가 같이 멈추면 안 된다)."""
+def _probe_write(path: Path, seconds: float = 30.0) -> str | None:
+    """쓰기 시험. 멈춘 USB 는 D 상태라 kill 도 안 듣는다 -- 기다리지 않고 «멈춤»을 돌려준다(감시기가 같이 멈추면 안 된다).
+    30초: 대량 복사 중에는 ext4 저널 커밋이 10초 넘게 걸린다(2026-11-07 08:18 거짓 CRITICAL 실측)."""
     p = subprocess.Popen(["touch", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:

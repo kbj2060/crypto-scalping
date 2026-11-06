@@ -16,7 +16,7 @@
 
 | 디스크 | 경로 | 담는 것 |
 |---|---|---|
-| C: NVMe VHDX 200GB (`C:\wsl\fast\fast.vhdx`) | `/mnt/nvme` | `data/hot`, `data/live`(DuckDB·상태·원장·래스터), `logs`. 3.6GB/s 쓰기 |
+| C: NVMe VHDX 200GB (`C:\wsl\fast\fast.vhdx`) | `/mnt/nvme` | `data/hot`, `data/live`(DuckDB·상태·원장·래스터), `logs`, 라이브 실행 환경, 임시 파일. 3.6GB/s 쓰기 |
 | D: HDD 1TB (ST1000DM010) | WSL 루트 `ext4.vhdx` | 코드, conda, 작은 `data/*`. 라이브 쓰기는 거의 없다. 포지션이 없을 때 C: 로 옮긴다(아래) |
 | 6TB USB (ext4, 라벨 data2) | `/mnt/data2` | 원시 호가 원본, lake, 학습용 대용량, 연구 산출물, hot 의 1차 백업. 209MB/s 쓰기 |
 | dev | `~/backups/crypto-scalping-server` | 전부의 사본(다른 기계) |
@@ -26,6 +26,7 @@
 | 코드가 쓰는 경로 | 실제 위치 |
 |---|---|
 | `data/hot`, `data/live`, `logs` | `/mnt/nvme/{hot,live,logs}` |
+| `~/miniconda3/envs/quant_ai` (라이브 실행 환경) | `/mnt/nvme/envs/quant_ai`. import 18.9초 → 1.8초(HDD 경합 중 실측) |
 | `data/live/orderflow/raster` | `/mnt/nvme/live/orderflow/raster` (실물) |
 | `data/live/orderflow/{bookticker,depthdiff,hyperliquid,hyperliquid_bookticker,okx_bookticker,raster_archive}` | `/mnt/data2/orderflow/…` |
 | `data/lake`, `data/splits` | `/mnt/data2/{lake,splits}` |
@@ -61,7 +62,7 @@
 |---|---|---|
 | C:·D: 실제 여유 | `check_host_disks` | WARN 50GiB · CRITICAL 20GiB |
 | NVMe 마운트·여유 | `check_host_disks` | 안 붙음 CRITICAL · WARN 30GiB · CRITICAL 10GiB |
-| 6TB 마운트·쓰기·여유 | `check_host_disks` | 안 붙음·쓰기 실패·10초 멈춤 = CRITICAL · WARN 200GiB · CRITICAL 50GiB |
+| 6TB 마운트·쓰기·여유 | `check_host_disks` · 데드맨 | 안 붙음·쓰기 실패·30초 멈춤 = CRITICAL · WARN 200GiB · CRITICAL 50GiB |
 | 백업 결과·나이 | `check_backup` | 26h WARN · 50h CRITICAL · 실패 CRITICAL |
 | 복원 시험 | `scripts/ops/backup_restore_check_20261107.py`, 월 1회 | 실패 CRITICAL · 40일 WARN |
 | 디스크 추세 | `morning_audit` 일별 기록 | 사람이 본다 |
