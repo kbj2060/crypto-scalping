@@ -496,6 +496,8 @@ def cmd_judge():
     vp = OUT / "verdict.json"
     if vp.exists():
         sys.exit(f"판정은 1회만 — {vp} 이미 있음")
+    ck = json.load(open(OUT / "checks.json"))     # 점검 통과 전 채점 금지(사전등록 판정 전 점검)
+    assert all(ck["label_recon"]) and abs(ck["max_abs_single_ic"][1]) <= .3, "점검 미통과"
     D = dict(np.load(OUT / "data.npz"))
     ts, y, lab, valid = D["ts"], D["y"], D["lab"], D["valid"]
     sel = json.load(open(OUT / "dl_selection.json"))
@@ -509,7 +511,8 @@ def cmd_judge():
     ics = {k: ic_series(p, y[te], valid[te]) for k, p in P.items()}
     rep = {"n_points": int(len(te)), "dl_selection": sel, "models": {}}
     for k, p in P.items():
-        rep["models"][k] = {"ic_ci": block_ci(ics[k], block=30, nb=2000, seed=0), **ls_stats(longshort(p, lab[te], valid[te]))}
+        rep["models"][k] = {"ic_ci": block_ci(ics[k], block=30, nb=2000, seed=0), **ls_stats(longshort(p, lab[te], valid[te])),
+                            "turnover_4h": float(pnl2(weights2(smooth_rank(p, valid[te], 0), valid[te], False), lab[te])[1].mean())}
     rep["seed_test_ic"] = [float(np.nanmean(ic_series(p, y[te], valid[te]))) for p in per]
     rep["dl_minus_ridge_ci"] = block_ci(ics["DL"] - ics["B3"], block=30, nb=2000, seed=0)
     T1, T2 = rep["models"]["DL"]["ic_ci"][1] > 0, rep["dl_minus_ridge_ci"][1] > 0

@@ -12,8 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import liqlab_harness_20261028 as H  # noqa: E402
 
 COINS = ["ETH", "BTC", "SOL", "XRP"]
-OUT = Path("tmp/dir_hourly_maker_20261107")
-HOLD, PHASES, WARM = 12, 12, 288 * 14
+OUT = Path("/home/kbj20/crypto-scalping/tmp/dir_hourly_maker_20261107")
+HOLD, PHASES, WARM = 12, 24, 288 * 14   # 수정 1: 위상 24개 × 2시간 간격 = 12위상 × 1시간 박자. 한 위상을 1시간 간격으로 두면 청산(t+12~13)이 다음 결정을 막아 2시간 박자가 된다
 STRICT, CAND = (2.0, 5.0, 5.0), (0.0, 5.0, 5.0)   # 메이커 · 대체 시장가 · 시장가
 
 
@@ -27,6 +27,7 @@ def load(coin):
     idx = pd.date_range(s.index.min() - pd.Timedelta("5min"), s.index.max() + pd.Timedelta("3h"), freq="5min")
     d = p.reindex(idx)
     assert d.close.notna().mean() > .999, (coin, "가격 결측", d.close.notna().mean())
+    d.attrs["price_nan"] = float(d.close.isna().mean())
     d = d.ffill()
     d["o"] = d.close.shift(1).fillna(d.close)
     # 결정 t 는 행 τ = t−5분의 끝이다
@@ -47,7 +48,7 @@ def signal(p):
     return np.where(p >= hi, 1, np.where(p <= lo, -1, 0)).astype(int)
 
 
-def phase_sig(sig, ph, step=PHASES):
+def phase_sig(sig, ph, step=PHASES):   # step=PHASES=24 행(2시간) -- 같은 분·시 위상의 짝수·홀수 시각을 나눠 모든 1시간 결정을 살린다
     out = np.zeros_like(sig)
     out[ph::step] = sig[ph::step]
     return out
@@ -73,21 +74,27 @@ def stats(tr):
 
 
 def null_means(D, S, P, hold, mode, kind, B=200, seed=11):
-    """코인·위상 묶음 위약 평균. kind = circular | random(같은 층·측면). P = 코인별 {층: 후보 행}."""
+    """코인·위상 묶음 위약 평균. 수정 1: 코인 간 동조를 보존한다.
+    circular = 네 코인에 같은 이동값 · random = 같은 시각의 신호는 같은 무작위 시각으로(층 = 공통 BTC 시각×변동성)."""
     rng = np.random.default_rng(seed)
     res = np.empty(B)
+    n_min = min(len(d) for d in D.values())
+    st = D["BTC"]["strata"].to_numpy()
     for b in range(B):
         tot, n = 0.0, 0
+        if kind == "circular":
+            shift = int(rng.integers(288, n_min - 288))
+        else:
+            fired = np.unique(np.concatenate([np.flatnonzero(S[c]) for c in D]))
+            to = {int(t): P[st[t]][rng.integers(len(P[st[t]]))] for t in fired}
         for c, d in D.items():
             sig = S[c]
             if kind == "circular":
-                r = np.roll(sig, int(rng.integers(288, len(sig) - 288)))
+                r = np.roll(sig, shift)
             else:
-                st = d["strata"].to_numpy()
                 r = np.zeros_like(sig)
                 for t in np.flatnonzero(sig):
-                    pool = P[c][st[t]]
-                    r[pool[rng.integers(len(pool))]] = sig[t]
+                    r[to[int(t)]] = sig[t]
             for ph in range(PHASES):
                 x = H.simulate(phase_sig(r, ph), d.o.to_numpy(), d.high.to_numpy(), d.low.to_numpy(), d.close.to_numpy(), H=hold, mode=mode)["net"]
                 tot += x.sum(); n += len(x)
@@ -96,7 +103,7 @@ def null_means(D, S, P, hold, mode, kind, B=200, seed=11):
 
 
 def prepare():
-    D, S, P = {}, {}, {}
+    D, S = {}, {}
     for c in COINS:
         d = load(c)
         sig = signal(d.p)
@@ -104,11 +111,16 @@ def prepare():
         rv = np.log(d.close).diff().rolling(288).std().shift(1).to_numpy()
         q = np.nanquantile(rv[:WARM + 288], [1 / 3, 2 / 3])   # 층 경계 = 예열 구간
         d["strata"] = H.strata_of(d.index.hour.to_numpy(), rv, q)
-        elig = np.ones(len(d), bool); elig[:WARM] = False; elig[-(HOLD + 40):] = False
-        st = d["strata"].to_numpy()
-        # 코인의 신호 행이 있는 층은 후보가 있어야 한다(층 전체가 비면 KeyError 로 멈춘다)
-        P[c] = {k: np.flatnonzero(elig & (st == k)) for k in np.unique(st[elig])}
         D[c], S[c] = d, sig
+    # 공통 후보: 모든 코인에 있는 행(가장 짧은 코인 기준), 층 = BTC
+    n_min = min(len(d) for d in D.values())
+    assert all(D[c].index[0] == D["BTC"].index[0] for c in COINS), "코인 시작 행이 다름"
+    elig = np.ones(n_min, bool); elig[:WARM] = False; elig[-(HOLD + 40):] = False
+    st = D["BTC"]["strata"].to_numpy()[:n_min]
+    P = {k: np.flatnonzero(elig & (st == k)) for k in np.unique(D["BTC"]["strata"].to_numpy())}
+    for k, v in P.items():
+        if not len(v):                                       # 드문 층이면 전체 후보로 대체
+            P[k] = np.flatnonzero(elig)
     return D, S, P
 
 
@@ -120,7 +132,7 @@ def checks():
         fwd = (d.close.shift(-HOLD) / d.close - 1)
         m = d.p.notna()
         ic = lambda sh: float(d.p[m].shift(sh).corr(fwd[m], method="spearman"))
-        rep[c] = {"ic_aligned": ic(0), "ic_shift_past1": ic(1), "ic_shift_future1": ic(-1), "signal_share": float((S[c] != 0).mean()), "price_nan": float(d.close.isna().mean())}
+        rep[c] = {"ic_aligned": ic(0), "ic_shift_past1": ic(1), "ic_shift_future1": ic(-1), "signal_share": float((S[c] != 0).mean()), "price_nan": d.attrs.get("price_nan")}
     # 양성·음성 (실제 가격, ETH): 미래 부호 70% / 예측 섞음
     set_cost(STRICT)
     d, rng = D["ETH"], np.random.default_rng(5)
@@ -133,10 +145,11 @@ def checks():
     shuf = np.where(fire, S["ETH"][rng.permutation(len(d))], 0).astype(int)
     rep["negative_control"] = stats(trades(d, shuf))
     OUT.mkdir(parents=True, exist_ok=True)
-    json.dump(rep, open(OUT / "checks.json", "w"), ensure_ascii=False, indent=1)
     print(json.dumps(rep, ensure_ascii=False, indent=1))
-    for c in COINS:
-        assert rep[c]["ic_aligned"] > 0, ("정렬판 IC 음수", c, rep[c])
+    for c in COINS:   # 수정 1: 씨앗 기록(1시간 IC .05~.07 안팎)과 크게 다르면 중단 · 미래로 민 판이 정렬판보다 낮아야(되돌림 지문)
+        assert .02 < rep[c]["ic_aligned"] < .10 and rep[c]["ic_shift_future1"] < rep[c]["ic_aligned"], ("IC 이상", c, rep[c])
+    assert abs(rep["negative_control"]["mean_gross"]) < 2.0, rep["negative_control"]
+    json.dump(rep, open(OUT / "checks.json", "w"), ensure_ascii=False, indent=1)
 
 
 def judge():
@@ -151,7 +164,7 @@ def judge():
         per = {c: trades(D[c], S[c]) for c in COINS}
         all_ = pd.concat([v.assign(coin=c) for c, v in per.items()]).sort_values("t")
         mid = all_.t.iloc[len(all_) // 2]
-        rep[tag] = {"pooled": stats(all_), "coins": {c: stats(v) for c, v in per.items()}, "first_half": float(all_[all_.t < mid].net.mean()), "second_half": float(all_[all_.t >= mid].net.mean()),
+        rep[tag] = {"fill_rate_of_decisions": len(all_) / max(1, sum(int((S[c] != 0).sum()) for c in COINS) / 12), "pooled": stats(all_), "coins": {c: stats(v) for c, v in per.items()}, "first_half": float(all_[all_.t < mid].net.mean()), "second_half": float(all_[all_.t >= mid].net.mean()),
                     "months": {str(k): round(float(v), 2) for k, v in all_.groupby(all_.t.dt.to_period("M")).net.mean().items()}}
         day_sum = all_.groupby(all_.t.dt.floor("D")).net.sum().sort_values(ascending=False)
         rep[tag]["mean_ex_top3days"] = float(all_[~all_.t.dt.floor("D").isin(day_sum.index[:3])].net.mean())
@@ -173,7 +186,7 @@ def judge():
     s15 = {c: signal(D[c].p15) for c in COINS}
     for c in COINS:
         s15[c][-(HOLD + 40):] = 0
-    t15 = pd.concat([_trades_step(D[c], s15[c], 3, 3) for c in COINS])
+    t15 = pd.concat([_trades_step(D[c], s15[c], 3, 6) for c in COINS])
     rep["aux_15m_strict"] = stats(t15)
     s, c = rep["strict"], rep["candidate"]
     g1 = s["pooled"]["ci95"][0] > 0
@@ -207,9 +220,15 @@ def selftest():
     s = signal(pd.Series(np.r_[np.arange(30.0), 1000.0, -1000.0, 15.0]))
     assert s[30] == 1 and s[31] == -1 and s[32] == 0 and s[:20].sum() == 0
     WARM = w0
-    # 위상: 12행마다 하나
-    sig = np.ones(36, int)
+    # 위상: 24행마다 하나 · 수정 1: 1시간 간격 결정이 하나도 안 버려진다
+    sig = np.ones(72, int)
     assert phase_sig(sig, 5).sum() == 3 and phase_sig(sig, 5)[5] == 1 and phase_sig(sig, 5)[6] == 0
+    set_cost(STRICT)
+    idx0 = pd.date_range("2026-01-01", periods=120, freq="5min")
+    c0 = 100 + np.sin(np.arange(120)) * .5
+    d0 = pd.DataFrame({"o": np.r_[100, c0[:-1]], "high": c0 + 1, "low": c0 - 1, "close": c0}, index=idx0)
+    x0 = np.zeros(120, int); x0[[0, 12, 24, 36]] = 1
+    assert sorted(trades(d0, x0).t.tolist()) == [idx0[i] for i in (0, 12, 24, 36)], "1시간 박자 결정이 버려짐"
     # 손계산: 비용 2/5 -- 지정가 100, 다음 봉 저가 99 체결 -> 12봉째 종가 101 -> 그다음 봉 고가 102 > 101 지정가 체결 -> gross 100bp, net 96bp
     set_cost(STRICT)
     n = 40

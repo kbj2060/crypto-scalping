@@ -139,12 +139,28 @@ def checks(D):
     h, band = sel["B3"]["R3"]["halflife"], sel["B3"]["R3"]["band"]
     F = fill_tables(ts[ii], *bars, 0)
     now = execute(X.weights2(X.smooth_rank(P[ii], valid[ii], h), valid[ii], band), F, 0, 0)
-    fut_score = np.vstack([P[ii][1:], P[ii][-1:]])
-    # 미래 라벨을 점수로 쓴 판: 장치가 미래를 잡는다는 양성 대조
-    oracle = execute(X.weights2(X.smooth_rank(np.nan_to_num(D["lab"][ii]), valid[ii], 0), valid[ii], False), F, 0, 0)
-    fut = execute(X.weights2(X.smooth_rank(fut_score, valid[ii], h), valid[ii], band), F, 0, 0)
-    rep["tripwire_validation"] = {"current_gross_sharpe": sharpe(now["gross"]), "next_decision_score": sharpe(fut["gross"]), "oracle_label": sharpe(oracle["gross"])}
-    assert rep["tripwire_validation"]["oracle_label"] > 10, rep["tripwire_validation"]
+    # 수정 1 대조(검증 구간만 -- 시험 창 안 엶)
+    W_or = X.weights2(X.smooth_rank(np.nan_to_num(D["lab"][ii]), valid[ii], 0), valid[ii], False)
+    oracle0 = execute(W_or, F, 0, 0)
+    oracle12 = execute(W_or, fill_tables(ts[ii], *bars, K_MAIN), 2e-4, 5e-4)
+    # (1) 1시간 민 피쳐로 리지 재적합, 평활·띠 없이
+    from sklearn.linear_model import Ridge
+    Ds = X.build(1)
+    s = X.WINDOWS["R3"]
+    tr = X.split_idx(ts, s[0], s[1])
+    assert (Ds["ts"] == ts).all(), "민 판 격자 불일치"
+    mu, sd = X.norm_stats(Ds["X"], valid, tr)
+    Xn = X.apply_norm(Ds["X"], mu, sd)
+    a = json.loads(str(np.load(XOUT / "base_R3.npz")["meta"]))["B3"]["param"]
+    rs = Ridge(alpha=a).fit(Xn[tr][valid[tr]], X.target(D["y"])[tr][valid[tr]])
+    Ps = rs.predict(Xn[ii].reshape(-1, Xn.shape[-1])).reshape(len(ii), Xn.shape[1])
+    shift = execute(X.weights2(X.smooth_rank(Ps, valid[ii], 0), valid[ii], False), F, 0, 0)
+    # (2) 다음 결정의 점수 ↔ 이번 라벨 IC(평활 없음): 되돌림 모델이면 뚜렷한 음수
+    ic_now = float(np.nanmean(X.ic_series(P[ii], D["y"][ii], valid[ii])))
+    ic_next = float(np.nanmean(X.ic_series(np.vstack([P[ii][1:], P[ii][-1:]])[:-1], D["y"][ii][:-1], valid[ii][:-1])))
+    rep["tripwire_validation"] = {"current_gross_sharpe": sharpe(now["gross"]), "shift1h_refit_gross_sharpe": sharpe(shift["gross"]), "oracle_K0_gross_sharpe": sharpe(oracle0["gross"]), "oracle_K12_net_sharpe": sharpe(oracle12["net"]), "ic_current": ic_now, "ic_next_score_vs_this_label": ic_next}
+    t_ = rep["tripwire_validation"]
+    assert t_["oracle_K0_gross_sharpe"] > 10 and t_["oracle_K12_net_sharpe"] > 10 and t_["shift1h_refit_gross_sharpe"] > t_["current_gross_sharpe"] + 5, t_
     OUT.mkdir(parents=True, exist_ok=True)
     json.dump(rep, open(OUT / "checks.json", "w"), indent=1)
     print(json.dumps(rep, ensure_ascii=False, indent=1))
@@ -246,6 +262,9 @@ def selftest():
     # K=0 재현 모드: 전부 p0 체결
     F0 = fill_tables(np.array([t.to_datetime64()]), c5, h5, l5, 0)
     assert execute(W, F0, 0, 0)["gross"][0] == (W * (F0["end"] / F0["p0"] - 1)).sum()
+    # 수정 1: 체결 탐색은 봉 t 부터 -- 기준가 봉(t−5분)의 저가가 p0 아래여도 체결로 안 친다
+    l6 = l5.copy(); l6[:] = 100.0; l6.loc[idx[59], "A"] = 99.0
+    assert not fill_tables(np.array([t.to_datetime64()]), c5, h5, l6, 12)["buy"][0, 0], "기준가 봉을 체결 탐색에 넣음"
     # 음성·양성: 무작위 점수 ≈ 0, 미래 점수 ≫ 0
     rng = np.random.default_rng(1)
     T, N = 1500, 20
