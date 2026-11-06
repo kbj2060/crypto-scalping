@@ -177,6 +177,22 @@ def top_long_aux(rows, key, h, t0, t1):
     return {"n_top": len(top), "n_all": len(all_r), "top_mean_bp": float(np.mean(top)) if top else None, "all_mean_bp": float(np.mean(all_r)) if all_r else None}
 
 
+def top_long_4h_aux(rows, t0, t1, warm=288 * 14):
+    """보조(판정 아님): 4h 예측이 과거 기록의 90분위 이상일 때 48봉 평균 수익 bp. 11-07 깨뜨리기에서 후보 탈락, 관찰만."""
+    px = {r["t"]: r["px"] for r in rows}
+    f = sorted((r for r in rows if r.get("k") == "4" and r.get("d") is not None), key=lambda r: r["t"])
+    hist, top, all_r = [], [], []
+    for r in f:
+        end = px.get(r["t"] + 48 * BAR)
+        if t0 <= r["t"] < t1 and end is not None and len(hist) >= warm:
+            v = (end / r["px"] - 1) * 1e4
+            all_r.append(v)
+            if r["d"] >= np.quantile(hist, .9):
+                top.append(v)
+        hist.append(r["d"])
+    return {"n_top": len(top), "n_all": len(all_r), "top_mean_bp": float(np.mean(top)) if top else None, "all_mean_bp": float(np.mean(all_r)) if all_r else None}
+
+
 def holm(ps):
     order = sorted(ps, key=ps.get)
     out, cur = {}, 0.0
@@ -217,6 +233,7 @@ def run(today):
             rep["aux_top_long"][f"{c}_{name}"] = top_long_aux(rows, key, h, t0, t1)
         if c != "BTC":
             rep["aux_dir4h"][c] = score_direction(rows, None, 48, t0, t1, kind="4")
+            rep["aux_top_long"][f"{c}_4h"] = top_long_4h_aux(rows, t0, t1)
     ps = {k: v["p"] for k, v in rep["direction"].items() if "p" in v}
     rep["holm_p_aux"] = holm(ps) if ps else {}
     model = LIVE / "regime_band_h48_model.joblib"
@@ -287,6 +304,9 @@ def selftest():
     else:
         raise AssertionError("판정일 전 거절 실패")
     assert holm({"a": .01, "b": .02, "c": .5}) == {"a": .03, "b": .04, "c": .5}
+    rows4 = [{"k": "4", "t": t0 + i * BAR, "px": 100.0 + i, "d": float(i % 10)} for i in range(200)]
+    a4 = top_long_4h_aux(rows4, t0, t1, warm=20)
+    assert a4["n_top"] > 0 and a4["n_all"] == 200 - 20 - 48 and abs(a4["all_mean_bp"] - np.mean([(148 + i) / (100 + i) - 1 for i in range(20, 152)]) * 1e4) < 1e-6, a4
     aux = top_long_aux([{"k": "s", "t": t0 + i * BAR, "px": 100.0 + i, "a": 95.0 if i == 0 else 50.0} for i in range(10)], "a", 3, t0, t1)
     assert aux["n_top"] == 1 and abs(aux["top_mean_bp"] - 300) < 1e-9 and aux["n_all"] == 7, aux
     print("selftest OK")

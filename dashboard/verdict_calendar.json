@@ -242,7 +242,8 @@
    "title": "RL v3.1 동결 앙상블 — 90일(기록용)",
    "what": "관문 G1~G4 그대로 · 무작위 400 시드 95분위",
    "how": "python3 scripts/forward_verdicts_20261025.py rl  (로컬 메인 체크아웃 · 동결 RL 5개 md5 확인 11-07)",
-   "doc": "docs/prereg/rl_v31_tcn_ensemble_20261025.md"
+   "doc": "docs/prereg/rl_v31_tcn_ensemble_20261025.md",
+   "done": "11-07 닫음 -- RL 축 종결(v27~v42 교사·시장 기준 넘은 판 0) · 기록용이라 결정을 바꾸지 않는다. 동결 파일 md5 는 확인해 두어 다시 열 수 있다"
   },
   {
    "id": "fwd_optsell",
@@ -279,14 +280,15 @@
    "title": "RL v19 매매 에이전트(TSMOM 위 조정, 10시드) — 180일",
    "what": "W1 RL 샤프 > T3 TSMOM · W2 조정 원형이동 > 90분위. 메이커 비용에선 방향 모델 규칙에 졌던 것(2.39 < 2.82) 함께 볼 것",
    "how": "python3 scripts/forward_verdicts_20261025.py rlv19  (로컬 메인 체크아웃 · 서버 5-01 재학습 뒤 · 동결 10개 md5 확인 11-07)",
-   "doc": "docs/prereg/rl_v19_forward_20261026.md"
+   "doc": "docs/prereg/rl_v19_forward_20261026.md",
+   "done": "11-07 닫음 -- 메이커 비용에서 규칙에 졌고(2.39 < 2.82) RL 축 종결. 동결 파일 md5 확인, 다시 열 수 있다"
   },
   {
    "id": "fwd_xsec",
    "date": "2027-04-24",
    "kind": "최종",
    "title": "20코인 4h 상대 수익 딥러닝 롱숏 — 180일",
-   "what": "Z1 DL 4bp 순 샤프 > 0 · Z2 DL > 리지 · Z3 횡단면 IC 평균 > 0 셋 다. tmp/xsec_dl_20261026 파일 보존",
+   "what": "Z1 DL 4bp 순 샤프 > 0 · Z2 DL > 리지 · Z3 횡단면 IC 평균 > 0 셋 다. tmp/xsec_dl_20261026 파일 보존 · 11-07 참고: 같은 평활 구성의 리지는 지정가 5창 −.18, 틈 창 −1.35 로 불통과. 평활 없는 DL 은 메이커 0% 일 때만 +.39",
    "how": "python3 scripts/forward_verdicts_20261025.py xsec  (로컬 메인 체크아웃 · 동결 파일 md5 확인 11-07)",
    "doc": "docs/prereg/xsec_dl_forward_20261026.md"
   },
@@ -304,7 +306,7 @@
    "date": "2027-01-08",
    "kind": "최종",
    "title": "15분·1시간 방향 칸 4코인 — 전진 60일(11-08~01-06)",
-   "what": "ETH·BTC·SOL·XRP × 15분·1시간 평균 초과 적중 일 블록 단측 90% 하한 > 0. 불통과면 그 칸을 끌지 사용자에게 올린다. 표본 조건 미달은 보류",
+   "what": "ETH·BTC·SOL·XRP × 15분·1시간 평균 초과 적중 일 블록 단측 90% 하한 > 0. 불통과면 그 칸을 끌지 사용자에게 올린다. 표본 조건 미달은 보류 · 보조로 15분·1시간·4h 상위 10% 롱 관찰(판정 아님, 4h 는 11-07 깨뜨리기 탈락)",
    "how": "python scripts/forward_display_verdicts_20261107.py run  (서버 · 읽기 전용)",
    "doc": "docs/prereg/display_forward_verdicts_20261107.md"
   },
@@ -352,7 +354,8 @@
    "title": "4h 방향 8위상 + EMA20 지정가 진입(C10) — 🔴판정 코드 미작성",
    "what": "제안 창 10-29~04-28 · 같은 후보/엄격 관문. 사전등록이 전진 창을 확정하지 않았고 코드도 없다 — 쓸 계획이면 코드부터, 아니면 닫는다",
    "how": "미작성",
-   "doc": "docs/prereg/ema_vwap_session_rules_r3_20261029.md"
+   "doc": "docs/prereg/ema_vwap_session_rules_r3_20261029.md",
+   "done": "11-07 닫음 -- 판정 코드 없음 · EMA20 지정가 몫 +0.8~1.3bp/일 CI 0 포함 · 11-07 지정가 체결 검정에서 역선택 약 1.4bp/체결 확인"
   },
   {
    "id": "fwd_dollar_z",
