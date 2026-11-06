@@ -30,7 +30,7 @@ def load(coin):
     assert nan < .002, (coin, "가격 결측", nan)
     d = d.ffill()
     d["o"] = d.close.shift(1).fillna(d.close)
-    d["p"] = s.reindex(d.index + pd.Timedelta("5min")).to_numpy()   # 결정 t = 행 τ(t−5분)의 끝
+    d["p"] = s.reindex(d.index).to_numpy()   # 수정 1: 4h 씨앗 ts = 봉 시작(값은 봉 끝 확정, 15분·1시간 씨앗과 다름) -> 행 τ 에 그대로
     return d
 
 
@@ -99,20 +99,29 @@ def checks():
         p = d.p[m]
         rep[c] = {"rows": int(m.sum()), "ic_aligned": float(p.corr(fwd[m], method="spearman")), "ic_future1": float(p.shift(-1).corr(fwd[m], method="spearman")), "ic_past1": float(p.shift(1).corr(fwd[m], method="spearman")),
                   "signal_share": float((S[c] != 0).mean()), "first_signal": str(d.index[np.flatnonzero(S[c])[0]])}
-    # 양성·음성(ETH 만, 시간 절약)
+        r1 = np.log(d.close).diff()
+        rep[c]["corr_this_bar"] = float(d.p.corr(r1))             # 행 τ 봉 수익: 예측이 본 값(되돌림이라 음수)
+        rep[c]["corr_next_bar"] = float(d.p.corr(r1.shift(-1)))   # 체결 봉: 예측이 못 본 값(≈0)
+    # 음성: 코인 공통 날짜 섞기(사전등록) -- 신호만 섞고 비용 전 평균을 본다
+    n_min = min(len(x) for x in D.values())
+    rng = np.random.default_rng(SEED)
+    block = np.array_split(np.arange(n_min), n_min // 288)
+    perm = np.concatenate([block[i] for i in rng.permutation(len(block))])
+    neg = pd.concat([trades(D[c].iloc[:n_min], S[c][:n_min][perm]) for c in COINS])
+    rep["negative_control_shuffled_days"] = stats(neg)
+    # 양성(ETH 만, 시간 절약)
     d = D["ETH"]
     fwd = (d.close.shift(-HOLD - 1) / d.close - 1).to_numpy()
     good = (fwd >= np.nanquantile(fwd, .9)).astype(int)
     good[-(HOLD + 80):] = 0
     rep["positive_control"] = stats(trades(d, good))
     assert rep["positive_control"]["ci95"][0] > 0, rep["positive_control"]
-    rng = np.random.default_rng(SEED)
-    block = np.array_split(np.arange(len(d)), len(d) // 288)
-    perm = np.concatenate([block[i] for i in rng.permutation(len(block))])
-    rep["negative_control_shuffled_days"] = stats(trades(d, S["ETH"][perm]))
     print(json.dumps(rep, ensure_ascii=False, indent=1))
     for c in COINS:
-        assert 0 < rep[c]["ic_aligned"] < .12 and rep[c]["ic_future1"] < rep[c]["ic_aligned"] + .005, ("IC 이상", c, rep[c])
+        # 수정 1: 정렬판이 IC 정점이어야 한다(과거 쪽도 낮게). 체결 봉 상관 ≈ 0 · 행 봉 상관 음수
+        assert 0 < rep[c]["ic_aligned"] < .12 and rep[c]["ic_future1"] < rep[c]["ic_aligned"] and rep[c]["ic_past1"] <= rep[c]["ic_aligned"] + .002, ("IC 이상", c, rep[c])
+        assert abs(rep[c]["corr_next_bar"]) < .02 and rep[c]["corr_this_bar"] < -.01, ("정렬 이상", c, rep[c])
+    assert abs(rep["negative_control_shuffled_days"]["mean_gross"]) < 3, rep["negative_control_shuffled_days"]
     OUT.mkdir(parents=True, exist_ok=True)
     json.dump(rep, open(OUT / "checks.json", "w"), ensure_ascii=False, indent=1)
 
@@ -131,12 +140,12 @@ def judge():
         nl = null_means(D, S)
         day = all_.t.dt.floor("D").astype("int64").to_numpy()
         ex = H.cluster_boot_mean(all_.net.to_numpy() - nl.mean(), day)
-        rep[tag] = {"pooled": stats(all_), "null_mean": float(nl.mean()), "null_q95": float(np.quantile(nl, .95)), "null_pct": float((nl < all_.net.mean()).mean() * 100), "excess_over_random_long": float(all_.net.mean() - nl.mean()), "excess_ci95": H.ci95(ex),
+        rep[tag] = {"fill_rate": len(all_) / max(1, sum(int((S[c] != 0).sum()) for c in COINS)), "pooled": stats(all_), "null_mean": float(nl.mean()), "null_q95": float(np.quantile(nl, .95)), "null_pct": float((nl < all_.net.mean()).mean() * 100), "excess_over_random_long": float(all_.net.mean() - nl.mean()), "excess_ci95": H.ci95(ex),
                     "years": {str(y): {"mean_net": float(g.net.mean()), "n": len(g)} for y, g in all_.groupby(all_.t.dt.year)}, "coins": {c: stats(v) for c, v in per.items()}}
         ds = all_.groupby(all_.t.dt.floor("D")).net.sum().sort_values(ascending=False)
         rep[tag]["mean_ex_top3days"] = float(all_[~all_.t.dt.floor("D").isin(ds.index[:3])].net.mean())
         if tag == "strict":
-            base = pd.concat([trades(D[c], (np.roll(S[c], 0) * 0 + (D[c].p.notna().to_numpy() & (np.arange(len(D[c])) >= WARM) & (np.arange(len(D[c])) < len(D[c]) - HOLD - 80)).astype(int))) for c in COINS])
+            base = pd.concat([trades(D[c], (D[c].p.notna().to_numpy() & (np.arange(len(D[c])) >= WARM) & (np.arange(len(D[c])) < len(D[c]) - HOLD - 80)).astype(int)) for c in COINS])
             rep["always_long_every_bar"] = stats(base)
     s, c = rep["strict"], rep["candidate"]
     ypos = lambda v: sum(x["mean_net"] > 0 for x in v["years"].values())
