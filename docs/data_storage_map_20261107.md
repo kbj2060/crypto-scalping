@@ -69,6 +69,18 @@
 ## 수집기 위치
 
 2026-11-07 부터 전 수집기가 서버에 있다. 목록은 `data_map.md` 의 매니페스트 표와 서버 crontab(`data/live/backups/crontab_latest.txt`).
-Pi 를 쓰지 않으므로 **서버가 멈추면 그 시간의 호가는 빈다**(예전에는 Pi 가 BTC·HYPE·SOL·XRP·ETH 일부를 따로 받았다).
+Pi 를 쓰지 않으므로 **서버가 멈추면 그 시간의 호가는 빈다**.
+
+Pi 에서 옮긴 기준(사용자 «대시보드에 사용하지 않는 것들은 제거»):
+
+| Pi 수집기 | 처리 | 이유 |
+|---|---|---|
+| 호가 diff BTC | 서버로 | `live_ob5m --symbol BTCUSDT` 가 대시보드 BTC 호가 칸의 원천인데 서버에 실시간 파일이 없어 비어 있었다 |
+| HL 체결·포지션 BTC | 서버로 | 대시보드 BTC HL 칸(`HL_LIQ_BY_ASSET`). 포지션이 체결 파일에서 주소를 고른다 |
+| HL 맥락 BTC | 서버 hot(`HL_BT_CTX_ONLY=1`) | 시장 맥락 카드. 원시 호가 `.bt` 는 안 받는다 |
+| 호가 diff·HL 체결 ETH·SOL·XRP | Pi 쪽만 끔 | 서버가 이미 받고 있었다(중복) |
+| bookTicker 5종 · OKX 호가 2종 · HYPE 전부 · HL 원시 호가 BTC·HYPE | 제거 | 대시보드와 라이브 워커 어디도 읽지 않는다 |
+
+쌓인 파일은 지우지 않았다(`/mnt/data2/orderflow`). 호가는 소급이 안 되므로, 연구에 다시 필요하면 그때부터 다시 쌓인다.
 
 새 수집기 규칙: 원시 시각 파일은 `data/live/orderflow/<스트림>/<코인>/` 아래에 쓴다(이미 6TB 로 간다). 새 스트림 폴더라면 `move_to_data2_20261107.sh` 로 링크를 만든다.
