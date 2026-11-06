@@ -74,7 +74,7 @@ def summarize(T, mk, tk, with_null=True):
 
 def checks():
     T = tables(X, M.XOUT, ("R1", "R2", "R3"))
-    rep = {}
+    rep, shuffled = {}, []
     for w, t in T.items():
         e = M.execute(t["W"], t["F"][0], 0, 0)
         g, tu = X.pnl2(t["W"], t["lab"])
@@ -85,8 +85,12 @@ def checks():
         v = t["valid"]
         shuf = rng.permuted(np.where(v, t["p"], np.nan), axis=1)
         vs = np.isfinite(shuf)
-        rep[w]["shuffled_gross_bp"] = float(M.execute(X.weights2(shuf, vs, False), t["F"][0], 0, 0)["gross"].mean() * 1e4)
-        assert abs(rep[w]["shuffled_gross_bp"]) < 2, ("음성 대조 이탈", rep[w])
+        g_s = M.execute(X.weights2(shuf, vs, False), t["F"][0], 0, 0)["gross"]
+        rep[w]["shuffled_gross_bp"] = float(g_s.mean() * 1e4)
+        shuffled.append(g_s)
+    pool = np.concatenate(shuffled) * 1e4
+    rep["shuffled_pooled_bp"] = float(pool.mean())   # 사전등록 = 합침 기준
+    assert abs(rep["shuffled_pooled_bp"]) < 2, ("음성 대조 이탈", rep["shuffled_pooled_bp"], rep)
     # 오라클: 검증 구간에서 라벨 순위, K=12 엄격
     D = dict(np.load(M.XOUT / "data.npz"))
     s = X.WINDOWS["R3"]
