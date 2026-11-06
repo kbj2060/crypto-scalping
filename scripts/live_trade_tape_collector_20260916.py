@@ -922,10 +922,12 @@ async def collect(symbol: str, db_path: Path, market: str = "futures") -> None:
 
     warn_if_whale_threshold_diverged()
     bucket = BUCKETS.get(symbol, 0.01)
-    store = TapeStore(db_path, symbol, bucket)
+    # 🔴스레드로: 심볼을 한 프로세스에 묶어 시작 때 파일을 차례로 연다 -- 2026-11-07 디스크가 바쁠 때 심볼당 ~16초라
+    #   OKX 8심볼이 이벤트 루프를 120초 넘게 막아 정지 감시가 기동 중에 프로세스를 죽였다(재시작 반복).
+    store = await asyncio.to_thread(TapeStore, db_path, symbol, bucket)
     buffer = TapeBuffer(bucket, symbol)
     orders = TakerOrderAggregator()
-    last_ms = store.last_ts_ms()      # 지난 판이 남긴 끝 -- 재시작 공백을 gaps 에 적으려고
+    last_ms = await asyncio.to_thread(store.last_ts_ms)      # 지난 판이 남긴 끝 -- 재시작 공백을 gaps 에 적으려고
     log(f"{symbol} {market} 수집 시작 (빈 {bucket}, db {db_path})")
     # total=None 을 **명시**한다: aiohttp 기본 5분이라 그냥 두면 5분마다 끊긴다.
     async with ClientSession(timeout=ClientTimeout(total=None)) as session:
@@ -960,8 +962,8 @@ async def collect(symbol: str, db_path: Path, market: str = "futures") -> None:
                             # 처음 켠 판이면 그 «분의 시작부터 여기까지»가 안 받은 구간이다.
                             # 적어두지 않으면 아래 완전성 검사가 그걸 유실로 오해한다.
                             orders.reset()   # 끊김 전에 열려 있던 묶음은 버린다
-                            store.record_gap(last_ms or (ts_ms // 60_000) * 60_000, ts_ms,
-                                             "ws_reconnect" if last_ms else "startup")
+                            await asyncio.to_thread(store.record_gap, last_ms or (ts_ms // 60_000) * 60_000, ts_ms,
+                                                    "ws_reconnect" if last_ms else "startup")
                             log("스트림 연결됨")
                         sell = bool(trade["m"])
                         if spot:                                # aggTrade = 이미 테이커 주문 하나(대시보드 현물 레인과 같은 규칙)
