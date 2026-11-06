@@ -4,10 +4,12 @@
 사본에서 종류별로 무작위 표본을 골라 실제로 연다: sqlite 표 count · duckdb 표 count · parquet 행 수 · gzip 전체 ·
 crontab 비어 있지 않음. 표본이 0개인 종류도 실패다(사본이 비었는데 통과하면 안 된다).
 결과 = data/live/ops_watchdog/backup_restore_check.json (감시기 check_backup 이 읽는다).
+6TB 사본은 hot 만 담고(원시 호가·lake 는 6TB 가 원본), cold 의 사본은 dev 에 있어 dev 를 ssh 로 함께 본다.
 
 ponytail: 표본 시험이라 전수 보증은 아니다 · 서버 전체를 새로 세우는 훈련도 아니다. 그 훈련은 WSL 이전 때 롤백 절차로 한다.
 
-  python scripts/ops/backup_restore_check_20261107.py [--root /mnt/data2/crypto-scalping-backups/data]
+  python scripts/ops/backup_restore_check_20261107.py          # 6TB hot + dev cold
+  python scripts/ops/backup_restore_check_20261107.py --root DIR --kinds sqlite,duckdb --stdout
   python scripts/ops/backup_restore_check_20261107.py --selftest
 """
 from __future__ import annotations
@@ -16,7 +18,9 @@ import argparse
 import gzip
 import json
 import random
+import re
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import time
@@ -79,10 +83,12 @@ KINDS = (("sqlite", "hot_backup/*.sqlite", _sqlite),
          ("crontab", "live/backups/crontab_latest.txt", _text))
 
 
-def run(root: Path, n: int = N, seed: int | None = None) -> dict:
+def run(root: Path, n: int = N, seed: int | None = None, kinds: tuple[str, ...] | None = None) -> dict:
     rng = random.Random(seed)
     res: dict = {"root": str(root), "finished_at": time.time(), "ok": True, "kinds": {}}
     for kind, pattern, opener in KINDS:
+        if kinds is not None and kind not in kinds:
+            continue
         files = [p for p in root.glob(pattern) if p.is_file() and p.stat().st_size <= MAX_DB_BYTES]
         sample = rng.sample(files, min(n, len(files)))
         rows, errors = [], []
@@ -125,21 +131,47 @@ def selftest() -> None:
     print("selftest OK")
 
 
+def dev_check() -> dict:
+    """같은 스크립트를 dev 에서 돌린다(주소는 gitignore 된 handoff.hosts.conf)."""
+    conf = (ROOT / "scripts/ops/handoff.hosts.conf").read_text()
+    m = re.search(r"\[dev\]=\"([^@]+@[^:]+):(\d+)\|[^|]*\|([^|]+)\|([^\"]+)\"", conf)
+    if not m:
+        return {"root": "dev", "ok": False, "kinds": {}, "error": "HOSTS[dev] not found"}
+    userhost, port, conda, env = m.groups()
+    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-p", port, userhost,
+                        f"{conda}/envs/{env}/bin/python - --root backups/crypto-scalping-server/data --kinds parquet,gzip,duckdb --stdout"],
+                       input=Path(__file__).read_text(encoding="utf-8"), capture_output=True, text=True, timeout=1800)
+    try:
+        return json.loads(r.stdout)
+    except ValueError:
+        return {"root": "dev", "ok": False, "kinds": {}, "error": f"rc={r.returncode} {r.stderr[-300:]}"}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--root", type=Path, default=DEFAULT_ROOT)
+    ap.add_argument("--root", type=Path, default=None)
+    ap.add_argument("--kinds", default="")
+    ap.add_argument("--stdout", action="store_true")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
         selftest()
         return 0
-    res = run(a.root)
+    if a.root is not None:
+        res = run(a.root, kinds=tuple(a.kinds.split(",")) if a.kinds else None)
+        if a.stdout:
+            print(json.dumps(res, ensure_ascii=False))
+            return 0 if res["ok"] else 1
+    else:
+        hot = run(DEFAULT_ROOT, kinds=("sqlite", "duckdb", "crontab"))
+        dev = dev_check()
+        res = {"finished_at": time.time(), "ok": hot["ok"] and dev["ok"], "hot_6tb": hot, "dev": dev}
     OUT.parent.mkdir(parents=True, exist_ok=True)
     tmp = OUT.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(res, ensure_ascii=False, indent=1))
     tmp.replace(OUT)
-    print(json.dumps({k: {"ok": v["ok"], "candidates": v["candidates"], "errors": v["errors"]}
-                      for k, v in res["kinds"].items()}, ensure_ascii=False))
+    for name, part in (("hot_6tb", res.get("hot_6tb", res)), ("dev", res.get("dev", {}))):
+        print(name, part.get("ok"), part.get("error", ""), {k: (v["candidates"], len(v["opened"]), v["errors"]) for k, v in part.get("kinds", {}).items()})
     return 0 if res["ok"] else 1
 
 
