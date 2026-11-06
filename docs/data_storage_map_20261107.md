@@ -16,21 +16,28 @@
 
 | 디스크 | 경로 | 담는 것 |
 |---|---|---|
-| C: NVMe 475GB | WSL 본체 `ext4.vhdx`(이전 후) | 코드, conda, hot SQLite, `data/live` 의 DuckDB·상태 파일, 모델 |
-| 6TB USB (ext4, 라벨 data2) | `/mnt/data2` | 원시 호가 원본, lake, 학습용 대용량, 연구 산출물, hot 의 1차 백업 |
-| D: HDD 1TB (ST1000DM010) | `/mnt/d` | cold 의 사본. 원본을 두지 않는다 |
+| C: NVMe VHDX 200GB (`C:\wsl\fast\fast.vhdx`) | `/mnt/nvme` | `data/hot`, `data/live`(DuckDB·상태·원장·래스터), `logs`. 3.6GB/s 쓰기 |
+| D: HDD 1TB (ST1000DM010) | WSL 루트 `ext4.vhdx` | 코드, conda, 작은 `data/*`. 라이브 쓰기는 거의 없다. 포지션이 없을 때 C: 로 옮긴다(아래) |
+| 6TB USB (ext4, 라벨 data2) | `/mnt/data2` | 원시 호가 원본, lake, 학습용 대용량, 연구 산출물, hot 의 1차 백업. 209MB/s 쓰기 |
 | dev | `~/backups/crypto-scalping-server` | 전부의 사본(다른 기계) |
 
-## 6TB 로 옮긴 경로 (전부 디렉터리 링크라 코드 경로는 그대로다)
+## 링크 지도 (전부 디렉터리 링크라 코드 경로는 그대로다)
 
 | 코드가 쓰는 경로 | 실제 위치 |
 |---|---|
+| `data/hot`, `data/live`, `logs` | `/mnt/nvme/{hot,live,logs}` |
+| `data/live/orderflow/raster` | `/mnt/nvme/live/orderflow/raster` (실물) |
 | `data/live/orderflow/{bookticker,depthdiff,hyperliquid,hyperliquid_bookticker,okx_bookticker,raster_archive}` | `/mnt/data2/orderflow/…` |
-| `data/lake` | `/mnt/data2/lake` |
-| `data/splits` | `/mnt/data2/splits` |
-| `tmp/causal_regen_20260516`, `~/gpu_jobs`, `~/.cache/huggingface` | `/mnt/data2/research/…` |
+| `data/lake`, `data/splits` | `/mnt/data2/{lake,splits}` |
+| `binance_data/aggTrades`, `~/gpu_jobs`, `~/.cache/huggingface`, 안 쓰는 실행 환경, `tmp` 큰 폴더들 | `/mnt/data2/research/…` |
 
-`data/live/orderflow/raster` 는 로컬에 둔다. 대시보드가 실시간으로 읽고, 14일 보존이다.
+### WSL 본체 C: 이전 (아직 안 했다)
+
+`scripts/ops/windows/migrate_wsl_to_c_20261107.ps1`. 압축·이동에 1~3시간 WSL 이 꺼진다.
+🔴**대시보드가 손절을 감시한다(거래소 주문이 아니다, `dashboard/orders.py::bracket_tick`).** 대시보드를 끄면 그동안 손절이 안 나간다.
+포지션이 없을 때만 돌린다. hot 은 이미 NVMe 라 이 이전의 효과는 D: 공간 회수와 낡은 HDD 탈출이다.
+
+`raster` 만 NVMe 에 둔다. 대시보드가 실시간으로 읽고, 14일 보존이다.
 
 저장 계층의 뜻(10-01 재설계): **hot** = SQLite WAL 최근 8~16일(`data/hot`) · **lake** = 끝난 날짜의 일별 Parquet(`scripts/seal_to_lake.py`,
 읽기는 `scripts/data_store.py`) · **state** = 상태 JSON · **ledger** = jsonl 원장.
@@ -39,7 +46,7 @@
 
 | 무엇 | 원본 | 사본 1 | 사본 2 |
 |---|---|---|---|
-| hot (`data/` 전체, 제외 목록 뺌) | 루트 디스크 | 6TB `crypto-scalping-backups` | dev |
+| hot (`data/live`, `data/hot` 사본, 그 밖의 `data/`) | NVMe·루트 | 6TB `crypto-scalping-backups` | dev |
 | cold (`orderflow`·`lake`·`splits`) | 6TB | D: `crypto-scalping-cold` (vhdx 가 D: 를 떠난 뒤부터) | dev |
 
 - 제외: `data/hot`(온라인 백업 API 사본을 보낸다) · `tmp` · `test` · `binance_vision`(다시 받을 수 있다) · `raster`(14일 보존) · 진행 중 시각 파일 `.bt`/`.jsonl` · `*.wal`.
@@ -53,18 +60,18 @@
 | 무엇 | 어디서 | 문턱 |
 |---|---|---|
 | C:·D: 실제 여유 | `check_host_disks` | WARN 50GiB · CRITICAL 20GiB |
+| NVMe 마운트·여유 | `check_host_disks` | 안 붙음 CRITICAL · WARN 30GiB · CRITICAL 10GiB |
 | 6TB 마운트·쓰기·여유 | `check_host_disks` | 안 붙음·쓰기 실패·10초 멈춤 = CRITICAL · WARN 200GiB · CRITICAL 50GiB |
 | 백업 결과·나이 | `check_backup` | 26h WARN · 50h CRITICAL · 실패 CRITICAL |
 | 복원 시험 | `scripts/ops/backup_restore_check_20261107.py`, 월 1회 | 실패 CRITICAL · 40일 WARN |
 | 디스크 추세 | `morning_audit` 일별 기록 | 사람이 본다 |
 
-## 6TB 가 안 붙으면
+## 디스크가 안 붙으면
 
-- 부팅: `CryptoWSLBootRecover`(`scripts/ops/windows/wsl_boot_recover.ps1`)가 60초마다 확인하고 `wsl --mount` + `mount /mnt/data2` 를 한다.
-  디스크는 번호가 아니라 «USB·5TB 초과»로 고른다. SYSTEM 계정으로 돌리면 안 된다(`wsl --mount` 는 호출 사용자의 VM 에 붙는다).
+- 부팅: `CryptoWSLBootRecover`(`scripts/ops/windows/wsl_boot_recover.ps1`)가 60초마다 확인하고 `wsl --mount` + `mount` 를 한다. 6TB 는 번호가 아니라 «USB·5TB 초과»로 고른다. SYSTEM 계정으로 돌리면 안 된다(`wsl --mount` 는 호출 사용자의 VM 에 붙는다).
+- cron 은 `/mnt/nvme` 가 붙을 때까지 최대 5분 기다린다(`/etc/systemd/system/cron.service.d/wait-data-disks.conf`). 안 기다리면 `@reboot` 감독들이 깨진 링크에서 죽고 다시 안 뜬다.
 - 손으로 복구: 관리자 PowerShell 에서 `powershell -ExecutionPolicy Bypass -File C:\Users\kbj20\crypto-ops\wsl_boot_recover.ps1 -MountOnly`
-- 그동안: 원시 수집기는 링크가 깨져 재시작을 반복한다(**그 시간의 호가는 비고, 소급 불가**). 봉인·백업의 6TB 단계도 건너뛰고 `check_backup` 이 경보한다.
-  대시보드의 실시간 풋프린트(hot)는 계속된다. ob5m·iceberg 처럼 depthdiff 를 읽는 워커는 함께 멈춘다.
+- 6TB 가 빠지면: 원시 수집기는 링크가 깨져 재시작을 반복한다(**그 시간의 호가는 비고, 소급 불가**). 봉인·백업의 6TB 단계도 건너뛰고 `check_backup` 이 경보한다. 대시보드의 실시간 풋프린트(hot)는 계속된다. ob5m·iceberg 처럼 호가 diff 를 읽는 워커는 함께 멈춘다.
 
 ## 수집기 위치
 
