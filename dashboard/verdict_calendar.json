@@ -361,7 +361,7 @@
    "approx": true,
    "title": "달러·순유동성 Z 중·장기 방향 규칙",
    "what": "10-15 이후 k=1.0 결정일 ≥ 180일 + 56일 라벨 확정 뒤. ETH·BTC 56일 적중 각 ≥ 60% · 56일 블록 95% 하한 > 50%. 공개 원천이라 기록기 없이 사후 계산",
-   "how": "scripts/research_trend_mid_long_20261015.py --liq 로 재계산  (판정 전용 함수 없음 — 판정일 전 추가 필요)",
+   "how": "python scripts/forward_mid_long_rules_20261107.py run  (로컬 · 원천 새로 받은 뒤 · --dry 로 연구 기록 재현 확인 11-07)",
    "doc": "docs/prereg/liq_dollar_netliq_rule_frozen_20261015.json"
   },
   {
@@ -371,7 +371,7 @@
    "approx": true,
    "title": "코인베이스 프리미엄 7일 변화 → 7일 방향",
    "what": "10-15 이후 예측일 ≥ 120일(예측 비중 28% 가정으로 날짜 추정). BTC·ETH ≥ 60% · CI 하한 > 50%. 공개 원천이라 사후 계산",
-   "how": "scripts/research_short_fresh_20261015.py --signal 로 재계산  (cb_BTC.csv·bn_BTC.csv 삭제 후 · 판정 전용 함수 없음 — 판정일 전 추가 필요)",
+   "how": "python scripts/forward_mid_long_rules_20261107.py run  (로컬 · cb_BTC.csv·bn_BTC.csv 삭제 후 --fetch · --dry 재현 확인 11-07)",
    "doc": "docs/prereg/short_fresh_coinbase_premium_frozen_20261015.json"
   },
   {
@@ -401,6 +401,26 @@
    "what": "11-02 부터 쌓인 CBOE 체인 iv30 약 60거래일. 대리 IV 검정은 11-07 불통과(상한 +.019, 20주). 같은 형식으로 새 사전등록 후 채점",
    "how": "data/live/options_equity/cboe/SOXL 일별 마지막 스냅숏 iv30 + 무기한 5분 RV · scripts/research_soxl_option_hypotheses_20261107.py 형식 재사용",
    "doc": "docs/experiments/soxl_option_hypotheses_20261107.md"
+  },
+  {
+   "id": "book_display_3m",
+   "date": "2027-01-26",
+   "kind": "심사 여부",
+   "approx": true,
+   "title": "5분 호가 표시(기울기·▲▼·◆) 재검정 — 데이터 3개월",
+   "what": "10-26 불통과(41일). 3개월 이상 쌓인 뒤 단일 사전등록 칸으로만 다시 잰다. 11-07 일괄 검증에서 표본 부족으로 판정 안 함",
+   "how": "data/live ob5m 워커 기록 + 새 사전등록",
+   "doc": "docs/prereg/new_sources_news_hl_onchain_20261107.md"
+  },
+  {
+   "id": "liq_gex_rerun",
+   "date": "2027-03-15",
+   "kind": "심사 여부",
+   "approx": true,
+   "title": "청산·GEX 트리거 재실행 — 백필 불가 스트림 표본",
+   "what": "09-19 «≈2027-03 재실행». 청산·GEX 는 과거를 메울 수 없어 쌓일 때까지 판정 불가",
+   "how": "새 사전등록",
+   "doc": "docs/experiments/ (zeus_altdata_options_liquidation_gex_no_trigger 메모)"
   }
  ]
 }
