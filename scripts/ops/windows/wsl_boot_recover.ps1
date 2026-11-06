@@ -24,7 +24,9 @@ function Fix-NetworkProfile {
 
 function Get-WslIp {
     $out = & $Wsl -d $Distro -u root -e hostname -I 2>$null
-    if ($out) { return ($out.Trim() -split '\s+')[0] }
+    # wsl.exe prints errors in UTF-16: without this check the error text became the portproxy target and SSH died until the next cycle (2026-11-06, 11-07).
+    $ip = if ($out) { ([string]$out).Trim() -split '\s+' | Select-Object -First 1 } else { $null }
+    if ($ip -match '^\d{1,3}(\.\d{1,3}){3}$') { return $ip }
     return $null
 }
 
