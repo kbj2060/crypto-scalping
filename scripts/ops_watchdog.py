@@ -628,6 +628,25 @@ def check_host_disks(disks=HOST_DISKS, data2: Path = DATA2, data2_warn: float = 
     return Check("host_disks", status, "; ".join(m for _, m in problems) or "host disks ok", details)
 
 
+def check_seal(status_path: Path | None = None, now: float | None = None) -> Check:
+    """매일 lake 봉인(seal_to_lake)의 결과. 11-05·06 에 도중에 죽어 Deribit 봉인과 hot 정리가 멈췄는데, lake_seal 은 앞쪽 스트림 파일만 봐서 몰랐다."""
+    status_path = status_path or OUT / "seal_status.json"
+    now = time.time() if now is None else now
+    try:
+        st = json.loads(status_path.read_text())
+        age_h = (now - float(st["finished_at"])) / 3600
+    except (OSError, ValueError, KeyError) as exc:
+        return Check("seal", "WARN", "no seal status", {"error": type(exc).__name__})
+    details = {"age_hours": round(age_h, 1), "failed": st.get("failed"), "written": st.get("written")}
+    if age_h > 50:
+        return Check("seal", "CRITICAL", f"last seal {age_h:.0f}h ago", details)
+    if age_h > 26:
+        return Check("seal", "WARN", f"last seal {age_h:.0f}h ago", details)
+    if st.get("failed"):
+        return Check("seal", "WARN", f"seal failed streams: {st['failed']}", details)
+    return Check("seal", "OK", "seal ok", details)
+
+
 def check_backup(status_path: Path | None = None, restore_path: Path | None = None, now: float | None = None) -> Check:
     """매일 백업(backup_live_data.sh)과 월 복원 시험(backup_restore_check)의 결과. 둘 다 그동안 로그에만 있어서 실패해도 아무도 몰랐다."""
     status_path = status_path or OUT / "backup_status.json"
@@ -823,7 +842,7 @@ def run_once(dry_run: bool) -> list[Check]:
     checks = [
         # 2026-10-12 봇 은퇴: trading_bot_process·decision_snapshot·heartbeat·data_pipeline·pipeline_contract·
         #   market_data_sources·execution_contract 제거(봇만 쓰던 파일들). 되살리려면 그 함수들(git 이력)과 이 줄을 함께.
-        check_dashboard(), check_data_sources(micro_db), check_runtime_resources(), check_host_disks(), check_backup(),
+        check_dashboard(), check_data_sources(micro_db), check_runtime_resources(), check_host_disks(), check_backup(), check_seal(),
         check_watchdog_storage(), check_raster_archive(),
         # 2026-10-01 lake 봉인(scripts/seal_to_lake.py, 매일 11:05 KST cron) -- 대표로 ETH 테이프의 가장 최근 일별 파일.
         #   하루 한 번 쓰므로 warn 26h · critical 50h. cron 을 끄면 이 줄도 지운다.

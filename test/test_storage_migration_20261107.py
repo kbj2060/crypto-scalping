@@ -95,6 +95,41 @@ def test_burn_rate_warns_but_one_off_move_does_not():
     assert "D_drive 12 days left" in c.summary and c.details["D_drive_days_left"] == 12.5
 
 
+def test_seal_check():
+    d, now = _tmp(), time.time()
+    p = d / "seal.json"
+    assert w.check_seal(p, now).status == "WARN", "기록 없음"
+    p.write_text(json.dumps({"finished_at": now - 3600, "failed": 0, "written": 9}))
+    assert w.check_seal(p, now).status == "OK"
+    p.write_text(json.dumps({"finished_at": now - 3600, "failed": 1}))
+    assert w.check_seal(p, now).status == "WARN"
+    p.write_text(json.dumps({"finished_at": now - 30 * 3600, "failed": 0}))
+    assert w.check_seal(p, now).status == "WARN"
+    p.write_text(json.dumps({"finished_at": now - 60 * 3600, "failed": 0}))
+    assert w.check_seal(p, now).status == "CRITICAL"
+
+
+def test_seal_survives_a_stream_that_cannot_be_read():
+    import datetime as dt
+    import sqlite3
+    from scripts import seal_to_lake as seal
+    root, lake = _tmp(), _tmp() / "lake"
+    (root / "data").mkdir()
+    con = sqlite3.connect(root / "data/ok.sqlite")
+    con.execute("create table t(symbol text, ts_ms integer)")
+    now = dt.datetime(2026, 11, 7, 3, tzinfo=dt.timezone.utc)
+    ms = int((now - dt.timedelta(days=1)).timestamp() * 1000)
+    con.execute("insert into t values ('ETH', ?)", [ms])
+    con.commit()
+    con.close()
+    # 열 이름이 틀린 시각식 = 읽다가 나는 duckdb 오류 대신 쓰는 재현(뒤 스트림이 그래도 돌아야 한다)
+    specs = [("x", "bad", [("data/ok.sqlite", "t", "symbol")], "1 / (select 1 from range(2))"),
+             ("x", "good", [("data/ok.sqlite", "t", "symbol")], "ts_ms")]
+    s = seal.seal(specs, root=root, lake=lake, now=now)
+    assert s["failed"] == 1 and s["written"] == 1
+    assert list((lake / "x/good").rglob("part.parquet")) and not (lake / "x/bad").exists()
+
+
 # ── 백업 스크립트 ─────────────────────────────────────────────────────
 def _repo() -> Path:
     r = _tmp() / "repo"

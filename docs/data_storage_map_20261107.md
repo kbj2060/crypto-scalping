@@ -92,6 +92,7 @@ hot 은 이미 NVMe 라 이 이전의 효과는 낡은 HDD(33,018시간)에서 O
 | 6TB 마운트·쓰기·여유 | `check_host_disks` · 데드맨 | 안 붙음·쓰기 실패·30초 멈춤 = CRITICAL · WARN 200GiB · CRITICAL 50GiB |
 | 백업 결과·나이 | `check_backup` | 26h WARN · 50h CRITICAL · 실패 CRITICAL |
 | 복원 시험 | `scripts/ops/backup_restore_check_20261107.py`, 월 1회 | 실패 CRITICAL · 40일 WARN |
+| lake 봉인 결과 | `check_seal` (`seal_status.json`) | 26h WARN · 50h CRITICAL · 실패 스트림 있으면 WARN |
 | 소진 속도 | `check_host_disks` 가 `morning_audit` 일별 기록을 읽는다 | 7일 평균과 어제 대비 중 느린 쪽으로 남은 일수 14일 아래 WARN |
 
 ## 디스크가 안 붙으면

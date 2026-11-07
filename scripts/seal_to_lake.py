@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import shutil
 import sqlite3
 import sys
@@ -201,8 +202,15 @@ def seal(specs=SPECS, root: Path = ROOT, lake: Path = LAKE, now: dt.datetime | N
             #   조건을 못 내려 매번 전체를 읽는다(10-01 서버: 바이낸스 테이프 31날짜 135초).
             cols = [r[0] for r in con.execute("describe select * exclude (__coin, __day) from v").fetchall()]
             row = "hash(row(" + ", ".join(f'"{c}"' for c in cols) + "))"
-            todo = con.execute(f"select __coin, __day, count(*), bit_xor({row}) from v "
-                               "where __coin is not null and __day <= ? group by all order by all", [last_day]).fetchall()
+            try:
+                todo = con.execute(f"select __coin, __day, count(*), bit_xor({row}) from v "
+                                   "where __coin is not null and __day <= ? group by all order by all", [last_day]).fetchall()
+            except duckdb.Error as exc:
+                # 🔴쓰는 중인 duckdb 를 복사한 사본은 count 가 돼도(snapshot) 열을 읽다 깨질 수 있다. 11-05·06 에 여기서 스크립트가 통째로 죽어
+                #   뒤 스트림과 hot 정리까지 건너뛰었고 아무도 몰랐다(같은 파일의 11-07 사본은 전 열 정상). 이 스트림만 실패로 세고 간다 -- 다음 날 새 사본으로 메운다.
+                print(f"[seal] 🔴 {venue}/{stream} read failed: {exc}"[:300], flush=True)
+                stats["failed"] += 1
+                continue
             for coin, day, n, src_hash in todo:
                 out = lake_path(venue, stream, coin, day.isoformat(), lake)
                 if out.exists():
@@ -284,4 +292,8 @@ if __name__ == "__main__":
                            for h, t, ts, cc, v, st, fn, k in HOT_PRUNE}
     print(f"[seal] {'DRY-RUN ' if a.dry_run else ''}{dt.datetime.now().isoformat(timespec='seconds')} "
           f"lake={LAKE} {s} {time.time() - t0:.0f}s", flush=True)
+    if not a.dry_run and not a.only:     # 감시기 check_seal 이 읽는다. 스크립트가 죽으면 안 써져 나이로 잡힌다
+        status = ROOT / "data" / "live" / "ops_watchdog" / "seal_status.json"
+        status.with_suffix(".tmp").write_text(json.dumps({"finished_at": time.time(), **s}, ensure_ascii=False))
+        status.with_suffix(".tmp").replace(status)
     sys.exit(1 if s["failed"] else 0)
