@@ -184,7 +184,7 @@
   CH.ladder = function (el, w, h) {
     var P = price(), M = { "30": mapOf(30), "7": mapOf(7), "1": mapOf(1) }, real = realRows(P), m = ctx(), hl = m && m.hl_liq, R_ = LADDER_R;
     if (!(P > 0) || !(M["1"] || M["7"] || M["30"])) return null;
-    var cols = ["30", "7", "1", "real", "hl"], LAB = { "30": "지도 30일", "7": "지도 7일", "1": "지도 1일", real: "실측 7일", hl: "HL 고래" }, narrow = w < 420, L = 50, Tp = 18, Bt = 6, gap = narrow ? 5 : 10, cw = (w - L - gap * cols.length) / cols.length, Y = function (d) { return Tp + (h - Tp - Bt) * (1 - (d + R_) / (2 * R_)); }, rh = Math.max((h - Tp - Bt) / (2 * R_ / 0.25) - 0.6, 1.2), s = "", ops = [0.5, 0.68, 0.84, 1];
+    var cols = ["30", "7", "1", "real", "hl"], LAB = { "30": "지도 30일", "7": "지도 7일", "1": "지도 1일", real: "실측 7일", hl: "HL 고래" }, narrow = w < 420, L = 50, Tp = 18, Bt = 6, gap = narrow ? 5 : 10, cw = (w - L - gap * cols.length) / cols.length, Y = function (d) { return Tp + (h - Tp - Bt) * (1 - (d + R_) / (2 * R_)); }, rh = Math.max((h - Tp - Bt) / (2 * R_ / 0.25) - 0.6, 1.2), s = "", LEV = ["--lev10", "--lev25", "--lev50", "--lev100"];   // 풋프린트 «청산» 기둥과 같은 레버리지 색(app.js TV) -- 위·아래는 현재가 위치와 누적 곡선이 말한다
     for (var d = -R_; d <= R_; d += 1) if (d) s += line("lq-gl", L, w, Y(d), Y(d)) + txt("lq-ax", L - 5, Y(d) + 3, px(P * (1 + d / 100)), "end");
     cols.forEach(function (c, ci) {
       var x0 = L + gap + ci * (cw + gap); s += txt("lq-ax lq-axh", x0, 10, LAB[c]);
@@ -198,7 +198,7 @@
       } else {
         var mp = M[c]; if (!mp) return;
         var ks2 = Object.keys(mp.rows).filter(function (g) { return Math.abs(g * 0.25) <= R_; }), sum = function (r) { return r[0] + r[1] + r[2] + r[3]; }, mx = Math.max.apply(null, ks2.map(function (g) { return sum(mp.rows[g]); }).concat([1]));
-        ks2.forEach(function (g) { var xx = x0; mp.rows[g].forEach(function (v, ti) { if (!v) return; var ww = cw * v / mx; s += '<rect class="' + (g < 0 ? "lq-lg" : "lq-sh") + '" opacity="' + ops[ti] + '" x="' + xx.toFixed(1) + '" y="' + (Y(g * 0.25) - rh / 2).toFixed(1) + '" width="' + ww.toFixed(1) + '" height="' + rh.toFixed(1) + '"/>'; xx += ww; }); });
+        ks2.forEach(function (g) { var xx = x0; mp.rows[g].forEach(function (v, ti) { if (!v) return; var ww = cw * v / mx; s += '<rect fill="var(' + LEV[ti] + ')" x="' + xx.toFixed(1) + '" y="' + (Y(g * 0.25) - rh / 2).toFixed(1) + '" width="' + ww.toFixed(1) + '" height="' + rh.toFixed(1) + '"/>'; xx += ww; }); });
         if (cw > 120) s += txt("lq-ax", x0 + cw, 10, "칸 최대 " + usd(mx), "end");
       }
     });
@@ -282,7 +282,7 @@
     var age = S.data ? (Date.now() - S.data.generated_ms) / 3600000 : null;
     fill("lqRemLeg", "<span>칸 = 그날 마감 기준 지난 " + S.win + "일 입력 중 아직 안 닿은 청산가 · 진할수록 많음</span><span>오른쪽 = 오늘 남은 양</span><span>아래 띠 = 그 날 만든 양 중 지금까지 남은 비율</span>" + (age != null && age > 3 ? '<span class="lq-warn">' + age.toFixed(0) + "시간 전 계산</span>" : ""));
     var pos = typeof snapshotAccountPosition === "function" ? snapshotAccountPosition() : null, liq = pos && Number(pos.liquidation_price);
-    fill("lqLadLeg", "<span>막대 네 단 = 레버리지(진할수록 높음)</span><span>지도 눈금 = OI×2 · 절대액 아님</span><span>실측 = 바이낸스 7일 체결 위치</span>" + (liq > 0 && P > 0 ? "<span>내 청산가 " + px(liq) + "(" + sgn((liq / P - 1) * 100, 1) + "%)</span>" : ""));
+    fill("lqLadLeg", "<span><i class=\"lq-sw\" style=\"background:var(--lev10)\"></i>10배</span><span><i class=\"lq-sw\" style=\"background:var(--lev25)\"></i>20~25배</span><span><i class=\"lq-sw\" style=\"background:var(--lev50)\"></i>50배</span><span><i class=\"lq-sw\" style=\"background:var(--lev100)\"></i>75~100배</span><span>지도 눈금 = OI×2 · 절대액 아님</span><span>실측 = 바이낸스 7일 체결 위치</span>" + (liq > 0 && P > 0 ? "<span>내 청산가 " + px(liq) + "(" + sgn((liq / P - 1) * 100, 1) + "%)</span>" : ""));
     var B = S.data && S.data.band; fill("lqTodLab", "오늘 5분 누적" + (B ? " · 띠 = 지난 " + B.n + "일" : S.data ? " · 비교 띠는 기록 7일부터" : ""));
     var br = S.data && S.data.branch, bl = br && br.length ? br[br.length - 1] : null; fill("lqBrLab", bl ? bl[0].slice(5) + " " + bl[1].toFixed(2) + " · 점선 = 대조 " + (Math.abs(bl[2]) < 0.005 ? 0 : bl[2]).toFixed(2) + (br.length < 20 ? " · " + br.length + "일뿐" : "") : "");
     host.querySelectorAll(".lq-d").forEach(function (el) { el.style.height = stack ? el.dataset.mh + "px" : ""; });
