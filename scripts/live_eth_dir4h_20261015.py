@@ -319,6 +319,21 @@ def _merge(old: pd.DataFrame | None, new: pd.DataFrame, keep_days: float) -> pd.
     return df[df.timestamp >= df.timestamp.max() - pd.Timedelta(days=keep_days)].reset_index(drop=True)
 
 
+_SHORT: dict[tuple, pd.DataFrame] = {}
+
+
+def _short_klines(sym: str, n: int, now_ms: int) -> pd.DataFrame:
+    """교차 코인 짧은 klines 는 4코인·두 판(4h·15분/1시간)이 같은 것을 쓴다 -- 5분봉 하나에 한 번만 받는다.
+    서버 실측 라운드당 REST 27회 1.7초 중 20회가 이것. 복사본을 준다(호출 쪽이 열을 붙인다)."""
+    key = (sym, n, now_ms // 300_000)
+    k = _SHORT.get(key)
+    if k is None:
+        if len(_SHORT) > 200:
+            _SHORT.clear()
+        k = _SHORT[key] = _klines(sym, n, now_ms)
+    return k.copy()
+
+
 def rest_frames(now_ms: int | None = None, others_n: int = 340, coin: str = "ETH") -> dict[str, pd.DataFrame]:
     """REST → vision 형식 frames(코인 이름 그대로 -- 대상 바꾸기는 frames_for). 첫 호출 = 대상 코인 31일(klines 9천·metrics 5종) 받기,
     다음부터 꼬리만 이어 붙인다(_CACHE, 코인별). 나머지 코인은 짧은 klines 만."""
@@ -334,9 +349,8 @@ def rest_frames(now_ms: int | None = None, others_n: int = 340, coin: str = "ETH
     for col, m in met.items():
         tgt = tgt.merge(m, on="timestamp", how="left")
     frames = {coin: tgt}
-    # ponytail: 교차 코인 짧은 klines 는 코인마다 따로 받는다(5분에 코인당 ~20회) -- 코인이 늘면 한 벌을 공유
     for sym in [s for s in ["ETH"] + COINS if s != coin]:   # 교차 = 1일 수익(288봉)·BTC 4h·OI 1h 면 충분
-        k = _klines(sym, others_n, now_ms)
+        k = _short_klines(sym, others_n, now_ms)
         if sym == ("ETH" if coin == "BTC" else "BTC"):   # OI 1h = frames_for 뒤 "BTC" 자리(BTC 대상이면 ETH 가 그 자리 -- X_btc_doi1h)
             k = k.merge(_metric(sym, "openInterestHist", others_n / 288 + 0.1), on="timestamp", how="left")
         frames[sym] = k

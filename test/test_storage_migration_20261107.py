@@ -286,3 +286,22 @@ def test_baseline_reads_one_text_block_and_matches_rows():
     for k, q in got["sec_vol_p99"].items():
         assert abs(q - np.quantile(v[h == k], 0.99)) < 1e-9
     assert micro_ref.baseline_from_tape(p, symbol="btcusdt") is None
+
+
+def test_cross_coin_klines_fetched_once_per_bar_and_not_shared_by_reference():
+    import pandas as pd
+    import live_eth_dir4h_20261015 as d4
+    calls = []
+    def fake(sym, n, now_ms):
+        calls.append((sym, now_ms))
+        return pd.DataFrame({"timestamp": [pd.Timestamp(now_ms // 300_000 * 300_000, unit="ms")], "close": [1.0]})
+    d4._SHORT.clear()
+    t = 1_793_400_000_000
+    with mock.patch.object(d4, "_klines", fake):
+        a = d4._short_klines("ADA", 340, t)
+        a["x"] = 1                                    # rest_frames 가 열을 붙인다
+        b = d4._short_klines("ADA", 340, t + 60_000)
+        c = d4._short_klines("ADA", 340, t + 300_000)  # 다음 봉은 다시 받는다
+        d = d4._short_klines("APT", 340, t)
+    assert "x" not in b and len(calls) == 3 and c.close[0] == 1.0 and d.close[0] == 1.0
+    assert c.timestamp[0] > b.timestamp[0], "낡은 봉을 새 봉에 돌려주면 안 된다"
