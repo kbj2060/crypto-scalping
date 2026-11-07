@@ -5,6 +5,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SUPERVISOR="$ROOT/dashboard/scripts/supervise_cloudflare_tunnel.sh"
 SUPERVISOR_PID="$ROOT/data/live/cloudflare_named_tunnel_supervisor.pid"
 
+# data/live·logs 는 /mnt/nvme 링크다. Windows 부팅 작업이 마운트보다 먼저 돌면 mkdir 이 실패하고 터널이 안 뜬 채 재시도도 없다
+# (2026-11-07 15:20:00 실행 · 15:20:55 마운트 · thesan.xyz 530). cron 의 대기(wait-data-disks.conf)와 같은 5분.
+timeout 300 sh -c 'until mountpoint -q /mnt/nvme; do sleep 2; done' || true
+
 mkdir -p "$ROOT/data/live"
 
 is_supervisor_process() {

@@ -484,7 +484,7 @@ def check_multicoin_collectors() -> list[Check]:
 # 1단계 BTC·SOL·XRP·HYPE 수집기는 Pi(`collector`)에서 도는데 이 감시기는 서버 매니페스트만 봤다 -- Pi 가
 # 통째로 죽어도 아무도 몰랐다. ssh 한 번으로 Pi 매니페스트의 신선도를 받아온다(scripts/ops/remote_fresh_probe.py,
 # DB 안 엶·mtime). ssh 실패 = pi_reachable BLOCKED 라 노드째 죽음도 잡는다. PI_COLLECTOR_SSH="" 면 끈다.
-PI_SSH = os.getenv("PI_COLLECTOR_SSH", "pi@192.168.1.131")
+PI_SSH = os.getenv("PI_COLLECTOR_SSH", "")   # 2026-11-07 Pi 수집기 전부 종료 -- 기본은 끔. 다시 쓰면 환경 변수로 주소를 준다
 PI_ROOT = os.getenv("PI_COLLECTOR_ROOT", "~/crypto-scalping")
 PI_TTL_S = 120.0                 # 감시기는 30초 주기 -- Pi 에 매번 ssh 할 이유가 없다
 _PI_CACHE: list[Any] = [-1e9, []]

@@ -16,8 +16,9 @@
 
 | 디스크 | 경로 | 담는 것 |
 |---|---|---|
+| C: NVMe | WSL 루트 `C:\wsl\Ubuntu\ext4.vhdx` | 코드, conda, 작은 `data/*`. 라이브 쓰기는 거의 없다 |
 | C: NVMe VHDX 200GB (`C:\wsl\fast\fast.vhdx`) | `/mnt/nvme` | `data/hot`, `data/live`(DuckDB·상태·원장·래스터), `logs`, 라이브 실행 환경, 임시 파일. 3.6GB/s 쓰기 |
-| D: HDD 1TB (ST1000DM010, 33,018시간) | WSL 루트 `ext4.vhdx`, `crypto-scalping-cold` | 코드, conda, 작은 `data/*`. 라이브 쓰기는 거의 없다(3 IOPS). 6TB 원본의 사본(cold). C: 로 옮길 예정(아래) |
+| D: HDD 1TB (ST1000DM010, 33,018시간) | `/mnt/d` | `crypto-scalping-cold`: 6TB 원본의 사본만 |
 | 6TB USB (ext4, 라벨 data2) | `/mnt/data2` | 원시 호가 원본, lake, 학습용 대용량, 연구 산출물, hot 의 1차 백업. 209MB/s 쓰기 |
 | dev | `~/backups/crypto-scalping-server` | 전부의 사본(다른 기계) |
 
@@ -32,15 +33,17 @@
 | `data/lake`, `data/splits` | `/mnt/data2/{lake,splits}` |
 | `binance_data/aggTrades`, `~/gpu_jobs`, `~/.cache/huggingface`, 안 쓰는 실행 환경, `tmp` 큰 폴더들 | `/mnt/data2/research/…` |
 
-### WSL 본체 C: 이전 (1차 압축만 끝났다, 이동은 아직)
+### WSL 본체 C: 이전 (2026-11-07 완료)
 
 `scripts/ops/windows/migrate_wsl_to_c_20261107.ps1`. 🔴**대시보드가 손절을 감시한다(거래소 주문이 아니다, `dashboard/orders.py::bracket_tick`).** 대시보드를 끄면 그동안 손절이 안 나간다.
 
-2026-11-07 1차(10:12:40 정지 ~ 12:00 복구, 약 1시간 48분): 압축만 1시간 45분, vhdx 658 → 212GB. 그대로 옮기면 C: 여유가 34.7GB 라 스크립트가 복사하지 않고 D: 에서 다시 켰다.
-fstrim 은 경로 오류로 안 돌았다(고침). 212GB 와 실제 사용량의 차이는 그 탓일 수 있다.
+| 회차 | 정지 | 결과 |
+|---|---|---|
+| 1차 | 10:12:40 ~ 12:00 (약 1시간 48분) | 압축 1시간 45분, 658 → 212GB. 그대로 옮기면 C: 여유 34.7GB 라 복사 안 함. fstrim 은 경로 오류로 안 돌았다 |
+| 2차 (사용자가 손절을 직접 보기로 함) | 14:10:50 ~ 15:06 (약 55분) | 압축 39분, 212 → 156.9GB. 복사 14분. `C:\wsl\Ubuntu\ext4.vhdx` |
 
-남은 일: 실행 환경을 뺀 뒤 루트 실사용 약 100GB. 다시 끄고 fstrim·압축·이동을 한다. 다시 끄면 `bookdepth` warm 12시간이 처음부터 돌고, 원시 호가는 Pi 가 메운다.
-hot 은 이미 NVMe 라 이 이전의 효과는 낡은 HDD(33,018시간)에서 OS·코드를 빼는 것이다. 속도 이득은 프로세스 시작할 때 코드 읽기 정도다.
+ext4 실사용 96GB 인데 vhdx 가 157GB 다. 압축은 통째로 빈 블록만 돌려주므로 fstrim 뒤에도 약 60GB 차이가 남았다.
+🔴**이전 뒤 C: 여유 88GB.** `fast.vhdx`(지금 54GB)는 200GB 까지 커질 수 있어 최악이면 C: 가 찬다. `check_host_disks` 가 C: 50GiB WARN·20GiB CRITICAL 로 잡는다. 줄일 때는 큰 폴더를 6TB 로 옮기고 다시 fstrim·압축한다.
 `wsl --manage --set-sparse` 는 쓰지 않는다(WSL 이 데이터 손상 가능성 때문에 막아 둔 기능이다).
 
 **긴 정지 뒤에는 일일 cron 을 확인한다. 소급 실행되지 않는다.** 11-07 정지(10:12~12:00)로 `seal_to_lake`(11:05)·`live_macro_bias_forward`(토 10:30, 일요일이 재시도)·`gen_data_map`(11:30)이 빠져 손으로 돌렸다.
@@ -55,7 +58,7 @@ hot 은 이미 NVMe 라 이 이전의 효과는 낡은 HDD(33,018시간)에서 O
 | 무엇 | 원본 | 사본 1 | 사본 2 |
 |---|---|---|---|
 | hot (`data/live`, `data/hot` 사본, 그 밖의 `data/`) | NVMe·루트 | 6TB `crypto-scalping-backups` | dev |
-| cold (`orderflow`·`lake`·`splits`) | 6TB | D: `crypto-scalping-cold` (vhdx 가 D: 에 있는 동안은 D: 여유 300GiB 초과일 때만) | dev |
+| cold (`orderflow`·`lake`·`splits`) | 6TB | D: `crypto-scalping-cold` | dev |
 
 - 제외: `data/hot`(온라인 백업 API 사본을 보낸다) · `tmp` · `test` · `binance_vision`(다시 받을 수 있다) · `raster`(14일 보존) · 진행 중 시각 파일 `.bt`/`.jsonl` · `*.wal`.
 - `--delete` 를 안 쓴다. 사본은 늘기만 한다.
@@ -102,14 +105,18 @@ hot 은 이미 NVMe 라 이 이전의 효과는 낡은 HDD(33,018시간)에서 O
 
 - 부팅: `CryptoWSLBootRecover`(`scripts/ops/windows/wsl_boot_recover.ps1`)가 60초마다 확인하고 `wsl --mount` + `mount` 를 한다. 6TB 는 번호가 아니라 «USB·5TB 초과»로 고른다. SYSTEM 계정으로 돌리면 안 된다(`wsl --mount` 는 호출 사용자의 VM 에 붙는다).
 - cron 은 `/mnt/nvme` 가 붙을 때까지 최대 5분 기다린다(`/etc/systemd/system/cron.service.d/wait-data-disks.conf`). 안 기다리면 `@reboot` 감독들이 깨진 링크에서 죽고 다시 안 뜬다.
+- 터널(`CryptoScalpingPublicDashboard`)도 부팅 때 바로 도는데 `data/live` 가 NVMe 링크라, `start_public_dashboard.sh` 가 `/mnt/nvme` 를 5분까지 기다린다(11-07 재부팅 때 먼저 돌아 터널이 안 떴다, 고친 뒤 실제 재부팅 시험 전).
+- 재부팅 뒤 로그인 전에는 WSL 안에서 `powershell.exe` 가 `Invalid argument` 로 실패한다. `WSL_INTEROP=/run/WSL/<keepalive>_interop` 를 주면 된다. crontab 은 Windows 실행 파일을 안 부른다.
 - 손으로 복구: 관리자 PowerShell 에서 `powershell -ExecutionPolicy Bypass -File C:\Users\kbj20\crypto-ops\wsl_boot_recover.ps1 -MountOnly`
 - 6TB 가 빠지면: 원시 수집기는 링크가 깨져 재시작을 반복한다(**그 시간의 호가는 비고, 소급 불가**). 봉인·백업의 6TB 단계도 건너뛰고 `check_backup` 이 경보한다. 대시보드의 실시간 풋프린트(hot)는 계속된다. ob5m·iceberg 처럼 호가 diff 를 읽는 워커는 함께 멈춘다.
 
 ## 수집기 위치
 
 대시보드가 쓰는 수집기는 전부 서버에 있다. 목록은 `data_map.md` 의 매니페스트 표와 서버 crontab(`data/live/backups/crontab_latest.txt`).
-Pi 에는 호가 diff 4개(ETH·BTC·SOL·XRP)와 HL 체결 2개(ETH·BTC)만 남겼다. 서버와 중복이고, WSL 본체 이전 때 호가 공백을 막는 용도다. 이전이 끝나면 끈다.
-그 뒤로는 **서버가 멈추면 그 시간의 호가는 빈다**.
+Pi 수집기는 2026-11-07 16:01 에 전부 껐다(`multicoin_collectors.json` 비움, crontab 비움, Pi 감시 끔). 마지막까지 돈 호가 diff 4개·HL 체결 2개는 WSL 이전과 재부팅 공백을 메웠고, `.gz` 는 전부 서버로 보낸 뒤 Pi 에서 지웠다.
+**이제 서버가 멈추면 그 시간의 호가는 빈다.**
+Pi 의 얼은 DB 와 정지 구간이 든 11-07 HL 체결 파일은 `/mnt/data2/research/pi_archive_20261107/` 에 보관했다. 서버 쪽 HL 일별 파일과 이름이 같아 일부러 합치지 않았다.
+SNDK·SOXL 원시 호가는 Pi 에 없어 10:12~12:01, 14:10~15:06, 15:18~15:21 이 비어 있다.
 
 Pi 에서 옮긴 기준(사용자 «대시보드에 사용하지 않는 것들은 제거»):
 
