@@ -151,14 +151,16 @@ def baseline_from_tape(db_path: Path, days: int = 7, symbol: str = "ethusdt") ->
     """UTC 시간대별 «1분 거래량» 분포와 «1초 거래량 p99». 실패(파일 없음 등)면 예외 -- 화면은 절대값만 보인다."""
     from scripts.data_store import read_rows  # noqa: PLC0415
     since = int(time.time()) - days * 86400
+    # 초 합계 7일 ~57만 행을 글자 한 덩어리(1행)로 받는다. sqlite3 는 행마다 GIL 을 놓았다 다시 잡아서, 행으로 받으면 재시작처럼
+    #   바쁠 때 코인당 1분 넘게 읽기 연결을 쥐고 시장 맥락까지 줄 세웠다(11-07 스택 표본 +20·+40·+60초 전부 여기, 한가할 때 0.5초).
     try:
-        sec = read_rows(db_path, "SELECT ts_sec, sum(buy_qty + sell_qty) FROM trade_tape_1s "
-                                 "WHERE symbol = ? AND ts_sec >= ? GROUP BY 1", [symbol, since])
+        txt = read_rows(db_path, "SELECT group_concat(ts_sec || ' ' || v, ' ') FROM (SELECT ts_sec, sum(buy_qty + sell_qty) AS v "
+                                 "FROM trade_tape_1s WHERE symbol = ? AND ts_sec >= ? GROUP BY 1)", [symbol, since])[0][0]
     except Exception as exc:  # noqa: BLE001 -- 기준선은 장식이다. 못 읽으면 없이 가되, 왜인지는 올린다.
         raise RuntimeError(f"baseline_from_tape({db_path.name}): {exc!r}") from exc
-    if not sec:
+    if not txt:
         return None
-    a = np.asarray(sec, dtype=float)
+    a = np.fromstring(txt, sep=" ").reshape(-1, 2)
     ts, v = a[:, 0].astype(np.int64), a[:, 1]
     mins, inv = np.unique(ts - ts % 60, return_inverse=True)
     if len(mins) < 600:

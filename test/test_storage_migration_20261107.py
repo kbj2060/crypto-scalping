@@ -226,3 +226,29 @@ def test_wal_writers_do_not_fsync_every_commit():
         assert con.execute("PRAGMA synchronous").fetchone()[0] == 1
     with tape.sqlite_shared(p) as con:
         assert con.execute("PRAGMA synchronous").fetchone()[0] == 1
+
+
+def test_baseline_reads_one_text_block_and_matches_rows():
+    import sqlite3
+    import warnings
+    import numpy as np
+    from dashboard import micro_ref
+    p = _tmp() / "t.sqlite"
+    con = sqlite3.connect(p)
+    con.execute("CREATE TABLE trade_tape_1s(symbol TEXT, ts_sec INTEGER, price_bin INTEGER, buy_qty REAL, sell_qty REAL)")
+    now = int(time.time())
+    rows = [("ethusdt", now - i * 10, b, 0.1 + i % 7, 1 / (1 + i)) for i in range(4000) for b in (1, 2)]
+    con.executemany("INSERT INTO trade_tape_1s VALUES (?,?,?,?,?)", rows)
+    con.commit()
+    want = {}
+    for _, t, _, b, s in rows:
+        want[t] = want.get(t, 0.0) + b + s
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        got = micro_ref.baseline_from_tape(p, symbol="ethusdt")
+    assert \
+        abs(sum(sum(v) for v in got["minute_vol_sorted"].values()) / sum(want.values()) - 1) < 1e-12
+    ts = np.array(list(want)); v = np.array(list(want.values())); h = (ts % 86400) // 3600
+    for k, q in got["sec_vol_p99"].items():
+        assert abs(q - np.quantile(v[h == k], 0.99)) < 1e-9
+    assert micro_ref.baseline_from_tape(p, symbol="btcusdt") is None
