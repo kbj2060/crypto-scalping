@@ -2377,12 +2377,11 @@ def make_app() -> web.Application:
     def _mc_history(asset: str = "eth") -> dict[str, Any]:
         """7일 OI(바이낸스 5분 끝값)·7일 베이시스(1분에 한 점) -- 둘 다 이 프로세스가 쓰는 파일."""
         since, sym = int(time.time() * 1000) - 7 * 86400 * 1000, flows[asset].spec.symbol.lower()
-        raw = own_db_rows(OI_1S_DB_PATH, f"""SELECT ts_ms, open_interest FROM {OI_1S_TABLE}
-                                           WHERE symbol = ? AND ts_ms >= ? ORDER BY ts_ms""", [sym, since])
-        last5: dict[int, float] = {}                       # 5분 봉 끝값(arg_max 를 파이썬에서, 4d)
-        for t, v in raw:
-            last5[int(t) // 300000 * 300] = float(v)
-        oi = sorted(last5.items())
+        # 5분 끝값은 SQL 안에서 접는다(아래 거래소들과 같은 방식). sqlite3 는 행마다 GIL 을 놓았다 다시 잡아서, 복원처럼 CPU 쓰는
+        #   스레드가 있으면 행당 수 ms~수십 ms 를 기다린다 -- 7일 60만 행을 파이썬으로 받으면 그때 수십 초(11-07 mc_history 62초).
+        oi = [(int(b), float(v)) for b, v, _ in own_db_rows(
+            OI_1S_DB_PATH, f"""SELECT ts_ms / 300000 * 300 AS b, open_interest, max(ts_ms) FROM {OI_1S_TABLE}
+                               WHERE symbol = ? AND ts_ms >= ? GROUP BY b ORDER BY b""", [sym, since])]
         # 2026-10-06 합산 OI(사용자 «바로 합산») -- OKX·HL·Bybit 도 같은 5분 끝값 격자로(market_ctx.oi_sum_series 가 덮는 거래소만 더한다)
         per = {"binance": oi}
         # 5분 끝값은 SQL 안에서 접는다(SQLite 는 max() 와 함께 쓴 맨 열이 그 최대 행의 값) -- 파이썬 행 루프는 HL 7일 59만 행에 수십 초였다(10-06 서버 실측, SQL 0.2초)
@@ -4669,6 +4668,9 @@ def main() -> None:
     import faulthandler
     import signal
     faulthandler.register(signal.SIGUSR2, all_threads=True)
+    # 2026-11-07 5ms -> 0.5ms. CPU 쓰는 스레드가 있을 때 이벤트 루프와 sqlite 행 읽기가 GIL 을 기다리는 시간. dev 실측(바쁜 스레드 3개):
+    #   루프 지연 p99 227 -> 26ms · sqlite 2,016행 191 -> 12초 · CPU 처리량 -2%
+    sys.setswitchinterval(0.0005)
     web.run_app(
         make_app(),
         host=args.host,
