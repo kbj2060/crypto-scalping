@@ -198,3 +198,13 @@ def test_restore_call_runs_on_its_own_small_pool():
         return got, other
     (a, k, name), other = asyncio.run(go())
     assert (a, k) == (1, 2) and name.startswith("restore") and other == "free"
+
+
+def test_wal_writers_do_not_fsync_every_commit():
+    import data_store
+    import live_trade_tape_collector_20260916 as tape
+    p = _tmp() / "t.sqlite"
+    with data_store.rw_connect(p) as con:
+        assert con.execute("PRAGMA synchronous").fetchone()[0] == 1
+    with tape.sqlite_shared(p) as con:
+        assert con.execute("PRAGMA synchronous").fetchone()[0] == 1

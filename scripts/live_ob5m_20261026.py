@@ -391,6 +391,7 @@ def db_open(path=DB):
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path, timeout=30)
     con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA synchronous = NORMAL")   # data_store.rw_connect 와 같은 이유
     cols = ["n_sec", "warm", "o", "h", "l", "c", *BOOK_COLS, "ret", "rng", *EV_COLS]
     con.execute(f"CREATE TABLE IF NOT EXISTS bars(t INTEGER PRIMARY KEY, {', '.join(c + ' REAL' for c in cols)})")
     con.execute("CREATE TABLE IF NOT EXISTS live(k INTEGER PRIMARY KEY, upd INTEGER, bar TEXT, marks TEXT)")   # 한 줄 -- 진행 중 봉·임시 표식(JSON)

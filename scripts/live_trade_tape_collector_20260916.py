@@ -448,6 +448,7 @@ def sqlite_shared(path):
     with ent[0]:
         if ent[1] is None:
             ent[1] = sqlite3.connect(path, timeout=30, isolation_level=None, check_same_thread=False)
+            ent[1].execute("PRAGMA synchronous = NORMAL")   # data_store.rw_connect 와 같은 이유
         con = ent[1]
         try:
             yield con

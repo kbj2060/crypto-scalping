@@ -102,6 +102,7 @@ def db_open(path=DB):
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path, timeout=30)
     con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA synchronous = NORMAL")   # data_store.rw_connect 와 같은 이유
     con.execute(f"CREATE TABLE IF NOT EXISTS bars(t INTEGER PRIMARY KEY, {', '.join(c + ' REAL' for c in COLS)}, written_ms INTEGER)")
     return con
 

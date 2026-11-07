@@ -40,6 +40,7 @@ def connect(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path, timeout=30, isolation_level=None)
     con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA synchronous = NORMAL")   # data_store.rw_connect 와 같은 이유
     con.execute("""CREATE TABLE IF NOT EXISTS bybit_liquidations(
         ts_ms INTEGER, symbol TEXT, side TEXT, qty REAL, price REAL, recv_ms INTEGER)""")
     con.execute("CREATE INDEX IF NOT EXISTS bybit_liq_sym_ts ON bybit_liquidations(symbol, ts_ms)")

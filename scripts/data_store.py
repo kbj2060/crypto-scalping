@@ -56,6 +56,8 @@ def rw_connect(path: Path):
     if path.suffix == ".sqlite":
         import sqlite3
         con = sqlite3.connect(path, timeout=30, isolation_level=None)
+        # WAL 에서는 NORMAL 도 깨지지 않는다(전원 차단 때 마지막 커밋만 잃을 수 있다). 11-07 NVMe 실측 커밋 p50 3.42 -> 0.09ms.
+        con.execute("PRAGMA synchronous = NORMAL")
     else:
         from scripts.live_trade_tape_collector_20260916 import duckdb_connect_retry
         con = duckdb_connect_retry(path)

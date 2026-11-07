@@ -91,6 +91,7 @@ def ctx_conn(path: Path) -> sqlite3.Connection:
     con = sqlite3.connect(path, timeout=30, isolation_level=None, check_same_thread=False)
     con.execute("PRAGMA auto_vacuum = INCREMENTAL")   # 새 파일에서만, WAL 전환보다 먼저(봉인기 prune_hot 이 공간을 돌려받게)
     con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA synchronous = NORMAL")   # data_store.rw_connect 와 같은 이유
     for ddl in ("CREATE TABLE IF NOT EXISTS bybit_oi(inst TEXT, ts_ms INTEGER, oi_base REAL, oi_usd REAL)",
                 "CREATE TABLE IF NOT EXISTS bybit_mark(inst TEXT, ts_ms INTEGER, mark_px REAL, index_px REAL)",
                 "CREATE TABLE IF NOT EXISTS bybit_funding(inst TEXT, ts_ms INTEGER, funding_rate REAL, next_funding_ms INTEGER)",

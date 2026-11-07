@@ -2378,7 +2378,7 @@ def make_app() -> web.Application:
         """7일 OI(바이낸스 5분 끝값)·7일 베이시스(1분에 한 점) -- 둘 다 이 프로세스가 쓰는 파일."""
         since, sym = int(time.time() * 1000) - 7 * 86400 * 1000, flows[asset].spec.symbol.lower()
         # 5분 끝값은 SQL 안에서 접는다(아래 거래소들과 같은 방식). sqlite3 는 행마다 GIL 을 놓았다 다시 잡아서, 복원처럼 CPU 쓰는
-        #   스레드가 있으면 행당 수 ms~수십 ms 를 기다린다 -- 7일 60만 행을 파이썬으로 받으면 그때 수십 초(11-07 mc_history 62초).
+        #   스레드가 있으면 행당 수 ms~수십 ms 를 기다린다 -- 7일 16만 행(11-07 ETH)을 파이썬으로 받으면 그때 수십 초(mc_history 62초).
         oi = [(int(b), float(v)) for b, v, _ in own_db_rows(
             OI_1S_DB_PATH, f"""SELECT ts_ms / 300000 * 300 AS b, open_interest, max(ts_ms) FROM {OI_1S_TABLE}
                                WHERE symbol = ? AND ts_ms >= ? GROUP BY b ORDER BY b""", [sym, since])]
