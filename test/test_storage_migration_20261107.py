@@ -95,6 +95,17 @@ def test_burn_rate_warns_but_one_off_move_does_not():
     assert "D_drive 12 days left" in c.summary and c.details["D_drive_days_left"] == 12.5
 
 
+def test_clock_check_reads_timesyncd_offset():
+    assert w._ntp_offset_s("       Offset: +1.482083s") == 1.482083
+    assert abs(w._ntp_offset_s(" Offset: -675.238ms") + 0.675238) < 1e-9
+    assert abs(w._ntp_offset_s(" Offset: +8us") - 8e-6) < 1e-12
+    assert w._ntp_offset_s("Server: x") is None
+    assert w.check_clock("Offset: +8.434ms").status == "OK"
+    assert w.check_clock("Offset: +1.482083s").status == "WARN", "11-07 톱니 때 값"
+    assert w.check_clock("Offset: -3.1s").status == "CRITICAL"
+    assert w.check_clock("").status == "BLOCKED"
+
+
 def test_seal_check():
     d, now = _tmp(), time.time()
     p = d / "seal.json"

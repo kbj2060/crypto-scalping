@@ -72,6 +72,19 @@ function Fix-DataDisk {
     }
 }
 
+function Sync-WindowsClock {
+    # 2026-11-07 After a reboot Windows ran 0.81 s behind with no sync at all. WSL follows the host clock and systemd-timesyncd
+    # follows NTP, so the two fought: the Linux clock lost 1.4 s every 33 s. w32tm /resync does not step small errors, so step here.
+    & w32tm.exe /resync /force *> $null
+    $line = (& w32tm.exe /stripchart /computer:time.google.com /samples:3 /dataonly | Select-Object -Last 1)
+    $m = [regex]::Match([string]$line, '([+-])(\d+\.\d+)s')
+    if (-not $m.Success) { Log "clock: no NTP sample: $line"; return }
+    $sec = [double]$m.Groups[2].Value; if ($m.Groups[1].Value -eq '-') { $sec = -$sec }
+    if ([math]::Abs($sec) -lt 0.05 -or [math]::Abs($sec) -gt 3600) { Log "clock: offset $sec s, not stepping"; return }
+    Set-Date -Adjust ([TimeSpan]::FromSeconds($sec)) | Out-Null
+    Log "clock: stepped by $sec s"
+}
+
 if ($MountOnly) { Fix-DataDisk; return }
 
 Log "start as $env:USERNAME"
@@ -79,6 +92,7 @@ for ($i = 0; $i -lt 36; $i++) {   # wait up to 3 min for the network
     if (Test-Connection -ComputerName 1.1.1.1 -Count 1 -Quiet) { break }
     Start-Sleep -Seconds 5
 }
+Sync-WindowsClock
 Fix-NetworkProfile
 $keep = Start-KeepAlive
 while ($true) {

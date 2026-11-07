@@ -154,6 +154,15 @@ C: 와 NVMe 는 같은 SSD 다. NVMe 여유는 `fast.vhdx` 안의 여유라 C: �
 - 6TB 모델·SMR 여부를 모른다(도킹이 SMART 를 막는다).
 - D: `crypto-scalping-cold` 안의 `hot_backup`·`ensemble`·`raster` 18GB 는 옛 잔여다. 6TB 와 대조했고 공간이 남아 지우지 않았다.
 
+### 이전 뒤 드러난 문제 (11-07 16시대)
+
+| 문제 | 원인 | 조치 | 확인 |
+|---|---|---|---|
+| 서버 시계가 33초마다 1.4초씩 벌어졌다 | 재부팅 뒤 Windows 시계가 0.81초 틀리고 동기화도 안 됐다. WSL 은 호스트를 따라가고 timesyncd 는 NTP 를 따라가 서로 싸웠다(`tick` 9606~10437 은 WSL 이 움직이는 값이라 고쳐도 되돌아온다. 시계 소스 전환도 효과 없음) | Windows 시계 1회 보정 · 부팅 때 자동 보정(`Sync-WindowsClock`) · 감시 `check_clock` | 보정 뒤 5분 점프 0회, 거래소 차이 최대 190ms, timesyncd 차이 8ms. 부팅 자동 보정은 실제 재부팅 시험 전 |
+| 진입 주문이 `-2019` 로 거부되고 SL/TP 도 안 걸렸다 | 수량을 가용 잔고가 아니라 순자산으로 쟀다. 이번 이전과 무관한 기존 동작 | `build_entry_plan` 이 가용 잔고의 98% 안으로 자른다 | 재현 시험 · 미리보기 100%: ETHUSDC 4.339개(증거금 973, 가용 993) · 실제 주문은 안 냈다 |
+
+**11-07 약 15:20~16:50 수집 시각은 최대 약 1.5초 어긋날 수 있다.** 재부팅 전 구간에도 있었는지는 재지 못했다. 이 구간을 초 단위로 쓰는 연구는 주의한다.
+
 ### 대가
 
 대시보드·손절 감시 정지: 10:12~12:00 · 14:10~15:06 · 15:18~15:23. 수정 배포마다 재시작.
@@ -169,6 +178,7 @@ C: 와 NVMe 는 같은 SSD 다. NVMe 여유는 `fast.vhdx` 안의 여유라 C: �
 | 백업 결과·나이 | `check_backup` | 26h WARN · 50h CRITICAL · 실패 CRITICAL |
 | 복원 시험 | `scripts/ops/backup_restore_check_20261107.py`, 월 1회 | 실패 CRITICAL · 40일 WARN |
 | lake 봉인 결과 | `check_seal` (`seal_status.json`) | 26h WARN · 50h CRITICAL · 실패 스트림 있으면 WARN |
+| 서버 시계 | `check_clock` (timesyncd 와 NTP 차이) | 0.5초 WARN · 2초 CRITICAL |
 | 소진 속도 | `check_host_disks` 가 `morning_audit` 일별 기록을 읽는다 | 7일 평균과 어제 대비 중 느린 쪽으로 남은 일수 14일 아래 WARN |
 
 ## 디스크가 안 붙으면

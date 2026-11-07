@@ -628,6 +628,27 @@ def check_host_disks(disks=HOST_DISKS, data2: Path = DATA2, data2_warn: float = 
     return Check("host_disks", status, "; ".join(m for _, m in problems) or "host disks ok", details)
 
 
+def _ntp_offset_s(text: str) -> float | None:
+    """`timedatectl timesync-status` 의 Offset 줄 -> 초. 없으면 None."""
+    m = re.search(r"Offset:\s*([+-]?[\d.]+)(us|ms|s|min)\b", text)
+    return None if not m else float(m.group(1)) * {"us": 1e-6, "ms": 1e-3, "s": 1.0, "min": 60.0}[m.group(2)]
+
+
+def check_clock(text: str | None = None) -> Check:
+    """서버 시계와 NTP 의 차이. 11-07 재부팅 뒤 Windows 시계가 0.81초 틀려 WSL(호스트 추종)과 timesyncd(NTP)가 싸웠고, 시계가 33초마다 1.4초씩
+    벌어졌다 -- 서명 주문이 -1021 로 거부될 수 있고 수집 시각도 어긋난다. 재부팅 뒤 아무도 몰랐다."""
+    if text is None:
+        try:
+            text = subprocess.run(["timedatectl", "timesync-status"], capture_output=True, text=True, timeout=5).stdout
+        except (OSError, subprocess.SubprocessError) as exc:
+            return Check("clock", "BLOCKED", "timesync status unavailable", {"error": type(exc).__name__})
+    off = _ntp_offset_s(text)
+    if off is None:
+        return Check("clock", "BLOCKED", "no NTP offset yet", {})
+    status = "CRITICAL" if abs(off) > 2 else "WARN" if abs(off) > 0.5 else "OK"
+    return Check("clock", status, f"NTP offset {off:+.3f}s", {"offset_s": round(off, 4), "warn": 0.5, "critical": 2})
+
+
 def check_seal(status_path: Path | None = None, now: float | None = None) -> Check:
     """매일 lake 봉인(seal_to_lake)의 결과. 11-05·06 에 도중에 죽어 Deribit 봉인과 hot 정리가 멈췄는데, lake_seal 은 앞쪽 스트림 파일만 봐서 몰랐다."""
     status_path = status_path or OUT / "seal_status.json"
@@ -842,7 +863,7 @@ def run_once(dry_run: bool) -> list[Check]:
     checks = [
         # 2026-10-12 봇 은퇴: trading_bot_process·decision_snapshot·heartbeat·data_pipeline·pipeline_contract·
         #   market_data_sources·execution_contract 제거(봇만 쓰던 파일들). 되살리려면 그 함수들(git 이력)과 이 줄을 함께.
-        check_dashboard(), check_data_sources(micro_db), check_runtime_resources(), check_host_disks(), check_backup(), check_seal(),
+        check_dashboard(), check_data_sources(micro_db), check_runtime_resources(), check_host_disks(), check_backup(), check_seal(), check_clock(),
         check_watchdog_storage(), check_raster_archive(),
         # 2026-10-01 lake 봉인(scripts/seal_to_lake.py, 매일 11:05 KST cron) -- 대표로 ETH 테이프의 가장 최근 일별 파일.
         #   하루 한 번 쓰므로 warn 26h · critical 50h. cron 을 끄면 이 줄도 지운다.
