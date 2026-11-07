@@ -340,3 +340,27 @@ def test_cross_coin_klines_fetched_once_per_bar_and_not_shared_by_reference():
         d = d4._short_klines("APT", 340, t)
     assert "x" not in b and len(calls) == 3 and c.close[0] == 1.0 and d.close[0] == 1.0
     assert c.timestamp[0] > b.timestamp[0], "낡은 봉을 새 봉에 돌려주면 안 된다"
+
+
+def test_tunnel_start_waits_for_nvme_mount():
+    def tree(strip_wait: bool):
+        r, nvme, bin_ = _tmp(), _tmp() / "nvme", _tmp()
+        d = r / "dashboard/scripts"
+        d.mkdir(parents=True)
+        src = (ROOT / "dashboard/scripts/start_public_dashboard.sh").read_text(encoding="utf-8")
+        if strip_wait:
+            src = "\n".join(ln for ln in src.splitlines() if "until mountpoint" not in ln) + "\n"
+        (d / "start_public_dashboard.sh").write_text(src, encoding="utf-8")
+        for name in ("start_external.sh", "supervise_cloudflare_tunnel.sh"):
+            (d / name).write_text("#!/bin/sh\nexit 0\n")
+            (d / name).chmod(0o755)
+        (r / "data").mkdir()
+        os.symlink(nvme / "live", r / "data/live")      # 부팅 직후 모양: 링크는 있는데 디스크가 아직 안 붙었다
+        # 첫 확인은 «안 붙음», 둘째 확인에서 디스크가 붙는다
+        (bin_ / "mountpoint").write_text(f'#!/bin/sh\nif [ -e "{bin_}/seen" ]; then mkdir -p "{nvme}/live"; exit 0; fi\ntouch "{bin_}/seen"; exit 1\n')
+        (bin_ / "mountpoint").chmod(0o755)
+        return subprocess.run(["bash", str(d / "start_public_dashboard.sh")], capture_output=True, text=True, timeout=30,
+                              env={**os.environ, "PATH": f"{bin_}:{os.environ['PATH']}"})
+    assert tree(strip_wait=True).returncode != 0, "대기가 없으면 11-07 처럼 mkdir 에서 실패해야 재현이다"
+    ok = tree(strip_wait=False)
+    assert ok.returncode == 0 and "PUBLIC_URL=" in ok.stdout, ok.stderr
