@@ -176,3 +176,25 @@ def test_data_map_shows_real_location_of_links():
     text = g.render(r, disks=(("tmp", r),), manifest={"collectors": {"bn_x": {"supervisor": "s.sh", "env": {"A": "1"}}}})
     assert str(target) in text and "BTCUSDT" in text and "a.sqlite" in text and "bn_x" in text
     assert "raster" in text and "(로컬)" in text
+
+
+# ── 재시작 복원 풀 ────────────────────────────────────────────────────
+def test_restore_call_runs_on_its_own_small_pool():
+    import asyncio
+    import threading
+    from dashboard.coin_flow import _RESTORE_POOL, restore_call
+    assert _RESTORE_POOL._max_workers == 3
+
+    async def go():
+        got = await restore_call(lambda a, k=0: (a, k, threading.current_thread().name), 1, k=2)
+        # 기본 풀은 복원과 별개라 복원이 다 차지해도 막히지 않는다
+        blocker = threading.Event()
+        jobs = [restore_call(blocker.wait, 5) for _ in range(3)]
+        tasks = [asyncio.ensure_future(j) for j in jobs]
+        await asyncio.sleep(0.05)
+        other = await asyncio.wait_for(asyncio.to_thread(lambda: "free"), 1)
+        blocker.set()
+        await asyncio.gather(*tasks)
+        return got, other
+    (a, k, name), other = asyncio.run(go())
+    assert (a, k) == (1, 2) and name.startswith("restore") and other == "free"

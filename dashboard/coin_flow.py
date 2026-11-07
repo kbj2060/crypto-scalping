@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import partial
 from types import SimpleNamespace
 import json
 import os
@@ -21,6 +23,15 @@ import duckdb
 from aiohttp import ClientSession, ClientTimeout, TCPConnector, WSMsgType, web
 
 from trading_bot_modules.duckdb_access import duckdb_path_lock
+
+# 2026-11-07 재시작 복원(풋프린트·1초 수급, 코인 6개 × 작업 ~6개)이 asyncio 기본 풀을 다 차지해 시장 맥락·청산지도가 줄을 섰다
+#   (mc_collectors 평소 0.2초 → 재시작 뒤 45초, 표시 복구 ~85초). 복원만 따로 3칸 풀에서 돌린다.
+_RESTORE_POOL = ThreadPoolExecutor(max_workers=3, thread_name_prefix="restore")
+
+
+async def restore_call(fn, *args, **kwargs):
+    return await asyncio.get_running_loop().run_in_executor(_RESTORE_POOL, partial(fn, *args, **kwargs))
+
 from scripts.live_trade_tape_collector_20260916 import (
     BUCKETS as TAPE_BUCKETS,
     TakerOrderAggregator,
@@ -530,10 +541,10 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
         got = None
         try:
             for _ in range(12):
-                got = await asyncio.to_thread(okx_tape_footprint, TAPE_DB, LIVE_DIR / "_no_ctx.duckdb",
-                                              spec.symbol.lower(), lo_sec, hi_sec * 1000,
-                                              FOOTPRINT_BAR_SECONDS, FOOTPRINT_BUCKET,
-                                              TAPE_BUCKETS[spec.symbol.lower()])
+                got = await restore_call(okx_tape_footprint, TAPE_DB, LIVE_DIR / "_no_ctx.duckdb",
+                                         spec.symbol.lower(), lo_sec, hi_sec * 1000,
+                                         FOOTPRINT_BAR_SECONDS, FOOTPRINT_BUCKET,
+                                         TAPE_BUCKETS[spec.symbol.lower()])
                 if got["tape_max"] >= hi_sec - 1:
                     break
                 await asyncio.sleep(5.0)
@@ -912,9 +923,9 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
         for attempt in range(8):
             await asyncio.sleep(15.0 if attempt == 0 else 300.0)
             try:
-                got = await asyncio.to_thread(okx_tape_footprint, OKX_TAPE_DB_PATH, OKX_CTX_DB_PATH,
-                                              OKX_INST, lo, t0, FOOTPRINT_BAR_SECONDS, FOOTPRINT_BUCKET,
-                                              liq_db=OKX_LIQ_DB_PATH)
+                got = await restore_call(okx_tape_footprint, OKX_TAPE_DB_PATH, OKX_CTX_DB_PATH,
+                                         OKX_INST, lo, t0, FOOTPRINT_BAR_SECONDS, FOOTPRINT_BUCKET,
+                                         liq_db=OKX_LIQ_DB_PATH)
             except Exception as exc:  # noqa: BLE001 -- 테이프가 없으면 C안 그대로 산다
                 print(f"{TAG}okx footprint 복원 실패({attempt + 1}회): {exc!r}", flush=True)
                 continue
@@ -973,7 +984,7 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
             got, err = None, None
             for _ in range(12):                     # 테이프는 5초마다 쓴다 -- t0 직전까지 따라잡을 때까지
                 try:
-                    got, top = await asyncio.to_thread(load, t0 - SUPPLY_1S_SECONDS, t0)
+                    got, top = await restore_call(load, t0 - SUPPLY_1S_SECONDS, t0)
                     if top >= t0 - 1:
                         break
                 except asyncio.CancelledError:
