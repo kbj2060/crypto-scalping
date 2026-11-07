@@ -2361,7 +2361,7 @@ html.fit1 #snapshotTabPanel > .panel { scroll-margin-top: var(--apph, 64px); }  
   html.fit1 #fpCard > .candle-container { flex: 1 1 0; min-height: 0; height: auto !important; }
   /* 2026-11-08 펜 메모 «카드 상단과 하단의 남는 부분을 최소화»: 머리 위아래 18→8 · 차트 위 12→0 · 빈 목록 16→0 · 카드 아래 16→6 -- 차트가 그만큼 커진다 */
   html.fit1 #fpCard { padding-bottom: 6px; }
-  html.fit1 #fpCard > .ops-health-head { padding-block: 8px; min-height: 0; }
+  html.fit1 :is(#fpCard, #mtCard, #newsCard, #optCard, #acctCard) > .ops-health-head { padding-block: 8px; min-height: 55px; }   /* 2026-11-08 펜 메모 «카드 상단 너비·높이를 나머지 카드에도» -- 다섯 카드 머리 = 55px */
   html.fit1 #liquidationMapList { padding: 0; }
   html.fit1 #lqTab { flex: 1 1 0; height: auto; }   /* «청산» 보기도 카드 바닥까지 */
   html.fit1 #candleSvgSnapshot { margin-top: 0; height: 100% !important; }   /* 상자 = 차트 + 12(예전 884/872 과 같은 여유) */
@@ -2748,11 +2748,10 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .fp-chip { font: 800 10.5px/1 var(--font-sans); font-style: normal; letter-spacing: .08em; padding: 3px 6px; border-radius: 4px; align-self: center; }
 .fp-chip.good { color: var(--good); background: color-mix(in srgb, var(--good) 16%, transparent); } .fp-chip.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }
 @media (min-width: 1700px) {
-  /* 2026-11-08 펜 메모: 맨 위 가운데 = 코인·주식 제목(정가운데) + 그 왼쪽에 포지션 요약 -- app.js placeTopLeft 가 옮긴다 · 코인 탭은 글래스/다크 왼쪽 */
+  /* 2026-11-08 펜 메모: 맨 위 가운데 = 코인·주식 제목(app.js placeTopLeft) · 코인 탭은 글래스/다크 왼쪽 · 포지션 요약 = 카드 머리 줄 정중앙 */
   .fp-coin-name { display: block; pointer-events: none; font: 800 30px/1 var(--font-sans); letter-spacing: .06em; color: var(--ink); }
-  .top-center-slot { position: relative; }
-  .top-center-slot > #fpPos { position: absolute; right: calc(100% + 18px); top: 50%; transform: translateY(-50%); gap: 2px; }
-  .top-center-slot > #fpPos .fp-pnl { font-size: 22px; }
+  #fpCard > .ops-health-head { position: relative; }
+  #fpPos { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
   .snap-head #assetMore { margin-left: -12px; }   /* 앱바 flex 간격 20 위에 원래 여백 8 -- 칩과 한 묶음으로 */
 }
 .fp-rates b { font: 700 11px/1 var(--font-mono); font-variant-numeric: tabular-nums; }

@@ -3255,12 +3255,12 @@ function renderMacroCalendar(payload) {
 // 2026-11-02 운영 관리·스냅샷 탭 제거(사용자 펜 메모) -- 화면은 스냅샷 하나다.
 // 넓은 화면(≥1200) = 맨 위 [세션(왼쪽) | 코인 탭(가운데) | 경보·다크·알림(오른쪽)] · 좁은 화면은 코인 탭 = 카드 머리 · 세션 = CSS 배치.
 const PAGE_TABS_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1200px)") : null;
-// 2026-11-08 펜 메모 «코인 탭은 글래스/다크 왼쪽으로 · 그 자리에 코인·주식 제목과 포지션 요약(요약은 제목 왼쪽)»: ≥1700(제목이 보이는 폭)만. 더 좁으면 코인 탭 가운데 · 요약 카드 머리 그대로.
+// 2026-11-08 펜 메모 «코인 탭은 글래스/다크 왼쪽으로 · 그 자리에 코인·주식 제목»: ≥1700(제목이 보이는 폭)만. 더 좁으면 코인 탭 가운데. 포지션 요약은 카드 머리 줄 정중앙(CSS).
 const TOP_TITLE_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1700px)") : null;
 function placeTopLeft() {
   const top = document.querySelector(".topbar"), slot = el("topLeftSlot"), mid = el("topCenterSlot");
   const coins = el("assetBar"), home = el("coinHome"), sess = document.querySelector(".top-right"), theme = el("themeToggle");
-  const title = el("fpCoinName"), pos = el("fpPos"), rates = el("fpRates"), tools = document.querySelector("#fpCard .ops-health-head-tools");
+  const title = el("fpCoinName"), tools = document.querySelector("#fpCard .ops-health-head-tools");
   if (!top || !slot || !mid) return;
   if (PAGE_TABS_WIDE && PAGE_TABS_WIDE.matches) {
     if (sess && sess.parentElement !== slot) slot.appendChild(sess);
@@ -3272,9 +3272,9 @@ function placeTopLeft() {
     if (sess && sess.parentElement !== top) top.appendChild(sess);
   }
   const atTop = !!(PAGE_TABS_WIDE && PAGE_TABS_WIDE.matches && TOP_TITLE_WIDE && TOP_TITLE_WIDE.matches);
-  if (title && pos) {
-    if (atTop) { if (title.parentElement !== mid) mid.append(pos, title); }
-    else if (title.parentElement === mid) { tools.before(title); rates.before(pos); }   // 제자리(카드 머리)
+  if (title) {
+    if (atTop) { if (title.parentElement !== mid) mid.appendChild(title); }
+    else if (title.parentElement === mid) tools.before(title);   // 제자리(카드 머리)
   }
 }
 if (TOP_TITLE_WIDE && TOP_TITLE_WIDE.addEventListener) TOP_TITLE_WIDE.addEventListener("change", placeTopLeft);
