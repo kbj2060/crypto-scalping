@@ -3157,12 +3157,18 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .lt-x:hover { color: var(--text); background: rgb(var(--lift) / .1); }
 /* 2026-10-29 SLTP 상자: 크기 줄(레버리지·증거금·명목) + 손익비 버튼 */
 /* 2026-10-30 SLTP 증거금 슬라이더(시안 C) + 손절 시 손실 줄 · 들어간 선 진입가 라벨 손익(시안 B) */
-.lt-mg { display: grid; gap: 5px; }
+.lt-mg, .lt-lv { display: grid; gap: 5px; }
 .lt-mg-hd { display: flex; justify-content: space-between; align-items: baseline; font: 600 11px/1.2 var(--font-sans); color: var(--muted); }
-.lt-mg-v { font: 700 13px/1 var(--font-mono); color: var(--text); font-variant-numeric: tabular-nums; }
-.lt-mg-v small { margin-left: 4px; font: 600 11px/1 var(--font-mono); color: var(--muted); }
-.lt-mg-r { width: 100%; height: 18px; margin: 0; accent-color: var(--text); pointer-events: auto; cursor: pointer; touch-action: pan-y; }
-@media (pointer: coarse) { .lt-mg-r { height: 28px; } }
+.lt-mg-v, .lt-lv-v { font: 700 13px/1 var(--font-mono); color: var(--text); font-variant-numeric: tabular-nums; }
+.lt-mg-v small, .lt-lv-v small { margin-left: 4px; font: 600 11px/1 var(--font-mono); color: var(--muted); }
+.lt-mg-r, .lt-lv-r { width: 100%; height: 18px; margin: 0; accent-color: var(--text); pointer-events: auto; cursor: pointer; touch-action: pan-y; }
+@media (pointer: coarse) { .lt-mg-r, .lt-lv-r { height: 28px; } }
+.lt-lv-r:disabled { opacity: .5; cursor: not-allowed; }
+/* 2026-11-07 SLTP 배수 게이지(증거금 슬라이더와 같은 모양) + «자동» = 고정 10배 칩 */
+.lt-lv-auto { margin-left: 7px; padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted); font: 700 10px/1.2 var(--font-sans); cursor: pointer; pointer-events: auto; }
+.lt-lv-auto[aria-pressed="true"] { color: var(--text); border-color: color-mix(in srgb, var(--text) 45%, transparent); background: color-mix(in srgb, var(--text) 8%, transparent); }
+.lt-lv-auto[hidden] { display: none; }
+.lt-lv-auto:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 .lt-en-p { font-weight: 700; font-variant-numeric: tabular-nums; }
 .lt-en-p.good { color: var(--good); } .lt-en-p.bad { color: var(--bad); }
 .lt-rrb { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
@@ -3180,9 +3186,9 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .lt-am-note.bad { color: var(--bad); white-space: normal; max-width: 60%; }
 @media (max-width: 720px) {
   /* 2026-11-05 플롯 아래 가로 3줄: [크기 | 증거금+슬라이더] · [손익비 | 1:1~1:3] · [진입]. ✕ 는 윗변 모서리에 걸친다. */
-  .lt-tk { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); grid-template-areas: "row mg" "rr rrb" "go go"; gap: 6px 12px; padding: 9px 10px; box-sizing: border-box; }
+  .lt-tk { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); grid-template-areas: "row mg" "rr lv" "rrb rrb" "go go"; gap: 6px 12px; padding: 9px 10px; box-sizing: border-box; }
   .lt-tk > .lt-row { grid-area: row; align-self: center; flex-direction: column; align-items: flex-start; gap: 2px; }
-  .lt-tk > .lt-mg { grid-area: mg; } .lt-tk > .lt-rr { grid-area: rr; align-self: center; } .lt-tk > .lt-rrb { grid-area: rrb; } .lt-tk > .lt-go { grid-area: go; }
+  .lt-tk > .lt-mg { grid-area: mg; } .lt-tk > .lt-lv { grid-area: lv; } .lt-tk > .lt-rr { grid-area: rr; align-self: center; } .lt-tk > .lt-rrb { grid-area: rrb; } .lt-tk > .lt-go { grid-area: go; }
   .lt-tk > .lt-x { position: absolute; top: -13px; right: 10px; width: 40px; height: 26px; margin: 0; border: 1px solid var(--line); background: var(--panel-strong); }
   .lt-tag { padding: 7px 10px 7px 8px; }   /* 손가락 -- 높이 ~30px */
   .lt-go { height: 42px; }

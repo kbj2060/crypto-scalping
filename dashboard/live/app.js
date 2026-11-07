@@ -469,6 +469,8 @@ function lineToolEl(box) {
     + '<div class="lt-tk"><div class="lt-row"><b class="lt-side"></b><span class="lt-qty"></span></div>'
     + '<div class="lt-mg"><div class="lt-mg-hd"><span>증거금</span><b class="lt-mg-v"></b></div>'
     + '<input type="range" class="lt-mg-r" min="1" max="50" step="1" aria-label="진입 증거금 (순자산 대비 %)"></div>'
+    + '<div class="lt-lv"><div class="lt-mg-hd"><span>배수<button type="button" class="lt-lv-auto" aria-pressed="false" title="자동 = 고정 10배">자동</button></span><b class="lt-lv-v"></b></div>'
+    + '<input type="range" class="lt-lv-r" min="5" max="50" step="5" aria-label="레버리지 배수"></div>'
     + '<div class="lt-row lt-rr"></div>'
     + `<div class="lt-rrb" role="group" aria-label="손익비로 익절선 맞추기 (손절선은 그대로)">${LINE_RR.map((r) => `<button type="button" data-rr="${r}">1:${r}</button>`).join("")}</div>`
     + '<button type="button" class="lt-go"></button>'
@@ -506,9 +508,24 @@ function lineToolEl(box) {
     try { localStorage.setItem("linePct", String(linePct)); } catch (err) { /* 기억은 편의일 뿐 */ }
     if (lineTool) { lineTool.plan = null; lineTool.arm = 0; renderLineTool(); linePreview(); }
   });
+  // 2026-11-07 사용자 «SLTP 에서 배수도 게이지로 조절»: 배수의 단일 원천은 아래 주문 패널의 레버리지 게이지(#snapLevGauge · manualLevValue)라 그 값을 바꾼다.
+  //   손으로 밀면 «자동»(고정 10배)을 끈다 · 기존 포지션이 있으면 거래소가 그 배수로 묶으므로(manualLevLocked) 잠근다.
+  h.querySelector(".lt-lv-r").addEventListener("input", (e) => {
+    const g = el("snapLevGauge"), a = el("snapLevAuto");
+    if (!g || manualLevLocked()) return;
+    if (a) a.checked = false;
+    g.disabled = false; g.value = e.target.value;
+    g.dispatchEvent(new Event("input", { bubbles: true }));   // 칩·«N배» 글자·크기 재조회는 그쪽 리스너가 한다(칩 클릭과 같은 길)
+    if (lineTool) { lineTool.plan = null; lineTool.arm = 0; renderLineTool(); linePreview(); }
+  });
   h.addEventListener("click", (e) => {
     e.stopPropagation();
     if (e.target.closest(".lt-tkr")) { lineTakerClick(e); return; }
+    if (e.target.closest(".lt-lv-auto")) {
+      const a = el("snapLevAuto");
+      if (a && lineTool && !lineTool.placed && !manualLevLocked()) { a.checked = !a.checked; a.dispatchEvent(new Event("change", { bubbles: true })); lineTool.plan = null; lineTool.arm = 0; renderLineTool(); linePreview(); }
+      return;
+    }
     if (e.target.closest(".lt-x, .lt-tx")) { if (lineTool?.placed) { lineTool.busy = true; manualWaitAction("cancel").then(() => setTimeout(() => { if (lineTool?.busy) { lineTool.busy = false; renderLineTool(); } }, 8000)); renderLineTool(); return; } lineTool = null; renderLineTool(); return; }   // 대기 주문 = 서버 취소(≤3초 뒤 선이 사라진다)
     const rb = e.target.closest("[data-rr]");
     if (rb && lineTool && !lineTool.placed) {   // 2026-10-29 사용자 «SLTP 비율 1:1·1:2 버튼 → 칸 자동» -- 손절선은 그대로, 익절선만 비율만큼(방향 = 손절선의 반대쪽)
@@ -753,6 +770,12 @@ function renderLineTool() {
   if (Number(rg.value) !== linePct) rg.value = String(linePct);
   rg.disabled = !!t.placed; h.querySelectorAll("[data-rr]").forEach((b) => { b.disabled = !!t.placed; });
   h.querySelector(".lt-mg-v").innerHTML = `${linePct}%${eq > 0 ? `<small>$${Math.round(eq * linePct / 100).toLocaleString()}</small>` : ""}`;   // 숫자뿐
+  const lr = h.querySelector(".lt-lv-r"), la = h.querySelector(".lt-lv-auto"), lk = !!manualLevLocked(), lvE = Number(manualLevEffective()) || MANUAL_LEV_AUTO;
+  lr.max = el("snapLevGauge")?.max || "50"; lr.min = lr.step = lk ? "1" : "5";   // 잠긴 값(예 ×3)은 5단위 눈금 위에 없다 -- 그대로 보이기만 한다
+  if (Number(lr.value) !== lvE) lr.value = String(lvE);
+  lr.disabled = lk || !!t.placed; syncRangeFill(lr);
+  la.hidden = lk; la.disabled = !!t.placed; la.setAttribute("aria-pressed", String(!lk && manualLevAuto()));
+  h.querySelector(".lt-lv-v").innerHTML = `${lvE}×${lk ? "<small>기존 포지션</small>" : ""}`;
   // 2026-11-04 펜 메모: 팝업의 «손절 시 −$ = 순자산 −%» · «레버리지 N× · 명목 N×» 줄은 뺐다(크기 줄 위쪽 «롱 · 10× / 수량» 과 증거금 숫자만 남긴다)
   rrEl.textContent = t.err || t.fail || (t.add ? "기존 익절·손절선 그대로 · 크기만 늘림" : side ? `손익비 ${rr.toFixed(2)} : 1` : "");
   rrEl.classList.toggle("bad", !!(t.err || t.fail));
