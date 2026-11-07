@@ -4,8 +4,8 @@
 #   hot  = NVMe(data/hot·data/live)와 루트 디스크의 data/ 전체(제외 목록 아래) -> 6TB + dev
 #   cold = 6TB 가 원본인 orderflow·lake·splits      -> D: + dev
 #
-# D: 사본은 서버 ext4.vhdx 가 D: 를 떠난 뒤부터 돈다. 그 전에는 D: 공간이 곧 서버 디스크의 한계라 쓰지 않는다
-#   (2026-11-07 실측 7~8GB/일 소진, 여유 102GB). 그동안 cold 의 둘째 사본은 dev 다.
+# D: 사본: 서버 ext4.vhdx 가 D: 에 있는 동안은 D: 공간이 곧 서버 디스크의 한계라, D: 여유가 300GiB 넘을 때만 돈다
+#   (11-07 압축 뒤 vhdx 212GB·여유 548GB. 압축 전에는 여유 102GB 에 7~8GB/일 소진이었다). 안 돌 때 cold 의 둘째 사본은 dev 다.
 #
 # Intentionally does NOT use rsync --delete: a file removed locally (accidental rm, a bug) must stay in the
 # backup rather than being mirrored away on the next run. 그래서 사본은 늘기만 한다 -- 보존 기간이 정해진 것
@@ -93,7 +93,8 @@ else
   log "🔴 $DATA2 not mounted -- 6TB 단계와 cold 단계를 건너뛴다"
 fi
 
-if [[ -e "$VHDX_ON_D" ]]; then
+d_free_gib=$(df --output=avail -BG "$(dirname "$COLD_DEST")" 2>/dev/null | tail -1 | tr -dc 0-9)
+if [[ -e "$VHDX_ON_D" ]] && (( ${d_free_gib:-0} < ${BACKUP_D_MIN_FREE_GIB:-300} )); then
   cold_d='"skipped_vhdx_on_d"'
 elif mountpoint -q "$DATA2" && [[ -d "$(dirname "$COLD_DEST")" ]]; then
   log "cold backup starting -> $COLD_DEST"

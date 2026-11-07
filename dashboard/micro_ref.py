@@ -10,12 +10,14 @@
 ponytail: 부호 규약 — 매수·매수벽·지지쪽이 양수.
 """
 from __future__ import annotations
+import io
 import math
 import time
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 QI_SIDE_ABS = 0.56        # |QI| p50 (4.6일 실측 0.56) -- 이보다 기울어야 «쪽»을 말한다
 # 2026-09-20 «계속 바뀐다»(사용자). 깜빡임은 두 종류이고 하나만 공짜로 없앨 수 있다:
@@ -154,13 +156,15 @@ def baseline_from_tape(db_path: Path, days: int = 7, symbol: str = "ethusdt") ->
     # 초 합계 7일 ~57만 행을 글자 한 덩어리(1행)로 받는다. sqlite3 는 행마다 GIL 을 놓았다 다시 잡아서, 행으로 받으면 재시작처럼
     #   바쁠 때 코인당 1분 넘게 읽기 연결을 쥐고 시장 맥락까지 줄 세웠다(11-07 스택 표본 +20·+40·+60초 전부 여기, 한가할 때 0.5초).
     try:
-        txt = read_rows(db_path, "SELECT group_concat(ts_sec || ' ' || v, ' ') FROM (SELECT ts_sec, sum(buy_qty + sell_qty) AS v "
+        txt = read_rows(db_path, "SELECT group_concat(ts_sec || ',' || v, char(10)) FROM (SELECT ts_sec, sum(buy_qty + sell_qty) AS v "
                                  "FROM trade_tape_1s WHERE symbol = ? AND ts_sec >= ? GROUP BY 1)", [symbol, since])[0][0]
     except Exception as exc:  # noqa: BLE001 -- 기준선은 장식이다. 못 읽으면 없이 가되, 왜인지는 올린다.
         raise RuntimeError(f"baseline_from_tape({db_path.name}): {exc!r}") from exc
     if not txt:
         return None
-    a = np.fromstring(txt, sep=" ").reshape(-1, 2)
+    # 파싱도 GIL 을 놓는 pandas C 파서로. dev 57만 행, 바쁜 스레드 2개: pandas 0.20초·루프 지연 최대 8ms · json.loads 0.12초·108ms(GIL 을 쥔다) ·
+    #   np.fromstring 60초 넘음(숫자마다 GIL 을 다시 잡는다, 11-07 서버 표본 50회 중 49회가 거기).
+    a = pd.read_csv(io.StringIO(txt), header=None, dtype=float, engine="c").to_numpy()
     ts, v = a[:, 0].astype(np.int64), a[:, 1]
     mins, inv = np.unique(ts - ts % 60, return_inverse=True)
     if len(mins) < 600:

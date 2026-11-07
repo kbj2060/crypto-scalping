@@ -119,12 +119,24 @@ def test_backup_scope_excludes_and_skips_d_while_vhdx_there():
     vhdx = _tmp() / "ext4.vhdx"
     vhdx.write_text("")
     rc, st = _backup(r, BACKUP_DATA2=str(data2), BACKUP_SKIP_MOUNT_CHECK="1", BACKUP_VHDX_PATH=str(vhdx),
-                     BACKUP_COLD_DEST=str(_tmp() / "cold"))
+                     BACKUP_COLD_DEST=str(_tmp() / "cold"), BACKUP_D_MIN_FREE_GIB="999999999")
     assert st["targets"] == {"hot_6tb": 0, "cold_d": "skipped_vhdx_on_d", "dev": 1}   # 이 시험엔 dev 설정이 없다
     dest = data2 / "crypto-scalping-backups/data"
     assert (dest / "live/state.json").exists() and (dest / "models/m.bin").exists()
     assert not (dest / "live/orderflow/raster").exists(), "raster 는 14일 보존 -- 사본에 쌓지 않는다"
     assert not (dest / "binance_vision").exists()
+
+
+def test_cold_runs_on_d_when_there_is_room_even_with_vhdx_there():
+    r, data2, cold = _repo(), _tmp(), _tmp() / "cold"
+    (data2 / "orderflow/depthdiff/ETHUSDT").mkdir(parents=True)
+    (data2 / "orderflow/depthdiff/ETHUSDT/a.jsonl.gz").write_text("z")
+    vhdx = _tmp() / "ext4.vhdx"
+    vhdx.write_text("")
+    rc, st = _backup(r, BACKUP_DATA2=str(data2), BACKUP_SKIP_MOUNT_CHECK="1", BACKUP_VHDX_PATH=str(vhdx),
+                     BACKUP_COLD_DEST=str(cold), BACKUP_D_MIN_FREE_GIB="0")
+    # 여기서는 마운트 확인을 건너뛴 시험이라 cold 단계의 mountpoint 에서 멈춘다 -- «건너뜀» 표시만 안 나오면 된다
+    assert st["targets"]["cold_d"] != "skipped_vhdx_on_d"
 
 
 def test_backup_seals_stale_hour_files():
