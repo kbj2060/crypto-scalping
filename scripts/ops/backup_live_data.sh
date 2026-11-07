@@ -2,10 +2,9 @@
 # Daily backup. 🔴규칙: 원본과 사본은 항상 다른 디스크(2026-11-07 재설계, docs/data_storage_map_20261107.md).
 #
 #   hot  = NVMe(data/hot·data/live)와 루트 디스크의 data/ 전체(제외 목록 아래) -> 6TB + dev
-#   cold = 6TB 가 원본인 orderflow·lake·splits      -> D: + dev
+#   cold = 6TB 가 원본인 orderflow·lake·splits      -> dev
 #
-# D: 사본: 서버 ext4.vhdx 가 D: 에 있는 동안은 D: 공간이 곧 서버 디스크의 한계라, D: 여유가 300GiB 넘을 때만 돈다
-#   (11-07 압축 뒤 vhdx 212GB·여유 548GB. 압축 전에는 여유 102GB 에 7~8GB/일 소진이었다). 안 돌 때 cold 의 둘째 사본은 dev 다.
+# 2026-11-07 사용자 결정으로 D: 사본을 없앴다(D: 는 다른 용도). 🔴cold 의 사본은 dev 하나뿐이다.
 #
 # Intentionally does NOT use rsync --delete: a file removed locally (accidental rm, a bug) must stay in the
 # backup rather than being mirrored away on the next run. 그래서 사본은 늘기만 한다 -- 보존 기간이 정해진 것
@@ -20,8 +19,6 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DATA2="${BACKUP_DATA2:-/mnt/data2}"
 DEST="${BACKUP_DEST:-$DATA2/crypto-scalping-backups}"
-COLD_DEST="${BACKUP_COLD_DEST:-/mnt/d/crypto-scalping-cold}"
-VHDX_ON_D="${BACKUP_VHDX_PATH:-/mnt/d/wsl/Ubuntu/ext4.vhdx}"
 STATUS="${BACKUP_STATUS:-$ROOT/data/live/ops_watchdog/backup_status.json}"
 log() { echo "[$(date -Iseconds)] $*"; }
 
@@ -67,7 +64,7 @@ seal_stale() {
   done < <(find "$DATA2/orderflow/" -type f \( -name '*.jsonl' -o -name '*.bt' \) -mmin +120 -print0 2>/dev/null)
 }
 
-hot_6tb=1; cold_d=1; dev=1
+hot_6tb=1; dev=1
 mkdir -p "$ROOT/data/live/backups" "$(dirname "$STATUS")"
 crontab -l > "$ROOT/data/live/backups/crontab_latest.txt.tmp" 2>/dev/null \
   && mv "$ROOT/data/live/backups/crontab_latest.txt.tmp" "$ROOT/data/live/backups/crontab_latest.txt"
@@ -91,15 +88,6 @@ s.backup(d); d.close(); s.close()' "$f" "$dst.tmp" && mv "$dst.tmp" "$dst" \
   log "backup done rc=$hot_6tb"
 else
   log "🔴 $DATA2 not mounted -- 6TB 단계와 cold 단계를 건너뛴다"
-fi
-
-d_free_gib=$(df --output=avail -BG "$(dirname "$COLD_DEST")" 2>/dev/null | tail -1 | tr -dc 0-9)
-if [[ -e "$VHDX_ON_D" ]] && (( ${d_free_gib:-0} < ${BACKUP_D_MIN_FREE_GIB:-300} )); then
-  cold_d='"skipped_vhdx_on_d"'
-elif mountpoint -q "$DATA2" && [[ -d "$(dirname "$COLD_DEST")" ]]; then
-  log "cold backup starting -> $COLD_DEST"
-  send_cold "$COLD_DEST" --no-perms --no-owner --no-group && cold_d=0
-  log "cold backup done rc=$cold_d"
 fi
 
 # ── 다른 머신(dev) ──────────────────────────────────────────────────────────────────────
@@ -153,6 +141,6 @@ else
   log "dev backup skipped: HOSTS[dev] missing in $HOSTS_CONF"
 fi
 
-printf '{"finished_at": %s, "targets": {"hot_6tb": %s, "cold_d": %s, "dev": %s}}\n' \
-  "$(date +%s)" "$hot_6tb" "$cold_d" "$dev" > "$STATUS.tmp" && mv "$STATUS.tmp" "$STATUS"
-[[ "$hot_6tb" == 0 && "$dev" == 0 && ( "$cold_d" == 0 || "$cold_d" == '"skipped_vhdx_on_d"' ) ]]
+printf '{"finished_at": %s, "targets": {"hot_6tb": %s, "dev": %s}}\n' \
+  "$(date +%s)" "$hot_6tb" "$dev" > "$STATUS.tmp" && mv "$STATUS.tmp" "$STATUS"
+[[ "$hot_6tb" == 0 && "$dev" == 0 ]]

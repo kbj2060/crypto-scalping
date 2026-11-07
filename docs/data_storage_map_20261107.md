@@ -18,7 +18,7 @@
 |---|---|---|
 | C: NVMe | WSL 루트 `C:\wsl\Ubuntu\ext4.vhdx` | 코드, conda, 작은 `data/*`. 라이브 쓰기는 거의 없다 |
 | C: NVMe VHDX 200GB (`C:\wsl\fast\fast.vhdx`) | `/mnt/nvme` | `data/hot`, `data/live`(DuckDB·상태·원장·래스터), `logs`, 라이브 실행 환경, 임시 파일. 3.6GB/s 쓰기 |
-| D: HDD 1TB (ST1000DM010, 33,018시간) | `/mnt/d` | `crypto-scalping-cold`: 6TB 원본의 사본만 |
+| D: HDD 1TB (ST1000DM010, 33,018시간) | `/mnt/d` | 파이프라인에서 뺐다(11-07 사용자 결정, 다른 용도) |
 | 6TB USB (ext4, 라벨 data2) | `/mnt/data2` | 원시 호가 원본, lake, 학습용 대용량, 연구 산출물, hot 의 1차 백업. 209MB/s 쓰기 |
 | dev | `~/backups/crypto-scalping-server` | 전부의 사본(다른 기계) |
 
@@ -58,9 +58,10 @@ ext4 실사용 96GB 인데 vhdx 가 157GB 다. 압축은 통째로 빈 블록만
 | 무엇 | 원본 | 사본 1 | 사본 2 |
 |---|---|---|---|
 | hot (`data/live`, `data/hot` 사본, 그 밖의 `data/`) | NVMe·루트 | 6TB `crypto-scalping-backups` | dev |
-| cold (`orderflow`·`lake`·`splits`) | 6TB | D: `crypto-scalping-cold` | dev |
+| cold (`orderflow`·`lake`·`splits`) | 6TB | dev | 없음 |
 
 - 제외: `data/hot`(온라인 백업 API 사본을 보낸다) · `tmp` · `test` · `binance_vision`(다시 받을 수 있다) · `raster`(14일 보존) · 진행 중 시각 파일 `.bt`/`.jsonl` · `*.wal`.
+- 🔴cold 의 사본은 dev 하나다(11-07 D: 사본 삭제, 사용자 결정). 원시 호가는 다시 받을 수 없으니 6TB·dev 가 함께 잘못되면 잃는다.
 - `--delete` 를 안 쓴다. 사본은 늘기만 한다.
 - 백업 전에 2시간 넘게 안 바뀐 `.jsonl`/`.bt` 를 압축한다. 수집기는 시각이 바뀔 때만 압축해서, 재시작하면 쓰던 시각 파일이 그대로 남고 사본에서 빠졌다. 같은 시각 `.gz` 가 이미 있으면 부분본은 `/mnt/data2/orderflow_partial/` 로 치운다.
 - `data/live/backups/crontab_latest.txt` 가 함께 간다(crontab 은 저장소에 없다).
@@ -77,7 +78,7 @@ ext4 실사용 96GB 인데 vhdx 가 157GB 다. 압축은 통째로 빈 블록만
 | hot DB·상태 파일·로그 | D: HDD | C: NVMe VHDX |
 | 라이브 실행 환경 | D: HDD | C: NVMe VHDX |
 | 원시 호가·lake·학습 데이터·연구 산출물 | D: HDD | 6TB |
-| 백업 | D:(원본과 같은 디스크) + dev | hot → 6TB + dev · cold → D: + dev |
+| 백업 | D:(원본과 같은 디스크) + dev | hot → 6TB + dev · cold → dev |
 | 수집기 | 서버 + Pi | 서버만 |
 | 여유(11-07 16:12) | D: 102GB, 소진 7~8GB/일 | C: 91GiB · NVMe 148GiB · D: 740GiB · 6TB 4.6TiB |
 
@@ -89,7 +90,7 @@ C: 와 NVMe 는 같은 SSD 다. NVMe 여유는 `fast.vhdx` 안의 여유라 C: �
 |---|---|---|---|
 | 1 | 용량 예측이 틀렸고 감시기가 가짜 여유(WSL 안)만 봤다 | `check_host_disks`: C:·D:·NVMe·6TB 실제 여유 + 소진 속도 | 시험 · 서버 감시 OK |
 | 2 | 백업 실패를 아무도 몰랐다 · 복원 시험·crontab 사본 없음 | 결과 JSON + `check_backup` · 월 복원 시험 · crontab 사본 | 11-07 13:31 전체 성공, 복원 시험 통과 |
-| 3 | 원본과 백업이 같은 디스크 | hot → 6TB + dev · cold → D: + dev | 같음 |
+| 3 | 원본과 백업이 같은 디스크 | hot → 6TB + dev · cold → dev(D: 사본은 11-07 사용자 결정으로 삭제) | 같음 |
 | 4 | hot 이 가장 느린 디스크에 있었다 | NVMe 로 이동 | 디스크 대기(PSI full) 약 27% → 2.5% |
 | 5 | 수집기가 동기 DB 작업으로 이벤트 루프를 막아 정지 | DB 작업 `asyncio.to_thread` · 초기화 잠금(`95cfb4e0`, `1535ca97`) | 전환 뒤 확인 구간에 정지 없음. 장기 효과는 더 봐야 한다 |
 | 6 | 보존 결정이 백업에서 안 지켜졌다(raster·압축 전 파일) | raster 제외 · 백업 전 시각 파일 닫기 | 시험 · 13개 278MB 처리. 옛 raster 18GB 는 사본에 남겼다 |
@@ -152,7 +153,6 @@ C: 와 NVMe 는 같은 SSD 다. NVMe 여유는 `fast.vhdx` 안의 여유라 C: �
 - WSL 본체 C: 이전의 속도 효과는 재지 않았다. hot 은 이미 NVMe 였으므로 작을 것으로 본다. 주된 이득은 낡은 HDD 에서 OS 를 뺀 것이다.
 - 🔴C: 여유 91GB 가 빠듯하다(위 «WSL 본체 C: 이전»).
 - 6TB 모델·SMR 여부를 모른다(도킹이 SMART 를 막는다).
-- D: `crypto-scalping-cold` 안의 `hot_backup`·`ensemble`·`raster` 18GB 는 옛 잔여다. 6TB 와 대조했고 공간이 남아 지우지 않았다.
 
 ### 이전 뒤 드러난 문제 (11-07 16시대)
 

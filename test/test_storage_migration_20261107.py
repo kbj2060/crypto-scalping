@@ -48,7 +48,7 @@ def test_probe_reports_failure_and_hang_without_blocking():
 def _status(d: Path, age_h: float, **targets) -> Path:
     p = d / "backup_status.json"
     p.write_text(json.dumps({"finished_at": time.time() - age_h * 3600,
-                             "targets": {"hot_6tb": 0, "cold_d": "skipped_vhdx_on_d", "dev": 0, **targets}}))
+                             "targets": {"hot_6tb": 0, "dev": 0, **targets}}))
     return p
 
 
@@ -164,7 +164,7 @@ def _backup(r: Path, **env) -> tuple[int, dict]:
 
 def test_backup_never_writes_into_unmounted_data2():
     r, data2 = _repo(), _tmp()
-    rc, st = _backup(r, BACKUP_DATA2=str(data2), BACKUP_VHDX_PATH="/nonexistent")
+    rc, st = _backup(r, BACKUP_DATA2=str(data2))
     assert rc != 0 and st["targets"]["hot_6tb"] == 1
     assert not list(data2.iterdir()), "안 붙은 6TB 폴더에 쓰면 루트 디스크가 찬다"
 
@@ -174,37 +174,21 @@ def test_backup_follows_live_symlink_to_nvme():
     shutil.move(str(r / "data/live"), str(nvme / "live"))
     os.symlink(nvme / "live", r / "data/live")          # 11-07 전환 뒤의 모양
     os.symlink(_tmp(), nvme / "live/orderflow/depthdiff")
-    rc, st = _backup(r, BACKUP_DATA2=str(data2), BACKUP_SKIP_MOUNT_CHECK="1", BACKUP_VHDX_PATH="/nonexistent",
-                     BACKUP_COLD_DEST=str(_tmp() / "cold"))
+    rc, st = _backup(r, BACKUP_DATA2=str(data2), BACKUP_SKIP_MOUNT_CHECK="1")
     dest = data2 / "crypto-scalping-backups/data"
     assert st["targets"]["hot_6tb"] == 0 and (dest / "live/state.json").is_file(), "링크라고 data/live 를 건너뛰면 안 된다"
     assert not (dest / "live").is_symlink() and not (dest / "live/orderflow/raster").exists()
     assert not (dest / "live/orderflow/depthdiff").exists(), "6TB 링크는 cold 단계가 실물로 보낸다"
 
 
-def test_backup_scope_excludes_and_skips_d_while_vhdx_there():
+def test_backup_scope_excludes():
     r, data2 = _repo(), _tmp()
-    vhdx = _tmp() / "ext4.vhdx"
-    vhdx.write_text("")
-    rc, st = _backup(r, BACKUP_DATA2=str(data2), BACKUP_SKIP_MOUNT_CHECK="1", BACKUP_VHDX_PATH=str(vhdx),
-                     BACKUP_COLD_DEST=str(_tmp() / "cold"), BACKUP_D_MIN_FREE_GIB="999999999")
-    assert st["targets"] == {"hot_6tb": 0, "cold_d": "skipped_vhdx_on_d", "dev": 1}   # 이 시험엔 dev 설정이 없다
+    rc, st = _backup(r, BACKUP_DATA2=str(data2), BACKUP_SKIP_MOUNT_CHECK="1")
+    assert st["targets"] == {"hot_6tb": 0, "dev": 1}   # 이 시험엔 dev 설정이 없다
     dest = data2 / "crypto-scalping-backups/data"
     assert (dest / "live/state.json").exists() and (dest / "models/m.bin").exists()
     assert not (dest / "live/orderflow/raster").exists(), "raster 는 14일 보존 -- 사본에 쌓지 않는다"
     assert not (dest / "binance_vision").exists()
-
-
-def test_cold_runs_on_d_when_there_is_room_even_with_vhdx_there():
-    r, data2, cold = _repo(), _tmp(), _tmp() / "cold"
-    (data2 / "orderflow/depthdiff/ETHUSDT").mkdir(parents=True)
-    (data2 / "orderflow/depthdiff/ETHUSDT/a.jsonl.gz").write_text("z")
-    vhdx = _tmp() / "ext4.vhdx"
-    vhdx.write_text("")
-    rc, st = _backup(r, BACKUP_DATA2=str(data2), BACKUP_SKIP_MOUNT_CHECK="1", BACKUP_VHDX_PATH=str(vhdx),
-                     BACKUP_COLD_DEST=str(cold), BACKUP_D_MIN_FREE_GIB="0")
-    # 여기서는 마운트 확인을 건너뛴 시험이라 cold 단계의 mountpoint 에서 멈춘다 -- «건너뜀» 표시만 안 나오면 된다
-    assert st["targets"]["cold_d"] != "skipped_vhdx_on_d"
 
 
 def test_backup_seals_stale_hour_files():
@@ -216,8 +200,7 @@ def test_backup_seals_stale_hour_files():
         (d / name).write_text(name)
         if name != "fresh.jsonl":
             os.utime(d / name, (old, old))
-    rc, st = _backup(r, BACKUP_DATA2=str(data2), BACKUP_SKIP_MOUNT_CHECK="1", BACKUP_VHDX_PATH="/nonexistent",
-                     BACKUP_COLD_DEST=str(_tmp() / "cold"))
+    rc, st = _backup(r, BACKUP_DATA2=str(data2), BACKUP_SKIP_MOUNT_CHECK="1")
     assert (d / "alone.jsonl.gz").is_file() and not (d / "alone.jsonl").exists()
     assert (d / "shipped.jsonl.gz").read_text() == "shipped.jsonl.gz", "Pi 완본을 덮으면 안 된다"
     assert not (d / "shipped.jsonl").exists() and (data2 / "orderflow_partial/depthdiff/ETHUSDT/shipped.jsonl").is_file()

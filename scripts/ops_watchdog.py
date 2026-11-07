@@ -678,7 +678,7 @@ def check_backup(status_path: Path | None = None, restore_path: Path | None = No
     except (OSError, ValueError) as exc:
         return Check("backup", "CRITICAL", "no backup status", {"error": f"{type(exc).__name__}"})
     age_h = (now - float(st["finished_at"])) / 3600
-    failed = [k for k, v in st["targets"].items() if v not in (0, "skipped_vhdx_on_d")]
+    failed = [k for k, v in st["targets"].items() if v != 0]
     details: dict[str, Any] = {"age_hours": round(age_h, 1), "targets": st["targets"]}
     problems = []
     if age_h > 50:
