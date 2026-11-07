@@ -544,6 +544,96 @@ def check_runtime_resources() -> Check:
     })
 
 
+DATA2 = Path(os.getenv("WATCHDOG_DATA2", "/mnt/data2"))
+FAST = Path(os.getenv("WATCHDOG_FAST", "/mnt/nvme"))      # C: 의 VHDX -- data/hot·data/live·logs 가 여기 있다
+# (이름, 경로, warn GiB, critical GiB)
+HOST_DISKS = (("C_drive", Path("/mnt/c"), 50, 20), ("D_drive", Path("/mnt/d"), 50, 20))
+
+
+def _probe_write(path: Path, seconds: float = 30.0) -> str | None:
+    """쓰기 시험. 멈춘 USB 는 D 상태라 kill 도 안 듣는다 -- 기다리지 않고 «멈춤»을 돌려준다(감시기가 같이 멈추면 안 된다).
+    30초: 대량 복사 중에는 ext4 저널 커밋이 10초 넘게 걸린다(2026-11-07 08:18 거짓 CRITICAL 실측)."""
+    p = subprocess.Popen(["touch", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        rc = p.poll()
+        if rc is not None:
+            return None if rc == 0 else f"write failed rc={rc}"
+        time.sleep(0.1)
+    p.kill()
+    return f"write hung over {seconds:.0f}s"
+
+
+def check_host_disks(disks=HOST_DISKS, data2: Path = DATA2, data2_warn: float = 200, data2_crit: float = 50, fast: Path | None = FAST) -> Check:
+    """Windows 쪽 실제 여유 · 6TB 가 붙어 있고 써지는지.
+
+    `check_runtime_resources` 의 여유는 sparse vhdx 의 가상 크기라 실제 한계가 아니다 -- 2026-11-07 D: 가 102GB(하루 7~8GB
+    소진)인데 WSL 안은 371GB 라 경보가 없었다. ponytail: 고정 문턱이다. 하루 8GB 면 50GiB 경보가 6일 전이고, 소진 속도는
+    morning_audit 의 일별 기록으로 본다. 속도 경보가 필요해지면 그 기록을 여기서 읽는다."""
+    details: dict[str, Any] = {}
+    problems: list[tuple[str, str]] = []
+    for name, path, warn, crit in disks:
+        if not path.exists():
+            continue
+        free = shutil.disk_usage(path).free / 2**30
+        details[f"{name}_free_gib"] = round(free, 1)
+        if free < warn:
+            problems.append(("CRITICAL" if free < crit else "WARN", f"{name} {free:.0f}GiB"))
+    if fast is not None:
+        if not os.path.ismount(fast):
+            problems.append(("CRITICAL", f"{fast} not mounted"))
+        else:
+            free = shutil.disk_usage(fast).free / 2**30
+            details["fast_free_gib"] = round(free, 1)
+            if free < 30:
+                problems.append(("CRITICAL" if free < 10 else "WARN", f"fast {free:.0f}GiB"))
+    if not os.path.ismount(data2):      # 안 붙은 폴더의 여유는 루트 디스크 값이라 재면 안 된다
+        problems.append(("CRITICAL", f"{data2} not mounted"))
+    else:
+        err = _probe_write(data2 / ".watchdog_probe")
+        if err:
+            problems.append(("CRITICAL", f"{data2} {err}"))
+        else:
+            free = shutil.disk_usage(data2).free / 2**30
+            details["data2_free_gib"] = round(free, 1)
+            if free < data2_warn:
+                problems.append(("CRITICAL" if free < data2_crit else "WARN", f"data2 {free:.0f}GiB"))
+    status = "CRITICAL" if any(s == "CRITICAL" for s, _ in problems) else "WARN" if problems else "OK"
+    return Check("host_disks", status, "; ".join(m for _, m in problems) or "host disks ok", details)
+
+
+def check_backup(status_path: Path | None = None, restore_path: Path | None = None, now: float | None = None) -> Check:
+    """매일 백업(backup_live_data.sh)과 월 복원 시험(backup_restore_check)의 결과. 둘 다 그동안 로그에만 있어서 실패해도 아무도 몰랐다."""
+    status_path = status_path or OUT / "backup_status.json"
+    restore_path = restore_path or OUT / "backup_restore_check.json"
+    now = time.time() if now is None else now
+    try:
+        st = json.loads(status_path.read_text())
+    except (OSError, ValueError) as exc:
+        return Check("backup", "CRITICAL", "no backup status", {"error": f"{type(exc).__name__}"})
+    age_h = (now - float(st["finished_at"])) / 3600
+    failed = [k for k, v in st["targets"].items() if v not in (0, "skipped_vhdx_on_d")]
+    details: dict[str, Any] = {"age_hours": round(age_h, 1), "targets": st["targets"]}
+    problems = []
+    if age_h > 50:
+        problems.append(("CRITICAL", f"last backup {age_h:.0f}h ago"))
+    elif age_h > 26:
+        problems.append(("WARN", f"last backup {age_h:.0f}h ago"))
+    if failed:
+        problems.append(("CRITICAL", f"backup failed: {','.join(failed)}"))
+    try:                                 # 복원 시험은 월 1회 -- 첫 결과가 생기기 전에는 경보하지 않는다
+        rc = json.loads(restore_path.read_text())
+        details["restore_check_ok"] = rc["ok"]
+        if not rc["ok"]:
+            problems.append(("CRITICAL", "restore check failed"))
+        elif (now - float(rc["finished_at"])) / 86400 > 40:
+            problems.append(("WARN", "restore check older than 40 days"))
+    except (OSError, ValueError):
+        details["restore_check_ok"] = None
+    status = "CRITICAL" if any(s == "CRITICAL" for s, _ in problems) else "WARN" if problems else "OK"
+    return Check("backup", status, "; ".join(m for _, m in problems) or "backup ok", details)
+
+
 def check_raster_archive() -> Check:
     """만료 래스터가 parquet 으로 **실제로 보관되는가**. (2026-09-20)
 
@@ -707,7 +797,7 @@ def run_once(dry_run: bool) -> list[Check]:
     checks = [
         # 2026-10-12 봇 은퇴: trading_bot_process·decision_snapshot·heartbeat·data_pipeline·pipeline_contract·
         #   market_data_sources·execution_contract 제거(봇만 쓰던 파일들). 되살리려면 그 함수들(git 이력)과 이 줄을 함께.
-        check_dashboard(), check_data_sources(micro_db), check_runtime_resources(),
+        check_dashboard(), check_data_sources(micro_db), check_runtime_resources(), check_host_disks(), check_backup(),
         check_watchdog_storage(), check_raster_archive(),
         # 2026-10-01 lake 봉인(scripts/seal_to_lake.py, 매일 11:05 KST cron) -- 대표로 ETH 테이프의 가장 최근 일별 파일.
         #   하루 한 번 쓰므로 warn 26h · critical 50h. cron 을 끄면 이 줄도 지운다.

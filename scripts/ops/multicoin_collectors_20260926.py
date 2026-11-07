@@ -57,7 +57,8 @@ OPS = "scripts/ops"
 COINS = ("BTC", "SOL", "XRP", "HYPE", "ZEC", "SNDK", "SOXL")
 # 2026-10-31 디스크 정책: 깊은 호가(depthdiff 하루 ~0.2~0.5GB/코인)·래스터·HL 체결/호가는 여기 있는 코인만 쌓는다.
 # 새 코인은 COINS 에만 넣으면 가벼운 단계(체결 테이프·OKX 컨텍스트·HL 맥락·경보기)만 켜진다 -- 깊은 쪽이 필요하면 DEEP 에도 넣는다.
-DEEP = ("BTC", "SOL", "XRP", "HYPE")
+# 2026-11-07 Pi 은퇴: HYPE 는 대시보드가 깊은 호가·HL 체결을 안 읽어 뺐다(사용자 «대시보드에 사용하지 않는 것들은 제거»).
+DEEP = ("BTC", "SOL", "XRP")
 TRADFI = ("SNDK", "SOXL")        # 2026-11-01 바이낸스 TradFi 주식 선물 -- HL 맥락 없음 · 깊은 호가는 diff 만(저유동 파일 크기 실측용) · 야간 거래가 얇아 신선도 기준을 넓힌다
 RASTER_TRADFI = ("SNDK", "SOXL")   # 2026-11-03 호가 히트맵·호가 유동성 카드용 래스터 -- 깊은 호가 diff 와 별개로 TradFi 도 켠다(과거는 재구성 불가)
 DEPTH_TRADFI = ("SNDK",)   # TradFi 중 깊은 호가 diff 를 쌓는 종목. SOXL 은 대시보드 풋프린트만이라 뺀다(거래대금이 커서 파일이 크다)
@@ -105,8 +106,8 @@ def specs(coins: list[str], phases: set[int]) -> list[dict]:
         deep and add("hl_bbo", lc, 1, "supervisor_hyperliquid_book_ticker.sh",
             "live_hyperliquid_book_ticker_collector_20260923.py", {"HL_BT_COIN": c},
             [_dir(f"hl_bbo_{lc}", f"{of}/hyperliquid_bookticker/{c}"),
-             _db(f"hl_ctx_{lc}", f"data/live/hyperliquid_context_{lc}.duckdb", "hl_asset_ctx",
-                 "to_timestamp(recv_ms / 1000)")],
+             _db(f"hl_ctx_{lc}", "data/hot/hl_ctx.sqlite", f"hl_asset_ctx WHERE coin = '{c}'",
+                 "datetime(max(recv_ms) / 1000, 'unixepoch', 'localtime')")],
             eth=f"{of}/hyperliquid_bookticker/ETH")
         # 2026-10-04 서버 hot(hl_ctx.sqlite)에 SOL·XRP 맥락 -- 대시보드 시장 맥락의 HL 펀딩·OI·프리미엄·가격차
         c not in TRADFI and add("hl_ctx", lc, 3, "supervisor_hyperliquid_book_ticker.sh",
@@ -139,8 +140,8 @@ def specs(coins: list[str], phases: set[int]) -> list[dict]:
     tag = "_".join(c.lower() for c in hl)
     hl and add("hl_positions", tag, 1, "supervisor_hyperliquid_positions.sh",
         "live_hyperliquid_positions_collector_20260924.py", {"HL_POS_COINS": ",".join(hl)},
-        [_db(f"hl_positions_{tag}", f"data/live/hyperliquid_positions_{tag}.duckdb", "hl_cycles",
-             "to_timestamp(ts_ms / 1000)", 30, 60)], grace=30)
+        [_db(f"hl_positions_{tag}", f"data/hot/hl_positions_{tag}.sqlite", "hl_cycles",
+             "datetime(max(ts_ms) / 1000, 'unixepoch', 'localtime')", 30, 60)], grace=30)
     return out
 
 
@@ -300,6 +301,9 @@ def cmd_plan_or_start(a, start: bool) -> int:
         return 2
     phases = {1, 2} if a.phase == "all" else {int(a.phase)}
     todo = specs(coins, phases)
+    if getattr(a, "only", ""):     # 2026-11-07 BTC: 호가 diff·HL 체결·포지션만, HL 원시 호가(.bt)는 안 읽어서 안 띄운다
+        only = set(a.only.split(","))
+        todo = [s for s in todo if s["key"] in only]
     py = os.getenv("PYTHON_BIN") or sys.executable
     print(f"호스트 {socket.gethostname()} · 파이썬 {py} · 코인 {coins} · 단계 {sorted(phases)}")
 
@@ -492,6 +496,7 @@ def main() -> int:
     for name in ("plan", "start"):
         p = sub.add_parser(name)
         p.add_argument("--coins", default=",".join(COINS))
+        p.add_argument("--only", default="", help="이 키들만(쉼표). 비우면 단계 전체")
         p.add_argument("--phase", choices=("1", "2", "3", "all"), default="1")
         if name == "start":
             p.add_argument("--install-cron", action="store_true")

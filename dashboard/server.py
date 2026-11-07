@@ -481,7 +481,7 @@ def size_bands_since(asset: str) -> int:
 # 2026-10-06 SOL·XRP HL 체결·호가·포지션을 Pi -> 서버(ETH 와 같은 설계, 사용자 «SOL·XRP 모두 이더리움과 동일한 설계»).
 #   포지션 = 서버 hot(HL_POS_COINS=SOL,XRP 프로세스 파일). Pi 복제본(…btc_sol_xrp_hype.from_pi.duckdb)은 BTC·HYPE 만 계속 쓰고 봉인기 원천으로만 남는다.
 HL_POS_SOLXRP_DB_PATH = REPO_ROOT / "data" / "hot" / "hl_positions_sol_xrp.sqlite"
-# 2026-10-31 BTC: 서버에 BTC 포지션 수집기가 아직 없다(Pi 복제본만) -- `HL_POS_COINS=BTC` 로 띄우면 쓸 파일 이름. 없으면 HL 칸만 빈다.
+# 2026-11-07 BTC 포지션 수집기도 서버로(HL_POS_COINS=BTC 프로세스 파일). HYPE 는 대시보드가 안 읽어 수집을 멈췄다.
 HL_LIQ_BY_ASSET = {"eth": HL_POS_DB_PATH, "sol": HL_POS_SOLXRP_DB_PATH, "xrp": HL_POS_SOLXRP_DB_PATH,
                    "btc": REPO_ROOT / "data" / "hot" / "hl_positions_btc.sqlite",
                    "sndk": REPO_ROOT / "data" / "hot" / "hl_positions_sndk.sqlite",

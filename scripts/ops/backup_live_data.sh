@@ -1,80 +1,117 @@
 #!/usr/bin/env bash
-# Daily backup of data/live and data/ensemble to a separate drive (D:\, mounted
-# at /mnt/d under WSL) and to the dev machine (second copy, see below) -- the only copy of live state/ledgers/duckdb files
-# otherwise lives on the single WSL root disk with no off-host redundancy.
+# Daily backup. 🔴규칙: 원본과 사본은 항상 다른 디스크(2026-11-07 재설계, docs/data_storage_map_20261107.md).
 #
-# Intentionally does NOT use rsync --delete: a file removed locally (accidental
-# rm, a bug) must stay in the backup rather than being mirrored away on the
-# next run. This means the backup only grows -- acceptable given the current
-# ~11.5G source size against hundreds of GB free on the destination drive.
+#   hot  = NVMe(data/hot·data/live)와 루트 디스크의 data/ 전체(제외 목록 아래) -> 6TB + dev
+#   cold = 6TB 가 원본인 orderflow·lake·splits      -> D: + dev
 #
-# Usage: run daily from cron, e.g.:
+# D: 사본은 서버 ext4.vhdx 가 D: 를 떠난 뒤부터 돈다. 그 전에는 D: 공간이 곧 서버 디스크의 한계라 쓰지 않는다
+#   (2026-11-07 실측 7~8GB/일 소진, 여유 102GB). 그동안 cold 의 둘째 사본은 dev 다.
+#
+# Intentionally does NOT use rsync --delete: a file removed locally (accidental rm, a bug) must stay in the
+# backup rather than being mirrored away on the next run. 그래서 사본은 늘기만 한다 -- 보존 기간이 정해진 것
+# (raster 14일)과 다시 받을 수 있는 것(binance_vision)은 처음부터 보내지 않는다.
+#
+# 실패를 조용히 넘기지 않는다: 결과는 data/live/ops_watchdog/backup_status.json 에 남고 감시기(check_backup)가 읽는다.
+#
+# Usage: run daily from cron:
 #   0 4 * * * cd /home/llewyn/crypto-scalping && /bin/bash scripts/ops/backup_live_data.sh >> logs/backup_live_data_cron.log 2>&1
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-DEST="${BACKUP_DEST:-/mnt/d/crypto-scalping-backups}"
+DATA2="${BACKUP_DATA2:-/mnt/data2}"
+DEST="${BACKUP_DEST:-$DATA2/crypto-scalping-backups}"
+COLD_DEST="${BACKUP_COLD_DEST:-/mnt/d/crypto-scalping-cold}"
+VHDX_ON_D="${BACKUP_VHDX_PATH:-/mnt/d/wsl/Ubuntu/ext4.vhdx}"
+STATUS="${BACKUP_STATUS:-$ROOT/data/live/ops_watchdog/backup_status.json}"
+log() { echo "[$(date -Iseconds)] $*"; }
 
-# hot SQLite(2026-10-01 저장 재설계 3b -- 바이낸스 테이프 최근 16일의 원본)는 쓰는 중인 파일을 rsync 하면 찢긴다.
-#   SQLite 온라인 백업 API 로 한 시점 사본을 data/hot_backup/ 에 떠서 그걸 보낸다(WAL 이라 수집기 쓰기를 안 막는다).
-mkdir -p "$ROOT/data/hot_backup"
-for f in "$ROOT"/data/hot/*.sqlite; do
-  [[ -f "$f" ]] || continue
-  dst="$ROOT/data/hot_backup/$(basename "$f")"
-  python3 -c 'import sqlite3, sys
+# 🔴*.wal 은 보내지 않는다 -- --delete 가 없어 원본이 체크포인트로 지운 옛 wal 이 새 본체 옆에 남고, 그 사본을
+#   열면 옛 wal 이 **조용히 재생돼 행이 중복**된다(2026-10-16 D: 에 16개 실측·재현).
+# --no-links: data/ 안의 6TB 심볼릭 링크(orderflow/*·lake·splits)는 아래 cold 단계가 실물로 보낸다.
+HOT_RSYNC=(-a --no-links --exclude '*.tmp' --exclude '*.wal' --exclude '.snap_*' --exclude '*.moved')
+# 진행 중 시각 파일(.bt·.jsonl)은 다음날 .gz 가 되므로 보내면 부분 사본만 남는다(ETH 만 57개 795MB 쌓였었다).
+COLD_RSYNC=(-a --exclude '*.tmp' --exclude '*.wal' --exclude '.snap_*' --exclude '*.bt' --exclude '*.jsonl')
+COLD_MAP=("orderflow:data/live/orderflow" "lake:data/lake" "splits:data/splits")
+
+rs() { rsync "$@"; local r=$?; [[ $r -eq 24 ]] && r=0; return $r; }   # 24 = 전송 중 사라짐(시각 파일 gzip 교체) -- 정상
+
+send_hot() {    # send_hot <받는 쪽 접두어> [rsync 옵션...]  data/live 는 NVMe 링크라 따로(--no-links 가 건너뛴다)
+  local prefix="$1" rc=0; shift
+  rs "${HOT_RSYNC[@]}" --exclude '/hot/' --exclude '/hot_backup/' --exclude '/live/' --exclude '/tmp/' --exclude '/test/' \
+     --exclude '/binance_vision/' --exclude '/orderflow_hdd/' "$@" "$ROOT/data/" "$prefix/data/" || rc=1
+  rs "${HOT_RSYNC[@]}" --exclude '/orderflow/raster/' "$@" "$ROOT/data/live/" "$prefix/data/live/" || rc=1
+  return $rc
+}
+
+send_cold() {   # send_cold <받는 쪽 접두어> [rsync 옵션...]
+  local prefix="$1" rc=0 m; shift
+  for m in "${COLD_MAP[@]}"; do
+    [[ -d "$DATA2/${m%%:*}" ]] || continue
+    rs "${COLD_RSYNC[@]}" "$@" "$DATA2/${m%%:*}/" "$prefix/${m##*:}/" || rc=1
+  done
+  return $rc
+}
+
+hot_6tb=1; cold_d=1; dev=1
+mkdir -p "$ROOT/data/live/backups" "$(dirname "$STATUS")"
+crontab -l > "$ROOT/data/live/backups/crontab_latest.txt.tmp" 2>/dev/null \
+  && mv "$ROOT/data/live/backups/crontab_latest.txt.tmp" "$ROOT/data/live/backups/crontab_latest.txt"
+
+# 🔴mountpoint: 안 붙은 /mnt/data2 는 그냥 빈 폴더라 없는 줄 모르고 루트 디스크에 수백 GB 를 쓰게 된다.
+if mountpoint -q "$DATA2" || [[ "${BACKUP_SKIP_MOUNT_CHECK:-0}" == "1" ]]; then
+  log "backup starting -> $DEST"
+  hot_6tb=0
+  mkdir -p "$DEST/data/hot_backup"
+  # hot SQLite 는 쓰는 중인 파일을 rsync 하면 찢긴다 -> 온라인 백업 API 로 한 시점 사본(WAL 이라 수집기 쓰기를 안 막는다).
+  for f in "$ROOT"/data/hot/*.sqlite; do
+    [[ -f "$f" ]] || continue
+    dst="$DEST/data/hot_backup/$(basename "$f")"
+    python3 -c 'import sqlite3, sys
 s = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True, timeout=60); d = sqlite3.connect(sys.argv[2])
 s.backup(d); d.close(); s.close()' "$f" "$dst.tmp" && mv "$dst.tmp" "$dst" \
-    || echo "[$(date -Iseconds)] 🔴 hot backup failed: $f"
-done
-
-if [[ -d "$(dirname "$DEST")" ]]; then
-  mkdir -p "$DEST/data/live" "$DEST/data/ensemble"
-  echo "[$(date -Iseconds)] backup starting -> $DEST"
-  for dir in data/live data/ensemble data/lake data/hot_backup; do
-    [[ -d "$ROOT/$dir" ]] || continue
-    mkdir -p "$DEST/$dir"
-    # 🔴*.wal 은 보내지 않는다(아래 dev 사본과 같은 이유) -- --delete 가 없어 원본이 체크포인트로 지운 옛 wal 이
-    #   새 본체 옆에 남고, 그 사본을 열면 옛 wal 이 **조용히 재생돼 행이 중복**된다(2026-10-16 D: 에 16개 실측·재현).
-    rsync -a --exclude '*.tmp' --exclude '*.wal' --exclude '.snap_*' "$ROOT/$dir/" "$DEST/$dir/"
+      || { log "🔴 hot backup failed: $f"; hot_6tb=1; }
   done
-  echo "[$(date -Iseconds)] backup done"
+  send_hot "$DEST" || hot_6tb=1
+  log "backup done rc=$hot_6tb"
 else
-  echo "[$(date -Iseconds)] backup destination drive not mounted, skipping ($DEST)"
+  log "🔴 $DATA2 not mounted -- 6TB 단계와 cold 단계를 건너뛴다"
 fi
 
-# ── 두 번째 사본: 다른 머신(dev) ──────────────────────────────────────────────────────────
-# 2026-10-01: D: 에는 서버 WSL 디스크(ext4.vhdx)도 있어 위 사본은 디스크 고장에 같이 죽는다.
+if [[ -e "$VHDX_ON_D" ]]; then
+  cold_d='"skipped_vhdx_on_d"'
+elif mountpoint -q "$DATA2" && [[ -d "$(dirname "$COLD_DEST")" ]]; then
+  log "cold backup starting -> $COLD_DEST"
+  send_cold "$COLD_DEST" --no-perms --no-owner --no-group && cold_d=0
+  log "cold backup done rc=$cold_d"
+fi
+
+# ── 다른 머신(dev) ──────────────────────────────────────────────────────────────────────
 # dev 주소는 공개 저장소에 적지 않는다 -- gitignore 된 handoff.hosts.conf 의 HOSTS[dev] 를 쓴다.
 # 🔴쓰는 중인 duckdb 를 rsync 하면 찢긴 사본이 될 수 있다 -> dev 에서 read_only 로 열어 표마다
 #   count(*) 를 해 보고, 실패한 파일만 최대 3번 다시 보낸다. (sealed 원시 .gz 는 안 바뀐다.)
-# 🔴*.wal 은 보내지 않는다 -- --delete 가 없어 원본이 체크포인트로 지운 옛 wal 이 dev 에 남고, 그걸 새 본체에
-#   재생하면 사본이 깨진다. wal 없는 본체는 «마지막 체크포인트 시점»의 온전한 스냅샷이다.
-#   rsync 24(전송 중 파일 사라짐)는 시각 파일 gzip 교체 때문에 정상이다.
 HOSTS_CONF="$ROOT/scripts/ops/handoff.hosts.conf"
 if [[ -f "$HOSTS_CONF" ]]; then
   # shellcheck disable=SC1090
   source "$HOSTS_CONF"
   IFS='|' read -r DEV_SSH _ DEV_CONDA DEV_ENV <<< "${HOSTS[dev]:-}"
 fi
-if [[ -z "${DEV_SSH:-}" ]]; then
-  echo "[$(date -Iseconds)] dev backup skipped: HOSTS[dev] missing in $HOSTS_CONF"
-  exit 0
-fi
-DEV_HOST="${DEV_SSH%:*}"; DEV_PORT="${DEV_SSH##*:}"
-DEV_DEST="${BACKUP_DEV_DEST:-backups/crypto-scalping-server}"   # dev 홈 기준, 저장소 밖(워크트리 복제 방지)
-DEV_PY="$DEV_CONDA/envs/$DEV_ENV/bin/python"
-SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10 -p "$DEV_PORT")
-
-echo "[$(date -Iseconds)] dev backup starting -> $DEV_HOST:$DEV_DEST"
-rc=0
-for dir in data/live data/ensemble data/lake data/hot_backup; do     # lake = 봉인된 일별 Parquet · hot_backup = hot SQLite 한 시점 사본
-  [[ -d "$ROOT/$dir" ]] || continue
-  "${SSH[@]}" "$DEV_HOST" "mkdir -p '$DEV_DEST/$dir'" || { rc=1; continue; }
-  rsync -a --exclude '*.tmp' --exclude '*.wal' --exclude '.snap_*' -e "${SSH[*]}" "$ROOT/$dir/" "$DEV_HOST:$DEV_DEST/$dir/"
-  r=$?; [[ $r -ne 0 && $r -ne 24 ]] && rc=1
-done
-for attempt in 1 2 3; do
-  bad="$("${SSH[@]}" "$DEV_HOST" "$DEV_PY - '$DEV_DEST/data/live'" <<'PY'
+if [[ -n "${DEV_SSH:-}" ]]; then
+  DEV_HOST="${DEV_SSH%:*}"; DEV_PORT="${DEV_SSH##*:}"
+  DEV_DEST="${BACKUP_DEV_DEST:-backups/crypto-scalping-server}"   # dev 홈 기준, 저장소 밖(워크트리 복제 방지)
+  DEV_PY="$DEV_CONDA/envs/$DEV_ENV/bin/python"
+  SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10 -p "$DEV_PORT")
+  log "dev backup starting -> $DEV_HOST:$DEV_DEST"
+  rc=0
+  "${SSH[@]}" "$DEV_HOST" "mkdir -p '$DEV_DEST/data/live/orderflow' '$DEV_DEST/data/lake' '$DEV_DEST/data/splits' '$DEV_DEST/data/hot_backup'" || rc=1
+  send_hot "$DEV_HOST:$DEV_DEST" -e "${SSH[*]}" || rc=1
+  if mountpoint -q "$DATA2"; then
+    send_cold "$DEV_HOST:$DEV_DEST" -e "${SSH[*]}" || rc=1
+    rs -a --exclude '*.tmp' -e "${SSH[*]}" "$DEST/data/hot_backup/" "$DEV_HOST:$DEV_DEST/data/hot_backup/" || rc=1
+  else
+    rc=1
+  fi
+  for attempt in 1 2 3; do
+    bad="$("${SSH[@]}" "$DEV_HOST" "$DEV_PY - '$DEV_DEST/data/live'" <<'PY'
 import sys, pathlib, duckdb
 for f in sorted(pathlib.Path(sys.argv[1]).rglob("*.duckdb")):
     try:
@@ -85,13 +122,20 @@ for f in sorted(pathlib.Path(sys.argv[1]).rglob("*.duckdb")):
     except Exception:
         print(f.relative_to(sys.argv[1]))
 PY
-)" || { echo "[$(date -Iseconds)] dev verify could not run"; rc=1; break; }
-  [[ -z "$bad" ]] && break
-  echo "[$(date -Iseconds)] dev verify attempt $attempt: torn copies -> resend: $(echo $bad | tr '\n' ' ')"
-  while IFS= read -r rel; do
-    rsync -a -e "${SSH[*]}" "$ROOT/data/live/$rel" "$DEV_HOST:$DEV_DEST/data/live/$(dirname "$rel")/"
-  done <<< "$bad"
-  [[ $attempt == 3 ]] && { echo "[$(date -Iseconds)] dev verify FAILED after 3 attempts: $bad"; rc=1; }
-done
-echo "[$(date -Iseconds)] dev backup done rc=$rc"
-exit $rc
+)" || { log "dev verify could not run"; rc=1; break; }
+    [[ -z "$bad" ]] && break
+    log "dev verify attempt $attempt: torn copies -> resend: $(echo $bad | tr '\n' ' ')"
+    while IFS= read -r rel; do
+      rsync -a -e "${SSH[*]}" "$ROOT/data/live/$rel" "$DEV_HOST:$DEV_DEST/data/live/$(dirname "$rel")/"
+    done <<< "$bad"
+    [[ $attempt == 3 ]] && { log "dev verify FAILED after 3 attempts: $bad"; rc=1; }
+  done
+  dev=$rc
+  log "dev backup done rc=$dev"
+else
+  log "dev backup skipped: HOSTS[dev] missing in $HOSTS_CONF"
+fi
+
+printf '{"finished_at": %s, "targets": {"hot_6tb": %s, "cold_d": %s, "dev": %s}}\n' \
+  "$(date +%s)" "$hot_6tb" "$cold_d" "$dev" > "$STATUS.tmp" && mv "$STATUS.tmp" "$STATUS"
+[[ "$hot_6tb" == 0 && "$dev" == 0 && ( "$cold_d" == 0 || "$cold_d" == '"skipped_vhdx_on_d"' ) ]]

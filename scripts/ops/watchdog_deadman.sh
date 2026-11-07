@@ -33,6 +33,21 @@ send_telegram() {
     -d "chat_id=${TELEGRAM_CHAT_ID}" --data-urlencode "text=${text}" >/dev/null 2>&1 || true
 }
 
+# 2026-11-07 data/live·logs 가 /mnt/nvme, 원시 호가가 /mnt/data2 다. 디스크가 빠지면 감시기 자신이 못 알린다.
+# 표시는 /tmp 에 둔다(data/live 가 깨진 상태에서도 돌아야 한다). 그래서 crontab 의 로그도 /tmp 로 받는다.
+for m in "${DEADMAN_MOUNTS:-/mnt/nvme /mnt/data2}"; do
+  for mp in $m; do
+    flag="/tmp/.deadman_unmounted_$(basename "$mp")"
+    if mountpoint -q "$mp"; then
+      [[ -f "$flag" ]] && { rm -f "$flag"; send_telegram "✅ [DEADMAN] $mp mounted again"; }
+    elif [[ ! -f "$flag" ]]; then
+      echo "[$(date -Iseconds)] DEADMAN: $mp not mounted"
+      send_telegram "⛔ [DEADMAN] $mp not mounted -- collectors on it are down. Recovery: wsl_boot_recover.ps1 -MountOnly (docs/data_storage_map_20261107.md)"
+      touch "$flag"
+    fi
+  done
+done
+
 recorded_at=""
 if [[ -f "$HEARTBEAT" ]]; then
   recorded_at="$(grep -o '"recorded_at_kst"[[:space:]]*:[[:space:]]*"[^"]*"' "$HEARTBEAT" | sed -E 's/.*"([^"]+)"$/\1/')"

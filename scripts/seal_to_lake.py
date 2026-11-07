@@ -52,6 +52,8 @@ HOT_PRUNE = (
     (ROOT / "data/hot/hl_positions.sqlite", "hl_liquidations", "detected_ms / 1000", "coin", "hl", "liquidations", str, 8),
     (ROOT / "data/hot/hl_positions_sol_xrp.sqlite", "hl_positions", "ts_ms / 1000", "coin", "hl", "positions", str, 8),        # 2026-10-06 SOL·XRP 서버 이전
     (ROOT / "data/hot/hl_positions_sol_xrp.sqlite", "hl_liquidations", "detected_ms / 1000", "coin", "hl", "liquidations", str, 8),
+    (ROOT / "data/hot/hl_positions_btc.sqlite", "hl_positions", "ts_ms / 1000", "coin", "hl", "positions", str, 8),        # 2026-11-07 BTC 서버 이전
+    (ROOT / "data/hot/hl_positions_btc.sqlite", "hl_liquidations", "detected_ms / 1000", "coin", "hl", "liquidations", str, 8),
     (ROOT / "data/hot/binance_spot_tape.sqlite", "trade_tape_1s", "ts_sec", "symbol", "binance", "spot_tape", _bn_coin, 8),
     (ROOT / "data/hot/bybit_tape.sqlite", "trade_tape_1s", "ts_sec", "symbol", "bybit", "tape", _bn_coin, HOT_KEEP_DAYS),   # 2026-10-06
     *[(ROOT / "data/hot/bybit_ctx.sqlite", f"bybit_{t}", "ts_ms / 1000", "inst", "bybit", t, _bn_coin, 8) for t in ("oi", "mark", "funding")],
@@ -110,9 +112,11 @@ SPECS = [
     ("yahoo", "macro_5m", [("data/hot/macro_5m.sqlite", "yahoo_5m", "symbol")], "ts_sec * 1000"),
     ("hl", "positions", [("data/hot/hl_positions.sqlite", "hl_positions", "coin"),
                          ("data/hot/hl_positions_sol_xrp.sqlite", "hl_positions", "coin"),     # 2026-10-06 SOL·XRP 서버 hot
+                         ("data/hot/hl_positions_btc.sqlite", "hl_positions", "coin"),    # 2026-11-07 BTC 서버 hot(from_pi 는 그 전까지의 얼은 원천)
                          (f"{L}/hyperliquid_positions_btc_sol_xrp_hype.from_pi.duckdb", "hl_positions", "coin")], "ts_ms"),
     ("hl", "liquidations", [("data/hot/hl_positions.sqlite", "hl_liquidations", "coin"),
                             ("data/hot/hl_positions_sol_xrp.sqlite", "hl_liquidations", "coin"),
+                            ("data/hot/hl_positions_btc.sqlite", "hl_liquidations", "coin"),
                             (f"{L}/hyperliquid_positions_btc_sol_xrp_hype.from_pi.duckdb", "hl_liquidations", "coin")],
      "detected_ms"),
     ("deribit", "option_trades", [(f"{L}/deribit_options.duckdb", "option_trades", DERIBIT)], "ts_ms"),

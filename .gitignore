@@ -45,6 +45,9 @@ __pycache__/
 
 # Virtual Environment
 venv*/
+/venv
+/venv_kronos
+/logs
 env/
 ENV/
 

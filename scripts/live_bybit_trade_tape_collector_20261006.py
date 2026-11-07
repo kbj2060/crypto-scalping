@@ -175,15 +175,17 @@ async def run() -> None:
     import aiohttp
     beat = [time.monotonic()]
     start_stall_guard(beat)
-    stores = {s: TapeStore(TAPE_DB, s, _bn.BUCKETS.get(s.lower(), 0.01)) for s in SYMBOLS}
+    stores = await asyncio.to_thread(lambda: {s: TapeStore(TAPE_DB, s, _bn.BUCKETS.get(s.lower(), 0.01)) for s in SYMBOLS})   # 스레드로: 바이낸스와 같은 이유(2026-11-07)
     bufs = {s: TapeBuffer(_bn.BUCKETS.get(s.lower(), 0.01), s) for s in SYMBOLS}
     groups = {s: OrderGrouper() for s in SYMBOLS}
-    for s, st in stores.items():
+    def _write_meta(s, st):
         with st._connect() as con:
             for k, v in ((f"max_unit:{s}", "taker_order_price_level"), (f"source:{s}", "bybit v5 publicTrade grouped by consecutive (T ms, side, price)")):
                 con.execute("DELETE FROM meta WHERE key = ?", [k]); con.execute("INSERT INTO meta VALUES (?, ?)", [k, v])
+    for s, st in stores.items():
+        await asyncio.to_thread(_write_meta, s, st)
     ctx, tick = ctx_conn(CTX_DB), TickerState()
-    last_ms = {s: st.last_ts_ms() for s, st in stores.items()}
+    last_ms = {s: await asyncio.to_thread(st.last_ts_ms) for s, st in stores.items()}
     ctx_buf: dict[str, list[tuple]] = {}
     down_ms, vtask = None, None
 

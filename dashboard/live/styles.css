@@ -1252,9 +1252,9 @@ svg {
 .acct-pn { background: var(--glass); border-radius: 12px; padding: 12px 14px; min-width: 0; min-height: 0; }
 .acct-pn-curve { position: relative; height: 340px; }
 #snapAcctCurve { position: absolute; inset: 12px 14px; min-width: 0; }   /* 칸 크기는 CSS 가 정하고 곡선이 거기에 맞춰 그려진다 -- 그림이 칸 높이를 밀지 않는다 */
-.acct-side { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 12px; min-width: 0; min-height: 0; }
-.acct-side .aw { padding: 0; border: 0; gap: 8px; }
-.acct-side .aw-bar { height: 24px; }
+.acct-rside { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 12px; min-width: 0; min-height: 0; }
+.acct-rside .aw { padding: 0; border: 0; gap: 8px; }
+.acct-rside .aw-bar { height: 24px; }
 .acct-pn-pos { overflow: auto; scrollbar-width: thin; }
 .acct-bot { display: flex; flex-direction: column; gap: 10px; margin: 12px 18px 18px; }
 .acct-tabs { flex-wrap: wrap; }
@@ -1335,7 +1335,7 @@ svg {
   .acct-kpi { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .acct-kpi b { font-size: 19px; }
   .acct-pn-curve { height: 300px; }
-  .acct-side { order: -1; }   /* 폰: 포지션·증거금이 곡선보다 먼저(지금 행동에 필요한 것) */
+  .acct-rside { order: -1; }   /* 폰: 포지션·증거금이 곡선보다 먼저(지금 행동에 필요한 것) */
   .acct-kpi s { white-space: normal; }
   .acct-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }   /* 탭 다섯 개는 한 줄로 옆으로 밀어 본다(두 줄로 접히면 본문이 밀린다) */
   .acct-tabs .chip { flex: none; }

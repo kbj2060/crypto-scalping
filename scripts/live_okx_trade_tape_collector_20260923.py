@@ -193,7 +193,7 @@ async def verify_recent(store, session, inst: str) -> None:
       뜨고, 진짜 유실과 구별이 안 된다.
     ⭐물량은 `volCcy`(ETH)를 쓴다 -- `vol` 은 계약 수다. 2026-09-23 실측에서 5개 봉 전부
       `vol * 0.1 == volCcy` 로 정확히 일치했다."""
-    minutes = store.unverified_minutes()
+    minutes = await asyncio.to_thread(store.unverified_minutes)   # 스레드로: 바이낸스 쪽과 같은 이유(2026-11-07)
     if not minutes:
         return
     # 🔴`candles` 는 최근 100분뿐이라 밀린 분을 영영 못 봤다 -> 과거용 history-candles(요청당 100분).
@@ -221,7 +221,7 @@ async def verify_recent(store, session, inst: str) -> None:
         await asyncio.sleep(0.12)
     if not kvol:
         return
-    results = store.verify(kvol, minutes)
+    results = await asyncio.to_thread(store.verify, kvol, minutes)
     ok = [r for r in results if abs(r[1]) <= VERIFY_TOLERANCE]
     if ok:
         log(f"완전성 OK {len(ok)}분 "
@@ -319,15 +319,18 @@ async def collect(inst: str, db_path: Path) -> None:
     if ct_val is None:
         raise SystemExit(f"🔴{inst} 의 ctVal 을 모른다 -- CT_VALS 에 실측값을 적고 다시 돌릴 것")
     bucket = BUCKETS.get(inst, 0.01)
-    store = TapeStore(db_path, inst, bucket)
-    with store._connect() as con:                       # 단위를 데이터와 함께 남긴다
-        for key, value in ((f"ct_val:{inst}", repr(ct_val)),
-                           (f"max_unit:{inst}", "taker_order"),
-                           (f"source:{inst}", "okx ws v5 public trades (already order-aggregated)")):
-            con.execute("DELETE FROM meta WHERE key = ?", [key])
-            con.execute("INSERT INTO meta VALUES (?, ?)", [key, value])
+    store = await asyncio.to_thread(TapeStore, db_path, inst, bucket)   # 스레드로: 바이낸스 collect 머리말과 같은 이유(2026-11-07)
+
+    def _write_meta() -> None:
+        with store._connect() as con:                       # 단위를 데이터와 함께 남긴다
+            for key, value in ((f"ct_val:{inst}", repr(ct_val)),
+                               (f"max_unit:{inst}", "taker_order"),
+                               (f"source:{inst}", "okx ws v5 public trades (already order-aggregated)")):
+                con.execute("DELETE FROM meta WHERE key = ?", [key])
+                con.execute("INSERT INTO meta VALUES (?, ?)", [key, value])
+    await asyncio.to_thread(_write_meta)
     buffer = OkxTapeBuffer(bucket, inst)
-    last_ms = store.last_ts_ms()
+    last_ms = await asyncio.to_thread(store.last_ts_ms)
     log(f"{inst} 수집 시작 (빈 {bucket}, ctVal {ct_val}, db {db_path})")
     async with ClientSession(timeout=ClientTimeout(total=None)) as session:
         await assert_ct_val(session, inst, ct_val)
@@ -366,8 +369,8 @@ async def collect(inst: str, db_path: Path) -> None:
                             ts_ms, price, qty, sell, fills = parsed
                             if first:
                                 first = False
-                                store.record_gap(
-                                    last_ms or (ts_ms // 60_000) * 60_000, ts_ms,
+                                await asyncio.to_thread(
+                                    store.record_gap, last_ms or (ts_ms // 60_000) * 60_000, ts_ms,
                                     "ws_reconnect" if last_ms else "startup")
                                 log("스트림 연결됨")
                             buffer.add_okx_order(ts_ms, price, qty, sell, fills)

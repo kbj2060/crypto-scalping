@@ -434,6 +434,7 @@ def _init_sqlite(path: Path) -> None:
 
 _SQLITE: dict = {}
 _SQLITE_G = threading.Lock()
+_SQLITE_INIT = threading.Lock()
 
 
 @contextmanager
@@ -487,7 +488,8 @@ class TapeStore:
         self.pending: list[tuple] = []
         self._lock = threading.Lock()   # 쓰기 스레드와 복구 태스크가 같은 파일을 동시에 연다
         if self.sqlite:
-            _init_sqlite(db_path)       # 기본키·타입·인덱스. 아래 DuckDB DDL 은 SQLite 에선 전부 «이미 있음»으로 지나간다
+            with _SQLITE_INIT:      # 2026-11-07 기동을 스레드로 옮기자 심볼들이 같은 파일을 동시에 초기화해 database is locked 로 죽었다
+                _init_sqlite(db_path)       # 기본키·타입·인덱스. 아래 DuckDB DDL 은 SQLite 에선 전부 «이미 있음»으로 지나간다
         with self._connect() as con:
             con.execute("""
                 CREATE TABLE IF NOT EXISTS trade_tape_1s(
@@ -726,7 +728,8 @@ class TapeStore:
 
 async def verify_recent(store: TapeStore, session, klines_url: str = KLINES_URL) -> None:
     """직전 분들을 kline volume 과 대조해 verify_1m 에 남긴다. 실패해도 수집은 계속한다."""
-    minutes = store.unverified_minutes()
+    # 🔴스레드로: 2026-11-05 이 조회가 이벤트 루프 안에서 122~129초 걸려 정지 감시가 8분마다 프로세스를 죽였다(7회 반복).
+    minutes = await asyncio.to_thread(store.unverified_minutes)
     if not minutes:
         return
     params = {"symbol": store.symbol.upper(), "interval": "1m",
@@ -737,7 +740,7 @@ async def verify_recent(store: TapeStore, session, klines_url: str = KLINES_URL)
             return
         klines = await response.json()
     kvol = {int(k[0]) // 1000: float(k[5]) for k in klines}
-    results = store.verify(kvol, minutes)
+    results = await asyncio.to_thread(store.verify, kvol, minutes)
     ok = [r for r in results if abs(r[1]) <= VERIFY_TOLERANCE]
     # 성공도 한 줄 남긴다 -- 아무 말이 없으면 «검사가 도는지» 자체를 알 수 없다(그 상태로
     # 조용히 꺼져 있던 게 2026-09-16 의 INT32 오버플로였다).
@@ -921,10 +924,12 @@ async def collect(symbol: str, db_path: Path, market: str = "futures") -> None:
 
     warn_if_whale_threshold_diverged()
     bucket = BUCKETS.get(symbol, 0.01)
-    store = TapeStore(db_path, symbol, bucket)
+    # 🔴스레드로: 심볼을 한 프로세스에 묶어 시작 때 파일을 차례로 연다 -- 2026-11-07 디스크가 바쁠 때 심볼당 ~16초라
+    #   OKX 8심볼이 이벤트 루프를 120초 넘게 막아 정지 감시가 기동 중에 프로세스를 죽였다(재시작 반복).
+    store = await asyncio.to_thread(TapeStore, db_path, symbol, bucket)
     buffer = TapeBuffer(bucket, symbol)
     orders = TakerOrderAggregator()
-    last_ms = store.last_ts_ms()      # 지난 판이 남긴 끝 -- 재시작 공백을 gaps 에 적으려고
+    last_ms = await asyncio.to_thread(store.last_ts_ms)      # 지난 판이 남긴 끝 -- 재시작 공백을 gaps 에 적으려고
     log(f"{symbol} {market} 수집 시작 (빈 {bucket}, db {db_path})")
     # total=None 을 **명시**한다: aiohttp 기본 5분이라 그냥 두면 5분마다 끊긴다.
     async with ClientSession(timeout=ClientTimeout(total=None)) as session:
@@ -959,8 +964,8 @@ async def collect(symbol: str, db_path: Path, market: str = "futures") -> None:
                             # 처음 켠 판이면 그 «분의 시작부터 여기까지»가 안 받은 구간이다.
                             # 적어두지 않으면 아래 완전성 검사가 그걸 유실로 오해한다.
                             orders.reset()   # 끊김 전에 열려 있던 묶음은 버린다
-                            store.record_gap(last_ms or (ts_ms // 60_000) * 60_000, ts_ms,
-                                             "ws_reconnect" if last_ms else "startup")
+                            await asyncio.to_thread(store.record_gap, last_ms or (ts_ms // 60_000) * 60_000, ts_ms,
+                                                    "ws_reconnect" if last_ms else "startup")
                             log("스트림 연결됨")
                         sell = bool(trade["m"])
                         if spot:                                # aggTrade = 이미 테이커 주문 하나(대시보드 현물 레인과 같은 규칙)
