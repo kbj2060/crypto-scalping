@@ -23,7 +23,7 @@ if ($vhdx -like "C:*") { Log "already on C:, nothing to do"; return }
 if ((Test-Path $Dest) -and (Get-ChildItem $Dest -Force | Measure-Object).Count -gt 0) { Log "destination not empty, stopping"; return }
 
 try {
-    & $Wsl -d $Distro -u root -e fstrim -v / 2>&1 | Out-String | ForEach-Object { Log "fstrim: $($_.Trim())" }
+    & $Wsl -d $Distro -u root -e /usr/sbin/fstrim -v / 2>&1 | Out-String | ForEach-Object { Log "fstrim: $($_.Trim())" }
     Disable-ScheduledTask -TaskName $BootTask | Out-Null   # its loop (or its restart-on-failure) would start WSL again and lock the vhdx
     Stop-ScheduledTask -TaskName $BootTask
     for ($i = 0; $i -lt 10; $i++) {
