@@ -18,8 +18,8 @@
 |---|---|---|
 | C: NVMe | WSL 루트 `C:\wsl\Ubuntu\ext4.vhdx` | 코드, conda, 작은 `data/*`. 라이브 쓰기는 거의 없다 |
 | C: NVMe VHDX 200GB (`C:\wsl\fast\fast.vhdx`) | `/mnt/nvme` | `data/hot`, `data/live`(DuckDB·상태·원장·래스터), `logs`, 라이브 실행 환경, 임시 파일. 3.6GB/s 쓰기 |
-| D: HDD 1TB (ST1000DM010, 33,018시간) | `/mnt/d` | 파이프라인에서 뺐다(11-07 사용자 결정, 다른 용도) |
-| 6TB USB (ext4, 라벨 data2) | `/mnt/data2` | 원시 호가 원본, lake, 학습용 대용량, 연구 산출물, hot 의 1차 백업. 209MB/s 쓰기 |
+| D: HDD 1TB (ST1000DM010, 33,033시간) VHDX 850GB (`D:\wsl\work\work.vhdx`) | `/mnt/work` | **잃어도 다시 만들 수 있는 것만.** 다시 만들 수 있는 연구 폴더, 6TB 장애 때 원시 호가 대피소. 쓰기 약 110~120MB/s(309GB 복사 실측) |
+| 6TB USB (ext4, 라벨 data2) | `/mnt/data2` | 원시 호가 원본, lake, 학습용 대용량, hot 의 1차 백업, 연구 일부(`data_csv`·보관본). 209MB/s 쓰기 |
 | dev | `~/backups/crypto-scalping-server` | 전부의 사본(다른 기계) |
 
 ## 링크 지도 (전부 디렉터리 링크라 코드 경로는 그대로다)
@@ -31,7 +31,8 @@
 | `data/live/orderflow/raster` | `/mnt/nvme/live/orderflow/raster` (실물) |
 | `data/live/orderflow/{bookticker,depthdiff,hyperliquid,hyperliquid_bookticker,okx_bookticker,raster_archive}` | `/mnt/data2/orderflow/…` |
 | `data/lake`, `data/splits` | `/mnt/data2/{lake,splits}` |
-| `binance_data/aggTrades`, `~/gpu_jobs`, `~/.cache/huggingface`, 안 쓰는 실행 환경, `tmp` 큰 폴더들 | `/mnt/data2/research/…` |
+| `binance_data/aggTrades`, `~/gpu_jobs`, `~/.cache/huggingface`, 안 쓰는 실행 환경, `tmp` 큰 폴더들 | `/mnt/work/research/…` |
+| `data/training_features_*.csv` | `/mnt/data2/research/data_csv/` |
 
 ### WSL 본체 C: 이전 (2026-11-07 완료)
 
@@ -66,7 +67,7 @@ ext4 실사용 96GB 인데 vhdx 가 157GB 다. 압축은 통째로 빈 블록만
 - 백업 전에 2시간 넘게 안 바뀐 `.jsonl`/`.bt` 를 압축한다. 수집기는 시각이 바뀔 때만 압축해서, 재시작하면 쓰던 시각 파일이 그대로 남고 사본에서 빠졌다. 같은 시각 `.gz` 가 이미 있으면 부분본은 `/mnt/data2/orderflow_partial/` 로 치운다.
 - `data/live/backups/crontab_latest.txt` 가 함께 간다(crontab 은 저장소에 없다).
 - `6TB` 의 `crypto-scalping-backups` 에는 11-07 까지 D: 에 있던 사본 전체(지금은 원본이 지운 파일 포함)가 들어 있다.
-- `/mnt/data2/research` 는 백업하지 않는다(연구 산출물, 다시 만들 수 있다).
+- 연구 폴더(`/mnt/work/research`, `/mnt/data2/research`)는 백업하지 않는다(다시 만들 수 있다). 11-07 이동 전 상태는 `/mnt/data2/research_moved_20261107/` 에 그대로 있다(지워도 되지만 그 뒤로는 D: 고장 때 사본이 없다).
 
 ## 2026-11-07 최적화 기록
 
@@ -188,7 +189,23 @@ C: 와 NVMe 는 같은 SSD 다. NVMe 여유는 `fast.vhdx` 안의 여유라 C: �
 - 터널(`CryptoScalpingPublicDashboard`)도 부팅 때 바로 도는데 `data/live` 가 NVMe 링크라, `start_public_dashboard.sh` 가 `/mnt/nvme` 를 5분까지 기다린다(11-07 재부팅 때 먼저 돌아 터널이 안 떴다, 고친 뒤 실제 재부팅 시험 전).
 - 재부팅 뒤 로그인 전에는 WSL 안에서 `powershell.exe` 가 `Invalid argument` 로 실패한다. `WSL_INTEROP=/run/WSL/<keepalive>_interop` 를 주면 된다. crontab 은 Windows 실행 파일을 안 부른다.
 - 손으로 복구: 관리자 PowerShell 에서 `powershell -ExecutionPolicy Bypass -File C:\Users\kbj20\crypto-ops\wsl_boot_recover.ps1 -MountOnly`
-- 6TB 가 빠지면: 원시 수집기는 링크가 깨져 재시작을 반복한다(**그 시간의 호가는 비고, 소급 불가**). 봉인·백업의 6TB 단계도 건너뛰고 `check_backup` 이 경보한다. 대시보드의 실시간 풋프린트(hot)는 계속된다. ob5m·iceberg 처럼 호가 diff 를 읽는 워커는 함께 멈춘다.
+- 6TB 가 빠지면: 아래 «6TB 장애 대피소»가 수집을 D: 로 돌린다. 봉인·백업의 6TB 단계는 건너뛰고 `check_backup` 이 경보한다.
+
+## 6TB 장애 대피소 (`scripts/ops/raw_failover_20261107.py`, 1분 cron)
+
+호가는 소급이 안 되는데 원시 파일을 USB 디스크 하나에 바로 쓴다. 6TB 쓰기 시험이 2회 연속 실패하면 `data/live/orderflow/<스트림>` 링크를 `/mnt/work/orderflow_spool/<스트림>` 으로 돌리고, 6TB 쪽 파일을 쓰기로 연 `scripts/live_*` 프로세스에 SIGTERM 을 보낸다(감독이 15초 뒤 새 경로로 다시 띄운다).
+5회 연속 정상이면 되돌리고, 2분 넘게 안 바뀐 대피 파일을 6TB 로 옮긴다. 같은 시각 파일이 6TB 에 이미 있으면 `/mnt/data2/orderflow_partial/` 로 보낸다(이어 붙이면 파일 중간에 스냅숏이 끼어 읽는 쪽이 틀린다).
+
+- 경보: `check_raw_failover`. 대피 중 CRITICAL · `/mnt/work` 안 붙음·상태 300초 넘게 묵음·옮기기 오류·여유 100GiB 아래 WARN. 상태 파일 = `data/live/ops_watchdog/raw_failover.json`.
+- 대피 중에는 D: 만 믿는다. 복구 전 D: 까지 고장 나면 그 구간을 잃는다.
+- 한계: 입출력이 D 상태로 멈춘 수집기는 SIGTERM 도 안 듣는다. 커널이 오류를 돌려줄 때까지 못 넘어간다. 읽는 쪽(ob5m·bookdepth·iceberg)은 12시간 warm 을 지키려고 안 끈다. 열린 파일이 끝날 때까지 멈춰 있고 다음 시각 파일부터 넘어간다. 실제 USB 를 뽑는 시험은 안 했다.
+- 연구 폴더와 같은 디스크다. 연구 작업이 꽉 채우면 대피소도 찬다.
+- 시험(11-07 19:36~19:39): 읽는 쪽이 없는 `hyperliquid_bookticker` 하나에서 전환 함수를 직접 호출했다. 수집기 3개 재시작 → 약 40초 안에 대피소에 파일 생성·증가 → 되돌림 → 재시작 → 30초 안에 6TB 로 복귀 → cron 이 2분 뒤 3개를 `orderflow_partial` 로 옮김. 판정(2회 실패·5회 정상)은 자체 점검으로만 시험했다.
+- 🔴부팅 작업의 실행 중인 루프는 옛 코드다(작업을 끄면 keepalive 가 같이 죽어 WSL 이 내려갈 수 있어 재시작하지 않았다). Windows 재부팅 때 새 코드로 뜬다. 그 전에 WSL 만 재시작되면 `/mnt/work` 가 안 붙으니 `-MountOnly` 를 손으로 돌린다(`check_raw_failover` 가 WARN).
+
+## 연구 폴더 이동 (11-07 19:30~20:30)
+
+`tmp`·`gpu_jobs`·`envs`·`binance_data_aggTrades`·`huggingface` 307GB 를 `/mnt/work/research` 로 복사하고, 파일 수·바이트와 무작위 40개 내용을 대조한 뒤 링크 28개를 돌렸다. 6TB 쪽은 지우지 않고 `/mnt/data2/research_moved_20261107/` 로 이름만 바꿨다(새 작업이 그쪽에 쓰지 않는다). D: 가 고장 나면 이 보관본에서 링크만 되돌리면 된다. 11-07 뒤에 만든 연구 산출물은 D: 에만 있다.
 
 ## 수집기 위치
 
