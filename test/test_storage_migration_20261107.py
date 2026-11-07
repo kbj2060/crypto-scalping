@@ -127,6 +127,24 @@ def test_backup_scope_excludes_and_skips_d_while_vhdx_there():
     assert not (dest / "binance_vision").exists()
 
 
+def test_backup_seals_stale_hour_files():
+    r, data2 = _repo(), _tmp()
+    d = data2 / "orderflow/depthdiff/ETHUSDT"
+    d.mkdir(parents=True)
+    old = time.time() - 3 * 3600
+    for name in ("alone.jsonl", "shipped.jsonl", "shipped.jsonl.gz", "fresh.jsonl"):
+        (d / name).write_text(name)
+        if name != "fresh.jsonl":
+            os.utime(d / name, (old, old))
+    rc, st = _backup(r, BACKUP_DATA2=str(data2), BACKUP_SKIP_MOUNT_CHECK="1", BACKUP_VHDX_PATH="/nonexistent",
+                     BACKUP_COLD_DEST=str(_tmp() / "cold"))
+    assert (d / "alone.jsonl.gz").is_file() and not (d / "alone.jsonl").exists()
+    assert (d / "shipped.jsonl.gz").read_text() == "shipped.jsonl.gz", "Pi 완본을 덮으면 안 된다"
+    assert not (d / "shipped.jsonl").exists() and (data2 / "orderflow_partial/depthdiff/ETHUSDT/shipped.jsonl").is_file()
+    assert (d / "fresh.jsonl").is_file(), "쓰는 중인 시각 파일은 건드리지 않는다"
+    assert st["targets"]["hot_6tb"] == 0
+
+
 # ── 이동 스크립트 ─────────────────────────────────────────────────────
 def test_move_swap_and_fail_closed_link():
     base = _tmp()

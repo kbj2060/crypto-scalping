@@ -52,6 +52,21 @@ send_cold() {   # send_cold <받는 쪽 접두어> [rsync 옵션...]
   return $rc
 }
 
+# 수집기는 시각이 바뀔 때만 압축한다 -- 재시작하면 쓰던 시각 파일이 .jsonl/.bt 로 남아 위 제외 규칙에 걸리고 사본이 안 생긴다
+#   (11-07 13개 278MB, 09-17 것까지). 2시간 넘게 안 바뀐 것을 닫는다. 같은 시각 .gz 가 이미 있으면(Pi 완본) 부분본은 치워 둔다 --
+#   둘 다 두면 읽는 쪽이 그 시각을 두 번 센다.
+seal_stale() {
+  local f part
+  while IFS= read -r -d '' f; do
+    if [[ -e "$f.gz" ]]; then
+      part="$DATA2/orderflow_partial/${f#"$DATA2/orderflow/"}"
+      mkdir -p "$(dirname "$part")" && mv -n "$f" "$part"
+    else
+      nice -n 10 gzip "$f" || log "🔴 gzip failed: $f"
+    fi
+  done < <(find "$DATA2/orderflow/" -type f \( -name '*.jsonl' -o -name '*.bt' \) -mmin +120 -print0 2>/dev/null)
+}
+
 hot_6tb=1; cold_d=1; dev=1
 mkdir -p "$ROOT/data/live/backups" "$(dirname "$STATUS")"
 crontab -l > "$ROOT/data/live/backups/crontab_latest.txt.tmp" 2>/dev/null \
@@ -60,6 +75,7 @@ crontab -l > "$ROOT/data/live/backups/crontab_latest.txt.tmp" 2>/dev/null \
 # 🔴mountpoint: 안 붙은 /mnt/data2 는 그냥 빈 폴더라 없는 줄 모르고 루트 디스크에 수백 GB 를 쓰게 된다.
 if mountpoint -q "$DATA2" || [[ "${BACKUP_SKIP_MOUNT_CHECK:-0}" == "1" ]]; then
   log "backup starting -> $DEST"
+  seal_stale
   hot_6tb=0
   mkdir -p "$DEST/data/hot_backup"
   # hot SQLite 는 쓰는 중인 파일을 rsync 하면 찢긴다 -> 온라인 백업 API 로 한 시점 사본(WAL 이라 수집기 쓰기를 안 막는다).
