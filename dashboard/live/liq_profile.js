@@ -4,7 +4,7 @@
 // 추정이지 실측 포지션이 아니다(scripts/live_liquidation_map_20260824.py 머리말). 🔴CI esprima: `?.(`·`?.[`·숫자 구분자 금지.
 (function () {
   "use strict";
-  var S = { ext: {}, extT: {}, sweep: null };
+  var S = { ext: {}, extT: {}, sweep: new WeakMap() };   // sweep = 지도별(곡선이 1·7·30일을 한 번에 부른다 -- 하나만 두면 서로 지워 매번 다시 계산하고 지나간 범위를 잊는다)
   var $ = function (id) { return document.getElementById(id); };
   var asset = function () { return typeof activeSnapshotAsset === "undefined" ? "eth" : activeSnapshotAsset; };
 
@@ -25,8 +25,8 @@
   //   안의 칸을 0 으로 -- 서버 생존 필터(그 뒤 봉 고·저)와 같은 규칙을 지도 사이 시간에 브라우저에서 이어 붙인다(서버 호출 0).
   //   새 지도가 오면(1·7·30일 60초) 서버가 같은 범위를 이미 걸러 낸 상태라 범위를 그 기준가로 다시 시작한다.
   function sweep(m, tp) {
-    var w = S.sweep, cp = tp.current_price, p = livePrice(tp);
-    if (!w || w.tp !== tp) w = S.sweep = { tp: tp, lo: cp, hi: cp, out: null, key: "" };
+    var w = S.sweep.get(tp), cp = tp.current_price, p = livePrice(tp);
+    if (!w) { w = { lo: cp, hi: cp, out: null, key: "" }; S.sweep.set(tp, w); }
     var lo = Math.min(w.lo, p), hi = Math.max(w.hi, p), a = typeof activeSnapshotAsset === "undefined" ? "eth" : activeSnapshotAsset;
     // 2026-10-11 1일 지도 = 마지막 닫힌 5분봉 끝(known_until)까지의 데이터 -- 그 뒤 봉 = 형성 5분봉부터라 지도 뒤 고·저를 빠짐없이 본다.
     //   7·30일(형성 1시간봉 포함)은 known_until 이 없어 generated_at.

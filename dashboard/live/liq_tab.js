@@ -1,4 +1,4 @@
-// 풋프린트 카드 «청산» 보기 -- 2026-11-07 사용자 시안 I «가격축 하나»: 남은 매물(전체) → 가격 사다리(±6% 확대) → 움직이면 닿는 누적(같은 가격축) ·
+// 풋프린트 카드 «청산» 보기 -- 2026-11-07 사용자 시안 I: 남은 매물(전체) → 가격 사다리(±6% 확대) · 2026-11-08 누적 곡선은 풋프린트 청산 기둥으로 옮김(fpLiqCurve) ·
 // 아래 줄 = 오늘·24시간 + 자기 흥분 지수. 보기 토글은 liq_profile.js setView, 이 파일은 그린다.
 // 원천: 지도 = fpLiqColTp(1·7·30일, 지나간 칸 지움) · HL 고래·호가·60초 = latestMarketCtx · 5분봉 = /api/liquidation-5m-history ·
 //   남은 매물·띠·실측 위치·탄력·자기 흥분 = /api/liq-tab(cron scripts/live_liq_tab_20261107.py, 매시).
@@ -6,7 +6,7 @@
 // 🔴CI esprima: `?.(`·`?.[`·숫자 구분자 금지.
 (function () {
   "use strict";
-  var LADDER_R = 6, BAR_POLL_MS = 30000, DATA_POLL_MS = 600000, TICK_MS = 5000, WINS = [30, 60, 90, 180], STACK_MQ = "(max-width:1100px)";
+  var LADDER_R = 6, FINE = 400, BAR_POLL_MS = 30000, DATA_POLL_MS = 600000, TICK_MS = 5000, WINS = [30, 60, 90, 180], STACK_MQ = "(max-width:1100px)";
   var S = { on: false, asset: null, win: 60, data: null, dataT: 0, bars: [], barsT: 0, built: "" };
   try { var saved = Number(localStorage.getItem("liqTabWin")); if (WINS.indexOf(saved) >= 0) S.win = saved; } catch (e) { /* 저장 못 해도 동작 */ }
   var $ = function (id) { return document.getElementById(id); };
@@ -68,26 +68,26 @@
     for (var i = 1; i < cum.length; i++) if (cum[i] == null) cum[i] = cum[i - 1];
     return { d0: d0, cum: cum, l: L, s: Sh, n: N, tot: L + Sh, first: first };
   }
-  // 지도 → 0.25% 사다리·0.1% 누적. 지나간 칸은 fpLiqColTp 가 이미 지웠다.
+  // 지도 → 0.25% 사다리·0.1% 누적(±40% -- 4h 창도 화면 끝까지). 지나간 칸은 fpLiqColTp 가 이미 지웠다.
   function mapOf(days) {
     var tp = typeof window.fpLiqColTp === "function" ? window.fpLiqColTp(days) : null, P = price();
     if (!tp || !tp.tiers || !(P > 0)) return null;
-    var rows = {}, fineDn = new Float64Array(121), fineUp = new Float64Array(121);
+    var rows = {}, fineDn = new Float64Array(FINE + 1), fineUp = new Float64Array(FINE + 1);
     tp.tiers.forEach(function (t, ti) {
       t.values.forEach(function (v, k) {
         if (!(v > 0)) return;
         var d = ((tp.lo + k) * tp.bin_width / P - 1) * 100;
-        if (Math.abs(d) > 12.1) return;
+        if (Math.abs(d) > FINE / 10 + 0.1) return;
         var g = Math.round(d / 0.25);
         if (g !== 0) { var r = rows[g] || (rows[g] = [0, 0, 0, 0]); r[ti] += v; }
-        var f = Math.min(120, Math.ceil(Math.abs(d) / 0.1));
+        var f = Math.min(FINE, Math.ceil(Math.abs(d) / 0.1));
         if (d < 0) fineDn[f] += v; else fineUp[f] += v;
       });
     });
-    for (var i = 1; i <= 120; i++) { fineDn[i] += fineDn[i - 1]; fineUp[i] += fineUp[i - 1]; }
+    for (var i = 1; i <= FINE; i++) { fineDn[i] += fineDn[i - 1]; fineUp[i] += fineUp[i - 1]; }
     return { rows: rows, dn: fineDn, up: fineUp };
   }
-  var cumAt = function (m, d) { var i = Math.min(120, Math.round(Math.abs(d) / 0.1)); return d < 0 ? m.dn[i] : m.up[i]; };
+  var cumAt = function (m, d) { var i = Math.min(FINE, Math.round(Math.abs(d) / 0.1)); return d < 0 ? m.dn[i] : m.up[i]; };
   function realRows(P) {   // 7일 실측을 지금 가격의 ±0.25% 칸으로
     var o = {};
     ((S.data && S.data.real) || []).forEach(function (r) { var g = Math.round((r[0] / P - 1) * 100 / 0.25), a = o[g] || (o[g] = [0, 0]); a[0] += r[1]; a[1] += r[2]; });
@@ -212,28 +212,48 @@
     };
     return svg(w, h, s, "가격 사다리: 지도 30일 7일 1일, 실측 7일, HL 고래 청산가");
   };
-  CH.curve = function (el, w, h) {
-    var P = price(), R_ = LADDER_R, M = { "1": mapOf(1), "7": mapOf(7), "30": mapOf(30) }, D = S.data, m = ctx(); if (!(P > 0) || !(M["1"] || M["7"] || M["30"])) return null;
-    var L = 8, RR = 10, Tp = 18, Bt = 6, lo = 5e5, hi = 2e10, X = function (v) { return L + (w - L - RR) * (Math.log10(Math.max(v, lo)) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo)); }, Y = function (d) { return Tp + (h - Tp - Bt) * (1 - (d + R_) / (2 * R_)); }, s = "";
-    for (var d = -R_; d <= R_; d += 1) if (d) s += line("lq-gl", L, w - RR, Y(d), Y(d));
-    [1e6, 1e8, 1e10].forEach(function (v) { s += line("lq-gl", X(v), X(v), Tp, h - Bt) + txt("lq-ax", X(v), 10, usd(v), "middle"); });
+  // 2026-11-08 펜 메모 «이 곡선으로 풋프린트 청산 프로파일을 대체»(옛 «움직이면 무엇이 닿나» 칸) -- 가격축은 풋프린트 것(yAt) · 지도 1·7·30일을 한꺼번에.
+  //   가로 = 로그 4자리, 코인마다 지도 크기에 맞춘다. app.js 청산 기둥이 부른다. 돌려주는 것 = { svg, hit(가격) → 툴팁 글 }.
+  window.fpLiqCurve = function (x0, x1, top, bot, yAt, yMin, yMax, win) {
+    var P = price(), M = { "1": mapOf(1), "7": mapOf(7), "30": mapOf(30) }, B = S.data && S.data.beta, m = ctx(), mx = 0;
+    ["1", "7", "30"].forEach(function (k) { if (M[k]) mx = Math.max(mx, M[k].dn[FINE], M[k].up[FINE]); });
+    if (!(P > 0) || !(mx > 0)) return null;
+    var hi = Math.pow(10, Math.ceil(Math.log10(mx))), lo = hi / 1e4, L = x0 + 2, W = x1 - x0 - 8, s = "";
+    var X = function (v) { return L + W * Math.log10(Math.max(v, lo) / lo) / 4; }, Y = function (p) { return Math.max(top, Math.min(bot, yAt(p))); }, inView = function (p) { return p >= yMin && p <= yMax; };
+    [lo, lo * 100, hi].forEach(function (v) { s += line("lq-gl", X(v), X(v), top, bot); });
+    s += txt("lq-ax o", L, top + 10, usd(lo)) + txt("lq-ax o", L + W, top + 10, usd(hi), "end");
     var sw = { "1": [2.2, ""], "7": [1.4, ""], "30": [1.2, "3 3"] };
     ["30", "7", "1"].forEach(function (k) {
       if (!M[k]) return;
-      [[-1, "--bad"], [1, "--good"]].forEach(function (q) { var a = []; for (var i = 1; i <= R_ * 10; i++) { var dd = q[0] * i / 10; a.push([X(cumAt(M[k], dd)), Y(dd)]); } s += '<path fill="none" stroke="var(' + q[1] + ')" stroke-width="' + sw[k][0] + '" stroke-dasharray="' + sw[k][1] + '" d="' + path(a) + '"/>'; });
+      [[-1, "--bad"], [1, "--good"]].forEach(function (q) {
+        var a = [];
+        for (var i = 1; i <= FINE; i++) {
+          var dd = q[0] * i / 10, p = P * (1 + dd / 100);
+          if (q[0] > 0 ? p < yMin : p > yMax) continue;   // 현재가가 화면 밖이면 화면 끝부터
+          a.push([X(cumAt(M[k], dd)), Y(p)]);
+          if (!inView(p)) break;                          // 화면 끝까지 한 칸 더 긋고 멈춘다
+        }
+        while (a.length > 1 && a[1][0] <= L) a.shift();   // 눈금 아래(거의 0) 구간은 안 긋는다 -- 왼쪽 끝에 붙은 선이 칸 테두리처럼 보였다(5분 창은 대부분 이 구간)
+        if (a.length > 1) s += '<path fill="none" stroke="var(' + q[1] + ')" stroke-width="' + sw[k][0] + '" stroke-dasharray="' + sw[k][1] + '" d="' + path(a) + '"/>';
+      });
     });
-    var B = D && D.beta;
-    if (B) s += '<path class="lq-ln" d="' + path([[X(B.dn * R_), Y(-R_)], [X(B.dn * 0.5), Y(-0.5)]]) + '"/><path class="lq-ln" d="' + path([[X(B.up * 0.5), Y(0.5)], [X(B.up * R_), Y(R_)]]) + '"/>' + txt("lq-ax t o", X(B.dn * R_) + 6, Y(-R_) - 3, "실측 1%당 " + usd(B.dn)) + txt("lq-ax t o", X(B.up * R_) + 6, Y(R_) + 11, "1%당 " + usd(B.up));
+    var k0 = M[win] ? String(win) : M["1"] ? "1" : M["7"] ? "7" : "30";   // 고른 막대 기간으로 화면 끝까지 얼마나 쌓였나 -- 5분 창처럼 좁으면 곡선보다 이 숫자가 먼저 읽힌다
+    [[-1, B && B.dn, (1 - yMin / P) * 100, bot - 16, bot - 5, "↓"], [1, B && B.up, (yMax / P - 1) * 100, top + 34, top + 22, "↑"]].forEach(function (q) {
+      if (!(q[2] > 0)) return;
+      s += txt("lq-ax t o", L, q[4], q[5] + " " + k0 + "일 " + usd(cumAt(M[k0], q[0] * q[2])));
+      if (!q[1]) return;
+      if (q[2] > 0.5) s += '<path class="lq-ln" d="' + path([[X(q[1] * 0.5), Y(P * (1 + q[0] * 0.005))], [X(q[1] * q[2]), Y(P * (1 + q[0] * q[2] / 100))]]) + '"/>';
+      s += txt("lq-ax o", L, q[3], "1%당 " + usd(q[1]));
+    });
     var bk = m && m.book && m.book.sweep, bps = m && m.book && m.book.bps;
-    if (bk && bps) bps.forEach(function (bp, j) { [[-1, bk.bid[j]], [1, bk.ask[j]]].forEach(function (q) { var dd = q[0] * bp / 100, x = X(q[1] * P), y = Y(dd); if (Math.abs(dd) <= R_) s += '<rect x="' + (x - 3) + '" y="' + (y - 3) + '" width="6" height="6" fill="var(--warn)" transform="rotate(45 ' + x + " " + y + ')"/>'; }); });
-    var hl = m && m.hl_liq; if (hl) (hl.below || []).concat(hl.above || []).forEach(function (l) { var dd = (l.px / P - 1) * 100; if (Math.abs(dd) <= R_) s += '<circle cx="' + X(l.usd) + '" cy="' + Y(dd) + '" r="4" fill="none" stroke="var(--accent)" stroke-width="1.3"/>'; });
-    s += line("lq-px", 0, w, Y(0), Y(0));
-    el._hit = function (x, y) {
-      var dd = Math.round((1 - (y - Tp) / (h - Tp - Bt)) * 2 * R_ * 10) / 10 - R_; if (!dd) return "";
+    if (bk && bps) bps.forEach(function (bp, j) { [[-1, bk.bid[j]], [1, bk.ask[j]]].forEach(function (q) { var pp = P * (1 + q[0] * bp / 1e4), x = X(q[1] * P), y = Y(pp); if (inView(pp)) s += '<rect x="' + (x - 2.5) + '" y="' + (y - 2.5) + '" width="5" height="5" fill="var(--warn)" transform="rotate(45 ' + x + " " + y + ')"/>'; }); });
+    var hl = m && m.hl_liq; if (hl) (hl.below || []).concat(hl.above || []).forEach(function (l) { if (inView(l.px)) s += '<circle cx="' + X(l.usd) + '" cy="' + Y(l.px) + '" r="3.5" fill="none" stroke="var(--accent)" stroke-width="1.3"/>'; });
+    return { svg: s, hit: function (p) {
+      var dd = Math.round((p / P - 1) * 1000) / 10; if (!dd || Math.abs(dd) > FINE / 10) return "";
       var v = function (k) { return M[k] ? usd(cumAt(M[k], dd)) : "—"; };
-      return px(P * (1 + dd / 100)) + " · " + sgn(dd, 1) + "%까지 누적<br>지도 1일 " + v("1") + " · 7일 " + v("7") + " · 30일 " + v("30") + (B ? "<br>실측 탄력으로는 " + usd((dd < 0 ? B.dn : B.up) * Math.abs(dd)) : "");
-    };
-    return svg(w, h, s, "가격이 움직일 때 닿는 청산 누적, 사다리와 같은 가격축");
+      return px(p) + " · " + sgn(dd, 1) + "%까지 누적 청산<br>지도 1일 " + v("1") + " · 7일 " + v("7") + " · 30일 " + v("30") + (B ? "<br>실측 탄력으로는 " + usd((dd < 0 ? B.dn : B.up) * Math.abs(dd)) : "")
+        + '<br><span style="opacity:.7">굵은 선 1일 · 가는 선 7일 · 점선 30일 · 흰 선 실측 탄력 · 마름모 호가 · 원 HL 고래<br>추정 지도(OI×2 눈금) · 절대액 아님 · 지도로만</span>';
+    } };
   };
 
   // ── 조립 ────────────────────────────────────────────────────────────────
@@ -263,7 +283,6 @@
       + '<div class="lq-row lq-top">'
       + '<section class="lq-p lq-f-rem">' + H("남은 매물 일봉별", "파생·서술", "der", seg) + '<div class="lq-b"><div id="lqRemKpi"></div>' + d_("remain", 300, "남은 매물 계산 전입니다") + '<div class="lq-leg" id="lqRemLeg"></div></div></section>'
       + '<section class="lq-p lq-f-lad">' + H("가격 사다리 ±" + LADDER_R + "%", "추정", "est", "<small>칸 0.25%</small>") + '<div class="lq-b">' + d_("ladder", 560, "지도를 받는 중입니다") + '<div class="lq-leg" id="lqLadLeg"></div></div></section>'
-      + '<section class="lq-p lq-f-cur">' + H("움직이면 무엇이 닿나", "추정", "est", "<small>누적 · 로그</small>") + '<div class="lq-b">' + d_("curve", 480, "지도를 받는 중입니다") + '<div class="lq-leg"><span>옆 사다리와 같은 가격축</span><span>굵기 = 지도 1·7·30일</span><span><i class="lq-sw-depth"></i>호가</span><span>원 = HL</span></div></div></section>'
       + "</div>"
       + '<div class="lq-row lq-bot">'
       + '<section class="lq-p lq-f-tod">' + H("오늘 · 24시간", "실측", "real") + '<div class="lq-b"><div class="lq-split"><div><h5 id="lqTodLab">오늘 5분 누적</h5>' + d_("today", 130, "오늘 기록이 아직 없습니다") + "</div><div><h5>24시간 5분 · 위 숏 · 아래 롱</h5>" + d_("bars24", 110, "5분봉을 받는 중입니다") + "</div></div></div></section>"
@@ -295,17 +314,19 @@
     });
   }
   function tick() {
-    if (!S.on || document.hidden) return;
+    if (document.hidden) return;
     if (S.asset !== asset()) return watchAsset();
-    fetchData(false); fetchBars(false);
+    fetchData(false);   // ponytail: 탭이 꺼져도 기둥의 실측 탄력(beta) 때문에 파일 통째(압축 전 ~1MB, 10분마다) -- 무거우면 서버에 beta 만 주는 길을 낸다
+    if (!S.on) return;
+    fetchBars(false);
     draw();
   }
   // 코인을 바꾼 순간: 옛 코인 숫자를 바로 지우고, 지도 7·30일은 응답이 늦으니 잠시 뒤 한두 번 더 그린다.
   function watchAsset() {
-    if (!S.on || S.asset === asset()) return;
-    S.asset = asset(); S.data = null; S.bars = []; S.heatKey = "";
-    draw(); fetchData(true); fetchBars(true);
-    setTimeout(draw, 900); setTimeout(draw, 2200);
+    if (S.asset === asset()) return;
+    S.asset = asset(); S.data = null; S.bars = []; S.barsT = 0; S.heatKey = "";
+    draw(); fetchData(true);
+    if (S.on) { fetchBars(true); setTimeout(draw, 900); setTimeout(draw, 2200); }
   }
   function setOn(on) {
     S.on = on;
