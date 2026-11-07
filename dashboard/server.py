@@ -2644,6 +2644,31 @@ def make_app() -> web.Application:
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
         return web.json_response(payload, headers=NOCACHE)
 
+    _liq_tab_files: dict[str, tuple[int, bytes]] = {}
+
+    async def api_liq_tab(request: web.Request) -> web.Response:
+        """풋프린트 카드 «청산» 보기의 미리 계산한 몫(2026-11-07) -- 매시 cron scripts/live_liq_tab_20261107.py 가 쓴 파일을 내주기만 한다."""
+        asset = _query_coin_asset(request)
+        path = LIVE_DIR / f"liq_tab_{asset}.json"
+
+        def read() -> bytes | None:
+            try:
+                mtime = path.stat().st_mtime_ns
+                hit = _liq_tab_files.get(asset)
+                if hit and hit[0] == mtime:
+                    return hit[1]
+                body = path.read_bytes()
+            except OSError:
+                return None
+            _liq_tab_files[asset] = (mtime, body)
+            return body
+        body = await asyncio.to_thread(read)
+        if body is None:
+            return web.json_response({"ok": False, "reason": "not_built"}, headers=NOCACHE)
+        resp = web.Response(body=body, content_type="application/json", headers=NOCACHE)
+        resp.enable_compression()
+        return resp
+
     def pred_record_safe(fn, coin: str, payload: dict, d4mod) -> None:
         """예측을 낸 직후 그 순간의 신호를 기록(2026-11-03). 기록 실패가 서빙을 깨면 안 된다 -- 삼키고 로그만."""
         try:
@@ -4627,6 +4652,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/trend", api_trend)
     app.router.add_get("/api/dir-signals", api_dir_signals)
     app.router.add_get("/api/regime-band", api_regime_band)
+    app.router.add_get("/api/liq-tab", api_liq_tab)
     app.router.add_get("/api/vol-forecast", api_vol_forecast)
     app.router.add_get("/api/dir4h", api_dir4h)
     app.router.add_get("/api/dir-short", api_dir_short)

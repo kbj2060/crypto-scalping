@@ -6760,6 +6760,7 @@ function scheduleFpLiveFrame() {
   });
 }
 function renderSnapshotChart() {
+  if (document.getElementById("fpCard")?.classList.contains("lq-on")) return;   // 2026-11-07 «청산» 보기는 차트를 가린다 -- 크기 0 으로 그리지 않는다(돌아올 때 liq_profile.js 가 다시 그린다)
   renderChartPan();
   renderFpPos();
   const svg = el("candleSvgSnapshot");

@@ -1,4 +1,4 @@
-// 풋프린트 보기 토글(풋프린트 · 체결 버블) + 오른쪽 기둥 «청산»의 입력(window.fpLiqColTp).
+// 풋프린트 보기 토글(풋프린트 · 체결 버블 · 청산) + 오른쪽 기둥 «청산»의 입력(window.fpLiqColTp).
 // 2026-10-08 «청산맵» 덮개 보기로 시작 -- 2026-10-27 탭을 없애고 지도를 풋프린트 기둥으로 옮겼다(app.js liqOn). 덮개 그리기·조작 코드는 지웠다.
 // 원천 = 1일: app.js 가 60초마다 받는 /api/liquidation-map 의 tier_profile · 7·30일: /api/liquidation-map/tiers?days= (같은 추정 모델, 입력 1시간봉 창만 다름).
 // 추정이지 실측 포지션이 아니다(scripts/live_liquidation_map_20260824.py 머리말). 🔴CI esprima: `?.(`·`?.[`·숫자 구분자 금지.
@@ -59,6 +59,10 @@
   function setView(view) {
     var card = $("fpCard");
     if (card) card.classList.toggle("fp-bbm-on", view === "bubble");
+    var wasLiq = !!(card && card.classList.contains("lq-on"));
+    if (card) card.classList.toggle("lq-on", view === "liq");   // 2026-11-07 «청산» 보기(liq_tab.js) -- 카드 몸통 전체를 쓴다
+    var tabsHost = $("fpViewTabs"), allTabs = tabsHost ? Array.prototype.slice.call(tabsHost.querySelectorAll(".asset-tab")) : [];
+    if (tabsHost) tabsHost.style.setProperty("--i", String(Math.max(0, allTabs.findIndex(function (b) { return b.dataset.view === view; }))));
     var wt = $("chartWindowTabs");
     if (wt) wt.hidden = view !== "fp";                       // 2026-10-13 체결 버블 = 창 탭 없음(차트 안에서 확대·이동, bubble_map.js)
     window.dispatchEvent(new CustomEvent("fpview", { detail: view }));
@@ -68,6 +72,7 @@
     });
     try { localStorage.setItem("fpView", view); } catch (e) { /* 저장 못 해도 동작 */ }
     if (typeof hideTooltip === "function") hideTooltip();   // app.js 전역
+    if (wasLiq && view !== "liq" && typeof scheduleSnapshotChartRender === "function") scheduleSnapshotChartRender();   // 가려 둔 차트를 제 크기로 다시
   }
 
   function init() {
@@ -76,7 +81,7 @@
     });
     var saved = null;
     try { saved = localStorage.getItem("fpView"); } catch (e) { /* 없음 */ }
-    setView(saved === "bubble" ? saved : "fp");
+    setView(saved === "bubble" || saved === "liq" ? saved : "fp");
   }
 
   // 2026-10-27 풋프린트 오른쪽 기둥 «청산»(사용자 «체결/포지션 칸에 청산을 만들어 청산맵을 풋프린트에 붙여줘») -- 지나간 칸은 지운 지도.

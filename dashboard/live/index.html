@@ -28,7 +28,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
-  <link rel="stylesheet" href="styles.css?v=20261102-profile5-css">
+  <link rel="stylesheet" href="styles.css?v=20261107-liqtab">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -181,6 +181,7 @@
             <div id="fpViewTabs" class="asset-tabs chart-mode-tabs fp-view-tabs" aria-label="차트 보기">
               <button type="button" class="asset-tab active" data-view="fp" aria-pressed="true">풋프린트</button>
               <button type="button" class="asset-tab" data-view="bubble" aria-pressed="false">체결 버블</button>   <!-- 2026-10-13 bubble_map.js -->
+              <button type="button" class="asset-tab" data-view="liq" aria-pressed="false">청산</button>   <!-- 2026-11-07 liq_tab.js -->
             </div>
             <div id="chartWindowTabs" class="asset-tabs chart-mode-tabs" aria-label="데이터 창"
                  title="풋프린트와 수급 프로파일이 보는 구간. 5m·30m·1h 에서 차트 위 휠 = 넓히기(최대 1주일 · 봉이 좁아지면 캔들)·좁히기(풋프린트) · 끌기·가로 휠 = 이동.">
@@ -244,6 +245,8 @@
              (사용자 지시). 별도 패널로 두지 않는 이유는 캔들과 x축이 구성상 같아야 해서다 --
              레짐 리본이 같은 이유로 여기 들어와 있다. app.js renderCandleSvg 의 「봉별 OI
              신규계약 레인」 블록. -->
+        <!-- 2026-11-07 «청산» 보기(liq_tab.js) -- 켜면 카드 몸통 전체를 쓴다 -->
+        <div id="lqTab" hidden></div>
         <div id="fpStrip" class="fp-strip" hidden></div>   <!-- 2026-10-06 머리 띠: 미 국채선물 4종 · 뉴스 기울기 1시간 · ETH/BTC/매크로(app.js renderFpStrip, 넓은 화면만) -->
         <div class="chart-container candle-container">
           <svg id="candleSvgSnapshot" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet" role="img"
@@ -619,9 +622,10 @@
   </div>
   <button type="button" id="ofabTab" class="ofab-tab" hidden aria-label="주문 버튼 꺼내기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg><i aria-hidden="true"></i><b>주문</b></button>
-  <script src="./app.js?v=20261102-profile5-js"></script>
+  <script src="./app.js?v=20261107-liqtab"></script>
   <script src="./fp_daily.js?v=20261031-btc"></script>
-  <script src="./liq_profile.js?v=20261015-align"></script>
+  <script src="./liq_profile.js?v=20261107-liqtab"></script>
+  <script src="./liq_tab.js?v=20261107-liqtab"></script>
   <script src="./bubble_map.js?v=20261016-minitop"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>

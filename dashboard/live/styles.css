@@ -3061,7 +3061,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
    10배·75~100배는 기존 토큰(호가 깊이 하늘 · 경고 주황), 사이 둘만 이 차트 몫으로 둔다(거래대금 파랑은 전용이라 안 씀). */
 :root { --lev10: var(--book-depth); --lev25: #8b93f0; --lev50: #e6c45c; --lev100: var(--warn); }
 [data-theme="light"] { --lev25: #4a52b8; --lev50: #9a7a12; }
-#fpViewTabs { --seg-n: 2; }   /* 풋프린트 · 체결 버블 -- 10-27 «청산맵» 칸을 뺐는데 3 이 남아 선택 조각이 1/3 폭이었다(사용자 «버튼은 3개 텍스트는 2개») */
+#fpViewTabs { --seg-n: 3; }   /* 풋프린트 · 체결 버블 -- 10-27 «청산맵» 칸을 뺐는데 3 이 남아 선택 조각이 1/3 폭이었다(사용자 «버튼은 3개 텍스트는 2개») */
 /* 2026-10-10 체결 기둥 [1d 7d 30d] [체결 | 포지션] -- 차트 위에 띄운 HTML 버튼(app.js placeFpColTog). 오른쪽 끝을 기둥 오른쪽에 맞춘다 */
 .fp-col-tog { position: absolute; transform: translateX(-100%); display: flex; gap: 6px; z-index: 2; width: max-content; white-space: nowrap; }
 .fp-col-tog[hidden], .fp-col-seg[hidden] { display: none; }
@@ -3651,4 +3651,73 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
 @media (max-width: 720px) {
   .aw { padding-inline: 14px; }
   .aw-kv { grid-template-columns: auto 1fr auto 1fr; }
+}
+
+/* ── 풋프린트 카드 «청산» 보기(2026-11-07 사용자 시안 I, liq_tab.js) ──────────────
+   카드 몸통 전체를 쓴다. 칸은 띄운 카드가 아니라 머리카락 선으로 나눈 판이다. 색은 초록(숏 청산)·빨강(롱 청산)·주황(주의)·중립, 히트맵은 densityColor. */
+#fpCard.lq-on > .candle-container, #fpCard.lq-on > #liquidationMapList, #fpCard.lq-on > #mcWall, #fpCard.lq-on > #mcBody,
+#fpCard.lq-on .fp-line-switch, #fpCard.lq-on .fp-line-btn, #fpCard.lq-on > #fpStrip, #fpCard.lq-on #chartPan, #fpCard.lq-on #chartWindowTabs { display: none !important; }
+#lqTab { color: var(--text); display: flex; flex-direction: column; gap: 8px; min-height: 0; height: clamp(760px, calc(100vh - 206px), 1180px); }
+#lqTab[hidden] { display: none; }
+#lqTab * { box-sizing: border-box; }
+.lq-now { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; min-height: 20px; font-size: 13px; line-height: 1.45; color: var(--muted); padding: 0 2px; }
+.lq-now b { color: var(--text); font: 700 14px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; }
+.lq-now b.lg { color: var(--bad); }
+.lq-burst { color: var(--warn); font-weight: 600; } .lq-burst b { color: var(--warn); }
+.lq-warn { color: var(--warn); }
+.lq-cols { display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-height: 0; background: var(--soft-line); border: 1px solid var(--soft-line); border-radius: 12px; overflow: hidden; }
+.lq-row { display: flex; gap: 1px; min-height: 0; min-width: 0; }
+.lq-top { flex: 1 1 0; } .lq-bot { flex: 0 0 216px; }
+.lq-f-rem { flex: 1.16 1 0; } .lq-f-lad { flex: 1.2 1 0; } .lq-f-cur { flex: .5 1 0; } .lq-f-tod { flex: 2 1 0; } .lq-f-br { flex: 1 1 0; }
+.lq-p { background: var(--chart-bg); padding: 9px 11px 8px; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.lq-p > header { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; margin-bottom: 5px; flex: 0 0 auto; min-width: 0; }
+.lq-p h4 { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--text); white-space: nowrap; }
+.lq-p header small { font-size: 11px; color: var(--muted); margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.lq-tag { font: 600 10px/1 var(--font-sans); padding: 3px 5px; border-radius: 4px; color: var(--muted); border: 1px solid color-mix(in srgb, var(--neutral) 26%, transparent); white-space: nowrap; }
+.lq-tag.real { color: var(--on-fill); background: var(--neutral); border-color: var(--neutral); }
+.lq-tag.est { border-style: dashed; }
+.lq-tag.lit { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.lq-seg { display: inline-flex; gap: 1px; margin-left: auto; padding: 2px; border-radius: 999px; background: rgb(var(--lift) / .06); }
+.lq-seg button { appearance: none; border: 0; background: none; cursor: pointer; min-height: 22px; padding: 2px 9px; border-radius: 999px; font: 600 11px/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted); }
+.lq-seg button:hover { color: var(--text); }
+.lq-seg button[aria-pressed="true"] { background: rgb(var(--lift) / .16); color: var(--text); }
+.lq-seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lq-b { flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.lq-d { flex: 1 1 auto; min-height: 0; min-width: 0; position: relative; }
+.lq-d svg { position: absolute; inset: 0; display: block; }
+.lq-empty { margin: 0; padding: 14px 2px; font-size: 12px; color: var(--muted); }
+.lq-ax { fill: var(--muted); font: 500 10px var(--font-mono); font-variant-numeric: tabular-nums; }
+.lq-ax.t { fill: var(--text); font-weight: 700; }
+.lq-ax.lq-axh { fill: var(--text); font-weight: 600; }
+.lq-ax.o { paint-order: stroke; stroke: var(--chart-bg); stroke-width: 3px; stroke-linejoin: round; }
+.lq-pxt { font: 700 10.5px var(--font-mono); fill: var(--on-fill); }
+.lq-gl { stroke: var(--soft-line); stroke-width: 1; }
+.lq-z { stroke: color-mix(in srgb, var(--neutral) 38%, transparent); stroke-width: 1; }
+.lq-px { stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 4 3; }
+.lq-lg { fill: var(--bad); } .lq-sh { fill: var(--good); }
+.lq-ln { fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linejoin: round; }
+.lq-ln2 { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 3 3; stroke-linejoin: round; }
+.lq-bd { fill: color-mix(in srgb, var(--neutral) 15%, transparent); }
+.lq-dt { fill: var(--accent); }
+.lq-wk { stroke: var(--muted); stroke-width: 1; }
+.lq-cu { fill: color-mix(in srgb, var(--good) 60%, var(--chart-bg)); } .lq-cd { fill: color-mix(in srgb, var(--bad) 60%, var(--chart-bg)); }
+.lq-rib { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+.lq-kp { padding: 1px 8px 1px 0; min-width: 0; }
+.lq-kp span { display: block; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lq-kp b { display: block; font: 700 18px/1.25 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); white-space: nowrap; }
+.lq-kp b.lg { color: var(--bad); } .lq-kp b.sh { color: var(--good); }
+.lq-kp small { display: block; font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lq-leg { display: flex; gap: 2px 10px; flex-wrap: wrap; flex: 0 0 auto; font-size: 10.5px; line-height: 1.4; color: var(--muted); }
+.lq-sw-depth { display: inline-block; width: 8px; height: 8px; margin-right: 4px; background: var(--warn); transform: rotate(45deg); }
+.lq-split { display: flex; gap: 12px; flex: 1 1 auto; min-height: 0; } .lq-split > div { flex: 1 1 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.lq-split h5 { margin: 0 0 3px; font-size: 11px; font-weight: 500; color: var(--muted); white-space: nowrap; }
+@media (max-width: 1100px) {
+  #lqTab { height: auto; }
+  .lq-row { display: contents; }
+  .lq-p { flex: 0 0 auto; }
+  .lq-d { flex: 0 0 auto; }
+  .lq-rib { grid-auto-flow: row; grid-template-columns: 1fr 1fr; gap: 4px 0; }
+  .lq-split { flex-direction: column; flex: 0 0 auto; } .lq-split > div { flex: 0 0 auto; }
+  .lq-seg button { min-height: 32px; padding: 4px 12px; font-size: 12px; }
+  .lq-p header small { white-space: normal; }
 }
