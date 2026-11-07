@@ -5,12 +5,14 @@
 #   then re-check every 60 s (WSL IP changes on every WSL start).
 #   4) 2026-11-07: attach and mount the NVMe VHDX (/mnt/nvme) and the 6TB USB disk (/mnt/data2); fstab has both by UUID.
 #      -MountOnly does just that once and exits (manual recovery, also how this was tested).
+#      2026-11-07: also the work VHDX on D: (/mnt/work: raw order book spool and research, see raw_failover_20261107.py).
 # ASCII only on purpose: Windows PowerShell 5.1 reads BOM-less UTF-8 as ANSI.
 param([string]$Distro = "Ubuntu", [int]$ListenPort = 2222, [int]$WslSshPort = 22, [switch]$MountOnly)
 $ErrorActionPreference = "Continue"
 $Log = Join-Path $PSScriptRoot "boot_recover.log"
 $Wsl = "$env:WINDIR\System32\wsl.exe"
 $FastVhd = "C:\wsl\fast\fast.vhdx"
+$WorkVhd = "D:\wsl\work\work.vhdx"
 function Log([string]$m) { "$(Get-Date -Format s) $m" | Add-Content -Path $Log -Encoding UTF8 }
 
 function Fix-NetworkProfile {
@@ -63,6 +65,10 @@ function Fix-DataDisk {
     if (-not (Test-Mounted /mnt/nvme)) {
         if (Test-Path $FastVhd) { Mount-Target /mnt/nvme @("--mount", "--vhd", $FastVhd, "--bare") "fast vhd" }
         else { Log "fast vhd missing: $FastVhd" }
+    }
+    if (-not (Test-Mounted /mnt/work)) {
+        if (Test-Path $WorkVhd) { Mount-Target /mnt/work @("--mount", "--vhd", $WorkVhd, "--bare") "work vhd" }
+        else { Log "work vhd missing: $WorkVhd" }
     }
     # /mnt/data2 = 6TB USB. Picked by size, not number: PHYSICALDRIVE numbers change when a disk is added.
     if (-not (Test-Mounted /mnt/data2)) {

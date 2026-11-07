@@ -628,6 +628,28 @@ def check_host_disks(disks=HOST_DISKS, data2: Path = DATA2, data2_warn: float = 
     return Check("host_disks", status, "; ".join(m for _, m in problems) or "host disks ok", details)
 
 
+WORK = Path(os.getenv("WATCHDOG_WORK", "/mnt/work"))      # D: 의 VHDX -- 원시 호가 대피소·연구 폴더
+
+
+def check_raw_failover(state_path: Path | None = None, work: Path = WORK, now: float | None = None) -> Check:
+    """scripts/ops/raw_failover_20261107.py(1분 cron) 상태. 대피 중이면 6TB 가 죽었다는 뜻이고 사람이 고쳐야 끝난다."""
+    if not os.path.ismount(work):
+        return Check("raw_failover", "WARN", f"{work} not mounted: 6TB failure would lose raw data", {})
+    state_path = LIVE / "ops_watchdog" / "raw_failover.json" if state_path is None else state_path
+    free = shutil.disk_usage(work).free / 2**30
+    try:
+        st = json.loads(state_path.read_text())
+    except (OSError, ValueError):
+        return Check("raw_failover", "WARN", "no failover state (cron not running?)", {"work_free_gib": round(free, 1)})
+    age = (time.time() if now is None else now) - float(st.get("at", 0))
+    details = {"on_spool": st.get("on_spool"), "age_s": round(age), "error": st.get("error", ""), "work_free_gib": round(free, 1)}
+    if st.get("on_spool"):
+        return Check("raw_failover", "CRITICAL", "6TB failed: raw order book is on the D: spool", details)
+    problems = [m for bad, m in ((age > 300, f"state {age:.0f}s old"), (bool(st.get("error")), str(st.get("error"))),
+                                 (free < 100, f"work {free:.0f}GiB")) if bad]
+    return Check("raw_failover", "WARN" if problems else "OK", "; ".join(problems) or "raw on 6TB, spool ready", details)
+
+
 def _ntp_offset_s(text: str) -> float | None:
     """`timedatectl timesync-status` 의 Offset 줄 -> 초. 없으면 None."""
     m = re.search(r"Offset:\s*([+-]?[\d.]+)(us|ms|s|min)\b", text)
@@ -863,7 +885,7 @@ def run_once(dry_run: bool) -> list[Check]:
     checks = [
         # 2026-10-12 봇 은퇴: trading_bot_process·decision_snapshot·heartbeat·data_pipeline·pipeline_contract·
         #   market_data_sources·execution_contract 제거(봇만 쓰던 파일들). 되살리려면 그 함수들(git 이력)과 이 줄을 함께.
-        check_dashboard(), check_data_sources(micro_db), check_runtime_resources(), check_host_disks(), check_backup(), check_seal(), check_clock(),
+        check_dashboard(), check_data_sources(micro_db), check_runtime_resources(), check_host_disks(), check_raw_failover(), check_backup(), check_seal(), check_clock(),
         check_watchdog_storage(), check_raster_archive(),
         # 2026-10-01 lake 봉인(scripts/seal_to_lake.py, 매일 11:05 KST cron) -- 대표로 ETH 테이프의 가장 최근 일별 파일.
         #   하루 한 번 쓰므로 warn 26h · critical 50h. cron 을 끄면 이 줄도 지운다.

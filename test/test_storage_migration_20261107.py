@@ -20,6 +20,31 @@ def _tmp() -> Path:
 
 
 # ── 감시기 ───────────────────────────────────────────────────────────
+def test_raw_failover_check():
+    d = _tmp()
+    state = d / "s.json"
+    assert w.check_raw_failover(state, work=d).status == "WARN", "안 붙었으면 대피소가 없다"
+    with mock.patch.object(w.os.path, "ismount", return_value=True), \
+            mock.patch.object(w.shutil, "disk_usage", return_value=mock.Mock(free=500 * 2**30)):
+        assert w.check_raw_failover(state, work=d).status == "WARN", "상태 파일 없음 = cron 이 안 돈다"
+        state.write_text(json.dumps({"on_spool": False, "at": 1000.0, "error": ""}))
+        assert w.check_raw_failover(state, work=d, now=1100.0).status == "OK"
+        assert "old" in w.check_raw_failover(state, work=d, now=2000.0).summary
+        state.write_text(json.dumps({"on_spool": True, "at": 1000.0, "error": ""}))
+        assert w.check_raw_failover(state, work=d, now=1100.0).status == "CRITICAL"
+        state.write_text(json.dumps({"on_spool": False, "at": 1000.0, "error": "size mismatch x"}))
+        assert w.check_raw_failover(state, work=d, now=1100.0).status == "WARN"
+    with mock.patch.object(w.os.path, "ismount", return_value=True), \
+            mock.patch.object(w.shutil, "disk_usage", return_value=mock.Mock(free=50 * 2**30)):
+        state.write_text(json.dumps({"on_spool": False, "at": 1000.0, "error": ""}))
+        assert "work 50GiB" in w.check_raw_failover(state, work=d, now=1100.0).summary
+
+
+def test_raw_failover_selftest():
+    r = subprocess.run([sys.executable, str(ROOT / "scripts/ops/raw_failover_20261107.py"), "--selftest"], capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0 and "selftest OK" in r.stdout, r.stderr
+
+
 def test_unmounted_data2_is_critical():
     c = w.check_host_disks(disks=(), data2=_tmp(), fast=None)
     assert c.status == "CRITICAL" and "not mounted" in c.summary
