@@ -73,6 +73,28 @@ def test_fast_disk_missing_is_critical():
     assert c.status == "CRITICAL" and "not mounted" in c.summary
 
 
+def test_burn_rate_warns_but_one_off_move_does_not():
+    a = _tmp()
+    now = time.mktime((2026, 11, 20, 12, 0, 0, 0, 0, -1))
+    def rec(days, gb):
+        d = time.strftime("%Y%m%d", time.localtime(now - days * 86400))
+        (a / f"{d}.json").write_text(json.dumps({"disk": {"D_drive": {"free_gb": gb}}}))
+    rec(7, 156); rec(1, 108)                # 하루 8GB 씩 꾸준히
+    assert 12 < w._days_left("D_drive", 100, a, now) < 13
+    rec(7, 200); rec(1, 100.1)              # 어제 크게 옮긴 뒤로는 안 줄어든다
+    assert w._days_left("D_drive", 100, a, now) > 14
+    rec(1, 99)                              # 늘었다 = 소진 없음
+    assert w._days_left("D_drive", 100, a, now) is None
+    assert w._days_left("nvme", 100, a, now) is None, "기록 없는 디스크"
+    assert w._days_left("D_drive", 100, _tmp(), now) is None, "기록 없음"
+    rec(7, 156); rec(1, 108)
+    d = _tmp()
+    with mock.patch.object(w.shutil, "disk_usage", return_value=mock.Mock(free=100 * 2**30)), \
+            mock.patch.object(w.os.path, "ismount", return_value=False):
+        c = w.check_host_disks(disks=(("D_drive", d, 50, 20),), data2=d, fast=None, audit=a, now=now)
+    assert "D_drive 12 days left" in c.summary and c.details["D_drive_days_left"] == 12.5
+
+
 # ── 백업 스크립트 ─────────────────────────────────────────────────────
 def _repo() -> Path:
     r = _tmp() / "repo"

@@ -17,7 +17,7 @@
 | 디스크 | 경로 | 담는 것 |
 |---|---|---|
 | C: NVMe VHDX 200GB (`C:\wsl\fast\fast.vhdx`) | `/mnt/nvme` | `data/hot`, `data/live`(DuckDB·상태·원장·래스터), `logs`, 라이브 실행 환경, 임시 파일. 3.6GB/s 쓰기 |
-| D: HDD 1TB (ST1000DM010) | WSL 루트 `ext4.vhdx` | 코드, conda, 작은 `data/*`. 라이브 쓰기는 거의 없다. 포지션이 없을 때 C: 로 옮긴다(아래) |
+| D: HDD 1TB (ST1000DM010, 33,018시간) | WSL 루트 `ext4.vhdx`, `crypto-scalping-cold` | 코드, conda, 작은 `data/*`. 라이브 쓰기는 거의 없다(3 IOPS). 6TB 원본의 사본(cold). C: 로 옮길 예정(아래) |
 | 6TB USB (ext4, 라벨 data2) | `/mnt/data2` | 원시 호가 원본, lake, 학습용 대용량, 연구 산출물, hot 의 1차 백업. 209MB/s 쓰기 |
 | dev | `~/backups/crypto-scalping-server` | 전부의 사본(다른 기계) |
 
@@ -32,11 +32,16 @@
 | `data/lake`, `data/splits` | `/mnt/data2/{lake,splits}` |
 | `binance_data/aggTrades`, `~/gpu_jobs`, `~/.cache/huggingface`, 안 쓰는 실행 환경, `tmp` 큰 폴더들 | `/mnt/data2/research/…` |
 
-### WSL 본체 C: 이전 (아직 안 했다)
+### WSL 본체 C: 이전 (1차 압축만 끝났다, 이동은 아직)
 
-`scripts/ops/windows/migrate_wsl_to_c_20261107.ps1`. 압축·이동에 1~3시간 WSL 이 꺼진다.
-🔴**대시보드가 손절을 감시한다(거래소 주문이 아니다, `dashboard/orders.py::bracket_tick`).** 대시보드를 끄면 그동안 손절이 안 나간다.
-포지션이 없을 때만 돌린다. hot 은 이미 NVMe 라 이 이전의 효과는 D: 공간 회수와 낡은 HDD 탈출이다.
+`scripts/ops/windows/migrate_wsl_to_c_20261107.ps1`. 🔴**대시보드가 손절을 감시한다(거래소 주문이 아니다, `dashboard/orders.py::bracket_tick`).** 대시보드를 끄면 그동안 손절이 안 나간다.
+
+2026-11-07 1차(10:12:40 정지 ~ 12:00 복구, 약 1시간 48분): 압축만 1시간 45분, vhdx 658 → 212GB. 그대로 옮기면 C: 여유가 34.7GB 라 스크립트가 복사하지 않고 D: 에서 다시 켰다.
+fstrim 은 경로 오류로 안 돌았다(고침). 212GB 와 실제 사용량의 차이는 그 탓일 수 있다.
+
+남은 일: 실행 환경을 뺀 뒤 루트 실사용 약 100GB. 다시 끄고 fstrim·압축·이동을 한다. 다시 끄면 `bookdepth` warm 12시간이 처음부터 돌고, 원시 호가는 Pi 가 메운다.
+hot 은 이미 NVMe 라 이 이전의 효과는 낡은 HDD(33,018시간)에서 OS·코드를 빼는 것이다. 속도 이득은 프로세스 시작할 때 코드 읽기 정도다.
+`wsl --manage --set-sparse` 는 쓰지 않는다(WSL 이 데이터 손상 가능성 때문에 막아 둔 기능이다).
 
 `raster` 만 NVMe 에 둔다. 대시보드가 실시간으로 읽고, 14일 보존이다.
 
@@ -48,13 +53,32 @@
 | 무엇 | 원본 | 사본 1 | 사본 2 |
 |---|---|---|---|
 | hot (`data/live`, `data/hot` 사본, 그 밖의 `data/`) | NVMe·루트 | 6TB `crypto-scalping-backups` | dev |
-| cold (`orderflow`·`lake`·`splits`) | 6TB | D: `crypto-scalping-cold` (vhdx 가 D: 를 떠난 뒤부터) | dev |
+| cold (`orderflow`·`lake`·`splits`) | 6TB | D: `crypto-scalping-cold` (vhdx 가 D: 에 있는 동안은 D: 여유 300GiB 초과일 때만) | dev |
 
 - 제외: `data/hot`(온라인 백업 API 사본을 보낸다) · `tmp` · `test` · `binance_vision`(다시 받을 수 있다) · `raster`(14일 보존) · 진행 중 시각 파일 `.bt`/`.jsonl` · `*.wal`.
 - `--delete` 를 안 쓴다. 사본은 늘기만 한다.
+- 백업 전에 2시간 넘게 안 바뀐 `.jsonl`/`.bt` 를 압축한다. 수집기는 시각이 바뀔 때만 압축해서, 재시작하면 쓰던 시각 파일이 그대로 남고 사본에서 빠졌다. 같은 시각 `.gz` 가 이미 있으면 부분본은 `/mnt/data2/orderflow_partial/` 로 치운다.
 - `data/live/backups/crontab_latest.txt` 가 함께 간다(crontab 은 저장소에 없다).
 - `6TB` 의 `crypto-scalping-backups` 에는 11-07 까지 D: 에 있던 사본 전체(지금은 원본이 지운 파일 포함)가 들어 있다.
 - `/mnt/data2/research` 는 백업하지 않는다(연구 산출물, 다시 만들 수 있다).
+
+## 속도 규칙과 실측 (2026-11-07)
+
+**🔴대시보드 프로세스에서 큰 결과를 행으로 받지 않는다.** `sqlite3` 는 행마다 GIL 을 놓았다가 다시 잡는다. CPU 를 쓰는 스레드가 하나라도 있으면 행당 전환 간격만큼 기다린다. dev 실측, 바쁜 스레드 3개, 2,016행: 한가할 때 0.11초 → 5ms 간격 191초 → 0.5ms 간격 12초.
+수만 행이 넘으면 SQL 에서 접거나(`GROUP BY`) 글자 한 덩어리로 받아 pandas C 파서로 읽는다. `np.fromstring` 은 숫자마다 GIL 을 다시 잡아 같은 병이 되고, `json.loads` 는 GIL 을 쥔 채 파싱해 이벤트 루프를 100ms 쯤 세운다.
+
+| 바꾼 것 | 전 | 후 | 조건 |
+|---|---|---|---|
+| 재시작 뒤 시장 맥락 표시 | 10:10 +104초 넘음 → 12:20 +73.6초 → 12:55 +25.1초 | 13:05 +6.9초 | 전부 서버 실측 재시작 1회씩. 10:10·12:20 은 다른 작업 영향 가능. 13:05 는 페이지 캐시가 찬 상태 |
+| 풋프린트·청산지도 표시 | 12:20 +18초·+23.8초 | 13:05 +2.5초·+6.8초 | 같음 |
+| 대시보드 CPU(재시작 직후 약 100초) | 108% | 10% | 표본 창이 재시작 후 시점 조금 다름 |
+| SQLite 커밋 p50·p99 (`synchronous=NORMAL`) | 3.42·6.0ms | 0.09·0.17ms | NVMe 빈 표에 초당 약 45회 |
+| NVMe flush | 22.4회/초 | 5.8회/초 | 서버 60초 표본, 후 표본은 복사 중 |
+| 이벤트 루프 지연 p99 (`setswitchinterval` 0.5ms) | 227ms | 26ms | dev, 바쁜 스레드 3개. CPU 처리량 −2% |
+
+`synchronous=NORMAL` 은 전원이 끊기면 마지막 커밋을 잃을 수 있다(DB 는 안 깨진다). 원장·주문 기록은 SQLite 가 아니다.
+
+재봐서 **안 바꾼 것**: `mmap_size`·`cache_size`(테이프 8일 조회 0.8초 그대로) · 6TB read-ahead(이미 8MB) · Windows 전원 구성(이미 고성능) · I/O 스케줄러(`none`, 조정 불가).
 
 ## 감시
 
@@ -65,7 +89,7 @@
 | 6TB 마운트·쓰기·여유 | `check_host_disks` · 데드맨 | 안 붙음·쓰기 실패·30초 멈춤 = CRITICAL · WARN 200GiB · CRITICAL 50GiB |
 | 백업 결과·나이 | `check_backup` | 26h WARN · 50h CRITICAL · 실패 CRITICAL |
 | 복원 시험 | `scripts/ops/backup_restore_check_20261107.py`, 월 1회 | 실패 CRITICAL · 40일 WARN |
-| 디스크 추세 | `morning_audit` 일별 기록 | 사람이 본다 |
+| 소진 속도 | `check_host_disks` 가 `morning_audit` 일별 기록을 읽는다 | 7일 평균과 어제 대비 중 느린 쪽으로 남은 일수 14일 아래 WARN |
 
 ## 디스크가 안 붙으면
 

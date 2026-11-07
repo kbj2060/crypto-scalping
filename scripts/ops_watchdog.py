@@ -564,19 +564,43 @@ def _probe_write(path: Path, seconds: float = 30.0) -> str | None:
     return f"write hung over {seconds:.0f}s"
 
 
-def check_host_disks(disks=HOST_DISKS, data2: Path = DATA2, data2_warn: float = 200, data2_crit: float = 50, fast: Path | None = FAST) -> Check:
-    """Windows 쪽 실제 여유 · 6TB 가 붙어 있고 써지는지.
+def _days_left(name: str, free: float, audit: Path, now: float | None = None) -> float | None:
+    """morning_audit 일별 기록으로 본 소진 속도 -> 남은 일수. 7일 평균과 어제 대비 중 **느린 쪽** -- 한 번 옮긴 큰 파일로 경보가 일주일 가지 않게.
+    기록이 없거나 줄지 않으면 None."""
+    now = time.time() if now is None else now
+    burns = []
+    for days in (7, 1):
+        day = datetime.fromtimestamp(now - days * 86400).strftime("%Y%m%d")
+        try:
+            burns.append((float(json.loads((audit / f"{day}.json").read_text())["disk"][name]["free_gb"]) - free) / days)
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+    burn = min(burns)
+    return free / burn if burn > 0 else None
 
-    `check_runtime_resources` 의 여유는 sparse vhdx 의 가상 크기라 실제 한계가 아니다 -- 2026-11-07 D: 가 102GB(하루 7~8GB
-    소진)인데 WSL 안은 371GB 라 경보가 없었다. ponytail: 고정 문턱이다. 하루 8GB 면 50GiB 경보가 6일 전이고, 소진 속도는
-    morning_audit 의 일별 기록으로 본다. 속도 경보가 필요해지면 그 기록을 여기서 읽는다."""
+
+def check_host_disks(disks=HOST_DISKS, data2: Path = DATA2, data2_warn: float = 200, data2_crit: float = 50, fast: Path | None = FAST,
+                     audit: Path | None = None, now: float | None = None) -> Check:
+    """Windows 쪽 실제 여유 · 소진 속도 · 6TB 가 붙어 있고 써지는지.
+
+    `check_runtime_resources` 의 여유는 vhdx 의 가상 크기라 실제 한계가 아니다 -- 2026-11-07 D: 가 102GB(하루 7~8GB
+    소진)인데 WSL 안은 371GB 라 경보가 없었다. 남은 일수 14일 아래면 WARN."""
     details: dict[str, Any] = {}
     problems: list[tuple[str, str]] = []
+    audit = OUT / "morning_audit" if audit is None else audit
+
+    def burn_check(name: str, free: float) -> None:
+        left = _days_left(name, free, audit, now)
+        if left is not None:
+            details[f"{name}_days_left"] = round(left, 1)
+            if left < 14:
+                problems.append(("WARN", f"{name} {left:.0f} days left"))
     for name, path, warn, crit in disks:
         if not path.exists():
             continue
         free = shutil.disk_usage(path).free / 2**30
         details[f"{name}_free_gib"] = round(free, 1)
+        burn_check(name, free)
         if free < warn:
             problems.append(("CRITICAL" if free < crit else "WARN", f"{name} {free:.0f}GiB"))
     if fast is not None:
@@ -585,6 +609,7 @@ def check_host_disks(disks=HOST_DISKS, data2: Path = DATA2, data2_warn: float = 
         else:
             free = shutil.disk_usage(fast).free / 2**30
             details["fast_free_gib"] = round(free, 1)
+            burn_check("nvme", free)
             if free < 30:
                 problems.append(("CRITICAL" if free < 10 else "WARN", f"fast {free:.0f}GiB"))
     if not os.path.ismount(data2):      # 안 붙은 폴더의 여유는 루트 디스크 값이라 재면 안 된다
@@ -596,6 +621,7 @@ def check_host_disks(disks=HOST_DISKS, data2: Path = DATA2, data2_warn: float = 
         else:
             free = shutil.disk_usage(data2).free / 2**30
             details["data2_free_gib"] = round(free, 1)
+            burn_check("data2", free)
             if free < data2_warn:
                 problems.append(("CRITICAL" if free < data2_crit else "WARN", f"data2 {free:.0f}GiB"))
     status = "CRITICAL" if any(s == "CRITICAL" for s, _ in problems) else "WARN" if problems else "OK"
