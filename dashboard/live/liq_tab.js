@@ -157,12 +157,12 @@
   }
   CH.remain = function (el, w, h) {
     var D = S.data, rm = D && D.remain[String(S.win)]; if (!rm || !rm.cols || !rm.cols.length) return null;
-    var P = price(), n = rm.view, days = D.days.slice(-n), prof = w < 300 ? 36 : 52, sh = h < 240 ? 26 : 40, L = 44, R = prof + 6, Tp = 6, Bt = 15, xr = w - R;
+    var P = price(), days = D.days.slice(-rm.view), n = days.length, prof = w < 300 ? 36 : 52, sh = h < 240 ? 26 : 40, L = 44, R = prof + 6, Tp = 6, Bt = 15, xr = w - R;
     var lo = Math.min.apply(null, days.map(function (d) { return d[3]; })) * 0.985, hi = Math.max.apply(null, days.map(function (d) { return d[2]; })) * 1.015, cw = (xr - L) / days.length, X = function (i) { return L + (i + 0.5) * cw; }, ch = h - Bt - sh - Tp, Y = function (p) { return Tp + ch * (1 - (p - lo) / (hi - lo)); }, s = "";
     var st = niceStep(hi - lo, 5); for (var p = Math.ceil(lo / st) * st; p < hi; p += st) s += line("lq-gl", L, xr, Y(p), Y(p)) + txt("lq-ax", L - 5, Y(p) + 3, px(p), "end");
-    s += '<image href="' + heatUrl({ lo: rm.lo, row: rm.row, cols: rm.cols.slice(-days.length) }, w, h, cw, L, Y, [L, Tp, xr - L, ch]) + '" x="0" y="0" width="' + w + '" height="' + h + '" preserveAspectRatio="none"/>';
+    s += '<image href="' + heatUrl({ lo: rm.lo, row: rm.row, cols: rm.cols.slice(-n) }, w, h, cw, L, Y, [L, Tp, xr - L, ch]) + '" x="0" y="0" width="' + w + '" height="' + h + '" preserveAspectRatio="none"/>';
     days.forEach(function (d, i) { var x = X(i), up = d[4] >= d[1]; s += line("lq-wk", x, x, Y(d[2]), Y(d[3])) + '<rect class="' + (up ? "lq-cu" : "lq-cd") + '" x="' + (x - cw * 0.3) + '" y="' + Y(Math.max(d[1], d[4])) + '" width="' + Math.max(cw * 0.6, 1) + '" height="' + Math.max(Math.abs(Y(d[1]) - Y(d[4])), 1) + '"/>'; });
-    if (S.win < n) { var xs = X(n - 1 - S.win); s += '<line x1="' + xs + '" x2="' + xs + '" y1="' + Tp + '" y2="' + (Tp + ch) + '" stroke="var(--accent)" stroke-dasharray="2 3" opacity=".7"/>' + txt("lq-ax o", xs + 4, Tp + 11, "오늘 지도 입력 시작 · " + S.win + "일 전"); }
+    if (S.win < n - 1) { var xs = X(n - 1 - S.win); s += '<line x1="' + xs + '" x2="' + xs + '" y1="' + Tp + '" y2="' + (Tp + ch) + '" stroke="var(--accent)" stroke-dasharray="2 3" opacity=".7"/>' + txt("lq-ax o", xs + 4, Tp + 11, "오늘 지도 입력 시작 · " + S.win + "일 전"); }
     var ba = LADDER_R / 100, yT = Y(P * (1 + ba)), yB = Y(P * (1 - ba));
     s += '<rect x="' + L + '" y="' + yT + '" width="' + (xr - L) + '" height="' + (yB - yT) + '" fill="color-mix(in srgb,var(--accent) 9%,transparent)" stroke="color-mix(in srgb,var(--accent) 45%,transparent)" stroke-dasharray="4 3"/>' + txt("lq-ax t o", L + 5, yT + 12, "사다리 ±" + LADDER_R + "%");
     s += line("lq-px", L, xr, Y(P), Y(P)) + txt("lq-ax t o", xr + 7, Y(P) - 3, px(P));
@@ -176,7 +176,7 @@
       var i = Math.floor((x - L) / cw), d = days[i]; if (!d) return "";
       var head = d[0] + " · 고 " + px(d[2]) + " · 저 " + px(d[3]) + " · 종 " + px(d[4]);
       if (y > Tp + ch) return head + "<br>그날 만든 양 중 지금까지 남음: 위 " + pc(d[6]) + " · 아래 " + pc(d[5]);
-      var pp = lo + (hi - lo) * (1 - (y - Tp) / ch), c = rm.cols[rm.cols.length - days.length + i], cell = Math.floor((pp - rm.lo) / rm.row), v = c && c.length && cell >= c[0] ? c[cell - c[0] + 1] : 0;
+      var pp = lo + (hi - lo) * (1 - (y - Tp) / ch), c = rm.cols[rm.cols.length - n + i], cell = Math.floor((pp - rm.lo) / rm.row), v = c && c.length && cell >= c[0] ? c[cell - c[0] + 1] : 0;
       return head + "<br>" + px(pp) + " 부근 진하기 " + ((v || 0) / 10).toFixed(0) + "%(이 탭 안 상대값)";
     };
     return svg(w, h, s, "일봉별 남은 청산 매물 히트맵");
@@ -283,8 +283,8 @@
     fill("lqRemLeg", "<span>칸 = 그날 마감 기준 지난 " + S.win + "일 입력 중 아직 안 닿은 청산가 · 진할수록 많음</span><span>오른쪽 = 오늘 남은 양</span><span>아래 띠 = 그 날 만든 양 중 지금까지 남은 비율</span>" + (age != null && age > 3 ? '<span class="lq-warn">' + age.toFixed(0) + "시간 전 계산</span>" : ""));
     var pos = typeof snapshotAccountPosition === "function" ? snapshotAccountPosition() : null, liq = pos && Number(pos.liquidation_price);
     fill("lqLadLeg", "<span>막대 네 단 = 레버리지(진할수록 높음)</span><span>지도 눈금 = OI×2 · 절대액 아님</span><span>실측 = 바이낸스 7일 체결 위치</span>" + (liq > 0 && P > 0 ? "<span>내 청산가 " + px(liq) + "(" + sgn((liq / P - 1) * 100, 1) + "%)</span>" : ""));
-    var B = S.data && S.data.band; fill("lqTodLab", "오늘 5분 누적" + (B ? " · 띠 = 지난 " + B.n + "일" : ""));
-    var br = S.data && S.data.branch, bl = br && br.length ? br[br.length - 1] : null; fill("lqBrLab", bl ? bl[0].slice(5) + " " + bl[1].toFixed(2) + " · 점선 = 대조 " + bl[2].toFixed(2) : "");
+    var B = S.data && S.data.band; fill("lqTodLab", "오늘 5분 누적" + (B ? " · 띠 = 지난 " + B.n + "일" : S.data ? " · 비교 띠는 기록 7일부터" : ""));
+    var br = S.data && S.data.branch, bl = br && br.length ? br[br.length - 1] : null; fill("lqBrLab", bl ? bl[0].slice(5) + " " + bl[1].toFixed(2) + " · 점선 = 대조 " + (Math.abs(bl[2]) < 0.005 ? 0 : bl[2]).toFixed(2) + (br.length < 20 ? " · " + br.length + "일뿐" : "") : "");
     host.querySelectorAll(".lq-d").forEach(function (el) { el.style.height = stack ? el.dataset.mh + "px" : ""; });
     host.querySelectorAll(".lq-d").forEach(function (el) {
       var r = el.getBoundingClientRect(), w = Math.round(r.width), h = Math.round(r.height);
@@ -296,14 +296,21 @@
   }
   function tick() {
     if (!S.on || document.hidden) return;
-    if (S.asset !== asset()) { S.asset = asset(); S.data = null; S.bars = []; S.heatKey = ""; fetchData(true); fetchBars(true); }
-    else { fetchData(false); fetchBars(false); }
+    if (S.asset !== asset()) return watchAsset();
+    fetchData(false); fetchBars(false);
     draw();
+  }
+  // 코인을 바꾼 순간: 옛 코인 숫자를 바로 지우고, 지도 7·30일은 응답이 늦으니 잠시 뒤 한두 번 더 그린다.
+  function watchAsset() {
+    if (!S.on || S.asset === asset()) return;
+    S.asset = asset(); S.data = null; S.bars = []; S.heatKey = "";
+    draw(); fetchData(true); fetchBars(true);
+    setTimeout(draw, 900); setTimeout(draw, 2200);
   }
   function setOn(on) {
     S.on = on;
     var host = $("lqTab"); if (host) host.hidden = !on;
-    if (on) { tick(); }
+    if (on) { tick(); setTimeout(draw, 900); setTimeout(draw, 2200); }
     else if (typeof hideTooltip === "function") hideTooltip();
   }
   function init() {
@@ -325,6 +332,7 @@
     window.addEventListener("fpview", function (e) { setOn(e.detail === "liq"); });
     if (document.body && $("fpCard") && $("fpCard").classList.contains("lq-on")) setOn(true);
     setInterval(tick, TICK_MS);
+    setInterval(watchAsset, 400);
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();

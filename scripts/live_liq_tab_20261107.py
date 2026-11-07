@@ -218,19 +218,20 @@ def real_rows(e: pd.DataFrame, price: float, now_ms: int) -> list:
     return [[round(float(b * step), 8), round(float(r.get("long", 0.0))), round(float(r.get("short", 0.0)))] for b, r in g.iterrows()]
 
 
-def elasticity(coin: str, k: pd.DataFrame, now_ms: int) -> dict | None:
-    """1시간 |이동| ≥ .5% 인 시간의 «1% 이동당 실제 청산» 중앙값(바이낸스 · 30일). 초당 1건 제한이 있어 하한이다."""
-    tr = lake_read(f"binance/tail_risk_1m/coin={coin}", "epoch_ms(ts) t, long_usd_1m l, short_usd_1m s")
-    if not len(tr):
+def elasticity(e: pd.DataFrame, k: pd.DataFrame, now_ms: int) -> dict | None:
+    """1시간 |이동| ≥ .5% 인 시간의 «1% 이동당 실제 청산» 중앙값(바이낸스 체결 이벤트 · 30일, 청산 없는 시간 = 0). 초당 1건 제한이 있어 하한이다.
+    이벤트 첫 시각 이후만 본다 -- 수집 전 시간을 0 으로 세면 안 된다."""
+    x = e[(e.venue == "bn") & (e.t >= now_ms - 30 * 86_400_000)]
+    if not len(x):
         return None
-    tr = tr[tr.t >= now_ms - 30 * 86_400_000]
-    h = tr.assign(h=tr.t // 3_600_000).groupby("h")[["l", "s"]].sum()
+    h = x.groupby(x.t // 3_600_000)["usd"].sum()
     r = k.assign(h=k.t // 3_600_000, r=k.close.pct_change() * 100).set_index("h").r
-    j = h.join(r, how="inner").dropna()
+    r = r[r.index >= h.index.min()]
+    j = pd.DataFrame({"r": r}).join(h.rename("u")).fillna({"u": 0.0}).dropna()
     up, dn = j[j.r >= 0.5], j[j.r <= -0.5]
     if len(up) < 10 or len(dn) < 10:
         return None
-    return {"up": float(((up.l + up.s) / up.r).median()), "dn": float(((dn.l + dn.s) / -dn.r).median()), "n_up": int(len(up)), "n_dn": int(len(dn))}
+    return {"up": float((up.u / up.r).median()), "dn": float((dn.u / -dn.r).median()), "n_up": int(len(up)), "n_dn": int(len(dn))}
 
 
 def build(coin: str, now_ms: int) -> dict | None:
@@ -259,7 +260,7 @@ def build(coin: str, now_ms: int) -> dict | None:
     e = events(coin.upper(), symbol)
     today = now_ms // 86_400_000
     return {"ok": True, "v": 1, "coin": coin, "generated_ms": now_ms, "price": price, "kline_end_ms": int(k.t.iloc[-1]) + 3_600_000, "days": days, "remain": remain,
-            "band": band(e, today), "branch": branch_series(e, today), "real": real_rows(e, price, now_ms), "beta": elasticity(coin.upper(), k, now_ms)}
+            "band": band(e, today), "branch": branch_series(e, today), "real": real_rows(e, price, now_ms), "beta": elasticity(e, k, now_ms)}
 
 
 def selftest() -> None:
@@ -306,7 +307,13 @@ def selftest() -> None:
     base = rng.integers(0, 86_400_000, 800)
     burst = np.concatenate([base + rng.integers(0, 15_000, 800), base + rng.integers(0, 30_000, 800), base]) % 86_400_000
     assert branching(burst) > branching(rng.integers(0, 86_400_000, 2400)) + 0.2, "군집이 더 커야 한다"
-    print("selftest OK -- 첫 닿음 · 인과(뒤 봉 무관) · 쓸린 칸 사라짐 · 입력 기간 · 부호화 · KPI · 분기비")
+    # ⑥ 실측 탄력: 수집 전 시간은 안 세고, 1% 이동당 금액을 낸다
+    hh = (t // 3_600_000)
+    ev = pd.DataFrame({"t": (hh[150:] * 3_600_000 + 60_000), "usd": 1000.0, "venue": "bn"})
+    kk = k.copy(); kk["close"] = np.where(np.arange(n) % 2, 100.0, 101.0)
+    b = elasticity(ev, kk, int(t[-1]) + 3_600_000)
+    assert b and b["n_up"] + b["n_dn"] == n - 150 - (0 if 150 else 1) and 900 < b["up"] < 1100 and 900 < b["dn"] < 1100, b
+    print("selftest OK -- 첫 닿음 · 인과(뒤 봉 무관) · 쓸린 칸 사라짐 · 입력 기간 · 부호화 · KPI · 분기비 · 실측 탄력")
 
 
 def main() -> int:
