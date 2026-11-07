@@ -364,8 +364,8 @@
       var imb = (buy[k] - sell[k]) / t;                        // −1 매도 우세 · +1 매수 우세
       var ws = room * sell[k] / mx, wb = room * buy[k] / mx;
       g.globalAlpha = 0.42 + 0.5 * Math.pow(Math.abs(imb), 0.7);
-      g.fillStyle = C.bad; g.fillRect(cx - ws, yTop, ws, h);
-      g.fillStyle = C.good; g.fillRect(cx, yTop, wb, h);
+      g.fillStyle = imb < 0 ? C.bad : imb > 0 ? C.good : C.soft;   // 2026-11-08 펜 메모: 좌우 모두 큰 쪽 색(5분 풋프린트 drawCell 과 같다)
+      g.fillRect(cx - ws, yTop, ws, h); g.fillRect(cx, yTop, wb, h);
       g.globalAlpha = 1;
       if (k === poc) { g.strokeStyle = C.warn; g.lineWidth = 1; g.strokeRect(cx - room, yTop + 0.5, room * 2, h - 1); }
       if (txt) {
@@ -663,7 +663,7 @@
   // ── 켜고 끄기 ──────────────────────────────────────────────────────────────────────
   var NOTE_1D = null;
   var NOTE_4H = "시각 = 칸 시작(보는 시계 · UTC 00·04·08·12·16·20시 경계 = KST 09·13·17·21·01·05시) · 지난 7일 + 형성 중 칸 · 1d 와 같은 그림을 4시간 칸으로 -- " +
-                "칸 = 공격자 매도(왼쪽) / 매수(오른쪽) · 주황 테두리 = 그 4시간 가장 많이 거래된 가격 · 파란 칸 = 그 칸 마감의 추정 청산 밀도(7일 1시간봉) · " +
+                "칸 = 공격자 매도(왼쪽) / 매수(오른쪽) · 색 = 큰 쪽(매도 빨강 · 매수 초록) · 주황 테두리 = 그 4시간 가장 많이 거래된 가격 · 파란 칸 = 그 칸 마감의 추정 청산 밀도(7일 1시간봉) · " +
                 "OI = 막대 직전 칸 대비 · 선 수준 · 청산 = 그 4시간 강제주문 합 · 추정 청산 = 그 칸 마감 지도의 고점 위/봉 안/저점 아래 비율 · 원천 = 우리 체결 테이프·OI·청산 수집기 · 서술이지 신호가 아님";
   function syncPeriodUi() {   // 범위 버튼·설명 줄·aria 를 지금 봉 길이에 맞춘다
     var tools = document.querySelectorAll("#fpDailyTools [data-view]:not([data-view=in]):not([data-view=out])");

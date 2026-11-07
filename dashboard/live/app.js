@@ -7010,7 +7010,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   const ml = (mobileChart ? (footprint ? 4 : 44) : footprint ? 36 - CENTER_NUDGE : 45) + CENTER_NUDGE + TRADE_L - (splitR ? FP_LEFT_SHIFT : 0),
         // 2026-09-27 풋프린트는 가격 배지를 전부 왼쪽 글자로 옮겼다(사용자 «호가가 잘 보이게») -- 오른쪽은 호가 띠가 쓴다.
         mr = (mobileChart ? 10 : footprint ? 34 : 112) - CENTER_NUDGE,
-        mtTop = 12, mt = mtTop + SUB_TOTAL + (splitR && svg.id === "candleSvgSnapshot" ? FP_TOP_ALIGN : 0), mb = svg.id === "candleSvgSnapshot" ? 28 : 70;   // 2026-10-06 풋프린트는 레짐·전환 리본 두 줄(+28~+64)이 빠져 x축 글자(+21)까지만 -- 빈 42px 는 가격 플롯에
+        mtTop = splitR ? 4 : 12 /* 2026-11-08 펜 메모 «카드 위 남는 부분 최소화» */, mt = mtTop + SUB_TOTAL + (splitR && svg.id === "candleSvgSnapshot" ? FP_TOP_ALIGN : 0), mb = svg.id === "candleSvgSnapshot" ? 28 : 70;   // 2026-10-06 풋프린트는 레짐·전환 리본 두 줄(+28~+64)이 빠져 x축 글자(+21)까지만 -- 빈 42px 는 가격 플롯에
   // 2026-09-21 사용자 요청: 「차트가 너무 많다 -- 레인을 한 덩어리로」 + 「가격 플롯을 키워라」.
   //   레인 5종(거래대금·델타/CVD·OI·수급·청산)이 각자 6px 간격으로 떨어져 있어 **다섯 장의
   //   그림**으로 읽혔다. 간격 6->3, 높이를 서로 가깝게 맞춰 한 블록으로 읽히게 한다:
@@ -7959,8 +7959,10 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           if (yTop + rowPx < mt || yTop > mt + ch) return;   // 창 밖 행은 건너뛴다
           const sx = x + (FPC === "L" ? fpcW + fpcGap : 0);                                 // 매도 칸 왼쪽 끝
           const bx = sx + half + 1 + (FPC === "C" ? fpcW + fpcGap : 0);                     // 매수 칸 왼쪽 끝
-          drawCell(ctx, sx, yTop, cell[1], cell[0], maxSell, "var(--bad)", sx - 2);          // 왼쪽 = 매도
-          drawCell(ctx, bx, yTop, cell[0], cell[1], maxBuy, "var(--good)", bx + half + 2); // 오른쪽 = 매수
+          // 2026-11-08 펜 메모 «좌우 거래량을 비교해 큰 쪽 색으로 좌우를 다 칠해줘»: 자리(왼쪽 매도·오른쪽 매수)는 그대로, 색 = 그 행에서 큰 쪽 · 같은 색이니 진하기도 같은 자(둘 중 최대)로
+          const col = cell[1] > cell[0] ? "var(--bad)" : cell[0] > cell[1] ? "var(--good)" : "var(--muted)", mxCell = Math.max(maxSell, maxBuy);
+          drawCell(ctx, sx, yTop, cell[1], cell[0], mxCell, col, sx - 2);          // 왼쪽 = 매도
+          drawCell(ctx, bx, yTop, cell[0], cell[1], mxCell, col, bx + half + 2); // 오른쪽 = 매수
           if (key === inf.pocKey) cvStrokeRect(ctx, sx, yTop, bx + half - sx, rowPx, "var(--amber)", 1, 0.85);   // POC -- 그 봉에서 가장 많이 거래된 가격 행
         });
         // 캔들은 테두리로만 남긴다 -- 셀을 덮지 않으면서 시가/종가/꼬리를 잃지 않으려는 것.
