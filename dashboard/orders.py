@@ -1407,6 +1407,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 equity=equity, leverage=leverage, fraction=fraction,
                 # 2026-09-25 사용자 지시: 비율 = 순자산 대비 증거금, 상한 넘으면 진입 불가
                 fraction_of_equity=True, order_leverage=margin_lev or 0.0,
+                available_margin=pool_balance(account, symbol).get("available"),
                 cap_label={"margin": f"증거금 상한 {SIZING_MARGIN_CAP_PCT:g}%",
                            "model": "위험모델 상한",
                            "rule": f"자동 규칙 상한(순자산 {cr['l'] if cr else 0:.2f}배)",

@@ -95,12 +95,18 @@ def _ceil_to(value: float, grid: float) -> float:
     return math.ceil(value / grid - 1e-9) * grid
 
 
+# 가용 잔고에서 남기는 몫. 거래소는 증거금을 주문가·마크 중 불리한 쪽으로 재므로, 가용을 다 쓰면 호가가 조금만 움직여도 -2019 로 거부한다.
+# ponytail: 고정 2%(가격 2% 움직임까지). 더 자주 거부되면 늘린다.
+MARGIN_BUFFER = 0.02
+
+
 def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended_qty: float,
                      cap_notional: float | None, filters: dict[str, float],
                      symbol: str = "ETHUSDT", existing_notional: float = 0.0,
                      equity: float = 0.0, leverage: float = 0.0,
                      fraction: float = 1.0, fraction_of_equity: bool = False,
-                     order_leverage: float = 0.0, cap_label: str = "상한") -> dict[str, Any]:
+                     order_leverage: float = 0.0, cap_label: str = "상한",
+                     available_margin: float | None = None) -> dict[str, Any]:
     """보낼 주문 하나를 만든다. **순수 함수** -- 네트워크도 시계도 안 본다(그래야 검사가 된다).
 
     peg 는 «내가 메이커로 남는 가격»이다: 롱은 최우선 매수호가, 숏은 최우선 매도호가.
@@ -155,6 +161,14 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
             qty = room / price
             notes.append(f"상한까지 남은 여유 {room:,.0f} USDT 로 줄였습니다"
                          f" (기존 {existing_notional:,.0f} + 신규 = 상한 {cap_notional:,.0f})")
+    # 2026-11-07 순자산이 아니라 **가용 잔고** 안으로 자른다. 순자산에는 다른 포지션이 쓰는 증거금과 미실현 손익이 들어 있어
+    #   그대로 쓰면 거래소가 -2019 로 거부하고 SL/TP 도 안 걸린다(11-07 ETHUSDC 4.43개 · USDT 풀은 순자산 686 · 가용 385).
+    short_of_margin = False
+    if available_margin is not None and order_leverage > 0:
+        most = max(0.0, available_margin) * (1 - MARGIN_BUFFER) * order_leverage / price
+        if qty > most:
+            qty, capped, short_of_margin = most, True, True
+            notes.append(f"가용 잔고 {available_margin:,.2f} 안으로 줄였습니다 (증거금 {most * price / order_leverage:,.2f})")
     # 🔴비율은 **상한에 자른 뒤** 곱한다. 권고량에 곱하면 뜻이 어긋난다 -- 권고가 상한을
     # 크게 넘는 구간(새 상한 6.7배에서는 절반쯤)에서는 «33%» 를 넣어도 상한의 71% 가
     # 들어간다(2026-09-13 실측). 그래서 슬라이더의 뜻은 «권고 중 얼마»가 아니라
@@ -169,7 +183,8 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
 
     blocked = None
     if qty < filters["min_qty"] or qty <= 0:
-        blocked = (f"{cap_label} 여유가 없습니다" if capped or (cap_notional and existing_notional >= cap_notional)
+        blocked = ("가용 잔고가 부족합니다" if short_of_margin
+                   else f"{cap_label} 여유가 없습니다" if capped or (cap_notional and existing_notional >= cap_notional)
                    else f"수량이 최소 {filters['min_qty']} 미만")
     elif filters["min_notional"] and qty * price < filters["min_notional"]:
         blocked = f"명목이 최소 {filters['min_notional']:,.0f} USDT 미만"
