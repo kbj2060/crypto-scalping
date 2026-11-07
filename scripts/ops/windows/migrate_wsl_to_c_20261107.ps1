@@ -24,16 +24,24 @@ if ((Test-Path $Dest) -and (Get-ChildItem $Dest -Force | Measure-Object).Count -
 
 try {
     & $Wsl -d $Distro -u root -e fstrim -v / 2>&1 | Out-String | ForEach-Object { Log "fstrim: $($_.Trim())" }
-    Stop-ScheduledTask -TaskName $BootTask      # its loop would start WSL again within 60 s
-    & $Wsl --shutdown
-    Log "wsl shutdown rc=$LASTEXITCODE"
-    Start-Sleep -Seconds 15
+    Disable-ScheduledTask -TaskName $BootTask | Out-Null   # its loop (or its restart-on-failure) would start WSL again and lock the vhdx
+    Stop-ScheduledTask -TaskName $BootTask
+    for ($i = 0; $i -lt 10; $i++) {
+        & $Wsl --shutdown
+        Start-Sleep -Seconds 15
+        $running = ((& $Wsl --list --running 2>$null) -join "") -replace "`0", ""
+        if ($running -notmatch $Distro) { break }
+        Log "still running after shutdown attempt $i"
+    }
+    Log "wsl stopped"
 
     $dp = Join-Path $env:TEMP "compact_vhdx.txt"
     "select vdisk file=`"$vhdx`"`r`nattach vdisk readonly`r`ncompact vdisk`r`ndetach vdisk`r`nexit" | Set-Content -Path $dp -Encoding ASCII
     Log "compact start"
     $out = diskpart /s $dp 2>&1 | Out-String
-    Log "compact rc=$LASTEXITCODE size=$(SizeGB $vhdx)GB"
+    $rc = $LASTEXITCODE
+    $out | Add-Content -Path $Log -Encoding UTF8
+    Log "compact rc=$rc size=$(SizeGB $vhdx)GB"
     Remove-Item $dp -ErrorAction SilentlyContinue
 
     $after = (FreeGB C) - (SizeGB $vhdx)
@@ -45,7 +53,8 @@ try {
         Log "move rc=$LASTEXITCODE; on C: $(Test-Path (Join-Path $Dest 'ext4.vhdx')); on old path $(Test-Path $vhdx)"
     }
 } finally {
-    Start-ScheduledTask -TaskName $BootTask     # starts WSL, keepalive, 6TB mount, portproxy
+    Enable-ScheduledTask -TaskName $BootTask | Out-Null
+    Start-ScheduledTask -TaskName $BootTask     # starts WSL, keepalive, NVMe and 6TB mounts, portproxy
     Start-Sleep -Seconds 30
     Start-ScheduledTask -TaskName $TunnelTask -ErrorAction SilentlyContinue
     Log "boot task restarted. C_free=$(FreeGB C)GB D_free=$(FreeGB D)GB"
