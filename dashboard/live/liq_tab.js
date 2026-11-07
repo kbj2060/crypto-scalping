@@ -213,15 +213,15 @@
     return svg(w, h, s, "가격 사다리: 지도 30일 7일 1일, 실측 7일, HL 고래 청산가");
   };
   // 2026-11-08 펜 메모 «이 곡선으로 풋프린트 청산 프로파일을 대체»(옛 «움직이면 무엇이 닿나» 칸) -- 가격축은 풋프린트 것(yAt) · 지도 1·7·30일을 한꺼번에.
-  //   가로 = 로그 4자리, 코인마다 지도 크기에 맞춘다. app.js 청산 기둥이 부른다. 돌려주는 것 = { svg, hit(가격) → 툴팁 글 }.
+  //   가로 = 로그 4자리, 코인마다 지도 크기에 맞춘다. 2026-11-08 사용자: 바닥선 = 오른쪽 세로선(x1) -- 레버리지 막대와 같은 선에서 왼쪽으로 자란다. app.js 청산 기둥이 부른다. 돌려주는 것 = { svg, hit(가격) → 툴팁 글 }.
   window.fpLiqCurve = function (x0, x1, top, bot, yAt, yMin, yMax, win) {
     var P = price(), M = { "1": mapOf(1), "7": mapOf(7), "30": mapOf(30) }, B = S.data && S.data.beta, m = ctx(), mx = 0;
     ["1", "7", "30"].forEach(function (k) { if (M[k]) mx = Math.max(mx, M[k].dn[FINE], M[k].up[FINE]); });
     if (!(P > 0) || !(mx > 0)) return null;
     var hi = Math.pow(10, Math.ceil(Math.log10(mx))), lo = hi / 1e4, L = x0 + 2, W = x1 - x0 - 8, s = "";
-    var X = function (v) { return L + W * Math.log10(Math.max(v, lo) / lo) / 4; }, Y = function (p) { return Math.max(top, Math.min(bot, yAt(p))); }, inView = function (p) { return p >= yMin && p <= yMax; };
+    var X = function (v) { return x1 - W * Math.log10(Math.max(v, lo) / lo) / 4; }, Y = function (p) { return Math.max(top, Math.min(bot, yAt(p))); }, inView = function (p) { return p >= yMin && p <= yMax; };
     [lo, lo * 100, hi].forEach(function (v) { s += line("lq-gl", X(v), X(v), top, bot); });
-    s += txt("lq-ax o", L, top + 10, usd(lo)) + txt("lq-ax o", L + W, top + 10, usd(hi), "end");
+    s += txt("lq-ax o", L, top + 10, usd(hi)) + txt("lq-ax o", x1 - 2, top + 10, usd(lo), "end");
     var sw = { "1": [2.2, ""], "7": [1.4, ""], "30": [1.2, "3 3"] };
     ["30", "7", "1"].forEach(function (k) {
       if (!M[k]) return;
@@ -233,7 +233,7 @@
           a.push([X(cumAt(M[k], dd)), Y(p)]);
           if (!inView(p)) break;                          // 화면 끝까지 한 칸 더 긋고 멈춘다
         }
-        while (a.length > 1 && a[1][0] <= L) a.shift();   // 눈금 아래(거의 0) 구간은 안 긋는다 -- 왼쪽 끝에 붙은 선이 칸 테두리처럼 보였다(5분 창은 대부분 이 구간)
+        while (a.length > 1 && a[1][0] >= x1) a.shift();   // 눈금 아래(거의 0) 구간은 안 긋는다 -- 바닥선에 붙은 선이 칸 테두리처럼 보였다(5분 창은 대부분 이 구간)
         if (a.length > 1) s += '<path fill="none" stroke="var(' + q[1] + ')" stroke-width="' + sw[k][0] + '" stroke-dasharray="' + sw[k][1] + '" d="' + path(a) + '"/>';
       });
     });
@@ -246,7 +246,7 @@
       s += txt("lq-ax o", L, q[3], "1%당 " + usd(q[1]));
     });
     var bk = m && m.book && m.book.sweep, bps = m && m.book && m.book.bps;
-    if (bk && bps) bps.forEach(function (bp, j) { [[-1, bk.bid[j]], [1, bk.ask[j]]].forEach(function (q) { var pp = P * (1 + q[0] * bp / 1e4), x = X(q[1] * P), y = Y(pp); if (inView(pp)) s += '<rect x="' + (x - 2.5) + '" y="' + (y - 2.5) + '" width="5" height="5" fill="var(--warn)" transform="rotate(45 ' + x + " " + y + ')"/>'; }); });
+    if (bk && bps) bps.forEach(function (bp, j) { [[-1, bk.bid[j]], [1, bk.ask[j]]].forEach(function (q) { var pp = P * (1 + q[0] * bp / 1e4), x = X(q[1] * P), y = Y(pp); if (inView(pp)) s += '<rect x="' + (x - 2.5) + '" y="' + (y - 2.5) + '" width="5" height="5" fill="var(--warn)" stroke="var(--chart-bg)" transform="rotate(45 ' + x + " " + y + ')"/>'; }); });
     var hl = m && m.hl_liq; if (hl) (hl.below || []).concat(hl.above || []).forEach(function (l) { if (inView(l.px)) s += '<circle cx="' + X(l.usd) + '" cy="' + Y(l.px) + '" r="3.5" fill="none" stroke="var(--accent)" stroke-width="1.3"/>'; });
     return { svg: s, hit: function (p) {
       var dd = Math.round((p / P - 1) * 1000) / 10; if (!dd || Math.abs(dd) > FINE / 10) return "";
