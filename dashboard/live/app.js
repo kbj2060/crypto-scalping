@@ -6358,6 +6358,58 @@ function renderChartPan() {
     + `<span class="chart-pan-when">${when}</span>`;   // 2026-10-26 펜 메모 «차트를 오가다 보면 두 글자가 겹친다 · 실시간/최신으로 제거»: 최신으로 = 차트 더블클릭 · End 키
   if (focused) box.querySelector(".chart-pan-map")?.focus();
 }
+// 2026-11-07 사용자 «풋프린트 차트에서 shift+클릭으로 바이낸스처럼 범위 박스 -- 몇 % 높이·시간 길이»(시안 B 눈금형):
+//   Shift+드래그 = 측정 박스. 봉 시각·가격에 고정돼 이동·줌·실시간에도 따라간다(좌표가 아니라 값을 들고 있다). 포지션이 있으면 그 구간의 내 손익 금액도 한 알약으로.
+//   지우기 = Esc · Shift+클릭(드래그 없이) · 알약의 ×. 휴대폰(터치)은 Shift 가 없어 이번엔 제외.
+let meas = null;   // {asset, t0, p0, t1, p1}
+function measClear() { if (meas) { meas = null; renderMeasure(); } }
+function measPt(ev) {   // 화면 좌표 → 가장 가까운 봉 시각 + 가격(chartGeo = 마지막 렌더의 플롯 자리)
+  const svg = el("candleSvgSnapshot"), G = chartGeo, m = svg && svg.getScreenCTM();
+  if (!G || !m || !G.bars.length || !(G.pb > G.mt)) return null;
+  const i = Math.round(((ev.clientX - m.e) / m.a - G.ml) / (G.cw / G.n) - 0.5 - G.off);
+  return { t: G.bars[Math.max(0, Math.min(G.bars.length - 1, i))].time, p: G.ymax - ((ev.clientY - m.f) / m.d - G.mt) * (G.ymax - G.ymin) / (G.pb - G.mt) };
+}
+function measIdx(bars, t) {   // 봉 시각 → 봉 번호(소수) -- 화면 밖 시각은 봉 간격으로 연장
+  const n = bars.length, step = n > 1 ? bars[n - 1].time - bars[n - 2].time || 300 : 300;
+  if (t <= bars[0].time) return (t - bars[0].time) / step;
+  if (t >= bars[n - 1].time) return n - 1 + (t - bars[n - 1].time) / step;
+  let lo = 0, hi = n - 1;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (bars[mid].time <= t) lo = mid; else hi = mid; }
+  return lo + (t - bars[lo].time) / (bars[hi].time - bars[lo].time);
+}
+function measDur(s) {   // 25분 · 1시간 30분 · 2일 3시간
+  const m = Math.round(s / 60), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mi = m % 60;
+  return d ? `${d}일${h ? ` ${h}시간` : ""}` : h ? `${h}시간${mi ? ` ${mi}분` : ""}` : `${mi}분`;
+}
+function renderMeasure() {
+  const svg = el("candleSvgSnapshot"), G = chartGeo, box = svg && svg.parentElement, m = svg && svg.getScreenCTM();
+  if (meas && meas.asset !== activeSnapshotAsset) meas = null;   // 다른 코인 가격의 박스를 그대로 두지 않는다
+  let h = el("lineMeas");
+  if (!(meas && G && m && box && G.bars.length && G.ymax > G.ymin && !fpAltOn())) { if (h) { h.hidden = true; h._k = ""; } return; }
+  if (!h) { h = document.createElement("div"); h.id = "lineMeas"; h.className = "lt lt-meas"; box.appendChild(h); }
+  const pr = box.getBoundingClientRect(), slot = G.cw / G.n, bars = G.bars;
+  const X = (i) => m.a * (G.ml + (i + G.off + 0.5) * slot) + m.e - pr.left, Y = (v) => m.d * (G.mt + (G.ymax - v) * (G.pb - G.mt) / (G.ymax - G.ymin)) + m.f - pr.top;
+  const i0 = measIdx(bars, meas.t0), i1 = measIdx(bars, meas.t1);
+  const L = m.a * G.ml + m.e - pr.left, R = m.a * (G.ml + G.cw) + m.e - pr.left, T = m.d * G.mt + m.f - pr.top, B = m.d * G.pb + m.f - pr.top;
+  const xl = Math.min(X(i0), X(i1)), xr = Math.max(X(i0), X(i1)), yt = Y(Math.max(meas.p0, meas.p1)), yb = Y(Math.min(meas.p0, meas.p1));
+  const out = xr < L || xl > R || yb < T || yt > B;   // 보이는 창 밖(값은 그대로 들고 있다 -- 돌아오면 다시 보인다)
+  const x0 = Math.max(L, xl), x1 = Math.min(R, xr), y0 = Math.max(T, yt), y1 = Math.min(B, yb), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  const up = meas.p1 >= meas.p0, dp = meas.p1 - meas.p0, pct = dp / meas.p0 * 100, sg = (v) => (v >= 0 ? "+" : "−");
+  const nb = Math.round(Math.abs(i1 - i0)), dig = Math.abs(dp) >= 1 ? 2 : 4, money = (v) => `${sg(v)}$${Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: dig, maximumFractionDigits: dig })}`;
+  const pos = snapshotAccountPosition(), qty = pos ? Math.abs(Number(pos.qty)) : 0, sgn = pos && String(pos.side).toUpperCase() === "SHORT" ? -1 : 1, pnl = dp * qty * sgn;
+  const pills = [{ cls: "", t: `${sg(pct)}${Math.abs(pct).toFixed(2)}% · ${money(dp)}` }];
+  if (qty) pills.push({ cls: pnl >= 0 ? "good" : "bad", t: `내 ${sgn > 0 ? "롱" : "숏"} ${qty.toLocaleString("en-US", { maximumSignificantDigits: 4 })} ${coinUnit().toUpperCase()} · ${money(pnl)}` });   // 이 구간을 내 포지션이 지났다면
+  const fam = '700 11.5px "JetBrains Mono", monospace', pw = (t) => measureTextW(t, fam) + 18, side = `${nb}봉 · ${measDur(Math.abs(meas.t1 - meas.t0))}`;
+  let y = up ? yt - 14 : yb + 14, dir = up ? -1 : 1;   // 알약은 박스 바깥에 쌓는다 -- 위(상승)·아래(하락) 가장자리에 붙어 모자라면 안쪽으로
+  if (y < T + 12 || y > B - 12) { y = up ? y0 + 14 : y1 - 14; dir = -dir; }
+  const hw = pw(side) + 22, hx = x1 + 6 + hw > R ? x1 - 4 : x1 + 4, hflip = hx < x1;
+  const html = out ? "" : `<div class="ms-bx" style="left:${x0}px;top:${y0}px;width:${x1 - x0}px;height:${y1 - y0}px"></div>`
+    + `<i class="ms-ln" style="left:${cx}px;top:${y0}px;width:1px;height:${y1 - y0}px"></i><i class="ms-ln" style="left:${x0}px;top:${cy}px;width:${x1 - x0}px;height:1px"></i>`
+    + pills.map((p, k) => `<span class="ms-pill ${p.cls}" style="left:${Math.max(L + pw(p.t) / 2, Math.min(R - pw(p.t) / 2, cx))}px;top:${Math.max(T + 12, Math.min(B - 12, y + dir * 24 * k))}px">${p.t}</span>`).join("")
+    + `<span class="ms-pill sub" style="left:${hx}px;top:${cy}px;transform:translate(${hflip ? "-100%" : "0"},-50%)">${side}<button type="button" class="ms-x" aria-label="측정 박스 지우기">×</button></span>`;
+  h.hidden = false;
+  if (h._k !== html) { h._k = html; h.innerHTML = html; h.classList.toggle("up", up); h.classList.toggle("dn", !up); }   // 같으면 다시 안 쓴다(실시간 렌더 중에도 × 클릭이 안 끊긴다)
+}
 function setupChartPan() {
   const box = el("chartPan"), svg = el("candleSvgSnapshot");
   if (!box || !svg) return;
@@ -6407,10 +6459,16 @@ function setupChartPan() {
     const t = ev.target;
     if (t === document || (t.contains && t.contains(svg))) chartHoverPt = null;
   }, { passive: true, capture: true });
-  let drag = null;
+  let drag = null, measDrag = null;
+  svg.addEventListener("mousedown", (ev) => { if (ev.shiftKey) ev.preventDefault(); });   // Shift+클릭이 글자 선택을 늘리지 않게
   svg.addEventListener("pointerdown", (ev) => {
     chartFlingStop();
     if (ev.button !== 0 || ev.pointerType === "touch") return;   // 세로 이동은 창 크기와 무관하게 늘 된다(가로만 canPan)
+    if (ev.shiftKey) {   // 측정 박스 -- 이동 끌기와 같은 칸(가격 칸) 안에서만 · 이동은 시작하지 않는다
+      const q = !fpAltOn() && (!flowOn() || (zoneY(ev.clientY) === "plot" && zoneX(ev.clientX) !== "side")) ? measPt(ev) : null;
+      if (q) { measDrag = { q, x: ev.clientX, y: ev.clientY, moved: false }; svg.setPointerCapture(ev.pointerId); }
+      return;
+    }
     if (flowOn() && !fpAltOn() && (zoneY(ev.clientY) !== "plot" || zoneX(ev.clientX) === "side")) return;   // 2026-11-01 사용자 «아래 수급 차트 2개를 끌면 풋프린트가 움직인다» -- 가격 칸 밖(프로파일·1초 수급·레인)에서 시작한 끌기는 차트를 안 옮긴다(휴대폰 규약과 같다)
     const g = chartSlotPx(svg);
     drag = { x: ev.clientX, y: ev.clientY, lx: ev.clientX, py: chartPanY, k: chartYPerPx, slot: g ? g.px : 1, moved: false, id: ev.pointerId, v: [] };
@@ -6434,6 +6492,16 @@ function setupChartPan() {
     if (Math.abs(pxPerMs) > 0.25) chartFlingStart(-pxPerMs / d.slot);
   };
   svg.addEventListener("pointermove", (ev) => {
+    if (measDrag) {
+      if (!(ev.buttons & 1)) { measDrag = null; return; }
+      const q = measPt(ev);
+      if (q && (measDrag.moved || Math.hypot(ev.clientX - measDrag.x, ev.clientY - measDrag.y) >= 5)) {
+        measDrag.moved = true;
+        meas = { asset: activeSnapshotAsset, t0: measDrag.q.t, p0: measDrag.q.p, t1: q.t, p1: q.p };
+        renderMeasure();
+      }
+      return;
+    }
     if (!drag || !(ev.buttons & 1)) { drag = null; return; }
     const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
     if (!drag.moved && Math.hypot(dx, dy) < 5) return;
@@ -6441,11 +6509,14 @@ function setupChartPan() {
     dragTo(drag, ev.clientX, ev.clientY, ev.timeStamp);
   });
   const stop = (ev) => {
+    if (measDrag) { const md = measDrag; measDrag = null; if (!md.moved) measClear(); return; }   // 끌지 않은 Shift+클릭 = 지우기
     const d = drag; drag = null; svg.classList.remove("panning");
     if (ev.type === "pointerup") flingFrom(d, ev.timeStamp);
   };
   svg.addEventListener("pointerup", stop); svg.addEventListener("pointercancel", stop);
   svg.addEventListener("dblclick", () => { if (chartPanEnd != null || chartPanY || chartPanRight) chartPanReset(); });
+  document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && meas) measClear(); });
+  document.addEventListener("click", (ev) => { if (ev.target.closest?.(".ms-x")) measClear(); });
   // 2026-10-27 휴대폰(사용자 «모바일에서도 풋프린트 차트를 자유롭게»): **가격 칸 안에서 시작한** 손가락만 차트가 받는다 --
   //   한 손가락 = 마우스 끌기와 같다(가로 시각 · 세로 가격 1:1 + 관성) · 두 손가락 = 벌리면 좁게(봉이 커짐)·오므리면 넓게 · 두 번 톡 = 최신으로.
   //   10-27(2) 사용자 «프로파일도 위아래로 드래그»: 아래 프로파일 칸(PROF)에서 끌면 **세로(가격)만** -- 같은 가격 범위라 차트도 같이 간다(칸 높이 기준 1:1).
@@ -7112,7 +7183,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   const yAt = (v) => mt + ((yMax - v) * ch) / ySpan;
   const pyAt = PROF ? (v) => PROF.top + ((yMax - v) * (PROF.bot - PROF.top)) / ySpan : yAt, pTop = PROF ? PROF.top : mt, pBot = PROF ? PROF.bot : plotBottom;   // 체결·호가 띠 자리(휴대폰 = 아래 칸)
   const bw = slot * 0.8;
-  if (svg.id === "candleSvgSnapshot") chartGeo = { ml, cw, n: N, wAll, hAll, mt, pb: plotBottom, prof: PROF && [PROF.top - 16, PROF.bot], ymin: yMin, ymax: yMax };   // 끌기·휠이 화면 px → 봉(chartSlotPx)
+  if (svg.id === "candleSvgSnapshot") chartGeo = { ml, cw, n: N, wAll, hAll, mt, pb: plotBottom, prof: PROF && [PROF.top - 16, PROF.bot], ymin: yMin, ymax: yMax, off: X0, bars: candles };   // 끌기·휠이 화면 px → 봉(chartSlotPx) · off·bars = 측정 박스(measPt)가 봉 번호↔시각을 바꾼다
   // 2026-10-20 1주일 창(5분봉 2,016개 · 봉 칸 ~0.5px): 봉마다 노드(캔들 <g>·선·사각형, 레인 막대 7개, 청산 원, 제목)를 만들면
   //   3.7만 노드 · 렌더 180ms 였다. 봉 칸이 4px 밑이면 같은 색끼리 <path> 하나로 모으고 봉별 <title> 은 뺀다(호버 툴팁이 그 봉 값을 말한다).
   // 2026-10-20 연속 줌(36~300봉이 «무거운 구간»): 문턱 4 → 8px. 4~8px 봉은 박스 없는 캔들이라 path 로 모아도 같은 그림(아래 DENSE 캔들 폭).
@@ -9727,6 +9798,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   fpCvPaint(fpCv.bg); fpCvPaint(fpCv.fg);   // 2026-10-20 캔버스 두 장(fpCv) -- 칠하기는 레이아웃을 안 건드린다
   if (svg.id === "candleSvgSnapshot") post.push(renderLineTool);   // 2026-10-28 선 주문 상자 자리
   if (svg.id === "candleSvgSnapshot") post.push(renderArmedLines);   // 2026-10-29 들어간 선 주문(익절·손절) 자리
+  if (svg.id === "candleSvgSnapshot") post.push(renderMeasure);   // 2026-11-07 Shift+드래그 측정 박스
   post.forEach((f) => f());   // 화면 상자를 재는 HTML 배치(위 ③) -- svg 를 다 쌓은 뒤 한 번만 배치된다
   // 2026-10-01 프로파일 오른쪽 끝 가격 이름과 겹치는 호가 벽 수량 글자(«11.8k»)는 숨긴다(사용자 지시) -- 층 캐시라 매번 되살린 뒤 다시 판정
   //   (2026-10-20 읽기를 먼저 다 하고 쓰기를 나중에 -- 글자마다 되살리고 재면 그때마다 레이아웃이 다시 돈다)
