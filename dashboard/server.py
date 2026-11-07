@@ -807,6 +807,57 @@ def merge_bybit_liq(bars: list[dict], events: list[dict], start_ms: int | None, 
     return out
 
 
+def okx_liq_hot_bars(inst: str, db: Path = OKX_LIQ_DB_PATH,
+                     bar_seconds: int = FOOTPRINT_BAR_SECONDS) -> tuple[dict[int, list[float]], int | None]:
+    """hot OKX 청산 -> ({봉 시작: [롱USD, 숏USD, 건수]}, 이 종목 기록 시작 ms). 없거나 실패면 ({}, None).
+    🔴SQL 이 봉으로 모아 돌려준다(최대 288봉×2줄) -- 이벤트 행을 받으면 그만큼 GIL 을 쥔다.
+    ponytail: 수집기 공백(gaps 표)은 빼지 않는다(공백 봉은 OKX 0 으로 보인다, Bybit 과 같다) -- 필요하면 gaps 로 봉을 거른다."""
+    since = (int(time.time()) // bar_seconds - FOOTPRINT_KEEP_BARS) * bar_seconds * 1000
+    bar_ms = bar_seconds * 1000
+    try:
+        start = _read_only_rows(db, "SELECT min(ts_ms) FROM okx_liquidations WHERE inst_id = ?", [inst])[0][0]
+        rows = _read_only_rows(db, """SELECT ts_ms - ts_ms % ?, pos_side, sum(sz_base * coalesce(bk_px, 0)), count(*)
+                                      FROM okx_liquidations WHERE inst_id = ? AND ts_ms >= ? AND sz_base > 0
+                                      GROUP BY 1, 2""", [bar_ms, inst, since])
+    except (duckdb.Error, sqlite3.Error, OSError, IndexError):
+        return {}, None
+    out: dict[int, list[float]] = {}
+    for bar, pos, usd, n in rows:
+        a = out.setdefault(int(bar) // 1000, [0.0, 0.0, 0])
+        a[0 if pos == "long" else 1] += float(usd or 0.0)   # 라이브(collect_okx_flow)와 같은 판정 -- long 아니면 short
+        a[2] += int(n)
+    return out, int(start) if start is not None else None
+
+
+def merge_okx_liq(bars: list[dict], live_events: list[dict], live_from: int, hot_bars: dict[int, list[float]],
+                  hot_start_ms: int | None, bar_seconds: int) -> list[dict]:
+    """5분봉 청산 원에 OKX 청산을 더하고 `okx_detail` 로 따로 남긴다. 입력 dict 는 고치지 않는다(swr 캐시 객체일 수 있다).
+    봉 하나의 원천은 하나다(이중 합산 금지): live_from 뒤 = 메모리(OKX 가 봉 전체를 본 봉 -- 방금 난 청산이 바로 보인다),
+    그 앞 = hot(재시작으로 메모리에 없는 봉, 재시작이 걸친 봉은 메모리가 반쪽이라 hot). live_from 0 = 라이브 OKX 체결이 아직 없음.
+    hot 기록 시작이 걸친 봉과 그 앞은 «모름»이라 그대로 둔다."""
+    add: dict[int, list[float]] = {}
+    for e in live_events if live_from else ():
+        bar = int(e["ts_ms"]) // 1000 // bar_seconds * bar_seconds
+        if bar > live_from:
+            a = add.setdefault(bar, [0.0, 0.0, 0])
+            a[0 if e["side"] == "long" else 1] += float(e.get("usd") or 0.0)
+            a[2] += 1
+    hot_first = None if hot_start_ms is None else hot_start_ms // 1000 // bar_seconds * bar_seconds
+    out = []
+    for b in bars:
+        t = int(datetime.fromisoformat(b["ts"]).timestamp())
+        a = add.get(t, [0.0, 0.0, 0]) if live_from and t > live_from else (
+            hot_bars.get(t, [0.0, 0.0, 0]) if hot_first is not None and t > hot_first else None)
+        if a is not None:
+            b = {**b, "okx": True, "long_usd": b["long_usd"] + a[0],
+                 "short_usd": b["short_usd"] + a[1], "events": b["events"] + a[2],
+                 # 2026-10-03 거래소별 툴팁(사용자 «거래소 0건인데 금액은 있다») -- OKX 몫을 따로 싣는다.
+                 #   바이낸스 몫 = 합 − OKX − Bybit − HL 은 화면이 뺀다(바이낸스가 바탕이라 따로 싣지 않는다).
+                 "okx_detail": {"long_usd": round(a[0]), "short_usd": round(a[1]), "n": a[2]}}
+        out.append(b)
+    return out
+
+
 def merge_hl_liq(bars: list[dict], events: list[tuple[int, float, bool, str]],
                  bar_seconds: int) -> list[dict]:
     """5분봉 청산 원에 HL 고래 청산을 **더하고** `hl` 로 따로도 남긴다(툴팁이 가른다).
@@ -4036,6 +4087,10 @@ def make_app() -> web.Application:
         if f is None or not payload.get("bars"):
             return web.json_response(payload, headers=NOCACHE)
         okx_from, okx_liq_events = f.okx_fp["first_bar"], f.okx_liq_events
+        # 2026-11-07 메모리 시작 전 봉은 hot 에서(재시작하면 메모리가 비고, 복원은 12시간 창·체결 테이프 온전한 데까지만이다 --
+        #   11-06 12:00~23:20 UTC $3.5M 이 24시간 합계에서 빠졌다). 지나간 봉이라 60초 캐시로 충분하다(2초 폴링이 매번 안 읽게).
+        inst = f.spec.okx_inst
+        okx_hot, okx_hot_start = await swr_cached(f"okx_liq_hot:{inst}", 60.0, lambda: asyncio.to_thread(okx_liq_hot_bars, inst))
 
         async def _done(bars: list[dict], venues: list[str]) -> dict:
             # 2026-10-03 Bybit 청산 합산(사용자 지시) -- 수집 시작 뒤 온전한 봉만, `bybit` 로 따로도 남긴다(툴팁)
@@ -4045,29 +4100,10 @@ def make_app() -> web.Application:
             if asset in HL_LIQ_BY_ASSET:
                 return await _with_hl_liq(payload, bars, venues, asset)
             return {**payload, "bars": bars, "venues": venues}
-        if not okx_from:
+        if not okx_from and okx_hot_start is None:
             return web.json_response(await _done(payload["bars"], ["binance-perp"]), headers=NOCACHE)
-        # 2026-09-24 OKX 청산 합산(사용자 지시). 메모리의 OKX 청산을 5분봉으로 더한다 -- 풋프린트와
-        #   같은 규칙으로 OKX 가 봉 전체를 본 봉(okx_fp 이후)만. 재기동 전 봉은 바이낸스만(okx 없음).
-        #   🔴swr 캐시 dict 를 고치면 30초 동안 요청마다 또 더해진다 -- 새로 만든다.
-        add: dict[int, list[float]] = {}
-        for e in list(okx_liq_events):
-            bar = int(e["ts_ms"]) // 1000 // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS
-            if bar > okx_from:
-                a = add.setdefault(bar, [0.0, 0.0, 0])
-                a[0 if e["side"] == "long" else 1] += float(e.get("usd") or 0.0)
-                a[2] += 1
-        bars = []
-        for b in payload["bars"]:
-            t = int(datetime.fromisoformat(b["ts"]).timestamp())
-            if t > okx_from:
-                a = add.get(t, [0.0, 0.0, 0])
-                b = {**b, "okx": True, "long_usd": b["long_usd"] + a[0],
-                     "short_usd": b["short_usd"] + a[1], "events": b["events"] + a[2],
-                     # 2026-10-03 거래소별 툴팁(사용자 «거래소 0건인데 금액은 있다») -- OKX 몫을 따로 싣는다.
-                     #   바이낸스 몫 = 합 − OKX − Bybit − HL 은 화면이 뺀다(바이낸스가 바탕이라 따로 싣지 않는다).
-                     "okx_detail": {"long_usd": round(a[0]), "short_usd": round(a[1]), "n": a[2]}}
-            bars.append(b)
+        # 2026-09-24 OKX 청산 합산(사용자 지시).
+        bars = merge_okx_liq(payload["bars"], list(okx_liq_events), okx_from, okx_hot, okx_hot_start, FOOTPRINT_BAR_SECONDS)
         return web.json_response(await _done(bars, ["binance-perp", "okx-swap"]), headers=NOCACHE)
 
     async def _with_hl_liq(payload: dict, bars: list[dict], venues: list[str], asset: str = "eth") -> dict:

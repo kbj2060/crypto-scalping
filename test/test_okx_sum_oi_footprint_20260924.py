@@ -1,12 +1,15 @@
 """OKX 합산: /api/oi-5m 봉별 Δ 에 OKX 를 더하고(캐시는 안 고친다), /api/footprint 는 진행 중 봉의
 OKX 몫(okxLive)을 따로 준다. 2026-09-24. `python3 test/test_okx_sum_oi_footprint_20260924.py`
 """
-import asyncio, json, re
+import asyncio, json, re, sys
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from aiohttp import web
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from dashboard.server import merge_okx_liq  # noqa: E402
 
 src = (Path(__file__).resolve().parents[1] / "dashboard" / "server.py").read_text(encoding="utf-8")
 def cut(a, b):
@@ -55,12 +58,16 @@ ns.update(flows=flows, flow_for=flow_for, SimpleNamespace=SimpleNamespace,
           HL_LIQ_BY_ASSET={"eth": None},   # 코인별 HL DB 표(09-26) -- 이 시험은 ETH 만 본다
           # Bybit 청산 합산(10-03)도 이 시험 대상이 아니다 -- 수집기 없음(시작 None)으로 통과
           bybit_liq_events=lambda sym: ([], None), merge_bybit_liq=lambda bars, ev, start, bar_s: bars,
+          merge_okx_liq=merge_okx_liq, okx_liq_hot_bars=None,
           COIN_CONFIG={a: {"binance_symbol": a.upper() + "USDT"} for a in ("eth", "btc", "sol", "xrp")})
 exec(compile(chunk, "okxsum", "exec"), ns)
 liq_cached = {"warmed_up": True, "bars": [
     {"ts": datetime.fromtimestamp(t, timezone.utc).isoformat(), "long_usd": 10.0, "short_usd": 5.0,
      "events": 1, "partial": t == 1200} for t in (600, 900, 1200)]}
+okx_hot = ({}, None)
 async def swr_any(key, ttl, produce, **kw):
+    if key == "okx_liq_hot:ETH-USDT-SWAP":
+        return okx_hot
     return liq_cached if key.startswith("liq5m") else cached
 ns["swr_cached"] = swr_any
 
@@ -89,6 +96,13 @@ async def main():
     assert b1200["okx"] and b1200["long_usd"] == 10.0                      # OKX 이벤트 없는 봉도 표시는 합산판
     assert liq_cached["bars"][1]["long_usd"] == 10.0, "swr 캐시를 고쳤다 -- 30초 동안 요청마다 또 더해진다"
     assert json.loads((await ns["api_liquidation_5m_history"](Req({"asset": "btc"}))).body) == liq_cached
+    # ── 2026-11-07 메모리 시작 전 봉(재기동 봉 포함)은 hot 에서 ──
+    global okx_hot
+    okx_hot = ({600: [70.0, 0.0, 2], 900: [999.0, 999.0, 9]}, 300_000)
+    lq = json.loads((await ns["api_liquidation_5m_history"](Req({"asset": "eth"}))).body)
+    assert lq["venues"] == ["binance-perp", "okx-swap"]
+    assert lq["bars"][0]["okx_detail"] == {"long_usd": 70, "short_usd": 0, "n": 2} and lq["bars"][0]["long_usd"] == 80.0
+    assert lq["bars"][1]["long_usd"] == 110.0, "메모리 구간에 hot 을 또 더했다"
     # ── 코인별(2026-09-26): XRP 칸 가격은 4자리 · 꺼진 코인은 ETH 대신 404 ──
     xfp = json.loads((await ns["api_footprint"](Req({"since": "0", "asset": "xrp"}))).body)
     assert xfp["symbol"] == "XRPUSDT" and xfp["bucket"] == 0.0003
