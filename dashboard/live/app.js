@@ -1928,18 +1928,18 @@ async function acctWrongAdd() {
   if (!row) return;
   acctWrong.push(row); inp.value = ""; acctWrongRender(); inp.focus();
 }
-// 2026-11-06 계좌 카드 아래 탭 한 칸(시안 C): 순환 · 성과 통계 · 달력·복기 · 오늘 손익 · 오답노트. 고른 탭은 기억 -- 처음엔 열린 순환이 있으면 순환, 없으면 성과.
+// 2026-11-06 계좌 카드 아래 탭 한 칸(시안 C): 순환 · 성과 통계 · 달력·복기 · 오답노트(2026-11-08 사용자: 오늘 손익 탭 삭제 -- 숫자는 위 KPI 칸). 고른 탭은 기억 -- 처음엔 열린 순환이 있으면 순환, 없으면 성과.
 let acctTab = (() => { try { return localStorage.getItem("acctTab") || ""; } catch (e) { return ""; } })(), acctHasCy = false, acctCurveBox = [0, 0];
 function acctTabApply(hasCy) {
   acctHasCy = hasCy;
-  const k = acctTab || (hasCy ? "cy" : "st");
+  const k = document.querySelector(`#acctCard [data-at="${acctTab}"]`) ? acctTab : hasCy ? "cy" : "st";   // 없어진 탭을 기억하고 있으면(옛 «오늘 손익») 빈 칸이 된다
   for (const b of document.querySelectorAll("#acctCard [data-at]")) { b.classList.toggle("on", b.dataset.at === k); b.setAttribute("aria-pressed", String(b.dataset.at === k)); }
   for (const p of document.querySelectorAll("#acctCard [data-ap]")) p.hidden = p.dataset.ap !== k;
   if (k === "wr" && acctWrong === null) acctWrongLoad();
 }
 document.addEventListener("click", async (e) => {
   const t = e.target.closest("#acctCard [data-at]"), d = e.target.closest("[data-wrong-del]");
-  if (t) { acctTab = t.dataset.at; try { localStorage.setItem("acctTab", acctTab); } catch (err) { /* 기억은 편의 */ } acctTabApply(acctHasCy); }
+  if (t) { acctTab = t.dataset.at; try { localStorage.setItem("acctTab", acctTab); } catch (err) { /* 기억은 편의 */ } acctTabApply(acctHasCy); if (acctTab === "cy" && cycleArgs) renderCycleCard(...cycleArgs); }
   if (e.target.closest("#acctWrongAdd")) acctWrongAdd();
   if (d && await acctWrongPost({ del: Number(d.dataset.wrongDel) })) { acctWrong = acctWrong.filter((r) => r.id !== Number(d.dataset.wrongDel)); acctWrongRender(); }
 });
@@ -2159,33 +2159,15 @@ function renderSnapshotAccountCore() {
   }).join("") : `<div class="acct-posline"><span class="acct-side neutral">포지션 없음</span>${pvNote}</div>`;
 
   // SVG 는 칸의 실제 폭(·한 화면 모드면 fitLayout 이 준 높이)으로 1:1 로 그린다 -- 고정 viewBox 를 늘리면 글자가 커지거나 가운데로 찌그러진다.
-  const narrowCard = matchMedia("(max-width: 900px)").matches;
-  const botW = Math.max(320, (el("acctBotBody").clientWidth || 900) - 8);   // 아래 탭 칸 폭 -- 숨은 탭도 같은 폭이라 미리 맞춰 그린다
-  const todayW = Math.max(240, Math.round(narrowCard ? botW : (botW - 20) * 1.3 / 2.3));   // 오늘 띠 = 숫자 1 : 흐름 1.3
   const cvEl = el("snapAcctCurve"), curveW = Math.max(300, cvEl.clientWidth || 600);
   const curveH = Math.max(160, (cvEl.clientHeight || 320) - 40);   // 곡선 칸(CSS 가 높이를 정한다 -- 한 화면 모드면 남는 높이)에 1:1 로 -- 위 기간 칩 40
   acctCurveBox = [cvEl.clientWidth, cvEl.clientHeight];
-  // ── 위 줄 «오늘 띠»(늘 오늘) · 아래 줄 상세 칸(달력에서 고른 날 -- 2026-11-04 펜 메모: 거래내역 + 메모장) ──
+  // ── 아래 줄 상세 칸(달력에서 고른 날 -- 2026-11-04 펜 메모: 거래내역 + 메모장) ──
   const selKey = acctSelDay && acctSelDay < todayKey ? acctSelDay : null, dKey = selKey || todayKey, s0 = acctDay0(dKey);
   const labOf = (k) => `${k.slice(5).replace("-", "/")}(${"일월화수목금토"[new Date(acctDay0(k) + ACCT_KST).getUTCDay()]})`;
   const vT = selKey ? T.filter((t) => t.exit_time >= s0 && t.exit_time < s0 + ACCT_DAY) : tT, vReal = vT.reduce((x, t) => x + (Number(t.net_pnl) || 0), 0);
   const incV = incOn(dKey) ? inc[dKey] || {} : null, vFig = incV ? Number(incV.pnl) || 0 : vReal;
-  // 막대 = 그날 닫힌 왕복의 전체 손익 -- 숫자(그날 지갑 입금)와 다르면 한 줄로 밝힌다
-  const barNote = (fig, sum) => (tT.length && Math.abs(fig - sum) >= 0.01 ? `<span class="acct-bar-note muted">막대 = 그날 닫힌 왕복 전체 손익(합 ${acctSu(sum)} · 다른 날 실현분 포함)</span>` : "");
-  const wins = tT.filter((t) => t.net_pnl > 0).length, vWins = vT.filter((t) => t.net_pnl > 0).length;
-  const dayLab = labOf(todayKey);
-  const todayHtml = `<div class="acct-today">
-      <div class="acct-today-hero">
-        <span class="acct-eyebrow">오늘 손익 · ${dayLab}</span>
-        <div class="acct-figline"><div class="acct-figure ${acctTone(net)}" title="${escapeHtml(startTip)}">${acctSu(net)}</div><span class="acct-figpct ${acctTone(net)}" title="${escapeHtml(startTip)}">${acctPct(pct)}</span></div>
-        <span class="acct-today-pct"><span class="muted">시작 ${fmtUsd(start)} → 지금 ${fmtUsd(equity)} 대비</span></span>
-        <dl class="acct-today-kv">${incT ? `<dt>실현 <span class="acct-kv-sub">· 펀딩·수수료 포함</span></dt><dd class="${acctTone(realT)}" title="${escapeHtml(acctIncTip(incT))}">${acctSu(realT)}</dd>`
-            + `<dt>미실현 변화 <span class="acct-kv-sub">· ${unreal0 != null ? `0시 ${acctSu(unreal0)} → ` : ""}지금 ${acctSu(unreal)}</span></dt><dd class="${acctTone(unreal - (unreal0 ?? 0))}">${acctSu(unreal - (unreal0 ?? 0))}</dd>`
-          : `<dt>실현 · ${tT.length}건${tT.length ? ` (승 ${wins} 패 ${tT.length - wins})` : ""}</dt><dd class="${acctTone(real)}">${acctSu(real)}</dd>
-          <dt>미실현${positions.length ? ` · ${positions.map((p) => `${p.side === "LONG" ? "롱" : "숏"} ${Number(p.qty)}`).join(", ")}` : ""}</dt><dd class="${acctTone(unreal)}">${acctSu(unreal)}</dd>`}</dl>
-      </div>
-      <div class="acct-today-flow">${acctTodaySvg(tT, unreal, positions.length > 0, t0, now, todayW, 120)}${incT ? barNote(realT, real) : ""}</div>
-    </div>`;
+  const vWins = vT.filter((t) => t.net_pnl > 0).length;
   const wBase = walletAt(s0, s0 + ACCT_DAY);
   const hm2 = (t) => `${acctKey(t.entry_time) === acctKey(t.exit_time) ? "" : `${acctMd(t.entry_time)} `}${acctHm(t.entry_time)}→${acctHm(t.exit_time)}`;
   const dayRows = vT.length ? vT.map((t) => `<li title="${escapeHtml(acctTripTip(t))}"><time>${hm2(t)}</time><span>${acctCoin(t.symbol)} ${t.side === "LONG" ? "롱" : "숏"} <b>${+Number(t.max_qty).toFixed(4)}</b></span><span class="px">${acctPx(t.entry_price)} → ${acctPx(t.exit_price)}</span><span class="hold muted">${acctDur(t.exit_time - t.entry_time)}${t.adds ? ` · 추가 ${t.adds}회` : ""}${t.peak_x > 6 ? ` · <em class="warn">${t.peak_x}배</em>` : ""}</span><b class="${acctTone(t.net_pnl)}">${acctSu(Number(t.net_pnl) || 0)}</b></li>`).join("")
@@ -2203,14 +2185,13 @@ function renderSnapshotAccountCore() {
   // 2026-11-06 펜 메모 «통계 박스를 왼쪽 섹션으로 옮기고 바로 위 차트 높이를 늘려줘»: 왼쪽 열 아래가 비어 있었다 -- 기간 칩은 곡선과 한 쌍이라 그대로 오른쪽
   const spanA = T.filter((t) => t.exit_time >= (ACCT_SPANS[acctSpanIdx][1] === 0 ? t0 : ACCT_SPANS[acctSpanIdx][1] > 0 ? now - ACCT_SPANS[acctSpanIdx][1] * ACCT_DAY : 0));
   setH("snapAcctPosition", posLine + closeAllRow);
-  setH("snapAcctToday", todayHtml);
   setH("snapAcctStats", spanA.length ? `<div class="acct-stats">${acctStatsHtml(spanA)}</div>` : `<p class="acct-empty">이 기간에 닫힌 왕복이 없습니다.</p>`);
   // 핵심 지표 6칸(시안 C) -- 승률·최대 낙폭은 성과 통계 탭과 같은 기간(자산 곡선 칩)·같은 계산(acctStatGroups)
   const SG = spanA.length ? acctStatGroups(spanA)[0] : null, spanLab = ACCT_SPANS[acctSpanIdx][0];
-  const kpi = (lab, val, tone, sub) => `<div><i>${lab}</i><b class="${tone}">${val}</b><s>${sub}</s></div>`;
+  const kpi = (lab, val, tone, sub, tip) => `<div${tip ? ` title="${escapeHtml(tip)}"` : ""}><i>${lab}</i><b class="${tone}">${val}</b><s>${sub}</s></div>`;
   setH("snapAcctKpi", [
     kpi("지갑", fmtUsd(W.pools.length ? W.wallet : wallet), "", W.pools.map((p) => `${p.name} ${fmtUsd(p.wallet)}`).join(" · ")),
-    kpi("오늘 손익", `${acctSu(net)} <small>${acctPct(pct)}</small>`, acctTone(net), `닫힌 거래 ${tT.length}건`),
+    kpi("오늘 손익", `${acctSu(net)} <small>${acctPct(pct)}</small>`, acctTone(net), `닫힌 거래 ${tT.length}건`, startTip),   // 산출 근거(0시 기준·입출금 제외)는 탭이 없어져 여기 호버로
     kpi("미실현", acctSu(unreal), acctTone(unreal), positions.length ? positions.map((p) => `${acctCoin(p.symbol)} ${acctSu(Number(p.unrealized_pnl) || 0)}`).join(" · ") : "포지션 없음"),
     kpi("증거금 사용", W.pools.length ? W.pools.map((p) => `${p.usedPct.toFixed(0)}%`).join(" · ") : "—", W.pools.some((p) => p.usedPct >= 75) ? "warn" : "", W.pools.map((p) => p.name).join(" · ")),
     kpi(`승률 (${spanLab})`, SG ? `${SG.win}%` : "—", "", SG ? `${SG.g.length}건 · 손익비 ${SG.al ? (SG.aw / Math.abs(SG.al)).toFixed(2) : "—"}` : "닫힌 왕복 없음"),
@@ -2305,10 +2286,11 @@ document.addEventListener("click", (e) => {
   const b = e.target.closest("[data-cy-tab]");
   if (b) { cycleTab = b.dataset.cyTab; if (cycleArgs) renderCycleCard(...cycleArgs); }
 });
+let cyRest = 0;   // 순환 칸에서 차트를 뺀 높이(그린 뒤 잰다)
 function renderCycleCard(A, positions, equity) {
   cycleArgs = [A, positions, equity];
   // 2026-11-02 사용자 «순환 섹션 너비를 절반으로 -- 현재 높이에 2개가 들어가게»: 넓은 화면에서 #snapAcctCycle 이 2열 격자(CSS) -- 차트 폭도 한 열 폭으로 그린다.
-  const bodyEl = el("acctBotBody"), now = Date.now(), W = Math.max(320, bodyEl ? bodyEl.clientWidth - 8 : 760);   // 화면 폭 그대로 -- 고정 viewBox 는 넓은 화면에서 가운데 작게 떴다
+  const bodyEl = el("acctBotBody"), now = Date.now(), fit = !!bodyEl && document.documentElement.classList.contains("fit1"), W = Math.max(320, bodyEl ? bodyEl.clientWidth - (fit ? 0 : 8) : 760);   // 화면 폭 그대로 -- 고정 viewBox 는 넓은 화면에서 가운데 작게 떴다
   // 🔴2026-11-02 사용자 «ETH 롱 순환 2개»: 같은 (심볼, 방향)의 열린 왕복이 둘 오면(서버 재동기화 파편 + 진짜) 카드가 그대로 둘이었다 -- 잘리지 않은 것 중
   //   진입이 가장 늦은 하나만, 없으면 잘린 것 중 하나(서버도 같은 규칙으로 파편을 거른다).
   const pick = new Map();
@@ -2320,7 +2302,8 @@ function renderCycleCard(A, positions, equity) {
   const open = [...pick.values()].map((t) => [t, positions.find((p) => p.symbol === t.symbol && p.side === t.side)]).filter(([, p]) => p);
   // 2026-11-06 펜 메모 «포지션이 늘수록 박스가 늘어나니 하나의 박스에 탭 전환»: 한 번에 하나만 그린다(탭 = 열린 순환마다)
   const nEl = el("acctCyN"); if (nEl) nEl.textContent = open.length || "";
-  const cyH = bodyEl && document.documentElement.classList.contains("fit1") && bodyEl.clientHeight > 300 ? Math.max(110, Math.min(420, bodyEl.clientHeight - (open.length > 1 ? 212 : 176))) : 250;   // 한 화면 모드: 탭 칸 높이에서 머리·타일·체결 줄을 뺀 만큼이 그림 높이
+  // 2026-11-08 펜 메모 «높이가 안 맞아 스크롤»: 고정 추정(212·176)을 버리고 그린 뒤 잰 나머지(cyRest)를 뺀다 -- 넘치지도 비지도 않는다
+  const cyH = fit && bodyEl.clientHeight > 0 ? Math.max(60, bodyEl.clientHeight - (cyRest || (open.length > 1 ? 212 : 176))) : 250;   // 한 화면 모드: 탭 칸 높이에서 머리·타일·체결 줄을 뺀 만큼이 그림 높이
   const ck = ([t]) => `${t.symbol}|${t.side}`, shown = open.find((o) => ck(o) === cycleTab) || open[0];
   const tabs = open.length > 1 ? `<div class="chipset cy-tabs" role="group" aria-label="진행 중 순환 고르기">${open.map((o) => `<button type="button" class="chip${o === shown ? " on" : ""}" data-cy-tab="${ck(o)}" aria-pressed="${o === shown}">${acctCoin(o[0].symbol)} ${o[0].side === "LONG" ? "롱" : "숏"}</button>`).join("")}</div>` : "";
   setH("snapAcctCycle", (shown ? [shown] : []).map(([t, pos]) => {
@@ -2344,7 +2327,8 @@ function renderCycleCard(A, positions, equity) {
     const pct2 = (f) => `${f >= 0 ? "+" : "−"}${Math.abs(f * 100).toFixed(2)}%`;
     const hold0 = peak, hold = peak / fpx * (pos.mark_price - fpx) * dir, cyc = total - hold, totR = total / peak, holdR = hold / hold0;
     const withPct = (usd, r) => `${usd} <small>${pct2(r)}</small>`;
-    const chips = legs.map(([ms, p, qty, inc, mk, rp]) => { const b = inc ? long : !long;
+    const chips = (fit ? [...legs].reverse() : legs).map(([ms, p, qty, inc, mk, rp]) => {   // 한 화면 모드 = 최신부터 한 줄(CSS) -- 나머지는 차트 표시와 머리의 건수가 말한다
+      const b = inc ? long : !long;
       return `<span class="${b ? "b" : "s"}"><i>${hm(ms)}</i>${b ? "매수" : "매도"} <b>${acctPx(p)}</b> ×${cycleQ(qty)}${mk ? "" : " · 테이커"}${rp ? ` <em class="${acctTone(rp)}">${acctSu(rp)}</em>` : ""}</span>`; }).join("");
     return `<div class="cy-box">${tabs}
       <div class="cy-head"><span class="cy-live">진행 중</span><b class="cy-title">${coin} ${long ? "롱" : "숏"} 순환</b>
@@ -2362,6 +2346,11 @@ function renderCycleCard(A, positions, equity) {
       <p class="cy-note">▲ 매수(초록 = 체결가 ×수량) ▼ 매도(빨강) · 속 빈 표시 = 메이커 · 점선 = 평단 · 주황 = 첫 진입 · 청산하면 이 칸은 사라지고 달력으로 넘어가요</p>
     </div>`;
   }).join("") || `<p class="acct-empty">진행 중인 순환이 없습니다 — 포지션을 열면 여기에 뜹니다.</p>`);
+  const box = fit && bodyEl.querySelector("#snapAcctCycle .cy-box"), chart = box && box.querySelector("svg.cy-chart");
+  if (chart && box.offsetHeight > 0) {   // 탭이 숨어 있으면 못 잰다 -- 탭을 누를 때 다시 그린다
+    const rest = Math.ceil(box.offsetHeight - chart.getBoundingClientRect().height);
+    if (Math.abs(rest - cyRest) > 1) { cyRest = rest; renderCycleCard(A, positions, equity); }   // 나머지는 차트 높이와 무관해 한 번이면 멈춘다
+  }
 }
 
 // 거래소 실계좌(수동 매매 포함). 봇 원장(trade_journal)과 달리 여기 숫자는 바이낸스가 준 것.
@@ -3266,18 +3255,29 @@ function renderMacroCalendar(payload) {
 // 2026-11-02 운영 관리·스냅샷 탭 제거(사용자 펜 메모) -- 화면은 스냅샷 하나다.
 // 넓은 화면(≥1200) = 맨 위 [세션(왼쪽) | 코인 탭(가운데) | 경보·다크·알림(오른쪽)] · 좁은 화면은 코인 탭 = 카드 머리 · 세션 = CSS 배치.
 const PAGE_TABS_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1200px)") : null;
+// 2026-11-08 펜 메모 «코인 탭은 글래스/다크 왼쪽으로 · 그 자리에 코인·주식 제목과 포지션 요약(요약은 제목 왼쪽)»: ≥1700(제목이 보이는 폭)만. 더 좁으면 코인 탭 가운데 · 요약 카드 머리 그대로.
+const TOP_TITLE_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1700px)") : null;
 function placeTopLeft() {
   const top = document.querySelector(".topbar"), slot = el("topLeftSlot"), mid = el("topCenterSlot");
-  const coins = el("assetBar"), home = el("coinHome"), sess = document.querySelector(".top-right");
+  const coins = el("assetBar"), home = el("coinHome"), sess = document.querySelector(".top-right"), theme = el("themeToggle");
+  const title = el("fpCoinName"), pos = el("fpPos"), rates = el("fpRates"), tools = document.querySelector("#fpCard .ops-health-head-tools");
   if (!top || !slot || !mid) return;
   if (PAGE_TABS_WIDE && PAGE_TABS_WIDE.matches) {
     if (sess && sess.parentElement !== slot) slot.appendChild(sess);
-    if (coins && coins.parentElement !== mid) mid.appendChild(coins);
+    if (TOP_TITLE_WIDE && TOP_TITLE_WIDE.matches) {
+      if (coins && theme && coins.nextElementSibling !== theme) theme.before(coins);
+    } else if (coins && coins.parentElement !== mid) mid.appendChild(coins);
   } else {
     if (coins && home && coins.previousElementSibling !== home) home.after(coins);
     if (sess && sess.parentElement !== top) top.appendChild(sess);
   }
+  const atTop = !!(PAGE_TABS_WIDE && PAGE_TABS_WIDE.matches && TOP_TITLE_WIDE && TOP_TITLE_WIDE.matches);
+  if (title && pos) {
+    if (atTop) { if (title.parentElement !== mid) mid.append(pos, title); }
+    else if (title.parentElement === mid) { tools.before(title); rates.before(pos); }   // 제자리(카드 머리)
+  }
 }
+if (TOP_TITLE_WIDE && TOP_TITLE_WIDE.addEventListener) TOP_TITLE_WIDE.addEventListener("change", placeTopLeft);
 if (PAGE_TABS_WIDE && PAGE_TABS_WIDE.addEventListener) PAGE_TABS_WIDE.addEventListener("change", placeTopLeft);   // 🔴CI 검사기(esprima)는 ?.( 를 못 읽는다
 
 // 2026-09-30 카드 이동 레일(사용자 지시 «점만»): 점을 누르면 그 카드로 스크롤 · 지금 보는 카드의 점이 채워진다. 스냅샷 탭에서만.
