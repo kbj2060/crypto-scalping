@@ -3341,9 +3341,19 @@ function fitApplyCached() {
 }
 // 2026-11-07 사용자 «폰에서 계좌를 누르면 옵션까지밖에 못 간다»: 폰은 화면 밖 패널이 content-visibility:auto 라 처음 가까워질 때 실제 크기로 커진다(Option 76 → 1705px).
 //   클릭 때 잰 목표 위치는 그 뒤 낡아 부드러운 스크롤이 «옵션 한가운데»에서 멈췄다. 스크롤이 멈추면 목표와 어긋난 만큼 다시 맞춘다(사용자가 만지면 그만둔다).
+// 2026-11-09 사용자 «풋프린트를 보다 스크롤이 다음 카드로 내려간다 -- 카드 고정 버튼»: 켜면 카드를 앱바 아래로 맞추고 페이지 스크롤(휠·키보드·스크롤바)을 막는다.
+//   차트 줌·칸 안 스크롤은 그대로. 내비(railGo)로 옮기면 풀린다. ponytail: 새로고침하면 풀린다(저장 안 함).
+function fpLockSet(on) {
+  const b = el("fpLockBtn"); if (!b) return;
+  if (on) el("fpCard")?.scrollIntoView({ block: "start" });
+  document.documentElement.classList.toggle("fp-lock", on);
+  b.setAttribute("aria-pressed", String(on));
+}
+el("fpLockBtn")?.addEventListener("click", () => fpLockSet(!document.documentElement.classList.contains("fp-lock")));
 function railGo(id) {
   const t = el(id);
   if (!t) return;
+  if (document.documentElement.classList.contains("fp-lock")) fpLockSet(false);
   t.scrollIntoView({ behavior: "smooth", block: "start" });
   let n = 0, prev = NaN, calm = 0;
   const stop = () => clearInterval(iv);
@@ -8519,11 +8529,15 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         else labs.push({ x, y, txt: `${BOX_NM[h.k]} ${mobileChart ? "" : "유지 "}${h.p}%${up}`, col: h.col });
       });
       const wOf = (l) => [...l.txt].reduce((a, c) => a + (c > "ᄀ" ? 1.05 : 0.62), 0) * fs;   // 글자 폭 어림(한글 ≈ 1em · 측정은 강제 레이아웃) -- 같은 높이에서 가로로 겹치면 한 줄 아래로
+      // 2026-11-09 사용자 «30분·1시간 유지 글자가 5분봉 안으로 넘지 않게 오른쪽으로»: 글자 왼쪽 끝이 지금 선(xs) 오른쪽에 오게 민다 -- 빈 칸이 좁으면 프로파일 쪽으로 나가므로 글자는 플롯 클립 밖 묶음에
+      const gT = document.createElementNS(NS, "g"); gT.setAttribute("pointer-events", "none");
+      labs.forEach((l) => { l.x = Math.max(l.x, xs + 4 + wOf(l)); if (l.x > xr) l.y = Math.max(l.y, mt + 50); });   // 플롯 밖으로 나가면 청산 기둥 머리 세 줄(↑1일·1%당, ~mt+34) 아래로
       labs.forEach((l, j) => {
         while (labs.slice(0, j).some((o) => Math.abs(o.y - l.y) < fs + 2 && l.x - wOf(l) < o.x && o.x - wOf(o) < l.x)) l.y += fs + 3;
         add("text", { x: l.x, y: l.y - 4, "text-anchor": "end", fill: l.col, ...halo }, l.txt);
+        gT.appendChild(g.lastChild);
       });
-      svg.appendChild(g);
+      svg.appendChild(g); svg.appendChild(gT);
     }
   }
 

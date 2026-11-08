@@ -3699,3 +3699,16 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
   .lq-seg button { min-height: 32px; padding: 4px 12px; font-size: 12px; }
   .lq-p header small { white-space: normal; }
 }
+
+/* 2026-11-09 카드 고정(풋프린트 머리, app.js fpLockSet): 창 탭 묶음과 같은 테두리·바탕의 원 · 켜면 선택된 탭과 같은 강조 · 휠이 없는 기기(폰)는 숨김 */
+.fp-lock-btn { flex: none; width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; padding: 0;
+  border: 1px solid color-mix(in srgb, var(--neutral) 11%, transparent); border-radius: 999px; background: rgb(var(--lift) / .035);
+  color: var(--muted); cursor: pointer; transition: background .2s ease, color .2s ease, box-shadow .2s ease; }
+.fp-lock-btn:hover { color: var(--text); background: rgb(var(--lift) / .07); }
+.fp-lock-btn[aria-pressed="true"] { color: var(--ink);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 30%, transparent), color-mix(in srgb, var(--accent) 13%, transparent));
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 18%, transparent), inset 0 1px 0 var(--specular); }
+.fp-lock-btn svg { width: 16px; height: 16px; display: block; }
+.fp-lock-btn[aria-pressed="true"] .lk-open, .fp-lock-btn[aria-pressed="false"] .lk-shut { display: none; }
+html.fp-lock { overflow: hidden; scrollbar-gutter: stable; }
+@media (hover: none) { .fp-lock-btn { display: none; } }
