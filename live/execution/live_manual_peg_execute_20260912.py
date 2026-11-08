@@ -347,6 +347,9 @@ async def run_entry(session, plan: dict, state: dict) -> dict:
     if state.get("action") == "cancel":   # 2026-10-11 대기 취소 -- 잔량은 시장가로 안 넘긴다(든 몫은 그대로, 손절은 호출부가 건다)
         state.update(phase="cancelled", taker_qty=0.0, cancel_reason=state.get("action_reason") or "사용자 취소", done_at=now_iso())
         return state
+    if plan.get("maker_only"):   # 2026-11-09 감시 진입(run_entry_stop): 사용자 «지정가 체결은 절대 시장가로 바꾸지 않는다» -- 따라가기 마감 뒤 잔량은 버린다
+        state.update(phase="cancelled", taker_qty=0.0, cancel_reason="따라가기 마감 — 남은 수량 버림(시장가 없음)", done_at=now_iso())
+        return state
 
     taker = await signed(session, "POST", "/fapi/v1/order",
                          {**common, "type": "MARKET", "quantity": remaining},
@@ -722,6 +725,36 @@ async def run_entry_limit(session, plan: dict, state: dict, max_sec: float = LIM
         state.update(phase="cancelled", taker_qty=0.0, done_at=now_iso(),
                      cancel_reason=(state.get("action_reason") or "사용자 취소") if state.get("action") else ("거래소에서 취소됨" if outside else "대기 시간 만료"))
     return state
+
+
+async def run_entry_stop(session, plan: dict, state: dict, touched, max_sec: float = LIMIT_MAX_SEC) -> dict:
+    """2026-11-09 사용자 «롱은 지금가 위·숏은 아래 선을 감시하다가 걸기» -- 닿으면 peg 따라가기(사용자 선택), 시장가 전환 없음.
+    touched(since) -> bool = since(epoch) 뒤 1초 체결가(USDT)가 선(plan["limit"]["usdt"])에 닿았나 -- 호출부가 sec_prices 로 본다(못 읽으면 False = 안 들어간다).
+    닿기 전엔 거래소에 주문이 없다: state["amend"] = 선 옮김(닿음 판정을 그 시각부터 다시) · action cancel = 취소 · action market = 지금 시장가(TAKER 두 번).
+    닿은 뒤 = run_entry(maker_only): 최우선 호가에 GTX, 달아나면 따라가고 FALLBACK_SEC 뒤 남은 수량은 버린다."""
+    state.update(phase="working", mode="limit", stop=True, triggered=None, filled=0.0, limit_price=float(plan["price"]),
+                 quantity=float(plan["quantity"]), amends=0, deadline_sec=max_sec,
+                 wait_until=datetime.fromtimestamp(time.time() + max_sec, timezone.utc).isoformat())
+    since, deadline = time.time(), time.monotonic() + max_sec
+    while not state.get("action"):
+        am = state.pop("amend", None)
+        if am:   # 수정 API 가 plan(선·수량)을 이미 바꿨다 -- 옛 선에 닿았던 가격은 버린다
+            since = time.time()
+            state.update(limit_price=float(am["price"]), quantity=float(am["qty"]), amends=state["amends"] + 1)
+        if touched(since):
+            break
+        if time.monotonic() >= deadline:
+            state.update(phase="cancelled", taker_qty=0.0, cancel_reason="대기 시간 만료", done_at=now_iso())
+            return state
+        await asyncio.sleep(1.0)
+    if state.get("action") == "market":
+        return await run_entry(session, {**plan, "type": "MARKET"}, state)
+    if state.get("action"):
+        state.update(phase="cancelled", taker_qty=0.0, cancel_reason=state.get("action_reason") or "사용자 취소", done_at=now_iso())
+        return state
+    state["triggered"] = now_iso()
+    price, _, _ = await maker_price(session, plan["side"], plan["symbol"])
+    return await run_entry(session, {**plan, "price": price, "maker_only": True}, state)
 
 
 async def cancel_wait_orphans(session, symbols: list[str]) -> dict:

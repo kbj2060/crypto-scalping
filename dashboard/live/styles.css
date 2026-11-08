@@ -3081,6 +3081,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .lt-ln { position: absolute; height: 0; border-top: 1.5px dashed var(--good); }
 .lt-ln.sl { border-top-color: var(--bad); }
 .lt-ln.en { border-top: 1px solid var(--accent); opacity: .8; }
+.lt-ln.en.stop { border-top-style: dashed; opacity: 1; }   /* 2026-11-09 감시 진입 = 닿아야 걸리는 선 */
 .lt-tag { position: absolute; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
   padding: 5px 9px 5px 7px; border-radius: 7px; border: 1px solid currentColor; background: color-mix(in srgb, var(--chart-bg) 90%, transparent);
   font: inherit; color: var(--good); box-shadow: 0 2px 10px rgb(var(--shadow) / .28); pointer-events: auto; cursor: ns-resize; touch-action: none; user-select: none; }

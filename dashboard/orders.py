@@ -38,7 +38,7 @@ from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position,
     COMMIT_CAP_X, HOLD_CAP_X, RULE_STOP_PCT, commit_rule_l, line_bracket, rec_rule_add_order, rec_rule_bracket, rec_rule_size)   # 2026-10-09 자동 규칙 진입(재생 ×15.2 크기식) · 10-14 자동 물타기 지정가
 from live.execution.live_manual_peg_execute_20260912 import (  # noqa: E402
-    WAIT_CHOICES_MIN, cancel_wait_orphans, clear_bracket, commission_bp, margin_type, nap, place_add_order, place_bracket, place_stop, run_entry, run_entry_limit, run_entry_wait, run_exit, wake_fills)
+    FALLBACK_SEC, WAIT_CHOICES_MIN, cancel_wait_orphans, clear_bracket, commission_bp, margin_type, nap, place_add_order, place_bracket, place_stop, run_entry, run_entry_limit, run_entry_stop, run_entry_wait, run_exit, wake_fills)
 import scripts.binance_ban_guard as ban_guard  # noqa: E402
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
 # 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).
@@ -922,7 +922,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                     await arm_bracket(plan, state, add=False)   # 2026-10-20 첫 부분 체결로 물타기 크기를 재면 남은 여유 거의 전부가 걸린다
                 except Exception as exc:  # noqa: BLE001 -- 대기는 계속(마감 때 다시 건다)
                     state["bracket"] = {"placed": False, "reason": f"{type(exc).__name__}: {exc}"}
-            await settle(run_entry_limit(binance_session(), plan, state, on_fill=first_fill, reprice=lambda: limit_reprice(plan)) if limit
+            await settle(run_entry_stop(binance_session(), plan, state, lambda since: stop_touched(plan, since)) if limit and plan.get("stop")
+                         else run_entry_limit(binance_session(), plan, state, on_fill=first_fill, reprice=lambda: limit_reprice(plan)) if limit
                          else run_entry_wait(binance_session(), plan, state, wait_sec, on_fill=first_fill), state)
         else:
             await settle(run_entry(binance_session(), plan, state), state)
@@ -934,6 +935,12 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 await arm_bracket(plan, state)
         if limit and state.get("phase") != "error":   # 정상 종료에서만 지운다 -- 서버 종료로 태스크가 취소되면(CancelledError) 여기까지 안 와서 파일이 남는다(재시작 복구용) · error = 거래소에 주문이 살아 있을 수 있다(검증 #1)
             limit_path().unlink(missing_ok=True)
+
+    def stop_touched(plan: dict, since: float) -> bool:
+        """감시 진입 닿음 = since 뒤 1초 체결가(USDT) 범위가 선에 닿았나(선 손절 감시와 같은 원천 · 1초 사이 꼬리도 빠짐없이)."""
+        lvl = float(plan["limit"]["usdt"])
+        pts = [px for t, px in sec_prices(exec_asset_of(plan["symbol"]) or "eth") or [] if t > since]
+        return bool(pts) and (max(pts) >= lvl if plan["positionSide"] == "LONG" else min(pts) <= lvl)
 
     async def limit_reprice(plan: dict) -> float | None:
         """2026-10-31 자동 재조정: 지금 basis(USDC÷USDT 호가 중간값)로 다시 잰 목표 주문가. 선(USDT)은 그대로 -- 접수 때 곱한 basis 가 낡았으면 주문가가 선에서 벗어난다.
@@ -1230,7 +1237,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
     async def assemble_entry_plan(side: str, fraction: float = 1.0,
                                   want_lev: int | None = None, asset: str = "eth", fresh: bool = False,
                                   rule_l: str | None = None, lines: tuple[float, float] | None = None,
-                                  limit_usdt: float | None = None):
+                                  limit_usdt: float | None = None, stop: bool = False):
         """계획 조립은 **여기 한 곳뿐**이다 -- 미리보기와 실주문이 같은 입력·같은 함수를 지난다.
         두 곳에 복사해 두면 언젠가 한쪽만 고쳐져 «미리보기와 다른 주문»이 나간다.
 
@@ -1483,11 +1490,13 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 if limit_usdt:   # 2026-10-31 지정가 진입: 주문가 = 진입선(USDT) × basis · 롱은 내림 · 숏은 올림(메이커 쪽) · 호가를 넘으면(= 지금 체결) 막는다 · 명목은 지금가 크기 그대로 유지(수량만 가격비로 재계산)
                     tick, step = filters.get("tick") or 0.01, filters["step"]
                     lp = round((math.floor(limit_usdt * b_ / tick + 1e-9) if side == "LONG" else math.ceil(limit_usdt * b_ / tick - 1e-9)) * tick, 8)
-                    if (side == "LONG" and lp >= float(book["askPrice"])) or (side == "SHORT" and lp <= float(book["bidPrice"])):
+                    if not stop and ((side == "LONG" and lp >= float(book["askPrice"])) or (side == "SHORT" and lp <= float(book["bidPrice"]))):
                         return None, {}, {}, ({"error": "limit_marketable", "detail": "지정가가 호가를 넘어 지금 체결됩니다 — 롱은 지금가 아래 · 숏은 위로(메이커)"}, 400)
                     qn = math.floor(plan["quantity"] * p_in / lp / step + 1e-9) * step
                     plan.update(price=lp, quantity=round(qn, 8), notional_usdt=round(qn * lp, 2), limit={"usdt": round(limit_usdt, 4), "price": lp})
-                    plan["notes"] = [*plan.get("notes", []), f"지정가 {lp:,.2f} 메이커 대기 — 안 닿으면 체결되지 않습니다(시장가 전환 없음)"]
+                    plan["notes"] = [*plan.get("notes", []), f"감시 진입 — 차트가 {limit_usdt:,.2f} 에 닿으면 최우선 호가 peg 로 따라갑니다({FALLBACK_SEC:.0f}초, 남은 수량 버림 · 시장가 전환 없음)" if stop
+                                     else f"지정가 {lp:,.2f} 메이커 대기 — 안 닿으면 체결되지 않습니다(시장가 전환 없음)"]
+                    plan["stop"] = stop   # 2026-11-09 감시 진입(롱 = 지금가 위 · 숏 = 아래): 수량·선 검사는 지정가와 같이 그 선 기준 · 집행 = run_entry_stop
                     if not plan.get("blocked") and (qn < filters["min_qty"] or qn <= 0 or (filters["min_notional"] and qn * lp < filters["min_notional"])):
                         plan["blocked"] = "지정가 크기가 거래소 최소 주문보다 작습니다"
             if rule:
@@ -1554,7 +1563,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         plan, cap, sizing, error = await assemble_entry_plan(side, frac,
                                                              query_leverage(request), query_asset(request),
                                                              fresh=request.query.get("fresh") == "1", rule_l=rule_l,
-                                                             lines=lines, limit_usdt=lim)
+                                                             lines=lines, limit_usdt=lim, stop=bool(lim) and request.query.get("stop") == "1")
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         return web.json_response({"ok": True, "plan": plan, "cap": cap,
@@ -1618,7 +1627,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         plan, cap, sizing, error = await assemble_entry_plan(side, frac,
                                                              query_leverage(request), query_asset(request),
                                                              fresh=request.query.get("fresh") == "1", rule_l=rule_l,
-                                                             lines=lines, limit_usdt=limit_px)
+                                                             lines=lines, limit_usdt=limit_px, stop=bool(limit_px) and request.query.get("stop") == "1")
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):
@@ -2198,7 +2207,9 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             return web.json_response({"ok": False, "error": "exec_disabled",
                                       "detail": "DASHBOARD_MANUAL_EXEC_ENABLED 가 꺼져 있습니다"}, status=403)
         st = manual_wait_state
-        if st.get("mode") != "limit" or st.get("phase") != "working" or st.get("action") or not st.get("order_id"):
+        watching = bool(st.get("stop")) and not st.get("triggered")   # 감시 진입은 닿기 전엔 거래소 주문이 없다 · 닿은 뒤(따라가기)는 수정 없음
+        if (st.get("mode") != "limit" or st.get("phase") != "working" or st.get("action") or not (st.get("order_id") or watching)
+                or (st.get("stop") and st.get("triggered"))):   # 닿아 따라가는 중엔 fill_maker 가 order_id 를 채운다 -- 그래도 수정 없음
             return web.json_response({"ok": False, "error": "no_limit", "detail": "수정할 대기 지정가 주문이 없습니다", "wait": st}, status=409)
         if float(st.get("filled") or 0.0) > 0:
             return web.json_response({"ok": False, "error": "partially_filled", "detail": "일부 체결돼 진입가를 못 바꿉니다 — 그 몫의 익절·손절은 포지션 선으로 수정하세요"}, status=409)
@@ -2208,7 +2219,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         if not isinstance(lines, tuple) or not isinstance(lim, float):
             return web.json_response({"ok": False, "error": "bad_limit", "detail": "limit·tp·sl 이 모두 양수여야 합니다"}, status=400)
         asset = st.get("asset") or "eth"
-        plan, _, _, error = await assemble_entry_plan(st["side"], float(old.get("fraction") or 1.0), int(old.get("target_leverage") or 0) or None, asset, fresh=True, rule_l=None, lines=lines, limit_usdt=lim)
+        plan, _, _, error = await assemble_entry_plan(st["side"], float(old.get("fraction") or 1.0), int(old.get("target_leverage") or 0) or None, asset, fresh=True, rule_l=None, lines=lines, limit_usdt=lim, stop=watching)
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):
@@ -2216,7 +2227,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         # 수량·레버리지는 걸린 주문 그대로(부분 체결 0 이라 같은 수량으로 다시 걸면 된다) -- 새 계획에서는 가격·선만 가져온다
         moved = abs(float(plan["price"]) - float(st.get("limit_price") or old["price"])) > 1e-9   # 걸려 있는 실제 주문가 기준(자동 재조정이 바꿨을 수 있다)
         if (st.get("phase") != "working" or st.get("action") or float(st.get("filled") or 0.0) > 0 or st.get("amend")
-                or st.get("order_id") is None):   # 계획 조립(await) 사이에 상태가 바뀌었다
+                or (st.get("order_id") is None and not watching) or (watching and st.get("triggered"))):   # 계획 조립(await) 사이에 상태가 바뀌었다(감시 중 닿음 포함 -- 닿으면 따라가기가 order_id 를 채운다)
             return web.json_response({"ok": False, "error": "state_changed", "detail": "그 사이 주문 상태가 바뀌었습니다 — 다시 확인하세요"}, status=409)
         old["bracket"] = plan["bracket"]
         old["limit"] = plan.get("limit")
@@ -2254,7 +2265,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             # 2026-11-04 사용자 «대기 라벨에 taker 버튼»: 지정가 대기도 «지금 시장가» = 집행 루프가 걸린 주문을 취소 **확인한 뒤** 남은 수량만 시장가(run_entry_limit).
             #   시장가는 지금 호가에 체결되므로 익절·손절선이 그 가격 기준으로 아직 맞는지 진입과 같은 line_bracket 으로 다시 본다 -- 가격이 선을 넘어갔으면 시장가로 안 넣는다.
             st = manual_wait_state
-            if st.get("phase") != "working" or not st.get("order_id") or st.get("action"):
+            if st.get("phase") != "working" or not (st.get("order_id") or st.get("stop")) or (st.get("stop") and st.get("triggered")) or st.get("action"):   # 감시 진입은 닿기 전에만(닿은 뒤 = 따라가는 중 -- 따라가기는 market 을 안 받는다)
                 return web.json_response({"ok": False, "error": "not_ready", "detail": "주문이 아직 걸리지 않았거나 이미 처리 중입니다", "wait": st}, status=409)
             try:
                 plan, symbol = st["plan"], st["plan"]["symbol"]

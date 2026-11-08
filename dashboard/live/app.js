@@ -397,6 +397,9 @@ let lineDrag = null, lineHold = 0, linePrevT = 0, linePt = "", linePrevSeq = 0; 
 //   방향·손익비·손절 손실은 진입선(ref)이 기준 -- 지정가면 ref = entry. 롱 지정가는 지금가 아래 · 숏 지정가는 위(메이커)여야 하고 넘으면 peg 로 되돌린다.
 const lineRef = (t, p) => (t.entry > 0 ? t.entry : p);
 const lineSide = (t, p) => { const r = lineRef(t, p); return t.tp > r && t.sl < r ? "LONG" : t.tp < r && t.sl > r ? "SHORT" : ""; };
+// 2026-11-09 사용자 «롱은 위에서 롱 · 숏은 아래서 숏을 감시하다가 걸게»: 진입선이 롱 = 지금가 위 · 숏 = 아래면 «감시 진입»(서버 run_entry_stop -- 1초 체결가가 선에 닿으면 peg 따라가기, 시장가 없음).
+//   걸린 뒤엔 서버가 정한 종류(stopP)를 따른다 -- 가격이 선을 지나가도 지정가로 바뀌어 보이지 않게.
+const lineStop = (t, p) => { if (t.placed) return !!t.stopP; const s = lineSide(t, p); return t.entry > 0 && ((s === "LONG" && t.entry > p) || (s === "SHORT" && t.entry < p)); };
 const lineDig = (v) => (v >= 100 ? 2 : 4);   // XRP(~2.5) 는 소수 넷째 자리 -- 둘째 자리로 자르면 선이 0.2% 옮겨진 채 나간다(10-28 검증)
 const lineFmt = (v) => Number(v).toLocaleString("en-US", { minimumFractionDigits: lineDig(v), maximumFractionDigits: lineDig(v) });
 const linePx = (v) => v.toFixed(lineDig(v));
@@ -442,7 +445,7 @@ function linePreview() {   // 크기는 서버 미리보기(증거금 linePct %)
     if (!t || t.placed) return;   // 대기 주문은 서버가 크기를 이미 정했다
     if (!side) { t.plan = null; t.err = "익절과 손절이 현재가 양쪽에 있어야 합니다"; renderLineTool(); return; }
     try {
-      const d = await manualEntryFetch(side, "entry", { rule: "", pct: linePct, tp: linePx(t.tp), sl: linePx(t.sl), limit: t.entry > 0 ? linePx(t.entry) : "" });
+      const d = await manualEntryFetch(side, "entry", { rule: "", pct: linePct, tp: linePx(t.tp), sl: linePx(t.sl), limit: t.entry > 0 ? linePx(t.entry) : "", stop: lineStop(t, p) });
       if (lineTool !== t || seq !== linePrevSeq) return;
       t.plan = d.ok ? d.plan : null; t.err = d.ok ? (d.plan.blocked || "") : (d.detail || d.error || "미리보기 실패");
     } catch (e) { if (lineTool === t && seq === linePrevSeq) { t.plan = null; t.err = "미리보기 실패"; } }
@@ -454,8 +457,9 @@ function lineFire() {   // 미리보기 → 오는 즉시 발주(manualFireOnPre
   if (!side) return;
   if (manualOrderBusy || manualPreviewInFlight) { t.fail = manualOrderBusy ? "이전 주문 처리 중 -- 끝나면 다시 누르세요" : "미리보기 받는 중 -- 잠시 뒤 다시 누르세요"; renderLineTool(); ofabSay(escapeHtml(manualOrderBusy ? "이전 주문을 처리하는 중이라 이번 누름은 무시됐습니다 — 끝나면 다시 눌러 주세요" : "다른 미리보기를 받는 중이라 이번 누름은 무시됐습니다 — 잠시 뒤 다시 눌러 주세요")); return; }   // 2026-11-05 사용자 «주문 버튼이 씹힌다» -- 조용히 무시하던 자리에 사유를 띄운다
   t.fail = ""; const lim = t.entry > 0;   // 지정가 = 접수가 확인될 때까지 선을 둔다(manualEntrySubmit 이 placed 로) · peg = 현행대로 바로 지운다
-  ofabWatchResult(); ofabSay(escapeHtml(`${side === "LONG" ? "롱" : "숏"} ${lim ? "지정가 " : ""}선 주문 — ${HOLD_FIRE_MS ? "미리보기 받는 중…" : "주문 전송 중…"}`));
-  const ov = { rule: "", pct: linePct, tp: linePx(t.tp), sl: linePx(t.sl), fresh: true, limit: lim ? linePx(t.entry) : "" };
+  const stp = lim && lineStop(t, p);
+  ofabWatchResult(); ofabSay(escapeHtml(`${side === "LONG" ? "롱" : "숏"} ${stp ? "감시 " : lim ? "지정가 " : ""}선 주문 — ${HOLD_FIRE_MS ? "미리보기 받는 중…" : "주문 전송 중…"}`));
+  const ov = { rule: "", pct: linePct, tp: linePx(t.tp), sl: linePx(t.sl), fresh: true, limit: lim ? linePx(t.entry) : "", stop: stp };
   if (!HOLD_FIRE_MS) manualFireNow(side, "entry", ov);   // 즉시 모드 -- 미리보기 없이 바로
   else { manualFireOnPreview = true; manualEntryPreview(side, "entry", ov); }
   renderLineTool();   // peg 도 선은 서버가 받았다고 한 뒤(manualEntrySubmit)에 거둔다 -- 거절되면 사유를 이 팝업에 남긴다
@@ -491,9 +495,10 @@ function lineToolEl(box) {
     if (!m || !G) return;
     const yv = (e.clientY - m.f) / m.d;   // 화면 → viewBox y(화면 밖으로 끌어도 같은 비율로 이어진다)
     const v = Math.max(0.01, G.ymax - (yv - G.mt) * (G.ymax - G.ymin) / (G.pb - G.mt));
-    if (lineDrag.k === "en") {   // 진입선: 방향 쪽(롱 = 지금가 아래 · 숏 = 위)이면 지정가, 넘으면 지금가 peg 로 되돌림
-      const p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), s = lineSide(lineTool, p);
-      lineTool.entry = (s === "LONG" && v < p) || (s === "SHORT" && v > p) ? v : lineTool.placed ? lineTool.entry : null;   // 대기 주문은 peg 로 못 돌아간다(그 자리에 머문다)
+    if (lineDrag.k === "en") {   // 진입선: 롱 = 지금가 아래 지정가 · 위 감시 진입(숏은 거울) · 지금가 8px 안으로 끌면 peg 로 되돌림
+      const p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), s = lineSide(lineTool, p), up = (s === "LONG" && v > p) || (s === "SHORT" && v < p);
+      if (lineTool.placed) { if (s && up === !!lineTool.stopP && !lineTool.trig) lineTool.entry = v; }   // 대기 주문은 종류(지정가↔감시)도 peg 도 못 바꾼다 · 닿아 따라가는 중이면 그대로
+      else lineTool.entry = Math.abs(v - p) < 8 * (G.ymax - G.ymin) / (G.pb - G.mt) ? null : v;
     } else lineTool[lineDrag.k] = v;
     lineTool.plan = null; lineTool.arm = 0; linePrevSeq++; renderLineTool();
   });
@@ -586,7 +591,7 @@ function lineSyncWait(w) {
   if (!lineTool && (w.asset || "eth") === activeSnapshotAsset) lineTool = { placed: true, asset: w.asset || "eth", plan: null, err: "" };   // 새로고침·다른 기기에서 걸린 주문도 다시 잇는다
   const t = lineTool;
   if (!t || !t.placed || lineDrag || t.busy) return;
-  Object.assign(t, { tp: br.tp_level, sl: br.sl_level, entry: pl.limit.usdt, px: Number(w.limit_price) || 0, amended: Number(w.amends || 0) });
+  Object.assign(t, { tp: br.tp_level, sl: br.sl_level, entry: pl.limit.usdt, px: Number(w.limit_price) || 0, amended: Number(w.amends || 0), stopP: !!(w.stop || pl.stop), trig: !!w.triggered });
   t.plan = { ...pl, quantity: Number(w.quantity ?? pl.quantity) || 0 };   // 크기 줄 = 서버가 정한 계획(수량·배수·명목·순자산)
   renderLineTool();
 }
@@ -710,7 +715,8 @@ function renderLineTool() {
   const clampY = (y) => Math.min(bot, Math.max(top, y));
   const L = X(G.ml), R = X(G.ml + G.cw), x0 = L + (R - L) * (mob ? 0.36 : 0.58), w = R - x0, cx = x0 + w / 2;
   const Rp = !mob && fpProfileSpan ? Math.max(R, X(fpProfileSpan[1])) : R;   // 2026-11-04 펜 메모 «익절·손절·진입 선을 프로파일(델타·TPO·호가 칸)까지 연장»: 가로선만 오른쪽 끝(호가 띠 끝)까지 · 상자·꼬리표 자리는 그대로
-  const side = lineSide(t, p), sgn = side === "SHORT" ? -1 : 1, ref = lineRef(t, p), lim = t.entry > 0;   // ref = 진입선 가격(지정가면 그 선 · 아니면 지금가)
+  const side = lineSide(t, p), sgn = side === "SHORT" ? -1 : 1, ref = lineRef(t, p), lim = t.entry > 0, stp = lim && lineStop(t, p);   // ref = 진입선 가격(지정가면 그 선 · 아니면 지금가) · stp = 감시 진입
+  const kindKo = stp ? (t.trig ? "닿음 · 따라가는 중" : "감시") : "지정가";
   const yP = clampY(Y(ref)), yNow = clampY(Y(p)), yT = clampY(Y(t.tp)), yS = clampY(Y(t.sl));
   const qty = Number(t.plan?.quantity) || 0, unit = coinUnit();
   // 🔴2026-11-02 사용자 «익절·손절을 끌 때마다 가격·%·금액이 맞게 변하게»: 끄는 동안 plan=null 이라 qty=0 이 되어 **금액이 사라졌다**. 서버 수량이 없으면 어림 수량으로 계속 보인다(«≈»).
@@ -730,7 +736,7 @@ function renderLineTool() {
     tag.title = `${k === "tp" ? "익절" : "손절"} ${lineFmt(v)} (${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%)`;
     tag.setAttribute("aria-label", `${k === "tp" ? "익절" : "손절"}선 ${lineFmt(v)} — 위아래로 끌어 옮기기`);
   });
-  set(".lt-ln.en", { left: x0 + "px", width: Rp - x0 + "px", top: yP + "px" });
+  set(".lt-ln.en", { left: x0 + "px", width: Rp - x0 + "px", top: yP + "px" })?.classList.toggle("stop", stp);   // 감시 진입선 = 점선(닿아야 걸리는 선)
   set(".lt-ln.now", { left: x0 + "px", width: Rp - x0 + "px", top: yNow + "px", display: lim ? "" : "none" });   // 지정가일 때만 지금가 기준선을 따로 보인다
   const waitC = lim && !!t.placed;   // 2026-11-04 펜 메모: 지정가 대기 라벨 = 왼쪽 끝 → 가운데(익절·손절 꼬리표와 같은 세로줄)
   const en = set(".lt-tag.en", { left: (waitC ? cx : x0 + 6) + "px", top: yP + "px" });
@@ -738,18 +744,19 @@ function renderLineTool() {
   // 2026-11-04 펜 메모 «지정가 라벨을 끌 때마다 오른쪽에 진입가 · 놓아 확정하면 라벨 안 «대기» 자리에 진입가»: 끄는 동안만 선 오른쪽 끝에 가격 칩
   const dpx = h.querySelector(".lt-dpx");
   if (dpx) { const on = lineDrag?.k === "en" && lim; dpx.hidden = !on; if (on) { dpx.textContent = lineFmt(ref); Object.assign(dpx.style, { left: R + 8 + "px", top: yP + "px" }); } }
-  en.title = lim ? (t.px ? `차트(USDT) 선 ${lineFmt(ref)} — 실제 주문가(USDC) ${lineFmt(t.px)} · 접수 때 USDC/USDT 차이(basis)를 곱해 걸었습니다` : `지정가 ${lineFmt(ref)}`)
+  en.title = stp ? `감시 진입 ${lineFmt(ref)} — 차트가 이 선에 닿으면 최우선 호가 peg 로 따라갑니다(120초 · 남은 수량 버림 · 시장가 전환 없음)${t.trig ? " · 지금 닿아 따라가는 중" : ""}`
+    : lim ? (t.px ? `차트(USDT) 선 ${lineFmt(ref)} — 실제 주문가(USDC) ${lineFmt(t.px)} · 접수 때 USDC/USDT 차이(basis)를 곱해 걸었습니다` : `지정가 ${lineFmt(ref)}`)
     : `진입 peg ${lineFmt(p)} — 끌면 지정가`;
   // 2026-11-03 시안 B: 진입 꼬리표 = 포지션만(작은 알약, 진입선 왼쪽 끝). 체결 기둥·청산 프로파일 칸(lane)으로 안 들어간다. 대기 중이면 «대기»와 취소 ✕ 는 그대로.
   en.classList.add("lt-mini"); en.classList.remove("lane"); en.style.width = "";
   // 🔴2026-11-04 펜 메모 «✕ 를 눌러도 한 번에 취소가 안 된다 · 여러 번 눌러야»: 가격이 틱마다 이 함수를 부르고, 같은 글을 innerHTML 로 다시 쓰면 ✕ 노드가 갈려
   //   마우스를 누른 사이 새 노드로 바뀐다 -- 클릭이 ✕ 가 아닌 부모로 가 취소가 안 나갔다(하네스 재현: 누름~뗌 사이 다시 그리기 1번 = 취소 0). 글이 바뀔 때만 쓴다.
   const tkArmed = Date.now() < (t.tkArm || 0);
-  const enH = `<span class="lt-grip" aria-hidden="true"></span>${side === "SHORT" ? "SHORT" : "LONG"}${t.add ? " 추가" : ""}${lim && t.placed ? " " + lineFmt(ref) : ""}`
+  const enH = `<span class="lt-grip" aria-hidden="true"></span>${side === "SHORT" ? "SHORT" : "LONG"}${t.add ? " 추가" : ""}${stp ? " 감시" : ""}${lim && t.placed ? " " + lineFmt(ref) : ""}`
     + (lim && t.placed ? `<span class="lt-tkr${tkArmed ? " arm" : ""}" role="button" tabindex="0" aria-label="${tkArmed ? "빨간색 = 한 번 더 누르면 시장가로 진입" : "지금 시장가로 진입(taker)"}" title="걸린 지정가를 취소하고 남은 수량을 시장가(테이커 4bp)로 진입 — 두 번 눌러 확인(첫 클릭 = 빨간색, 5초)">${t.busy ? "…" : "TAKER"}</span>`
       + `<span class="lt-tx" role="button" tabindex="0" aria-label="지정가 주문 취소" title="주문 취소">✕</span>` : "");
   if (en._h !== enH) { en.innerHTML = enH; en._h = enH; }
-  en.setAttribute("aria-label", lim ? `지정가 진입선 ${lineFmt(ref)} — 위아래로 끌어 옮기기` : "지금가 peg 진입선 — 끌어서 지정가로 바꾸기");
+  en.setAttribute("aria-label", lim ? `${stp ? "감시" : "지정가"} 진입선 ${lineFmt(ref)} — 위아래로 끌어 옮기기` : "지금가 peg 진입선 — 끌어서 지정가로 바꾸기");
   h.classList.toggle("short", side === "SHORT");
   // 표는 플롯 왼쪽 -- 두 꼬리표의 높이 띠(±22px)를 피한 빈 구간 중 표가 들어가는 첫 곳(위부터, 대개 두 선 사이). 없으면 가장 넓은 곳.
   const tk = h.querySelector(".lt-tk"), th = tk.offsetHeight + 8, ys = [yT, yS].sort((a, b) => a - b);
@@ -782,9 +789,9 @@ function renderLineTool() {
   const go = h.querySelector(".lt-go"), armed = Date.now() < (t.arm || 0);
   go.disabled = !side || !!t.err || !qty || !!t.placed;
   go.classList.toggle("short", side === "SHORT"); go.classList.toggle("armed", armed);   // className 을 덮으면 꾹 채움(hold)이 매초 지워진다
-  go.innerHTML = t.placed ? `✓ ${side === "LONG" ? "롱" : "숏"} 지정가 대기 중`
-    : armed ? `확인: ${side === "LONG" ? "롱" : "숏"} ${qty} ${unit} ${lim ? "지정가 " + lineFmt(ref) : "주문"}`
-    : `${side || "진입"} ${t.add ? "추가 " : ""}${lim ? "지정가 대기" : "진입 · peg"} <small>${matchMedia("(pointer: coarse)").matches ? (mob ? "두 번" : "두 번 눌러 확인") : "누르면 바로"}</small>`;
+  go.innerHTML = t.placed ? `✓ ${side === "LONG" ? "롱" : "숏"} ${kindKo}${stp && !t.trig ? " 중" : stp ? "" : " 대기 중"}`
+    : armed ? `확인: ${side === "LONG" ? "롱" : "숏"} ${qty} ${unit} ${lim ? kindKo + " " + lineFmt(ref) : "주문"}`
+    : `${side || "진입"} ${t.add ? "추가 " : ""}${stp ? "감시 진입" : lim ? "지정가 대기" : "진입 · peg"} <small>${matchMedia("(pointer: coarse)").matches ? (mob ? "두 번" : "두 번 눌러 확인") : "누르면 바로"}</small>`;
   const lx = h.querySelector(".lt-x"); lx.setAttribute("aria-label", t.placed ? (t.busy ? "취소 중…" : "주문 취소") : "닫기 (선 지우기)"); lx.disabled = !!t.busy;
 }
 // ── 2026-10-29 사용자 «SLTP 선주문에서 이미 들어간 주문은 풋프린트에 선과 띠를 계속 · 선을 움직이면 움직인 대로 주문 수정»
@@ -10809,7 +10816,7 @@ async function manualEntryFetch(side, kind = "entry", ov = null) {
     + (kind === "exit" ? "" : (ov?.lev ? `&lev=${ov.lev}` : manualLevQuery()))
     + (kind === "exit" ? exitExecQuery(ov) : ((ov?.rule ?? manualRule()) ? `&rule=${ov?.rule ?? manualRule()}` : ""))
     + (ov?.fresh ? "&fresh=1" : "") + (kind !== "exit" && ov?.tp ? `&tp=${ov.tp}&sl=${ov.sl}` : "")
-    + (kind !== "exit" && ov?.limit ? `&limit=${ov.limit}` : "");   // 2026-10-31 지정가 진입(USDT 차트 가격)
+    + (kind !== "exit" && ov?.limit ? `&limit=${ov.limit}${ov.stop ? "&stop=1" : ""}` : "");   // 2026-10-31 지정가 진입(USDT 차트 가격) · 11-09 stop=1 감시 진입
   const res = await fetch(`/api/manual-${kind}/preview?side=${side}&asset=${activeSnapshotAsset}${q}`, { cache: "no-cache" });
   return res.json();
 }
@@ -11035,7 +11042,7 @@ function manualEntryArmConfirm(side, plan, kind = "entry", ov = null) {
                          lev: ov?.lev ?? manualLevEffective(),
                          rule: kind === "exit" ? "" : (ov?.rule ?? manualRule()),
                          fresh: !!ov?.fresh, sw: ov?.switch || null, tp: ov?.tp || "", sl: ov?.sl || "", limit: ov?.limit || "",
-                         exec: kind === "exit" ? exitExecQuery(ov) : (ov?.limit ? "&mode=limit" : ov?.tp ? "" : manualExecQuery()) };   // 2026-10-28 선 주문 = 따라가기(run_entry)만
+                         exec: kind === "exit" ? exitExecQuery(ov) : (ov?.limit ? "&mode=limit" + (ov.stop ? "&stop=1" : "") : ov?.tp ? "" : manualExecQuery()) };   // 2026-10-28 선 주문 = 따라가기(run_entry)만
   // 🔴2026-09-26 비평 P0 + 사용자 결정 «길게 누르면 바로 발주»: 0.4초를 채운 뒤 미리보기가 **늦게** 오면
   //   예전엔 확인 버튼이 떴다 -- 네트워크 속도에 따라 한 단계/두 단계가 갈렸다. 채움을 끝낸 사람은 이미
   //   확인했다. 미리보기가 오는 즉시 발주한다(막혔으면 위에서 이미 멈췄다).
@@ -11312,7 +11319,8 @@ async function manualEntrySubmit() {
       manualOrderBusy = false;
       manualButtonsDisabled(false);
       if (pending.limit && lineTool) { lineTool.placed = true; lineTool.arm = 0; lineTool.err = ""; renderLineTool(); }   // 접수 확인 -- 선이 «대기 주문»이 된다(끌면 수정)
-      box.innerHTML = entryNote(pending.limit ? "지정가 대기 — 선 가격에 걸어 두었습니다. 선을 끌면 주문이 수정되고, «주문 취소»로 거둡니다(시장가 전환 없음)"
+      box.innerHTML = entryNote(pending.limit && /stop=1/.test(pending.exec || "") ? "감시 진입 — 차트가 선에 닿으면 최우선 호가로 따라가며 진입합니다(120초 · 남은 수량 버림 · 시장가 전환 없음). 선을 끌면 수정, «주문 취소»로 거둡니다"
+        : pending.limit ? "지정가 대기 — 선 가격에 걸어 두었습니다. 선을 끌면 주문이 수정되고, «주문 취소»로 거둡니다(시장가 전환 없음)"
         : "기다리기 — 최우선 호가에 걸어 두었습니다. 아래에서 취소·지금 시장가", "live");
       manualWaitPoll();
       return;
@@ -11344,7 +11352,7 @@ function renderManualWait(w) {
   if (acts) acts.hidden = !live;
   el("snapWaitMarket")?.toggleAttribute("hidden", w?.mode === "limit");   // 지정가 대기는 «지금 시장가» 없음(검증 D5)
   if (box.hidden) return;
-  const ko = w.side === "LONG" ? "롱" : "숏", unit = (ASSET_CONFIG[w.asset] || {}).label || coinUnit();
+  const ko = w.side === "LONG" ? "롱" : "숏", unit = (ASSET_CONFIG[w.asset] || {}).label || coinUnit(), wk = w.mode === "limit" ? (w.stop ? "감시 진입" : "지정가 대기") : "기다리기";
   let t, tone = "live";
   if (ph === "restart_cancelled") {
     const n = (w.cancelled || []).length, errs = (w.errors || []).join(" · ");
@@ -11354,12 +11362,13 @@ function renderManualWait(w) {
     tone = errs || rc?.reason ? "bad" : "live";
   } else if (live) {
     const left = Math.max(0, Math.ceil((Date.parse(w.wait_until || "") - Date.now()) / 60e3));
-    t = `${w.mode === "limit" ? "지정가 대기" : "기다리기"} ${ko} ${Number(w.filled || 0)} / ${Number(w.quantity ?? w.plan?.quantity ?? 0)} ${unit}`
-      + (w.limit_price ? ` · 주문가(USDC) ${w.limit_price}${w.plan?.limit?.usdt ? ` = 차트선(USDT) ${w.plan.limit.usdt}` : ""} (따라가지 않음)` : "")
-      + (w.mode === "limit" ? ` · 시장가 전환 없음 · 선을 끌면 수정${w.reprices ? ` · 자동 재조정 ${w.reprices}회(USDC/USDT 차이)` : ""}` : Number.isFinite(left) && w.wait_until ? ` · ${left}분 뒤 남은 수량 시장가` : "")
+    t = `${wk}${w.stop && w.triggered ? " 닿음 · 따라가는 중" : ""} ${ko} ${Number(w.filled || 0)} / ${Number(w.quantity ?? w.plan?.quantity ?? 0)} ${unit}`
+      + (w.stop ? (w.triggered ? ` · 주문가(USDC) ${w.limit_price} · 최우선 호가를 따라갑니다(120초 · 남은 수량 버림 · 시장가 전환 없음)` : ` · 차트(USDT) ${w.plan?.limit?.usdt} 에 닿으면 peg 따라가기 · 시장가 전환 없음 · 선을 끌면 수정`)
+        : w.limit_price ? ` · 주문가(USDC) ${w.limit_price}${w.plan?.limit?.usdt ? ` = 차트선(USDT) ${w.plan.limit.usdt}` : ""} (따라가지 않음)` : "")
+      + (w.stop ? "" : w.mode === "limit" ? ` · 시장가 전환 없음 · 선을 끌면 수정${w.reprices ? ` · 자동 재조정 ${w.reprices}회(USDC/USDT 차이)` : ""}` : Number.isFinite(left) && w.wait_until ? ` · ${left}분 뒤 남은 수량 시장가` : "")
       + (w.action ? ` · ${w.action === "cancel" ? "취소" : "지금 시장가"} 요청됨 — 3초 안에 처리` : "");
   } else {
-    t = `${w.mode === "limit" ? "지정가 대기" : "기다리기"} 끝 — ${manualEntryStateText(w).replace(/\n/g, " · ")}`
+    t = `${wk} 끝 — ${manualEntryStateText(w).replace(/\n/g, " · ")}`
       + (w.taker_reason ? ` (${w.taker_reason})` : "") + (w.cancel_reason ? ` (${w.cancel_reason})` : "");
     tone = /^(error|taker_failed|rejected)$/.test(ph) ? "bad" : "";   // 끝난 결과는 흐리게 -- 주황(주의)은 거래소에 걸려 있는 동안만
   }
@@ -11492,7 +11501,7 @@ function manualFireNow(side, kind = "entry", ov = null) {
                          lev: ov?.lev ?? manualLevEffective(),
                          rule: kind === "exit" ? "" : (ov?.rule ?? manualRule()),
                          fresh: !!ov?.fresh, sw: ov?.switch || null, tp: ov?.tp || "", sl: ov?.sl || "", limit: ov?.limit || "",
-                         exec: kind === "exit" ? exitExecQuery(ov) : (ov?.limit ? "&mode=limit" : ov?.tp ? "" : manualExecQuery()) };
+                         exec: kind === "exit" ? exitExecQuery(ov) : (ov?.limit ? "&mode=limit" + (ov.stop ? "&stop=1" : "") : ov?.tp ? "" : manualExecQuery()) };
   manualEntrySubmit();
 }
 function manualHoldStart(btn, side, kind, ov = null) {
