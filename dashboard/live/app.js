@@ -4744,7 +4744,19 @@ function fcTrendCell(t, cell) {
   return cell("지금 추세", `${up ? "up" : "dn"} now`, `${up ? "▲ 상승" : "▼ 하락"} <small class="fc-cnt">${ups}:${n - ups}</small>`, `위 ${ups} · 아래 ${n - ups} · ${t.age_days}일째 · 매일 09시 마감`,
     `지금 추세 — 예측 아님. 매일 09시(KST) 일봉 종가를 7·14·28·56·90일 전 종가와 비교한 5표 중 다수 · ${t.age_days}일째 같은 방향`
       + (TREND_NOTE[activeSnapshotAsset] || ""), "",
-    tags);
+    tags, null, f1Html(t.f1, px));
+}
+// 2026-11-09 F1 «7일 추세»(트레일링 스탑 세션 요청 · 사용자 시안 C): 7·14·21·28일 전 종가 대비 4표 다수 · 2:2 중립 · 서버 trend_rule.F1_LOOKBACKS(고정).
+//   근거는 툴팁에만, 확률·적중률은 싣지 않는다(지금 추세 칸 규칙). 표시 전용 -- 주문·손절에 안 씀.
+function f1Html(f, px) {
+  if (!f || !Array.isArray(f.votes)) return "";
+  const dir = f.signal > 0 ? "up" : f.signal < 0 ? "dn" : "flat", word = f.signal > 0 ? "▲ 상승" : f.signal < 0 ? "▼ 하락" : "중립";
+  const tip = "7일 추세(F1) — 앞으로 7일 보유 기준 방향 · 예측 아님 · 참고용\n매일 09시(KST) 일봉 종가를 7·14·21·28일 전 종가와 비교한 4표의 다수 · 2:2 는 중립\n"
+    + "근거: 4코인(ETH·BTC·SOL·XRP) 2020~26 7일 보유 초과 +94bp/거래 · 최근 2년(2024~) +42bp 는 단독으로 유의하지 않음 · 안 쓴 16코인 재현 불통과\n"
+    + "왼쪽 «지금 추세»와 같은 방향인 날이 약 90%";
+  const chips = f.votes.map((v) => `<i class="${v.s > 0 ? "u" : v.s < 0 ? "" : "z"}" title="${v.L}일 전 종가 ${px(v.ref_now)}보다 ${v.s > 0 ? "높게" : v.s < 0 ? "낮게" : "같게"} 마감">${v.L}</i>`).join("");
+  return `<div class="f1 ${dir}" title="${escapeHtml(tip)}"><span class="hz">7일 추세</span><span class="f1-h"><b class="gl">${word}</b>`
+    + `<span class="f1-n">${f.ups}:${f.downs} · 참고용</span></span><span class="fc-tl f1-tl">${chips}</span></div>`;
 }
 
 // 2026-10-31 ⑤ 툴팁 코인별 실측 -- docs/experiments/xrp_trend_cb7d_20261031.md · «지금 추세» 다음 7일 적중(2024-01~2026-10-23)
@@ -4821,11 +4833,11 @@ function fcRowHtml(sec) {
   // 2026-11-04 펜 메모 «예측 줄과 적중 기록을 정보 빠지는 것 없이 융합»: 칸 → 행. 윗줄 = 이름 · 판정 · 분위 · 게이지 / 아랫줄(.fz-r) = 덧붙임(σ·표) + 적중 기록(일별 막대 · 적중률 · 분모)
   // 2026-11-04 펜 메모 «방향 게이지의 "하락" 글자는 게이지 안 점을 따라가게 · 글자 줄이고 그래프 위주로»: 판정 글자 = 게이지 점 바로 위(점 따라 이동, 끝에서는 안쪽으로 붙는다) ·
   //   게이지 없는 칸(지금 추세·횡보/추세)은 같은 자리에 가운데 정렬 · 오른쪽 = 적중 기록(막대 · 적중률 · 분모) · 분위·σ·대기 같은 덧붙임은 툴팁.
-  const cell = (hz, c, main, sub, tip, gauge = "", rest = "", hitKey = null) => {
+  const cell = (hz, c, main, sub, tip, gauge = "", rest = "", hitKey = null, right = "") => {   // right = 적중 기록이 없는 줄의 오른쪽 칸(«지금 추세» 줄의 7일 추세)
     const h = prHit(hitKey), m = /<u style="left:([\d.]+)%"><\/u><\/span>$/.exec(gauge);
     const lab = m ? `<b class="gl" style="left:${m[1]}%;--x:${m[1]}%">${main}</b>` : `<b class="gl c">${main}</b>`;
     return `<div class="fc-c ${c}" title="${escapeHtml(tip + (sub ? "\n" + sub.replace(/<[^>]+>/g, "") : "") + (h.tip ? "\n" + h.tip : ""))}"><span class="hz">${hz}</span>`
-      + `<div class="fc-t">${m ? gauge.replace(/<\/span>$/, lab + "</span>") : lab}${m ? "" : rest}</div>${h.html ? `<div class="fz-r">${h.html}</div>` : ""}</div>`;
+      + `<div class="fc-t">${m ? gauge.replace(/<\/span>$/, lab + "</span>") : lab}${m ? "" : rest}</div>${h.html || right ? `<div class="fz-r">${h.html || right}</div>` : ""}</div>`;
   };
   const sig = (g, hz, nm) => (!g || !g.ok ? cell(hz, "flat", "-", "데이터 대기", nm)
     : cell(hz, cls(g.state), word(g.state), `${nm.split(" ")[0]} ${zf(g.v)}${g.state ? ` · ${g.run}일째` : ""}`, `${nm} · ${g.date} UTC 종가 · |값| ≥ 1 일 때만 방향`));

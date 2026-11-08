@@ -3258,6 +3258,15 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .fc-cnt { font-size: 11px; font-weight: 700; color: var(--muted); margin-left: 2px; }
 .fc-tl { display: flex; gap: 2px; } .fc-tl i { flex: 1; font: 700 10px/16px var(--font-mono); font-style: normal; text-align: center; border-radius: 3px; color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }
 .fc-tl i.u { color: var(--good); background: color-mix(in srgb, var(--good) 16%, transparent); }
+/* 2026-11-09 F1 «7일 추세»(시안 C): «지금 추세» 줄 오른쪽 칸 -- 판정+칩 두 줄로 왼쪽과 같은 꼴 */
+.f1 { --fc: var(--muted); display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; align-items: center; min-width: 0; cursor: help; }
+.f1.up { --fc: var(--good); } .f1.dn { --fc: var(--bad); }
+.f1 .hz { font: 700 11px/1.2 var(--font-sans); color: var(--muted); white-space: nowrap; }
+.f1 .gl { font-size: 13px; }
+.f1-h { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.f1-n { font: 500 10.5px/1.2 var(--font-sans); color: var(--muted); white-space: nowrap; }
+.f1-tl { grid-column: 2; max-width: 132px; }
+.fc-tl i.z { color: var(--muted); background: color-mix(in srgb, var(--muted) 16%, transparent); }   /* 같은 종가 = 0표 */
 /* 2026-10-16 시안 ①: 칸별 아이스버그 풋프린트 육각형(app.js iceMarks) -- 표식만 방향색 · 건수 칩은 10-17 알림 센터(#ncIce)로 */
 .ice-mk.buy { color: var(--good); }
 .ice-mk.sell { color: var(--bad); }

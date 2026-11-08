@@ -14,6 +14,7 @@ import math
 from typing import Any, Sequence
 
 LOOKBACKS = (7, 14, 28, 56, 90)
+F1_LOOKBACKS = (7, 14, 21, 28)   # 2026-11-09 F1 «1~4주 추세 · 7일 보유» (docs/prereg/lowfreq_entry_edge_2019_20261109.md 고정 -- 튜닝 금지)
 VOL_WINDOW = 20
 TARGET_VOL = 0.50
 MAX_LEVERAGE = 2.0
@@ -46,9 +47,13 @@ def trend_payload(closes: Sequence[float], close_times_ms: Sequence[int]) -> dic
         if (1 if sig_at(i) > 0 else -1) != sgn:
             break
         age += 1
+    # F1 = sign(mean(sign(C[n-1] - C[n-1-L]))) · 같은 종가는 0표 · 2:2 = 0(중립). 화면 «7일 추세» 칸(참고용, 주문·손절에 안 씀)
+    f1v = [{"L": L, "s": (c[n - 1] > c[n - 1 - L]) - (c[n - 1] < c[n - 1 - L]), "ref_now": c[n - 1 - L]} for L in F1_LOOKBACKS]
+    f1s = sum(v["s"] for v in f1v)
+    f1 = {"signal": (f1s > 0) - (f1s < 0), "ups": sum(v["s"] > 0 for v in f1v), "downs": sum(v["s"] < 0 for v in f1v), "votes": f1v}
     return {"ok": True, "signal": round(signal, 1), "ups": sum(v["up"] for v in votes), "n_votes": len(votes),
             "votes": votes, "close": c[n - 1], "asof_ms": int(close_times_ms[-1]), "vol_ann": round(vol_ann, 4),
-            "size": round(size, 3), "age_days": age, "lookbacks": list(LOOKBACKS)}
+            "size": round(size, 3), "age_days": age, "lookbacks": list(LOOKBACKS), "f1": f1}
 
 
 if __name__ == "__main__":
@@ -64,4 +69,9 @@ if __name__ == "__main__":
     m = trend_payload(mix, list(range(120)))
     assert [v["up"] for v in m["votes"]] == [False, True, True, True, True] and m["signal"] == 0.6, m
     assert not trend_payload(up[:50], list(range(50)))["ok"]
+    assert p["f1"]["signal"] == 1 and p["f1"]["ups"] == 4 and q["f1"]["signal"] == -1, (p["f1"], q["f1"])
+    tie = [100.0] * 120
+    tie[-8], tie[-15], tie[-22], tie[-29] = 110.0, 110.0, 90.0, 90.0   # 7·14일 전보다 낮고 21·28일 전보다 높다 → 2:2 중립
+    t2 = trend_payload(tie, list(range(len(tie))))["f1"]
+    assert (t2["ups"], t2["downs"], t2["signal"]) == (2, 2, 0), t2
     print("trend_rule selfcheck OK", {k: m[k] for k in ("signal", "ups", "size", "age_days")})
