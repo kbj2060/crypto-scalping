@@ -92,7 +92,7 @@ let footprintLastFetchAt = 0;
 const CHART_WINDOW_MAX = { 1: 2016, 6: 336, 12: 168 };   // tf 마다 1주일(5m · 30m · 1h 봉 수)
 // 2026-11-01 사용자 «데스크탑 5분봉에서 풋프린트가 2시간은 보이게 · 너무 빨리 사라진다»: 기본 창 = 데스크탑 24봉(2시간) · 모바일 12봉.
 //   24봉이면 봉 폭이 48봉(≈26px)의 두 배라 칸 숫자가 그대로 들어간다. 버튼(5m·30m·1h)의 data-bars 도 같은 값으로 맞춘다.
-const FP_BARS = window.matchMedia("(max-width: 720px)").matches ? 12 : 24;
+const FP_BARS = window.matchMedia("(max-width: 720px)").matches ? 12 : 36;   // 2026-11-09 펜 메모 «풋프린트 봉을 더 많이» 24 -> 36(3시간) -- 프로파일 5칸을 3/4 로 줄인 폭을 봉에 줌
 document.querySelectorAll("button[data-bars]").forEach((b) => { b.dataset.bars = String(FP_BARS); });
 let chartWindowBars = FP_BARS;
 const fpZoomed = () => chartWindowBars > FP_BARS;   // 넓힌 창(1주일 받기 · 창 칸 불 끄기) -- 박스 유무는 fpBoxesOff
@@ -7046,8 +7046,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   이름이 같아도 값이 다르다. 툴팁에 창을 적는다.
   // 2026-09-27 풋프린트 오른쪽 «실시간 호가 띠»(사용자 지시) -- 캔들 폭에서 띠 폭을 뗀다(데스크톱 70 · 모바일 40).
   // 2026-09-27 넓혔다(사용자 «호가 너비를 키워줘») -- 오른쪽 배지 자리(86px)를 띠에 줬다: 70 -> 148 · 모바일 40 -> 56.
-  const PS = w >= 1000 ? 1 : 0.76;   // 2026-11-02 5칸(시안 3) -- 좁은 창은 칸을 줄인다
-  const BOOK_W = footprint ? (mobileChart ? (PROF_H ? 0 : 56) : Math.round(84 * PS)) : 0;   // 2026-10-29 140 -> 104(펜 메모 «차트를 오른쪽으로 키우고 박스 오른쪽 너비는 줄여») · 2026-09-30 148 -> 112 -> 140(꼬리표 칸을 없애 돌려줌)(사용자 «차트·프로파일을 조금 줄여도 데이터가 다 보이게»)   // 모바일은 수량 글자 없이
+  const PS = w >= 1000 ? 0.75 : 0.76;   // 2026-11-02 5칸(시안 3) -- 좁은 창은 칸을 줄인다 · 2026-11-09 펜 메모 «오른쪽 프로파일을 줄여 차트를 잘 보이게» 넓은 창 1 -> .75(398 -> 326px, 호가 칸은 그대로)
+  const BOOK_W = footprint ? (mobileChart ? (PROF_H ? 0 : 56) : w >= 1000 ? 84 : 64) : 0;   // 11-09 호가 칸은 줄이지 않는다(PS 밖) -- 레벨 꼬리표(저항3↑·max pain↑)가 이 칸에 들어가 63px 에선 앞글자가 가려졌다   // 2026-10-29 140 -> 104(펜 메모 «차트를 오른쪽으로 키우고 박스 오른쪽 너비는 줄여») · 2026-09-30 148 -> 112 -> 140(꼬리표 칸을 없애 돌려줌)(사용자 «차트·프로파일을 조금 줄여도 데이터가 다 보이게»)   // 모바일은 수량 글자 없이
   // 2026-09-28 체결 기둥(사용자 선택 시안 B) -- 풋프린트와 호가 띠 사이 150px. 모바일은 기둥 없이 셀 뒤에 깐다(시안 A).
   const TRADE_W = footprint && !mobileChart ? Math.round(88 * PS) : 0;   // 2026-10-29 140 -> 104(같은 펜 메모 -- 캔들 칸 +72px) · 2026-09-30 150 -> 112 -> 140
   // 2026-09-30 가격 꼬리표 칸(사용자 «왼쪽 라벨을 오른쪽으로, 겹치지 않게»): 캔들 칸과 체결 기둥 사이 120px.
@@ -7171,7 +7171,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   const xAt = (i) => ml + (i + X0) * slot;
   const yAt = (v) => mt + ((yMax - v) * ch) / ySpan;
   const pyAt = PROF ? (v) => PROF.top + ((yMax - v) * (PROF.bot - PROF.top)) / ySpan : yAt, pTop = PROF ? PROF.top : mt, pBot = PROF ? PROF.bot : plotBottom;   // 체결·호가 띠 자리(휴대폰 = 아래 칸)
-  const bw = slot * 0.8;
+  const bw = slot * 0.86;   // 2026-11-09 펜 메모 «간격 최적화» -- 봉 사이 틈 20% -> 14%
   if (svg.id === "candleSvgSnapshot") chartGeo = { ml, cw, n: N, wAll, hAll, mt, pb: plotBottom, prof: PROF && [PROF.top - 16, PROF.bot], ymin: yMin, ymax: yMax, off: X0, bars: candles };   // 끌기·휠이 화면 px → 봉(chartSlotPx) · off·bars = 측정 박스(measPt)가 봉 번호↔시각을 바꾼다
   // 2026-10-20 1주일 창(5분봉 2,016개 · 봉 칸 ~0.5px): 봉마다 노드(캔들 <g>·선·사각형, 레인 막대 7개, 청산 원, 제목)를 만들면
   //   3.7만 노드 · 렌더 180ms 였다. 봉 칸이 4px 밑이면 같은 색끼리 <path> 하나로 모으고 봉별 <title> 은 뺀다(호버 툴팁이 그 봉 값을 말한다).

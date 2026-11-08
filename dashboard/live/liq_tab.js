@@ -221,7 +221,7 @@
     var hi = Math.pow(10, Math.ceil(Math.log10(mx))), lo = hi / 1e4, L = x0 + 2, W = x1 - x0 - 8, s = "";
     var X = function (v) { return x1 - W * Math.log10(Math.max(v, lo) / lo) / 4; }, Y = function (p) { return Math.max(top, Math.min(bot, yAt(p))); }, inView = function (p) { return p >= yMin && p <= yMax; };
     [lo, lo * 100, hi].forEach(function (v) { s += line("lq-gl", X(v), X(v), top, bot); });
-    s += txt("lq-ax o", L, top + 10, usd(hi)) + txt("lq-ax o", x1 - 2, top + 10, usd(lo), "end");
+    s += txt("lq-ax o", L, top + 10, usd(hi)) + (W >= 60 ? txt("lq-ax o", x1 - 2, top + 10, usd(lo), "end") : "");   // 11-09 칸이 좁으면(프로파일 3/4) 두 눈금이 붙어 오른쪽 작은 값을 뺀다
     var sw = { "1": [2.2, ""], "7": [1.4, ""], "30": [1.2, "3 3"] };
     ["30", "7", "1"].forEach(function (k) {
       if (!M[k]) return;
