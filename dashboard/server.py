@@ -3401,6 +3401,7 @@ def make_app() -> web.Application:
                         # 켜진 코인 목록을 **서버가 알려준다**. 클라가 같은 목록을 따로 들고
                         # 있으면 둘이 어긋나는 날이 온다(SUSTAIN_BARS_OVERRIDE 류의 반복 교훈).
                         "assets": DASHBOARD_ASSETS,
+                        "acct_seq": order_api.acct_seq(),   # 2026-11-09 체결 알림 뒤 계좌를 새로 읽을 때마다 오른다 -- 화면이 10초 조회를 안 기다리고 받는다
                     }
                     encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
                     for queue in tuple(event_clients):
@@ -4710,6 +4711,7 @@ def make_app() -> web.Application:
     app.on_startup.append(start_micro_ref)
     app.on_startup.append(order_api.start_bracket_watcher)
     app.on_startup.append(order_api.start_wait_cleanup)
+    app.on_startup.append(order_api.start_user_stream)   # 2026-11-09 체결 알림(태스크는 refresh_tasks 라 stop_http_session 이 취소)
     app.on_cleanup.append(order_api.stop_bracket_watcher)
     app.on_cleanup.append(stop_micro_ref)
     app.on_cleanup.append(stop_flows)

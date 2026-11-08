@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from aiohttp import web
+from aiohttp import ClientSession, ClientTimeout, TCPConnector, WSMsgType, web
 
 from dashboard.trend_rule import trend_payload
 from dashboard.coin_flow import FOOTPRINT_BAR_SECONDS
@@ -38,7 +38,8 @@ from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position,
     COMMIT_CAP_X, HOLD_CAP_X, RULE_STOP_PCT, commit_rule_l, line_bracket, rec_rule_add_order, rec_rule_bracket, rec_rule_size)   # 2026-10-09 자동 규칙 진입(재생 ×15.2 크기식) · 10-14 자동 물타기 지정가
 from live.execution.live_manual_peg_execute_20260912 import (  # noqa: E402
-    WAIT_CHOICES_MIN, cancel_wait_orphans, clear_bracket, commission_bp, margin_type, place_add_order, place_bracket, place_stop, run_entry, run_entry_limit, run_entry_wait, run_exit)
+    WAIT_CHOICES_MIN, cancel_wait_orphans, clear_bracket, commission_bp, margin_type, nap, place_add_order, place_bracket, place_stop, run_entry, run_entry_limit, run_entry_wait, run_exit, wake_fills)
+import scripts.binance_ban_guard as ban_guard  # noqa: E402
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
 # 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).
 from scripts.live_eth_risk_sizing_policy_20260913 import (  # noqa: E402
@@ -606,6 +607,25 @@ def sizing_cap() -> dict[str, Any]:
             "cap_notional_usdt": round(SIZING_CAP_MULT * median, 2)}
 
 
+USER_STREAM_WS = "wss://fstream.binance.com/private/ws/"   # 2026-11-09 공식 문서(caas user-data-streams): /private 를 빼면 계좌 알림이 안 온다
+USER_STREAM_KEEPALIVE_S = 1800.0   # listenKey 60분 유효 -- 30분마다 연장
+ACCOUNT_PUSH_GAP_S = 3.0           # 체결 알림 뒤 계좌 재조회 사이 최소 간격(조회 1회 ≈ 무게 50 → 연속 체결에도 분당 ≤ ~1,000, IP 한도 2,400)
+
+
+def user_event_kind(msg: dict) -> str:
+    """바이낸스 사용자 데이터 스트림 메시지 → "fill"(체결·잔고 변화 -- 계좌를 다시 읽는다) · "order"(취소·만료 -- 기다리던 루프만 깨운다)
+    · "expired"(listenKey 만료 -- 다시 연결) · ""(무시: 우리가 낸 새 주문 NEW 등 -- 리페그마다 계좌를 읽지 않게)."""
+    e = msg.get("e") if isinstance(msg, dict) else None
+    if e == "ORDER_TRADE_UPDATE":
+        x = (msg.get("o") or {}).get("x")
+        return "fill" if x in ("TRADE", "CALCULATED") else "order" if x in ("CANCELED", "EXPIRED", "AMENDMENT") else ""
+    if e == "ACCOUNT_UPDATE":
+        return "fill"
+    if e == "listenKeyExpired":
+        return "expired"
+    return ""
+
+
 def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, fetch_binance_json, swr_cached,
              _timed_produce, load_market_history, situation_by, NOCACHE, STALE_GRACE_SECONDS, sec_prices=lambda _a: None):
     """make_app() 이 부른다. 인자 = 코어·시장 쪽 객체(server.py make_app 지역 · 모듈 상수). sec_prices(asset) = 1초 마지막 체결가 [(초, 가격)] · 없는 코인 None(선 손절 감시). 돌려주는 것 = 라우트·기동/정리 훅이 쓸 함수들.
@@ -767,7 +787,9 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         # 2026-10-20 두 코인 보유(사용자): 손절 무장이 없는 열린 포지션 -- 화면이 «손절 없음»을 크게 말한다(10-20 XRP 가 조용히 무방비였다)
         unprotected = [k for k in (bracket_key(p.get("symbol"), str(p.get("side")).upper()) for p in payload.get("positions") or []
                                    if float(p.get("qty") or 0)) if not (armed.get(k) or {}).get("sl_price")]
-        return {**payload, "bracket_armed": armed, "unprotected": unprotected}
+        return {**payload, "bracket_armed": armed, "unprotected": unprotected,
+                "user_stream": {"connected": user_stream["connected"], "error": user_stream["error"], "seq": user_stream["seq"],
+                                "last_event_age_s": round(time.time() - user_stream["last_event_at"]) if user_stream["last_event_at"] else None}}
 
     def effective_cap(sizing: dict[str, Any], equity: float,
                       safe_mae_pct: float | None) -> tuple[float | None, str | None, dict]:
@@ -1170,7 +1192,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
 
     async def watch_brackets(app: web.Application) -> None:
         while True:
-            await asyncio.sleep(2.0)
+            await nap(2.0)   # 2026-11-09 체결 알림이 오면 2초를 안 기다린다(익절 체결 → 남은 손절 정리 · 지정가 체결 뒤 감시)
             try:
                 await bracket_tick()
             except asyncio.CancelledError:
@@ -2292,6 +2314,108 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         if exec_enabled():
             refresh_tasks["wait_cleanup"] = asyncio.create_task(wait_cleanup())
 
+    # ── 2026-11-09 체결 알림(바이낸스 사용자 데이터 스트림) ─────────────────────────────
+    #   사용자 «지정가·익절·손절 라인이 닿아도 5초쯤 가만히 있다 처리된다»: 거래소 체결은 즉시인데 서버가 주문 상태를 3초·계좌를 10초마다 물어서 늦게 알았다.
+    #   알림이 오면 ① 주문을 기다리던 루프(지정가 진입·메이커 청산·감시 틱)를 바로 깨우고 ② 체결이면 계좌를 곧장 다시 읽어 seq 를 올린다 -- 화면은 SSE 의 acct_seq 로 받아 간다.
+    #   🔴알림은 앞당기기만 한다: 끊겨도 기존 3초·10초 조회가 그대로 돈다. listenKey 는 지우지 않는다(같은 계좌의 다른 연결까지 끊긴다) -- 60분 지나면 스스로 만료.
+    user_stream: dict[str, Any] = {"connected": False, "seq": 0, "last_event_at": None, "error": None}   # last_event_at = 마지막 알림(시각) -- 연결은 됐는데 알림이 안 오면(주소 오류) 이걸로 안다
+    acct_dirty = asyncio.Event()
+
+    async def listen_key(method: str) -> str:
+        if ban_guard.ban_remaining() > 0:   # 연장(PUT)도 -- 차단 중에 두드리면 해제가 늦어진다
+            raise RuntimeError("바이낸스 차단 중")
+        async with binance_session().request(method, "https://fapi.binance.com/fapi/v1/listenKey",
+                                             headers={"X-MBX-APIKEY": os.getenv("BINANCE_API_KEY", "")}) as r:
+            if r.status != 200:   # 본문을 JSON 으로 읽기 전에 -- 418·429 본문이 JSON 이 아니어도 기록은 남는다
+                body = await r.text()
+                ban_guard.note(r.status, body, r.headers.get("Retry-After"))
+                raise RuntimeError(f"listenKey {method} {r.status} {body[:120]}")
+            return str((await r.json(content_type=None) or {}).get("listenKey") or "")
+
+    async def user_stream_loop() -> None:
+        wait = 5.0
+        # 공용 세션(binance_session)은 total=10초라 WS 에 못 쓴다(coin_flow.collect_footprint 주석 -- aiohttp 버전에 따라 10초마다 끊긴다) -- 전용 세션, total=None 명시
+        ws_session = ClientSession(timeout=ClientTimeout(total=None), connector=TCPConnector(limit=2))
+        try:
+            await _user_stream_run(ws_session, wait)
+        finally:
+            await ws_session.close()
+
+    async def _user_stream_run(ws_session, wait: float) -> None:
+        while True:
+            t_conn = None
+            try:
+                if ban_guard.ban_remaining() > 0:
+                    await asyncio.sleep(ban_guard.ban_remaining() + 1)
+                    continue
+                lk = await listen_key("POST")
+                if not lk:
+                    raise RuntimeError("listenKey 빈 응답")
+                async with ws_session.ws_connect(USER_STREAM_WS + lk, heartbeat=120) as ws:
+                    user_stream.update(connected=True, error=None)
+                    print("user stream: 체결 알림 연결", flush=True)
+                    acct_dirty.set()   # 끊긴 동안의 체결은 다시 오지 않는다 -- 붙자마자 계좌를 한 번 읽는다
+                    wake_fills()
+                    t_conn = kept = time.monotonic()
+                    first = True
+                    while True:
+                        if time.monotonic() - kept > USER_STREAM_KEEPALIVE_S:
+                            kept = time.monotonic()
+                            try:
+                                await listen_key("PUT")
+                            except Exception as exc:  # noqa: BLE001 -- 연장 실패면 거래소가 listenKeyExpired 를 보낸다 → 다시 연결
+                                print(f"user stream: 연장 실패 {exc}", flush=True)
+                        try:
+                            msg = await ws.receive(timeout=60)
+                        except asyncio.TimeoutError:
+                            continue
+                        if msg.type != WSMsgType.TEXT:
+                            break   # CLOSE·ERROR -- 거래소가 24시간마다 끊는다 → 다시 연결
+                        try:
+                            kind = user_event_kind(json.loads(msg.data))
+                        except ValueError:
+                            continue
+                        if kind == "expired":
+                            break
+                        if kind:
+                            if first:   # 주소가 틀리면 연결은 돼도 알림이 안 온다(검토) -- 첫 알림을 로그에 남겨 확인한다
+                                print(f"user stream: 첫 알림 수신({kind})", flush=True)
+                                first = False
+                            user_stream["last_event_at"] = time.time()
+                            wake_fills()
+                            if kind == "fill":
+                                acct_dirty.set()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 -- 알림이 죽어도 조회 경로는 그대로 -- 물러났다 다시
+                user_stream["error"] = f"{type(exc).__name__}: {exc}"[:200]
+                print(f"user stream: {user_stream['error']}", flush=True)
+            user_stream["connected"] = False
+            if t_conn is not None and time.monotonic() - t_conn > 300:
+                wait = 5.0   # 5분 넘게 붙어 있었으면 정상 끊김(24시간) -- 바로 다시. 붙자마자 끊기길 반복하면 늘어난다(매번 계좌 조회 무게 50, 검토)
+            await asyncio.sleep(wait)
+            wait = min(wait * 2, 300.0)
+
+    async def account_refresher() -> None:
+        while True:
+            await acct_dirty.wait()
+            await asyncio.sleep(0.3)   # 한 체결의 알림 두세 개(ORDER_TRADE_UPDATE·ACCOUNT_UPDATE·부분 체결)를 조회 한 번으로
+            acct_dirty.clear()
+            try:
+                async with swr_locks.setdefault("binance_account", asyncio.Lock()):
+                    binance_account_cache["payload"] = await _timed_produce("binance_account", produce_account)
+                    binance_account_cache["ts"] = time.monotonic()
+                user_stream["seq"] += 1
+                wake_fills()   # 감시 틱이 새 계좌로 다시 본다
+            except Exception as exc:  # noqa: BLE001
+                print(f"user stream: 계좌 재조회 실패 {type(exc).__name__}: {exc}", flush=True)
+            await asyncio.sleep(ACCOUNT_PUSH_GAP_S)
+
+    async def start_user_stream(app: web.Application) -> None:
+        if exec_enabled() and os.getenv("BINANCE_API_KEY"):   # 실주문 게이트가 켜진 곳(서버)만 -- 주문이 없는 곳은 알림도 필요 없다
+            refresh_tasks["user_stream"] = asyncio.create_task(user_stream_loop())
+            refresh_tasks["account_refresher"] = asyncio.create_task(account_refresher())
+
     async def busy_or(handler, request: web.Request) -> web.Response:
         if manual_order_lock.locked():
             return web.json_response({"ok": False, "error": "already_working", "state": manual_entry_state}, status=409)
@@ -2300,6 +2424,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
 
     return SimpleNamespace(
         keep_trip_ledger=keep_trip_ledger,
+        start_user_stream=start_user_stream,
+        acct_seq=lambda: user_stream["seq"],   # SSE 가 화면에 싣는다 -- 오르면 화면이 계좌를 바로 받는다
         start_bracket_watcher=start_bracket_watcher,
         bracket_tick=bracket_tick,   # 시험이 감시 한 틱을 직접 돌린다(test_chart_lines_entry)
         stop_bracket_watcher=stop_bracket_watcher,

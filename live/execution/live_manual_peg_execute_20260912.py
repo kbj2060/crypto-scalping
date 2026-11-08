@@ -40,6 +40,27 @@ FALLBACK_SEC = 120.0
 POLL_SEC = 3.0
 TERMINAL = ("FILLED", "CANCELED", "EXPIRED", "REJECTED")
 
+# 2026-11-09 사용자 «지정가·익절·손절이 닿아도 5초쯤 뒤에 처리된다»: 대시보드 서버가 바이낸스 체결 알림(사용자 데이터 스트림)을 받으면 wake_fills() 를 부른다.
+#   주문 상태를 POLL_SEC 마다 묻던 루프가 그 자리에서 다시 묻는다. 알림이 끊겨도 POLL_SEC 조회는 그대로다(알림은 앞당기기만 한다).
+_wakers: set = set()
+
+
+def wake_fills() -> None:
+    for f in list(_wakers):
+        if not f.done():
+            f.set_result(None)
+
+
+async def nap(sec: float) -> None:
+    """asyncio.sleep(sec) 인데 wake_fills() 가 오면 일찍 깬다."""
+    f = asyncio.get_running_loop().create_future()
+    _wakers.add(f)
+    try:
+        await asyncio.wait({f}, timeout=sec)   # wait_for 는 3.11 에서 깨움과 취소가 같은 틱이면 취소를 삼킨다(gh-86296) -- 종료 때 루프가 안 멈췄다(검토)
+    finally:
+        f.cancel()
+        _wakers.discard(f)
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -451,9 +472,9 @@ async def fill_maker(session, *, common: dict, price: float, total: float, deadl
 
         oid = order.get("orderId")
         state.update(order_id=oid, limit_price=price)
-        this_filled, status, need_repeg = 0.0, "", False
+        this_filled, status, need_repeg, last_chk = 0.0, "", False, time.monotonic()
         while time.monotonic() < deadline and not cancel():
-            await asyncio.sleep(POLL_SEC)
+            await nap(POLL_SEC)
             cur = await signed(session, "GET", "/fapi/v1/order",
                                {**common, "orderId": oid}, key, secret, offset)
             if "__error__" in cur:
@@ -463,6 +484,9 @@ async def fill_maker(session, *, common: dict, price: float, total: float, deadl
             state["filled"] = round(done + this_filled, 8)
             if status in TERMINAL:
                 break
+            if time.monotonic() - last_chk < POLL_SEC:
+                continue   # 2026-11-09 체결 알림에 일찍 깨면 상태만 본다 -- 따라가기(리페그) 판단은 예전처럼 3초마다(REPEG_MAX 40 = 3초×120초 상한이 알림 빈도로 일찍 바닥나 잔량이 시장가로 가지 않게, 검토)
+            last_chk = time.monotonic()
             try:
                 price_now, bid, ask = await maker_price(session, side, common["symbol"])
             except Exception:  # noqa: BLE001 -- 호가 조회 실패 = 앞지름 모름, 주문은 살아 있다 -- 다음 조회에(주문 조회 실패와 같은 취급)
@@ -535,7 +559,7 @@ async def run_entry_wait(session, plan: dict, state: dict, wait_sec: float, on_f
     state.update(order_id=oid, client_order_id=cid, limit_price=price)
     filled, status = 0.0, ""
     while time.monotonic() < deadline and not state.get("action"):
-        await asyncio.sleep(POLL_SEC)
+        await nap(POLL_SEC)
         cur = await signed(session, "GET", "/fapi/v1/order", {**common, "orderId": oid}, key, secret, offset)
         if "__error__" in cur:
             continue        # 조회 실패는 재시도 -- 주문은 거래소에 살아 있다
@@ -640,7 +664,7 @@ async def run_entry_limit(session, plan: dict, state: dict, max_sec: float = LIM
         state.update(order_id=oid, client_order_id=cid, limit_price=price)
         this_filled, status, last_chk = 0.0, "", time.monotonic()
         while time.monotonic() < deadline and not state.get("action") and not state.get("amend"):
-            await asyncio.sleep(POLL_SEC)
+            await nap(POLL_SEC)
             cur = await signed(session, "GET", "/fapi/v1/order", {**common, "orderId": oid}, key, secret, offset)
             if "__error__" in cur:
                 continue        # 조회 실패는 재시도 -- 주문은 거래소에 살아 있다

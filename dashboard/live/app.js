@@ -1626,6 +1626,7 @@ function maybeRenderSnapshotChartNow() {
   renderLiquidationMapPanel();
 }
 
+let lastAcctSeq = null;
 function applyDashboardEvent(payload) {
   if (Array.isArray(payload?.assets) && payload.assets.length) {
     const next = payload.assets.filter((a) => SNAPSHOT_ASSET_KEYS.includes(a));
@@ -1635,6 +1636,11 @@ function applyDashboardEvent(payload) {
       // 보고 있던 코인이 꺼졌으면 켜진 첫 코인으로 옮긴다 -- 안 그러면 영원히 빈 패널을 본다.
       if (!next.includes(activeSnapshotAsset)) setActiveSnapshotAsset(next[0]);
     }
+  }
+  // 2026-11-09 체결 알림: 서버가 체결을 받아 계좌를 새로 읽으면 acct_seq 가 오른다 -- 10초 조회를 기다리지 않고 바로 받는다(첫 값은 기준만 잡는다)
+  if (payload?.acct_seq != null && payload.acct_seq !== lastAcctSeq) {
+    if (lastAcctSeq != null) refreshBinanceAccount(true, false);
+    lastAcctSeq = payload.acct_seq;
   }
   const tickers = payload?.tickers || {};
   Object.entries(tickers).forEach(([asset, ticker]) => {
@@ -2344,7 +2350,7 @@ function fmtUsd(value) {
   return `${n >= 0 ? "" : "-"}$${Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: Math.abs(n) < 10 ? 4 : 2 })}`;
 }
 
-async function refreshBinanceAccount(force = false) {
+async function refreshBinanceAccount(force = false, fresh = force) {   // fresh=false + force = 게이트만 건너뛰고 서버 캐시를 받는다(체결 알림이 방금 새로 읽어 둔 값)
   // tick 과 주문 직후에서 부르므로 자체 게이트를 둔다.
   // force = 주문 체결 직후(2026-10-06 사용자 «완료되면 플로팅 버튼에 바로») -- 게이트·서버 캐시(10초)를 건너뛰고 떠 있는 버튼을 바로 다시 그린다.
   const now = Date.now();
@@ -2352,7 +2358,7 @@ async function refreshBinanceAccount(force = false) {
   binanceAccountLastFetchAt = now;
   const seq = ++accountReqSeq;
   try {
-    const res = await fetch(API_BINANCE_ACCOUNT_URL + (force ? "?fresh=1" : ""), { cache: "no-cache" });
+    const res = await fetch(API_BINANCE_ACCOUNT_URL + (fresh ? "?fresh=1" : ""), { cache: "no-cache" });
     const j = await res.json();
     if (seq < accountAppliedSeq) return;   // 더 나중에 보낸 요청의 응답이 이미 반영됐다 -- 늦게 온 옛 응답은 버린다
     accountAppliedSeq = seq;
