@@ -344,15 +344,12 @@
           </div>
         </div>
         <!-- 2026-11-06 사용자 «계좌 카드 전체 리디자인 · 시안 C»(한 화면 벤토): 핵심 지표 6칸 · 큰 곡선 | 증거금 풀 + 포지션 · 아래 탭 한 칸(순환·성과·달력·오늘·오답) -- app.js renderSnapshotAccountCore -->
-        <div id="snapAcctKpi" class="acct-kpi"></div>
         <div class="acct-mid">
           <div class="acct-pn acct-pn-curve"><div id="snapAcctCurve"></div></div>
-          <div class="acct-rside">
+          <div class="acct-rside">   <!-- 2026-11-08 펜 메모 «이 섹션은 제거»: 포지션 줄·전체 청산·잘림 경고 삭제 -- 손절 없음은 KPI 미실현, 잘림 경고는 달력 아래로 -->
             <div class="acct-pn"><div id="snapAcctWealth"></div></div>
-            <div class="acct-pn acct-pn-pos"><div id="snapAcctPosition" class="ops-health-list"></div></div>
           </div>
         </div>
-        <p id="snapAcctWarn" class="acct-warn" role="status" hidden></p>   <!-- 2026-11-02 체결 조회 실패·잘림 심볼 경고(app.js renderSnapshotAccountCore) -->
         <!-- 2026-09-12 수동 진입 1단계. **크기를 화면이 정한다** -- 재량 사이징이 실계좌 손실의
              출처였다(크기–수익 상관 −0.494, 한 건 −548.88 이 이익 합 전부보다 컸다).
              지금은 미리보기 전용: 서버 게이트 DASHBOARD_MANUAL_EXEC_ENABLED 가 닫혀 있어

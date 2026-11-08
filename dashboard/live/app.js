@@ -1258,9 +1258,6 @@ async function setActiveSnapshotAsset(asset) {
   try { renderNews(); } catch (e) { console.error("news render:", e); }   // 2026-10-05 뉴스 카드의 «지금 코인» 강조·필터(예외가 코인 전환을 끊지 않게)
   chartPanReset();   // 코인을 바꾸면 실시간으로(관성도 멈춘다 -- 리뷰: 미끄러지던 게 새 코인을 과거로 끌었다)
   renderSnapshotAssetTabs();
-  // 🔴2026-09-30 진입 미리보기(plan·cap)는 **코인별**인데 전환 때 안 비워 XRP 탭이 최대 60초(주문 불가 코인이면
-  //   계속) ETH 계획(~$2,676)을 «지금 설정으로 넣으면»에 그렸다. 비우고 새 코인 것을 바로 받는다.
-  lastEntryPlan = null; setEntryProjPreview(null);
   manualEntryRefreshSize();
   // 계좌 payload 는 전 코인의 포지션을 담고 있어 재요청 없이 다시 그리기만 하면 된다.
   renderSnapshotAccount();
@@ -1723,17 +1720,21 @@ function acctPools(A) {
   pools.forEach((p) => { p.share = total > 0 ? p.equity / total * 100 : 0; });
   return { pools, total, wallet: pools.reduce((x, p) => x + p.wallet, 0), unreal: pools.reduce((x, p) => x + p.unreal, 0), avail: pools.reduce((x, p) => x + p.avail, 0), used: pools.reduce((x, p) => x + p.used, 0) };
 }
-function acctWealthHtml(A) {
-  const W = acctPools(A), pct = (v) => `${v.toFixed(v >= 10 || v === 0 ? 0 : 1)}%`;
-  if (!W.pools.length) return "";
-  const sw = (p) => `<i class="aw-dot p${p.i}" aria-hidden="true"></i>`;
-  const body = `<div class="aw-bar" role="img" aria-label="풀별 비중">${W.pools.map((p) => `<span class="p${p.i}" style="flex:${Math.max(p.share, 4)}">${p.name} ${pct(p.share)}</span>`).join("")}</div>
-      <div class="aw-cols">${W.pools.map((p) => `<div class="aw-col">
-        <div class="aw-colhead">${sw(p)}<b>${p.name}</b><span class="muted">${p.n ? p.pos : "포지션 없음"}</span></div>
-        <div class="aw-num">${fmtUsd(p.equity)}</div>
-        <div class="aw-meter" title="사용 증거금 ${fmtUsd(p.used)} / 순자산 ${fmtUsd(p.equity)}"><span style="width:${Math.min(100, p.usedPct)}%"></span></div>
-        <dl class="aw-kv"><dt>증거금 사용</dt><dd>${pct(p.usedPct)}</dd><dt>가용</dt><dd>${fmtUsd(p.avail)}</dd><dt>지갑</dt><dd>${fmtUsd(p.wallet)}</dd><dt>미실현</dt><dd class="${acctTone(p.unreal)}">${acctSu(p.unreal)}</dd></dl></div>`).join("")}</div>`;
-  return `<div class="aw">${body}</div>`;
+// 2026-11-08 펜 메모 «KPI 줄과 자산 구성을 하나로» 시안 C(사용자 선택): 곡선 옆 한 기둥 = 순자산·오늘 손익 / 풀 비중 / 풀별 증거금·가용·지갑·미실현 / 승률·낙폭
+function acctWealthHtml(A, W, today, SG, spanLab) {
+  const pct = (v) => `${v.toFixed(v >= 10 || v === 0 ? 0 : 1)}%`;
+  const stop = (p) => (A.positions || []).filter((x) => Math.abs(Number(x.qty) || 0) > 0 && String(x.symbol).endsWith(p.name) && (A.unprotected || []).includes(`${x.symbol}:${String(x.side).toUpperCase()}`)).map((x) => acctCoin(x.symbol));
+  const pool = (p) => { const s = stop(p); return `<div class="aw-p">
+      <span class="aw-pn"><b>${p.name}</b> <span class="muted">${p.n ? p.pos : "포지션 없음"}</span>${s.length ? ` <em class="bad" title="거래소 스탑도 서버 5분봉 감시도 없습니다">🔴${s.join("·")} 손절 없음</em>` : ""}</span>
+      <span class="aw-meter" title="사용 증거금 ${fmtUsd(p.used)} / 순자산 ${fmtUsd(p.equity)}"><span style="width:${Math.min(100, p.usedPct)}%"></span></span><b class="aw-pv">${fmtUsd(p.equity)}</b>
+      <span class="aw-sub"><span>증거금 <span class="${p.usedPct >= 75 ? "warn" : ""}">${pct(p.usedPct)}</span> · 가용 ${fmtUsd(p.avail)}</span><span>지갑 ${fmtUsd(p.wallet)} · 미실현 <span class="${acctTone(p.unreal)}">${acctSu(p.unreal)}</span></span></span></div>`; };
+  return `<div class="aw">
+    <div><i>순자산${W.pools.length > 1 ? " · 두 풀 합" : ""} / 오늘</i><div class="aw-hero"><b>${fmtUsd(W.total)}</b><span class="${acctTone(today.net)}" title="${escapeHtml(today.tip)}">${acctSu(today.net)} <small>${acctPct(today.pct)}</small></span></div></div>
+    ${W.pools.length > 1 ? `<div class="aw-bar" role="img" aria-label="풀별 비중">${W.pools.map((p) => `<span class="p${p.i}" style="flex:${Math.max(p.share, 4)}">${p.name} ${pct(p.share)}</span>`).join("")}</div>` : ""}
+    ${W.pools.map(pool).join("")}
+    <div class="aw-two"><div><i>승률 (${spanLab})</i><b>${SG ? `${SG.win}%` : "—"}</b><i>${SG ? `${SG.g.length}건 · 손익비 ${SG.al ? (SG.aw / Math.abs(SG.al)).toFixed(2) : "—"}` : "닫힌 왕복 없음"}</i></div>
+      <div><i>최대 낙폭</i><b class="${SG && SG.mdd < 0 ? "bad" : ""}">${SG ? acctSuc(SG.mdd) : "—"}</b><i>${spanLab} 누적 실현 기준</i></div></div>
+  </div>`;
 }
 
 // 스냅샷 탭이 보고 있는 코인의 포지션 하나. 없으면 null.
@@ -2067,11 +2068,6 @@ function acctStatsHtml(a) {
   return `<div class="as" data-sum="누적 실현 ${acctSu(all.tot)} · ${all.g.length}건 · 승률 ${all.win}% · 최대 낙폭 ${acctSu(all.mdd)}">${body}</div>`;
 }
 
-// 2026-09-22 진입 미리보기(/api/manual-entry/preview)가 받아 둔 계획 -- 카드 포지션 줄의 «넣으면 →» 한 마디가 읽는다.
-let entryProjPreview = null;
-let entryProjKey = "";
-let lastEntryPlan = null;
-
 // 2026-11-02 사용자 «가끔 불러오지 않는 데이터»: 조회가 한 번 실패하면 달력·성과·순환 카드가 통째로 비었다 다음 폴링에 돌아왔다. 낡은 값이 있으면(서버 last_good ·
 //   없으면 이 화면의 마지막 정상값, 30분까지) 카드만 그것으로 그리고 «낡은 값» 배지를 단다. latestBinanceAccount 는 건드리지 않는다 -- 그걸 읽는 주문·청산·진입선은 «모름».
 function renderSnapshotAccount() {
@@ -2090,31 +2086,28 @@ function renderSnapshotAccount() {
 function renderSnapshotAccountCore() {
   syncOrderCoinGate();
   const summary = el("snapAcctSummary");
-  if (!el("snapAcctPosition")) return;
-  const warn = el("snapAcctWarn");
+  if (!el("snapAcctWealth")) return;
   if (!latestBinanceAccount) {
     if (summary) { summary.textContent = "데이터 없음"; summary.className = "ops-health-summary neutral"; }
     setT("snapAcctBalance", "-");
-    setH("snapAcctPosition", `<p class="muted">계좌를 불러오지 못했습니다.${lastAccountError ? ` (${escapeHtml(lastAccountError)})` : ""}</p>`);
+    setH("snapAcctWealth", `<p class="muted">계좌를 불러오지 못했습니다.${lastAccountError ? ` (${escapeHtml(lastAccountError)})` : ""}</p>`);
     setH("snapAcctCurve", ""); setH("snapAcctCal", ""); setH("snapAcctDay", ""); el("acctDayBox").hidden = true;
     setH("snapAcctCycle", "");
-    if (warn) warn.hidden = true;
     return;
   }
-  // 2026-11-02 «누락처럼 보임» -- 서버가 알려 주는 체결 조회 실패·잘림 심볼을 화면이 말한다(전엔 trades_truncated 를 아무도 안 읽었다)
-  if (warn) {
-    const failed = latestBinanceAccount.trades_failed || [], cutSyms = latestBinanceAccount.trades_truncated || [];
-    const msg = [failed.length ? `체결 조회 실패: ${failed.join(", ")} — 이 심볼의 진행 중 순환·원장이 잠시 빠졌습니다(다음 조회에 복구)` : "",
-                 cutSyms.length ? `체결 이력 잘림: ${cutSyms.join(", ")} — 오래된 왕복·진행 중 합계가 창 안 몫만일 수 있습니다` : ""].filter(Boolean).join(" · ");
-    warn.hidden = !msg; warn.textContent = msg;
-  }
+  // 2026-11-02 «누락처럼 보임» -- 서버가 알려 주는 체결 조회 실패·잘림 심볼을 화면이 말한다(전엔 trades_truncated 를 아무도 안 읽었다) · 11-08 포지션 칸을 지우며 달력 아래로
+  const failed = latestBinanceAccount.trades_failed || [], cutSyms = latestBinanceAccount.trades_truncated || [];
+  const warnMsg = [failed.length ? `체결 조회 실패: ${failed.join(", ")} — 이 심볼의 진행 중 순환·원장이 잠시 빠졌습니다(다음 조회에 복구)` : "",
+                   cutSyms.length ? `체결 이력 잘림: ${cutSyms.join(", ")} — 오래된 왕복·진행 중 합계가 창 안 몫만일 수 있습니다` : ""].filter(Boolean).join(" · ");
   const A = latestBinanceAccount, b = A.balance || {}, wallet = Number(b.wallet) || 0;
   const positions = (A.positions || []).filter((p) => Math.abs(Number(p.qty) || 0) > 0);
   const unreal = positions.reduce((x, p) => x + (Number(p.unrealized_pnl) || 0), 0), equity = wallet + unreal;
   const mine = snapshotAccountPosition();
   const W = acctPools(A), eqAll = W.pools.length ? W.total : equity;   // 머리 = 풀 합산 순자산(USDC+USDT) -- 아래 «자산 구성»이 풀별로 쪼갠다
+  // 2026-11-08 펜 메모 «수익률이 안 맞아 -- USDC·USDT 를 달러로 합친 총액 대비»: balance 는 주문 풀(USDC) 하나뿐인데 income·원장 손익은 두 풀 합이었다(주 −$87 ÷ USDC $880 = −9.9%).
+  //   ponytail: USDC = USDT = $1 로 본다(괴리 수 bp).
+  const wallet$ = W.pools.length ? W.wallet : wallet, equity$ = W.pools.length ? W.total : equity;
   setH("snapAcctBalance", `<b class="aw-headnum">${fmtUsd(eqAll)}</b><span class="aw-headlab">순자산</span>${W.pools.length > 1 ? `<span class="aw-headsub">${W.pools.map((p) => `${p.name} ${p.share.toFixed(0)}%`).join(" · ")}</span>` : ""}`);
-  setH("snapAcctWealth", acctWealthHtml(A));
   if (summary) {
     summary.textContent = mine ? (mine.side === "LONG" ? "롱 보유" : "숏 보유") : "포지션 없음";
     summary.className = `ops-health-summary ${mine ? (mine.side === "LONG" ? "good" : "bad") : "neutral"}`;
@@ -2128,35 +2121,19 @@ function renderSnapshotAccountCore() {
   const incSum = (k) => Object.entries(inc || {}).reduce((x, [d, o]) => x + (d >= k ? (Number(o.pnl) || 0) + (Number(o.transfer) || 0) : 0), 0);
   const incCut = inc ? acctDay0(A.income_from) : Infinity;
   // walletAt(t, t1) = t 시점 지갑 + [t, t1) 사이 입금(있으면) -- 달 중간에 넣은 돈을 분모에 넣지 않으면 «한 달 −157%»(10-07·09 입금 $2.5k)가 나온다
-  const walletAt = (t, t1) => (incOn(acctKey(t)) ? wallet - incSum(acctKey(t))   // 그날 시작 지갑 = 지금 − 그 뒤 들어온 돈(입출금 포함)
-    : wallet - (inc ? incSum(A.income_from) : 0) - T.reduce((x, tr) => x + (tr.exit_time >= t && tr.exit_time < incCut ? Number(tr.net_pnl) || 0 : 0), 0))   // 추정(펀딩·입출금 섞임)
+  const walletAt = (t, t1) => (incOn(acctKey(t)) ? wallet$ - incSum(acctKey(t))   // 그날 시작 지갑 = 지금 − 그 뒤 들어온 돈(입출금 포함)
+    : wallet$ - (inc ? incSum(A.income_from) : 0) - T.reduce((x, tr) => x + (tr.exit_time >= t && tr.exit_time < incCut ? Number(tr.net_pnl) || 0 : 0), 0))   // 추정(펀딩·입출금 섞임)
     + (t1 ? Object.entries(inc || {}).reduce((x, [d, o]) => x + (d >= acctKey(t) && d < acctKey(t1) ? Math.max(0, Number(o.transfer) || 0) : 0), 0) : 0);
   // 오늘 시작 순자산: 서버가 0시 뒤 15분 안에 잰 값이 있으면 그것, 없으면 «0시 지갑»(미실현 0 가정)
-  const dsOk = A.day_start && A.day_start.date === todayKey && Number(A.day_start.late_s) <= 900;
+  // 서버 0시 값이 풀 하나만 쟀으면(옛 기록 · pools 없음) 두 풀 합 분모와 안 맞아 버린다
+  const dsOk = A.day_start && A.day_start.date === todayKey && Number(A.day_start.late_s) <= 900 && (W.pools.length < 2 || (A.day_start.pools || []).length >= W.pools.length);
   const ds = dsOk ? Number(A.day_start.equity) : null, unreal0 = dsOk ? ds - Number(A.day_start.wallet) : null;
   const incT = incOn(todayKey) ? inc[todayKey] || {} : null, realT = incT ? Number(incT.pnl) || 0 : real, trfT = incT ? Number(incT.transfer) || 0 : 0;
   // 큰 숫자 = 실현(지갑 입금) + 미실현 변화 -- 오늘 입출금은 빠진다(옛 «지금 순자산 − 0시»는 입금도 손익으로 셌다)
-  const start = ds != null ? ds : incT ? walletAt(t0) : wallet - real;
-  const net = incT ? realT + unreal - (unreal0 ?? 0) : ds != null ? equity - ds : real + unreal, pct = start > 0 ? net / start : null;
+  const start = ds != null ? ds : incT ? walletAt(t0) : wallet$ - real;
+  const net = incT ? realT + unreal - (unreal0 ?? 0) : ds != null ? equity$ - ds : real + unreal, pct = start > 0 ? net / start : null;
   const startTip = (ds != null ? `0시 ${Math.round(A.day_start.late_s / 60)}분에 잰 순자산 ${fmtUsd(ds)} 기준` : incT ? `0시 지갑 ${fmtUsd(start)} 기준(0시 미실현 기록 없음 -- 0으로 봄)` : "0시 순자산 기록이 없어 «지갑 − 오늘 실현»으로 추정(펀딩·입출금 섞임)")
     + (incT ? `\n= 실현 ${acctSu(realT)} + 미실현 변화 ${acctSu(unreal - (unreal0 ?? 0))}${Math.abs(trfT) >= 0.005 ? `\n오늘 입출금 ${acctSu(trfT)} 은 손익에서 뺐다` : ""}` : ds != null ? "(입출금이 있으면 섞임)" : "");
-
-  // ── 포지션 한 줄 + 진입 미리보기 한 마디(주문 조작부는 플로팅 버튼) ──
-  const pj = (entryProjPreview || (lastEntryPlan && lastEntryPlan.projection) || {}).after;
-  const pvNote = pj && Number(pj.notional_usdt) > 0
-    ? `<span class="acct-pv" title="플로팅 버튼의 지금 설정(비율·배수)으로 넣으면 — 실제 포지션 아님">넣으면 → 청산까지 <b>${Number(pj.liq_pct).toFixed(1)}%</b> · 노출 <b>${Number(pj.exposure_x).toFixed(1)}배</b></span>` : "";
-  const posLine = positions.length ? positions.map((p) => {
-    const long = p.side === "LONG", mk = Number(p.mark_price) || 0, liq = Number(p.liquidation_price) || 0;
-    const liqD = mk > 0 && liq > 0 ? (long ? mk - liq : liq - mk) / mk * 100 : null;
-    const oo = (A.open_orders || []).filter((o) => o.symbol === p.symbol);
-    return `<div class="acct-posline"><span class="acct-side ${long ? "good" : "bad"}">${long ? "롱" : "숏"} ×${Number(p.leverage) || "?"}</span>
-      <span><b>${escapeHtml(acctCoin(p.symbol))}</b></span>
-      ${(A.unprotected || []).includes(`${p.symbol}:${String(p.side).toUpperCase()}`) ? `<span class="bad" title="거래소 스탑도 서버 5분봉 감시도 없습니다">🔴손절 없음</span>` : ""}
-      ${liqD != null ? `<span>청산 <b>${acctPx(liq)}</b> <em class="${liqD < 3 ? "bad" : liqD < 6 ? "warn" : ""}">(${liqD.toFixed(1)}% 남음)</em></span>` : ""}
-      <span>노출 <b>${equity > 0 ? (Math.abs(Number(p.notional) || 0) / equity).toFixed(1) : "—"}배</b></span>
-      ${oo.length ? `<span>걸린 주문 ${oo.map((o) => `${o.side === "BUY" ? "매수" : "매도"} ${acctPx(o.price)}×${o.qty}`).join(", ")}</span>` : ""}
-      ${p === mine ? pvNote : ""}</div>`;
-  }).join("") : `<div class="acct-posline"><span class="acct-side neutral">포지션 없음</span>${pvNote}</div>`;
 
   // SVG 는 칸의 실제 폭(·한 화면 모드면 fitLayout 이 준 높이)으로 1:1 로 그린다 -- 고정 viewBox 를 늘리면 글자가 커지거나 가운데로 찌그러진다.
   const cvEl = el("snapAcctCurve"), curveW = Math.max(300, cvEl.clientWidth || 600);
@@ -2178,25 +2155,12 @@ function renderSnapshotAccountCore() {
   // 리뷰: 카드를 통째로 다시 쓰면(포지션이 있으면 폴링마다 -- 미실현이 바뀐다) 키보드로 고른 날·칩의 포커스가 <body> 로 떨어졌다 -- 같은 칸에 되돌린다
   const fa = document.activeElement, fAt = fa && fa.closest && fa.closest("#acctCard")
     ? ["day", "month", "span"].map((k) => (fa.hasAttribute(`data-acct-${k}`) ? `#acctCard [data-acct-${k}="${fa.getAttribute(`data-acct-${k}`)}"]` : "")).find(Boolean) : "";
-  // 2026-10-22 사용자 «여러 코인 한꺼번에 청산 -- 지금은 다른 청산을 기다려야 한다»: 포지션이 둘 이상이면 «전체 청산».
-  //   서버가 코인별 청산 칸으로 동시에 보낸다(/api/manual-exit/submit-all). 두 번 눌러야 나간다 · 체결 방식은 플로팅 패널의 청산 방식(지정가/즉시)을 따른다.
-  const closeAllRow = positions.length >= 2 || closeAllMsg ? `<div class="acct-posline acct-closeall">${positions.length >= 2
-    ? `<button type="button" class="acct-closeall-btn${closeAllArmed ? " arm" : ""}" data-close-all="${positions.length}"${closeAllBusy ? " disabled" : ""}>${closeAllLabel(positions.length)}</button>` : ""}${closeAllMsg ? `<span>${escapeHtml(closeAllMsg)}</span>` : ""}</div>` : "";
   // 2026-11-06 펜 메모 «통계 박스를 왼쪽 섹션으로 옮기고 바로 위 차트 높이를 늘려줘»: 왼쪽 열 아래가 비어 있었다 -- 기간 칩은 곡선과 한 쌍이라 그대로 오른쪽
   const spanA = T.filter((t) => t.exit_time >= (ACCT_SPANS[acctSpanIdx][1] === 0 ? t0 : ACCT_SPANS[acctSpanIdx][1] > 0 ? now - ACCT_SPANS[acctSpanIdx][1] * ACCT_DAY : 0));
-  setH("snapAcctPosition", posLine + closeAllRow);
   setH("snapAcctStats", spanA.length ? `<div class="acct-stats">${acctStatsHtml(spanA)}</div>` : `<p class="acct-empty">이 기간에 닫힌 왕복이 없습니다.</p>`);
-  // 핵심 지표 6칸(시안 C) -- 승률·최대 낙폭은 성과 통계 탭과 같은 기간(자산 곡선 칩)·같은 계산(acctStatGroups)
+  // 승률·최대 낙폭은 성과 통계 탭과 같은 기간(자산 곡선 칩)·같은 계산(acctStatGroups)
   const SG = spanA.length ? acctStatGroups(spanA)[0] : null, spanLab = ACCT_SPANS[acctSpanIdx][0];
-  const kpi = (lab, val, tone, sub, tip) => `<div${tip ? ` title="${escapeHtml(tip)}"` : ""}><i>${lab}</i><b class="${tone}">${val}</b><s>${sub}</s></div>`;
-  setH("snapAcctKpi", [
-    kpi("지갑", fmtUsd(W.pools.length ? W.wallet : wallet), "", W.pools.map((p) => `${p.name} ${fmtUsd(p.wallet)}`).join(" · ")),
-    kpi("오늘 손익", `${acctSu(net)} <small>${acctPct(pct)}</small>`, acctTone(net), `닫힌 거래 ${tT.length}건`, startTip),   // 산출 근거(0시 기준·입출금 제외)는 탭이 없어져 여기 호버로
-    kpi("미실현", acctSu(unreal), acctTone(unreal), positions.length ? positions.map((p) => `${acctCoin(p.symbol)} ${acctSu(Number(p.unrealized_pnl) || 0)}`).join(" · ") : "포지션 없음"),
-    kpi("증거금 사용", W.pools.length ? W.pools.map((p) => `${p.usedPct.toFixed(0)}%`).join(" · ") : "—", W.pools.some((p) => p.usedPct >= 75) ? "warn" : "", W.pools.map((p) => p.name).join(" · ")),
-    kpi(`승률 (${spanLab})`, SG ? `${SG.win}%` : "—", "", SG ? `${SG.g.length}건 · 손익비 ${SG.al ? (SG.aw / Math.abs(SG.al)).toFixed(2) : "—"}` : "닫힌 왕복 없음"),
-    kpi("최대 낙폭", SG ? acctSuc(SG.mdd) : "—", SG && SG.mdd < 0 ? "bad" : "", `${spanLab} 누적 실현 기준`),
-  ].join(""));
+  setH("snapAcctWealth", W.pools.length ? acctWealthHtml(A, W, { net, pct, tip: startTip }, SG, spanLab) : "");
 
   // ── 아래: 달력 | 자산 곡선 ──
   const days = new Map();
@@ -2214,6 +2178,7 @@ function renderSnapshotAccountCore() {
       ${cal.html}
       ${inc && ym <= A.income_from.slice(0, 7) ? `<p class="acct-foot muted">칸 = 그날 지갑에 들어온 실현+펀딩+수수료 · ${acctMd(incCut)}부터(바이낸스 기록은 최근 3개월)${T.length && T[0].exit_time < incCut ? ` · 그 앞은 닫힌 거래 왕복 합` : ""}</p>`
         : T.length && ym <= oldest ? `<p class="acct-foot muted">원장은 ${acctMd(T[0].exit_time)}부터입니다(서버 꼬리 최근 400왕복).</p>` : ""}
+      ${warnMsg ? `<p class="acct-foot acct-warn" role="status">${escapeHtml(warnMsg)}</p>` : ""}
     </div>`;
   const spanDays = ACCT_SPANS[acctSpanIdx][1];
   const from = spanDays === 0 ? t0 : spanDays > 0 ? now - spanDays * ACCT_DAY : 0;
@@ -10932,32 +10897,6 @@ async function manualEntryPreview(side, kind = "entry", ov = null) {
   }
 }
 
-// 2026-09-20 계좌 카드 게이지를 진입 미리보기로 움직인다(사용자 요청). 09-16 에 이 자리에
-// 있던 «지금 넣으면» 4행(#entryProj 블록과 그 전용 렌더러들)은 통째로 지웠다 -- 진입이
-// 모달에서 카드 안으로 나온 뒤로는 **바로 위 계좌 카드**가 같은 네 값을 같은 눈금으로 이미
-// 그린다. 같은 사실을 두 번 그리면 어느 쪽이 결정인지 흐려진다.
-// 값이 실제로 바뀔 때만 손댄다 -- 30초마다 같은 값으로 재그리면 툴팁이 닫히고 스크롤이 튄다.
-// 🔴켜는 조건은 «진입 블록이 펼쳐져 있다» 다. 접혀 있으면 사용자는 진입을 보고 있지 않으므로
-//    계좌 카드는 **실제 계좌**여야 한다. 실패·차단·투영 없음도 전부 끄는 쪽이다.
-function setEntryProjPreview(plan) {
-  const box = el("snapEntryBox");
-  const pr = plan && !plan.blocked && Number(plan.quantity) > 0 ? plan.projection : null;
-  const on = pr && pr.after && box && box.open ? pr : null;
-  // 🔴키에는 **카드가 그리는 것 전부**가 들어가야 한다. 2026-09-22 에 `target_leverage` 가
-  //   빠져 있어, 레버리지만 바꾸면(서버 투영은 배수에 안 움직이므로) 키가 같아 조기 반환했고
-  //   카드가 «레버 20배»에 굳었다. 배수는 화면이 직접 나눠 쓰는 값이라 키에 있어야 한다.
-  const key = on ? `${on.after.liq_pct}|${on.after.margin_used_pct}|${on.after.exposure_x}`
-                   + `|${plan.quantity}|${plan.target_leverage}|${plan.price}` : "";
-  if (key === entryProjKey) return;
-  entryProjKey = key;
-  entryProjPreview = on ? { ...on, __plan: plan } : null;
-  // ⭐켜거나 값이 바뀌면 **제자리에서** 고친다 -- 그래야 CSS transition 이 걸린다.
-  // 🔴끌 때는 **통째로 다시 그린다**. 제자리 수정은 실제 값을 덮어쓴 뒤라 «지우기»만으로는
-  //    복구가 안 된다(2026-09-15 테스트에서 실제로 미리보기 값이 굳었다). 렌더는 항상
-  //    실제 계좌를 그리므로 재그리기가 곧 복구다.
-  renderSnapshotAccount();   // 2026-10-14 카드 포지션 줄의 «넣으면 →» 한 마디만 바뀐다(타일·제자리 패처는 카드 개편으로 없어짐)
-}
-
 async function manualEntryRefreshSize() {
   const line = el("snapEntrySize");
   if (!line) return;
@@ -10979,7 +10918,6 @@ async function manualEntryRefreshSize() {
         : (data.detail || data.error || "알 수 없음");   // 2026-10-09 자동 규칙의 막힘(격리 마진·변동성 없음)은 서버 문장 그대로
       line.hidden = false;
       line.textContent = `크기 확인 실패 — ${why}`;
-      setEntryProjPreview(null);   // 🔴옛 투영을 남기지 않는다
       return;
     }
     const plan = data.plan || {};
@@ -11011,15 +10949,12 @@ async function manualEntryRefreshSize() {
     line.className = "entry-note" + (ovX && !blockText ? " bad" : "");
     line.textContent = blockText
       || (ovX ? `🔴사이징 상한 꺼짐 — 크기 기준이 «순자산 × ${ovX}» 하나뿐입니다` : "") || capNote;
-    lastEntryPlan = plan && !plan.blocked ? plan : null;
-    setEntryProjPreview(plan);
     // 2026-09-25 «보유 N시간 · 역행 · 최대 N배» 줄은 뺐다(사용자 지시). 레버 게이지는 그대로 맞춘다.
     renderLevGauge(plan);
   } catch (err) {
     line.hidden = false;
     line.className = "entry-note bad";
     line.textContent = "크기 확인 실패 — 서버 응답 없음";
-    setEntryProjPreview(null);
   }
 }
 
@@ -11239,35 +11174,6 @@ document.addEventListener("click", async (e) => {
 //   취소는 남은 수량을 안 사는 쪽이라 위험을 줄이지만, 노리던 진입을 버리는 것이라 «지금 시장가»처럼 두 번(5초 무장).
 //   청산·스위칭은 안 붙인다(서버도 409) -- 청산 취소는 포지션을 그대로 두는 것이다.
 let entryCancelArmT = 0, entryCancelArmed = false, entryCancelLive = false;
-// 2026-10-22 «전체 청산»(계좌 카드) -- 카드가 폴링마다 다시 그려지므로 상태는 여기 둔다
-let closeAllArmed = false, closeAllBusy = false, closeAllMsg = "", closeAllT = 0, closeAllMsgT = 0;
-const closeAllLabel = (n) => (closeAllBusy ? "전체 청산 보내는 중…"
-  : closeAllArmed ? `한 번 더 = ${n}개 전부 ${manualExitMarket() ? "즉시(시장가)" : "지정가"} 청산` : `전체 청산 · ${n}개`);
-document.addEventListener("click", async (e) => {
-  const b = e.target.closest("[data-close-all]");
-  if (!b || b.disabled) return;
-  const n = Number(b.dataset.closeAll) || 2;
-  if (!closeAllArmed) {
-    closeAllArmed = true; b.classList.add("arm"); b.textContent = closeAllLabel(n);
-    clearTimeout(closeAllT);
-    closeAllT = setTimeout(() => { closeAllArmed = false; const x = document.querySelector("[data-close-all]");
-      if (x && !x.disabled) { x.classList.remove("arm"); x.textContent = closeAllLabel(n); } }, 5000);
-    return;
-  }
-  clearTimeout(closeAllT); closeAllArmed = false; closeAllBusy = true;
-  b.disabled = true; b.classList.remove("arm"); b.textContent = closeAllLabel(n);
-  try {
-    const r = await (await fetch(`/api/manual-exit/submit-all?confirm=1${exitExecQuery()}`, { method: "POST", cache: "no-cache" })).json();
-    closeAllMsg = (r.results || []).map((x) => `${x.symbol ? acctCoin(x.symbol) : "?"} ${x.side === "LONG" ? "롱" : "숏"} ${x.ok ? "청산 접수" : (x.detail || x.error)}`).join(" · ")
-      || `전체 청산 못 함: ${r.detail || r.error}`;
-  } catch (err) {
-    closeAllMsg = `전체 청산 요청 실패: ${err && err.message ? err.message : err} — 거래소에서 확인하세요`;
-  }
-  closeAllBusy = false;
-  clearTimeout(closeAllMsgT); closeAllMsgT = setTimeout(() => { closeAllMsg = ""; refreshBinanceAccount(true); }, 60000);
-  manualEntryPollStatus();
-  refreshBinanceAccount(true);
-});
 const entryCancelableP = (st) => /^(working|submitting)$/.test(st?.phase || "") && st?.kind !== "exit" && !st?.switch && st?.plan?.type !== "MARKET";
 let pegOrder = null;   // 2026-10-31 차트 ✕ -- 따라가기(peg) 진입이 걸려 있는 동안만(끝나면 null)
 function entryResultHtml(st, tone) {

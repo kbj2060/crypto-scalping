@@ -108,9 +108,12 @@ def account_day_start(payload: dict, now: float | None = None, path: Path = ACCO
 
     ponytail: 입출금이 섞인다. late_s(0시 뒤 몇 초에 잰 값인가)가 크면 화면이 «지갑 − 오늘 실현» 추정으로 돌아간다."""
     bal = payload.get("balance") if isinstance(payload, dict) and payload.get("ok") else None
+    # 2026-11-08 단일자산 모드: balance 는 주문 풀(USDC) 하나 -- 화면 손익은 USDC·USDT 합이라 두 풀을 달러로 더한다(USDC=USDT=$1)
+    pools = (payload.get("balances") or {}) if isinstance(payload, dict) and not payload.get("multi_assets_margin") else {}
     try:
-        wallet = float(bal["wallet"])
-        equity = wallet + float(bal.get("unrealized") or 0.0)
+        parts = list(pools.values()) if pools else [bal]
+        wallet = sum(float(b["wallet"]) for b in parts)
+        equity = wallet + sum(float(b.get("unrealized") or 0.0) for b in parts)
     except (KeyError, TypeError, ValueError):
         return None
     now = time.time() if now is None else now
@@ -122,7 +125,7 @@ def account_day_start(payload: dict, now: float | None = None, path: Path = ACCO
         cur = {}
     if cur.get("date") != day:
         midnight = kst.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-        cur = {"date": day, "equity": equity, "wallet": wallet, "ts": now, "late_s": round(now - midnight)}
+        cur = {"date": day, "equity": equity, "wallet": wallet, "ts": now, "late_s": round(now - midnight), "pools": sorted(pools)}
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(cur))
         tmp.replace(path)

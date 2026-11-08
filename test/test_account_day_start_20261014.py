@@ -29,3 +29,11 @@ def test_failed_payload_is_none(tmp_path):
     assert account_day_start({"ok": False, "balance": {"wallet": 1}}, now=0, path=p) is None
     assert account_day_start({"ok": True}, now=0, path=p) is None
     assert not p.exists()
+
+
+def test_two_pools_are_summed_in_dollars(tmp_path):
+    """2026-11-08 단일자산 모드: balance = USDC 풀 하나 · balances = 두 풀 -- 0시 기준은 두 풀 합(화면 손익이 두 풀 합이라)."""
+    pay = {"ok": True, "balance": {"wallet": 791, "unrealized": 107},
+           "balances": {"USDC": {"wallet": 791, "unrealized": 107}, "USDT": {"wallet": 380, "unrealized": -3}}}
+    a = account_day_start(pay, now=datetime(2026, 11, 8, 0, 1, tzinfo=KST).timestamp(), path=tmp_path / "ds.json")
+    assert a["wallet"] == 1171 and a["equity"] == 1275 and a["pools"] == ["USDC", "USDT"]
