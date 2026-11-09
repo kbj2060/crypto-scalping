@@ -5142,6 +5142,10 @@ function wallDrawerHtml() {
 
 function renderPaper() {
   const wall = el("mcWall");   // 2026-10-13 모의 판이 #mcBody 에서 빠져 강제 다시 그리기(_mcHtml = null)는 뺐다 -- renderMarketCtx 가 내용 비교로 바뀜을 잡는다
+  if (wall && el("mcBody")?.classList.contains("mc-cmp")) {   // 2026-11-10 펜 메모: 넓은 화면 #mcWall = 차트 아래 전폭 체결 버블 띠(bubble_map.js 가 #mcBubble 에 그린다)
+    if (mcBubbleCanvas().parentNode !== wall) { wall._ppm = null; wall.replaceChildren(mcBubbleEl); }
+    return;
+  }
   if (wall) { const html = wallDrawerHtml(); if (wall._ppm !== html) { wall._ppm = html; keepFocus(wall, () => { wall.innerHTML = html; }); } }
 }
 
@@ -5231,6 +5235,7 @@ function mcUsSession(nowMs = Date.now()) {
 let mcNeedH = FIT0.mc || 0;   // 시장 맥락(좁은 칸) 내용 높이 -- renderMarketCtx 가 재고 renderCandleSvg 가 1초 수급 몫을 정할 때 쓴다
 // 2026-10-30 펜 메모 «이전 미니 체결 버블 실시간 차트를 같은 자리(1초 수급 아래)에 · 수급 차트 말고 아래 것들 높이를 줄이고 바닥을 왼쪽 지지·저항 바닥에 맞춰» --
 //   bubble_map.js 가 #mcBubble 에 최근 90초를 그린다(10-24 «지금 들어가면» 가격 자로 바꿨다가 10-28 가격 자를 지운 자리). 높이 = 칸 − 아래 두 줄(시장 맥락·⑤) 내용 → 바닥이 지지·저항 칸 바닥과 같은 선.
+const FP_BUB_BAND = 150;   // 2026-11-10 펜 메모: 넓은 화면 체결 버블 = 차트 아래 전폭 띠 높이(#mcWall)
 const MC_BUBBLE_H = 176;   // 2026-11-04 160 → 176: 상대 강도 박스를 ~42px 줄여 생긴 높이를 버블(+16)과 1초 수급(+26)이 나눠 갖는다(펜 메모)   // 1초 수급 몫에서 빼는 버블 자리 = 아래 두 줄을 줄여 생긴 높이(그래서 수급 차트 높이는 그대로)
 let mcBubbleEl = null;
 const mcBubbleCanvas = () => mcBubbleEl || (mcBubbleEl = Object.assign(document.createElement("canvas"), { id: "mcBubble", className: "mc-bubble", tabIndex: 0,
@@ -5429,9 +5434,10 @@ function renderMarketCtx() {
           + gk("", G.seg4(d.quad ? d.quad.key : null, wallTile ? gv + 96 : gv, wallTile), `가격×OI 1시간 · 네 칸 = 신규 롱 · 숏커버 · 신규 숏 · 롱정리 (초록 = 가격↑ · 빨강 = 가격↓ · 다 비면 보류)\n` + (d.quad ? `지금 ${({ up_up: "새 롱", up_dn: "숏 커버", dn_up: "새 숏", dn_dn: "롱 정리", small: "보류" })[d.quad.key] || "-"} · ${d.quad.label} · 1시간 ${sg(d.move60, 0, "bp")}` : "가격×OI 1시간 -"), wallTile ? null : ""), "", wallTile);   // 벽 칸은 값 칸(.v) 없이 타일 폭 전체를 쓴다
     // 2026-11-04 펜 메모 «호가벽은 제거 · 나머지 2개(①②)를 아래 박스 친 지지/저항 자리로»: 넓은 화면 ①② = #mcWall(프로파일 아래), ④ 호가 벽 칸은 뺐다
     //   (좁은 화면은 그대로 ④ 가 있다). 칸 폭에 맞춘 게이지 폭으로 다시 만든다.
-    const wallPx = parseFloat(el("mcWall") && el("mcWall").style.width) || 400, gwWall = Math.max(40, Math.floor((wallPx - 12) / 2) - 96);   // 한 줄 배치: 이름 44 + 값 40 + 간격 8 을 뺀 게이지 폭
-    mcWallTiles = `<div class="mc-strip mc-strip-wall">${mkTiles(gwWall, true)}</div>`;
-    htmlB = [fcHtml];
+    // 2026-11-10 펜 메모: ①② 게이지는 오른쪽 칸 맨 위(옛 체결 버블 자리) -- 칸 폭(G.cmpW)에 맞춘 게이지 폭 · #mcWall 은 체결 버블 띠(renderPaper)
+    const gwWall = Math.max(40, Math.floor((G.cmpW - 12) / 2) - 96);   // 한 줄 배치: 이름 44 + 값 40 + 간격 8 을 뺀 게이지 폭
+    mcWallTiles = "";
+    htmlB = [`<div class="mc-strip mc-strip-wall">${mkTiles(gwWall, true)}</div>`, fcHtml];
     // 2026-10-28 사용자 «풋프린트 상단 나스닥/2년물/10년물 차트 자리에 Macro Trend 요약»(시안 H1) -- 나스닥·10년은 Macro Trend 카드 «오늘» 칸으로 옮겼다.
     //   급변 칩(5분 |z|≥4, 10-14)은 그대로 끝에 둔다.
     setH("fpRates", mtHeadHtml());
@@ -5452,7 +5458,7 @@ function renderMarketCtx() {
   if (!whenBox) htmlB += `<div class="mc-wide">${whenHtml}</div>`;
   if (body._mcHtml === htmlB) return;     // 같은 내용이면 다시 안 그린다(포커스 유지)
   body._mcHtml = htmlB;
-  keepFocus(body, () => { body.innerHTML = htmlB; if (G.cmpW) body.insertBefore(mcBubbleCanvas(), body.firstChild); mcFoldApply(body); });   // 10-30 버블 = 맨 위(1초 수급 바로 아래) · 2026-10-28 펜 메모 «가격 자 제거 · 그 자리에 수급 차트 2개를 키워» -- 맨 위 «지금 들어가면» 가격 자(#mcEntry) 삭제
+  keepFocus(body, () => { body.innerHTML = htmlB; mcFoldApply(body); });   // 2026-11-10 버블은 차트 아래 띠(#mcWall, renderPaper)   // 10-30 버블 = 맨 위(1초 수급 바로 아래) · 2026-10-28 펜 메모 «가격 자 제거 · 그 자리에 수급 차트 2개를 키워» -- 맨 위 «지금 들어가면» 가격 자(#mcEntry) 삭제
   if (body.classList.contains("mc-cmp")) {   // 내용 높이(칸 높이가 아니라 자식들의 아래 끝) -- 바뀌면 차트를 다시 그려 1초 수급 몫을 조정
     const bb = mcBubbleEl && mcBubbleEl.parentNode === body ? mcBubbleEl.getBoundingClientRect() : null, top = bb ? bb.bottom + 6 : body.getBoundingClientRect().top;   // 버블은 높이 계산에서 뺀다(renderCandleSvg 가 남는 높이를 준다)
     const need = Math.ceil(Math.max(0, ...[...body.children].filter((k) => k !== mcBubbleEl).map((k) => k.getBoundingClientRect().bottom - top)) + 6);
@@ -7026,10 +7032,13 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   const TRADE_L = footprint && mobileChart && !PROF_H ? 50 : 0;
   // 2026-09-28 모바일 풋프린트는 왼쪽 가격 글자를 없앴다(사용자 «차트가 너무 작다») -- 값은 플롯 아래 한 줄이 갖는다. 여백 44 -> 4.
   // 2026-09-30 풋프린트(데스크톱)는 왼쪽 여백 71 -> 36(사용자 «풋프린트를 왼쪽으로»).
+  // 2026-11-10 펜 메모 «선택한 박스들을 선·화살표 방향으로»: ⓪ 레버리지·수급 게이지 → 오른쪽 칸 맨 위(옛 체결 버블 자리) · ② 체결 버블 → 차트 아래 전폭 띠 ·
+  //   ④ 차트 아래 줄(사분면·거래대금·시각)은 그 띠 높이만큼 위로. 띠 = 바닥 여백(mb)에 더해 플롯·레인·시각 줄을 통째로 올린다(#mcWall 이 띠를 맡는다).
+  const FP_BUB = svg.id === "candleSvgSnapshot" && splitR && !mobileChart && footprint && flowOn() ? FP_BUB_BAND : 0;
   const ml = (mobileChart ? (footprint ? 4 : 44) : footprint ? 36 - CENTER_NUDGE : 45) + CENTER_NUDGE + TRADE_L - (splitR ? FP_LEFT_SHIFT : 0),
         // 2026-09-27 풋프린트는 가격 배지를 전부 왼쪽 글자로 옮겼다(사용자 «호가가 잘 보이게») -- 오른쪽은 호가 띠가 쓴다.
         mr = (mobileChart ? 10 : footprint ? 34 : 112) - CENTER_NUDGE,
-        mtTop = splitR ? 4 : 12 /* 2026-11-08 펜 메모 «카드 위 남는 부분 최소화» */, mt = mtTop + SUB_TOTAL + (splitR && svg.id === "candleSvgSnapshot" ? FP_TOP_ALIGN : 0), mb = svg.id === "candleSvgSnapshot" ? 28 : 70;   // 2026-10-06 풋프린트는 레짐·전환 리본 두 줄(+28~+64)이 빠져 x축 글자(+21)까지만 -- 빈 42px 는 가격 플롯에
+        mtTop = splitR ? 4 : 12 /* 2026-11-08 펜 메모 «카드 위 남는 부분 최소화» */, mt = mtTop + SUB_TOTAL + (splitR && svg.id === "candleSvgSnapshot" ? FP_TOP_ALIGN : 0), mb = svg.id === "candleSvgSnapshot" ? (FP_BUB ? FP_BUB + 2 : 28) : 70;   // 11-10(2) 버블 띠가 있으면 시각 줄은 플롯 안 바닥으로   // 2026-10-06 풋프린트는 레짐·전환 리본 두 줄(+28~+64)이 빠져 x축 글자(+21)까지만 -- 빈 42px 는 가격 플롯에
   // 2026-09-21 사용자 요청: 「차트가 너무 많다 -- 레인을 한 덩어리로」 + 「가격 플롯을 키워라」.
   //   레인 5종(거래대금·델타/CVD·OI·수급·청산)이 각자 6px 간격으로 떨어져 있어 **다섯 장의
   //   그림**으로 읽혔다. 간격 6->3, 높이를 서로 가깝게 맞춰 한 블록으로 읽히게 한다:
@@ -7123,7 +7132,11 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   let liqInfo = null;         // 2026-10-27 청산 행(호버가 읽는다) -- 청산 보기일 때 체결 대신
   let fpRowSize = 0;          // 풋프린트 행 크기($) -- 호가 띠가 같은 행으로 묶는다(2026-09-28)
   let fpRowOff = 0;           // 그 행 격자의 어긋남($) = 버킷/2 (2026-10-11, 아래 off)
-  const ch = h - mt - mb - QUAD_H - (LANE_MERGE ? 0 : CUM_H + LANE_GAP) - LANE_GAP
+  // 2026-11-10(2) 펜 메모 «풋프린트를 미니 버블차트 상단까지 늘리고 박스(봉 색 줄·호가 기울기·거래대금·시각)를 풋프린트 내부 하단에»:
+  //   버블 띠가 있으면 레인을 플롯 **안** 바닥(LANE_IN = 레인 + 시각 글자 24)에 겹친다 -- 플롯·프로파일 기둥이 띠 위까지 내려온다.
+  //   봉이 레인을 덮지 않게 가격 축 아래쪽에 그만큼 여백을 더한다(yRangeOf). 레인 = 플롯 바닥 − 20(시각 글자) 위 QUAD_H.
+  const LANE_IN = FP_BUB && QUAD_H ? QUAD_H + 24 : 0;
+  const ch = LANE_IN ? h - mt - mb : h - mt - mb - QUAD_H - (LANE_MERGE ? 0 : CUM_H + LANE_GAP) - LANE_GAP
             - PRICE_ROW_H;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
   // 2026-10-08 사용자 «풋프린트부 차트부터 모의 판+지지·저항까지 일봉·청산맵으로 대체»: 교체 영역 = 왼쪽 열 전체(0,0)~(w,h).
@@ -7138,7 +7151,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   const sub1sY = S1_BELOW ? h + SUB_GAP + PROF_PANEL : mtTop;
   const PROF = PROF_H ? { top: h + SUB_GAP + 36, bot: h + SUB_GAP + PROF_H, cx: Math.round((ml + w - mr) / 2) } : null;   // 머리 = 체결·포지션·청산 토글 줄 + 글자 줄(36) 아래부터
   const subLegendY = splitR ? mtTop : S1_BELOW ? mtTop : sub1sY + SUB_1S_H - STATS_ROW_H;   // 2단: 왼쪽 칸 맨 위 · 그 밖: 1초 수급 바로 아래(= 풋프린트 바로 위)   // 2단: 왼쪽 칸 맨 위(풋프린트 바로 위)
-  const quadY = plotBottom + PRICE_ROW_H + LANE_GAP;  // 사분면 막대 바닥 = quadY + QUAD_H
+  const quadY = LANE_IN ? plotBottom - LANE_IN + 4 : plotBottom + PRICE_ROW_H + LANE_GAP;  // 사분면 막대 바닥 = quadY + QUAD_H
   const cumY = LANE_MERGE ? quadY : quadY + QUAD_H + LANE_GAP; // 누적 행 위쪽
   const cumBottom = cumY + CUM_DRAW_H;
   const NS = "http://www.w3.org/2000/svg";
@@ -7197,6 +7210,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   const yRangeOf = (minP, maxP) => {
     const pad = (maxP - minP) * padPct || 1;
     let yMin = minP - pad, yMax = maxP + pad;
+    if (LANE_IN && ch > LANE_IN) yMin -= (yMax - yMin) * LANE_IN / (ch - LANE_IN);   // 11-10(2) 플롯 안 바닥 레인 자리만큼 아래 여백 -- 봉은 레인 위에서 끝난다
     // 2026-11-02 사용자 «바이낸스는 봉이 길고 급등락이 커 보이는데 우리는 아니다» 시안 1번: 현재가 중앙 고정(먼 쪽 기준 대칭)을 풀고
     //   보이는 봉의 고저(+여백)에 맞춘다 -- 풋프린트 칸 단위로만 반올림(yMin/yMax 가 층 캐시 서명에 들어 있다). 봉이 25~30% 길어진다.
     if (footprint && fpQ > 0 && !panned) { yMin = Math.floor(yMin / fpQ) * fpQ; yMax = Math.ceil(yMax / fpQ) * fpQ; }
@@ -7289,8 +7303,9 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   };
   const plotClip = isSnapshotChart ? mkClip("-mcclip", mt, ch) : null;
   // 2026-10-20 끌기 연속: 양 끝에 반쯤 걸친 봉이 레인(사분면·막대)에서 왼쪽 여백·오른쪽 값 칸으로 삐져나오지 않게 가로만 자른다
-  const laneClip = isSnapshotChart ? mkClip("-laneclip", plotBottom, hAll - plotBottom) : null;
-  const plotC = plotClip && [ml, mt, cw, ch], laneC = laneClip && [ml, plotBottom, cw, hAll - plotBottom];   // 같은 자르기의 캔버스판
+  const laneTop = LANE_IN ? quadY - 8 : plotBottom;   // 11-10(2) 레인이 플롯 안이면 자르기도 거기서부터(-8 = 받침 경계선)
+  const laneClip = isSnapshotChart ? mkClip("-laneclip", laneTop, hAll - laneTop) : null;
+  const plotC = plotClip && [ml, mt, cw, ch], laneC = laneClip && [ml, laneTop, cw, hAll - laneTop];   // 같은 자르기의 캔버스판
 
   // Liquidation-map density heatmap -- drawn first so candles/grid/lines sit on top of it (paint
   // order unchanged). 2026-08-25: replaced the old right-anchored, length-encoded "volume profile"
@@ -7528,13 +7543,13 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     const line = document.createElementNS(NS, "line");
     line.setAttribute("x1", x);
     line.setAttribute("x2", x);
-    line.setAttribute("y1", h - mb);
-    line.setAttribute("y2", h - mb + 5);
+    line.setAttribute("y1", LANE_IN ? h - mb - 19 : h - mb);   // 11-10(2) 플롯 안 바닥이면 글자 위 짧은 눈금
+    line.setAttribute("y2", LANE_IN ? h - mb - 16 : h - mb + 5);
     line.setAttribute("stroke", "var(--line)");
     g.appendChild(line);
 
     const txt = document.createElementNS(NS, "text");
-    txt.setAttribute("y", h - mb + 21);
+    txt.setAttribute("y", LANE_IN ? h - mb - 3 : h - mb + 21);
     txt.setAttribute("text-anchor", "middle");
     txt.setAttribute("font-size", isMobileChartMode() ? "12" : "13");
     txt.setAttribute("font-weight", "700");
@@ -9519,7 +9534,10 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     fgI.push({ x0: -1e9, x1: 1e9, y0: quadY, y1: hAll, c: laneC, p: (ctx) => ops.forEach((f) => f(ctx)) });
     const mk = (tag, at, parent = g) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); parent.appendChild(e); return e; };
     const txt = (x, y, s, at = {}) => { const t = mk("text", Object.assign({ x, y, "font-size": mobileChart ? 10 : 12 }, at)); t.textContent = s; return t; };
-    const top = quadY, bot = h - mb - 4, RIB = mobileChart ? 14 : 22, GAP = mobileChart ? 4 : 8;
+    if (LANE_IN) ops.push((ctx) => {   // 2026-11-10(3) 사용자 «차트 안에 들어가니 잘 안 보인다» → 시안 A: 레인 뒤를 차트 바탕색으로 막고 위에 경계선(봉·청산 밀도 배경이 비치지 않게)
+      cvRect(ctx, ml, quadY - 8, cw, plotBottom - quadY + 8, "var(--chart-bg)", 1); cvHLine(ctx, ml, ml + cw, quadY - 8, "var(--line)", 1);
+    });
+    const top = quadY, bot = LANE_IN ? plotBottom - 20 : h - mb - 4, RIB = mobileChart ? 14 : 22, GAP = mobileChart ? 4 : 8;
     const cx = (i) => xAt(i) + bw / 2, slotW = slot;
     const chartTop = top + RIB + GAP;
     const ribCol = slot < 1 ? new Map() : null;   // 2026-10-20 1px 밑이면 픽셀 열마다 마지막 봉(겹쳐 칠할 때 맨 위에 오던 것) 하나
@@ -9710,7 +9728,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     // 2026-10-01 바닥 = 전환 리본 바닥(사용자 «전환 리본까지 나머지 바닥을 맞춰») -- 시장 맥락·모의 판(옛 옵션 요약) 칸이 같은 선에서 끝난다
     const floorY = hAll - 2;   // 2026-10-06 리본 줄이 빠져 칸 바닥 = 상자 바닥
     const s1Avail = floorY + 12 - mtTop - 4;   // +10 = 시장 맥락 내용 높이의 여유(+6)·칸 아래 여백 -- 마지막 줄 글자가 리본 바닥에 닿게
-    const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.22), mcNeedH ? Math.round(s1Avail - mcNeedH - 16 - 8 - MC_BUBBLE_H) : Math.round(s1Avail * 0.47)) : s1Avail) : S1_BELOW ? S1_PANEL : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
+    const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.22), mcNeedH ? Math.round(s1Avail - mcNeedH - 16 - 8 - (FP_BUB ? 0 : MC_BUBBLE_H)) : Math.round(s1Avail * 0.47)) : s1Avail) : S1_BELOW ? S1_PANEL : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
     { const fs = el("fpLineSwitch"), card = el("fpCard");   // 청산 밀도 범례(왼쪽 위, ~256px) 오른쪽
       if (fs && card) {
         // 2026-10-30 레이아웃 정리: 1단 데스크톱(≈1440, 1초 수급이 아래)도 같은 한 줄 -- 전엔 이 폭에서만 «지표» 버튼이 없고 LONG·SHORT 가 체결 기둥 머리에 끼어 호가 계기와 겹쳤다
@@ -9737,11 +9755,12 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       } }
     // 2026-10-15 아티팩트 댓글 «봉 시간은 수급 차트 위로, 남는 공간은 미니 체결 버블»: 수급 바닥 시각 줄(12px, renderSupply1s mb 16→4)을 버블에 넘긴다
     const s1Give = mcSplit ? 12 : 0, s1Hd = s1H - s1Give;
-    if (mcSplit && mcBubbleEl) { const bh = floorY - (sub1sY + s1Hd + 12) - mcNeedH - 6;   // 10-30 버블 = 칸 − 아래 두 줄 내용 → 아래 두 줄 바닥 = 칸 바닥(지지·저항 칸 바닥)
+    if (mcSplit && mcBubbleEl) { const bh = FP_BUB ? FP_BUB - 14 : floorY - (sub1sY + s1Hd + 12) - mcNeedH - 6;   // 11-10 띠 안(위 여백 8 · 아래 6)   // 10-30 버블 = 칸 − 아래 두 줄 내용 → 아래 두 줄 바닥 = 칸 바닥(지지·저항 칸 바닥)
       const v = bh >= 60 ? `${bh}px` : "0px"; if (mcBubbleEl.style.height !== v) mcBubbleEl.style.height = v; mcBubbleEl.hidden = bh < 60; }
     post.push(() => mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1Hd + 12, w: subW - 16, h: floorY - (sub1sY + s1Hd + 12) } : null,
-            mcSplit && TRADE_W ? (() => { const y = plotBottom + 12;   // 2026-10-01(4) 프로파일 아래 = 2026-10-04 모의 판(renderPaper 가 채운다)
-              return { x: tradeX0 + 4, y, w: REG_W - 8, h: floorY - y }; })() : null));   // 10-26 레인 값 칸(옛 LANE_VAL_W 144)을 빼 지지/저항 칸이 제자리로
+            mcSplit && TRADE_W ? (FP_BUB ? { x: ml, y: h - FP_BUB + 8, w: w - mr - ml, h: FP_BUB - 14 }   // 2026-11-10 차트 아래 전폭 체결 버블 띠(플롯 왼쪽 ~ 호가 칸 오른쪽)
+              : (() => { const y = plotBottom + 12;   // 2026-10-01(4) 프로파일 아래 = 2026-10-04 모의 판(renderPaper 가 채운다)
+              return { x: tradeX0 + 4, y, w: REG_W - 8, h: floorY - y }; })()) : null));   // 10-26 레인 값 칸(옛 LANE_VAL_W 144)을 빼 지지/저항 칸이 제자리로
     supply1sSubBox = {
       svg: subSvg("s1", subX, sub1sY, subW, s1Hd, sub1sKey(subW, s1Hd),
                   (g) => renderSupply1s({ svg: g, w: subW, h: s1Hd })),

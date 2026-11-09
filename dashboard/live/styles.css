@@ -3583,14 +3583,22 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
 .pr-note { font: 500 11px/1.35 var(--font-sans); color: var(--muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 2026-11-04 펜 메모: 넓은 화면 프로파일 아래 칸(#mcWall) = ① 레버리지 · ② 누가 밀고 있나. 호가벽·칩·«?» 는 뺐고 지지/저항은 차트 안으로.
    네 줄이 칸 높이(= 가격 플롯 아래 레인 높이 + 20)를 똑같이 나눠 가져 두 타일의 줄이 가로로 맞는다 -- 4분면(2×2)은 넷째 줄 높이 */
-#mcWall .mc-strip.mc-strip-wall { grid-template-columns: 1fr 1fr; flex: 1; min-height: 0; column-gap: 12px; }
-#mcWall .mc-strip.mc-strip-wall .mc-sec { padding: 0; }
-#mcWall .mc-strip.mc-strip-wall .mc-rows { display: grid; grid-template-rows: repeat(4, 1fr); gap: 0; }
-#mcWall .mc-strip.mc-strip-wall .mc-gk { height: auto; min-height: 0; align-self: stretch; }
-#mcWall .mc-strip.mc-strip-wall .mc-gk > span { font: 500 11px/1 var(--font-sans); }
-#mcWall .mc-strip.mc-strip-wall .mc-gk:not(.v) { display: block; }                                  /* 4분면(2×2 · 이름 글자 들어 있음) = 타일 폭 전체 */
-#mcWall .mc-strip.mc-strip-wall .mc-gk:not(.v) > span { display: none; }
-#mcWall .mc-strip.mc-strip-wall .mc-gk:not(.v) > .mc-svg { width: 100%; height: 100%; }
+:is(#mcWall, #mcBody) .mc-strip.mc-strip-wall { grid-template-columns: 1fr 1fr; flex: 1; min-height: 0; column-gap: 12px; }
+:is(#mcWall, #mcBody) .mc-strip.mc-strip-wall .mc-sec { padding: 0; }
+:is(#mcWall, #mcBody) .mc-strip.mc-strip-wall .mc-rows { display: grid; grid-template-rows: repeat(4, 1fr); gap: 0; }
+:is(#mcWall, #mcBody) .mc-strip.mc-strip-wall .mc-gk { height: auto; min-height: 0; align-self: stretch; }
+:is(#mcWall, #mcBody) .mc-strip.mc-strip-wall .mc-gk > span { font: 500 11px/1 var(--font-sans); }
+:is(#mcWall, #mcBody) .mc-strip.mc-strip-wall .mc-gk:not(.v) { display: block; }                                  /* 4분면(2×2 · 이름 글자 들어 있음) = 타일 폭 전체 */
+:is(#mcWall, #mcBody) .mc-strip.mc-strip-wall .mc-gk:not(.v) > span { display: none; }
+:is(#mcWall, #mcBody) .mc-strip.mc-strip-wall .mc-gk:not(.v) > .mc-svg { width: 100%; height: 100%; }
+/* 2026-11-10 펜 메모: ①② 게이지 = 오른쪽 칸 맨 위(옛 체결 버블 자리, 높이 = 옛 아래 칸 128px) · 체결 버블 = 차트 아래 전폭 띠(#mcWall) */
+#mcBody .mc-strip.mc-strip-wall { display: grid; height: 128px; padding: 2px 0 8px; border-bottom: 1px solid var(--soft-line); margin-bottom: 4px; }
+#mcWall > .mc-bubble { flex: 1; min-height: 0; margin: 0; border-radius: 8px; }
+/* 오른쪽 칸 .mc-cmp 의 «그림 위 · 이름·값 아래» 두 줄 규칙(위 3200~3204)을 이 묶음만 옛 아래 칸처럼 한 줄(이름 · 그림 · 값)로 되돌린다 -- 네 줄이 128px 에 든다 */
+#mcBody.mc-cmp .mc-strip.mc-strip-wall .mc-gk { grid-template-columns: 44px minmax(0, 1fr); grid-template-rows: none; column-gap: 6px; }
+#mcBody.mc-cmp .mc-strip.mc-strip-wall .mc-gk.v { grid-template-columns: 44px minmax(0, 1fr) auto; }
+#mcBody.mc-cmp .mc-strip.mc-strip-wall .mc-gk > * { grid-row: auto; grid-column: auto; padding: 0; }
+#mcBody.mc-cmp .mc-strip.mc-strip-wall .mc-gk > b { font-size: 11.5px; min-width: 40px; }
 /* 2026-11-04 펜 메모: 지정가 진입선을 끄는 동안 선 오른쪽 끝에 뜨는 진입가 칩 */
 .lt-dpx { position: absolute; transform: translateY(-50%); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--accent); background: color-mix(in srgb, var(--chart-bg) 90%, transparent);
   color: var(--accent); font: 700 12px/1 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
