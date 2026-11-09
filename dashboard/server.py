@@ -230,6 +230,15 @@ def sr_breaks(sup: list[float], res: list[float], prev: float, lo: float, hi: fl
         nxt = next((p for p in shown if p not in crossed), None)
         out += [(f"{name}{i + 1}", p, nxt) for i, p in enumerate(shown[:n]) if p in crossed]
     return out
+def bar_delta_hl(deltas) -> list[float]:
+    """2026-11-10 봉 안 누적 델타 [최저, 최고, 마감] -- deltas = 봉 안 1초 (매수−매도)를 시간순. 봉 시작(0)도 최저·최고 후보."""
+    c = lo = hi = 0.0
+    for d in deltas:
+        c += d
+        lo, hi = min(lo, c), max(hi, c)
+    return [round(lo, 3), round(hi, 3), round(c, 3)]
+
+
 def sr_watch_view(sup: list[float], res: list[float], px: float, broken: set, n: int = 3) -> dict:
     """2026-11-04 지지·저항 «가까워짐» 알림 워커용 보기. 화면 srLevelsLive 와 같은 목록(현재가 쪽 · 안 쓸린(broken 밖) · 가까운 순 n개)을 그대로 준다 --
     워커가 레벨을 따로 계산하지 않는다(알림 숫자 = 화면 숫자)."""
@@ -3674,6 +3683,43 @@ def make_app() -> web.Application:
             raise web.HTTPBadRequest(reason="range") from None
         return web.json_response(payload, headers=NOCACHE)
 
+    # 2026-11-10 사용자 «봉 안 델타 고점·저점을 호가 기울기 자리에»: 봉마다 [최저, 최고, 마감] 누적 델타(화면 레인 «델타 캔들» 꼬리·몸통).
+    #   최근 봉(1초 링 footprint_state["sec"] 가 봉 시작부터 덮는 봉) = 라이브 그대로 · 6분 넘게 지난 닫힌 봉 = hot 바이낸스 테이프 1초(한 번 읽고 기억) ·
+    #   그 사이(재시작 직후 덜 덮인 봉) = 없음 -- 화면은 몸통(마감 델타)만. 풋프린트와 같은 바이낸스 선물 체결이다(11-10 대조: 144봉 마감 델타 중앙 차 0).
+    #   ponytail: 1주일 창(/api/footprint-week)은 안 붙인다 -- 넓혀 보면 옛 봉은 몸통만. 필요하면 fp_week_part 에 같은 테이프 읽기를 더한다.
+    fp_dhl_cache: dict[tuple[str, int], list[float]] = {}
+
+    async def fp_dhl(f: SimpleNamespace, bars: list[int]) -> dict[int, list[float]]:
+        sec, bs, out, need = f.footprint_state["sec"], FOOTPRINT_BAR_SECONDS, {}, []
+        items = sorted(sec.items())
+        s0 = items[0][0] if items else None
+        for b in bars:
+            if s0 is not None and s0 <= b:
+                out[b] = bar_delta_hl([c[4] - c[5] for t, c in items if b <= t < b + bs])
+            elif (f.spec.symbol, b) in fp_dhl_cache:
+                out[b] = fp_dhl_cache[(f.spec.symbol, b)]
+            elif b + bs <= time.time() - 360:
+                need.append(b)
+        if need:
+            try:
+                # 봉당 한 줄(창 함수 누적) -- 1초 행 수만 개를 파이썬으로 받지 않는다(대시보드 GIL). 실측 12시간 144봉 0.045초.
+                rows = await asyncio.to_thread(read_rows, HOT_TAPE_DB,
+                    "WITH s AS (SELECT ts_sec - ts_sec % ? AS bar, ts_sec, sum(buy_qty) - sum(sell_qty) AS d FROM trade_tape_1s"
+                    " WHERE symbol = ? AND ts_sec >= ? AND ts_sec < ? GROUP BY ts_sec),"
+                    " c AS (SELECT bar, d, sum(d) OVER (PARTITION BY bar ORDER BY ts_sec) AS cum FROM s)"
+                    " SELECT bar, min(cum), max(cum), sum(d) FROM c GROUP BY bar",
+                    [bs, f.spec.symbol.lower(), min(need), max(need) + bs])
+            except Exception as exc:  # noqa: BLE001 -- 못 읽으면 이번엔 몸통만(기억하지 않는다 -- 다음 전량 요청에 다시)
+                print(f"footprint dhl tape: {type(exc).__name__}: {exc}", flush=True)
+                rows = []
+            got = {int(b): [round(min(0.0, float(lo or 0.0)), 3), round(max(0.0, float(hi or 0.0)), 3), round(float(c or 0.0), 3)] for b, lo, hi, c in rows}
+            if len(fp_dhl_cache) > 20000:
+                fp_dhl_cache.clear()   # ponytail: 통째로 비우기 -- 코인 7개 × 1주일 ≈ 14k 봉이라 거의 안 닿는다
+            for b in need:
+                if b in got:
+                    out[b] = fp_dhl_cache[(f.spec.symbol, b)] = got[b]
+        return out
+
     async def api_footprint(request: web.Request) -> web.Response:
         """가격레벨별 매수/매도 체결량. 레벨은
         [가격, 매수, 매도, 고래매수, 고래매도, 리테일매수, 리테일매도] 7칸 배열이다
@@ -3706,6 +3752,7 @@ def make_app() -> web.Application:
             since = 0
         full = since <= 0 or not footprint_state["ready"]
         sent = recent if full else [(b, c) for b, c in recent if b >= since]
+        dhl = await fp_dhl(f, [b for b, _ in sent])
         return web.json_response({
             "symbol": FOOTPRINT_SYMBOL,
             "bucket": FOOTPRINT_BUCKET,
@@ -3735,7 +3782,8 @@ def make_app() -> web.Application:
                  # aggTrades 로 메운 봉은 체결이 **묶여** 있어 고래가 과장된다.
                  "agg": bar in agg_bars,
                  "levels": [[round(k * FOOTPRINT_BUCKET, dp)] + [round(x, 3) for x in v]
-                            for k, v in sorted(cells.items())]}
+                            for k, v in sorted(cells.items())],
+                 **({"dhl": dhl[bar]} if bar in dhl else {})}   # 11-10 봉 안 누적 델타 [최저, 최고, 마감]
                 for bar, cells in sent
             ],
         }, headers=NOCACHE)
