@@ -2424,13 +2424,15 @@ function srLevelsLive(n = 3) {
   if (!(cur > 0)) return null;
   // 2026-10-07 «게이지 지지1 ≠ 풋프린트 지지1»(사용자): 여기는 쓸림 필터가 없어 청산맵 마지막 봉 뒤 가격이 이미 지나간 레벨을
   //   남겼다(급락 저점 2,587 아래로 뚫린 2,600·2,592·2,590 이 게이지 지지1~3, 풋프린트는 2,579). 풋프린트와 같은 규칙으로 하나로.
-  const since = liqMapKnownUntilSec(map);
+  // 2026-11-09 레벨은 서버가 5분 경계마다 다시 계산한다(levels_known_until) -- 그 뒤 봉만 쓸림으로 본다(30분·1시간 차트면 그 시각이 든 봉부터).
+  const ku = Date.parse(map.levels_known_until || "");
+  const since = Number.isFinite(ku) ? tfT(Math.floor(ku / 1000)) : liqMapKnownUntilSec(map);
   const candles = candleHistoryByAsset[activeSnapshotAsset] || [];
   const live = (lv, below) => Number(lv.price) > 0 && (below ? lv.price < cur : lv.price > cur)
     && liqSweepIdx(candles, since, Number(lv.price)) < 0;
   // 2026-11-09 사용자 «쓸리면 그 다음 레벨을 자동으로»: 서버 목록(현재가 ±5% 상위 6개)이 급락 한 번에 다 쓸리면(SOXL 01:15 UTC 저점 42.25 가
   //   지지 6개 42.57~43.55 를 전부 지움) 빈자리를 heatmap_bins(같은 칸 격자·같은 쪽 정규화)에서 서버와 같은 규칙으로 채운다 --
-  //   안 쓸림 · 무게 5% 이상 · 지금가 ±5% · 무게 순 → 가까운 순. 서버 support_levels 는 띠 모델 입력이라 안 건드린다.
+  //   안 쓸림 · 무게 5% 이상 · 지금가 ±5% · 무게 순 → 가까운 순. (11-09 오후부터 레벨이 5분마다라 다음 5분 경계 전까지의 빈자리용)
   const pick = (levels, below) => {
     const keep = (levels || []).filter((lv) => live(lv, below)).slice(0, n);
     if (keep.length >= n) return keep;

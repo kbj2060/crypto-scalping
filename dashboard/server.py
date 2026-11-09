@@ -3300,7 +3300,7 @@ def make_app() -> web.Application:
         constants (see design doc section 5) -- BTC's map uses the same constants, unvalidated for
         BTC's own liquidity/volatility."""
         async def produce() -> dict[str, Any]:
-            df = await liq_klines_df(asset, LIQUIDATION_MAP_FETCH_LIMIT)   # 레벨 = 닫힌 1시간봉만(검증된 규약)
+            df = await liq_klines_df(asset, LIQUIDATION_MAP_FETCH_LIMIT)   # 정시 격자(bin_width·밀도 이력) -- 레벨은 아래 lv5(5분 경계, 11-09)가 덮어쓴다
             df_5m = await liq_klines_df(asset, LIQUIDATION_MAP_5M_FETCH_LIMIT, interval="5m")
             current_price = float(df["close"].iloc[-1]) if len(df) else 0.0
             payload = await asyncio.to_thread(
@@ -3324,6 +3324,13 @@ def make_app() -> web.Application:
                 tp = await asyncio.to_thread(compute_tier_profile, win[0], current_price, oi_usd, df_5m)
                 if tp is not None:
                     tp.update(current_price=end_px, known_until=win[1].isoformat())
+                # 2026-11-09 사용자 «전체 로직을 5분 재계산으로»: 지지·저항(+후보 칸 heatmap_bins)은 같은 5분 경계 창·기준가 = 마지막 닫힌 5분봉 종가
+                #   (docs/experiments/liqmap_sr_refresh_5m_vs_1h_results_20261109.md 의 B -- 정시 뒤 1% 넘게 움직인 시간 실측 청산 몫 16.8 → 24.0%).
+                #   bin_width·current_price·밀도 이력은 정시 격자 그대로(화면이 밀도 이력을 그 bin_width 로 그린다). 띠 모델은 자기 계산이라 무관.
+                lv5 = await asyncio.to_thread(compute_spliced_levels, win[0], end_px, df_5m)
+                if lv5.get("warmed_up"):
+                    payload.update(support_levels=lv5["support_levels"], resistance_levels=lv5["resistance_levels"],
+                                   heatmap_bins=lv5["heatmap_bins"], levels_price=end_px, levels_known_until=win[1].isoformat())
             payload["tier_profile"] = tp
             payload["generated_at"] = datetime.now(timezone.utc).isoformat()
             return payload
