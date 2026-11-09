@@ -7114,7 +7114,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // 2026-09-27 넓혔다(사용자 «호가 너비를 키워줘») -- 오른쪽 배지 자리(86px)를 띠에 줬다: 70 -> 148 · 모바일 40 -> 56.
   const PS = w >= 1000 ? 0.75 : 0.76;   // 2026-11-02 5칸(시안 3) -- 좁은 창은 칸을 줄인다 · 2026-11-09 펜 메모 «오른쪽 프로파일을 줄여 차트를 잘 보이게» 넓은 창 1 -> .75(398 -> 326px, 호가 칸은 그대로)
   // 2026-11-10 펜 메모 «호가 프로파일은 제거해줘»: 데스크톱 호가 기둥(84px)을 뺐다 -- 폭은 캔들 칸으로. 레벨 꼬리표·현재가(xRR = 오른쪽 끝 정렬)는 TPO 기둥 오른쪽 끝에 붙는다(꼬리표 바탕이 불투명). 휴대폰은 그대로.
-  const BOOK_W = footprint ? (mobileChart ? (PROF_H ? 0 : 56) : 0) : 0;   // 11-09 호가 칸은 줄이지 않는다(PS 밖) -- 레벨 꼬리표(저항3↑·max pain↑)가 이 칸에 들어가 63px 에선 앞글자가 가려졌다   // 2026-10-29 140 -> 104(펜 메모 «차트를 오른쪽으로 키우고 박스 오른쪽 너비는 줄여») · 2026-09-30 148 -> 112 -> 140(꼬리표 칸을 없애 돌려줌)(사용자 «차트·프로파일을 조금 줄여도 데이터가 다 보이게»)   // 모바일은 수량 글자 없이
+  const BOOK_W = footprint ? (mobileChart ? (PROF_H ? 0 : 56) : splitR ? 0 : w >= 1000 ? 84 : 64) : 0;   // 11-10 리뷰: 1단 데스크톱은 그대로(위 막대 계기 4개가 호가 칸에 매달려 있다) -- 펜 메모 화면(넓은 2단)만 뺀다   // 11-09 호가 칸은 줄이지 않는다(PS 밖) -- 레벨 꼬리표(저항3↑·max pain↑)가 이 칸에 들어가 63px 에선 앞글자가 가려졌다   // 2026-10-29 140 -> 104(펜 메모 «차트를 오른쪽으로 키우고 박스 오른쪽 너비는 줄여») · 2026-09-30 148 -> 112 -> 140(꼬리표 칸을 없애 돌려줌)(사용자 «차트·프로파일을 조금 줄여도 데이터가 다 보이게»)   // 모바일은 수량 글자 없이
   // 2026-09-28 체결 기둥(사용자 선택 시안 B) -- 풋프린트와 호가 띠 사이 150px. 모바일은 기둥 없이 셀 뒤에 깐다(시안 A).
   const TRADE_W = footprint && !mobileChart ? Math.round(88 * PS) : 0;   // 2026-10-29 140 -> 104(같은 펜 메모 -- 캔들 칸 +72px) · 2026-09-30 150 -> 112 -> 140
   // 2026-09-30 가격 꼬리표 칸(사용자 «왼쪽 라벨을 오른쪽으로, 겹치지 않게»): 캔들 칸과 체결 기둥 사이 120px.
@@ -9567,8 +9567,10 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     dh.forEach((d, i) => {
       if (!d) return;
       const x = cx(i), col = d.c >= 0 ? "var(--good)" : "var(--bad)", yb = Math.min(zero, Yd(d.c)), hb = Math.max(1, Math.abs(Yd(d.c) - zero)), ww = Math.max(1.5, Math.min(3, bwid * 0.2));
-      ops.push((ctx) => { if (d.w) cvRect(ctx, x - ww / 2, Yd(d.hi), ww, Math.max(1, Yd(d.lo) - Yd(d.hi)), col, 0.75, 1); cvRect(ctx, x - bwid / 2, yb, bwid, hb, col, 0.85, DENSE ? 0 : 1.5); });
+      if (DENSE) { un.add(col, 0.85, (pp) => pp.rect(x - bwid / 2, yb, bwid, hb)); return; }   // 11-10 리뷰: 1주일 창(2천 봉) = 색별 한 칠 · 꼬리 생략
+      ops.push((ctx) => { if (d.w) cvRect(ctx, x - ww / 2, Yd(d.hi), ww, Math.max(1, Yd(d.lo) - Yd(d.hi)), col, 0.75, 1); cvRect(ctx, x - bwid / 2, yb, bwid, hb, col, 0.85, 1.5); });
     });
+    un.flush((f) => ops.push(f));
     // 거래대금 선 -- 값 없는 봉에서 끊는다(모름을 이어 그리지 않는다)
     const turns = rows.map((r) => (r ? r.turn : null)), uMax = Math.max(1e-9, ...turns.filter((v) => v != null)), uSc = (LH - 2) / uMax;
     const runs = [];
@@ -9578,7 +9580,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     const lg = txt(ml + 4, chartTop + (mobileChart ? 8 : 9), "", { "font-size": mobileChart ? 9 : 10, fill: "var(--muted)", "pointer-events": "auto" });
     [["▮ 봉 안 델타 (몸통 = 마감 · 꼬리 = 봉 안 최고·최저 · √ 눈금)", "var(--muted)"], ["  ─ 거래대금", "var(--turnover)"]].forEach(([t, f]) => { const sp = mk("tspan", { fill: f }, lg); sp.textContent = t; });
     { const tt = document.createElementNS(NS, "title");
-      tt.textContent = "봉 안 델타 = 봉 시작부터 누적한 테이커 매수 − 매도(바이낸스+OKX 1초 체결 순서). 몸통 = 마감 델타 · 위 꼬리 = 봉 안에서 가장 높이 간 값 · 아래 꼬리 = 가장 낮게 간 값.\n"
+      tt.textContent = "봉 안 델타 = 봉 시작부터 누적한 테이커 매수 − 매도(바이낸스 선물 1초 체결 순서 -- 풋프린트와 같은 원천). 몸통 = 마감 델타 · 위 꼬리 = 봉 안에서 가장 높이 간 값 · 아래 꼬리 = 가장 낮게 간 값.\n"
         + "꼬리가 몸통 반대쪽으로 길면 봉 안에서 힘이 뒤집혔다는 뜻이다(예: −1,500 까지 팔리다 +200 마감 = 매수가 받아냄). 서술 표시 -- 반전 신호로 검정된 것 아님.\n파랑 선 = 거래대금(제 축).";
       lg.append(tt); }
   })();
@@ -9699,7 +9701,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       if (c.partial || i === candles.length - 1) return;
       const r = (footprint.byTime.get(c.time) || []).filter((l) => (Number(l[1]) || 0) + (Number(l[2]) || 0) > 0);
       if (!r.length) return;
-      const later = candles.slice(i + 1), open = (p) => !later.some((x) => x.low <= p && p <= x.high) && far(p);
+      const hq = (Number(footprint.bucket) || 0) / 2, later = candles.slice(i + 1), open = (p) => !later.some((x) => x.low <= p + hq && p - hq <= x.high) && far(p);   // 11-10 리뷰: 레벨 = 칸 중심 -- 반 칸 허용
       const vol = (l) => (Number(l[1]) || 0) + (Number(l[2]) || 0);
       const poc = Number(r.reduce((a, l) => (vol(l) > vol(a) ? l : a))[0]);
       const seen = (p) => lines.some((q) => q[1] === p);   // 같은 가격이 여러 봉에서 나오면 가장 먼저 생긴 것 하나만(글자 겹침)

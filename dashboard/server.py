@@ -3689,15 +3689,23 @@ def make_app() -> web.Application:
     #   ponytail: 1주일 창(/api/footprint-week)은 안 붙인다 -- 넓혀 보면 옛 봉은 몸통만. 필요하면 fp_week_part 에 같은 테이프 읽기를 더한다.
     fp_dhl_cache: dict[tuple[str, int], list[float]] = {}
 
-    async def fp_dhl(f: SimpleNamespace, bars: list[int]) -> dict[int, list[float]]:
+    async def fp_dhl(f: SimpleNamespace, sent: list[tuple[int, dict]]) -> dict[int, list[float]]:
+        """🔴11-10 리뷰: 마감값이 그 봉 풋프린트 칸 델타와 안 맞으면(1초 링·테이프에 구멍 -- 수집기 쓰기 멈춤·WS 끊김) 내보내지 않는다(화면 = 몸통만).
+        테이프로 정한 값은 맞든 안 맞든(None) 기억한다 -- 구멍 난 봉을 폴링마다 다시 읽지 않게."""
         sec, bs, out, need = f.footprint_state["sec"], FOOTPRINT_BAR_SECONDS, {}, []
         items = sorted(sec.items())
         s0 = items[0][0] if items else None
-        for b in bars:
+        cd = {b: sum(v[0] - v[1] for v in cells.values()) for b, cells in sent}   # 그 봉 칸 델타(매수 − 매도)
+        ok = lambda b, v: v is not None and abs(v[2] - cd[b]) <= max(0.5, 0.01 * abs(cd[b]))   # noqa: E731
+        for b, _ in sent:
+            key = (f.spec.symbol, b)
             if s0 is not None and s0 <= b:
-                out[b] = bar_delta_hl([c[4] - c[5] for t, c in items if b <= t < b + bs])
-            elif (f.spec.symbol, b) in fp_dhl_cache:
-                out[b] = fp_dhl_cache[(f.spec.symbol, b)]
+                v = bar_delta_hl([c[4] - c[5] for t, c in items if b <= t < b + bs])
+                if ok(b, v):
+                    out[b] = v
+            elif key in fp_dhl_cache:
+                if ok(b, fp_dhl_cache[key]):
+                    out[b] = fp_dhl_cache[key]
             elif b + bs <= time.time() - 360:
                 need.append(b)
         if need:
@@ -3711,13 +3719,15 @@ def make_app() -> web.Application:
                     [bs, f.spec.symbol.lower(), min(need), max(need) + bs])
             except Exception as exc:  # noqa: BLE001 -- 못 읽으면 이번엔 몸통만(기억하지 않는다 -- 다음 전량 요청에 다시)
                 print(f"footprint dhl tape: {type(exc).__name__}: {exc}", flush=True)
-                rows = []
-            got = {int(b): [round(min(0.0, float(lo or 0.0)), 3), round(max(0.0, float(hi or 0.0)), 3), round(float(c or 0.0), 3)] for b, lo, hi, c in rows}
+                rows = None   # 읽기 실패 = 아무것도 기억하지 않는다
+            got = {int(b): [round(min(0.0, float(lo or 0.0)), 3), round(max(0.0, float(hi or 0.0)), 3), round(float(c or 0.0), 3)] for b, lo, hi, c in rows or []}
             if len(fp_dhl_cache) > 20000:
                 fp_dhl_cache.clear()   # ponytail: 통째로 비우기 -- 코인 7개 × 1주일 ≈ 14k 봉이라 거의 안 닿는다
             for b in need:
-                if b in got:
-                    out[b] = fp_dhl_cache[(f.spec.symbol, b)] = got[b]
+                if rows is not None and (b in got or b + bs <= time.time() - 900):   # 읽기 실패·아직 최근인 빈 봉은 기억하지 않는다 -- 다음 전량 요청에 다시
+                    fp_dhl_cache[(f.spec.symbol, b)] = got.get(b)
+                if ok(b, got.get(b)):
+                    out[b] = got[b]
         return out
 
     async def api_footprint(request: web.Request) -> web.Response:
@@ -3752,7 +3762,7 @@ def make_app() -> web.Application:
             since = 0
         full = since <= 0 or not footprint_state["ready"]
         sent = recent if full else [(b, c) for b, c in recent if b >= since]
-        dhl = await fp_dhl(f, [b for b, _ in sent])
+        dhl = await fp_dhl(f, sent)
         return web.json_response({
             "symbol": FOOTPRINT_SYMBOL,
             "bucket": FOOTPRINT_BUCKET,
