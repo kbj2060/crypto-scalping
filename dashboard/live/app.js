@@ -5456,9 +5456,12 @@ function renderMarketCtx() {
   setH("mcWhen", whenBox ? whenHtml : "");
   nwWhenFit();
   if (!whenBox) htmlB += `<div class="mc-wide">${whenHtml}</div>`;
-  if (body._mcHtml === htmlB) return;     // 같은 내용이면 다시 안 그린다(포커스 유지)
+  if (body._mcHtml !== htmlB) {     // 같은 내용이면 다시 안 그린다(포커스 유지)
   body._mcHtml = htmlB;
-  keepFocus(body, () => { body.innerHTML = htmlB; mcFoldApply(body); });   // 2026-11-10 버블은 차트 아래 띠(#mcWall, renderPaper)   // 10-30 버블 = 맨 위(1초 수급 바로 아래) · 2026-10-28 펜 메모 «가격 자 제거 · 그 자리에 수급 차트 2개를 키워» -- 맨 위 «지금 들어가면» 가격 자(#mcEntry) 삭제
+  keepFocus(body, () => { body.innerHTML = htmlB; mcFoldApply(body); });
+  }
+  // 2026-11-10 펜 메모 «이 표(4h 상대 강도)가 안 보여»: 내용 높이는 내용이 같아도 매번 잰다 -- 옛 판은 html 이 바뀔 때만 재서, 글꼴이 늦게 들어와 줄이 커지면
+  //   1초 수급 몫이 그대로라 맨 아래 칸이 칸 밖으로 잘렸다(버블이 남는 높이를 받던 때는 버블이 줄어 가렸다).   // 2026-11-10 버블은 차트 아래 띠(#mcWall, renderPaper)   // 10-30 버블 = 맨 위(1초 수급 바로 아래) · 2026-10-28 펜 메모 «가격 자 제거 · 그 자리에 수급 차트 2개를 키워» -- 맨 위 «지금 들어가면» 가격 자(#mcEntry) 삭제
   if (body.classList.contains("mc-cmp")) {   // 내용 높이(칸 높이가 아니라 자식들의 아래 끝) -- 바뀌면 차트를 다시 그려 1초 수급 몫을 조정
     const bb = mcBubbleEl && mcBubbleEl.parentNode === body ? mcBubbleEl.getBoundingClientRect() : null, top = bb ? bb.bottom + 6 : body.getBoundingClientRect().top;   // 버블은 높이 계산에서 뺀다(renderCandleSvg 가 남는 높이를 준다)
     const need = Math.ceil(Math.max(0, ...[...body.children].filter((k) => k !== mcBubbleEl).map((k) => k.getBoundingClientRect().bottom - top)) + 6);
@@ -7110,7 +7113,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // 2026-09-27 풋프린트 오른쪽 «실시간 호가 띠»(사용자 지시) -- 캔들 폭에서 띠 폭을 뗀다(데스크톱 70 · 모바일 40).
   // 2026-09-27 넓혔다(사용자 «호가 너비를 키워줘») -- 오른쪽 배지 자리(86px)를 띠에 줬다: 70 -> 148 · 모바일 40 -> 56.
   const PS = w >= 1000 ? 0.75 : 0.76;   // 2026-11-02 5칸(시안 3) -- 좁은 창은 칸을 줄인다 · 2026-11-09 펜 메모 «오른쪽 프로파일을 줄여 차트를 잘 보이게» 넓은 창 1 -> .75(398 -> 326px, 호가 칸은 그대로)
-  const BOOK_W = footprint ? (mobileChart ? (PROF_H ? 0 : 56) : w >= 1000 ? 84 : 64) : 0;   // 11-09 호가 칸은 줄이지 않는다(PS 밖) -- 레벨 꼬리표(저항3↑·max pain↑)가 이 칸에 들어가 63px 에선 앞글자가 가려졌다   // 2026-10-29 140 -> 104(펜 메모 «차트를 오른쪽으로 키우고 박스 오른쪽 너비는 줄여») · 2026-09-30 148 -> 112 -> 140(꼬리표 칸을 없애 돌려줌)(사용자 «차트·프로파일을 조금 줄여도 데이터가 다 보이게»)   // 모바일은 수량 글자 없이
+  // 2026-11-10 펜 메모 «호가 프로파일은 제거해줘»: 데스크톱 호가 기둥(84px)을 뺐다 -- 폭은 캔들 칸으로. 레벨 꼬리표·현재가(xRR = 오른쪽 끝 정렬)는 TPO 기둥 오른쪽 끝에 붙는다(꼬리표 바탕이 불투명). 휴대폰은 그대로.
+  const BOOK_W = footprint ? (mobileChart ? (PROF_H ? 0 : 56) : 0) : 0;   // 11-09 호가 칸은 줄이지 않는다(PS 밖) -- 레벨 꼬리표(저항3↑·max pain↑)가 이 칸에 들어가 63px 에선 앞글자가 가려졌다   // 2026-10-29 140 -> 104(펜 메모 «차트를 오른쪽으로 키우고 박스 오른쪽 너비는 줄여») · 2026-09-30 148 -> 112 -> 140(꼬리표 칸을 없애 돌려줌)(사용자 «차트·프로파일을 조금 줄여도 데이터가 다 보이게»)   // 모바일은 수량 글자 없이
   // 2026-09-28 체결 기둥(사용자 선택 시안 B) -- 풋프린트와 호가 띠 사이 150px. 모바일은 기둥 없이 셀 뒤에 깐다(시안 A).
   const TRADE_W = footprint && !mobileChart ? Math.round(88 * PS) : 0;   // 2026-10-29 140 -> 104(같은 펜 메모 -- 캔들 칸 +72px) · 2026-09-30 150 -> 112 -> 140
   // 2026-09-30 가격 꼬리표 칸(사용자 «왼쪽 라벨을 오른쪽으로, 겹치지 않게»): 캔들 칸과 체결 기둥 사이 120px.
@@ -7870,7 +7874,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         });
         const ax = document.createElementNS(NS, "line");   // 델타 0 선
         ax.setAttribute("x1", dMid); ax.setAttribute("x2", dMid); ax.setAttribute("y1", pTop); ax.setAttribute("y2", pBot); ax.setAttribute("stroke", "var(--soft-line)"); g.appendChild(ax);
-        [[colX0, "청산"], [dX0, "체결 · 델타"], [tX0, "TPO"], [cBook, "호가"]].forEach(([x, s]) => {
+        [[colX0, "청산"], [dX0, "체결 · 델타"], [tX0, "TPO"], ...(BOOK_W ? [[cBook, "호가"]] : [])].forEach(([x, s]) => {
           const t = document.createElementNS(NS, "text");
           t.setAttribute("x", x); t.setAttribute("y", pTop - 4); t.setAttribute("font-size", "9"); t.setAttribute("font-weight", "700"); t.setAttribute("fill", "var(--muted)");
           t.setAttribute("paint-order", "stroke"); t.setAttribute("stroke", "var(--chart-bg)"); t.setAttribute("stroke-width", "3"); t.textContent = s; g.appendChild(t);
