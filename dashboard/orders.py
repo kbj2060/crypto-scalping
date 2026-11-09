@@ -2415,6 +2415,10 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             await acct_dirty.wait()
             await asyncio.sleep(0.3)   # 한 체결의 알림 두세 개(ORDER_TRADE_UPDATE·ACCOUNT_UPDATE·부분 체결)를 조회 한 번으로
             acct_dirty.clear()
+            # 2026-11-09 사용자 «매매 리스트는 바로인데 순자산·오늘 수익률은 느리다»: 오늘 손익 = income 실현 + 미실현 변화(app.js) 인데 income 은 60초마다만 다시 물었다 --
+            #   닫히는 순간 미실현은 0 이 되고 실현은 최대 60초 늦게 들어와 오늘 손익이 그만큼 빠져 보였다. 체결 알림 재조회는 income 도 같이(무게 30, 최소 3초 간격).
+            #   ponytail: 거래소 income 기록이 체결보다 늦게 잡히면 그 몫은 다음 60초 갱신에 -- 실측으로 늦으면 몇 초 뒤 한 번 더 묻기를 더한다.
+            income_cache["ts"] = 0.0
             try:
                 async with swr_locks.setdefault("binance_account", asyncio.Lock()):
                     binance_account_cache["payload"] = await _timed_produce("binance_account", produce_account)
