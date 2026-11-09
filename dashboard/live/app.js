@@ -2426,9 +2426,20 @@ function srLevelsLive(n = 3) {
   //   남겼다(급락 저점 2,587 아래로 뚫린 2,600·2,592·2,590 이 게이지 지지1~3, 풋프린트는 2,579). 풋프린트와 같은 규칙으로 하나로.
   const since = liqMapKnownUntilSec(map);
   const candles = candleHistoryByAsset[activeSnapshotAsset] || [];
-  const pick = (levels, below) => (levels || []).filter((lv) => Number(lv.price) > 0
-    && (below ? lv.price < cur : lv.price > cur)
-    && liqSweepIdx(candles, since, Number(lv.price)) < 0).slice(0, n);
+  const live = (lv, below) => Number(lv.price) > 0 && (below ? lv.price < cur : lv.price > cur)
+    && liqSweepIdx(candles, since, Number(lv.price)) < 0;
+  // 2026-11-09 사용자 «쓸리면 그 다음 레벨을 자동으로»: 서버 목록(현재가 ±5% 상위 6개)이 급락 한 번에 다 쓸리면(SOXL 01:15 UTC 저점 42.25 가
+  //   지지 6개 42.57~43.55 를 전부 지움) 빈자리를 heatmap_bins(같은 칸 격자·같은 쪽 정규화)에서 서버와 같은 규칙으로 채운다 --
+  //   안 쓸림 · 무게 5% 이상 · 지금가 ±5% · 무게 순 → 가까운 순. 서버 support_levels 는 띠 모델 입력이라 안 건드린다.
+  const pick = (levels, below) => {
+    const keep = (levels || []).filter((lv) => live(lv, below)).slice(0, n);
+    if (keep.length >= n) return keep;
+    const have = new Set((levels || []).map((lv) => Number(lv.price)));
+    const more = (map.heatmap_bins || []).filter((b) => !have.has(Number(b.price)) && b.weight_pct >= 0.05
+      && Math.abs(b.price - cur) / cur <= 0.05 && live(b, below))
+      .sort((a, b) => b.weight_pct - a.weight_pct || Math.abs(a.price - cur) - Math.abs(b.price - cur)).slice(0, n - keep.length);
+    return keep.concat(more).sort((a, b) => (below ? b.price - a.price : a.price - b.price));
+  };
   return { cur, res: pick(map.resistance_levels, false), sup: pick(map.support_levels, true) };
 }
 
