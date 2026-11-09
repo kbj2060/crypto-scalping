@@ -563,7 +563,7 @@ async function lineTakerClick(e, a = "market") {
   t.tkArm = 0; t.busy = true; t.err = ""; renderLineTool();
   let msg = "";
   try {
-    const r = await (await fetch(`/api/manual-entry/wait-action?action=${a}&confirm=1`, { method: "POST", cache: "no-cache" })).json();
+    const r = await (await fetch(`/api/manual-entry/wait-action?action=${a}&asset=${t.asset || "eth"}&confirm=1`, { method: "POST", cache: "no-cache" })).json();
     if (!r.ok) msg = r.detail || r.error || (a === "peg" ? "peg 요청 실패" : "시장가 요청 실패");
   } catch (err) { msg = "서버에 닿지 못했습니다"; }
   if (lineTool === t) { t.busy = false; t.err = msg; renderLineTool(); }
@@ -575,7 +575,7 @@ async function lineAmend() {
   if (!t || !t.placed || !(t.entry > 0)) return;
   t.busy = true; t.err = ""; renderLineTool();
   try {
-    const r = await (await fetch(`/api/manual-entry/limit-amend?confirm=1&tp=${linePx(t.tp)}&sl=${linePx(t.sl)}&limit=${linePx(t.entry)}`, { method: "POST", cache: "no-cache" })).json();
+    const r = await (await fetch(`/api/manual-entry/limit-amend?confirm=1&asset=${t.asset || "eth"}&tp=${linePx(t.tp)}&sl=${linePx(t.sl)}&limit=${linePx(t.entry)}`, { method: "POST", cache: "no-cache" })).json();
     if (!r.ok) t.err = r.detail || r.error || "수정 실패";
   } catch (e) { t.err = "서버에 닿지 못했습니다"; }
   t.busy = false;
@@ -1269,6 +1269,7 @@ async function setActiveSnapshotAsset(asset) {
   chartPanReset();   // 코인을 바꾸면 실시간으로(관성도 멈춘다 -- 리뷰: 미끄러지던 게 새 코인을 과거로 끌었다)
   renderSnapshotAssetTabs();
   manualEntryRefreshSize();
+  manualWaitPoll();   // 2026-11-10 대기 칸은 코인별 -- 이 코인에 걸린 지정가를 곧바로 다시 잇는다
   // 계좌 payload 는 전 코인의 포지션을 담고 있어 재요청 없이 다시 그리기만 하면 된다.
   renderSnapshotAccount();
   // Clear the 4 wired signals' cached readings + their poll-interval gates immediately -- without
@@ -11357,7 +11358,8 @@ async function manualEntrySubmit() {
 
 // ── 2026-10-10 기다리는 진입 ─────────────────────────────────────────────────────────
 // 서버 별도 칸(/api/manual-entry/status 의 wait). 진행 중이면 3초마다 다시 본다 -- 페이지를 새로 열어도 첫 조회가 다시 잇는다.
-let manualWaitTimer = 0, manualWaitLive = false, manualWaitArmT = 0;
+// 2026-11-10 사용자 «코인별로»: 대기 칸이 코인마다 하나 -- 지금 탭 코인 칸만 본다(?asset=) · 탭을 바꾸면 그 코인 칸을 곧바로 다시 본다.
+let manualWaitTimer = 0, manualWaitLive = false, manualWaitArmT = 0, manualWaitAsset = "eth";
 const waitLiveP = (w) => /^(working|submitting)$/.test(w?.phase || "");
 function renderManualWait(w) {
   const box = el("snapWait"), txt = el("snapWaitText"), acts = el("snapWaitActs");
@@ -11397,23 +11399,25 @@ function renderManualWait(w) {
 }
 async function manualWaitPoll() {
   clearTimeout(manualWaitTimer);
+  const a = activeSnapshotAsset;
   let w = null;
   try {
-    w = (await (await fetch("/api/manual-entry/status", { cache: "no-cache" })).json()).wait || null;
+    w = (await (await fetch(`/api/manual-entry/status?asset=${a}`, { cache: "no-cache" })).json()).wait || null;
   } catch (e) {
     manualWaitTimer = setTimeout(manualWaitPoll, 10000);   // 조회 실패 -- 표시는 그대로 두고 늦게 다시
     return;
   }
+  if (a !== activeSnapshotAsset) return;   // 조회 중 탭을 바꿨다 -- 탭 전환이 부른 새 조회가 그린다
   renderManualWait(w);
   const live = waitLiveP(w);
-  if (manualWaitLive && !live) { refreshBinanceAccount(true); manualEntryRefreshSize(); }   // 방금 끝났다 -- 포지션 다시
-  manualWaitLive = live;
+  if (manualWaitLive && !live && manualWaitAsset === a) { refreshBinanceAccount(true); manualEntryRefreshSize(); }   // 방금 끝났다 -- 포지션 다시(탭 전환은 끝난 게 아니다)
+  manualWaitLive = live; manualWaitAsset = a;
   if (live) manualWaitTimer = setTimeout(manualWaitPoll, STATUS_POLL_MS);
 }
 async function manualWaitAction(action) {
   ["snapWaitCancel", "snapWaitMarket"].forEach((id) => { const b = el(id); if (b) b.disabled = true; });
   try {
-    const r = await (await fetch(`/api/manual-entry/wait-action?action=${action}&confirm=1`, { method: "POST", cache: "no-cache" })).json();
+    const r = await (await fetch(`/api/manual-entry/wait-action?action=${action}&asset=${manualWaitAsset}&confirm=1`, { method: "POST", cache: "no-cache" })).json();
     if (!r.ok) { const t = el("snapWaitText"); if (t) { t.className = "entry-note bad"; t.textContent = `요청 실패: ${r.detail || r.error}`; } }
   } catch (e) { /* 아래 조회가 실제 상태를 다시 그린다 */ }
   manualWaitPoll();

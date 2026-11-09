@@ -80,7 +80,7 @@ class LimitServerTest(ChartLinesTest):
             st = (await (await c.get("/api/manual-entry/status")).json())["wait"]
             self.assertEqual((st["mode"], st["phase"], seen[0]["price"]), ("limit", "working", 2480.0))
             from dashboard import server
-            self.assertTrue((server.LIVE_DIR / "manual_limit_wait.json").exists())   # 재시작 복구용 저장(접수 때)
+            self.assertTrue((server.LIVE_DIR / f"manual_limit_wait_{orders.MANUAL_EXEC_SYMBOLS['eth']}.json").exists())   # 재시작 복구용 저장(접수 때)
             r = await c.post(f"/api/manual-entry/limit-amend?{Q}&tp=2550&sl=2450&limit=2470")   # confirm 없음
             self.assertEqual(r.status, 400)
             r = await c.post(f"/api/manual-entry/limit-amend?{Q}&tp=2560&sl=2440&limit=2470&confirm=1")
@@ -106,7 +106,7 @@ class LimitServerTest(ChartLinesTest):
             self.assertEqual(r.status, 200)
             await asyncio.sleep(0.1)
             self.assertEqual((await (await c.get("/api/manual-entry/status")).json())["wait"]["phase"], "cancelled")
-            self.assertFalse((server.LIVE_DIR / "manual_limit_wait.json").exists())   # 정상 종료하면 지운다
+            self.assertFalse((server.LIVE_DIR / f"manual_limit_wait_{orders.MANUAL_EXEC_SYMBOLS['eth']}.json").exists())   # 정상 종료하면 지운다
         self._run(fn, run_entry_limit=fake_limit)
 
     # ── 2026-11-04 사용자 «대기 라벨에 taker 버튼»: 지정가 대기에서 «지금 시장가» ───────────────────────────────
@@ -261,7 +261,7 @@ class LimitServerTest(ChartLinesTest):
         async def fn(c):
             await c.post(f"/api/manual-entry/submit?side=LONG&{Q}&tp=2550&sl=2450&limit=2480&mode=limit&confirm=1")
             await asyncio.sleep(0.2)
-            self.assertTrue((server.LIVE_DIR / "manual_limit_wait.json").exists())   # error = 지우지 않는다
+            self.assertTrue((server.LIVE_DIR / f"manual_limit_wait_{orders.MANUAL_EXEC_SYMBOLS['eth']}.json").exists())   # error = 지우지 않는다
             mode["m"] = "mod"
             for _ in range(20):   # 앞 주문(error)이 끝나 칸이 비면 다음 접수
                 r = await c.post(f"/api/manual-entry/submit?side=LONG&{Q}&tp=2550&sl=2450&limit=2480&mode=limit&confirm=1")
@@ -287,7 +287,46 @@ class LimitServerTest(ChartLinesTest):
             await c.post(f"/api/manual-entry/submit?side=LONG&{Q}&tp=2550&sl=2450&limit=2480&mode=limit&confirm=1")
             await asyncio.sleep(0.05)
             r = await c.post(f"/api/manual-entry/submit?side=LONG&{Q}&tp=2550&sl=2450&limit=2470&mode=limit&confirm=1")
-            self.assertEqual((r.status, (await r.json())["error"]), (409, "wait_pending"))   # 대기 몫이 명목에 안 잡히니 겹쳐 넣지 못한다
+            self.assertEqual((r.status, (await r.json())["error"]), (409, "wait_pending"))   # 같은 코인은 겹쳐 넣지 못한다
+        self._run(fn, run_entry_limit=fake_limit)
+
+    def test_other_coin_limit_while_eth_waits_and_same_pool_reserve(self) -> None:   # 2026-11-10 사용자 «코인별로»
+        c_ = None
+        async def fake_limit(_s, plan, state, max_sec=0, on_fill=None, reprice=None):
+            state.update(phase="working", mode="limit", order_id=5, filled=0.0, limit_price=plan["price"])
+            while not state.get("action"):
+                await asyncio.sleep(0.01)
+            state.update(phase="cancelled")
+            return state
+
+        ex = orders.MANUAL_EXEC_SYMBOLS
+        mate = next(a for a, s in ex.items() if a not in ("eth", "soxl") and orders.quote_of(s) == orders.quote_of(ex["eth"]))   # ETH 와 같은 증거금 풀의 다른 코인
+        other = next(a for a, s in ex.items() if orders.quote_of(s) != orders.quote_of(ex["eth"]))                          # 다른 풀
+
+        async def seen(a):
+            return (await (await c_.get(f"/api/manual-entry/preview?side=LONG&asset={a}&{Q}&tp=2550&sl=2450")).json())["plan"]["existing_notional_usdt"]
+
+        async def fn(c):
+            nonlocal c_
+            c_ = c
+            m0, o0 = await seen(mate), await seen(other)
+            r = await c.post(f"/api/manual-entry/submit?side=LONG&{Q}&tp=2550&sl=2450&limit=2480&mode=limit&confirm=1")
+            eth_plan = (await r.json())["plan"]
+            await asyncio.sleep(0.05)
+            self.assertAlmostEqual(await seen(mate) - m0, eth_plan["quantity"] * eth_plan["price"], delta=0.05)   # 같은 풀 = ETH 대기 잔량이 노출에 잡힌다
+            self.assertEqual(await seen(other), o0)                                                                 # 다른 풀 = 안 잡힌다
+            r = await c.post(f"/api/manual-entry/submit?side=SHORT&asset=soxl&{Q}&tp=2450&sl=2550&limit=2520&mode=limit&confirm=1")
+            self.assertEqual(r.status, 200, await r.json())   # 다른 코인 = 접수
+            await asyncio.sleep(0.05)
+            st = await (await c.get("/api/manual-entry/status?asset=soxl")).json()
+            self.assertEqual((st["wait"]["asset"], st["wait"]["phase"], st["waits"]["eth"]["phase"]), ("soxl", "working", "working"))
+            r = await c.post("/api/manual-entry/wait-action?action=cancel&asset=soxl&confirm=1")   # 취소는 그 코인 칸만
+            self.assertEqual(r.status, 200)
+            await asyncio.sleep(0.1)
+            st = await (await c.get("/api/manual-entry/status?asset=soxl")).json()
+            self.assertEqual((st["wait"]["phase"], st["waits"]["eth"]["phase"]), ("cancelled", "working"))
+            await c.post("/api/manual-entry/wait-action?action=cancel&confirm=1")
+            await asyncio.sleep(0.1)
         self._run(fn, run_entry_limit=fake_limit)
 
 
