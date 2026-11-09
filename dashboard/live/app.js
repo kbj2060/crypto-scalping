@@ -525,7 +525,7 @@ function lineToolEl(box) {
   });
   h.addEventListener("click", (e) => {
     e.stopPropagation();
-    if (e.target.closest(".lt-tkr")) { lineTakerClick(e); return; }
+    const tkb = e.target.closest(".lt-tkr"); if (tkb) { lineTakerClick(e, tkb.dataset.a || "market"); return; }
     if (e.target.closest(".lt-lv-auto")) {
       const a = el("snapLevAuto");
       if (a && lineTool && !lineTool.placed && !manualLevLocked()) { a.checked = !a.checked; a.dispatchEvent(new Event("change", { bubbles: true })); lineTool.plan = null; lineTool.arm = 0; renderLineTool(); linePreview(); }
@@ -552,18 +552,19 @@ function lineToolEl(box) {
 }
 // 2026-11-04 사용자 «대기 라벨에 taker 버튼 -- 여차하면 바로 시장가로 진입»: 대기 중인 지정가를 취소 확인한 뒤 남은 수량만 시장가(서버 run_entry_limit action=market).
 //   테이커 주문이라 두 번: 첫 클릭 = 5초 무장(글자가 «한 번 더»로) · 그 안에 한 번 더 = 전송(더블클릭은 무시). 서버가 익절·손절선이 지금 호가 기준으로 아직 맞는지 다시 본다(맞지 않으면 거절 사유를 손익비 줄에).
+// 2026-11-09 사용자 «taker 말고 peg 버튼 -- 현재가 peg maker»: 같은 두 번 확인 · action=peg = 걸린 지정가 취소 확인 뒤 최우선 호가 따라가기(120초 · 남은 수량 버림 · 시장가 없음). 무장은 누른 버튼(tkK)에만.
 const TAKER_ARM_MS = 5000;
-async function lineTakerClick(e) {
+async function lineTakerClick(e, a = "market") {
   const t = lineTool;
   if (!t || !t.placed || t.busy || !(t.entry > 0)) return;
   const now = Date.now();
-  if (!(now < (t.tkArm || 0))) { t.tkArm = now + TAKER_ARM_MS; t.tkAt = now; t.err = ""; renderLineTool(); setTimeout(renderLineTool, TAKER_ARM_MS + 50); return; }
+  if (!(now < (t.tkArm || 0)) || t.tkK !== a) { t.tkArm = now + TAKER_ARM_MS; t.tkAt = now; t.tkK = a; t.err = ""; renderLineTool(); setTimeout(renderLineTool, TAKER_ARM_MS + 50); return; }
   if (e.detail > 1 || now - (t.tkAt || 0) < 400) return;   // 더블클릭·같은 탭이 두 번으로 읽히는 것은 확인이 아니다
   t.tkArm = 0; t.busy = true; t.err = ""; renderLineTool();
   let msg = "";
   try {
-    const r = await (await fetch("/api/manual-entry/wait-action?action=market&confirm=1", { method: "POST", cache: "no-cache" })).json();
-    if (!r.ok) msg = r.detail || r.error || "시장가 요청 실패";
+    const r = await (await fetch(`/api/manual-entry/wait-action?action=${a}&confirm=1`, { method: "POST", cache: "no-cache" })).json();
+    if (!r.ok) msg = r.detail || r.error || (a === "peg" ? "peg 요청 실패" : "시장가 요청 실패");
   } catch (err) { msg = "서버에 닿지 못했습니다"; }
   if (lineTool === t) { t.busy = false; t.err = msg; renderLineTool(); }
   manualWaitPoll();
@@ -591,7 +592,7 @@ function lineSyncWait(w) {
   if (!lineTool && (w.asset || "eth") === activeSnapshotAsset) lineTool = { placed: true, asset: w.asset || "eth", plan: null, err: "" };   // 새로고침·다른 기기에서 걸린 주문도 다시 잇는다
   const t = lineTool;
   if (!t || !t.placed || lineDrag || t.busy) return;
-  Object.assign(t, { tp: br.tp_level, sl: br.sl_level, entry: pl.limit.usdt, px: Number(w.limit_price) || 0, amended: Number(w.amends || 0), stopP: !!(w.stop || pl.stop), trig: !!w.triggered });
+  Object.assign(t, { tp: br.tp_level, sl: br.sl_level, entry: pl.limit.usdt, px: Number(w.limit_price) || 0, amended: Number(w.amends || 0), stopP: !!(w.stop || pl.stop), trig: !!(w.triggered || w.pegged) });
   t.plan = { ...pl, quantity: Number(w.quantity ?? pl.quantity) || 0 };   // 크기 줄 = 서버가 정한 계획(수량·배수·명목·순자산)
   renderLineTool();
 }
@@ -716,7 +717,7 @@ function renderLineTool() {
   const L = X(G.ml), R = X(G.ml + G.cw), x0 = L + (R - L) * (mob ? 0.36 : 0.58), w = R - x0, cx = x0 + w / 2;
   const Rp = !mob && fpProfileSpan ? Math.max(R, X(fpProfileSpan[1])) : R;   // 2026-11-04 펜 메모 «익절·손절·진입 선을 프로파일(델타·TPO·호가 칸)까지 연장»: 가로선만 오른쪽 끝(호가 띠 끝)까지 · 상자·꼬리표 자리는 그대로
   const side = lineSide(t, p), sgn = side === "SHORT" ? -1 : 1, ref = lineRef(t, p), lim = t.entry > 0, stp = lim && lineStop(t, p);   // ref = 진입선 가격(지정가면 그 선 · 아니면 지금가) · stp = 감시 진입
-  const kindKo = stp ? (t.trig ? "닿음 · 따라가는 중" : "감시") : "지정가";
+  const kindKo = stp ? (t.trig ? "닿음 · 따라가는 중" : "감시") : t.trig ? "따라가는 중" : "지정가";
   const yP = clampY(Y(ref)), yNow = clampY(Y(p)), yT = clampY(Y(t.tp)), yS = clampY(Y(t.sl));
   const qty = Number(t.plan?.quantity) || 0, unit = coinUnit();
   // 🔴2026-11-02 사용자 «익절·손절을 끌 때마다 가격·%·금액이 맞게 변하게»: 끄는 동안 plan=null 이라 qty=0 이 되어 **금액이 사라졌다**. 서버 수량이 없으면 어림 수량으로 계속 보인다(«≈»).
@@ -751,10 +752,11 @@ function renderLineTool() {
   en.classList.add("lt-mini"); en.classList.remove("lane"); en.style.width = "";
   // 🔴2026-11-04 펜 메모 «✕ 를 눌러도 한 번에 취소가 안 된다 · 여러 번 눌러야»: 가격이 틱마다 이 함수를 부르고, 같은 글을 innerHTML 로 다시 쓰면 ✕ 노드가 갈려
   //   마우스를 누른 사이 새 노드로 바뀐다 -- 클릭이 ✕ 가 아닌 부모로 가 취소가 안 나갔다(하네스 재현: 누름~뗌 사이 다시 그리기 1번 = 취소 0). 글이 바뀔 때만 쓴다.
-  const tkArmed = Date.now() < (t.tkArm || 0);
+  const tkArmed = Date.now() < (t.tkArm || 0), pgArmed = tkArmed && t.tkK === "peg", mkArmed = tkArmed && t.tkK !== "peg";
   const enH = `<span class="lt-grip" aria-hidden="true"></span>${side === "SHORT" ? "SHORT" : "LONG"}${t.add ? " 추가" : ""}${stp ? " 감시" : ""}${lim && t.placed ? " " + lineFmt(ref) : ""}`
-    + (lim && t.placed ? `<span class="lt-tkr${tkArmed ? " arm" : ""}" role="button" tabindex="0" aria-label="${tkArmed ? "빨간색 = 한 번 더 누르면 시장가로 진입" : "지금 시장가로 진입(taker)"}" title="걸린 지정가를 취소하고 남은 수량을 시장가(테이커 4bp)로 진입 — 두 번 눌러 확인(첫 클릭 = 빨간색, 5초)">${t.busy ? "…" : "TAKER"}</span>`
-      + `<span class="lt-tx" role="button" tabindex="0" aria-label="지정가 주문 취소" title="주문 취소">✕</span>` : "");
+    + (lim && t.placed && !t.trig ? `<span class="lt-tkr pg${pgArmed ? " arm" : ""}" data-a="peg" role="button" tabindex="0" aria-label="${pgArmed ? "채워짐 = 한 번 더 누르면 지금 호가 peg 로 진입" : "지금 호가 peg 로 진입(maker)"}" title="걸린 지정가를 취소하고 남은 수량을 지금 최우선 호가 peg(메이커)로 따라갑니다 — 120초 · 남은 수량 버림 · 시장가 전환 없음 · 두 번 눌러 확인(첫 클릭 = 채워짐, 5초)">${t.busy && t.tkK === "peg" ? "…" : "PEG"}</span>` : "")
+    + (lim && t.placed && !t.trig ? `<span class="lt-tkr${mkArmed ? " arm" : ""}" role="button" tabindex="0" aria-label="${mkArmed ? "빨간색 = 한 번 더 누르면 시장가로 진입" : "지금 시장가로 진입(taker)"}" title="걸린 지정가를 취소하고 남은 수량을 시장가(테이커 4bp)로 진입 — 두 번 눌러 확인(첫 클릭 = 빨간색, 5초)">${t.busy && t.tkK !== "peg" ? "…" : "TAKER"}</span>` : "")
+    + (lim && t.placed ? `<span class="lt-tx" role="button" tabindex="0" aria-label="지정가 주문 취소" title="주문 취소">✕</span>` : "");
   if (en._h !== enH) { en.innerHTML = enH; en._h = enH; }
   en.setAttribute("aria-label", lim ? `${stp ? "감시" : "지정가"} 진입선 ${lineFmt(ref)} — 위아래로 끌어 옮기기` : "지금가 peg 진입선 — 끌어서 지정가로 바꾸기");
   h.classList.toggle("short", side === "SHORT");
@@ -789,7 +791,7 @@ function renderLineTool() {
   const go = h.querySelector(".lt-go"), armed = Date.now() < (t.arm || 0);
   go.disabled = !side || !!t.err || !qty || !!t.placed;
   go.classList.toggle("short", side === "SHORT"); go.classList.toggle("armed", armed);   // className 을 덮으면 꾹 채움(hold)이 매초 지워진다
-  go.innerHTML = t.placed ? `✓ ${side === "LONG" ? "롱" : "숏"} ${kindKo}${stp && !t.trig ? " 중" : stp ? "" : " 대기 중"}`
+  go.innerHTML = t.placed ? `✓ ${side === "LONG" ? "롱" : "숏"} ${kindKo}${t.trig ? "" : stp ? " 중" : " 대기 중"}`
     : armed ? `확인: ${side === "LONG" ? "롱" : "숏"} ${qty} ${unit} ${lim ? kindKo + " " + lineFmt(ref) : "주문"}`
     : `${side || "진입"} ${t.add ? "추가 " : ""}${stp ? "감시 진입" : lim ? "지정가 대기" : "진입 · peg"} <small>${matchMedia("(pointer: coarse)").matches ? (mob ? "두 번" : "두 번 눌러 확인") : "누르면 바로"}</small>`;
   const lx = h.querySelector(".lt-x"); lx.setAttribute("aria-label", t.placed ? (t.busy ? "취소 중…" : "주문 취소") : "닫기 (선 지우기)"); lx.disabled = !!t.busy;
@@ -3368,7 +3370,7 @@ function fitApplyCached() {
 // 2026-11-07 사용자 «폰에서 계좌를 누르면 옵션까지밖에 못 간다»: 폰은 화면 밖 패널이 content-visibility:auto 라 처음 가까워질 때 실제 크기로 커진다(Option 76 → 1705px).
 //   클릭 때 잰 목표 위치는 그 뒤 낡아 부드러운 스크롤이 «옵션 한가운데»에서 멈췄다. 스크롤이 멈추면 목표와 어긋난 만큼 다시 맞춘다(사용자가 만지면 그만둔다).
 // 2026-11-09 사용자 «풋프린트를 보다 스크롤이 다음 카드로 내려간다 -- 카드 고정 버튼»: 켜면 카드를 앱바 아래로 맞추고 페이지 스크롤(휠·키보드·스크롤바)을 막는다.
-//   차트 줌·칸 안 스크롤은 그대로. 내비(railGo)로 옮기면 풀린다. ponytail: 새로고침하면 풀린다(저장 안 함).
+//   차트 줌·칸 안 스크롤은 그대로. 내비(railGo)로 옮기면 풀린다. ponytail: 새로고침하면 다시 잠금(풀어 둔 것 저장 안 함).
 function fpLockSet(on) {
   const b = el("fpLockBtn"); if (!b) return;
   if (on) el("fpCard")?.scrollIntoView({ block: "start" });
@@ -3376,6 +3378,8 @@ function fpLockSet(on) {
   b.setAttribute("aria-pressed", String(on));
 }
 el("fpLockBtn")?.addEventListener("click", () => fpLockSet(!document.documentElement.classList.contains("fp-lock")));
+// 2026-11-09 사용자 «디폴트 값을 잠금으로»: 휠 있는 기기는 처음부터 잠금(폰은 버튼이 없으니 안 잠근다) · 위 카드가 그려진 뒤(load) 맞춘다.
+if (!matchMedia("(hover: none)").matches) addEventListener("load", () => fpLockSet(true), { once: true });
 function railGo(id) {
   const t = el(id);
   if (!t) return;
@@ -11375,10 +11379,11 @@ function renderManualWait(w) {
     tone = errs || rc?.reason ? "bad" : "live";
   } else if (live) {
     const left = Math.max(0, Math.ceil((Date.parse(w.wait_until || "") - Date.now()) / 60e3));
-    t = `${wk}${w.stop && w.triggered ? " 닿음 · 따라가는 중" : ""} ${ko} ${Number(w.filled || 0)} / ${Number(w.quantity ?? w.plan?.quantity ?? 0)} ${unit}`
+    t = `${wk}${w.stop && w.triggered ? " 닿음 · 따라가는 중" : w.pegged ? " → PEG 따라가는 중" : ""} ${ko} ${Number(w.filled || 0)} / ${Number(w.quantity ?? w.plan?.quantity ?? 0)} ${unit}`
       + (w.stop ? (w.triggered ? ` · 주문가(USDC) ${w.limit_price} · 최우선 호가를 따라갑니다(120초 · 남은 수량 버림 · 시장가 전환 없음)` : ` · 차트(USDT) ${w.plan?.limit?.usdt} 에 닿으면 peg 따라가기 · 시장가 전환 없음 · 선을 끌면 수정`)
+        : w.pegged ? ` · 주문가(USDC) ${w.limit_price} · 최우선 호가를 따라갑니다(120초 · 남은 수량 버림 · 시장가 전환 없음)`
         : w.limit_price ? ` · 주문가(USDC) ${w.limit_price}${w.plan?.limit?.usdt ? ` = 차트선(USDT) ${w.plan.limit.usdt}` : ""} (따라가지 않음)` : "")
-      + (w.stop ? "" : w.mode === "limit" ? ` · 시장가 전환 없음 · 선을 끌면 수정${w.reprices ? ` · 자동 재조정 ${w.reprices}회(USDC/USDT 차이)` : ""}` : Number.isFinite(left) && w.wait_until ? ` · ${left}분 뒤 남은 수량 시장가` : "")
+      + (w.stop || w.pegged ? "" : w.mode === "limit" ? ` · 시장가 전환 없음 · 선을 끌면 수정${w.reprices ? ` · 자동 재조정 ${w.reprices}회(USDC/USDT 차이)` : ""}` : Number.isFinite(left) && w.wait_until ? ` · ${left}분 뒤 남은 수량 시장가` : "")
       + (w.action ? ` · ${w.action === "cancel" ? "취소" : "지금 시장가"} 요청됨 — 3초 안에 처리` : "");
   } else {
     t = `${wk} 끝 — ${manualEntryStateText(w).replace(/\n/g, " · ")}`

@@ -721,6 +721,21 @@ async def run_entry_limit(session, plan: dict, state: dict, max_sec: float = LIM
             tq = executed_qty(taker) or remaining
             state.update(phase="filled_taker", taker_qty=tq, filled=round(done + tq, 8), taker_order_id=taker.get("orderId"),
                          taker_reason="지금 시장가(사용자)", done_at=now_iso())
+    elif state.get("action") == "peg" and not outside:
+        # 2026-11-09 사용자 «taker 말고 peg 버튼 -- 현재가 peg maker»: 걸린 지정가를 취소 확인한 뒤(위 ensure_closed) 남은 수량을 최우선 호가 따라가기.
+        #   FALLBACK_SEC 뒤 남은 수량은 버린다 -- 시장가 없음(사용자 «지정가 체결은 절대 시장가로 바꾸지 않는다»).
+        state.pop("action", None)   # fill_maker 는 action=cancel 만 멈춤으로 본다 -- 비워 둬야 따라가는 중 ✕ 취소가 먹는다
+        state["pegged"] = now_iso()
+        px, _, _ = await maker_price(session, common["side"], common["symbol"])
+        got, px, rp, err = await fill_maker(session, common=common, price=px, total=remaining, deadline=time.monotonic() + FALLBACK_SEC,
+                                            state=state, key=key, secret=secret, offset=offset)
+        state.update(filled=round(done + got, 8), repegs=rp, limit_price=px, taker_qty=0.0, done_at=now_iso())
+        if err is not None:
+            state.update(phase=err["phase"], error=err["error"])
+        elif round(remaining - got, 8) <= 0:
+            state.update(phase="filled_maker")
+        else:
+            state.update(phase="cancelled", cancel_reason=state.get("action_reason") or "따라가기 마감 — 남은 수량 버림(시장가 없음)")
     else:
         state.update(phase="cancelled", taker_qty=0.0, done_at=now_iso(),
                      cancel_reason=(state.get("action_reason") or "사용자 취소") if state.get("action") else ("거래소에서 취소됨" if outside else "대기 시간 만료"))
@@ -730,7 +745,7 @@ async def run_entry_limit(session, plan: dict, state: dict, max_sec: float = LIM
 async def run_entry_stop(session, plan: dict, state: dict, touched, max_sec: float = LIMIT_MAX_SEC) -> dict:
     """2026-11-09 사용자 «롱은 지금가 위·숏은 아래 선을 감시하다가 걸기» -- 닿으면 peg 따라가기(사용자 선택), 시장가 전환 없음.
     touched(since) -> bool = since(epoch) 뒤 1초 체결가(USDT)가 선(plan["limit"]["usdt"])에 닿았나 -- 호출부가 sec_prices 로 본다(못 읽으면 False = 안 들어간다).
-    닿기 전엔 거래소에 주문이 없다: state["amend"] = 선 옮김(닿음 판정을 그 시각부터 다시) · action cancel = 취소 · action market = 지금 시장가(TAKER 두 번).
+    닿기 전엔 거래소에 주문이 없다: state["amend"] = 선 옮김(닿음 판정을 그 시각부터 다시) · action cancel = 취소 · action market = 지금 시장가(TAKER 두 번) · action peg = 지금 따라가기(PEG 두 번).
     닿은 뒤 = run_entry(maker_only): 최우선 호가에 GTX, 달아나면 따라가고 FALLBACK_SEC 뒤 남은 수량은 버린다."""
     state.update(phase="working", mode="limit", stop=True, triggered=None, filled=0.0, limit_price=float(plan["price"]),
                  quantity=float(plan["quantity"]), amends=0, deadline_sec=max_sec,
@@ -747,6 +762,8 @@ async def run_entry_stop(session, plan: dict, state: dict, touched, max_sec: flo
             state.update(phase="cancelled", taker_qty=0.0, cancel_reason="대기 시간 만료", done_at=now_iso())
             return state
         await asyncio.sleep(1.0)
+    if state.get("action") == "peg":   # PEG 버튼 = 지금 닿은 것으로 치고 따라가기
+        state.pop("action", None)
     if state.get("action") == "market":
         return await run_entry(session, {**plan, "type": "MARKET"}, state)
     if state.get("action"):

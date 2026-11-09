@@ -3092,6 +3092,9 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .lt-tag .lt-tkr { margin-left: 6px; padding: 1px 7px; border: 1px solid var(--amber); border-radius: 999px; color: var(--amber); font: 700 10px/1.3 var(--font-mono); letter-spacing: .08em; cursor: pointer; }
 .lt-tag .lt-tkr:hover { background: color-mix(in srgb, var(--amber) 16%, transparent); }
 .lt-tag .lt-tkr.arm { border-color: var(--bad); background: var(--bad); color: var(--on-fill); }   /* 2026-11-04 펜 메모: 글자는 TAKER 그대로 · 무장되면 색만 빨강 */
+.lt-tag .lt-tkr.pg { border-color: currentColor; color: inherit; }   /* 2026-11-09 PEG = 메이커(진입선 색) · TAKER 의 경고색과 구별 */
+.lt-tag .lt-tkr.pg:hover { background: color-mix(in srgb, currentColor 16%, transparent); }
+.lt-tag .lt-tkr.pg.arm { border-color: var(--accent); background: var(--accent); color: var(--on-fill); }   /* 무장 = 채움(TAKER 무장 빨강과 같은 문법) */
 .lt-tag .lt-tx { margin-left: 4px; padding: 0 4px; border-radius: 4px; font-weight: 800; cursor: pointer; }
 .lt-tag .lt-tx:hover { background: rgb(var(--lift) / .16); }
 .lt-tag.lt-peg { cursor: pointer; border-style: solid; font: 600 12px/1.3 var(--font-sans); }

@@ -2209,7 +2209,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         st = manual_wait_state
         watching = bool(st.get("stop")) and not st.get("triggered")   # 감시 진입은 닿기 전엔 거래소 주문이 없다 · 닿은 뒤(따라가기)는 수정 없음
         if (st.get("mode") != "limit" or st.get("phase") != "working" or st.get("action") or not (st.get("order_id") or watching)
-                or (st.get("stop") and st.get("triggered"))):   # 닿아 따라가는 중엔 fill_maker 가 order_id 를 채운다 -- 그래도 수정 없음
+                or (st.get("stop") and st.get("triggered")) or st.get("pegged")):   # 닿아 따라가는 중엔 fill_maker 가 order_id 를 채운다 -- 그래도 수정 없음
             return web.json_response({"ok": False, "error": "no_limit", "detail": "수정할 대기 지정가 주문이 없습니다", "wait": st}, status=409)
         if float(st.get("filled") or 0.0) > 0:
             return web.json_response({"ok": False, "error": "partially_filled", "detail": "일부 체결돼 진입가를 못 바꿉니다 — 그 몫의 익절·손절은 포지션 선으로 수정하세요"}, status=409)
@@ -2227,7 +2227,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         # 수량·레버리지는 걸린 주문 그대로(부분 체결 0 이라 같은 수량으로 다시 걸면 된다) -- 새 계획에서는 가격·선만 가져온다
         moved = abs(float(plan["price"]) - float(st.get("limit_price") or old["price"])) > 1e-9   # 걸려 있는 실제 주문가 기준(자동 재조정이 바꿨을 수 있다)
         if (st.get("phase") != "working" or st.get("action") or float(st.get("filled") or 0.0) > 0 or st.get("amend")
-                or (st.get("order_id") is None and not watching) or (watching and st.get("triggered"))):   # 계획 조립(await) 사이에 상태가 바뀌었다(감시 중 닿음 포함 -- 닿으면 따라가기가 order_id 를 채운다)
+                or (st.get("order_id") is None and not watching) or (watching and st.get("triggered")) or st.get("pegged")):   # 계획 조립(await) 사이에 상태가 바뀌었다(감시 중 닿음 포함 -- 닿으면 따라가기가 order_id 를 채운다)
             return web.json_response({"ok": False, "error": "state_changed", "detail": "그 사이 주문 상태가 바뀌었습니다 — 다시 확인하세요"}, status=409)
         old["bracket"] = plan["bracket"]
         old["limit"] = plan.get("limit")
@@ -2252,30 +2252,33 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         """기다리는 진입에 «취소»(잔량 버림 -- 시장가 없음) 또는 «지금 시장가». 진입과 같은 방어: POST + confirm=1 + 게이트.
         집행 루프가 다음 조회(≤3초)에 따른다(run_entry_wait)."""
         action = request.query.get("action")
-        if action not in ("cancel", "market") or request.query.get("confirm") != "1":
+        if action not in ("cancel", "market", "peg") or request.query.get("confirm") != "1":
             return web.json_response({"ok": False, "error": "bad_action",
-                                      "detail": "action=cancel|market 과 confirm=1 이 필요합니다"}, status=400)
+                                      "detail": "action=cancel|market|peg 과 confirm=1 이 필요합니다"}, status=400)
         if not exec_enabled():
             return web.json_response({"ok": False, "error": "exec_disabled",
                                       "detail": "DASHBOARD_MANUAL_EXEC_ENABLED 가 꺼져 있습니다"}, status=403)
         if not wait_pending():
             return web.json_response({"ok": False, "error": "no_wait", "detail": "기다리는 진입 주문이 없습니다",
                                       "wait": manual_wait_state}, status=409)
-        if action == "market" and manual_wait_state.get("mode") == "limit":
+        if action == "peg" and manual_wait_state.get("mode") != "limit":   # 2026-11-09 PEG 는 지정가 대기(SLTP)만 -- 기다리기(run_entry_wait)는 action 이 cancel 이 아니면 시장가로 간다
+            return web.json_response({"ok": False, "error": "bad_action", "detail": "PEG 는 지정가 대기에서만 됩니다"}, status=400)
+        if action in ("market", "peg") and manual_wait_state.get("mode") == "limit":
+            # 2026-11-09 사용자 «taker 말고 peg 버튼»: peg = 걸린 지정가를 취소 확인한 뒤 남은 수량을 최우선 호가 따라가기(시장가 없음) -- 선 검사는 메이커 쪽 호가로.
             # 2026-11-04 사용자 «대기 라벨에 taker 버튼»: 지정가 대기도 «지금 시장가» = 집행 루프가 걸린 주문을 취소 **확인한 뒤** 남은 수량만 시장가(run_entry_limit).
             #   시장가는 지금 호가에 체결되므로 익절·손절선이 그 가격 기준으로 아직 맞는지 진입과 같은 line_bracket 으로 다시 본다 -- 가격이 선을 넘어갔으면 시장가로 안 넣는다.
             st = manual_wait_state
-            if st.get("phase") != "working" or not (st.get("order_id") or st.get("stop")) or (st.get("stop") and st.get("triggered")) or st.get("action"):   # 감시 진입은 닿기 전에만(닿은 뒤 = 따라가는 중 -- 따라가기는 market 을 안 받는다)
+            if st.get("phase") != "working" or not (st.get("order_id") or st.get("stop")) or (st.get("stop") and st.get("triggered")) or st.get("pegged") or st.get("action"):   # 감시 진입은 닿기 전에만(닿은 뒤 = 따라가는 중 -- 따라가기는 market 을 안 받는다)
                 return web.json_response({"ok": False, "error": "not_ready", "detail": "주문이 아직 걸리지 않았거나 이미 처리 중입니다", "wait": st}, status=409)
             try:
                 plan, symbol = st["plan"], st["plan"]["symbol"]
                 br = plan.get("bracket") or {}
                 book = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker", {"symbol": symbol}, error_reason="book_ticker_failed")
                 basis, filters = await basis_for(book, exec_asset_of(symbol) or "eth"), await load_filters(binance_session(), symbol)
-                ref = float(book["askPrice" if plan["positionSide"] == "LONG" else "bidPrice"]) / basis   # 시장가가 체결될 쪽 호가(USDT)
+                ref = float(book["askPrice" if (plan["positionSide"] == "LONG") == (action == "market") else "bidPrice"]) / basis   # 체결될 쪽 호가(USDT): 시장가 = 반대편 · peg = 내 쪽
                 line_bracket(position_side=plan["positionSide"], ref_level=ref, tp_level=float(br["tp_level"]), sl_level=float(br["sl_level"]), basis=basis, filters=filters)
             except ValueError as exc:
-                return web.json_response({"ok": False, "error": "lines_off", "detail": f"지금 호가 기준으로 익절·손절선이 맞지 않아 시장가로 넣지 않습니다 — {exc}"}, status=409)
+                return web.json_response({"ok": False, "error": "lines_off", "detail": f"지금 호가 기준으로 익절·손절선이 맞지 않아 {'시장가' if action == 'market' else 'peg'}로 넣지 않습니다 — {exc}"}, status=409)
             except Exception as exc:  # noqa: BLE001 -- 시세를 못 읽으면 시장가를 내지 않는다(취소는 따로 된다)
                 return web.json_response({"ok": False, "error": "quote_failed", "detail": f"{type(exc).__name__}: {exc}"}, status=502)
             if st.get("phase") != "working" or st.get("action"):   # 시세를 기다리는 사이 상태가 바뀌었다

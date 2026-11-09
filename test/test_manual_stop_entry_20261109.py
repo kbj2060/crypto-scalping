@@ -1,4 +1,4 @@
-"""2026-11-09 «감시 진입»(롱 = 지금가 위 · 숏 = 아래 선에 닿으면 peg 따라가기, 시장가 없음). 🔴실주문 0(집행·서명 전부 가짜).
+"""2026-11-09 «감시 진입»(롱 = 지금가 위 · 숏 = 아래 선에 닿으면 peg 따라가기, 시장가 없음) · 대기 라벨 «PEG»(지금 호가 따라가기). 🔴실주문 0(집행·서명 전부 가짜).
 python -m pytest -q test/test_manual_stop_entry_20261109.py"""
 from __future__ import annotations
 
@@ -76,6 +76,57 @@ class StopServerTest(ChartLinesTest):
             await asyncio.sleep(0.1)
         self._run(fn, run_entry_stop=fake_stop)
 
+    # ── 2026-11-09 사용자 «taker 말고 peg 버튼 -- 현재가 peg maker» ──────────────────────────────
+    def test_peg_action_on_limit_then_locked(self) -> None:
+        seen = []
+
+        async def fake_limit(_s, plan, state, max_sec=0, on_fill=None, reprice=None):
+            state.update(phase="working", mode="limit", order_id=5, filled=0.0, limit_price=plan["price"])
+            while not state.get("action"):
+                await asyncio.sleep(0.01)
+            seen.append(state.pop("action"))
+            state.update(pegged="now", order_id=6)   # 따라가는 중(fill_maker 가 order_id 를 채운다)
+            while not state.get("action"):
+                await asyncio.sleep(0.01)
+            state.update(phase="cancelled")
+            return state
+
+        async def fn(c):
+            r = await c.post(f"/api/manual-entry/submit?side=LONG&{Q}&tp=2600&sl=2450&limit=2480&mode=limit&confirm=1")
+            self.assertEqual(r.status, 200, await r.json())
+            await asyncio.sleep(0.1)
+            r = await c.post("/api/manual-entry/wait-action?action=peg&confirm=1")
+            self.assertEqual(r.status, 200, await r.json())
+            await asyncio.sleep(0.1)
+            self.assertEqual(seen, ["peg"])
+            r = await c.post("/api/manual-entry/wait-action?action=peg&confirm=1")
+            self.assertEqual((r.status, (await r.json())["error"]), (409, "not_ready"))   # 따라가는 중엔 다시 없음
+            r = await c.post("/api/manual-entry/wait-action?action=market&confirm=1")
+            self.assertEqual((r.status, (await r.json())["error"]), (409, "not_ready"))
+            r = await c.post(f"/api/manual-entry/limit-amend?{Q}&tp=2600&sl=2450&limit=2470&confirm=1")
+            self.assertEqual((r.status, (await r.json())["error"]), (409, "no_limit"))
+            await c.post("/api/manual-entry/wait-action?action=cancel&confirm=1")
+            await asyncio.sleep(0.1)
+        self._run(fn, run_entry_limit=fake_limit)
+
+    def test_peg_refused_outside_limit_mode(self) -> None:
+        async def fake_wait(_s, plan, state, wait_sec, on_fill=None):
+            state.update(phase="working", mode="wait", order_id=5, filled=0.0)
+            while state.get("action") != "cancel":
+                await asyncio.sleep(0.01)
+            state.update(phase="cancelled")
+            return state
+
+        async def fn(c):
+            r = await c.post(f"/api/manual-entry/submit?side=LONG&{Q}&sltp=0&mode=wait&wait_min=60&confirm=1")
+            self.assertEqual(r.status, 200, await r.json())
+            await asyncio.sleep(0.1)
+            r = await c.post("/api/manual-entry/wait-action?action=peg&confirm=1")   # 기다리기는 action 이 cancel 이 아니면 시장가로 간다 -- 받으면 안 된다
+            self.assertEqual((r.status, (await r.json())["error"]), (400, "bad_action"))
+            await c.post("/api/manual-entry/wait-action?action=cancel&confirm=1")
+            await asyncio.sleep(0.1)
+        self._run(fn, run_entry_wait=fake_wait)
+
 
 PLAN = {"symbol": "ETHUSDC", "side": "BUY", "positionSide": "LONG", "price": 2520.0, "quantity": 0.4, "limit": {"usdt": 2520.0}}
 
@@ -129,6 +180,53 @@ class StopLoopTest(unittest.TestCase):
             st["action"] = "market"
         st, calls = self._go(lambda since: False, script)
         self.assertEqual(calls[0]["type"], "MARKET")
+
+    def test_peg_action_while_watching_chases_now(self) -> None:
+        async def script(st):
+            st["action"] = "peg"
+        st, calls = self._go(lambda since: False, script)
+        self.assertTrue(calls[0]["maker_only"])
+        self.assertTrue(st["triggered"])
+        self.assertNotIn("action", st)
+
+
+class LimitPegTest(unittest.TestCase):
+    def _go(self, got):
+        sent, fm = [], []
+
+        async def fake_signed(_s, method, path, params, *a, **k):
+            sent.append((method, path, params.get("type")))
+            return {}
+
+        async def fake_fill(*_a, **k):
+            fm.append((k["price"], k["total"], dict(k["state"])))
+            return got, k["price"], 2, None
+
+        async def fake_book(*_a):
+            return 2479.5, 2479.5, 2479.6
+
+        async def go():
+            st: dict = {"action": "peg"}   # 걸기 전에 눌린 것과 같은 길(루프를 바로 빠져 남은 수량 = 전량)
+            with mock.patch.dict("os.environ", {"BINANCE_API_KEY": "k", "BINANCE_SECRET_KEY": "s"}), \
+                 mock.patch.object(ex, "signed", fake_signed), mock.patch.object(ex, "fill_maker", fake_fill), \
+                 mock.patch.object(ex, "maker_price", fake_book), \
+                 mock.patch.object(ex, "_clock_offset", mock.AsyncMock(return_value=0)), \
+                 mock.patch.object(ex, "ensure_leverage", mock.AsyncMock(return_value=None)):
+                await ex.run_entry_limit(None, {**PLAN, "price": 2480.0}, st)
+            return st, sent, fm
+        return asyncio.run(go())
+
+    def test_peg_chases_best_bid_and_drops_rest_never_market(self) -> None:
+        st, sent, fm = self._go(0.1)
+        self.assertEqual((fm[0][0], fm[0][1]), (2479.5, 0.4))
+        self.assertNotIn("action", fm[0][2], "따라가기 전에 action 을 비워야 ✕ 취소가 먹는다")
+        self.assertEqual((st["phase"], st["filled"], st["taker_qty"]), ("cancelled", 0.1, 0.0))
+        self.assertTrue(st["pegged"])
+        self.assertFalse([x for x in sent if x[2] == "MARKET"], "지정가 체결은 시장가로 바꾸지 않는다")
+
+    def test_peg_full_fill(self) -> None:
+        st, _, _ = self._go(0.4)
+        self.assertEqual((st["phase"], st["filled"]), ("filled_maker", 0.4))
 
 
 class MakerOnlyTest(unittest.TestCase):
