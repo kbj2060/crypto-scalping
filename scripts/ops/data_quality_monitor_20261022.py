@@ -33,6 +33,9 @@ REPORT, DAILY, STATE = OUT / "data_quality.json", OUT / "data_quality_daily.json
 COINS = ("ETH", "BTC", "SOL", "XRP")
 TOL = 1e-4                                   # 수집기 VERIFY_TOLERANCE 와 같다(테이프 합 vs 1분봉 상대오차)
 LEDGER_FROM = "2026-10-01"                   # 장부 첫 날 -- 판정 달력에서 수집기에 기대는 가장 이른 시작(gex_rev)
+# 끝난 날은 이만큼 지나서 장부에 쓴다(한 번 쓰면 안 고침). 2026-11-09 감사 거짓 CRIT: 00:18 UTC 에 쓰니 deribit_chain 은
+# lake 봉인(02:05 UTC cron, 최장 ~05 UTC) 전이라 매일 None, liqmap_score 는 H=4 채점이 안 끝나 21시간 → 10-21~11-07 18일 «구멍».
+SETTLE_H = 8
 
 # 체결 테이프: 거래소 → (DB, 코인 → 심볼). 심볼 표기는 수집기마다 다르다.
 TAPES = {"binance": ("binance_tape.sqlite", lambda c: f"{c.lower()}usdt"), "okx": ("okx_tape.sqlite", lambda c: f"{c}-USDT-SWAP"),
@@ -305,7 +308,7 @@ def run(now: float | None = None) -> dict:
     except sqlite3.Error as exc:
         add("liq:ETH", "WARN", f"읽기 실패 {exc}")
     today = utc_day(now)
-    checks += forward_coverage(update_ledger(today), today)
+    checks += forward_coverage(update_ledger(utc_day(now - SETTLE_H * 3600)), today)
     rank = {"OK": 0, "WARN": 1, "CRIT": 2}
     return {"generated_at_kst": W.iso_now(),
             "window_utc": [datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M") for t in (t0, t1)],
