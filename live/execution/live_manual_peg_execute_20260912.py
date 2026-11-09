@@ -727,6 +727,7 @@ async def run_entry_limit(session, plan: dict, state: dict, max_sec: float = LIM
         state.pop("action", None)   # fill_maker 는 action=cancel 만 멈춤으로 본다 -- 비워 둬야 따라가는 중 ✕ 취소가 먹는다
         state["pegged"] = now_iso()
         px, _, _ = await maker_price(session, common["side"], common["symbol"])
+        print(f"limit entry: PEG 따라가기 시작 {common['symbol']} {pside} {remaining} @ {px}", flush=True)
         got, px, rp, err = await fill_maker(session, common=common, price=px, total=remaining, deadline=time.monotonic() + FALLBACK_SEC,
                                             state=state, key=key, secret=secret, offset=offset)
         state.update(filled=round(done + got, 8), repegs=rp, limit_price=px, taker_qty=0.0, done_at=now_iso())
@@ -736,6 +737,7 @@ async def run_entry_limit(session, plan: dict, state: dict, max_sec: float = LIM
             state.update(phase="filled_maker")
         else:
             state.update(phase="cancelled", cancel_reason=state.get("action_reason") or "따라가기 마감 — 남은 수량 버림(시장가 없음)")
+        print(f"limit entry: PEG 끝 {state.get('phase')} 체결 {state.get('filled')} 리페그 {rp} 마지막 {px}", flush=True)
     else:
         state.update(phase="cancelled", taker_qty=0.0, done_at=now_iso(),
                      cancel_reason=(state.get("action_reason") or "사용자 취소") if state.get("action") else ("거래소에서 취소됨" if outside else "대기 시간 만료"))

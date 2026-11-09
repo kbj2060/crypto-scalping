@@ -592,7 +592,8 @@ function lineSyncWait(w) {
   if (!lineTool && (w.asset || "eth") === activeSnapshotAsset) lineTool = { placed: true, asset: w.asset || "eth", plan: null, err: "" };   // 새로고침·다른 기기에서 걸린 주문도 다시 잇는다
   const t = lineTool;
   if (!t || !t.placed || lineDrag || t.busy) return;
-  Object.assign(t, { tp: br.tp_level, sl: br.sl_level, entry: pl.limit.usdt, px: Number(w.limit_price) || 0, amended: Number(w.amends || 0), stopP: !!(w.stop || pl.stop), trig: !!(w.triggered || w.pegged) });
+  Object.assign(t, { tp: br.tp_level, sl: br.sl_level, entry: (w.pegged || w.triggered) && w.limit_price > 0 && pl.limit.price > 0 ? w.limit_price * pl.limit.usdt / pl.limit.price : pl.limit.usdt, px: Number(w.limit_price) || 0, amended: Number(w.amends || 0), stopP: !!(w.stop || pl.stop), trig: !!(w.triggered || w.pegged) });
+  // 따라가는 중(PEG · 감시 닿음) 진입선 = 서버가 옮기는 주문가(USDC) ÷ 접수 basis -- 처음 선에 두면 따라가도 멈춰 보인다(2026-11-09)
   t.plan = { ...pl, quantity: Number(w.quantity ?? pl.quantity) || 0 };   // 크기 줄 = 서버가 정한 계획(수량·배수·명목·순자산)
   renderLineTool();
 }
