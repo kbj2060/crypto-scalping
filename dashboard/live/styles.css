@@ -2388,6 +2388,12 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   .topbar { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
   .topbar > .top-right { grid-column: 2; grid-row: 1; justify-content: center; }
   .topbar > .snap-head { grid-column: 3; grid-row: 1; }
+  /* 2026-11-10 사용자: 가운데 고정(absolute) 발표·급변 칩이 코인 탭(≥1700, 11-08 이 줄로 옴)·다크/알림 단추 위에 겹쳐 색이 섞였다 -- 흐름으로 단추 왼쪽에 ·
+     칸이 모자라면 안 들어가는 칩만 통째로 숨는다(둘째 줄로 넘겨 가림 · 코인 탭·가운데 제목은 그대로) */
+  .topbar > .snap-head { min-width: 0; }
+  .session-alert-center { position: static; transform: none; min-width: 0; flex-wrap: wrap; max-height: 32px; overflow: hidden; }
+  .session-alert-center > .mc-spk { display: contents; }
+  .snap-head > #assetBar { flex-shrink: 0; }
 }
 @media (max-width: 720px) {
   /* 2026-09-27 모바일 최적화: 세션과 테마를 한 줄에(전엔 테마 혼자 한 줄). 1줄 = 페이지 탭, 2줄 = 세션 | 테마. */
