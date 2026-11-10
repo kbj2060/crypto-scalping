@@ -2657,7 +2657,7 @@ def make_app() -> web.Application:
 
     async def api_liq_tab(request: web.Request) -> web.Response:
         """풋프린트 카드 «청산» 보기의 미리 계산한 몫(2026-11-07) -- 매시 cron scripts/live_liq_tab_20261107.py 가 쓴 파일을 내주기만 한다."""
-        asset = _query_coin_asset(request)
+        asset = "all" if request.query.get("asset") == "all" else _query_coin_asset(request)   # all = 코인별 최대 고통 묶음(2026-11-11)
         path = LIVE_DIR / f"liq_tab_{asset}.json"
 
         def read() -> bytes | None:
