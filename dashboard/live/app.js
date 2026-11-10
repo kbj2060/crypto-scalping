@@ -8532,7 +8532,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       if (f) {
         const y = yAt(f.pain), lab = `max pain ${optQ(f.pain)} · ${optKst(f.exp_ms)} KST 만기${f.oi_share == null ? "" : `(전체 미결제의 ${Math.round(f.oi_share * 100)}%)`}`;
         if (y >= mt && y <= plotBottom) {
-          add("line", { x1: ml, x2: ml + cw, y1: y, y2: y, stroke: "var(--warn)", "stroke-opacity": 0.6, "stroke-dasharray": "2 5" });
+          add("line", { x1: ml, x2: ml + cw, y1: y, y2: y, stroke: "var(--warn)", "stroke-opacity": 0.85, "stroke-width": 2, "stroke-linecap": "round", "stroke-dasharray": "0.1 6" });   // 11-10 둥근 점 줄 -- 주황은 max pain 만(nPOC 와 안 헷갈리게)
           if (gutOn) fpNotes.push({ val: f.pain, label: "max pain", color: "var(--warn)", title: lab });
           else add("text", { x: ml + cw - 4, y: y - 4, "font-size": fs, "font-weight": 700, fill: "var(--warn)", "text-anchor": "end" }, mobileChart ? `max pain ${optQ(f.pain)}` : lab);   // 2026-10-01 휴대폰은 짧게(긴 글이 화면 밖으로 잘렸다)
         } else if (gutOn) {
@@ -8852,12 +8852,23 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       //   (배지 자체는 겹침 회피로 위아래로 밀릴 수 있어서 행을 정확히 못 가리킨다).
       line = tri;   // 아래 data-live 표식과 빠른 갱신이 같은 변수를 쓴다
     } else {
-      line = document.createElementNS(NS, "line");
-      line.setAttribute("x1", ml - TRADE_L); line.setAttribute("x2", w - mr);
+      // 2026-11-10 사용자 «nPOC 가 지지/저항과 헷갈린다» → 시안 C: 지지·저항 = 반투명 띠(세기 = 띠 두께 -- 구역으로 읽힌다) · max pain = 주황 둥근 점 줄 · nPOC = 흐린 실선 + 생긴 봉 점.
+      //   레인(플롯 안 바닥) 높이의 선은 캔들 칸을 건너뛰고 프로파일 기둥 쪽만(봉 안 델타 막대를 가로지르지 않게).
+      const isSR = /^(지지|저항)\d/.test(p.label || ""), xL = LANE_IN && p.realY > quadY - 8 ? tradeX0 : ml - TRADE_L;
+      line = document.createElementNS(NS, isSR ? "rect" : "line");
+      if (isSR) {
+        const hh = 3 + 2 * (p.width || 1);
+        line.setAttribute("x", xL); line.setAttribute("width", w - mr - xL);
+        line.setAttribute("y", p.realY - hh / 2); line.setAttribute("height", hh);
+        line.setAttribute("fill", p.color); line.setAttribute("fill-opacity", "0.22");
+        line.setAttribute("stroke", p.color); line.setAttribute("stroke-opacity", "0.55"); line.setAttribute("stroke-width", "0.8");
+      } else {
+      line.setAttribute("x1", xL); line.setAttribute("x2", w - mr);
       line.setAttribute("y1", p.realY); line.setAttribute("y2", p.realY);
       line.setAttribute("stroke", p.color);
       line.setAttribute("stroke-width", String(p.width || 2));
       if (lineDashed) line.setAttribute("stroke-dasharray", "4,4");
+      }
       if (p.outOfView) line.setAttribute("opacity", "0.72");
       if (p.behindCells) {                       // 셀 숫자를 덮지 않게 격자 바로 위(셀 아래) = 2026-10-20 bg 캔버스(칸이 fg 라). 빠른 갱신은 bg 띠만 다시 칠한다(liveLineCtx.cvLine)
         const it = { x0: ml - TRADE_L - 1, x1: w - mr + 1, y: p.realY, y0: p.realY - 2, y1: p.realY + 2,
@@ -9690,7 +9701,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   }
 
   // ── 2026-11-10 사용자 «맨 POC·미완 경매도 넣어서 시안»: 아직 다시 안 간 가격 -- 서술 표시(자석 아님).
-  //   맨 POC = 닫힌 봉의 최다 체결 행 중 그 뒤 봉 고저가 아직 안 지난 것(주황 파선 → 오른쪽 끝 «nPOC 가격») ·
+  //   맨 POC = 닫힌 봉의 최다 체결 행 중 그 뒤 봉 고저가 아직 안 지난 것(흐린 실선 + 생긴 봉 점 → 오른쪽 끝 «nPOC 가격») ·
   //   미완 경매 = 닫힌 봉 고가·저가 행에 매수·매도가 둘 다 체결됐는데 아직 안 간 것(꺾쇠 아이콘: 고 ︿ · 저 ﹀).
   //   검정(docs/experiments/footprint_naked_poc_unfinished_auction_results_20261110.md, ETH 55일): 1시간 안 재방문 맨 POC 70.5% vs 위약 68.6% ·
   //   미완 67.6% vs 65.0% -- 통과지만 +2~2.6%p 뿐이고 지금가 10bp 안쪽은 위약 이하라 그리지 않는다. 1주일 창(DENSE)은 너무 많아 끈다.
@@ -9713,7 +9724,11 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       const xR = ml + cw;
       fgI.push({ ...CV_ALL, c: plotC, p: (ctx) => lines.forEach(([x0, p, k]) => {
         const y = Math.round(yAt(p)) + 0.5;
-        if (k === "poc") { cvStroke(ctx, [[x0, y], [xR, y]], "var(--warn)", 1.2, 0.85, [5, 4]); return; }
+        if (k === "poc") {   // 11-10 시안 C: 흐린 실선 + 생긴 봉 점(지지·저항 띠·max pain 주황 점 줄과 다른 문법)
+          cvStroke(ctx, [[x0, y], [xR, y]], "var(--text)", 1, 0.28);
+          ctx.globalAlpha = 0.9; ctx.fillStyle = cvc("var(--muted)"); ctx.beginPath(); ctx.arc(x0, y, 2.6, 0, Math.PI * 2); ctx.fill();
+          return;
+        }
         // 2026-11-10 사용자 «미완은 아이콘으로 깔끔하게» → 시안 1 꺾쇠: 고 = 봉 위 ︿ · 저 = 봉 아래 ﹀(경매가 그쪽으로 덜 끝났다) · 글자 없음(뜻은 툴팁)
         const hi = k === "ua고", s = Math.max(3.5, Math.min(5, bw * 0.35)), yc = hi ? y - 7 : y + 7, d = hi ? 1 : -1;
         cvStroke(ctx, [[x0 - s, yc + d * s * 0.6], [x0, yc - d * s * 0.6], [x0 + s, yc + d * s * 0.6]], "var(--text)", 1.6, 0.85, null, "round");
@@ -9726,12 +9741,12 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         const t = document.createElementNS(NS, "text");
         t.setAttribute("x", xR - 4); t.setAttribute("y", yAt(p) - 3);
         t.setAttribute("text-anchor", "end"); t.setAttribute("font-size", "10"); t.setAttribute("font-weight", "700");
-        t.setAttribute("fill", "var(--warn)"); t.setAttribute("paint-order", "stroke"); t.setAttribute("stroke", "var(--chart-bg)"); t.setAttribute("stroke-width", "3");
+        t.setAttribute("fill", "var(--muted)"); t.setAttribute("paint-order", "stroke"); t.setAttribute("stroke", "var(--chart-bg)"); t.setAttribute("stroke-width", "3");
         t.textContent = `nPOC ${fmtNum(p, Math.max(1, pxDp()))}`;
         lg.appendChild(t);
       });
       const ti = document.createElementNS(NS, "title");
-      ti.textContent = "아직 다시 안 간 가격(서술 표시 · 자석 아님). nPOC(주황 파선) = 닫힌 봉의 최다 체결 행 · 꺾쇠 ︿/﹀ = 미완 경매(봉 고가·저가 행에 매수·매도가 둘 다 체결됨). 지금가 0.1% 안쪽은 생략.";
+      ti.textContent = "아직 다시 안 간 가격(서술 표시 · 자석 아님). nPOC(흐린 선 · 생긴 봉 점) = 닫힌 봉의 최다 체결 행 · 꺾쇠 ︿/﹀ = 미완 경매(봉 고가·저가 행에 매수·매도가 둘 다 체결됨). 지금가 0.1% 안쪽은 생략.";
       lg.appendChild(ti);
       svg.appendChild(lg);
     }
