@@ -179,8 +179,55 @@ class CancelOnlyStopTest(unittest.TestCase):
 
         with mock.patch.object(ex, "signed", fake_signed):
             out = asyncio.run(ex.cancel_bracket(None, SYM, "LONG", "k", "s", 0, only_tp=True))
-        self.assertEqual(deleted, [1]); self.assertEqual(out, {"cancelled": 1, "errors": []})
+        self.assertEqual(deleted, [1]); self.assertEqual(out, {"cancelled": 1, "errors": [], "tp_open": ["dbtpL1"]})   # tp_open = 지우기 전 살아 있던 롱 익절(분할 익절 체결 판단)
         self.assertNotIn(("GET", "/fapi/v1/openAlgoOrders"), seen)
+
+
+class TpLadderPlaceTest(unittest.TestCase):
+    """2026-11-11 place_tp_ladder: 우리 익절만 지우고(strict) 무게대로 조각마다 GTX · 걸려 있던 조각이 목록에 없으면 체결로 보고 다시 안 건다. 거래소 = 가짜 signed."""
+    def _go(self, opens, cancel_err=False):
+        posted, seen = [], []
+
+        async def fake_signed(_s, method, path, params, *_a, **_k):
+            seen.append((method, path))
+            if path == "/fapi/v2/positionRisk":
+                return [{"positionSide": "LONG", "positionAmt": "1.0"}]
+            if method == "GET" and path == "/fapi/v1/openOrders":
+                return opens
+            if method == "DELETE":
+                return {"__error__": "-1003"} if cancel_err else {}
+            if method == "POST" and path == "/fapi/v1/order":
+                posted.append(params)
+                return {"orderId": len(posted)}
+            raise AssertionError(f"예상 밖 호출 {method} {path}")
+
+        async def zero(_s):
+            return 0
+
+        async def filt(_s, _sym):
+            return {"step": 0.001, "tick": 0.01, "min_qty": 0.001, "min_notional": 20.0}
+        legs = [{"level": 2600.0, "price": 2600.0, "w": 1, "resting": True, "cid": "dbtpLgone"},   # 걸려 있었는데 목록에 없다 = 체결
+                {"level": 2550.0, "price": 2550.0, "w": 1, "resting": True, "cid": "dbtpLa"},
+                {"level": 2700.0, "price": 2700.0, "w": 2, "resting": False, "cid": None}]
+        from scripts import live_manual_peg_entry_20260912 as pe
+        with mock.patch.object(ex, "signed", fake_signed), mock.patch.object(ex, "_clock_offset", zero), mock.patch.object(pe, "load_filters", filt), \
+             mock.patch.dict("os.environ", {"BINANCE_API_KEY": "k", "BINANCE_SECRET_KEY": "s"}):
+            out = asyncio.run(ex.place_tp_ladder(None, legs, SYM, "LONG"))
+        return out, posted, seen
+
+    def test_splits_by_weight_and_drops_filled(self) -> None:
+        out, posted, _ = self._go([{"orderId": 7, "clientOrderId": "dbtpLa"}, {"orderId": 8, "clientOrderId": "aos_user"}])
+        self.assertTrue(out["placed"])
+        self.assertEqual([x["filled"] for x in out["legs"]], [True, False, False])
+        self.assertEqual(sorted((p["price"], p["quantity"], p["timeInForce"], p["side"]) for p in posted),
+                         [(2550.0, 0.333, "GTX", "SELL"), (2700.0, 0.667, "GTX", "SELL")])            # 무게 1:2 · 합 = 포지션 전량
+        self.assertTrue(all(p["newClientOrderId"].startswith("dbtpL") for p in posted))
+
+    def test_cancel_failure_places_nothing(self) -> None:
+        out, posted, _ = self._go([{"orderId": 7, "clientOrderId": "dbtpLa"}], cancel_err=True)
+        self.assertFalse(out["placed"])
+        self.assertEqual(posted, [])
+        self.assertIn("cleared", out)
 
 
 class PlaceStopTest(unittest.TestCase):

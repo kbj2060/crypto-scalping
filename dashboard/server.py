@@ -4756,6 +4756,8 @@ def make_app() -> web.Application:
     app.router.add_post("/api/manual-bracket/disarm", order_api.api_manual_bracket_disarm)
     app.router.add_post("/api/manual-bracket/rearm", order_api.api_manual_bracket_rearm)
     app.router.add_post("/api/manual-bracket/tp", lambda r: order_api.busy_or(order_api.api_manual_bracket_tp, r))   # 2026-11-11 익절선 지우기·다시 걸기(진입가 팝업)
+    app.router.add_post("/api/manual-bracket/tp-legs", lambda r: order_api.busy_or(order_api.api_manual_bracket_tp_legs, r))   # 2026-11-11 분할 익절 조각 지우기·무게(진입가 팝업)
+    app.router.add_post("/api/manual-bracket/add", lambda r: order_api.busy_or(order_api.api_manual_bracket_add, r))   # 2026-11-11 손절·익절 선 추가(진입가 팝업 → 초안 끌어 놓기)
     app.router.add_post("/api/manual-bracket/modify", lambda r: order_api.busy_or(order_api.api_manual_bracket_modify, r))   # 2026-10-29 선 끌어 주문 수정(주문 잠금 안에서)
     app.router.add_get("/api/manual-exit/preview", order_api.api_manual_exit_preview)
     app.router.add_post("/api/manual-exit/submit", lambda r: order_api.busy_or(order_api.api_manual_exit_submit, r))

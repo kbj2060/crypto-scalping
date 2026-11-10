@@ -394,6 +394,49 @@ def line_bracket(*, position_side: str, ref_level: float, tp_level: float, sl_le
             "sl_pct": round(100 * (sl_level / ref_level - 1), 2), "sl_name": f"선 손절 {sl_level:.2f}"}
 
 
+TP_LEGS_MAX = 4   # 2026-11-11 분할 익절 선 최대 개수
+
+
+def split_tp_qty(qty: float, legs: list[dict], filters: dict[str, float], position_side: str) -> list[float]:
+    """2026-11-11 사용자 «청산 100% 를 나눠 SLTP 선 여러 개»(1단계 = 분할 익절). 포지션 수량 qty 를 legs 의 무게(w)대로 나눈다. **순수 함수**.
+    legs = [{"price": 주문가, "w": 무게}] · 돌려주기 = legs 순서 그대로의 수량(0 = 이웃에 합침 -- 거래소에 안 건다).
+    규칙: 가까운 쪽(롱 = 낮은 가격)부터 격자 내림 · 최소 수량·최소 명목 미달 조각은 다음(먼) 조각에 몰아준다 · 남는 몫은 가장 먼 조각에 -- 합이 qty 를 넘지 않는다.
+    가장 먼 조각까지 미달이면 앞에서 마지막으로 건 조각에 더한다(그것도 없으면 전량 한 조각)."""
+    step, mn, mnn = filters.get("step") or 0.001, filters.get("min_qty") or 0.0, filters.get("min_notional") or 0.0
+    order = sorted(range(len(legs)), key=lambda i: legs[i]["price"] * (1 if position_side == "LONG" else -1))
+    tot_w = sum(max(float(l.get("w") or 0), 0.0) for l in legs) or 1.0
+    out, carry = [0.0] * len(legs), 0.0
+    fl = lambda v: int(v / step + 1e-9) * step  # noqa: E731
+
+    def ok(q, px):
+        return q > 0 and q >= mn - 1e-12 and q * px >= mnn - 1e-9
+    for j, i in enumerate(order):
+        raw = qty * max(float(legs[i].get("w") or 0), 0.0) / tot_w + carry
+        q = fl(qty - sum(out)) if j == len(order) - 1 else fl(raw)
+        if ok(q, legs[i]["price"]):
+            out[i], carry = round(q, 8), raw - q
+        else:
+            carry = raw
+    rest = fl(qty - sum(out))
+    if rest > 1e-12:   # 마지막 조각이 미달이었다 -- 마지막으로 건 조각에 더한다
+        placed = [i for i in order if out[i] > 0]
+        out[placed[-1] if placed else order[-1]] = round(out[placed[-1]] + rest if placed else fl(qty), 8)
+    return out
+
+
+def sl_legs_hit(position_side: str, armed: dict, touch: tuple[float, float] | None, last_bar: tuple[float, float] | None) -> list[int]:
+    """2026-11-11 분할 손절: 닿은 손절 조각 번호들. 조각 = {"level", "up", "w", "fired"} -- 이미 쏜(fired) 조각은 닫힐 때까지 계속 «닿음».
+    닿음 = 1초 체결가(무장·수정 뒤) 또는 무장 뒤 마감된 5분봉 종가(bracket_sl_hit 과 같은 뒷받침). up = 올라 닿으면(롱 감시 손절·숏 기본)."""
+    since = max(float(armed.get("armed_at") or 0), float(armed.get("watch_from") or 0))
+    out = []
+    for i, leg in enumerate(armed.get("sl_legs") or []):
+        up, lv = (position_side != "LONG") if leg.get("up") is None else bool(leg["up"]), float(leg["level"])
+        if (leg.get("fired") or (touch and (touch[1] >= lv if up else touch[0] <= lv))
+                or (last_bar and last_bar[0] > since and (last_bar[1] >= lv if up else last_bar[1] <= lv))):
+            out.append(i)
+    return out
+
+
 def sl_up_of(position_side: str, armed: dict) -> bool:
     """손절이 «올라 닿으면» 쏘나. 숏 기본 · 롱 손절을 지금가 위에 옮긴 무장(sl_up True). 옛 무장·규칙 손절은 칸이 없거나 None -- 기본값."""
     up = armed.get("sl_up")
@@ -410,6 +453,11 @@ def line_hit(position_side: str, armed: dict, touch: tuple[float, float] | None)
     sl, tp, up = armed.get("sl_level"), None if armed.get("tp_off") else armed.get("tp_level"), sl_up_of(position_side, armed)   # tp_off = 2026-11-11 «익절선 지우기»
     if sl and (hi >= sl if up else lo <= sl):
         return "sl"
+    legs = armed.get("tp_legs")
+    if legs and not armed.get("tp_off"):   # 2026-11-11 분할 익절: 거래소에 못 건 조각이 닿으면 -- ponytail: 그 조각 몫만이 아니라 전량을 닫는다(드문 대비책 · 조각 청산은 2단계)
+        if any(not l.get("resting") and not l.get("merged") and (hi >= l["level"] if long_side else lo <= l["level"]) for l in legs):
+            return "tp"
+        return None
     if tp and not armed.get("tp_resting") and (hi >= tp if long_side else lo <= tp):
         return "tp"
     return None
@@ -446,6 +494,12 @@ def bracket_action(armed: dict, position_side: str, positions: list[dict], accou
             #   옛 판은 여기서 hold 라 거래소 익절 지정가가 못 걸린 선(tp_resting False)이면 익절까지 같이 꺼졌다.
             #   fired == "tp" = 손절을 지운 뒤 익절로 쏜 청산(닫힐 때까지) · fired True + sl_off = 손절로 쏜 청산을 «손절 해제»로 멈춘 것(10-15 동작 그대로 hold)
             return "fire" if armed.get("fired") == "tp" or line_hit(position_side, {**armed, "sl_level": None}, touch) else "hold"
+        legs = armed.get("sl_legs")
+        if legs and not armed.get("fired"):   # 2026-11-11 분할 손절: 닿은 조각 몫만 닫는다(sl_leg) · 남은 조각이 다 닿았거나 익절(서버 감시 몫)이 닿으면 전량(fire)
+            hit = sl_legs_hit(position_side, armed, touch, last_bar)
+            if len(hit) >= len(legs) or line_hit(position_side, {**armed, "sl_level": None}, touch):
+                return "fire"
+            return "sl_leg" if hit else "hold"
         return "fire" if armed.get("fired") or line_hit(position_side, armed, touch) or bracket_sl_hit(position_side, last_bar, armed) else "hold"
     if armed.get("sl_off"):   # 2026-10-15 «손절 해제» 버튼: 5분봉 종가 손절도 끈다(닫히면 남은 물타기 정리는 계속)
         return "hold"
@@ -468,7 +522,7 @@ def bracket_rekey(state: dict) -> dict:
     return out
 
 
-OWNED_BY_SAVED = ("sl_off", "tp_off", "tp_level", "tp_price", "sl_level", "sl_price", "sl_name", "sl_up", "watch_from", "mod", "placed")   # bracket_merge: 저장본이 주인인 칸
+OWNED_BY_SAVED = ("sl_off", "tp_off", "tp_legs", "sl_legs", "tp_level", "tp_price", "sl_level", "sl_price", "sl_name", "sl_up", "watch_from", "mod", "placed")   # bracket_merge: 저장본이 주인인 칸
 
 
 def bracket_merge(current: dict, mine: dict, seen_at: dict) -> dict:
@@ -986,6 +1040,27 @@ def _self_check_rec_rule() -> None:
     assert bracket_action(lo_, "LONG", [], True, 100.0, None, None) == "clear"
     assert bracket_action({**lo_, "fired": True}, "LONG", pos, True, 100.0, None, (2490.0, 2500.0)) == "hold"   # 손절 청산을 해제로 멈춤 -- 다시 쏘지 않는다
     assert bracket_action({**lo_, "fired": "tp"}, "LONG", pos, True, 100.0, None, (2490.0, 2500.0)) == "fire"   # 익절 청산은 닫힐 때까지
+    # 2026-11-11 분할 손절: 닿은 조각만(sl_leg) · 남은 조각 전부 닿으면 전량(fire) · 쏜 조각은 계속 닿음 · 손절 해제면 hold · 5분봉 종가 뒷받침
+    sll = {**la, "sl_legs": [{"level": 2480.0, "w": 1}, {"level": 2460.0, "w": 1}]}
+    assert bracket_action(sll, "LONG", pos, True, 100.0, None, (2479.0, 2500.0)) == "sl_leg"
+    assert bracket_action(sll, "LONG", pos, True, 100.0, None, (2459.0, 2500.0)) == "fire"
+    assert bracket_action(sll, "LONG", pos, True, 100.0, None, (2485.0, 2500.0)) == "hold"
+    assert bracket_action(sll, "LONG", pos, True, 100.0, (200.0, 2479.0), None) == "sl_leg"
+    assert sl_legs_hit("LONG", {**sll, "sl_legs": [{"level": 2480.0, "fired": True}, {"level": 2460.0}]}, None, None) == [0]
+    assert bracket_action({**sll, "sl_off": {"at": 1.0}}, "LONG", pos, True, 100.0, None, (2459.0, 2500.0)) == "hold"
+    assert bracket_action({**sll, "sl_legs": [{"level": 2520.0, "up": True}, {"level": 2460.0}]}, "LONG", pos, True, 100.0, None, (2490.0, 2521.0)) == "sl_leg"   # 감시(올라 닿음) 조각
+    # 2026-11-11 분할 익절: 수량 나누기(합 = 전량 · 격자 · 최소 미달 합침) · 안 걸린 조각만 서버가 닫는다
+    f_ = {"step": 0.001, "min_qty": 0.001, "min_notional": 20.0}
+    L3 = [{"price": 2600.0, "w": 1}, {"price": 2550.0, "w": 1}, {"price": 2700.0, "w": 2}]
+    q3 = split_tp_qty(1.0, L3, f_, "LONG")
+    assert abs(sum(q3) - 1.0) < 1e-9 and q3[1] == 0.25 and q3[0] == 0.25 and q3[2] == 0.5, q3
+    qs = split_tp_qty(0.012, [{"price": 2550.0, "w": 1}, {"price": 2600.0, "w": 1}], f_, "LONG")   # 조각 0.006 × 2550 = $15 < $20 → 먼 조각에 합침
+    assert qs == [0.0, 0.012], qs
+    qx = split_tp_qty(0.5, [{"price": 2450.0, "w": 1}, {"price": 2400.0, "w": 3}], f_, "SHORT")   # 숏: 가까운 = 높은 가격
+    assert qx == [0.125, 0.375], qx
+    lg = {**la, "tp_legs": [{"level": 2550.0, "resting": True}, {"level": 2600.0, "resting": False}]}
+    assert line_hit("LONG", lg, (2481.0, 2560.0)) is None and line_hit("LONG", lg, (2481.0, 2600.0)) == "tp"
+    assert line_hit("LONG", {**lg, "tp_legs": [{"level": 2550.0, "resting": True}, {"level": 2600.0, "resting": False, "merged": True}]}, (2481.0, 2650.0)) is None
     # 2026-11-11 익절선 지움(tp_off): 익절 닿음은 안 쏘고 손절은 그대로 · 둘 다 지우면 닿아도 hold
     to_ = {**la, "tp_off": {"at": 1.0}, "tp_resting": False}
     assert line_hit("LONG", to_, (2481.0, 2600.0)) is None and line_hit("LONG", to_, (2479.0, 2600.0)) == "sl"

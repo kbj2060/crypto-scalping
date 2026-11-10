@@ -192,13 +192,14 @@ async def cancel_bracket(session, symbol: str, pside: str, key: str, secret: str
                                             key, secret, offset)
     if not isinstance(opens, list):
         errors.append(f"openOrders: {opens.get('__error__') if isinstance(opens, dict) else opens}")
+    tp_open = [str(o.get("clientOrderId")) for o in opens if str(o.get("clientOrderId") or "").startswith(tp_pre)] if isinstance(opens, list) else None   # 2026-11-11 분할 익절: 지우기 전에 살아 있던 우리 익절(없어진 조각 = 체결)
     for o in opens if isinstance(opens, list) else []:
         if str(o.get("clientOrderId") or "").startswith((tp_pre,) if only_tp else (tp_pre, add_pre)):
             r = await signed(session, "DELETE", "/fapi/v1/order",
                              {"symbol": symbol, "orderId": o.get("orderId")}, key, secret, offset)
             n, errors = (n + 1, errors) if "__error__" not in r else (n, errors + [r["__error__"]])
     if only_tp:
-        return {"cancelled": n, "errors": errors}
+        return {"cancelled": n, "errors": errors, "tp_open": tp_open}
     algos = await signed(session, "GET", "/fapi/v1/openAlgoOrders", {"symbol": symbol},
                          key, secret, offset)
     if not isinstance(algos, list):
@@ -300,6 +301,48 @@ async def place_bracket(session, bracket: dict, symbol: str, pside: str, *, stri
     if bracket.get("backstop_price"):
         out["backstop"] = await _post_stop(session, symbol, pside, bracket["backstop_price"], key, secret, offset, stamp)
     out["placed"] = all(v.get("placed") for k, v in out.items() if k in ("tp", "backstop"))
+    return out
+
+
+async def place_tp_ladder(session, legs: list[dict], symbol: str, pside: str) -> dict:
+    """2026-11-11 분할 익절: 우리 익절 지정가(dbtp)를 지우고 legs(주문가 price · 무게 w) 대로 포지션 수량을 나눠 조각마다 GTX 로 다시 건다.
+    🔴옛 익절을 다 못 지웠으면 아무것도 안 건다(strict -- 같은 쪽 익절이 겹쳐 포지션보다 커지지 않게) · 키·포지션 조회 실패면 "cleared" 없이 돌려준다(호출부 = 아무것도 안 바꿈).
+    거래소 사실: 이미 resting 이던 조각의 주문이 목록에 없으면 체결된 것 -- 그 조각은 filled 로 돌려주고 다시 걸지 않는다(사용자 스트림이 놓쳤을 때의 대비).
+    돌려주기 = {"qty", "cleared", "legs": [{**leg, "qty", "cid", "order_id", "resting", "merged", "filled", "error"}]}."""
+    key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
+    if not (key and secret):
+        return {"placed": False, "reason": "API 키가 없습니다"}
+    offset = await _clock_offset(session)
+    pos = await signed(session, "GET", "/fapi/v2/positionRisk", {"symbol": symbol}, key, secret, offset)
+    if not isinstance(pos, list):
+        return {"placed": False, "reason": f"포지션 조회 실패: {pos.get('__error__') if isinstance(pos, dict) else pos}"}
+    qty = round(sum(abs(float(p.get("positionAmt") or 0.0)) for p in pos if p.get("positionSide") == pside), 8)
+    if qty <= 0:
+        return {"placed": False, "reason": "포지션 없음"}
+    cleared = await cancel_bracket(session, symbol, pside, key, secret, offset, only_tp=True)
+    out: dict[str, Any] = {"qty": qty, "cleared": cleared}
+    if cleared.get("errors"):
+        out.update(placed=False, reason="옛 익절 정리 실패")
+        return out
+    from scripts.live_manual_peg_entry_20260912 import load_filters, split_tp_qty   # 함수 안 -- 이 모듈의 다른 진입점들과 같은 방식(순환 참조 피함)
+    seen = cleared.get("tp_open")
+    live = [dict(l) for l in legs]
+    for l in live:   # 걸려 있던 조각이 목록에 없다 = 체결됨
+        l["filled"] = bool(l.get("filled") or (seen is not None and l.get("resting") and l.get("cid") and l["cid"] not in seen))
+    todo = [l for l in live if not l["filled"]]
+    filters = await load_filters(session, symbol)
+    qs = split_tp_qty(qty, todo, filters, pside) if todo else []
+    close_side, stamp = "SELL" if pside == "LONG" else "BUY", int(time.time() * 1000)
+    for i, (l, q) in enumerate(zip(todo, qs)):
+        l.update(qty=q, merged=q <= 0, resting=False, order_id=None, error=None, cid=f"{bracket_tag(TP_TAG, pside)}{stamp}{i}")
+        if q <= 0:
+            continue
+        r = await signed(session, "POST", "/fapi/v1/order",
+                         {"symbol": symbol, "side": close_side, "positionSide": pside, "type": "LIMIT", "timeInForce": "GTX",
+                          "price": l["price"], "quantity": q, "newClientOrderId": l["cid"]}, key, secret, offset)
+        l.update(resting="__error__" not in r, order_id=r.get("orderId"), error=r.get("__error__"))
+    out["legs"] = live
+    out["placed"] = all(l.get("resting") or l.get("merged") or l.get("filled") for l in live)
     return out
 
 

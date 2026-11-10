@@ -42,7 +42,7 @@ class ChartLinesTest(unittest.TestCase):
             return acct
 
         async def exercise() -> None:
-            base = {"place_bracket": _boom, "place_add_order": _boom, "run_entry": _boom, "run_exit": _boom, "clear_bracket": _boom, "place_stop": _boom}
+            base = {"place_bracket": _boom, "place_add_order": _boom, "run_entry": _boom, "run_exit": _boom, "clear_bracket": _boom, "place_stop": _boom, "place_tp_ladder": _boom}
             base.update(patches)
             with mock.patch.object(orders, "fetch_account", fake_account), \
                  mock.patch.object(orders, "produce_account", fake_account, create=True), \
@@ -383,6 +383,224 @@ class LineModifyTest(ChartLinesTest):
             r = await c.post(f"/api/manual-bracket/modify?side=LONG&symbol={SYM}&tp=2560&sl=2490")
             self.assertEqual(r.status, 400)
         self._run(fn, acct=POS)
+
+
+class LineAddTest(ChartLinesTest):
+    """2026-11-11 «손절/익절 라인 추가»(POST /api/manual-bracket/add · 진입 팝업 «추가» → 초안 선 끌어 놓기). 시세 = 가짜 bookTicker 2500 · 계좌 POS(롱 2500). 실주문 0."""
+    _armed = LinesArmedGuardTest._armed
+
+    def _add(self, q, acct=POS, armed=None, place=None, write=True):
+        out = {}
+
+        async def fn(c):
+            if write:
+                self._armed({"tp_price": 2550.0, "sl_price": 2480.0, **(armed or {})})
+            out["t0"] = time.time()
+            r = await c.post(f"/api/manual-bracket/add?side=LONG&symbol={SYM}&confirm=1{q}")
+            out["status"], out["body"] = r.status, await r.json()
+            f = server.LIVE_DIR / "manual_bracket_state.json"
+            out["state"] = json.loads(f.read_text("utf-8")).get(f"{SYM}:LONG") if f.exists() else None
+        self._run(fn, acct=acct, **({"place_bracket": place} if place else {}))
+        return out
+
+    @staticmethod
+    def _place(calls):
+        async def place(_s, b, symbol, pside, **k):
+            calls.append((dict(b), k.get("strict")))
+            return {"qty": 0.5, "cleared": {"cancelled": 0, "errors": []}, "tp": {"placed": True, "price": b["tp_price"]}, "placed": True}
+        return place
+
+    def test_sl_on_position_without_bracket_makes_new_lines_arm(self) -> None:
+        o = self._add("&leg=sl&level=2470", write=False)   # 무장 파일 없음 = 앱으로 들어간 «손절 없음» 포지션 · place_bracket = _boom(거래소 주문 없음)
+        self.assertEqual(o["status"], 200, o["body"])
+        b = o["state"]
+        self.assertTrue(b["lines"] and b["tp_off"]["never"] and "sl_off" not in b, b)
+        self.assertEqual((b["sl_level"], b["sl_up"]), (2470.0, False))
+        self.assertGreaterEqual(b["watch_from"], o["t0"])
+
+    def test_tp_on_position_without_bracket_places_only_tp(self) -> None:
+        calls = []
+        o = self._add("&leg=tp&level=2560", write=False, place=self._place(calls))
+        self.assertEqual(o["status"], 200, o["body"])
+        self.assertEqual(calls, [({"tp_price": 2560.0}, True)])
+        b = o["state"]
+        self.assertTrue(b["sl_off"]["never"] and b["tp_resting"] and b["tp_level"] == 2560.0, b)
+
+    def test_readd_removed_sl_at_new_price(self) -> None:
+        o = self._add("&leg=sl&level=2490", armed={"sl_off": {"at": 1.0}})
+        self.assertEqual(o["status"], 200, o["body"])
+        self.assertTrue("sl_off" not in o["state"] and o["state"]["sl_level"] == 2490.0 and o["state"]["tp_level"] == 2550.0, o["state"])
+
+    def test_refusals(self) -> None:
+        o = self._add("&leg=sl&level=2470")                                                                  # 손절선이 이미 있다 = 분할 손절 조각 하나 더(2026-11-11)
+        self.assertEqual((o["status"], len(o["state"]["sl_legs"])), (200, 2), o["body"])
+        self.assertEqual(self._add("&leg=sl&level=2470", armed={"lines": False})["body"]["error"], "rule_armed")
+        self.assertEqual(self._add("&leg=sl&level=2470", armed={"sl_off": {"at": 1.0}, "fired": "tp"})["status"], 409)
+        self.assertEqual(self._add("&leg=tp&level=2450", armed={"tp_off": {"at": 1.0}})["status"], 400)       # 롱 익절이 지금가 아래
+        self.assertEqual(self._add("&leg=sl&level=2470", acct=FLAT, write=False)["body"]["error"], "no_position")
+        self.assertEqual(self._add("&leg=x&level=2470")["status"], 400)
+        o = self._add("&leg=sl&level=2470", write=False, armed=None)
+        self.assertEqual(o["status"], 200)
+
+    def test_modify_ignores_removed_leg_even_if_out_of_range(self) -> None:
+        async def fn(c):
+            self._armed({"tp_price": 2550.0, "sl_price": 2000.0, "sl_level": 2000.0, "sl_off": {"at": 1.0}})   # 지운 손절은 지금가에서 20% -- 범위 밖
+            r = await c.post(f"/api/manual-bracket/modify?side=LONG&symbol={SYM}&confirm=1&tp=2550&sl=2000")
+            self.assertEqual(r.status, 200, await r.json())
+            b = json.loads((server.LIVE_DIR / "manual_bracket_state.json").read_text("utf-8"))[f"{SYM}:LONG"]
+            self.assertEqual((b["sl_level"], b["tp_level"]), (2000.0, 2550.0))
+        self._run(fn, acct=POS)
+
+    def test_rearm_refuses_never_armed_sl(self) -> None:
+        async def fn(c):
+            self._armed({"sl_level": None, "sl_off": {"at": 1.0, "never": True}})
+            r = await c.post(f"/api/manual-bracket/rearm?side=LONG&symbol={SYM}&confirm=1")
+            self.assertEqual((r.status, (await r.json())["error"]), (409, "no_sl_line"))
+        self._run(fn, acct=POS)
+
+
+class TpLadderTest(ChartLinesTest):
+    """2026-11-11 분할 익절 1단계: 익절선 하나 더(add) · 조각 끌기(modify tpi) · 조각 지우기·무게(tp-legs) · 추가 진입 막기. 거래소 = 가짜 place_tp_ladder(실주문 0)."""
+    _armed = LinesArmedGuardTest._armed
+
+    @staticmethod
+    def _ladder(calls, filled=()):
+        async def fake(_s, legs, symbol, pside):
+            calls.append([(round(x["level"], 2), round(float(x.get("w") or 0), 3)) for x in legs])
+            return {"qty": 0.5, "cleared": {"cancelled": 1, "errors": [], "tp_open": []}, "placed": True,
+                    "legs": [{**x, "resting": True, "qty": 0.25, "cid": f"dbtpL{i}", "filled": round(x["level"], 2) in filled} for i, x in enumerate(legs)]}
+        return fake
+
+    def _post(self, path, armed, calls, filled=()):
+        out = {}
+
+        async def fn(c):
+            self._armed({"tp_price": 2550.0, "sl_price": 2480.0, **armed})
+            r = await c.post(f"/api/manual-bracket/{path}&side=LONG&symbol={SYM}&confirm=1")
+            out["status"], out["body"] = r.status, await r.json()
+            out["state"] = json.loads((server.LIVE_DIR / "manual_bracket_state.json").read_text("utf-8"))[f"{SYM}:LONG"]
+        self._run(fn, acct=POS, place_tp_ladder=self._ladder(calls, filled))
+        return out
+
+    LEGS = {"tp_legs": [{"level": 2550.0, "price": 2550.0, "w": 1.0, "resting": True, "cid": "dbtpL0"},
+                        {"level": 2600.0, "price": 2600.0, "w": 1.0, "resting": True, "cid": "dbtpL1"}]}
+
+    def test_add_second_tp_makes_two_equal_legs(self) -> None:
+        calls = []
+        o = self._post("add?leg=tp&level=2600", {}, calls)
+        self.assertEqual(o["status"], 200, o["body"])
+        self.assertEqual(calls, [[(2550.0, 1.0), (2600.0, 1.0)]])
+        b = o["state"]
+        self.assertEqual((len(b["tp_legs"]), b["tp_level"], b["tp_price"], b["tp_resting"]), (2, 2550.0, 2550.0, True), b)
+
+    def test_add_refusals(self) -> None:
+        self.assertEqual(self._post("add?leg=tp&level=2551", {}, [])["body"]["error"], "same_level")
+        four = {"tp_legs": [{"level": 2550.0 + 20 * i, "price": 2550.0 + 20 * i, "w": 1.0, "resting": True} for i in range(4)]}
+        self.assertEqual(self._post("add?leg=tp&level=2700", four, [])["body"]["error"], "too_many")
+
+    def test_drag_one_leg_replaces_ladder_with_new_price(self) -> None:
+        calls = []
+        o = self._post("modify?tp=2620&sl=2480&tpi=1", self.LEGS, calls)
+        self.assertEqual(o["status"], 200, o["body"])
+        self.assertEqual(calls, [[(2550.0, 1.0), (2620.0, 1.0)]])
+        self.assertEqual([x["level"] for x in o["state"]["tp_legs"]], [2550.0, 2620.0])
+
+    def test_drag_sl_only_keeps_ladder(self) -> None:
+        calls = []
+        o = self._post("modify?tp=2550&sl=2470", self.LEGS, calls)   # tpi 없음 = 손절만 -- 익절 조각은 거래소에서 안 건드린다
+        self.assertEqual(o["status"], 200, o["body"])
+        self.assertEqual(calls, [])
+        self.assertEqual((o["state"]["sl_level"], len(o["state"]["tp_legs"])), (2470.0, 2))
+
+    def test_remove_leg_collapses_to_single(self) -> None:
+        calls = []
+        o = self._post("tp-legs?act=remove&i=0", self.LEGS, calls)
+        self.assertEqual(o["status"], 200, o["body"])
+        self.assertEqual(calls, [[(2600.0, 1.0)]])
+        b = o["state"]
+        self.assertTrue("tp_legs" not in b and b["tp_level"] == 2600.0 and b["tp_resting"], b)
+
+    def test_weights_and_filled_leg_dropped(self) -> None:
+        calls = []
+        o = self._post("tp-legs?act=weights&w=1,3", self.LEGS, calls, filled=(2550.0,))   # 거래소에 없던 조각(체결) = 빠진다
+        self.assertEqual(o["status"], 200, o["body"])
+        self.assertEqual(calls, [[(2550.0, 1.0), (2600.0, 3.0)]])
+        self.assertTrue("tp_legs" not in o["state"] and o["state"]["tp_level"] == 2600.0, o["state"])
+        self.assertEqual(self._post("tp-legs?act=weights&w=1", self.LEGS, [])["status"], 400)
+        self.assertEqual(self._post("tp-legs?act=remove&i=0", {}, [])["body"]["error"], "no_legs")
+        self.assertEqual(self._post("tp-legs?act=remove&i=0", {**self.LEGS, "fired": True}, [])["status"], 409)
+
+    def test_same_side_add_entry_blocked_with_ladder(self) -> None:
+        async def fn(c):
+            self._armed({"tp_price": 2550.4, "sl_price": 2479.6, "sl_name": "선 손절 2480.00", **self.LEGS})
+            r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10&tp=2600&sl=2400")
+            self.assertEqual((r.status, (await r.json())["error"]), (409, "lines_has_position"))
+        self._run(fn, acct=POS)
+
+
+class SlLadderTest(ChartLinesTest):
+    """2026-11-11 분할 손절: 손절 조각 하나 더(add) · 조각 끌기(modify sli) · 조각 지우기·무게(tp-legs kind=sl) -- 서버 감시 레벨뿐이라 거래소 주문 0(place_* = _boom)."""
+    _armed = LinesArmedGuardTest._armed
+    LEGS = {"sl_legs": [{"level": 2480.0, "price": 2480.0, "up": False, "w": 1.0}, {"level": 2460.0, "price": 2460.0, "up": False, "w": 1.0}]}
+
+    def _post(self, path, armed):
+        out = {}
+
+        async def fn(c):
+            self._armed({"tp_price": 2550.0, "sl_price": 2480.0, **armed})
+            r = await c.post(f"/api/manual-bracket/{path}&side=LONG&symbol={SYM}&confirm=1")
+            out["status"], out["body"] = r.status, await r.json()
+            out["state"] = json.loads((server.LIVE_DIR / "manual_bracket_state.json").read_text("utf-8"))[f"{SYM}:LONG"]
+        self._run(fn, acct=POS)
+        return out
+
+    def test_add_second_sl_leg(self) -> None:
+        o = self._post("add?leg=sl&level=2460", {})
+        self.assertEqual(o["status"], 200, o["body"])
+        b = o["state"]
+        self.assertEqual(([x["level"] for x in b["sl_legs"]], [x["w"] for x in b["sl_legs"]], b["sl_level"]), ([2480.0, 2460.0], [1.0, 1.0], 2480.0), b)
+        self.assertEqual(self._post("add?leg=sl&level=2480.5", {})["body"]["error"], "same_level")
+
+    def test_drag_one_sl_leg(self) -> None:
+        o = self._post("modify?tp=2550&sl=2450&sli=1", self.LEGS)
+        self.assertEqual(o["status"], 200, o["body"])
+        self.assertEqual([x["level"] for x in o["state"]["sl_legs"]], [2480.0, 2450.0])
+        o = self._post("modify?tp=2550&sl=2470", self.LEGS)   # sli 없음(익절 꼬리표를 놓은 경우) -- 손절 조각은 그대로
+        self.assertEqual([x["level"] for x in o["state"]["sl_legs"]], [2480.0, 2460.0])
+
+    def test_refuse_while_leg_fired(self) -> None:
+        fired = {"sl_legs": [{**self.LEGS["sl_legs"][0], "fired": True}, self.LEGS["sl_legs"][1]]}
+        self.assertEqual(self._post("modify?tp=2550&sl=2450&sli=1", fired)["status"], 409)
+        self.assertEqual(self._post("tp-legs?kind=sl&act=remove&i=1", fired)["status"], 409)
+
+    def test_remove_and_weights(self) -> None:
+        o = self._post("tp-legs?kind=sl&act=weights&w=1,3", self.LEGS)
+        self.assertEqual((o["status"], [x["w"] for x in o["state"]["sl_legs"]]), (200, [1.0, 3.0]), o["body"])
+        o = self._post("tp-legs?kind=sl&act=remove&i=0", self.LEGS)
+        self.assertEqual(o["status"], 200, o["body"])
+        self.assertTrue("sl_legs" not in o["state"] and o["state"]["sl_level"] == 2460.0, o["state"])
+
+
+class SlLadderTickTest(LineTickTest):
+    """감시 한 틱: 손절 조각 하나 닿음 → 그 몫만 청산(익절 지정가는 안 지움) → 조각을 빼고 남은 손절로 · 청산 실패면 쏜 표시를 남겨 다시."""
+    LEGS = {"sl_legs": [{"level": 2480.0, "price": 2480.0, "up": False, "w": 1.0}, {"level": 2460.0, "price": 2460.0, "up": False, "w": 1.0}]}
+
+    def test_one_leg_partial_exit(self) -> None:
+        calls, st = self._tick([(2001, 2490.0), (2002, 2479.5)], armed_at=1999.0, armed=self.LEGS)
+        self.assertEqual(calls, [("exit", "LONG")], "익절 지정가를 지우지 않고 그 몫만 청산")
+        b = st[f"{SYM}:LONG"]
+        self.assertTrue("sl_legs" not in b and b["sl_level"] == 2460.0 and not b.get("fired"), b)
+
+    def test_all_legs_full_exit(self) -> None:
+        calls, st = self._tick([(2001, 2490.0), (2002, 2455.0)], armed_at=1999.0, armed=self.LEGS)
+        self.assertEqual([c[0] for c in calls][:2], ["clear", "exit"], calls)
+        self.assertEqual(st, {})
+
+    def test_failed_leg_exit_keeps_fired(self) -> None:
+        calls, st = self._tick([(2002, 2479.5)], armed_at=1999.0, armed=self.LEGS, exit_phase="error")
+        legs = st[f"{SYM}:LONG"]["sl_legs"]
+        self.assertEqual([x.get("fired") for x in legs], [True, None])
+        self.assertGreater(st[f"{SYM}:LONG"]["retry_after"], time.time())
 
 
 class FiredPersistAndBarTest(LineTickTest):
