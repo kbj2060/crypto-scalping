@@ -407,7 +407,7 @@ def line_hit(position_side: str, armed: dict, touch: tuple[float, float] | None)
         return None
     lo, hi = touch
     long_side = position_side == "LONG"
-    sl, tp, up = armed.get("sl_level"), armed.get("tp_level"), sl_up_of(position_side, armed)
+    sl, tp, up = armed.get("sl_level"), None if armed.get("tp_off") else armed.get("tp_level"), sl_up_of(position_side, armed)   # tp_off = 2026-11-11 «익절선 지우기»
     if sl and (hi >= sl if up else lo <= sl):
         return "sl"
     if tp and not armed.get("tp_resting") and (hi >= tp if long_side else lo <= tp):
@@ -441,10 +441,14 @@ def bracket_action(armed: dict, position_side: str, positions: list[dict], accou
                and abs(float(p.get("qty") or 0.0)) > 0 for p in positions or [])
     if account_ok and not held and account_ts > float(armed["armed_at"]) + 5:
         return "clear"
+    if armed.get("lines"):   # 2026-10-28 선: 1초 체결가 닿음 · 체결 흐름이 끊겨도 5분봉 종가 이탈이면 닫는다(뒷받침) · 한 번 쏘면(fired) 닫힐 때까지
+        if armed.get("sl_off"):   # 2026-11-11 사용자 «포지션 들어가 있을 때 손절선만 제거»: 손절 닿음·5분봉 종가 손절은 끄고 익절(서버 감시 몫)은 계속 --
+            #   옛 판은 여기서 hold 라 거래소 익절 지정가가 못 걸린 선(tp_resting False)이면 익절까지 같이 꺼졌다.
+            #   fired == "tp" = 손절을 지운 뒤 익절로 쏜 청산(닫힐 때까지) · fired True + sl_off = 손절로 쏜 청산을 «손절 해제»로 멈춘 것(10-15 동작 그대로 hold)
+            return "fire" if armed.get("fired") == "tp" or line_hit(position_side, {**armed, "sl_level": None}, touch) else "hold"
+        return "fire" if armed.get("fired") or line_hit(position_side, armed, touch) or bracket_sl_hit(position_side, last_bar, armed) else "hold"
     if armed.get("sl_off"):   # 2026-10-15 «손절 해제» 버튼: 5분봉 종가 손절도 끈다(닫히면 남은 물타기 정리는 계속)
         return "hold"
-    if armed.get("lines"):   # 2026-10-28 선: 1초 체결가 닿음 · 체결 흐름이 끊겨도 5분봉 종가 이탈이면 닫는다(뒷받침) · 한 번 쏘면(fired) 닫힐 때까지
-        return "fire" if armed.get("fired") or line_hit(position_side, armed, touch) or bracket_sl_hit(position_side, last_bar, armed) else "hold"
     return "fire" if bracket_sl_hit(position_side, last_bar, armed) else "hold"
 
 
@@ -464,7 +468,7 @@ def bracket_rekey(state: dict) -> dict:
     return out
 
 
-OWNED_BY_SAVED = ("sl_off", "tp_level", "tp_price", "sl_level", "sl_price", "sl_name", "sl_up", "watch_from", "mod", "placed")   # bracket_merge: 저장본이 주인인 칸
+OWNED_BY_SAVED = ("sl_off", "tp_off", "tp_level", "tp_price", "sl_level", "sl_price", "sl_name", "sl_up", "watch_from", "mod", "placed")   # bracket_merge: 저장본이 주인인 칸
 
 
 def bracket_merge(current: dict, mine: dict, seen_at: dict) -> dict:
@@ -974,6 +978,18 @@ def _self_check_rec_rule() -> None:
     assert bracket_action(la, "LONG", pos, True, 100.0, (100.0, 2479.0), None) == "fire"           # 체결 흐름이 끊겨도 5분봉 종가 이탈
     assert bracket_action(la, "LONG", pos, True, 100.0, (100.0, 2490.0), (2485.0, 2560.0)) == "hold"
     assert bracket_action({**la, "sl_off": {"at": 1.0}}, "LONG", pos, True, 100.0, None, (2470.0, 2500.0)) == "hold"
+    # 2026-11-11 손절선만 지움: 손절 닿음·5분봉 종가 이탈은 hold · 익절 서버 감시(tp_resting False)는 그대로 쏜다
+    lo_ = {**la, "sl_off": {"at": 1.0}, "tp_resting": False}
+    assert bracket_action(lo_, "LONG", pos, True, 100.0, (100.0, 2470.0), (2470.0, 2500.0)) == "hold"
+    assert bracket_action(lo_, "LONG", pos, True, 100.0, None, (2470.0, 2551.0)) == "fire"
+    assert bracket_action({**lo_, "tp_resting": True}, "LONG", pos, True, 100.0, None, (2470.0, 2551.0)) == "hold"   # 익절은 거래소 지정가가 닫는다
+    assert bracket_action(lo_, "LONG", [], True, 100.0, None, None) == "clear"
+    assert bracket_action({**lo_, "fired": True}, "LONG", pos, True, 100.0, None, (2490.0, 2500.0)) == "hold"   # 손절 청산을 해제로 멈춤 -- 다시 쏘지 않는다
+    assert bracket_action({**lo_, "fired": "tp"}, "LONG", pos, True, 100.0, None, (2490.0, 2500.0)) == "fire"   # 익절 청산은 닫힐 때까지
+    # 2026-11-11 익절선 지움(tp_off): 익절 닿음은 안 쏘고 손절은 그대로 · 둘 다 지우면 닿아도 hold
+    to_ = {**la, "tp_off": {"at": 1.0}, "tp_resting": False}
+    assert line_hit("LONG", to_, (2481.0, 2600.0)) is None and line_hit("LONG", to_, (2479.0, 2600.0)) == "sl"
+    assert bracket_action({**to_, "sl_off": {"at": 1.0}}, "LONG", pos, True, 100.0, (100.0, 2470.0), (2470.0, 2600.0)) == "hold"
     assert bracket_action({**la, "fired": True}, "LONG", pos, True, 100.0, None, (2490.0, 2500.0)) == "fire"   # 익절을 지운 뒤 청산이 밀려도 닫힐 때까지
     try:
         line_bracket(position_side="LONG", ref_level=2500.0, tp_level=2550.0, sl_level=2370.0, basis=1.0, filters=f3)   # 손절 5.2% > 규칙 5%

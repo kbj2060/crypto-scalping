@@ -164,6 +164,24 @@ class CancelOnlyStopTest(unittest.TestCase):
         self.assertEqual(out, {"cancelled": 1, "errors": []})
         self.assertNotIn(("GET", "/fapi/v1/openOrders"), seen)
 
+    def test_only_tp_cancels_only_take_profit(self) -> None:
+        """2026-11-11 «익절선 지우기»: 롱 익절 지정가(dbtpL)만 -- 물타기(dbad)·숏 익절·사용자 주문·스탑(algo)은 안 건드린다."""
+        deleted, seen = [], []
+
+        async def fake_signed(_s, method, path, params, *_a, **_k):
+            seen.append((method, path))
+            if method == "GET" and path == "/fapi/v1/openOrders":
+                return [{"orderId": 1, "clientOrderId": "dbtpL1"}, {"orderId": 2, "clientOrderId": "dbadL2"},
+                        {"orderId": 3, "clientOrderId": "dbtpS3"}, {"orderId": 4, "clientOrderId": "aos_user"}]
+            if method == "DELETE":
+                deleted.append(params.get("orderId")); return {}
+            raise AssertionError(f"예상 밖 호출 {method} {path}")             # openAlgoOrders(스탑)는 부르지도 않는다
+
+        with mock.patch.object(ex, "signed", fake_signed):
+            out = asyncio.run(ex.cancel_bracket(None, SYM, "LONG", "k", "s", 0, only_tp=True))
+        self.assertEqual(deleted, [1]); self.assertEqual(out, {"cancelled": 1, "errors": []})
+        self.assertNotIn(("GET", "/fapi/v1/openAlgoOrders"), seen)
+
 
 class PlaceStopTest(unittest.TestCase):
     def test_places_only_stop_after_clearing_old(self) -> None:
@@ -193,6 +211,68 @@ class PlaceStopTest(unittest.TestCase):
         self.assertEqual((posted[0]["side"], posted[0]["type"], posted[0]["triggerPrice"], posted[0]["closePosition"]), ("SELL", "STOP_MARKET", 2306.98, "true"))
         self.assertFalse(none["placed"]) ; self.assertEqual(none["error"], "포지션 없음")   # 숏 포지션 없음 → 안 건다
         self.assertEqual(seen, [("GET", "/fapi/v2/positionRisk")])
+
+
+class LinesSlOnlyTest(unittest.TestCase):
+    _run, state = DisarmTest._run, DisarmTest.state
+
+    def test_lines_sl_only_removal(self) -> None:
+        """2026-11-11 «SLTP 포지션에서 손절선만 제거»: 선 무장 해제 = sl_off(익절 지정가·기록은 그대로) · 익절로 쏜 청산(fired "tp") 중엔 다시 켜기 거절."""
+        lines = {KEY: {"symbol": SYM, "side": "LONG", "lines": True, "tp_level": 2550.0, "tp_price": 2548.8, "tp_resting": True,
+                       "sl_level": 2480.0, "sl_price": 2478.9, "backstop_price": None, "armed_at": 1000.0}}
+
+        async def no_stop(_s, symbol, pside, *, only_sl=False):
+            return {"cancelled": 0, "errors": []}   # 선 손절은 거래소 스탑이 없다
+
+        async def fn(c):
+            r = await c.post(f"/api/manual-bracket/disarm?side=LONG&symbol={SYM}&confirm=1")
+            self.assertEqual(r.status, 200, await r.text())
+            st = self.state()[KEY]
+            self.assertTrue(st["sl_off"] and st["tp_resting"] and st["tp_level"] == 2550.0)   # 익절은 그대로
+        self._run(fn, armed=lines, clear=no_stop)
+
+        async def fired_rearm(c):
+            self.assertEqual((await c.post(f"/api/manual-bracket/rearm?side=LONG&symbol={SYM}&confirm=1")).status, 409)
+            self.assertEqual(self.state()[KEY]["fired"], "tp")                        # 익절 청산을 멈추지 않는다
+        self._run(fired_rearm, armed={KEY: {**lines[KEY], "fired": "tp", "sl_off": {"at": 5.0}}})
+
+    def test_lines_tp_only_removal(self) -> None:
+        """2026-11-11 «익절선 지우기»(/api/manual-bracket/tp?act=off): 우리 익절 지정가만(only_tp) 취소 + tp_off · 취소 실패면 그대로 ·
+        청산 진행 중·선 아닌 무장은 거절 · 다시 걸기(act=on)는 지금가를 못 읽으면 아무것도 안 바꾼다(place_bracket = _boom)."""
+        lines = {KEY: {"symbol": SYM, "side": "LONG", "lines": True, "tp_level": 2550.0, "tp_price": 2548.8, "tp_resting": True,
+                       "sl_level": 2480.0, "sl_price": 2478.9, "backstop_price": None, "armed_at": 1000.0}}
+        calls = []
+
+        async def only_tp(_s, symbol, pside, *, only_sl=False, only_tp=False):
+            calls.append((symbol, pside, only_sl, only_tp))
+            return {"cancelled": 1, "errors": []}
+
+        async def failing(_s, symbol, pside, *, only_sl=False, only_tp=False):
+            return {"cancelled": 0, "errors": ["openOrders: timeout"]}
+
+        async def fn(c):
+            self.assertEqual((await c.post(f"/api/manual-bracket/tp?side=LONG&symbol={SYM}&act=off")).status, 400)           # confirm 없음
+            self.assertEqual((await c.post(f"/api/manual-bracket/tp?side=LONG&symbol={SYM}&act=x&confirm=1")).status, 400)
+            r = await c.post(f"/api/manual-bracket/tp?side=LONG&symbol={SYM}&act=off&confirm=1")
+            self.assertEqual(r.status, 200, await r.text())
+            self.assertEqual(calls, [(SYM, "LONG", False, True)])                    # 익절 지정가만
+            st = self.state()[KEY]
+            self.assertTrue(st["tp_off"] and st["tp_resting"] is False and st["sl_level"] == 2480.0 and "sl_off" not in st)   # 손절은 그대로
+            j = await (await c.post(f"/api/manual-bracket/tp?side=LONG&symbol={SYM}&act=off&confirm=1")).json()
+            self.assertTrue(j["ok"] and j["already"]); self.assertEqual(len(calls), 1)
+            r = await c.post(f"/api/manual-bracket/tp?side=LONG&symbol={SYM}&act=on&confirm=1")   # 시험 앱엔 1초 체결가가 없다 → 거절
+            self.assertEqual(r.status, 502); self.assertTrue(self.state()[KEY]["tp_off"])
+        self._run(fn, armed=lines, clear=only_tp)
+
+        async def fail(c):
+            self.assertEqual((await c.post(f"/api/manual-bracket/tp?side=LONG&symbol={SYM}&act=off&confirm=1")).status, 502)
+            self.assertNotIn("tp_off", self.state()[KEY]); self.assertTrue(self.state()[KEY]["tp_resting"])
+        self._run(fail, armed=lines, clear=failing)
+
+        async def guarded(c):
+            self.assertEqual((await c.post(f"/api/manual-bracket/tp?side=LONG&symbol={SYM}&act=off&confirm=1")).status, 409)
+        self._run(guarded, armed={KEY: {**lines[KEY], "fired": "tp"}})
+        self._run(guarded, armed=ARMED)                                                  # 규칙 무장(선 아님)
 
 
 if __name__ == "__main__":

@@ -843,6 +843,7 @@ function armedEl(box) {
   h = document.createElement("div"); h.id = "lineArmed"; h.className = "lt lt-armed";
   h.innerHTML = '<div class="lt-zone up"></div><div class="lt-zone dn"></div><i class="lt-ln tp"></i><i class="lt-ln sl"></i><i class="lt-ln en"></i>'
     + '<button type="button" class="lt-tag tp" data-k="tp"></button><button type="button" class="lt-tag sl" data-k="sl"></button><span class="lt-tag en"></span>'
+
     + '<span class="lt-am-note" role="status" aria-live="polite"></span>';
   h.addEventListener("pointerdown", (e) => {
     e.stopPropagation();
@@ -889,11 +890,13 @@ function renderArmedLines() {
   const set = (sel, css) => { const n = h.querySelector(sel); if (n) Object.assign(n.style, css); return n; };
   h.classList.toggle("short", a.side === "SHORT"); h.classList.toggle("busy", !!(armedEdit && armedEdit.busy)); h.classList.toggle("locked", !!lineTool);
   set(".lt-zone.up", { left: x0 + "px", width: w + "px", top: Math.min(yT, yE) + "px", height: Math.abs(yE - yT) + "px" });
-  set(".lt-zone.dn", { left: x0 + "px", width: w + "px", top: Math.min(yS, yE) + "px", height: Math.abs(yE - yS) + "px" });
+  const slOff = !!a.b.sl_off, tpOff = !!a.b.tp_off;   // 2026-11-11 진입가 팝업에서 지운 선 -- 그 선·띠·꼬리표를 안 그린다
+  set(".lt-zone.up", { display: tpOff ? "none" : "" });
+  set(".lt-zone.dn", { left: x0 + "px", width: w + "px", top: Math.min(yS, yE) + "px", height: Math.abs(yE - yS) + "px", display: slOff ? "none" : "" });
   [["tp", tp], ["sl", sl]].forEach(([k, v]) => {
-    const y = Y(v), off = y < top ? "↑ " : y > bot ? "↓ " : "", d = v / en - 1;
-    set(`.lt-ln.${k}`, { left: L + "px", width: Rp - L + "px", top: clampY(y) + "px", opacity: off ? "0" : "" });
-    const tag = set(`.lt-tag.${k}`, { left: cx + "px", top: clampY(y) + "px" });
+    const y = Y(v), off = y < top ? "↑ " : y > bot ? "↓ " : "", d = v / en - 1, gone = k === "sl" ? slOff : tpOff;
+    set(`.lt-ln.${k}`, { left: L + "px", width: Rp - L + "px", top: clampY(y) + "px", opacity: off ? "0" : "", display: gone ? "none" : "" });
+    const tag = set(`.lt-tag.${k}`, { left: cx + "px", top: clampY(y) + "px", display: gone ? "none" : "" });
     // 2026-11-03 사용자 «이미 포지션 있는 진입 라벨이 큰 박스로 청산 프로파일을 가린다»(시안 B와 같은 소형): 금액만 · 가격·%는 툴팁
     const amt = qty ? `${d * sgn >= 0 ? "+" : "−"}$${Math.abs((v - en) * qty).toFixed(1)}` : `${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%`;
     // 2026-11-10 사용자 «롱 손절을 현재가 위(숏은 아래)로 놓으면 감시하다 peg 손절»: 지금가 반대쪽 손절 = «감시»(올라/내려 닿으면 peg 청산). 끄는 중엔 지금가로, 놓은 뒤엔 서버 sl_up 으로.
@@ -920,7 +923,7 @@ function renderArmedLines() {
   const note = h.querySelector(".lt-am-note"), e = armedEdit;
   note.textContent = e && e.busy ? "주문 수정 중…" : e && e.err ? `수정 실패 — ${e.err}`
     : e && e.okAt && Date.now() - e.okAt < 6000 ? (e.warn ? `수정됨 — ${e.warn}` : e.tpOk === false ? "수정됨 — 익절 지정가를 못 걸어 서버가 닿으면 닫습니다" : "수정됨")
-    : lineTool ? "선 주문 도구를 닫으면 들어간 선을 옮길 수 있습니다" : "";
+    : lineTool ? "선 주문 도구를 닫으면 들어간 선을 옮길 수 있습니다" : slOff || tpOff ? `${[slOff && "손절", tpOff && "익절"].filter(Boolean).join("·")} 없음 — 다시 켜기 = 진입가 라벨 팝업` : "";
   note.className = `lt-am-note${e && (e.err || e.warn) ? " bad" : ""}`;
   Object.assign(note.style, { left: x0 + 6 + "px", top: Math.min(bot - 14, yE + 16) + "px" });
   if (e && e.err && !e.errShownAt) e.errShownAt = Date.now();
@@ -930,6 +933,49 @@ function renderArmedLines() {
 //   평단·미실현 손익·청산가(강제청산) 거리 + 25/50/100% 청산 버튼. 버튼은 **새 경로가 아니라** 기존 청산 미리보기(manualExitPreview)를 열어 주문 패널의
 //   «확인» 두 번을 그대로 거친다(여기서 바로 주문이 나가지 않는다). 가격은 전부 USDT 환산(entryUsdt 의 basis).
 function entryPopClose() { el("entryPop")?.remove(); }
+// 2026-11-11 사용자 «손절선 지우기·익절선 지우기 버튼은 진입가 팝업에»: 선(SLTP)으로 들어간 포지션만. 두 번 눌러(5초 무장) 서버에 보낸다 -- 주문이 아니라 걸린 선을 끄는 것.
+//   손절 = /api/manual-bracket/disarm·rearm(선 손절은 거래소 스탑 없음 · 서버 감시만 끔/켬) · 익절 = /api/manual-bracket/tp?act=off|on(우리 익절 지정가만 지움 · 저장된 가격으로 다시 검).
+//   지운 선은 차트에 안 그린다 · 다시 켜기는 같은 자리. 청산 진행 중(fired)엔 못 누른다(서버도 409).
+let epLnArm = { k: "", t: 0 }, epLnBusy = false;
+function epLinesHtml(pos) {
+  const a = armedLinesNow();
+  if (!a || a.p !== pos && !(a.p.symbol === pos.symbol && String(a.p.side).toUpperCase() === String(pos.side).toUpperCase())) return "";
+  const btn = (k, off, offTxt, onTxt) => {
+    const id = `${k}:${off ? "on" : "off"}:${a.k}`, armed = epLnArm.k === id;
+    return `<button type="button" data-ln="${k}" data-act="${off ? "on" : "off"}" data-key="${escapeHtml(a.k)}" class="${armed ? "arm" : ""}"${a.b.fired || epLnBusy ? " disabled" : ""}`
+      + ` title="${off ? onTxt + " — 두 번 누르기" : offTxt + " — 서버 감시를 끄고 차트에서 지웁니다. 두 번 누르기"}">${armed ? "한 번 더" : off ? onTxt : offTxt}</button>`;
+  };
+  return `<div class="ep-ln" role="group" aria-label="걸린 선">`
+    + btn("sl", !!a.b.sl_off, "손절선 지우기", "손절선 다시 켜기") + btn("tp", !!a.b.tp_off, "익절선 지우기", "익절선 다시 걸기")
+    + `</div>${a.b.fired ? "<small>청산 진행 중 — 선을 못 바꿉니다</small>" : ""}`;
+}
+async function epLinePress(b) {
+  if (b.disabled || epLnBusy) return;
+  const k = b.dataset.ln, act = b.dataset.act, key = b.dataset.key, id = `${k}:${act}:${key}`;
+  const redraw = () => { const box = el("entryPop"), old = box && box.querySelector(".ep-ln"), pos = snapshotAccountPosition(); if (old && pos) { old.nextElementSibling?.tagName === "SMALL" && old.nextElementSibling.remove(); old.outerHTML = epLinesHtml(pos) || ""; } };
+  if (epLnArm.k !== id) {
+    clearTimeout(epLnArm.t);
+    epLnArm = { k: id, t: setTimeout(() => { epLnArm = { k: "", t: 0 }; redraw(); }, 5000) };
+    redraw(); return;
+  }
+  clearTimeout(epLnArm.t); epLnArm = { k: "", t: 0 }; epLnBusy = true; redraw();
+  const [symbol, side] = key.split(":"), q = `side=${encodeURIComponent(side)}&symbol=${encodeURIComponent(symbol)}&confirm=1`;
+  const url = k === "sl" ? `/api/manual-bracket/${act === "on" ? "rearm" : "disarm"}?${q}` : `/api/manual-bracket/tp?act=${act}&${q}`;
+  const what = `${k === "sl" ? "손절선" : "익절선"} ${act === "on" ? (k === "sl" ? "다시 켜기" : "다시 걸기") : "지우기"}`;
+  try {
+    const r = await (await fetch(url, { method: "POST", cache: "no-store" })).json();
+    if (r.ok) {   // 다음 계좌 조회 전까지 차트를 바로 맞춘다
+      const ba = (latestBinanceAccount?.bracket_armed || {})[key];
+      if (ba) { const f = k === "sl" ? "sl_off" : "tp_off"; if (act === "off") ba[f] = r[f] || r.sl_off || { at: Date.now() / 1000 }; else delete ba[f]; if (k === "tp" && "tp_resting" in r) ba.tp_resting = r.tp_resting; }
+      entryPopClose(); renderArmedLines();
+    }
+    ofabSay(r.ok ? `${what} 완료${k === "tp" && act === "on" && r.tp_resting === false ? " — 지정가를 못 걸어 서버가 닿으면 닫습니다" : ""}` : escapeHtml(`${what} 못 함: ${r.detail || r.error}`), r.ok ? "" : "bad");
+  } catch (err) {
+    ofabSay(escapeHtml(`${what} — 바뀌었는지 모릅니다(계좌 확인): ${err && err.message ? err.message : err}`), "bad");
+  } finally {
+    epLnBusy = false; redraw(); refreshBinanceAccount(true);
+  }
+}
 function entryPopOpen(x, y) {
   entryPopClose();
   const pos = snapshotAccountPosition(), cur = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
@@ -945,7 +991,7 @@ function entryPopOpen(x, y) {
     + `<dt>미실현</dt><dd class="${up >= 0 ? "good" : "bad"}">${sg(up)}$${Math.abs(up).toFixed(2)}</dd>`
     + `<dt>청산가</dt><dd>${liq > 0 ? `${lineFmt(liq)}${dist != null ? ` · ${dist.toFixed(1)}% 남음` : ""}` : "없음"}</dd></dl>`
     + `<div class="ep-btns">${[25, 50, 100].map((v) => `<button type="button" data-pct="${v}" aria-label="${v}% 청산"><i class="hold-fill" aria-hidden="true"></i><span>${v}%</span></button>`).join("")}</div>`
-    + `<small>누르면 바로 청산 주문이 나갑니다</small>`;
+    + `<small>누르면 바로 청산 주문이 나갑니다</small>` + epLinesHtml(pos);
   document.body.appendChild(d);
   const r = d.getBoundingClientRect();
   d.style.left = Math.max(8, Math.min(innerWidth - r.width - 8, x - r.width - 12)) + "px";
@@ -965,6 +1011,8 @@ function entryPopOpen(x, y) {
     if (b) { if (e.type === "pointerleave") { if (manualHoldLeave(b, e)) released = true; } else { released = true; manualHoldCancel(b); } }
   }, true));
   d.addEventListener("click", (e) => {
+    const ln = e.target.closest("button[data-ln]");
+    if (ln) { e.stopPropagation(); epLinePress(ln); return; }   // 단추를 다시 그려 대상이 문서에서 떨어진다 -- 문서의 «바깥 클릭 = 닫기»까지 안 올린다
     const b = e.target.closest("button[data-pct]");
     if (!b || !(touched || e.detail === 0) || manualOrderBusy) return;
     // 2026-11-04 사용자 «모바일에서 청산 50% 가 안 된다(3번 시도)»: 터치는 탭 → 미리보기 → 떠 있는 패널 맨 아래 «확인» 한 번 더였는데 패널이 열리며 가려져 주문이 안 나간 것으로 보였다.

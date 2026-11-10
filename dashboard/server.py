@@ -4755,6 +4755,7 @@ def make_app() -> web.Application:
     app.router.add_post("/api/manual-entry/limit-amend", lambda r: order_api.busy_or(order_api.api_manual_limit_amend, r))   # 2026-10-31 대기 지정가 진입 수정(선 끌기)
     app.router.add_post("/api/manual-bracket/disarm", order_api.api_manual_bracket_disarm)
     app.router.add_post("/api/manual-bracket/rearm", order_api.api_manual_bracket_rearm)
+    app.router.add_post("/api/manual-bracket/tp", lambda r: order_api.busy_or(order_api.api_manual_bracket_tp, r))   # 2026-11-11 익절선 지우기·다시 걸기(진입가 팝업)
     app.router.add_post("/api/manual-bracket/modify", lambda r: order_api.busy_or(order_api.api_manual_bracket_modify, r))   # 2026-10-29 선 끌어 주문 수정(주문 잠금 안에서)
     app.router.add_get("/api/manual-exit/preview", order_api.api_manual_exit_preview)
     app.router.add_post("/api/manual-exit/submit", lambda r: order_api.busy_or(order_api.api_manual_exit_submit, r))
