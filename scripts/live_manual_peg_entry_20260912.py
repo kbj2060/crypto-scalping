@@ -369,14 +369,17 @@ LINE_MIN_PCT, LINE_MAX_PCT = 0.0005, 0.15   # 선이 현재가에서 0.05% ~ 15%
 
 
 def line_bracket(*, position_side: str, ref_level: float, tp_level: float, sl_level: float, basis: float,
-                 filters: dict[str, float]) -> dict:
+                 filters: dict[str, float], sl_watch: bool = False) -> dict:
     """선 브래킷. **순수 함수**. 선(레벨) = USDT 차트 가격 · basis = 주문 심볼/USDT.
     익절 = 체결 직후 주문 심볼 post-only 지정가(place_bracket 의 tp_price) · 손절 = 서버가 1초 체결가로 닿음 판정 → peg 청산(거래소 스탑 없음)."""
     if not (ref_level > 0 and basis > 0 and tp_level > 0 and sl_level > 0):
         raise ValueError("선 가격이 없습니다")
     long_side = position_side == "LONG"
-    if not ((sl_level < ref_level < tp_level) if long_side else (tp_level < ref_level < sl_level)):
-        raise ValueError("롱은 익절선이 현재가 위·손절선이 아래, 숏은 반대여야 합니다")
+    # 2026-11-10 사용자 «롱 손절을 현재가보다 위로(숏은 아래로) 놓으면 가격 감시하다가 peg 손절»: sl_watch(들어간 포지션 선 수정)면 손절선이 지금가 어느 쪽이든 받는다 --
+    #   sl_up = 손절이 «올라 닿으면» 쏜다(롱 기본 False · 숏 기본 True · 반대쪽에 놓으면 뒤집힘). 익절은 그대로 수익 쪽이어야 한다.
+    sl_up = sl_level > ref_level if sl_watch else not long_side
+    if not ((ref_level < tp_level) if long_side else (tp_level < ref_level)) or not (sl_watch or ((sl_level < ref_level) if long_side else (ref_level < sl_level))):
+        raise ValueError("롱은 익절선이 현재가 위·손절선이 아래, 숏은 반대여야 합니다" if not sl_watch else "롱은 익절선이 현재가 위, 숏은 아래여야 합니다")
     # 2026-11-04 사용자 «규칙 손절폭 5% 를 SLTP 로 주문할 경우 제거»: 손절 상한이 규칙 손절폭(5%)이던 것을 익절과 같은 오조작 방지 범위(0.05~15%)로.
     #   🔴자동 2× 크기가 맞춰 준 «손절 시 손실 한도»는 이제 선 거리만큼 커진다(2× 크기에 손절 10% 면 계좌 −20%).
     for name, lv, hi in (("익절", tp_level, LINE_MAX_PCT), ("손절", sl_level, LINE_MAX_PCT)):
@@ -386,9 +389,15 @@ def line_bracket(*, position_side: str, ref_level: float, tp_level: float, sl_le
     tick = filters.get("tick") or 0.01
     tp = tp_level * basis   # 익절 지정가는 선보다 불리하지 않게(롱 올림 · 숏 내림)
     tp = round((math.ceil(tp / tick - 1e-9) if long_side else math.floor(tp / tick + 1e-9)) * tick, 8)
-    return {"available": True, "lines": True, "rule": False, "tp_price": tp, "tp_level": round(tp_level, 4),
+    return {"available": True, "lines": True, "rule": False, "tp_price": tp, "tp_level": round(tp_level, 4), "sl_up": sl_up,
             "sl_price": round(sl_level * basis, 8), "sl_level": round(sl_level, 4), "backstop_price": None,
             "sl_pct": round(100 * (sl_level / ref_level - 1), 2), "sl_name": f"선 손절 {sl_level:.2f}"}
+
+
+def sl_up_of(position_side: str, armed: dict) -> bool:
+    """손절이 «올라 닿으면» 쏘나. 숏 기본 · 롱 손절을 지금가 위에 옮긴 무장(sl_up True). 옛 무장·규칙 손절은 칸이 없거나 None -- 기본값."""
+    up = armed.get("sl_up")
+    return position_side != "LONG" if up is None else bool(up)
 
 
 def line_hit(position_side: str, armed: dict, touch: tuple[float, float] | None) -> str | None:
@@ -398,8 +407,8 @@ def line_hit(position_side: str, armed: dict, touch: tuple[float, float] | None)
         return None
     lo, hi = touch
     long_side = position_side == "LONG"
-    sl, tp = armed.get("sl_level"), armed.get("tp_level")
-    if sl and (lo <= sl if long_side else hi >= sl):
+    sl, tp, up = armed.get("sl_level"), armed.get("tp_level"), sl_up_of(position_side, armed)
+    if sl and (hi >= sl if up else lo <= sl):
         return "sl"
     if tp and not armed.get("tp_resting") and (hi >= tp if long_side else lo <= tp):
         return "tp"
@@ -416,7 +425,7 @@ def bracket_sl_hit(position_side: str, last_bar: tuple[float, float] | None, arm
     if not level or not last_bar or last_bar[0] <= since:
         return False
     close = last_bar[1]
-    return close <= level if position_side == "LONG" else close >= level
+    return close >= level if sl_up_of(position_side, armed) else close <= level
 
 
 def bracket_action(armed: dict, position_side: str, positions: list[dict], account_ok: bool,
@@ -455,7 +464,7 @@ def bracket_rekey(state: dict) -> dict:
     return out
 
 
-OWNED_BY_SAVED = ("sl_off", "tp_level", "tp_price", "sl_level", "sl_price", "sl_name", "watch_from", "mod", "placed")   # bracket_merge: 저장본이 주인인 칸
+OWNED_BY_SAVED = ("sl_off", "tp_level", "tp_price", "sl_level", "sl_price", "sl_name", "sl_up", "watch_from", "mod", "placed")   # bracket_merge: 저장본이 주인인 칸
 
 
 def bracket_merge(current: dict, mine: dict, seen_at: dict) -> dict:

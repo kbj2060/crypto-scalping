@@ -787,7 +787,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         무장 파일의 화면용 몇 칸만 얹는다(캐시된 계좌 payload 는 건드리지 않는다)."""
         if not isinstance(payload, dict):
             return payload
-        armed = {k: {f: v.get(f) for f in ("sl_price", "sl_name", "sl_off", "rule", "lines", "tp_level", "sl_level", "tp_resting")} for k, v in bracket_load().items()}
+        armed = {k: {f: v.get(f) for f in ("sl_price", "sl_name", "sl_off", "rule", "lines", "tp_level", "sl_level", "tp_resting", "sl_up")} for k, v in bracket_load().items()}
         # 2026-10-20 두 코인 보유(사용자): 손절 무장이 없는 열린 포지션 -- 화면이 «손절 없음»을 크게 말한다(10-20 XRP 가 조용히 무방비였다)
         unprotected = [k for k in (bracket_key(p.get("symbol"), str(p.get("side")).upper()) for p in payload.get("positions") or []
                                    if float(p.get("qty") or 0)) if not (armed.get(k) or {}).get("sl_price")]
@@ -1022,7 +1022,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                      "rule": bool(b.get("rule")), "sl_name": b.get("sl_name"),   # 2026-10-09 권고 규칙 손절 = 물타기해도 유지
                      # 2026-10-24 직접 진입도 같은 −5% 손절(rule True)이라 «자동 규칙 크기로 연 포지션»은 따로 남긴다 -- 계좌 3배 공유 상한(rule_shared)이 이것만 본다
                      "auto": bool(plan.get("rule")),
-                     "lines": bool(b.get("lines")), "tp_level": b.get("tp_level"),   # 2026-10-28 선: 1초 체결가 닿음 감시
+                     "lines": bool(b.get("lines")), "tp_level": b.get("tp_level"), "sl_up": b.get("sl_up"),   # 2026-10-28 선: 1초 체결가 닿음 감시 · sl_up = 올라 닿으면 손절(None = 측면 기본)
                      "tp_resting": bool(((state["bracket"] or {}).get("tp") or {}).get("placed")),   # 익절 지정가가 못 걸렸으면 닿을 때 서버가 peg 로
                      "armed_at": time.time(), "placed": state["bracket"], "add_order": add}
         bracket_save(st)
@@ -2177,7 +2177,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             basis, filters = await basis_for(book, asset), await load_filters(binance_session(), symbol)
             pts = sec_prices(asset) or []   # 5초 넘게 묵은 1초 체결가는 안 쓴다(검토 S6)
             ref = float(pts[-1][1]) if pts and time.time() - float(pts[-1][0]) <= 5 else (float(book["bidPrice"]) + float(book["askPrice"])) / 2 / basis   # 지금가(USDT) = 1초 마지막 체결 · 없으면 주문 심볼 중간가 ÷ basis
-            nb = line_bracket(position_side=side, ref_level=ref, tp_level=lines[0], sl_level=lines[1], basis=basis, filters=filters)
+            nb = line_bracket(position_side=side, ref_level=ref, tp_level=lines[0], sl_level=lines[1], basis=basis, filters=filters, sl_watch=True)
         except ValueError as exc:
             return web.json_response({"ok": False, "error": "bad_lines", "detail": str(exc)}, status=400)
         except Exception as exc:  # noqa: BLE001 -- 시세·필터를 못 읽으면 아무것도 안 바꾼다
@@ -2202,7 +2202,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 await clear_bracket(binance_session(), symbol, side)
             return web.json_response({"ok": False, "error": "rearmed", "detail": "그 사이 무장이 바뀌었거나 청산이 시작됐습니다 — 다시 확인하세요"}, status=409)
         cur = st[key]
-        cur.update(tp_level=nb["tp_level"], tp_price=nb["tp_price"], sl_level=nb["sl_level"], sl_price=nb["sl_price"], sl_name=nb["sl_name"],
+        cur.update(tp_level=nb["tp_level"], tp_price=nb["tp_price"], sl_level=nb["sl_level"], sl_price=nb["sl_price"], sl_name=nb["sl_name"], sl_up=nb["sl_up"],
                    watch_from=time.time(), mod={"at": time.time(), "tp": nb["tp_level"], "sl": nb["sl_level"]})
         if tp_moved:
             cur["tp_resting"] = bool((tp_res.get("tp") or {}).get("placed"))
@@ -2210,7 +2210,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         bracket_save(st)
         print(f"bracket {side}: 선 수정(사용자) 익절 {b.get('tp_level')}→{nb['tp_level']} 손절 {b.get('sl_level')}→{nb['sl_level']} · "
               f"익절 지정가 {'다시 걸음' if tp_moved else '그대로'} {tp_res and tp_res.get('tp')}", flush=True)
-        return web.json_response({"ok": True, "tp_level": nb["tp_level"], "sl_level": nb["sl_level"], "sl_price": nb["sl_price"], "tp_resting": cur.get("tp_resting"),
+        return web.json_response({"ok": True, "tp_level": nb["tp_level"], "sl_level": nb["sl_level"], "sl_price": nb["sl_price"], "sl_up": nb["sl_up"], "tp_resting": cur.get("tp_resting"),
                                   "tp": tp_res and tp_res.get("tp"), "warn": warn}, headers=NOCACHE)
 
     async def api_manual_limit_amend(request: web.Request) -> web.Response:

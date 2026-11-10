@@ -823,7 +823,7 @@ async function armedSubmit() {
     const d = await r.json().catch(() => ({}));
     if (r.ok && d.ok) {
       const b = (latestBinanceAccount?.bracket_armed || {})[e.key];   // 다음 계좌 조회 전까지 새 선을 그린다
-      if (b) Object.assign(b, { tp_level: d.tp_level, sl_level: d.sl_level, sl_price: d.sl_price, tp_resting: d.tp_resting });   // sl_price 도(진입가 환산 basis = sl_price/sl_level, 검토 S3)
+      if (b) Object.assign(b, { tp_level: d.tp_level, sl_level: d.sl_level, sl_price: d.sl_price, sl_up: d.sl_up, tp_resting: d.tp_resting });   // sl_price 도(진입가 환산 basis = sl_price/sl_level, 검토 S3)
       armedEdit = { key: e.key, okAt: Date.now(), tpOk: d.tp ? !!d.tp.placed : null, warn: d.warn || "" };
     } else armedEdit = { key: e.key, err: d.detail || d.error || `HTTP ${r.status}` };   // 선은 서버 값으로 돌아간다
   } catch (err) {
@@ -891,11 +891,13 @@ function renderArmedLines() {
     const tag = set(`.lt-tag.${k}`, { left: cx + "px", top: clampY(y) + "px" });
     // 2026-11-03 사용자 «이미 포지션 있는 진입 라벨이 큰 박스로 청산 프로파일을 가린다»(시안 B와 같은 소형): 금액만 · 가격·%는 툴팁
     const amt = qty ? `${d * sgn >= 0 ? "+" : "−"}$${Math.abs((v - en) * qty).toFixed(1)}` : `${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%`;
-    const st = k === "tp" ? (a.b.tp_resting ? "" : " · 서버 감시") : (a.b.sl_off ? " · 꺼짐" : "");
+    // 2026-11-10 사용자 «롱 손절을 현재가 위(숏은 아래)로 놓으면 감시하다 peg 손절»: 지금가 반대쪽 손절 = «감시»(올라/내려 닿으면 peg 청산). 끄는 중엔 지금가로, 놓은 뒤엔 서버 sl_up 으로.
+    const pN = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), up = ed && pN > 0 ? v > pN : a.b.sl_up == null ? a.side === "SHORT" : !!a.b.sl_up, watch = k === "sl" && up === (a.side === "LONG");
+    const st = k === "tp" ? (a.b.tp_resting ? "" : " · 서버 감시") : (a.b.sl_off ? " · 꺼짐" : watch ? " · 감시" : "");
     tag.classList.add("lt-mini");
     tag.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${off}${amt}${st}`;
-    tag.title = `${k === "tp" ? "익절" : "손절"} ${lineFmt(v)} (${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%)`;
-    tag.setAttribute("aria-label", `${k === "tp" ? "익절" : "손절"}선 ${lineFmt(v)} — 위아래로 끌어 놓으면 주문이 그 가격으로 바뀝니다`);
+    tag.title = `${k === "tp" ? "익절" : "손절"} ${lineFmt(v)} (${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%)${watch ? ` — 지금가 ${up ? "위" : "아래"} 손절: 가격이 ${up ? "올라" : "내려"} 닿으면 peg 로 청산` : ""}`;
+    tag.setAttribute("aria-label", `${k === "tp" ? "익절" : "손절"}선 ${lineFmt(v)}${watch ? ` · ${up ? "올라" : "내려"} 닿으면 청산` : ""} — 위아래로 끌어 놓으면 주문이 그 가격으로 바뀝니다`);
     tag.disabled = !!(armedEdit && armedEdit.busy);
   });
   set(".lt-ln.en", { left: x0 + "px", width: Rp - x0 + "px", top: yE + "px" });
