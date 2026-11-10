@@ -2287,6 +2287,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             # 2026-11-04 사용자 «대기 라벨에 taker 버튼»: 지정가 대기도 «지금 시장가» = 집행 루프가 걸린 주문을 취소 **확인한 뒤** 남은 수량만 시장가(run_entry_limit).
             #   시장가는 지금 호가에 체결되므로 익절·손절선이 그 가격 기준으로 아직 맞는지 진입과 같은 line_bracket 으로 다시 본다 -- 가격이 선을 넘어갔으면 시장가로 안 넣는다.
             if st.get("phase") != "working" or not (st.get("order_id") or st.get("stop")) or (st.get("stop") and st.get("triggered")) or st.get("pegged") or st.get("action"):   # 감시 진입은 닿기 전에만(닿은 뒤 = 따라가는 중 -- 따라가기는 market 을 안 받는다)
+                print(f"wait-action {action}: 거절 not_ready phase={st.get('phase')} order_id={st.get('order_id')} pegged={st.get('pegged')} action={st.get('action')}", flush=True)
                 return web.json_response({"ok": False, "error": "not_ready", "detail": "주문이 아직 걸리지 않았거나 이미 처리 중입니다", "wait": st}, status=409)
             try:
                 plan, symbol = st["plan"], st["plan"]["symbol"]
@@ -2296,13 +2297,16 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 ref = float(book["askPrice" if (plan["positionSide"] == "LONG") == (action == "market") else "bidPrice"]) / basis   # 체결될 쪽 호가(USDT): 시장가 = 반대편 · peg = 내 쪽
                 line_bracket(position_side=plan["positionSide"], ref_level=ref, tp_level=float(br["tp_level"]), sl_level=float(br["sl_level"]), basis=basis, filters=filters)
             except ValueError as exc:
+                print(f"wait-action {action}: 거절 lines_off {exc}", flush=True)
                 return web.json_response({"ok": False, "error": "lines_off", "detail": f"지금 호가 기준으로 익절·손절선이 맞지 않아 {'시장가' if action == 'market' else 'peg'}로 넣지 않습니다 — {exc}"}, status=409)
             except Exception as exc:  # noqa: BLE001 -- 시세를 못 읽으면 시장가를 내지 않는다(취소는 따로 된다)
+                print(f"wait-action {action}: 거절 quote_failed {type(exc).__name__}: {exc}", flush=True)
                 return web.json_response({"ok": False, "error": "quote_failed", "detail": f"{type(exc).__name__}: {exc}"}, status=502)
             if st.get("phase") != "working" or st.get("action"):   # 시세를 기다리는 사이 상태가 바뀌었다
                 return web.json_response({"ok": False, "error": "state_changed", "detail": "그 사이 주문 상태가 바뀌었습니다 — 다시 확인하세요"}, status=409)
         st.update(action=action, action_at=datetime.now(timezone.utc).isoformat(),
                   action_reason="사용자 취소" if action == "cancel" else None)
+        print(f"wait-action {action}: 접수 {st.get('asset')} {st.get('side')} order_id={st.get('order_id')}", flush=True)   # 2026-11-11 PEG 가 안 나간 원인을 로그로 못 갈랐다(접속 로그 없음)
         return web.json_response({"ok": True, "wait": st}, headers=NOCACHE)
 
     async def api_manual_entry_cancel(request: web.Request) -> web.Response:

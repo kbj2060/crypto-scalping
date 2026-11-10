@@ -558,8 +558,13 @@ async function lineTakerClick(e, a = "market") {
   const t = lineTool;
   if (!t || !t.placed || t.busy || !(t.entry > 0)) return;
   const now = Date.now();
-  if (!(now < (t.tkArm || 0)) || t.tkK !== a) { t.tkArm = now + TAKER_ARM_MS; t.tkAt = now; t.tkK = a; t.err = ""; renderLineTool(); setTimeout(renderLineTool, TAKER_ARM_MS + 50); return; }
-  if (e.detail > 1 || now - (t.tkAt || 0) < 400) return;   // 더블클릭·같은 탭이 두 번으로 읽히는 것은 확인이 아니다
+  if (a === "peg") {   // 2026-11-11 사용자 «PEG 한 번 누름»: 두 번 확인은 빠른 두 번째 누름을 조용히 버려 PEG 가 한 번도 안 나갔다(서버 로그 0건) -- 메이커·시장가 없음이라 지정가 걸기와 같은 한 번
+    if (e.detail > 1 || (t.tkK === a && now - (t.tkAt || 0) < 1500)) return;   // 더블클릭·연타의 두 번째는 같은 요청을 또 보내지 않는다(서버가 «이미 처리 중»으로 거절해 빨간 글이 뜬다)
+    t.tkK = a; t.tkAt = now;
+  } else {
+    if (!(now < (t.tkArm || 0)) || t.tkK !== a) { t.tkArm = now + TAKER_ARM_MS; t.tkAt = now; t.tkK = a; t.err = ""; renderLineTool(); setTimeout(renderLineTool, TAKER_ARM_MS + 50); return; }
+    if (e.detail > 1 || now - (t.tkAt || 0) < 400) return;   // 더블클릭·같은 탭이 두 번으로 읽히는 것은 확인이 아니다
+  }
   t.tkArm = 0; t.busy = true; t.err = ""; renderLineTool();
   let msg = "";
   try {
@@ -753,9 +758,9 @@ function renderLineTool() {
   en.classList.add("lt-mini"); en.classList.remove("lane"); en.style.width = "";
   // 🔴2026-11-04 펜 메모 «✕ 를 눌러도 한 번에 취소가 안 된다 · 여러 번 눌러야»: 가격이 틱마다 이 함수를 부르고, 같은 글을 innerHTML 로 다시 쓰면 ✕ 노드가 갈려
   //   마우스를 누른 사이 새 노드로 바뀐다 -- 클릭이 ✕ 가 아닌 부모로 가 취소가 안 나갔다(하네스 재현: 누름~뗌 사이 다시 그리기 1번 = 취소 0). 글이 바뀔 때만 쓴다.
-  const tkArmed = Date.now() < (t.tkArm || 0), pgArmed = tkArmed && t.tkK === "peg", mkArmed = tkArmed && t.tkK !== "peg";
+  const mkArmed = Date.now() < (t.tkArm || 0) && t.tkK !== "peg";
   const enH = `<span class="lt-grip" aria-hidden="true"></span>${side === "SHORT" ? "SHORT" : "LONG"}${t.add ? " 추가" : ""}${stp ? " 감시" : ""}${lim && t.placed ? " " + lineFmt(ref) : ""}`
-    + (lim && t.placed && !t.trig ? `<span class="lt-tkr pg${pgArmed ? " arm" : ""}" data-a="peg" role="button" tabindex="0" aria-label="${pgArmed ? "채워짐 = 한 번 더 누르면 지금 호가 peg 로 진입" : "지금 호가 peg 로 진입(maker)"}" title="걸린 지정가를 취소하고 남은 수량을 지금 최우선 호가 peg(메이커)로 따라갑니다 — 120초 · 남은 수량 버림 · 시장가 전환 없음 · 두 번 눌러 확인(첫 클릭 = 채워짐, 5초)">${t.busy && t.tkK === "peg" ? "…" : "PEG"}</span>` : "")
+    + (lim && t.placed && !t.trig ? `<span class="lt-tkr pg" data-a="peg" role="button" tabindex="0" aria-label="지금 호가 peg 로 진입(maker)" title="누르면 바로: 걸린 지정가를 취소하고 남은 수량을 지금 최우선 호가 peg(메이커)로 따라갑니다 — 120초 · 남은 수량 버림 · 시장가 전환 없음">${t.busy && t.tkK === "peg" ? "…" : "PEG"}</span>` : "")
     + (lim && t.placed && !t.trig ? `<span class="lt-tkr${mkArmed ? " arm" : ""}" role="button" tabindex="0" aria-label="${mkArmed ? "빨간색 = 한 번 더 누르면 시장가로 진입" : "지금 시장가로 진입(taker)"}" title="걸린 지정가를 취소하고 남은 수량을 시장가(테이커 4bp)로 진입 — 두 번 눌러 확인(첫 클릭 = 빨간색, 5초)">${t.busy && t.tkK !== "peg" ? "…" : "TAKER"}</span>` : "")
     + (lim && t.placed ? `<span class="lt-tx" role="button" tabindex="0" aria-label="지정가 주문 취소" title="주문 취소">✕</span>` : "");
   if (en._h !== enH) { en.innerHTML = enH; en._h = enH; }
