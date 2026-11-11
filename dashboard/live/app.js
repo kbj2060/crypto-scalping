@@ -739,8 +739,8 @@ function renderLineTool() {
     // 2026-11-03 사용자 «라벨이 커서 청산 프로파일이 안 보인다 · short +$1 처럼 포지션·수익금만»(시안 B): 금액만(수량을 아직 모르면 %). 가격·%는 선 위치·가격축·툴팁이 말한다.
     const amt = qShow ? `${qty ? "" : "≈"}${d * sgn >= 0 ? "+" : "−"}$${Math.abs(d * ref * qShow).toFixed(1)}` : `${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%`;
     tag.classList.add("lt-mini");
-    tag.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${off}${amt}`;
-    tag.title = `${k === "tp" ? "익절" : "손절"} ${lineFmt(v)} (${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%)`;
+    tag.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${off}${amt}${reachSpan(v)}`;
+    tag.title = `${k === "tp" ? "익절" : "손절"} ${lineFmt(v)} (${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%)${reachTitle(v)}`;
     tag.setAttribute("aria-label", `${k === "tp" ? "익절" : "손절"}선 ${lineFmt(v)} — 위아래로 끌어 옮기기`);
   });
   set(".lt-ln.en", { left: x0 + "px", width: Rp - x0 + "px", top: yP + "px" })?.classList.toggle("stop", stp);   // 감시 진입선 = 점선(닿아야 걸리는 선)
@@ -808,6 +808,15 @@ function renderLineTool() {
 //   진입가 기준 손절 한도(규칙 손절폭)를 검사하고 익절 지정가를 다시 건다. 실패하면 선을 서버 값으로 되돌리고 사유를 띄운다. 요청 중엔 못 끈다.
 //   진입가(USDC 주문 심볼) → 차트(USDT) = 진입가 ÷ basis, basis = 무장 손절 주문가 ÷ 손절 레벨(서버가 같은 basis 로 만든 값).
 let armedEdit = null, armedDrag = null;   // armedEdit = {key, tp, sl, busy, err, okAt} -- 끄는 중·보내는 중·결과
+// 2026-11-11 사용자 «청산 탭 데이터를 풋프린트에»: 24시간 안 닿을 확률(청산 탭 최대 고통과 같은 하루 σ·무작위 보행 · 1년 재현 예측 26.7% vs 실제 25.8%).
+//   SLTP·지지·저항 꼬리표에 붙인다 -- 거리를 확률로 바꾼 것일 뿐 방향 신호가 아니다. 데이터가 없으면(청산 탭 파일 전) 빈 글.
+function reach24(v) {
+  const p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), r = typeof window.liqReach === "function" ? window.liqReach(activeSnapshotAsset, v, p) : null;
+  return r ? Math.round(r.p * 100) : null;
+}
+const pctTxt = (r) => (r < 1 ? "<1%" : `${r}%`);   // 0% 는 «절대 안 닿음»으로 읽혀서
+const reachSpan = (v) => { const r = reach24(v); return r == null ? "" : `<span class="lt-rc">24h ${pctTxt(r)}</span>`; };
+const reachTitle = (v) => { const r = reach24(v); return r == null ? "" : ` · 24시간 안 닿을 확률 ${pctTxt(r)}(하루 변동성 · 무작위 보행 가정)`; };
 function armedBasis(b, dflt = 1) {   // 주문 심볼(USDC) ÷ 차트(USDT) -- 손절 → 익절 → 서버가 적은 basis
   return b.sl_price > 0 && b.sl_level > 0 ? b.sl_price / b.sl_level : b.tp_price > 0 && b.tp_level > 0 ? b.tp_price / b.tp_level : Number(b.basis) || dflt;
 }
@@ -903,7 +912,7 @@ function renderLineDraft() {
   Object.assign(h.querySelector(".lt-ln").style, { left: L + "px", width: R - L + "px", top: y + "px" });
   const tag = h.querySelector(".lt-tag");
   Object.assign(tag.style, { left: cx + "px", top: y + "px" });
-  tag.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${name} 초안 ${lineFmt(d.level)} · ${dPct >= 0 ? "+" : "−"}${Math.abs(dPct).toFixed(2)}%`;
+  tag.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${name} 초안 ${lineFmt(d.level)} · ${dPct >= 0 ? "+" : "−"}${Math.abs(dPct).toFixed(2)}%${reachSpan(d.level)}`;
   tag.setAttribute("aria-label", `${name}선 초안 ${lineFmt(d.level)} — 위아래로 끌어 놓으면 그 가격에 걸립니다`);
   tag.disabled = !!d.busy;
   Object.assign(h.querySelector(".lt-dx").style, { left: cx + tag.offsetWidth / 2 + 4 + "px", top: y + "px" });
@@ -1014,8 +1023,8 @@ function renderArmedLines() {
     const pN = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), up = ed && pN > 0 ? v > pN : a.b.sl_up == null ? a.side === "SHORT" : !!a.b.sl_up, watch = k === "sl" && up === (a.side === "LONG");
     const st = k === "tp" ? (a.b.tp_resting ? "" : " · 서버 감시") : (a.b.sl_off ? " · 꺼짐" : watch ? " · 감시" : "");
     tag.classList.add("lt-mini");
-    tag.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${off}${amt}${st}`;
-    tag.title = `${k === "tp" ? "익절" : "손절"} ${lineFmt(v)} (${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%)${watch ? ` — 지금가 ${up ? "위" : "아래"} 손절: 가격이 ${up ? "올라" : "내려"} 닿으면 peg 로 청산` : ""}`;
+    tag.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${off}${amt}${st}${reachSpan(v)}`;
+    tag.title = `${k === "tp" ? "익절" : "손절"} ${lineFmt(v)} (${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%)${reachTitle(v)}${watch ? ` — 지금가 ${up ? "위" : "아래"} 손절: 가격이 ${up ? "올라" : "내려"} 닿으면 peg 로 청산` : ""}`;
     tag.setAttribute("aria-label", `${k === "tp" ? "익절" : "손절"}선 ${lineFmt(v)}${watch ? ` · ${up ? "올라" : "내려"} 닿으면 청산` : ""} — 위아래로 끌어 놓으면 주문이 그 가격으로 바뀝니다`);
     tag.disabled = !!(armedEdit && armedEdit.busy);
   });
@@ -1037,8 +1046,8 @@ function renderArmedLines() {
       const amt = qty ? `${d * sgn >= 0 ? "+" : "−"}$${Math.abs((v - en) * qty * share).toFixed(1)}` : `${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%`;
       const watch = k === "sl" && (g.up == null ? a.side === "SHORT" : !!g.up) === (a.side === "LONG");
       const st = k === "tp" ? (g.merged ? " · 합침" : g.resting ? "" : " · 서버 감시") : (g.fired ? " · 청산 중" : watch ? " · 감시" : "");
-      tg.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${off}${amt} · ${pc_}%${st}`;
-      tg.title = `${name} ${i + 1} ${lineFmt(v)} (${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%) · 포지션의 ${pc_}%`
+      tg.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${off}${amt} · ${pc_}%${st}${reachSpan(v)}`;
+      tg.title = `${name} ${i + 1} ${lineFmt(v)} (${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%) · 포지션의 ${pc_}%${reachTitle(v)}`
         + (k === "tp" ? (g.merged ? " — 조각이 최소 주문보다 작아 다음 조각에 합쳐졌습니다" : g.resting ? "" : " — 지정가를 못 걸어 서버가 닿으면 닫습니다(전량)")
           : " — 닿으면 이 몫만 peg 로 청산(남은 손절선이 하나면 전량)");
       tg.setAttribute("aria-label", `${name}선 ${i + 1} ${lineFmt(v)} · ${pc_}% — 위아래로 끌어 놓으면 그 조각만 바뀝니다`);
@@ -3799,6 +3808,26 @@ function liqMapKnownUntilSec(map) {
   return Number.isFinite(t) ? Math.floor(t / 3600e3) * 3600 : Infinity;   // 모르면 아무것도 안 지운다
 }
 
+// 2026-11-11 1주·1달 최대 고통(청산 탭과 같은 ±0.5% 묶음 · 지도 7·30일 모델) -- 풋프린트 지지·저항(1일 지도)에 없는 긴 주기.
+//   화면 안 = 옅은 ±0.5% 띠 + 점선 · 화면 밖 = 가장자리 꼬리표 «1주 고통 3%↑»(priceLabels 규칙) · 1주·1달이 같은 구간(±0.35%)이면 하나로. 서술용.
+function painFarLevels() {
+  const cur = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), f = typeof window.liqPainFar === "function" ? window.liqPainFar(activeSnapshotAsset, cur) : null;
+  if (!f) return [];
+  const out = [];
+  [["1W", "1주"], ["1M", "1달"]].forEach(([k, nm]) => {
+    const q = f[k];
+    if (!q) return;
+    [[q.dn, "var(--liq-support)", "dn"], [q.up, "var(--liq-resistance)", "up"]].forEach(([z, color, sd]) => {
+      if (!z) return;
+      const same = out.find((o) => o.sd === sd && Math.abs(o.val / z.px - 1) <= 0.0035);
+      if (same) { same.label = same.label.replace("1주", "1주·1달"); return; }
+      out.push({ sd, val: z.px, color, label: `${nm} 고통 ${pctTxt(Math.round(z.p * 100))}`, priceLeft: true, dashed: true, width: 1, band: [z.px * 0.995, z.px * 1.005],
+                 title: `${nm} 최대 고통 구간 ${lineFmt(z.px * 0.995)}~${lineFmt(z.px * 1.005)} (${z.d >= 0 ? "+" : "−"}${Math.abs(z.d).toFixed(2)}%) · 24시간 안 닿을 확률 ${Math.round(z.p * 100)}% · 추정 · 서술용` });
+    });
+  });
+  return out;
+}
+
 function nearestLiquidationLevel() {
   // 게이지·서랍·가격 지형과 **같은 목록**(srLevelsLive: 현재가 쪽 · 아직 안 쓸린 · 가까운 순)의 첫 칸.
   // 2026-10-07 사용자 «가까운 지지1과 저항1은 보이게»: 더 가까운 한쪽만 그리던 것(08-24)을 **양쪽 다** 그린다 --
@@ -3812,7 +3841,8 @@ function nearestLiquidationLevel() {
   ].filter((c) => c.lv).map((c) => ({
     val: c.lv.price,
     color: c.color,
-    label: c.tag,
+    label: c.tag + (reach24(c.lv.price) != null ? ` ${pctTxt(reach24(c.lv.price))}` : ""),   // 2026-11-11 «지지1 58%» = 24시간 안 닿을 확률
+    title: reach24(c.lv.price) != null ? `24시간 안 닿을 확률 ${reach24(c.lv.price)}%(하루 변동성 · 무작위 보행 가정) · 방향 신호 아님` : "",
     priceLeft: true,   // 2026-09-26 사용자 지시: 지지/저항 가격은 오른쪽 배지가 아니라 왼쪽 이름 옆에
     dashed: true,
     width: Math.max(1, Math.min(4, Math.round(1 + (c.lv.weight_pct || 0) * 3))),
@@ -7063,7 +7093,7 @@ function renderSnapshotChart() {
   const candles = flowCut ? fullCandles.slice(s0, Math.min(len, Math.ceil(edge - 1e-6))) : fullCandles.slice(-SNAPSHOT_CHART_MAX_CANDLES);
   const view = flowCut && footprint ? { n, off: s0 - (edge - n) } : null;
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
-  const riskLevels = [...nearestLiquidationLevel(), ...trendFlipLevels(footprint, candles),
+  const riskLevels = [...nearestLiquidationLevel(), ...(footprint ? painFarLevels() : []), ...trendFlipLevels(footprint, candles),
 ];
   // 2026-09-21 사용자 요청: **풋프린트에도 청산 밀도 배경을 깐다**(전에는 청산맵 전용이었다).
   // 비용 걱정은 없다 -- liquidationDensityHistory() 가 payload 신원으로 memoize 돼 있어
@@ -7733,6 +7763,10 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   }
   (riskLevels || []).forEach((level) => {
     if (Number(level.val) > 0) priceLabels.push(level);
+    if (level.band) {   // 2026-11-11 최대 고통 ±0.5% 구간 = 옅은 띠(화면 안일 때만 · 격자 바로 위 층)
+      const ya = Math.max(mt, yAt(level.band[1])), yb = Math.min(plotBottom, yAt(level.band[0]));
+      if (yb - ya > 0.5 && yb - ya < (plotBottom - mt) * 0.35) bgI.push({ ...CV_ALL, p: (ctx) => cvRect(ctx, ml, ya, cw, yb - ya, level.color, 0.13) });   // 5분 창은 세로 범위가 ±0.5% 남짓 -- 띠가 화면을 덮으면 점선만
+    }
   });
 
   // Precompute clamped position/off-view state before sorting -- the liquidation-map overlay can

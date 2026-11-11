@@ -234,6 +234,17 @@
     };
     return { per: per, nest: { dn: nest("dn"), up: nest("up") } };
   }
+  // 2026-11-11 풋프린트용(app.js): 24시간 안 닿을 확률(위 reach, 하루 σ) · 1주/1달 최대 고통(실시간 가격으로 고른 봉우리)
+  window.liqReach = function (a, level, P) {
+    var E = allOf(a);
+    if (!E || !(E.sigma_d > 0) || !(level > 0) || !(P > 0)) return null;
+    var z = Math.abs(Math.log(level / P)) / E.sigma_d;
+    return { p: reach(z), z: z };
+  };
+  window.liqPainFar = function (a, P) {
+    var E = allOf(a), R = painOf(E, P);
+    return R ? { "1W": R.per["1W"], "1M": R.per["1M"], unit: E.unit } : null;
+  };
   var pullTxt = function (u) { return u == null ? "—" : "위 " + pc(u) + " : 아래 " + pc(1 - u); };
   CH.pain = function (el, w, h) {
     var E = allOf(asset()), P = price(), R = painOf(E, P); if (!R || !E.k3 || E.k3.length < 2) return null;
@@ -416,8 +427,9 @@
     if (document.hidden) return;
     if (S.asset !== asset()) return watchAsset();
     fetchData(false);   // ponytail: 탭이 꺼져도 기둥의 실측 탄력(beta) 때문에 파일 통째(압축 전 ~1MB, 10분마다) -- 무거우면 서버에 beta 만 주는 길을 낸다
+    fetchAll(false);    // 2026-11-11 풋프린트도 쓴다(24h 닿을 확률·1주/1달 최대 고통) -- 탭이 꺼져도 · ~30KB/10분
     if (!S.on) return;
-    fetchBars(false); fetchAll(false);
+    fetchBars(false);
     draw();
   }
   // 코인을 바꾼 순간: 옛 코인 숫자를 바로 지우고, 지도 7·30일은 응답이 늦으니 잠시 뒤 한두 번 더 그린다.
