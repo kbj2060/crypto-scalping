@@ -2378,7 +2378,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
 
     def check_lines(side: str, ref: float, basis: float, filters: dict, tp: float | None, sl: float | None) -> dict:
         """line_bracket(진입·수정과 같은 검사, sl_watch) 을 한쪽 선만으로도 -- 없는 쪽(None)은 늘 통과하는 자리(지금가 ±1%)를 넣고 그 칸은 호출부가 안 쓴다.
-        ponytail: 대역 값을 넣는 꼼수 -- 검사 규칙을 두 벌로 베끼지 않으려고. line_bracket 의 범위(0.05~15%)가 ±1% 를 빼면 여기도 바꾼다."""
+        ponytail: 대역 값을 넣는 꼼수 -- 검사 규칙을 두 벌로 베끼지 않으려고. line_bracket 의 범위(15% 안)가 ±1% 를 빼면 여기도 바꾼다."""
         up = side == "LONG"
         return line_bracket(position_side=side, ref_level=ref, basis=basis, filters=filters, sl_watch=True,
                             tp_level=tp if tp else ref * (1.01 if up else 0.99), sl_level=sl if sl else ref * (0.99 if up else 1.01))
@@ -2483,7 +2483,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
     async def api_manual_bracket_modify(request: web.Request) -> web.Response:
         """2026-10-29 사용자 «이미 들어간 SLTP 선은 풋프린트에 계속 · 선을 끌면 그대로 주문 수정». 선 무장(lines)만 -- 일반 진입의 −5% 거래소 스탑은 안 건드린다.
         익절 = 우리 post-only 지정가를 지우고 새 가격·포지션 전량으로 다시(place_bracket, 비상 스탑 없음) · 손절 = 서버 감시 레벨만(거래소 주문 없음).
-        검사 = 진입 때와 같은 line_bracket(지금가 기준 방향·거리 0.05~15%) -- 2026-11-04 진입가 기준 규칙 손절폭(5%) 한도는 뺐다.
+        검사 = 진입 때와 같은 line_bracket(지금가 기준 방향·거리 15% 안, 2026-11-11 최소 거리 없앰) -- 2026-11-04 진입가 기준 규칙 손절폭(5%) 한도는 뺐다.
         🔴익절 지우기가 실패하면 아무것도 안 바꾼다 · 지운 뒤 새 지정가를 못 걸면 tp_resting False(서버가 1초 닿음으로 닫는다 -- 무방비 아님) ·
         이미 쏜(fired) 무장은 거절 · watch_from = 지금(옮기기 전 지나간 가격으로 바로 닫지 않게). 방어 = 진입과 같다(POST + confirm=1 + 게이트 + 주문 잠금 busy_or)."""
         if request.query.get("confirm") != "1":

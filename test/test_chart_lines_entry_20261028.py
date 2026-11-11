@@ -77,7 +77,7 @@ class ChartLinesTest(unittest.TestCase):
             self.assertEqual((await get("&tp=2480&sl=2550"))[0], 400)        # 롱인데 익절이 아래
             self.assertEqual((await get("&tp=2550"))[0], 400)                # 하나만
             self.assertEqual((await get("&tp=abc&sl=2480"))[0], 400)
-            self.assertEqual((await get("&tp=2500.5&sl=2480"))[0], 400)      # 0.05% 안쪽
+            self.assertEqual((await get("&tp=2500.5&sl=2499.5"))[0], 200)    # 2026-11-11 현재가에 붙인 선(0.02%)도 받는다 -- 최소 거리 없앰
             self.assertEqual((await get("&tp=2550&sl=2300"))[0], 200)        # 2026-11-04 손절 8% -- 규칙 손절폭 5% 한도를 뺐다
             self.assertEqual((await get("&tp=2550&sl=2100"))[0], 400)        # 지금가에서 16% > 15% (오조작 방지 범위는 익절과 같다)
         self._run(fn)
@@ -333,6 +333,17 @@ class LineModifyTest(ChartLinesTest):
         self.assertEqual((b["tp_level"], b["sl_level"], b["tp_price"], b["tp_resting"]), (2560.0, 2490.0, 2560.0, True), b)
         self.assertGreaterEqual(b["watch_from"], o["t0"], "옮기기 전 가격으로 바로 닫지 않게")
         self.assertEqual(b["armed_at"], 1000.0, "무장 시각은 그대로(감시 틱 병합 기준)")
+
+    def test_lines_hugging_price_go_out_as_dragged(self) -> None:   # 2026-11-11 사용자 «현재가에 최대한 붙여도 끌어 놓은 곳으로 바로 지정가»
+        calls = []
+
+        async def place(_s, b, symbol, pside, **k):
+            calls.append(b["tp_price"])
+            return {"qty": 0.5, "cleared": {"cancelled": 1, "errors": []}, "tp": {"placed": True, "price": b["tp_price"]}, "placed": True}
+        o = self._mod("&tp=2500.05&sl=2499.95", place=place)   # 지금가 2500 에서 ±0.002%
+        self.assertEqual(o["status"], 200, o["body"])
+        self.assertEqual((calls, o["state"]["tp_level"], o["state"]["sl_level"]), ([2500.05], 2500.05, 2499.95), o["state"])
+        self.assertEqual(self._mod("&tp=2499.9&sl=2480")["status"], 400, "익절이 이미 지금가 너머(롱인데 아래)면 거절 -- 방향 검사는 남긴다")
 
     def test_move_sl_only_touches_no_exchange_order(self) -> None:
         o = self._mod("&tp=2550&sl=2470")   # place_bracket = _boom

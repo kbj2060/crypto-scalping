@@ -365,7 +365,9 @@ def rec_rule_bracket(b: dict, *, position_side: str, anchor_price: float, basis:
 
 
 # 2026-10-28 사용자 «차트 위 익절·손절 선 2개를 끌어 놓고 진입 → peg · 둘 다 메이커로 청산 · 닿으면 닫기 · 비상 스탑 없음 · 안전장치(peg 마감 뒤 시장가) 유지».
-LINE_MIN_PCT, LINE_MAX_PCT = 0.0005, 0.15   # 선이 현재가에서 0.05% ~ 15% -- 너무 가까우면 진입 직후 스프레드에 닿고, 먼 건 오조작
+# 2026-11-11 사용자 «현재가에 최대한 붙여도 끌어 놓은 곳으로 바로»: 최소 거리(0.05%)를 뺐다 -- 방향(익절 = 수익 쪽)과 상한(오조작 방지)만 본다.
+#   붙인 익절 지정가가 그 사이 호가를 넘으면 post-only 가 거절(5022) → tp_resting False → 서버가 1초 닿음으로 닫는다 · 붙인 손절은 스프레드·다음 틱에 바로 닿을 수 있다(사용자 선택).
+LINE_MAX_PCT = 0.15   # 선이 현재가에서 15% 넘게 먼 건 오조작
 
 
 def line_bracket(*, position_side: str, ref_level: float, tp_level: float, sl_level: float, basis: float,
@@ -380,12 +382,12 @@ def line_bracket(*, position_side: str, ref_level: float, tp_level: float, sl_le
     sl_up = sl_level > ref_level if sl_watch else not long_side
     if not ((ref_level < tp_level) if long_side else (tp_level < ref_level)) or not (sl_watch or ((sl_level < ref_level) if long_side else (ref_level < sl_level))):
         raise ValueError("롱은 익절선이 현재가 위·손절선이 아래, 숏은 반대여야 합니다" if not sl_watch else "롱은 익절선이 현재가 위, 숏은 아래여야 합니다")
-    # 2026-11-04 사용자 «규칙 손절폭 5% 를 SLTP 로 주문할 경우 제거»: 손절 상한이 규칙 손절폭(5%)이던 것을 익절과 같은 오조작 방지 범위(0.05~15%)로.
+    # 2026-11-04 사용자 «규칙 손절폭 5% 를 SLTP 로 주문할 경우 제거»: 손절 상한이 규칙 손절폭(5%)이던 것을 익절과 같은 오조작 방지 범위(15% 안)로.
     #   🔴자동 2× 크기가 맞춰 준 «손절 시 손실 한도»는 이제 선 거리만큼 커진다(2× 크기에 손절 10% 면 계좌 −20%).
     for name, lv, hi in (("익절", tp_level, LINE_MAX_PCT), ("손절", sl_level, LINE_MAX_PCT)):
         d = abs(lv / ref_level - 1)
-        if not LINE_MIN_PCT <= d <= hi:
-            raise ValueError(f"{name}선이 현재가에서 {100 * d:.2f}% — {100 * LINE_MIN_PCT:g}~{100 * hi:g}% 사이여야 합니다")
+        if d > hi:
+            raise ValueError(f"{name}선이 현재가에서 {100 * d:.2f}% — {100 * hi:g}% 안이어야 합니다")
     tick = filters.get("tick") or 0.01
     tp = tp_level * basis   # 익절 지정가는 선보다 불리하지 않게(롱 올림 · 숏 내림)
     tp = round((math.ceil(tp / tick - 1e-9) if long_side else math.floor(tp / tick + 1e-9)) * tick, 8)
@@ -1018,12 +1020,15 @@ def _self_check_rec_rule() -> None:
     assert lb["tp_price"] == 2548.76 and lb["sl_level"] == 2480.0 and lb["backstop_price"] is None and lb["lines"], lb
     ls = line_bracket(position_side="SHORT", ref_level=2500.0, tp_level=2450.0, sl_level=2520.0, basis=0.99951, filters=f3)
     assert ls["tp_price"] == 2448.79, ls
-    for bad in ({"tp_level": 2480.0, "sl_level": 2550.0}, {"tp_level": 2500.5, "sl_level": 2480.0}, {"tp_level": 3000.0, "sl_level": 2480.0}):
+    for bad in ({"tp_level": 2480.0, "sl_level": 2550.0}, {"tp_level": 2500.0, "sl_level": 2480.0}, {"tp_level": 3000.0, "sl_level": 2480.0}):
         try:
             line_bracket(position_side="LONG", ref_level=2500.0, basis=1.0, filters=f3, **bad)
             raise AssertionError(bad)
         except ValueError:
             pass
+    near = line_bracket(position_side="LONG", ref_level=2500.0, tp_level=2500.01, sl_level=2499.99, basis=1.0, filters=f3)   # 2026-11-11 현재가에 붙인 선(0.0004%)도 받는다
+    assert (near["tp_price"], near["sl_level"]) == (2500.01, 2499.99), near
+    assert line_bracket(position_side="LONG", ref_level=2500.0, tp_level=2550.0, sl_level=2500.0, basis=1.0, filters=f3, sl_watch=True)["sl_up"] is False   # 들어간 포지션: 손절을 현재가에 = 다음 틱에 닿음
     la = {"symbol": "ETHUSDC", "armed_at": 0.0, "lines": True, "sl_level": 2480.0, "tp_level": 2550.0, "tp_resting": True}
     assert line_hit("LONG", la, (2479.9, 2551.0)) == "sl" and line_hit("LONG", la, (2481.0, 2560.0)) is None
     assert line_hit("LONG", {**la, "tp_resting": False}, (2481.0, 2550.0)) == "tp" and line_hit("LONG", la, None) is None
