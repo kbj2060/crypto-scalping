@@ -464,6 +464,13 @@ function lineFire() {   // 미리보기 → 오는 즉시 발주(manualFireOnPre
   else { manualFireOnPreview = true; manualEntryPreview(side, "entry", ov); }
   renderLineTool();   // peg 도 선은 서버가 받았다고 한 뒤(manualEntrySubmit)에 거둔다 -- 거절되면 사유를 이 팝업에 남긴다
 }
+// 화면 y(clientY) → 차트 가격(USDT). 플롯 밖으로 끌어도 같은 비율로 이어진다. 차트가 아직 없으면 null.
+function chartValAt(clientY) {
+  const svg = el("candleSvgSnapshot"), G = chartGeo, m = svg && svg.getScreenCTM();
+  if (!m || !G) return null;
+  return G.ymax - ((clientY - m.f) / m.d - G.mt) * (G.ymax - G.ymin) / (G.pb - G.mt);
+}
+const ARMED_TOUCH_HOLD_MS = 250;   // 2026-11-12 터치로 실주문 선(들어간 선·대기 지정가)을 옮기려면 이만큼 누른 뒤 끈다 -- 쓸다 걸린 손가락이 주문을 바꾸지 않게
 function lineToolEl(box) {
   let h = document.getElementById("lineTool");
   if (h || !box) return h;
@@ -483,7 +490,12 @@ function lineToolEl(box) {
     e.stopPropagation();   // 차트 끌기로 번지지 않게
     linePt = e.pointerType;
     const tag = e.target.closest(".lt-tx, .lt-tkr") ? null : e.target.closest(".lt-tag[data-k]"), go = e.target.closest(".lt-go");
-    if (tag && lineTool) { lineDrag = { k: tag.dataset.k, id: e.pointerId }; tag.setPointerCapture(e.pointerId); e.preventDefault(); }
+    if (tag && lineTool) {
+      // 2026-11-12 검토: 꼬리표가 플롯 끝에 고정(화면 밖 선)이면 손가락 절대 위치로 재 선이 튀었다 -- 잡은 순간의 «선 − 손가락 가격» 차이만큼 띄워 움직인 만큼만 옮긴다.
+      const k = tag.dataset.k, p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), lv = k === "en" ? lineRef(lineTool, p) : lineTool[k], v0 = chartValAt(e.clientY);
+      lineDrag = { k, id: e.pointerId, y0: e.clientY, t0: performance.now(), touch: e.pointerType === "touch", off: v0 == null || !(lv > 0) ? 0 : lv - v0 };
+      tag.setPointerCapture(e.pointerId); e.preventDefault();
+    }
     if (go && e.pointerType === "mouse" && !go.disabled) {   // 마우스 = 누르면 바로(HOLD_FIRE_MS = 0)
       if (!HOLD_FIRE_MS) lineFire();   // 즉시 모드
       else { go.classList.add("hold"); lineHold = setTimeout(() => { go.classList.remove("hold"); lineFire(); }, HOLD_FIRE_MS); }
@@ -491,10 +503,17 @@ function lineToolEl(box) {
   });
   h.addEventListener("pointermove", (e) => {
     if (!lineDrag || e.pointerId !== lineDrag.id || !lineTool) return;
-    const svg = el("candleSvgSnapshot"), G = chartGeo, m = svg && svg.getScreenCTM();
-    if (!m || !G) return;
-    const yv = (e.clientY - m.f) / m.d;   // 화면 → viewBox y(화면 밖으로 끌어도 같은 비율로 이어진다)
-    const v = Math.max(0.01, G.ymax - (yv - G.mt) * (G.ymax - G.ymin) / (G.pb - G.mt));
+    const G = chartGeo, v1 = chartValAt(e.clientY);
+    if (v1 == null) return;
+    const far = Math.abs(e.clientY - lineDrag.y0) > 3;
+    if (lineTool.placed && far && !lineDrag.moved && lineDrag.touch && performance.now() - lineDrag.t0 < ARMED_TOUCH_HOLD_MS) {   // 대기 지정가 = 실주문 -- 쓸다 걸린 손가락은 무시(들어간 선과 같은 규칙)
+      const hint = "선을 옮기려면 잠깐 누른 뒤 끄세요";
+      lineDrag = null; lineTool.err = hint; renderLineTool();
+      setTimeout(() => { if (lineTool?.err === hint) { lineTool.err = ""; renderLineTool(); } }, 3000);
+      return;
+    }
+    lineDrag.moved = lineDrag.moved || far;
+    const v = Math.max(0.01, v1 + lineDrag.off);
     if (lineDrag.k === "en") {   // 진입선: 롱 = 지금가 아래 지정가 · 위 감시 진입(숏은 거울) · 지금가 8px 안으로 끌면 peg 로 되돌림
       const p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), s = lineSide(lineTool, p), up = (s === "LONG" && v > p) || (s === "SHORT" && v < p);
       if (lineTool.placed) { if (s && up === !!lineTool.stopP && !lineTool.trig) lineTool.entry = v; }   // 대기 주문은 종류(지정가↔감시)도 peg 도 못 바꾼다 · 닿아 따라가는 중이면 그대로
@@ -503,7 +522,10 @@ function lineToolEl(box) {
     lineTool.plan = null; lineTool.arm = 0; linePrevSeq++; renderLineTool();
   });
   const end = (e) => {
-    if (lineDrag && e.pointerId === lineDrag.id) { lineDrag = null; renderLineTool(); if (lineTool?.placed) lineAmend(); else linePreview(); }   // 대기 주문 = 놓는 순간 서버에 주문 수정
+    if (lineDrag && e.pointerId === lineDrag.id) {   // 대기 주문 = 놓는 순간 서버에 주문 수정 -- 2026-11-12 검토: 안 움직인 탭(3px 안)은 보내지 않는다(basis 1틱 차이로 주문을 다시 걸어 순번을 잃었다)
+      const moved = lineDrag.moved; lineDrag = null; renderLineTool();
+      if (lineTool?.placed) { if (moved && e.type === "pointerup") lineAmend(); } else linePreview();
+    }
     clearTimeout(lineHold); h.querySelector(".lt-go")?.classList.remove("hold");
   };
   h.addEventListener("pointerup", end); h.addEventListener("pointercancel", end); h.addEventListener("pointerleave", end);
@@ -847,7 +869,8 @@ async function lineDraftSubmit() {
   d.busy = true; d.err = ""; renderArmedLines();
   const [symbol, side] = d.key.split(":"), name = d.leg === "sl" ? "손절" : "익절";
   try {
-    const r = await fetch(`/api/manual-bracket/add?side=${encodeURIComponent(side)}&symbol=${encodeURIComponent(symbol)}&leg=${d.leg}&level=${linePx(d.level)}&confirm=1`, { method: "POST", cache: "no-store" });
+    const pNow = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), slup = d.leg === "sl" && pNow > 0 ? `&slup=${d.level > pNow ? 1 : 0}` : "";   // 2026-11-12 손절 방향 = 놓은 순간 차트 기준
+    const r = await fetch(`/api/manual-bracket/add?side=${encodeURIComponent(side)}&symbol=${encodeURIComponent(symbol)}&leg=${d.leg}&level=${linePx(d.level)}${slup}&confirm=1`, { method: "POST", cache: "no-store" });
     const j = await r.json().catch(() => ({}));
     if (r.ok && j.ok) {
       const ba = latestBinanceAccount && (latestBinanceAccount.bracket_armed = latestBinanceAccount.bracket_armed || {});
@@ -937,7 +960,9 @@ async function armedSubmit() {
   const [sym, side] = e.key.split(":");
   try {
     const lp = (v) => (v > 0 ? linePx(v) : "1");   // 2026-11-11 지운 쪽(값 없음)은 서버가 무시한다 -- 검사용 양수 자리표
-    const r = await fetch(`/api/manual-bracket/modify?side=${encodeURIComponent(side)}&symbol=${encodeURIComponent(sym)}&tp=${lp(e.tp)}&sl=${lp(e.sl)}${e.tpi != null ? `&tpi=${e.tpi}` : ""}${e.sli != null ? `&sli=${e.sli}` : ""}&confirm=1`,
+    const pNow = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);   // 2026-11-12 손절을 끌었으면 놓은 순간 차트 지금가 기준 방향(위 = 올라 닿으면) -- 서버 지금가가 몇 초 늦어 뒤집히지 않게
+    const slup = e.k === "sl" && e.sl > 0 && pNow > 0 ? `&slup=${e.sl > pNow ? 1 : 0}` : "";
+    const r = await fetch(`/api/manual-bracket/modify?side=${encodeURIComponent(side)}&symbol=${encodeURIComponent(sym)}&tp=${lp(e.tp)}&sl=${lp(e.sl)}${slup}${e.tpi != null ? `&tpi=${e.tpi}` : ""}${e.sli != null ? `&sli=${e.sli}` : ""}&confirm=1`,
       { method: "POST", cache: "no-store" });
     const d = await r.json().catch(() => ({}));
     if (r.ok && d.ok) {
@@ -965,17 +990,28 @@ function armedEl(box) {
     const tag = e.target.closest(".lt-tag[data-k]"), a = armedLinesNow();
     if (!tag || !a || (armedEdit && armedEdit.busy) || lineTool) return;   // 진입 전 선 도구가 켜져 있으면 들어간 선은 못 끈다(꼬리표가 겹쳐 실주문을 잘못 고치지 않게, 검토 S4)
     const ti = tag.dataset.i != null ? Number(tag.dataset.i) : null, kk = tag.dataset.k, arr = a.b[`${kk}_legs`], leg = ti != null && Array.isArray(arr) ? arr[ti] : null;   // 분할 익절·손절 조각을 잡았다
-    armedEdit = { key: a.k, tp: kk === "tp" && leg ? leg.level : a.b.tp_level, sl: kk === "sl" && leg ? leg.level : a.b.sl_level,
-                  tpi: kk === "tp" && leg ? ti : null, sli: kk === "sl" && leg ? ti : null, y0: e.clientY };
+    armedEdit = { key: a.k, k: kk, tp: kk === "tp" && leg ? leg.level : a.b.tp_level, sl: kk === "sl" && leg ? leg.level : a.b.sl_level,
+                  tpi: kk === "tp" && leg ? ti : null, sli: kk === "sl" && leg ? ti : null, y0: e.clientY, t0: performance.now(), touch: e.pointerType === "touch" };
+    // 2026-11-12 검토: 꼬리표는 겹침 정리(휴대폰)·화면 밖 선(가장자리 고정)으로 선과 떨어져 있을 수 있다 -- 손가락 절대 위치로 재면 첫 움직임에 선이 그만큼 튀어 실주문이 바뀌었다.
+    //   잡은 순간의 «선 − 손가락 가격» 차이를 기억해 움직인 만큼만 옮긴다.
+    const v0 = chartValAt(e.clientY);
+    armedEdit.off = v0 == null ? 0 : armedEdit[kk] - v0;
     armedDrag = { k: tag.dataset.k, id: e.pointerId }; tag.setPointerCapture(e.pointerId); e.preventDefault();
   });
   h.addEventListener("pointermove", (e) => {
     if (!armedDrag || e.pointerId !== armedDrag.id || !armedEdit) return;
-    const svg = el("candleSvgSnapshot"), G = chartGeo, m = svg && svg.getScreenCTM();
-    if (!m || !G) return;
-    const yv = (e.clientY - m.f) / m.d;
-    armedEdit[armedDrag.k] = Math.max(0.01, G.ymax - (yv - G.mt) * (G.ymax - G.ymin) / (G.pb - G.mt));
-    armedEdit.moved = armedEdit.moved || Math.abs(e.clientY - armedEdit.y0) > 3;   // 3px 안쪽 = 누르기만(수정 안 함)
+    const v = chartValAt(e.clientY);
+    if (v == null) return;
+    const far = Math.abs(e.clientY - armedEdit.y0) > 3;   // 3px 안쪽 = 누르기만(수정 안 함)
+    if (far && !armedEdit.moved && armedEdit.touch && performance.now() - armedEdit.t0 < ARMED_TOUCH_HOLD_MS) {
+      // 2026-11-12 검토: 휴대폰에서 차트를 쓸다 손가락이 꼬리표에 걸리면 실주문 선이 옮겨졌다 -- 터치는 잠깐(0.25초) 누른 뒤 끌어야 옮긴다. 바로 쓸면 아무것도 안 바꾼다.
+      armedDrag = null;
+      armedEdit = { key: armedEdit.key, hint: "선을 옮기려면 잠깐 누른 뒤 끄세요", okAt: Date.now() };
+      renderArmedLines(); setTimeout(renderArmedLines, 3000);
+      return;
+    }
+    armedEdit[armedDrag.k] = Math.max(0.01, v + armedEdit.off);
+    armedEdit.moved = armedEdit.moved || far;
     renderArmedLines();
   });
   const end = (e) => {
@@ -1076,7 +1112,7 @@ function renderArmedLines() {
     ts.forEach((o) => { o.t.style.top = o.y + "px"; });
   }
   const note = h.querySelector(".lt-am-note"), e = armedEdit;
-  note.textContent = e && e.busy ? "주문 수정 중…" : e && e.err ? `수정 실패 — ${e.err}`
+  note.textContent = e && e.busy ? "주문 수정 중…" : e && e.err ? `수정 실패 — ${e.err}` : e && e.hint ? (Date.now() - e.okAt < 3000 ? e.hint : "")
     : e && e.okAt && Date.now() - e.okAt < 6000 ? (e.warn ? `수정됨 — ${e.warn}` : e.tpOk === false ? "수정됨 — 익절 지정가를 못 걸어 서버가 닿으면 닫습니다" : "수정됨")
     : lineTool ? "선 주문 도구를 닫으면 들어간 선을 옮길 수 있습니다" : slOff || tpOff ? `${[slOff && "손절", tpOff && "익절"].filter(Boolean).join("·")} 없음 — 추가 = 진입가 라벨 팝업` : "";
   note.className = `lt-am-note${e && (e.err || e.warn) ? " bad" : ""}`;

@@ -185,7 +185,7 @@ class CancelOnlyStopTest(unittest.TestCase):
 
 class TpLadderPlaceTest(unittest.TestCase):
     """2026-11-11 place_tp_ladder: 우리 익절만 지우고(strict) 무게대로 조각마다 GTX · 걸려 있던 조각이 목록에 없으면 체결로 보고 다시 안 건다. 거래소 = 가짜 signed."""
-    def _go(self, opens, cancel_err=False):
+    def _go(self, opens, cancel_err=False, gone_status="FILLED"):
         posted, seen = [], []
 
         async def fake_signed(_s, method, path, params, *_a, **_k):
@@ -194,6 +194,8 @@ class TpLadderPlaceTest(unittest.TestCase):
                 return [{"positionSide": "LONG", "positionAmt": "1.0"}]
             if method == "GET" and path == "/fapi/v1/openOrders":
                 return opens
+            if method == "GET" and path == "/fapi/v1/order":   # 2026-11-12 목록에 없는 조각 = 주문 상태를 직접 본다
+                return {"status": gone_status, "clientOrderId": params["origClientOrderId"]} if gone_status else {"__error__": "-2013 Order does not exist."}
             if method == "DELETE":
                 return {"__error__": "-1003"} if cancel_err else {}
             if method == "POST" and path == "/fapi/v1/order":
@@ -222,6 +224,13 @@ class TpLadderPlaceTest(unittest.TestCase):
         self.assertEqual(sorted((p["price"], p["quantity"], p["timeInForce"], p["side"]) for p in posted),
                          [(2550.0, 0.333, "GTX", "SELL"), (2700.0, 0.667, "GTX", "SELL")])            # 무게 1:2 · 합 = 포지션 전량
         self.assertTrue(all(p["newClientOrderId"].startswith("dbtpL") for p in posted))
+
+    def test_exchange_cancelled_leg_is_placed_again(self) -> None:   # 2026-11-12 검토: 거래소가 지운 조각(부분 청산 뒤)을 체결로 치고 영영 뺐다
+        for status in ("CANCELED", "EXPIRED", None):
+            out, posted, _ = self._go([{"orderId": 7, "clientOrderId": "dbtpLa"}], gone_status=status)
+            self.assertEqual([x["filled"] for x in out["legs"]], [False, False, False], status)
+            self.assertEqual(sorted(p["price"] for p in posted), [2550.0, 2600.0, 2700.0], status)
+            self.assertAlmostEqual(sum(p["quantity"] for p in posted), 1.0, places=6)
 
     def test_cancel_failure_places_nothing(self) -> None:
         out, posted, _ = self._go([{"orderId": 7, "clientOrderId": "dbtpLa"}], cancel_err=True)
@@ -313,7 +322,7 @@ class LinesSlOnlyTest(unittest.TestCase):
 
         async def fail(c):
             self.assertEqual((await c.post(f"/api/manual-bracket/tp?side=LONG&symbol={SYM}&act=off&confirm=1")).status, 502)
-            self.assertNotIn("tp_off", self.state()[KEY]); self.assertTrue(self.state()[KEY]["tp_resting"])
+            self.assertNotIn("tp_off", self.state()[KEY]); self.assertFalse(self.state()[KEY]["tp_resting"])   # 2026-11-12 취소 실패 = 일부 지워졌을 수 있어 «그대로»가 아니라 서버 감시
         self._run(fail, armed=lines, clear=failing)
 
         async def guarded(c):

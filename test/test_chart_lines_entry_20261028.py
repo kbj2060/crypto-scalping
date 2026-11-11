@@ -345,6 +345,17 @@ class LineModifyTest(ChartLinesTest):
         self.assertEqual((calls, o["state"]["tp_level"], o["state"]["sl_level"]), ([2500.05], 2500.05, 2499.95), o["state"])
         self.assertEqual(self._mod("&tp=2499.9&sl=2480")["status"], 400, "익절이 이미 지금가 너머(롱인데 아래)면 거절 -- 방향 검사는 남긴다")
 
+    def test_sl_direction_kept_when_only_tp_moves(self) -> None:   # 2026-11-12 검토: 이미 넘어간 손절(롱 2510 · 지금가 2500)이 익절 수정 한 번에 «올라 닿으면»으로 뒤집혔다
+        async def place(_s, b, symbol, pside, **k):
+            return {"qty": 0.5, "cleared": {"cancelled": 1, "errors": []}, "tp": {"placed": True, "price": b["tp_price"]}, "placed": True}
+        o = self._mod("&tp=2560&sl=2510", armed={"sl_level": 2510.0}, place=place)
+        self.assertEqual((o["status"], o["state"]["sl_up"]), (200, False), o["body"])
+
+    def test_sl_direction_from_where_user_dropped_it(self) -> None:   # 화면이 놓은 순간 차트 기준 방향(slup) -- 서버 지금가가 이미 넘어갔어도 «내려 닿으면»
+        self.assertIs(self._mod("&tp=2550&sl=2500.5&slup=0")["state"]["sl_up"], False)
+        self.assertIs(self._mod("&tp=2550&sl=2500.5")["state"]["sl_up"], True, "옛 화면(slup 없음) = 서버 지금가 기준 그대로")
+        self.assertIs(self._mod("&tp=2550&sl=2520&slup=1")["state"]["sl_up"], True, "롱 손절을 위로 = 감시형(11-10 사용자 기능) 유지")
+
     def test_move_sl_only_touches_no_exchange_order(self) -> None:
         o = self._mod("&tp=2550&sl=2470")   # place_bracket = _boom
         self.assertEqual(o["status"], 200, o["body"])
@@ -504,6 +515,24 @@ class TpLadderTest(ChartLinesTest):
         b = o["state"]
         self.assertEqual((len(b["tp_legs"]), b["tp_level"], b["tp_price"], b["tp_resting"]), (2, 2550.0, 2550.0, True), b)
 
+    def test_partial_cancel_hands_legs_to_server_watch(self) -> None:   # 2026-11-12 검토: 조각 하나 취소 실패 = 다른 조각은 이미 지워졌는데 «아무것도 안 바뀜» + 전부 resting 으로 남아 익절 무방비
+        out = {}
+
+        async def fake(_s, legs, symbol, pside):
+            return {"qty": 0.5, "placed": False, "reason": "옛 익절 정리 실패", "cleared": {"cancelled": 1, "errors": ["-2011 Unknown order sent."], "tp_open": ["dbtpL0", "dbtpL1"]}}
+
+        async def fn(c):
+            self._armed({"tp_price": 2550.0, "sl_price": 2480.0, **self.LEGS})
+            r = await c.post(f"/api/manual-bracket/tp-legs?kind=tp&act=weights&w=1,3&side=LONG&symbol={SYM}&confirm=1")
+            out["status"], out["body"] = r.status, await r.json()
+            out["state"] = json.loads((server.LIVE_DIR / "manual_bracket_state.json").read_text("utf-8"))[f"{SYM}:LONG"]
+        self._run(fn, acct=POS, place_tp_ladder=fake)
+        b = out["state"]
+        self.assertEqual((out["status"], out["body"]["error"]), (502, "tp_partial_cancel"), out["body"])
+        self.assertEqual((b["tp_resting"], [x["resting"] for x in b["tp_legs"]], [x["w"] for x in b["tp_legs"]]), (False, [False, False], [1.0, 1.0]), b)
+        from scripts.live_manual_peg_entry_20260912 import line_hit
+        self.assertEqual(line_hit("LONG", b, (2540.0, 2551.0)), "tp", "이제 서버가 닿으면 닫는다")
+
     def test_add_refusals(self) -> None:
         self.assertEqual(self._post("add?leg=tp&level=2551", {}, [])["body"]["error"], "same_level")
         four = {"tp_legs": [{"level": 2550.0 + 20 * i, "price": 2550.0 + 20 * i, "w": 1.0, "resting": True} for i in range(4)]}
@@ -642,6 +671,50 @@ class BracketMergeOwnershipTest(unittest.TestCase):
         fired = {k: {**mine[k], "fired": True, "tp_resting": False}}
         m = bracket_merge({k: {**cur[k], "tp_resting": True}}, fired, {k: 1.0})[k]
         self.assertTrue(m["fired"] and m["tp_resting"] is False, "틱이 쏘았으면 그 틱의 tp_resting")
+
+
+class WatcherOwnSymbolTest(unittest.TestCase):
+    """2026-11-12 검토: 지키던 USDC 롱이 이미 닫혔는데(30초 묵은 계좌엔 남음) 같은 쪽 USDT 롱이 있으면 감시 틱이 그 USDT 포지션을 닫았다 -- 무장한 심볼만 닫는다."""
+    def test_does_not_close_other_symbol(self) -> None:
+        mine, other = orders.MANUAL_EXEC_SYMBOLS["btc"], orders.MARKET_SYMBOLS["btc"]   # 주문 심볼 ≠ 시세 심볼인 코인(BTCUSDC · BTCUSDT)
+        p = POS["positions"][0]
+        stale = {**POS, "positions": [{**p, "symbol": mine}], "generated_at": "2000-01-01T00:00:00+00:00"}
+        fresh = {**POS, "positions": [{**p, "symbol": other, "qty": 3.0}]}
+        calls = []
+
+        async def fresh_acct(*_a, **_k):
+            return fresh
+
+        async def swr(_k, _ttl, _produce, **_kw):
+            return stale
+
+        async def clear(_s, symbol, _pside, *_a, **_k):
+            calls.append(("clear", symbol))
+            return {"cancelled": 0}
+
+        async def exit_(_s, plan, state):
+            calls.append(("run_exit", plan["symbol"]))
+            state.update(phase="filled_maker", filled=plan["quantity"], quantity=plan["quantity"])
+            return state
+
+        async def hist(_a):
+            return []
+
+        async def go():
+            with mock.patch.object(orders, "fetch_account", fresh_acct), mock.patch.object(orders, "produce_account", fresh_acct, create=True), \
+                 mock.patch.object(orders, "exec_enabled", lambda: True), \
+                 mock.patch.multiple(orders, clear_bracket=clear, run_exit=exit_, run_entry=_boom, place_bracket=_boom, place_add_order=_boom):
+                api = orders.register(account_trip_state={"seen": {}}, refresh_tasks={}, swr_locks={}, binance_session=lambda: None,
+                                      fetch_binance_json=_fake_binance, swr_cached=swr, _timed_produce=None, load_market_history=hist,
+                                      situation_by={}, NOCACHE={}, STALE_GRACE_SECONDS=60, sec_prices=lambda a: [(time.time(), 2495.0)])
+                (orders.LIVE_DIR / "manual_bracket_state.json").write_text(json.dumps({f"{mine}:LONG": {
+                    "symbol": mine, "side": "LONG", "lines": True, "sl_level": 2480.0, "tp_level": 2550.0, "tp_resting": False,
+                    "fired": True, "backstop_price": None, "armed_at": 1999.0}}), "utf-8")
+                await api.bracket_tick()
+        self.assertNotEqual(mine, other)
+        with _isolated_dirs():
+            asyncio.run(go())
+        self.assertNotIn(("run_exit", other), calls, calls)
 
 
 if __name__ == "__main__":

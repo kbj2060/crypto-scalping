@@ -35,7 +35,7 @@ from dashboard.worker_state import worker_payload
 from scripts.live_binance_account_20260910 import fetch_account  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     EXIT_VOL_WINDOW, bracket_action, bracket_key, bracket_merge, bracket_rekey, build_entry_plan, build_exit_plan, sl_legs_hit,
-    exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position,
+    exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position, sl_up_of,
     COMMIT_CAP_X, HOLD_CAP_X, RULE_STOP_PCT, TP_LEGS_MAX, commit_rule_l, line_bracket, rec_rule_add_order, rec_rule_bracket, rec_rule_size)   # 2026-10-09 자동 규칙 진입(재생 ×15.2 크기식) · 10-14 자동 물타기 지정가
 from live.execution.live_manual_peg_execute_20260912 import (  # noqa: E402
     FALLBACK_SEC, WAIT_CHOICES_MIN, cancel_wait_orphans, clear_bracket, commission_bp, margin_type, nap, place_add_order, place_bracket, place_stop, place_tp_ladder, run_entry, run_entry_limit, run_entry_stop, run_entry_wait, run_exit, wake_fills)
@@ -983,6 +983,9 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             if b.get("tp_legs") and not b.get("fired") and not b.get("tp_off") and key not in bracket_exiting:   # 2026-11-11 분할 익절 -- 조각 전부를 남은 수량 무게대로
                 r = await place_tp_ladder(binance_session(), b["tp_legs"], symbol, pside)
                 state["tp_rearm"] = {k: r.get(k) for k in ("qty", "placed", "reason")}
+                if (r.get("cleared") or {}).get("errors"):   # 2026-11-12 검토: 여기서 r["legs"] 가 없어 KeyError 로 조용히 끝났다(일부 조각만 지워진 채)
+                    tp_watch_only(key, b)
+                    return
                 st = bracket_load()
                 if "cleared" in r and key in st and st[key].get("armed_at") == b.get("armed_at"):
                     set_tp_legs(st[key], r["legs"])
@@ -1156,7 +1159,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                     continue
                 st2[key]["sl_legs"] = [{**x, "fired": True} if i in hit else x for i, x in enumerate(st2[key]["sl_legs"])]
                 bracket_save(st2)
-                plan, err = await assemble_exit_plan(pside, min(1.0, frac), fresh=True, asset=b_asset)
+                plan, err = await assemble_exit_plan(pside, min(1.0, frac), fresh=True, asset=b_asset, only_symbol=b["symbol"])
                 slot = exit_slot(b_asset)
                 if (bracket_load().get(key) or {}).get("sl_off") or manual_order_lock.locked() or slot is None:
                     continue
@@ -1208,7 +1211,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                     bracket_save(st2)
                 bracket_exiting.discard(key)
                 changed = True
-            plan, err = await assemble_exit_plan(pside, 1.0, fresh=True, asset=exec_asset_of(b["symbol"]) or "eth")
+            plan, err = await assemble_exit_plan(pside, 1.0, fresh=True, asset=exec_asset_of(b["symbol"]) or "eth", only_symbol=b["symbol"])
             # 🔴검사는 조립(await) **뒤**에 -- 그 사이 «손절 해제»나 사용자 청산이 들어오면 쏘지 않는다(남의 상태를 clear 하고 두 번 청산하지 않게)
             if (bracket_load().get(key) or {}).get("sl_off") and not (b.get("lines") and b.get("sl_off")):   # 선 무장이 이미 손절 없이 판단한 fire = 익절(위와 같음)
                 continue
@@ -1848,7 +1851,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         return pct / 100.0 if 0.0 < pct <= 100.0 else None
 
     async def assemble_exit_plan(position_side: str, fraction: float = 1.0,
-                                 fresh: bool = False, asset: str = "eth", market: bool = False, for_order: bool = False):
+                                 fresh: bool = False, asset: str = "eth", market: bool = False, for_order: bool = False, only_symbol: str | None = None):
         """청산 계획 조립. 진입과 같은 이유로 **여기 한 곳뿐**이다.
 
         for_order=True(실주문 제출 경로) = 화면 해설용 펀딩률·수수료율 조회를 건너뛴다(trade_plan 의 비용 칸만 비고 수량·가격·시장가 판단은 그대로).
@@ -1863,6 +1866,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         보내면 «없는 포지션을 닫는» 주문이 헤지 모드에서 **반대 방향 신규 진입**이 된다."""
         lap, t0 = {}, time.perf_counter()
         candidates = list(dict.fromkeys([MANUAL_EXEC_SYMBOLS[asset], MARKET_SYMBOLS[asset]]))   # 그 코인만(09-26)
+        if only_symbol:   # 2026-11-12 검토: 브래킷 감시는 무장한 심볼만 -- 지키던 USDC 포지션이 이미 닫혔는데 같은 쪽 USDT 포지션이 있으면 그걸 닫았다
+            candidates = [only_symbol]
         try:
             # 🔴실주문(fresh=True)은 30초 캐시를 **우회**한다. 헤지 모드라 reduceOnly 가 없어
             # 과청산 방어가 수량뿐인데, 그 수량이 30초 묵으면 방어가 30초 묵는다.
@@ -2206,8 +2211,9 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         """조각 목록을 무장에 쓴다. 옛 단일 칸(tp_level·tp_price = 가장 가까운 살아 있는 조각 · tp_resting = 전부 걸렸나)도 맞춘다 -- 선 수정 검사·추가 진입·화면이 그 칸을 읽는다.
         체결된 조각은 버리고, 살아 있는 조각이 하나면 tp_legs 를 지워 옛 단일 경로로 돌아간다(그 조각의 주문은 우리 dbtp 꼬리표라 단일 경로가 그대로 지우고 다시 건다)."""
         live = [{k: x.get(k) for k in ("level", "price", "w", "resting", "merged", "cid", "order_id", "qty")} for x in legs if not x.get("filled")]
-        if not live:
+        if not live:   # 2026-11-12 검토: 조각이 다 빠졌는데 tp_resting 이 True 로 남아 익절 주문도 서버 감시도 없었다 -- 포지션이 남았으면 마지막 익절선을 서버가 감시
             cur.pop("tp_legs", None)
+            cur["tp_resting"] = False
             return
         near = min(live, key=lambda x: x["level"] * (1 if cur.get("side") != "SHORT" else -1))
         cur.update(tp_level=near["level"], tp_price=near["price"], tp_resting=all(x.get("resting") or x.get("merged") for x in live))
@@ -2236,12 +2242,32 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         else:
             cur.pop("sl_legs", None)
 
+    def tp_watch_only(key: str, b: dict) -> bool:
+        """2026-11-12 검토: 우리 익절 지정가 취소가 **일부만** 됐을 수 있다(한 조각 취소 실패 = 대개 그 조각이 막 체결되는 중) -- 어느 게 남았는지 모르니
+        익절선(조각 포함)을 «거래소에 안 걸림»으로 바꿔 서버가 1초 닿음으로 닫게 한다. 레벨은 그대로. 무장이 바뀌었으면 손대지 않는다(False)."""
+        st = bracket_load()
+        cur = st.get(key)
+        if not cur or cur.get("armed_at") != b.get("armed_at"):
+            return False
+        cur["tp_resting"] = False
+        if cur.get("tp_legs"):
+            cur["tp_legs"] = [{**x, "resting": False} for x in cur["tp_legs"]]
+        cur.update(watch_from=time.time(), mod={"at": time.time(), "tp": cur.get("tp_level"), "sl": cur.get("sl_level"), "watch_only": True})
+        bracket_save(st)
+        print(f"bracket {cur.get('side')}: 익절 취소 일부 실패 → 익절선은 서버 감시로", flush=True)
+        return True
+
     async def ladder_apply(key: str, b: dict, symbol: str, side: str, legs: list[dict]) -> tuple[web.Response | None, dict | None]:
         """조각을 거래소에 다시 걸고 무장에 쓴다. 실패 = (오류 응답, None) -- 🔴키·포지션 조회 실패나 옛 익절 정리 실패면 아무것도 안 바꾼다.
         그 사이 무장이 바뀌었으면 방금 건 조각을 지운다(고아 방지)."""
         r = await place_tp_ladder(binance_session(), legs, symbol, side)
-        if "cleared" not in r or (r.get("cleared") or {}).get("errors"):
+        if "cleared" not in r:
             return web.json_response({"ok": False, "error": "tp_place_failed", "detail": f"익절 지정가를 못 바꿨습니다(아무것도 안 바뀜): {r.get('reason') or '?'}"}, status=502), None
+        if (r.get("cleared") or {}).get("errors"):   # 일부 조각은 이미 지워졌을 수 있다 -- «안 바뀜»이 아니다
+            tp_watch_only(key, b)
+            return web.json_response({"ok": False, "error": "tp_partial_cancel",
+                                      "detail": "익절 주문 정리가 일부 실패해 새로 걸지 않았습니다 — 기존 익절선은 이제 서버가 닿으면 닫습니다(거래소에 익절 주문이 일부 남았을 수 있으니 확인하세요): "
+                                      + "; ".join(map(str, r["cleared"]["errors"]))}, status=502), None
         st = bracket_load()
         if key not in st or st[key].get("armed_at") != b.get("armed_at") or st[key].get("fired") or key in bracket_exiting:
             if any(x.get("resting") for x in r.get("legs") or []):
@@ -2334,9 +2360,10 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         res: dict = {}
         if act == "off":
             r = await clear_bracket(binance_session(), symbol, side, only_tp=True)
-            if r.get("errors"):
+            if r.get("errors"):   # 2026-11-12 검토: 조각 몇 개는 지워졌을 수 있다 -- «그대로»가 아니라 서버 감시로 돌린다(익절선은 남는다)
+                tp_watch_only(key, b)
                 return web.json_response({"ok": False, "error": "cancel_failed",
-                                          "detail": f"거래소 익절 지정가 취소 실패 — 익절은 그대로입니다: {'; '.join(map(str, r['errors']))}"}, status=502)
+                                          "detail": f"거래소 익절 지정가 취소가 일부 실패했습니다 — 익절선은 남아 이제 서버가 닿으면 닫습니다(거래소에 익절 주문이 일부 남았을 수 있음): {'; '.join(map(str, r['errors']))}"}, status=502)
             res = {"tp_off": {"at": time.time(), "cancelled": int(r.get("cancelled") or 0)}, "tp_resting": False}
             if b.get("tp_legs"):   # 2026-11-11 분할 익절도 한 번에 -- 다시 켜면 가장 가까운 조각 하나(전량)로
                 st0 = bracket_load()
@@ -2376,12 +2403,22 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         ref = float(pts[-1][1]) if pts and time.time() - float(pts[-1][0]) <= 5 else (float(book["bidPrice"]) + float(book["askPrice"])) / 2 / basis
         return ref, basis, filters
 
-    def check_lines(side: str, ref: float, basis: float, filters: dict, tp: float | None, sl: float | None) -> dict:
+    def query_slup(request: web.Request) -> bool | None:
+        """2026-11-12 손절 «올라 닿으면 쏨» 여부 = 사용자가 선을 놓을 때 차트 지금가 기준(화면이 보낸다 · 없으면 None = 서버 지금가로)."""
+        v = request.query.get("slup")
+        return True if v == "1" else False if v == "0" else None
+
+    def check_lines(side: str, ref: float, basis: float, filters: dict, tp: float | None, sl: float | None, slup: bool | None = None) -> dict:
         """line_bracket(진입·수정과 같은 검사, sl_watch) 을 한쪽 선만으로도 -- 없는 쪽(None)은 늘 통과하는 자리(지금가 ±1%)를 넣고 그 칸은 호출부가 안 쓴다.
         ponytail: 대역 값을 넣는 꼼수 -- 검사 규칙을 두 벌로 베끼지 않으려고. line_bracket 의 범위(15% 안)가 ±1% 를 빼면 여기도 바꾼다."""
+        # 2026-11-12 검토 «손절 방향 뒤집힘»: 서버 지금가(1초 체결, 최대 5초 묵음)로 방향을 정하면 손절을 지금가 바로 옆에 놓는 순간 이미 넘어간 가격 기준으로
+        #   거꾸로(롱인데 «올라 닿으면») 저장돼 가격이 계속 빠져도 안 쏜다 -- 화면이 놓은 순간의 방향(slup)이 있으면 그걸 쓴다(이미 넘어간 손절 = 다음 틱에 쏜다).
         up = side == "LONG"
-        return line_bracket(position_side=side, ref_level=ref, basis=basis, filters=filters, sl_watch=True,
-                            tp_level=tp if tp else ref * (1.01 if up else 0.99), sl_level=sl if sl else ref * (0.99 if up else 1.01))
+        nb = line_bracket(position_side=side, ref_level=ref, basis=basis, filters=filters, sl_watch=True,
+                          tp_level=tp if tp else ref * (1.01 if up else 0.99), sl_level=sl if sl else ref * (0.99 if up else 1.01))
+        if sl and slup is not None:
+            nb["sl_up"] = slup
+        return nb
 
     async def api_manual_bracket_add(request: web.Request) -> web.Response:
         """2026-11-11 사용자 «손절/익절 라인 추가» -- 진입 팝업의 «추가»로 만든 초안 선을 끌어 놓으면 여기로 온다(leg=sl|tp · level = USDT 차트 가격).
@@ -2422,7 +2459,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             return web.json_response({"ok": False, "error": "no_position", "detail": "그 포지션을 계좌에서 못 찾았습니다"}, status=409)
         try:
             ref, basis, filters = await lines_quote(symbol, asset)
-            nb = check_lines(side, ref, basis, filters, level if leg == "tp" else None, level if leg == "sl" else None)
+            nb = check_lines(side, ref, basis, filters, level if leg == "tp" else None, level if leg == "sl" else None, query_slup(request))
         except ValueError as exc:
             return web.json_response({"ok": False, "error": "bad_lines", "detail": str(exc)}, status=400)
         except Exception as exc:  # noqa: BLE001 -- 시세·필터를 못 읽으면 아무것도 안 바꾼다
@@ -2512,11 +2549,13 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         tp_off, sl_off = bool(b.get("tp_off")), bool(b.get("sl_off"))   # 2026-11-11 지운 선(진입 팝업)은 검사·갱신하지 않는다 -- 옛 값이 범위를 벗어나 남은 선 수정까지 막지 않게
         try:
             ref, basis, filters = await lines_quote(symbol, asset)
-            nb = check_lines(side, ref, basis, filters, None if tp_off else lines[0], None if sl_off else lines[1])
+            nb = check_lines(side, ref, basis, filters, None if tp_off else lines[0], None if sl_off else lines[1], query_slup(request))
         except ValueError as exc:
             return web.json_response({"ok": False, "error": "bad_lines", "detail": str(exc)}, status=400)
         except Exception as exc:  # noqa: BLE001 -- 시세·필터를 못 읽으면 아무것도 안 바꾼다
             return web.json_response({"ok": False, "error": "quote_failed", "detail": f"{type(exc).__name__}: {exc}"}, status=502)
+        if not sl_off and not b.get("sl_legs") and abs(nb["sl_level"] - float(b.get("sl_level") or 0)) <= 1e-9:
+            nb["sl_up"] = sl_up_of(side, b)   # 2026-11-12 검토: 손절을 안 옮겼으면(익절만 끌기) 방향도 그대로 -- 이미 넘어간 손절이 익절 수정 한 번에 «반대로 닿으면»으로 뒤집혀 무력화됐다
         # 2026-11-04 사용자 «규칙 손절폭 5% 를 SLTP 로 주문할 경우 제거»: 진입가 기준 5% 한도 검사를 뺐다(선 거리 범위는 위 line_bracket 이 지금가 기준으로 본다)
         # 익절 레벨(USDT)이 그대로면 지정가를 안 건드린다 -- 주문가(USDC)끼리 비교하면 basis 가 1틱만 움직여도 손절만 옮긴 게 익절 재발주가 됐다(검토 F3)
         slegs = b.get("sl_legs")

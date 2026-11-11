@@ -327,8 +327,11 @@ async def place_tp_ladder(session, legs: list[dict], symbol: str, pside: str) ->
     from scripts.live_manual_peg_entry_20260912 import load_filters, split_tp_qty   # 함수 안 -- 이 모듈의 다른 진입점들과 같은 방식(순환 참조 피함)
     seen = cleared.get("tp_open")
     live = [dict(l) for l in legs]
-    for l in live:   # 걸려 있던 조각이 목록에 없다 = 체결됨
-        l["filled"] = bool(l.get("filled") or (seen is not None and l.get("resting") and l.get("cid") and l["cid"] not in seen))
+    for l in live:   # 걸려 있던 조각이 목록에 없다 = 체결 **또는** 거래소가 지움(부분 청산 뒤 닫는 쪽 주문 정리) -- 2026-11-12 검토: 없다고 체결로 치면 지워진 조각이 영영 빠졌다
+        l["filled"] = bool(l.get("filled"))
+        if not l["filled"] and seen is not None and l.get("resting") and l.get("cid") and l["cid"] not in seen:   # 그 주문 상태를 직접 본다(드묾 · 조각당 1회)
+            o = await signed(session, "GET", "/fapi/v1/order", {"symbol": symbol, "origClientOrderId": l["cid"]}, key, secret, offset)
+            l["filled"] = isinstance(o, dict) and o.get("status") == "FILLED"   # 못 읽음·취소·만료 = 남은 수량으로 다시 건다(체결이었다면 수량이 이미 줄어 있어 겹치지 않는다)
     todo = [l for l in live if not l["filled"]]
     filters = await load_filters(session, symbol)
     qs = split_tp_qty(qty, todo, filters, pside) if todo else []
