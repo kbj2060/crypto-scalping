@@ -1066,6 +1066,15 @@ function renderArmedLines() {
   enTag.title = `${a.side === "SHORT" ? "SHORT" : "LONG"} 진입 ${lineFmt(en)}${im > 0 && pNow > 0 && qty ? ` · 증거금 ${sg(upnl)}${Math.abs(100 * upnl / im).toFixed(1)}%` : ""} — 누르면 청산 메뉴`;
   enTag.innerHTML = `${a.side === "SHORT" ? "SHORT" : "LONG"}`
     + (pNow > 0 && qty ? ` <span class="lt-en-p ${pc}">${sg(upnl)}$${Math.abs(upnl).toFixed(2)}</span>` : "");
+  // 2026-11-11 사용자 «모바일 최적화»: 휴대폰은 진입·익절·손절(조각 포함) 꼬리표가 같은 세로줄 근처라, 화면 밖 선들이 끝에 모이면 겹쳤다 --
+  //   세로로 최소 간격만큼 떼어 놓는다(선은 제자리 · 위→아래 한 번 · 아래→위 한 번). 끄는 중엔 손가락을 따라가게 두지 않는다.
+  if (mob && !armedDrag) {
+    const ts = [...h.querySelectorAll(".lt-tag")].filter((t) => t.style.display !== "none" && t.style.top).map((t) => ({ t, y: parseFloat(t.style.top) })).sort((a, b) => a.y - b.y);
+    const GAP = 26, lo = top + 11, hi = bot - 11;
+    for (let i = 0; i < ts.length; i++) ts[i].y = Math.max(ts[i].y, lo, i ? ts[i - 1].y + GAP : lo);
+    for (let i = ts.length - 1; i >= 0; i--) ts[i].y = Math.min(ts[i].y, hi, i < ts.length - 1 ? ts[i + 1].y - GAP : hi);
+    ts.forEach((o) => { o.t.style.top = o.y + "px"; });
+  }
   const note = h.querySelector(".lt-am-note"), e = armedEdit;
   note.textContent = e && e.busy ? "주문 수정 중…" : e && e.err ? `수정 실패 — ${e.err}`
     : e && e.okAt && Date.now() - e.okAt < 6000 ? (e.warn ? `수정됨 — ${e.warn}` : e.tpOk === false ? "수정됨 — 익절 지정가를 못 걸어 서버가 닿으면 닫습니다" : "수정됨")
@@ -6648,7 +6657,7 @@ function renderChartPan() {
   if (!box) return;
   if (box.classList.contains("inrow")) { box.hidden = true; chartPanKey = ""; return; }   // 2026-11-02 사용자 펜 메모 «박스 안의 왼쪽 그래프 요약 표시는 제거» -- 넓은 화면 차트 위 줄. 휴대폰 머리 줄 것은 그대로
   const full = chartTfFull();
-  if (!full.length || !flowOn()) { box.hidden = true; chartPanKey = ""; return; }
+  if (!full.length || !flowOn() || isMobileChartMode()) { box.hidden = true; chartPanKey = ""; return; }   // 2026-11-11 사용자 «모바일에서 차트 네비게이터 제거» -- 휴대폰은 차트를 손가락으로 끌어 옮긴다
   box.hidden = false;
   const hist = full, n = hist.length;
   const eF = chartPanEdge(full), sF = Math.max(0, eF - chartWindowBars), live = chartPanEnd == null && !chartPanY && !chartPanRight;
@@ -9308,7 +9317,16 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     //   줄이 넘쳐 넘침 가드가 뒤쪽을 자르는데, 하필 그 뒤쪽이 «지지1» 처럼 이름 있는 것이었다
     //   (실측). 익명 레벨은 플롯 안의 선·꺾쇠가 이미 «어느 행인가»를 말한다.
     // 2026-10-10 풋프린트는 현재가가 차트 안(호가 띠 끝)에 있어 줄에서 뺀다 -- 그 자리로 지지·저항이 덜 잘린다.
-    priceLabels.filter((p) => p.label && !(footprint && p.label === "현재")).forEach((p) => {
+    // 2026-11-11 사용자 «모바일 최적화»: 꼬리표에 확률(«지지1 58%»)·최대 고통이 붙어 줄이 길어지자 위(먼 저항)부터 채우다 가까운 지지1 이 잘렸다 --
+    //   현재가에서 가까운 순으로 들어갈 만큼 고른 뒤 가격 순(위→아래)으로 싣는다 · 화면 밖 1주·1달 최대 고통은 뺀다(차트 안 선이 없고 가장 멀다).
+    const row = priceLabels.filter((p) => p.label && !(footprint && p.label === "현재") && !(p.band && p.outOfView));
+    const keep = new Set();
+    let est = 3;
+    row.slice().sort((a, b) => Math.abs(a.val - currentPrice) - Math.abs(b.val - currentPrice)).forEach((p) => {
+      const wEst = (`${p.label} ↑${fmtNum(p.val, pxDp())}`.length) * 6.4 + 9;
+      if (est + wEst <= w - 3) { keep.add(p); est += wEst; }
+    });
+    row.filter((p) => keep.has(p)).forEach((p) => {
       if (x > w - 30) return;
       const t = document.createElementNS(NS, "text");
       t.setAttribute("x", x); t.setAttribute("y", rowY);
