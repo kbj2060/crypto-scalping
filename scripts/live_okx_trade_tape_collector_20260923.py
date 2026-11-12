@@ -106,7 +106,7 @@ HTTP_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; crypto-scalping-collecto
 BUCKETS = {"ETH-USDT-SWAP": 0.1, "BTC-USDT-SWAP": 1.0, "SOL-USDT-SWAP": 0.01,
            "XRP-USDT-SWAP": 0.0001, "HYPE-USDT-SWAP": 0.001,
            "ZEC-USDT-SWAP": 0.05, "SNDK-USDT-SWAP": 0.05,
-           "SOXL-USDT-SWAP": 0.01}
+           "SOXL-USDT-SWAP": 0.01, "SKHYNIX-USDT-SWAP": 0.1, "MU-USDT-SWAP": 0.05}
 # 계약당 기초자산 수량. 하드코딩하는 이유는 바이낸스 수집기가 경계를 하드코딩한 이유와 같다 --
 # 쌓인 행의 뜻이 영원히 고정돼야 한다. 대신 시작할 때 REST 와 대조해서 «갈라진 순간» 에 뜬다.
 # 🔴XRP·HYPE(2026-09-26 추가)는 이 세션에서 거래소 REST 에 닿지 못해 **실측 전**이다. 그래서
@@ -115,7 +115,7 @@ BUCKETS = {"ETH-USDT-SWAP": 0.1, "BTC-USDT-SWAP": 1.0, "SOL-USDT-SWAP": 0.01,
 CT_VALS = {"ETH-USDT-SWAP": 0.1, "BTC-USDT-SWAP": 0.01, "SOL-USDT-SWAP": 1.0,
            "XRP-USDT-SWAP": 100.0, "HYPE-USDT-SWAP": 0.1,
            "ZEC-USDT-SWAP": 0.01, "SNDK-USDT-SWAP": 1.0,
-           "SOXL-USDT-SWAP": 1.0}   # 2026-11-01 OKX REST 실측(ctVal) · SOXL 은 11-02 실측(1주, 틱 0.01)
+           "SOXL-USDT-SWAP": 1.0, "SKHYNIX-USDT-SWAP": 1.0, "MU-USDT-SWAP": 1.0}   # 2026-11-01 OKX REST 실측(ctVal) · SOXL 은 11-02 실측(1주, 틱 0.01)
 
 FLUSH_SECONDS = 5.0
 VERIFY_SECONDS = 300.0

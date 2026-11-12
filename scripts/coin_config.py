@@ -108,4 +108,20 @@ COIN_CONFIG: dict[str, dict] = {
         "tail_risk_db_path": ROOT / "data" / "live" / "tail_risk_soxl.duckdb",
         "tail_risk_table": "tail_risk_1m_soxl",
     },
+    # 2026-11-13 사용자 «꾸준히 거래량 많은 주식 선물 2개 추가» -- 60일 평일 거래대금 중앙 SKHYNIX $11.6억(하위10% 5.3억) · MU $6.1억(하위10% 3.6억). soxl 과 같은 사정(전용 워커 없음·현물 없음).
+    "skhynix": {
+        "binance_symbol": "SKHYNIXUSDT",   # KR_EQUITY(SK하이닉스) -- 미국 상장 옵션이 없어 equity(CBOE 옵션) 아님
+        "microstructure_db_path": ROOT / "data" / "live" / "microstructure_skhynix.duckdb",
+        "microstructure_table": "microstructure_1m_skhynix",
+        "tail_risk_db_path": ROOT / "data" / "live" / "tail_risk_skhynix.duckdb",
+        "tail_risk_table": "tail_risk_1m_skhynix",
+    },
+    "mu": {
+        "binance_symbol": "MUUSDT",   # 마이크론
+        "equity": True,   # CBOE 옵션 체인 자동 수집·옵션 카드
+        "microstructure_db_path": ROOT / "data" / "live" / "microstructure_mu.duckdb",
+        "microstructure_table": "microstructure_1m_mu",
+        "tail_risk_db_path": ROOT / "data" / "live" / "tail_risk_mu.duckdb",
+        "tail_risk_table": "tail_risk_1m_mu",
+    },
 }

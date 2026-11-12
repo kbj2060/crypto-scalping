@@ -64,7 +64,7 @@ HOT_TAPE_DB = ROOT / "data" / "hot" / "binance_tape.sqlite"
 # 가격빈. 자산마다 틱과 가격대가 달라 한 값을 못 쓴다 -- 대략 «가격의 0.4bp» 로 맞췄다.
 BUCKETS = {"ethusdt": 0.1, "btcusdt": 1.0, "solusdt": 0.01, "xrpusdt": 0.0001, "hypeusdt": 0.001,
            "zecusdt": 0.05, "sndkusdt": 0.05,   # 2026-11-01 ZEC·SNDK(TradFi 주식) -- 가격의 0.4bp 쯤
-           "soxlusdt": 0.01}   # 2026-11-02 SOXL $80.8 -- 틱 0.01 이 이미 1.2bp 라 틱이 곧 칸
+           "soxlusdt": 0.01, "skhynixusdt": 0.1, "muusdt": 0.05}   # 2026-11-13 SKHYNIX $938 · MU $796 -- ~1bp(OKX 틱 SKHYNIX 0.1 과 맞춤)   # 2026-11-02 SOXL $80.8 -- 틱 0.01 이 이미 1.2bp 라 틱이 곧 칸
 WS_URL = "wss://fstream.binance.com/ws/{symbol}@trade"
 KLINES_URL = "https://fapi.binance.com/fapi/v1/klines"
 AGG_TRADES_URL = "https://fapi.binance.com/fapi/v1/aggTrades"
@@ -147,7 +147,10 @@ SIZE_BANDS_USD = {"solusdt": (7_500.0, 55_000.0), "xrpusdt": (3_400.0, 23_000.0)
                   #   ETH 대조군(1.3h)이 아카이브 값에서 ~5%p 벗어나 표본이 짧다 -- 평일 며칠 쌓이면 다시 잰다(바꾸면 size_bands_changed 가 시각을 남긴다).
                   "zecusdt": (1_000.0, 6_000.0), "sndkusdt": (1_000.0, 6_700.0),
                   # 2026-11-02 SOXL 잠정: 같은 정의로 aggTrades 6,000건(0.74h, 서버에서 측정)에 맞췄다. 표본이 짧다 -- 평일 며칠 쌓이면 다시 잰다.
-                  "soxlusdt": (3_900.0, 36_000.0)}
+                  "soxlusdt": (3_900.0, 36_000.0),
+                  # 2026-11-13 SKHYNIX·MU 잠정: aggTrades 6,000건(서버, 0.2~0.3h)의 같은 정의 금액을 같은 표본의 ETH 값(2,938/42,664)으로 나눠 ETH 경계에 곱했다
+                  #   (짧은 표본은 ETH 도 아카이브 값에서 크게 벗어나 그대로 못 쓴다 -- 평일 며칠 쌓이면 아카이브로 다시 잰다).
+                  "skhynixusdt": (1_800.0, 5_600.0), "muusdt": (1_700.0, 6_700.0)}
 
 
 def size_bands(symbol: str) -> tuple[float, float]:

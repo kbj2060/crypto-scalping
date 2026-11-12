@@ -14,7 +14,7 @@ def test_sndk_flow_spec():
 
 
 def test_sndk_coin_config_has_every_key():
-    assert set(COIN_CONFIG["sndk"]) == set(COIN_CONFIG["xrp"]) and COIN_CONFIG["sndk"]["binance_symbol"] == "SNDKUSDT"
+    assert set(COIN_CONFIG["sndk"]) - {"equity"} == set(COIN_CONFIG["xrp"]) and COIN_CONFIG["sndk"]["binance_symbol"] == "SNDKUSDT"
 
 
 def test_every_flow_asset_has_a_tab_button():
@@ -31,4 +31,15 @@ def test_soxl_flow_spec():
     assert s.symbol == "SOXLUSDT" and s.okx_inst == "SOXL-USDT-SWAP" and s.spot_url is None
     for tape in (BN_BUCKETS["soxlusdt"], OKX_BUCKETS["SOXL-USDT-SWAP"]):
         assert abs(s.bucket / tape - round(s.bucket / tape)) < 1e-9, (s.bucket, tape)
-    assert COIN_CONFIG["soxl"]["binance_symbol"] == "SOXLUSDT" and set(COIN_CONFIG["soxl"]) == set(COIN_CONFIG["xrp"])
+    assert COIN_CONFIG["soxl"]["binance_symbol"] == "SOXLUSDT" and set(COIN_CONFIG["soxl"]) - {"equity"} == set(COIN_CONFIG["xrp"])
+
+
+def test_skhynix_mu_flow_spec():
+    """2026-11-13 주식 선물 2종 추가 -- 현물 없음 · 칸이 바이낸스·OKX 테이프 칸의 정수배 · MU 만 CBOE 옵션(equity)."""
+    for a, sym in (("skhynix", "SKHYNIX"), ("mu", "MU")):
+        s = FLOW_SPECS[a]
+        assert s.symbol == f"{sym}USDT" and s.okx_inst == f"{sym}-USDT-SWAP" and s.spot_url is None
+        for tape in (BN_BUCKETS[f"{a}usdt"], OKX_BUCKETS[f"{sym}-USDT-SWAP"]):
+            assert abs(s.bucket / tape - round(s.bucket / tape)) < 1e-9, (a, s.bucket, tape)
+        assert set(COIN_CONFIG[a]) - {"equity"} == set(COIN_CONFIG["xrp"])
+    assert COIN_CONFIG["mu"].get("equity") and not COIN_CONFIG["skhynix"].get("equity")

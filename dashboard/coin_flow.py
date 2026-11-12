@@ -274,7 +274,9 @@ FLOW_SPECS = {"eth": _flow_spec("eth", FOOTPRINT_BUCKET, 2),
               # 2026-11-01 SNDK(TradFi 주식 선물): 칸 $0.2 = ETH 와 같은 상대 폭(~1.7bp, 11-01 $1,152) · 테이프 칸 0.05(바이낸스·OKX)의 4배 · 현물 없음
               "sndk": _flow_spec("sndk", 0.2, 2, spot=False),
               # 2026-11-02 SOXL(TradFi ETF 선물): 칸 $0.02 = ETH 와 같은 상대 폭(~2.5bp, $80.8) · 테이프 칸 0.01(바이낸스·OKX)의 2배 · 현물 없음
-              "soxl": _flow_spec("soxl", 0.02, 2, spot=False)}
+              "soxl": _flow_spec("soxl", 0.02, 2, spot=False),
+              # 2026-11-13 SKHYNIX($938)·MU($796): 칸 $0.2 ≈ 2.1~2.5bp(ETH 와 같은 상대 폭) · 테이프 칸(SKHYNIX 0.1 · MU 0.05, 바이낸스·OKX)의 정수배 · 현물 없음
+              "skhynix": _flow_spec("skhynix", 0.2, 2, spot=False), "mu": _flow_spec("mu", 0.2, 2, spot=False)}
 assert FLOW_SPECS["eth"].snapshot_path == FOOTPRINT_SNAPSHOT_PATH and FLOW_SPECS["eth"].spot_url == SPOT_WS_URL
 
 
