@@ -80,6 +80,7 @@
 
 - **SOXL(11-02, 사용자 «soxlusdt 선물 대시보드에 추가»)**: SNDK 와 같은 자리에 한 줄씩(위 목록 + `live_okx_trade_tape` `BUCKETS`·`CT_VALS` + 테이프 `BUCKETS`·`SIZE_BANDS_USD` + `multicoin_collectors` `COINS`·`TRADFI` + ctx `OI_SLOW`·`MARK`). 칸 $0.02(테이프 0.01의 2배) · 크기 구간 잠정 $3.9k/$36k(aggTrades 6,000건·0.74h) -- 평일에 다시 잰다 · 깊은 호가 diff 는 SNDK 만(`DEPTH_TRADFI`; **SOXL 은 11-03 수동으로 시작** §5-2) · 옵션 카드는 11-02 연결(CBOE 체인 SOXL 2,872계약 수신 확인 · `write_state` 를 종목별 병합으로 고침 · cron 인자 `SNDK SOXL` · app.js `optData` 표).
 
+- **SKHYNIX·MU(11-13, 사용자 «꾸준히 거래량 많은 주식 선물 2개»)**: 60일 평일 거래대금으로 골랐다(SKHYNIX 중앙 $11.6억·하위10% 5.3억 · MU 6.1억·3.6억, 서버 일봉 조회). SOXL 자리 그대로 + 🔴**`dashboard/orders.py` `MARKET_SYMBOLS`(시세 표)에도 넣어야 한다** — 서버 `DASHBOARD_ASSETS` 가 이 표에 없는 코인을 조용히 빼서 탭은 보이는데 ETH 봉이 그려졌다(553e99b0). 주문 표(`MANUAL_EXEC_SYMBOLS`)는 안 넣음 = 주문 막힘. 서버: 래스터 2 start(--only) · 묶음 3개 crontab 목록 sed + 감독자·자식 종료 후 같은 줄로 재기동 · 매니페스트 묶음 env 갱신 · ctx 자식만 재시작(백업 data/live/backups/*_20261113_skhynix_mu). 크기 구간은 짧은 표본을 ETH 같은 표본 값으로 나눠 환산한 잠정값. 미연결: 일봉 풋프린트 소급·호가벽 워커·청산 lake.
 - **주식 옵션은 자동(11-13, 사용자 «주식류는 이런식으로»)**: 새 주식 코인은 `scripts/coin_config.py` 에 `"equity": True` 만 넣으면 CBOE 수집기(cron 인자와 무관하게 equity 코인 전부)가 체인을 모으고 요약기가 옵션 카드(오늘 체결 · 거래량·평소 대비 · 풋/콜 비중 · 감마 노출 주요 레벨)를 채운다. app.js `optData` 는 표 없이 서버 묶음에 그 코인이 있으면 보인다. 평소 대비는 스냅샷이 2거래일 넘게 쌓인 뒤부터.
 
 ### 5-1. 주식·ETF 옵션 (11-01 조사, 사용자 «주식 옵션 데이터를 다른 소스로»)
