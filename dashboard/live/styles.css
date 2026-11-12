@@ -3091,9 +3091,8 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .pnl-tk[hidden] { display: none; }
 .pnl-tk .it { flex: none; display: grid; align-content: center; width: 132px; padding: 0 16px; }
 .pnl-tk .it + .it { border-left: 1px solid var(--line); }
-.pnl-tk .it { cursor: pointer; border-radius: 8px; }   /* 2026-11-12 펜 메모: 누르면 그 코인 탭으로 */
-.pnl-tk .it:hover { background: rgb(var(--lift) / .06); }
-.pnl-tk .it:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pnl-tk .it { cursor: pointer; }   /* 2026-11-12 펜 메모: 누르면 그 코인 탭으로 · 11-13 사용자 «버튼처럼 보여 이상» -- 바탕·모서리 없이 전광판 그대로(올리면 멈춤만) */
+.pnl-tk .it:focus-visible { outline: 1px dashed var(--muted); outline-offset: -1px; }
 .pnl-tk .it i { font: 600 11px/1.3 var(--font-sans); color: var(--muted); font-style: normal; letter-spacing: .02em; white-space: nowrap; }
 .pnl-tk .mq { overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 10px, #000 calc(100% - 10px), transparent); mask-image: linear-gradient(90deg, transparent, #000 10px, #000 calc(100% - 10px), transparent); }
 .pnl-tk .run { display: flex; width: max-content; animation: pnl-tk 6s linear infinite; }
