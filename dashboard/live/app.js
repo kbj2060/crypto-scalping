@@ -3646,16 +3646,12 @@ function renderPnlTicker() {
   const ps = ((latestBinanceAccount || {}).positions || []).filter((p) => Math.abs(Number(p.qty) || 0) > 0);
   const tr = box.parentElement.getBoundingClientRect(), l = slot && slot.getBoundingClientRect().right - tr.left + 28, r = title && title.getBoundingClientRect().left - tr.left - 28;
   if (!ps.length || !title || title.parentElement !== mid || !(r - l >= 160)) { box.hidden = true; return; }
-  box.hidden = false; box.style.left = `${Math.round(l)}px`; box.style.width = `${Math.round(r - l)}px`;
-  const su = (u) => `${u >= 0 ? "+" : "−"}$${Math.abs(u).toFixed(2)}`, run = box.firstElementChild;
-  const key = `${ps.map((p) => `${p.symbol}:${p.side}`).join("|")}@${Math.round((r - l) / 40)}`;
+  box.hidden = false; box.style.left = `${Math.round(l)}px`; box.style.maxWidth = `${Math.round(r - l)}px`;
+  // 2026-11-12 사용자 «종목이 복제되어 이상하다 -- 종목 칸 안에서 손익만 움직여야»: 종목 칸은 하나씩 제자리 · 칸 아래 손익 숫자만 칸 안에서 왼쪽으로 흐른다(같은 숫자 두 벌 −50% 이동)
+  const su = (u) => `${u >= 0 ? "+" : "−"}$${Math.abs(u).toFixed(2)}`, key = ps.map((p) => `${p.symbol}:${p.side}`).join("|");
   if (box.dataset.k !== key) {
     box.dataset.k = key;
-    const one = ps.map((p) => `<span class="it" data-s="${p.symbol}:${p.side}"><i>${acctCoin(p.symbol)} ${p.side === "LONG" ? "롱" : "숏"}</i><b>${su(tickerPnl(p))}</b></span>`).join("");
-    run.innerHTML = one;
-    const half = one.repeat(Math.max(1, Math.ceil((r - l) / Math.max(1, run.scrollWidth))));
-    run.innerHTML = half + half;   // 두 벌 = −50% 이동이 이음매 없이 돈다
-    run.style.animationDuration = `${Math.max(8, run.scrollWidth / 2 / 40).toFixed(1)}s`;   // 초당 40px
+    box.innerHTML = ps.map((p) => `<span class="it" data-s="${p.symbol}:${p.side}"><i>${acctCoin(p.symbol)} ${p.side === "LONG" ? "롱" : "숏"}</i><span class="mq"><span class="run"><b></b><b aria-hidden="true"></b></span></span></span>`).join("");
   }
   ps.forEach((p) => { const u = tickerPnl(p); box.querySelectorAll(`[data-s="${p.symbol}:${p.side}"] b`).forEach((b) => { b.textContent = su(u); b.className = u >= 0 ? "good" : "bad"; }); });
 }
