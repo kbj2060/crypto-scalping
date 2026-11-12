@@ -112,8 +112,10 @@ def events(levels: list[tuple[list, list]], taus: np.ndarray, cur: np.ndarray, s
 SHIFTS = (25e-4, -25e-4, 50e-4, -50e-4)   # 위약 = 진짜 레벨 묶음을 통째로 옮김(수명·개수 구조 보존) -- 파일럿에서 «거리 섞기»는 매 τ 새 레벨이라 닿음이 3배였다
 
 
-def placebo_levels(levels: list[tuple[list, list]], cur: np.ndarray, seed: int) -> list[tuple[list, list]]:
-    """seed 번째 이동(SHIFTS)만큼 같은 쪽 레벨을 옮긴다 -- 지금가의 맞은쪽으로 넘어가거나 진짜 레벨 ±0.15% 안에 떨어지면 뺀다."""
+def placebo_levels(levels: list[tuple[list, list]], cur: np.ndarray, seed: int, m5: tuple | None = None, taus: np.ndarray | None = None) -> list[tuple[list, list]]:
+    """seed 번째 이동(SHIFTS)만큼 같은 쪽 레벨을 옮긴다 -- 지금가의 맞은쪽으로 넘어가거나 진짜 레벨 ±0.15% 안에 떨어지면 뺀다.
+    2026-11-13 독립 검토(leak-auditor) 결함 1: 진짜 레벨은 [정시, τ) 에 이미 지나간 가격이 빠져 있는데(A1 = 화면 쓸림 필터, B = 지도 자체) 위약엔 그 필터가 없어
+    이미 다녀간 가격의 재닿음(버팀 낮음)이 위약에 섞여 X 를 부풀렸다 → m5·taus 를 주면 같은 필터를 건다(두 팔 모두)."""
     f = 1 + SHIFTS[seed % len(SHIFTS)]
     out = []
     for k, (sup, res) in enumerate(levels):
@@ -121,7 +123,8 @@ def placebo_levels(levels: list[tuple[list, list]], cur: np.ndarray, seed: int) 
         for s, lv in ((0, sup), (1, res)):
             real = np.array(lv)
             side.append([L * f for L in lv if ((L * f < cur[k]) if s == 0 else (L * f > cur[k]))
-                         and not (len(real) and (np.abs(real / (L * f) - 1) <= SAME).any())])
+                         and not (len(real) and (np.abs(real / (L * f) - 1) <= SAME).any())
+                         and not (m5 is not None and P.swept(m5, int(taus[k]) // 3600 * 3600, int(taus[k]), L * f))])
         out.append(tuple(side))
     return out
 
@@ -198,7 +201,8 @@ def run_coin(coin: str, d0: str, d1: str) -> dict:
     print(f"[{coin}] {d0}~{d1} τ {len(taus)} · 1m {len(k1)} · 청산 {len(liq)}", flush=True)
     arms = build(h1, m5, taus)
     real = {a: events(v, taus, cur, sig, k1, liq) for a, v in arms.items()}
-    plac = {a: pd.concat([events(placebo_levels(v, cur, s), taus, cur, sig, k1, liq) for s in range(N_PLACEBO)]) for a, v in arms.items()}
+    m5a = LM._bar_arrays(m5)
+    plac = {a: pd.concat([events(placebo_levels(v, cur, s, m5a, taus), taus, cur, sig, k1, liq) for s in range(N_PLACEBO)]) for a, v in arms.items()}
     out = {"coin": coin, "d0": d0, "d1": d1, "n_tau": int(len(taus)), "liq_n": int(len(liq)), "D_med_bp": round(float(np.nanmedian(sig)) * 1e4, 1)}
     for a in arms:
         rr, rp = real[a], plac[a]
@@ -235,6 +239,9 @@ def selftest() -> None:
     pl = placebo_levels([([99.0, 98.75], [101.0])], np.array([100.0]), 0)   # +25bp: 99→99.2475 · 98.75→98.997(진짜 99 ±0.15% 안 → 뺌) · 101→101.2525
     assert [round(x, 2) for x in pl[0][0]] == [99.25] and [round(x, 2) for x in pl[0][1]] == [101.25], pl
     pl = placebo_levels([([99.8], [])], np.array([100.0]), 2)                # +50bp: 99.8→100.299 은 지금가 위 → 뺌
+    assert pl[0][0] == [], pl
+    m5t = (np.array([3600]), {"low": np.array([99.0]), "high": np.array([99.5])})   # [3600, 3900) 봉이 99~99.5 를 지났다
+    pl = placebo_levels([([99.0], [])], np.array([100.0]), 0, m5t, np.array([3900]))   # +25bp → 99.2475 = 이번 시간에 이미 지나감 → 뺀다
     assert pl[0][0] == [], pl
     assert lifetime([([99.0], []), ([99.05], []), ([90.0], [])], 1) == 0.5
     assert sorted(run_lengths([([99.0], []), ([99.05], []), ([90.0], [])]).tolist()) == [1, 2]
