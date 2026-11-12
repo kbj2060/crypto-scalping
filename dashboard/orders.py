@@ -335,7 +335,8 @@ def record_account_trips(payload: dict, seen: dict[str, tuple[str, str, int, int
 POSITION_SIZING_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_position_sizing_state.json"
 POSITION_SIZING_MAX_AGE_MIN = 30.0         # 워커 주기 300초 x 6
 
-MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT", "sndk": "SNDKUSDT", "soxl": "SOXLUSDT"}   # 2026-11-02 TradFi 주식 선물 -- USDC 시장이 없어 주문도 USDT
+MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT", "sndk": "SNDKUSDT", "soxl": "SOXLUSDT",
+                  "skhynix": "SKHYNIXUSDT", "mu": "MUUSDT"}   # 2026-11-02 TradFi 주식 선물 -- USDC 시장이 없어 주문도 USDT · 11-13 SKHYNIX·MU 는 시세만(MANUAL_EXEC_SYMBOLS 에 없음 = 주문 막힘)
 # 2026-09-19 수동 진입이 나갈 심볼. **차트·시세·청산맵과 분리한다** -- MARKET_SYMBOLS 는
 # 화면 전체가 공유하므로 그걸 뒤집으면 데이터 출처까지 통째로 바뀐다.
 # ⭐왜 USDC 인가: 계정 실요율(/fapi/v1/commissionRate) ETHUSDT 메이커 2.0bp vs **ETHUSDC 0bp**.
