@@ -1303,7 +1303,41 @@ def make_app() -> web.Application:
         response.enable_compression()               # Accept-Encoding 에 맞춰 협상된다
         return response
 
-    app = web.Application(middlewares=[static_asset_headers, json_compress_etag])
+    # 2026-11-12 사용자 «기록만 남기기»: 02:45 SOXL 50% 청산이 누른 건지 가릴 수 없었다(접속 기록 없음) --
+    #   주문을 바꾸는 요청(POST /api/manual-*)마다 시각·경로·인자·결과·걸린 시간·기기(User-Agent)·접속 IP 를 한 줄씩 남긴다.
+    #   ponytail: 크기 회전 없음(하루 수십~수백 줄) -- 커지면 날짜별 파일로.
+    order_log = LIVE_DIR / "order_requests.jsonl"
+
+    @web.middleware
+    async def order_request_log(request: web.Request, handler: Any) -> web.StreamResponse:
+        if request.method != "POST" or not request.path.startswith("/api/manual-"):
+            return await handler(request)
+        t0, status, err = time.time(), 500, None
+        try:
+            response = await handler(request)
+            status = response.status
+            if isinstance(response, web.Response) and response.body is not None and len(response.body) < 20000:
+                try:
+                    j = json.loads(response.body)
+                    err = None if j.get("ok", True) else (j.get("error") or "")
+                except (ValueError, AttributeError):
+                    pass
+            return response
+        except web.HTTPException as exc:
+            status = exc.status
+            raise
+        finally:
+            row = {"at": datetime.fromtimestamp(t0, ZoneInfo("Asia/Seoul")).isoformat(timespec="milliseconds"), "path": request.path,
+                   "query": dict(request.query), "status": status, "error": err, "ms": round(1000 * (time.time() - t0)),
+                   "ua": request.headers.get("User-Agent", "")[:200],
+                   "ip": request.headers.get("CF-Connecting-IP") or request.headers.get("X-Forwarded-For") or request.remote}
+            try:
+                with order_log.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            except OSError as exc:
+                print(f"order_request_log: 못 씀 {exc}", flush=True)
+
+    app = web.Application(middlewares=[order_request_log, static_asset_headers, json_compress_etag])
     json_cache: dict[Path, tuple[tuple[int, int] | None, Any]] = {}
     event_clients: set[asyncio.Queue[str]] = set()
     latest_event_state: dict[str, Any] | None = None

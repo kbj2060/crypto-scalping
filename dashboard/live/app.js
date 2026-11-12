@@ -1298,13 +1298,13 @@ function entryPopOpen(x, y) {
   d.style.left = Math.max(8, Math.min(innerWidth - r.width - 8, x - r.width - 12)) + "px";
   d.style.top = Math.max(8, Math.min(innerHeight - r.height - 8, y - r.height / 2)) + "px";
   // 플로팅 청산 버튼과 같은 규약: 마우스 = 꾹(왼쪽→오른쪽 게이지, HOLD_FIRE_MS) · 터치·키보드 = 탭 → 미리보기 → 패널에서 확인
-  const side = String(pos.side).toUpperCase(), ovOf = (b) => ({ pct: Number(b.dataset.pct) });
+  const side = String(pos.side).toUpperCase(), ovOf = (b, pt) => ({ pct: Number(b.dataset.pct), src: `ep-${pt}` });   // src = 2026-11-12 주문 요청 기록(서버 order_requests.jsonl)에 «진입가 팝업·마우스/터치/키보드»
   let touched = false, released = false;
   d.addEventListener("pointerdown", (e) => {
     const b = e.target.closest("button[data-pct]");
     touched = e.pointerType === "touch";
     if (!b || touched || manualOrderBusy) return;
-    released = false; e.preventDefault(); ofabSetOpen(true); manualHoldStart(b, side, "exit", ovOf(b));
+    released = false; e.preventDefault(); ofabSetOpen(true); manualHoldStart(b, side, "exit", ovOf(b, "mouse"));
     setTimeout(() => { if (!released) entryPopClose(); }, HOLD_FIRE_MS + 60);   // 끝까지 눌렀으면(발주) 팝업을 닫는다
   });
   ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => d.addEventListener(ev, (e) => {
@@ -1320,7 +1320,8 @@ function entryPopOpen(x, y) {
     if (!b || !(touched || e.detail === 0) || manualOrderBusy) return;
     // 2026-11-04 사용자 «모바일에서 청산 50% 가 안 된다(3번 시도)»: 터치는 탭 → 미리보기 → 떠 있는 패널 맨 아래 «확인» 한 번 더였는데 패널이 열리며 가려져 주문이 안 나간 것으로 보였다.
     //   팝업 버튼 자체가 이미 «진입 라벨 탭 → 퍼센트 탭» 두 번이라 마우스처럼 바로 발주한다(서버 confirm=1·게이트·409 는 그대로). 결과는 열린 패널의 결과 칸이 말한다.
-    touched = false; entryPopClose(); ofabSetOpen(true); manualFireNow(side, "exit", ovOf(b));
+    const ov = ovOf(b, touched ? "touch" : "key");
+    touched = false; entryPopClose(); ofabSetOpen(true); manualFireNow(side, "exit", ov);
   });
 }
 (() => {
@@ -11525,7 +11526,7 @@ function manualEntryArmConfirm(side, plan, kind = "entry", ov = null) {
   manualEntryPending = { side, quantity: plan.quantity, kind, pct, asset: activeSnapshotAsset,
                          lev: ov?.lev ?? manualLevEffective(),
                          rule: kind === "exit" ? "" : (ov?.rule ?? manualRule()),
-                         fresh: !!ov?.fresh, sw: ov?.switch || null, tp: ov?.tp || "", sl: ov?.sl || "", limit: ov?.limit || "",
+                         fresh: !!ov?.fresh, sw: ov?.switch || null, tp: ov?.tp || "", sl: ov?.sl || "", limit: ov?.limit || "", src: ov?.src || "",
                          exec: kind === "exit" ? exitExecQuery(ov) : (ov?.limit ? "&mode=limit" + (ov.stop ? "&stop=1" : "") : ov?.tp ? "" : manualExecQuery()) };   // 2026-10-28 선 주문 = 따라가기(run_entry)만
   // 🔴2026-09-26 비평 P0 + 사용자 결정 «길게 누르면 바로 발주»: 0.4초를 채운 뒤 미리보기가 **늦게** 오면
   //   예전엔 확인 버튼이 떴다 -- 네트워크 속도에 따라 한 단계/두 단계가 갈렸다. 채움을 끝낸 사람은 이미
@@ -11781,7 +11782,7 @@ async function manualEntrySubmit() {
     const q = `&pct=${pending.pct ?? 100}`
       + (pending.kind === "exit" ? "" : (pending.lev ? `&lev=${pending.lev}` : ""))
       + (pending.kind !== "exit" && pending.rule ? `&rule=${pending.rule}` : "")
-      + (pending.fresh ? "&fresh=1" : "") + (pending.exec || "")
+      + (pending.fresh ? "&fresh=1" : "") + (pending.exec || "") + (pending.src ? `&src=${pending.src}` : "")
       + (pending.kind !== "exit" && pending.tp ? `&tp=${pending.tp}&sl=${pending.sl}` : "")   // 2026-10-28 차트 선 주문
       + (pending.kind !== "exit" && pending.limit ? `&limit=${pending.limit}` : "")   // 2026-10-31 지정가 대기(mode=limit 은 exec)
       // 2026-10-10 스위칭 = 서버 한 작업(청산 다 닫히면 서버가 반대 진입) -- 화면이 꺼져도 이어진다
@@ -11988,7 +11989,7 @@ function manualFireNow(side, kind = "entry", ov = null) {
   manualEntryPending = { side, kind, pct: ov?.pct ?? (kind === "exit" ? manualExitPct() : manualEntryPct()), asset: activeSnapshotAsset,
                          lev: ov?.lev ?? manualLevEffective(),
                          rule: kind === "exit" ? "" : (ov?.rule ?? manualRule()),
-                         fresh: !!ov?.fresh, sw: ov?.switch || null, tp: ov?.tp || "", sl: ov?.sl || "", limit: ov?.limit || "",
+                         fresh: !!ov?.fresh, sw: ov?.switch || null, tp: ov?.tp || "", sl: ov?.sl || "", limit: ov?.limit || "", src: ov?.src || "",
                          exec: kind === "exit" ? exitExecQuery(ov) : (ov?.limit ? "&mode=limit" + (ov.stop ? "&stop=1" : "") : ov?.tp ? "" : manualExecQuery()) };
   manualEntrySubmit();
 }
