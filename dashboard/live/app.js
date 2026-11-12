@@ -3647,7 +3647,9 @@ function renderPnlTicker() {
   const tr = box.parentElement.getBoundingClientRect(), l = slot && slot.getBoundingClientRect().right - tr.left + 28, r = title && title.getBoundingClientRect().left - tr.left - 28;
   if (!ps.length || !title || title.parentElement !== mid || !(r - l >= 160)) { box.hidden = true; return; }
   // 2026-11-12 사용자 «전광판 너비가 너무 길다 -- 종목 3개 정도»: 칸(132px) 셋 폭으로 고정. ponytail: 넷째 종목부터는 잘린다 -- 늘 넷 이상 들면 칸 폭을 줄이거나 칸끼리 넘기기
-  box.hidden = false; box.style.left = `${Math.round(l)}px`; box.style.width = `${Math.round(Math.min(r - l, 3 * 132))}px`;
+  //   사용자 «시장 열림·닫힘(세션)과 코인 이름 사이 가운데»: 상자를 그 틈 가운데에 · 칸도 상자 안 가운데(CSS justify-content)
+  const w = Math.min(r - l, 3 * 132);
+  box.hidden = false; box.style.left = `${Math.round((l + r - w) / 2)}px`; box.style.width = `${Math.round(w)}px`;
   // 2026-11-12 사용자 «종목이 복제되어 이상하다 -- 종목 칸 안에서 손익만 움직여야»: 종목 칸은 하나씩 제자리 · 칸 아래 손익 숫자만 칸 안에서 왼쪽으로 흐른다(같은 숫자 두 벌 −50% 이동)
   const su = (u) => `${u >= 0 ? "+" : "−"}$${Math.abs(u).toFixed(2)}`, key = ps.map((p) => `${p.symbol}:${p.side}`).join("|");
   if (box.dataset.k !== key) {
