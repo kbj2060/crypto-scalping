@@ -229,7 +229,9 @@
     var priceH = H - axisH - LANES.length * (laneH + gap) - 6;
     var lanes = {}, y = 6 + priceH + gap;
     LANES.forEach(function (l) { lanes[l[0]] = { y: y, h: laneH }; y += laneH + gap; });
-    return { W: W, H: H, L: L, R: R, plotW: W - L - R, top: 6, priceH: priceH, lanes: lanes, axisY: H - axisH, narrow: narrow };
+    // 2026-11-13 사용자 «1d 차트에도 오른쪽에 체결·델타 프로파일»: 플롯과 가격 눈금 사이 PW 칸(5분 차트 «체결 · 델타»와 같은 그림)
+    var PW = narrow ? 70 : 160;
+    return { W: W, H: H, L: L, R: R, PW: PW, plotW: W - L - R - PW, top: 6, priceH: priceH, lanes: lanes, axisY: H - axisH, narrow: narrow };
   }
 
   function clampView() {
@@ -281,7 +283,7 @@
     var g = cv.getContext("2d");
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, G.W, G.H);
-    var C = { good: css("--good"), bad: css("--bad"), turn: css("--turnover"), warn: css("--warn"), text: css("--text"),
+    var C = { good: css("--good"), bad: css("--bad"), turn: css("--turnover"), warn: css("--warn"), text: css("--text"), amber: css("--amber"), accent: css("--accent"),
               muted: css("--muted"), line: css("--line"), soft: css("--soft-line"), bg: css("--chart-bg") || "#171b23",
               mono: css("--font-mono") || "monospace", sans: css("--font-sans") || "sans-serif" };
     var D = S.D, bw = G.plotW / S.span;
@@ -294,7 +296,7 @@
     lo += S.yOff; hi += S.yOff;
     var yOf = function (p) { return G.top + (hi - p) / (hi - lo) * G.priceH; };
     var cellMode = bw >= cellMinPx(G), row = rowFor(lo, hi, G.priceH);
-    if (cellMode) scheduleCells(row, a, b);
+    if (cellMode || b - a < 399) scheduleCells(row, a, b);   // 프로파일은 줌과 무관하게 칸이 필요하다 · 서버 상한(400일) 넘으면 프로파일 생략
     scheduleHeat(row, a, b);   // 히트맵을 꺼도 받는다 -- «추정 청산 위·아래» 레인이 같은 데이터를 쓴다(그리기만 켜기/끄기)
     S.view = { G: G, a: a, b: b, lo: lo, hi: hi, bw: bw, row: row, cellMode: cellMode };
 
@@ -334,15 +336,71 @@
       g.setLineDash([]); g.globalAlpha = 1;
     }
     g.restore();
+    drawProfile(g, C, G, a, b, row, yOf);   // 플롯 잘라내기(G.L ~ G.L+plotW) 밖 칸이라 restore 뒤에
     var last = D.c[S.n - 1], lastY = last >= lo && last <= hi ? yOf(last) : -99;
     g.font = "600 12px " + C.sans; g.textAlign = "left"; g.textBaseline = "middle";
-    for (p = Math.ceil(lo / step) * step; p <= hi; p += step) if (Math.abs(yOf(p) - lastY) > 14) halo(g, C, px(p), G.L + G.plotW + 6, yOf(p), C.muted);
+    for (p = Math.ceil(lo / step) * step; p <= hi; p += step) if (Math.abs(yOf(p) - lastY) > 14) halo(g, C, px(p), G.L + G.plotW + G.PW + 6, yOf(p), C.muted);
     if (last >= lo && last <= hi) {                // 현재가 = 5분 차트처럼 상자 없이 굵은 숫자 + 바탕 외곽선
       g.font = "700 13px " + C.sans;
-      halo(g, C, px(last), G.L + G.plotW + 6, yOf(last), C.text);
+      halo(g, C, px(last), G.L + G.plotW + G.PW + 6, yOf(last), C.text);
     }
     drawDates(g, C, G, a, b, xOf, bw);
     legend(S.hover ? S.hover.i : S.n - 1);
+  }
+
+  // 보이는 봉 합산 가격대 프로파일 -- 가운데 선 왼쪽 = 체결(매수+매도, 주황 · 최다 행 테두리) · 오른쪽 = 델타(매수−매도, 초록 +/빨강 −) · 옅은 띠 = 체결 70% 가치 영역.
+  //   5분 차트(app.js «체결 · 델타»)와 같은 규약 -- 두 막대는 각자 최대값 기준(길이끼리 비교 안 함). 수량 = 코인 단위. 서술이지 신호가 아님.
+  function profAgg(a, b, row) {
+    var D = S.D, agg = new Map(), got = 0, i, j;
+    for (i = a; i <= b; i++) {
+      var cell = S.cells.get(row + "|" + D.d[i]);
+      if (cell === undefined) continue;          // 아직 안 받음
+      got++;
+      if (!cell) continue;
+      var k0 = Math.round(cell[0] / row);
+      for (j = 0; j < cell[1].length; j++) {
+        var bq = cell[1][j], sq = cell[2][j];
+        if (!(bq + sq)) continue;
+        var e = agg.get(k0 + j) || [0, 0];
+        e[0] += bq + sq; e[1] += bq - sq; agg.set(k0 + j, e);
+      }
+    }
+    var tot = 0, dMax = 0, pocK = null, sum = 0, kLo = Infinity, kHi = -Infinity;
+    agg.forEach(function (e, k) { sum += e[0]; if (e[0] > tot) { tot = e[0]; pocK = k; } dMax = Math.max(dMax, Math.abs(e[1])); kLo = Math.min(kLo, k); kHi = Math.max(kHi, k); });
+    var up = pocK, dn = pocK, acc = tot;            // 가치 영역 = 최다 행에서 위·아래 중 큰 쪽을 붙여 가며 70%
+    while (pocK != null && acc < 0.7 * sum && (up < kHi || dn > kLo)) {
+      var u = up < kHi ? (agg.get(up + 1) || [0])[0] : -1, d = dn > kLo ? (agg.get(dn - 1) || [0])[0] : -1;
+      if (u >= d) { up++; acc += Math.max(u, 0); } else { dn--; acc += Math.max(d, 0); }
+    }
+    return { agg: agg, got: got, n: b - a + 1, tot: tot, dMax: dMax, pocK: pocK, vaHi: up, vaLo: dn, row: row };
+  }
+  function drawProfile(g, C, G, a, b, row, yOf) {
+    if (!G.PW) return;
+    var x0 = G.L + G.plotW + 6, PW = G.PW - 12, mid = x0 + PW / 2, top = G.top, bot = G.top + G.priceH;
+    g.font = "700 " + (G.narrow ? 10 : 11) + "px " + C.sans; g.textAlign = "left"; g.textBaseline = "top";
+    S.prof = null;
+    if (b - a >= 399) { halo(g, C, G.narrow ? "400일↑" : "체결 · 델타 — 400일 넘음", x0, top + 2, C.muted); return; }
+    var P = profAgg(a, b, row);
+    S.prof = { P: P, x0: x0, x1: x0 + PW };
+    g.save(); g.beginPath(); g.rect(x0 - 2, top, PW + 4, G.priceH); g.clip();
+    if (P.tot > 0) {
+      var vaT = Math.max(top, yOf((P.vaHi + 1) * row)), vaB = Math.min(bot, yOf(P.vaLo * row));
+      if (vaB > vaT) { g.fillStyle = C.accent; g.globalAlpha = 0.07; g.fillRect(x0, vaT, PW, vaB - vaT); g.globalAlpha = 1; }
+      P.agg.forEach(function (e, k) {
+        var yT = Math.max(top, yOf((k + 1) * row)), yB = Math.min(bot, yOf(k * row));
+        if (yB - yT < 1) return;
+        var hh = Math.max(1, yB - yT - 1), ow = (PW / 2 - 1) * e[0] / P.tot, dw = P.dMax > 0 ? (PW / 2 - 1) * Math.abs(e[1]) / P.dMax : 0;
+        if (ow > 0.5) {
+          g.fillStyle = C.amber; g.globalAlpha = k === P.pocK ? 0.7 : 0.5; g.fillRect(mid - 1 - ow, yT + 0.5, ow, hh); g.globalAlpha = 1;
+          if (k === P.pocK) { g.strokeStyle = C.text; g.globalAlpha = 0.9; g.lineWidth = 1.2; g.strokeRect(mid - 1 - ow, yT + 0.5, ow, hh); g.globalAlpha = 1; }
+        }
+        if (dw > 0.5) { g.fillStyle = e[1] >= 0 ? C.good : C.bad; g.globalAlpha = 0.85; g.fillRect(mid + 1, yT + 0.5, dw, hh); g.globalAlpha = 1; }
+      });
+      g.strokeStyle = C.soft; g.lineWidth = 1; g.beginPath(); g.moveTo(Math.round(mid) + 0.5, top); g.lineTo(Math.round(mid) + 0.5, bot); g.stroke();
+    }
+    g.restore();
+    halo(g, C, G.narrow ? "체결·델타" : "체결 · 델타", x0, top + 2, C.muted);
+    if (P.got < P.n) { g.textBaseline = "bottom"; halo(g, C, "칸 받는 중 " + P.got + "/" + P.n, x0, bot - 2, C.muted); g.textBaseline = "top"; }
   }
 
   function drawCells(g, C, cell, row, x, bw, yOf, D, i) {
@@ -672,7 +730,17 @@
     var v = S.view;
     if (!v || !S.D) return;
     var cv = $("fpDailyCanvas"), r = cv.getBoundingClientRect();
-    var i = Math.round(idxAt(e.clientX)), y = e.clientY - r.top, D = S.D, html = null;
+    var i = Math.round(idxAt(e.clientX)), y = e.clientY - r.top, D = S.D, html = null, mx = e.clientX - r.left;
+    if (S.prof && mx >= S.prof.x0 - 2 && mx <= S.prof.x1 + 2 && y >= v.G.top && y < v.G.top + v.G.priceH) {   // 프로파일 칸 = 보이는 봉 합계 그 행
+      var pp = v.hi - (y - v.G.top) / v.G.priceH * (v.hi - v.lo), P = S.prof.P, kk = Math.floor(pp / P.row + 1e-9), ee = P.agg.get(kk);
+      S.hover = null;
+      if (ee) tipShow(e.pageX, e.pageY, "<b>$" + px(kk * P.row) + "–" + px((kk + 1) * P.row) + " · 보이는 " + P.n + (S.period === "4h" ? "칸" : "일") + " 합</b><br>체결 " + qty(ee[0]) + " " + A().coin +
+        " (≈" + usd(ee[0] * (kk + 0.5) * P.row) + ")" + (kk === P.pocK ? " · 최다" : "") + '<br>델타 <span class="' + (ee[1] >= 0 ? "fpd-pos" : "fpd-neg") + '">' + (ee[1] >= 0 ? "+" : "−") + qty(Math.abs(ee[1])) + " " + A().coin + "</span>" +
+        (kk >= P.vaLo && kk <= P.vaHi ? " · 가치 영역(70%) 안" : ""));
+      else tipHide();
+      redraw();
+      return;
+    }
     if (i < 0 || i >= S.n) { S.hover = null; tipHide(); redraw(); return; }
     S.hover = { i: i, y: y };
     if (y < v.G.top + v.G.priceH) {                    // 가격 칸 위면 그 행
