@@ -3659,6 +3659,16 @@ function renderPnlTicker() {
   }
   ps.forEach((p) => { const u = tickerPnl(p); box.querySelectorAll(`[data-s="${p.symbol}:${p.side}"] b`).forEach((b) => { b.textContent = su(u); b.className = u >= 0 ? "good" : "bad"; }); });
 }
+// 2026-11-13 사용자 «전광판 내용을 크롬 탭에도»: 탭 제목 = 손익 큰 순 «SOXL숏 −$42 · ETH숏 +$12 | 트레이딩룸» · 1초마다 따로 돈다(차트 그리기와 무관 -- 숨은 탭에서도).
+//   ponytail: 크롬은 숨은 탭 타이머를 1초(5분 넘게 숨으면 1분)에 한 번으로 늦춘다 -- 그보다 자주 바꿀 수 없다.
+const TAB_TITLE = document.title;
+setInterval(() => {
+  const ps = ((latestBinanceAccount || {}).positions || []).filter((p) => Math.abs(Number(p.qty) || 0) > 0);
+  const t = ps.map((p) => [p, tickerPnl(p)]).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+    .map(([p, u]) => `${acctCoin(p.symbol)}${p.side === "LONG" ? "롱" : "숏"} ${u >= 0 ? "+" : "−"}$${Math.abs(u).toFixed(0)}`).join(" · ");
+  const next = t ? `${t} | ${TAB_TITLE}` : TAB_TITLE;
+  if (document.title !== next) document.title = next;
+}, 1000);
 { const go = (e) => { const it = e.target.closest && e.target.closest(".pnl-tk .it"), tab = it && document.querySelector(`#snapshotAssetTabs .asset-tab[data-asset="${it.dataset.a}"]`); if (tab) tab.click(); };
   const tk = el("pnlTicker");
   if (tk) { tk.addEventListener("click", go); tk.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(e); } }); } }
