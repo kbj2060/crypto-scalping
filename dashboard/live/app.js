@@ -2173,10 +2173,12 @@ function renderFpPos() {
   const sgn = String(pos.side).toUpperCase() === "SHORT" ? -1 : 1, pct = (cur - en) / en * 100 * sgn, pnl = (cur - en) * qty * sgn;
   const sg = (v) => (v >= 0 ? "+" : "−"), cls = pnl >= 0 ? "good" : "bad";
   // 2026-11-04 위계 정리 시안 C: 손익이 머리에서 가장 큰 숫자(26px) · 아래 한 줄 = 수익률(굵게) · 진입가 · 청산까지 거리(%) -- 이름은 작고 흐리게, 색은 손익 부호에만
-  const k = en > 0 ? Number(pos.entry_price) / en : 1, liq = Number(pos.liquidation_price) > 0 ? Number(pos.liquidation_price) / k : 0;
-  const dist = liq > 0 ? Math.abs(cur - liq) / cur * 100 : null;
+  // 2026-11-12 펜 메모 «청산까지는 빼고 증거금에서 몇 % 들어갔는지»: 이 포지션 증거금(명목 ÷ 레버리지) ÷ 같은 풀(USDC·USDT) 순자산
+  const A = latestBinanceAccount || {}, q = String(pos.symbol).slice(-4), bal = (A.multi_assets_margin ? A.balance : (A.balances || {})[q] || (A.assets || []).find((x) => x.asset === q)) || {};
+  const eq = Number(bal.margin) || (Number(bal.wallet) || 0) + (Number(bal.unrealized) || 0), lev = Number(pos.leverage), im = lev > 0 ? Math.abs(Number(pos.notional) || 0) / lev : 0;
+  const mPct = eq > 0 && im > 0 ? im / eq * 100 : null;
   box.innerHTML = `<div class="fp-pnl-row"><i class="fp-chip ${sgn < 0 ? "bad" : "good"}">${sgn < 0 ? "SHORT" : "LONG"}</i><b class="fp-pnl ${cls}">${sg(pnl)}$${lineFmt(Math.abs(pnl))}</b></div>`
-    + `<div class="fp-sub"><b class="${cls}">${sg(pct)}${Math.abs(pct).toFixed(2)}%</b><span>진입 ${lineFmt(en)}</span>${dist != null ? `<span>청산까지 <b>${dist.toFixed(1)}%</b></span>` : ""}</div>`;
+    + `<div class="fp-sub"><b class="${cls}">${sg(pct)}${Math.abs(pct).toFixed(2)}%</b><span>진입 ${lineFmt(en)}</span>${mPct != null ? `<span title="이 포지션 증거금 ${fmtUsd(im)} ÷ ${A.multi_assets_margin ? "" : `${q} `}순자산 ${fmtUsd(eq)} · ${lev}배">증거금 <b>${mPct.toFixed(mPct >= 10 ? 0 : 1)}%</b></span>` : ""}</div>`;
   box.hidden = false;
 }
 
