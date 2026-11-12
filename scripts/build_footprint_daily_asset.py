@@ -41,11 +41,12 @@ SYM = os.environ.get("FP_SYM", "ETHUSDT")
 # 칸(가격 폭)·틱: ETH $1 ≈ 4bp(2026 $2.5k) · XRP 0.0005 ≈ 3.5bp($1.4) -- 라이브 테이프 칸(ETH 0.1 · XRP 0.0001)의 정수배(10 · 5)
 #   2026-10-31 BTC $30 ≈ 3.9bp($77.5k) -- 테이프 칸 1.0 의 30배 · 틱 0.1
 #   2026-11-03 주식 선물: SNDK $1,130 → 칸 $0.5(≈4.4bp · 테이프 칸 0.05 의 10배 · 틱 0.01 의 50배) · SOXL $78 → 칸 $0.03(≈3.8bp · 테이프 칸 0.01 의 3배)
-TICK, CELL_TICKS = {"ETHUSDT": (0.01, 100), "XRPUSDT": (0.0001, 5), "BTCUSDT": (0.1, 300), "SNDKUSDT": (0.01, 50), "SOXLUSDT": (0.01, 3)}[SYM]
+TICK, CELL_TICKS = {"ETHUSDT": (0.01, 100), "XRPUSDT": (0.0001, 5), "BTCUSDT": (0.1, 300), "SNDKUSDT": (0.01, 50), "SOXLUSDT": (0.01, 3),
+                     "SKHYNIXUSDT": (0.01, 40), "MUUSDT": (0.01, 30)}[SYM]   # 2026-11-13 SKHYNIX 칸 $0.4 · MU $0.3 (≈4bp)
 OUT = Path(os.environ.get("FP_OUT", str(MAIN / "data/footprint_daily")))
 WORK = Path(os.environ.get("FP_WORK", str(MAIN / "tmp/fp_daily_build")))
 BASE = "https://data.binance.vision/data/futures/um"
-FIRST_MONTH = os.environ.get("FP_FIRST", {"SNDKUSDT": "2026-04", "SOXLUSDT": "2026-05"}.get(SYM, "2020-01"))   # 주식 선물은 상장월부터(SNDK 2026-04-07 · SOXL 2026-05-15)
+FIRST_MONTH = os.environ.get("FP_FIRST", {"SNDKUSDT": "2026-04", "SOXLUSDT": "2026-05", "MUUSDT": "2026-04", "SKHYNIXUSDT": "2026-06"}.get(SYM, "2020-01"))   # 주식 선물은 상장월부터(SNDK 2026-04-07 · SOXL 2026-05-15)
 
 AGG_SQL = """
 WITH r AS (SELECT * FROM {src}

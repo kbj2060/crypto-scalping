@@ -337,6 +337,7 @@ POSITION_SIZING_MAX_AGE_MIN = 30.0         # 워커 주기 300초 x 6
 
 MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT", "sndk": "SNDKUSDT", "soxl": "SOXLUSDT",
                   "skhynix": "SKHYNIXUSDT", "mu": "MUUSDT"}   # 2026-11-02 TradFi 주식 선물 -- USDC 시장이 없어 주문도 USDT · 11-13 SKHYNIX·MU 는 시세만(MANUAL_EXEC_SYMBOLS 에 없음 = 주문 막힘)
+MARKET_ONLY_ASSETS = {"skhynix", "mu"}   # 2026-11-13 시세만(주문 막힘) -- 계좌 체결·미체결 조회 대상에서 뺀다(api_binance_account)
 # 2026-09-19 수동 진입이 나갈 심볼. **차트·시세·청산맵과 분리한다** -- MARKET_SYMBOLS 는
 # 화면 전체가 공유하므로 그걸 뒤집으면 데이터 출처까지 통째로 바뀐다.
 # ⭐왜 USDC 인가: 계정 실요율(/fapi/v1/commissionRate) ETHUSDT 메이커 2.0bp vs **ETHUSDC 0bp**.
@@ -674,7 +675,9 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         quote = "USDC" if MANUAL_EXEC_SYMBOL.endswith("USDC") else "USDT"
         payload = await fetch_account(
             binance_session(),
-            list(dict.fromkeys([*MARKET_SYMBOLS.values(), *MANUAL_EXEC_SYMBOLS.values()])),
+            # 2026-11-13 시세만 보는 종목(주문 막힘)은 체결·미체결 조회(심볼마다 userTrades·openOrders, 가중치 5씩)에서 뺀다 -- 포지션은 positionRisk 가 전 종목이라 그대로 보인다.
+            #   주문을 열면 MANUAL_EXEC_SYMBOLS 에 넣고 MARKET_ONLY_ASSETS 에서 뺀다.
+            list(dict.fromkeys([*(v for k, v in MARKET_SYMBOLS.items() if k not in MARKET_ONLY_ASSETS), *MANUAL_EXEC_SYMBOLS.values()])),
             quote_asset=quote, income=account_income)
         # 화면이 «이 코인의 포지션»을 찾을 때 USDT 심볼 하나만 보면 USDC 포지션을 못 본다.
         # 서버가 실제로 쓰는 심볼을 payload 에 실어 보내 화면이 하드코딩하지 않게 한다 --
