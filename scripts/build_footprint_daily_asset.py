@@ -44,7 +44,8 @@ SYM = os.environ.get("FP_SYM", "ETHUSDT")
 TICK, CELL_TICKS = {"ETHUSDT": (0.01, 100), "XRPUSDT": (0.0001, 5), "BTCUSDT": (0.1, 300), "SNDKUSDT": (0.01, 50), "SOXLUSDT": (0.01, 3),
                      "SKHYNIXUSDT": (0.01, 40), "MUUSDT": (0.01, 30)}[SYM]   # 2026-11-13 SKHYNIX 칸 $0.4 · MU $0.3 (≈4bp)
 OUT = Path(os.environ.get("FP_OUT", str(MAIN / "data/footprint_daily")))
-WORK = Path(os.environ.get("FP_WORK", str(MAIN / "tmp/fp_daily_build")))
+# 2026-11-13 🔴기본 작업 폴더를 종목별로 -- 공용 tmp/fp_daily_build(ETH 조각)를 MU 가 «끝난 기간»으로 건너뛰어 ETH 를 MU 결과로 내보냈다(대조 assert 가 잡음). ETH 는 옛 경로 그대로.
+WORK = Path(os.environ.get("FP_WORK", str(MAIN / ("tmp/fp_daily_build" if SYM == "ETHUSDT" else f"tmp/fp_daily_build_{SYM}"))))
 BASE = "https://data.binance.vision/data/futures/um"
 FIRST_MONTH = os.environ.get("FP_FIRST", {"SNDKUSDT": "2026-04", "SOXLUSDT": "2026-05", "MUUSDT": "2026-04", "SKHYNIXUSDT": "2026-06"}.get(SYM, "2020-01"))   # 주식 선물은 상장월부터(SNDK 2026-04-07 · SOXL 2026-05-15)
 
