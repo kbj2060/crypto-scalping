@@ -69,6 +69,52 @@ def flow_today(options: list[dict]) -> dict:
     return {"call": [round(tot["C"][0]), round(tot["C"][1])], "put": [round(tot["P"][0]), round(tot["P"][1])], "top": rows[:6]}
 
 
+def gex_levels(options: list[dict], S: float, now: float) -> dict:
+    """2026-11-13 사용자 «saveticker(Unusual Whales) 옵션 칸을 CBOE 로» -- 감마 노출 주요 레벨. 행사가별 순 GEX($/1% 움직임) =
+    Σ 감마 × 미결제 × 100 × S² × 0.01, 콜 +·풋 −(딜러가 콜은 사고 풋은 판다는 흔한 관례 -- 실제 딜러 포지션은 모른다). 전 만기 · 지금가 ±30%.
+    돌려주기 = {net: 합계, pos: 큰 + 행사가 3개, neg: 큰 − 행사가 3개} -- 각 [행사가, $]. 서술용."""
+    by: dict[float, float] = {}
+    for o in options:
+        m = OPT_RE.match(o["option"])
+        if not m or datetime.strptime(m[1], "%y%m%d").replace(hour=16, tzinfo=ET).timestamp() <= now:
+            continue
+        k = int(m[3]) / 1000
+        if abs(k / S - 1) > 0.30:
+            continue
+        g = float(o.get("gamma") or 0) * float(o.get("open_interest") or 0) * MULT * S * S * 0.01
+        by[k] = by.get(k, 0.0) + (g if m[2] == "C" else -g)
+    lv = sorted(by.items(), key=lambda kv: -abs(kv[1]))
+    return {"net": round(sum(by.values())), "pos": [[k, round(v)] for k, v in lv if v > 0][:3], "neg": [[k, round(v)] for k, v in lv if v < 0][:3]}
+
+
+def volume_vs_normal(sym_dir: Path, now_et: datetime, today_n: float, days: int = 10) -> dict | None:
+    """오늘 지금까지 옵션 거래량(전 만기, 계약) ÷ 지난 거래일들의 «같은 시각까지» 거래량 평균. 저장된 10분 스냅샷이 곧 이력이다
+    (CBOE 는 하루 이력을 안 준다). 날마다 같은 ET 시각 이전의 마지막 스냅샷 하나를 읽는다. 지난날이 없으면 None.
+    ponytail: 스냅샷을 매번 다시 읽는다(최대 10개 × ~0.7MB) -- 느려지면 날짜·시각별 합계를 캐시."""
+    clock, pick = now_et.hour * 60 + now_et.minute, {}
+    for p in sym_dir.glob("*/*.json.gz"):
+        try:
+            t = datetime.strptime(p.parent.name + p.name[:6], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc).astimezone(ET)
+        except ValueError:
+            continue
+        if t.date() >= now_et.date() or t.hour * 60 + t.minute > clock:
+            continue
+        if t.date() not in pick or t > pick[t.date()][0]:
+            pick[t.date()] = (t, p)
+    vols = []
+    for d in sorted(pick)[-days:]:
+        try:
+            ops = json.loads(gzip.decompress(pick[d][1].read_bytes()))["data"]["options"]
+        except (OSError, ValueError, KeyError):
+            continue
+        vols.append(sum(float(o.get("volume") or 0) for o in ops))
+    vols = [v for v in vols if v > 0]
+    if not vols:
+        return None
+    avg = sum(vols) / len(vols)
+    return {"today": round(today_n), "avg": round(avg), "ratio": round(today_n / avg, 3), "days": len(vols)}
+
+
 RV_CACHE = ROOT / "data" / "live" / "cboe_rv7_cache.json"
 
 
@@ -139,6 +185,7 @@ def summarize(data: dict, now: float | None = None) -> dict:
         e.pop("_g"); e.pop("_yrs")
     out["expiries"] = exps[:8]
     out["flow_today"] = flow_today(data["options"])
+    out["gex"] = gex_levels(data["options"], S, now)
     out["cm"] = {str(d): D._const_maturity(exps, d) for d in (1, 7, 30, 60)}
     band = ch[(ch["strike"] >= S * 0.92) & (ch["strike"] <= S * 1.08)]
     usd_oi = band["open_interest"] * MULT * S
@@ -168,6 +215,9 @@ def write_state(snapshot: Path, state: Path = STATE, rv7: bool = True) -> None:
     opt = summarize(data)
     if rv7:
         opt["rv7"] = realized_vol_7d(data["symbol"])      # 2026-11-03 «IV−실현» 칸 -- 전엔 늘 «-» 였다
+    ft0 = opt["flow_today"]   # 2026-11-13 «평소 대비 거래량» -- 스냅샷이 쌓인 폴더(<종목>/<UTC날짜>/<시각>.json.gz)의 지난 거래일 같은 시각
+    opt["vol_norm"] = volume_vs_normal(snapshot.parent.parent, datetime.strptime(data["last_trade_time"], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=ET),
+                                       ft0["call"][0] + ft0["put"][0])
     opt = _clean(opt)
     try:
         cur = json.loads(state.read_text(encoding="utf-8"))["currencies"]
@@ -205,7 +255,17 @@ def _selftest() -> None:
                  last_trade_price=3.0, last_trade_time="2026-10-30T15:00:00") for o in ops]
     ft = summarize({"symbol": "SNDK", "current_price": 100.0, "iv30": 70.0, "last_trade_time": "2026-10-30T15:59:59", "options": ops2}, now)["flow_today"]
     assert ft["call"][0] == 15 and ft["put"][0] == 6 and ft["top"][0][1] == 5 * 3.0 * 100 and ft["top"][0][3] == "C", ft   # 만기 셋 × 5 · 셋 × 2
+    gx = gex_levels([{"option": "SNDK261106C00100000", "gamma": 0.05, "open_interest": 10}, {"option": "SNDK261106P00090000", "gamma": 0.02, "open_interest": 30},
+                     {"option": "SNDK261023C00100000", "gamma": 1.0, "open_interest": 999}], 100.0, now)   # 지난 만기(10-23)는 뺀다
+    assert gx["pos"] == [[100.0, 5000]] and gx["neg"] == [[90.0, -6000]] and gx["net"] == -1000, gx   # 0.05×10×100×100²×0.01 = 5000
     import tempfile as _t
+    with _t.TemporaryDirectory() as td:       # 평소 대비: 지난 거래일의 같은 시각 이전 마지막 스냅샷만 · 오늘·더 늦은 시각은 안 센다
+        sd = Path(td)
+        for day, hhmmss, vol in (("20261028", "150000", 50.0), ("20261028", "193000", 999.0), ("20261029", "145000", 150.0), ("20261030", "140000", 7.0)):
+            (sd / day).mkdir(exist_ok=True)
+            (sd / day / f"{hhmmss}.json.gz").write_bytes(gzip.compress(json.dumps({"data": {"options": [{"volume": vol}]}}).encode()))
+        vn = volume_vs_normal(sd, datetime(2026, 10, 30, 11, 30, tzinfo=ET), 200.0)   # ET 11:30 = UTC 15:30 → 10-28 15:00Z(50) · 10-29 14:50Z(150) · 10-30 은 오늘
+        assert vn == {"today": 200, "avg": 100, "ratio": 2.0, "days": 2}, vn
     with _t.TemporaryDirectory() as td:       # 6시간 안의 캐시는 네트워크 없이 그대로
         c = Path(td) / "rv.json"
         c.write_text(json.dumps({"SNDK": [now, 77.7]}))

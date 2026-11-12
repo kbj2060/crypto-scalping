@@ -2457,6 +2457,19 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .opt-blk-sum { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12.5px; padding: 8px 10px; margin-top: 6px;
   border: 1px solid var(--soft-line); border-radius: 10px; font-variant-numeric: tabular-nums; }
 .opt-blk-sum b { color: var(--option); }
+/* 2026-11-13 주식 옵션(CBOE) 세 칸 -- 오늘 거래량·평소 대비 · 풋/콜 비중 · 감마 노출 주요 레벨 (app.js optEqKpiHtml) · 휴대폰은 한 줄씩 */
+.oq { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.3fr); gap: 8px; margin-top: 6px; }
+@media (max-width: 720px) { .oq { grid-template-columns: minmax(0, 1fr); } }
+.oq-k { display: grid; align-content: start; gap: 5px; padding: 8px 10px; border: 1px solid var(--soft-line); border-radius: 10px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.oq-k > i { font-style: normal; font-size: 11px; color: var(--muted); }
+.oq-k > b { font: 700 17px/1.1 var(--font-mono); color: var(--text); }
+.oq-k small { font-size: 11px; color: var(--muted); margin-left: 3px; }
+.oq-x { font: 700 13px/1 var(--font-mono); color: var(--option); }
+.oq-bar { display: flex; height: 20px; border-radius: 6px; overflow: hidden; font: 600 11px/20px var(--font-mono); color: var(--text); }
+.oq-bar .c { background: color-mix(in srgb, var(--good) 34%, transparent); padding-left: 6px; white-space: nowrap; }
+.oq-bar .p { background: color-mix(in srgb, var(--bad) 34%, transparent); padding-right: 6px; text-align: right; white-space: nowrap; }
+.oq-gx { display: flex; flex-wrap: wrap; gap: 3px 12px; font: 700 13px/1.35 var(--font-mono); }
+.oq-gx small { font-weight: 500; }
 .opt-blk-btn { flex: none; min-height: 30px; padding: 0 12px; border-radius: 999px; background: none; cursor: pointer;
   border: 1px solid color-mix(in srgb, var(--option) 50%, transparent); color: var(--option); font: 600 12px/1 var(--font-sans); }
 .opt-blk-btn:focus-visible { outline: 2px solid var(--option); outline-offset: 2px; }

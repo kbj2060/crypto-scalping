@@ -4745,7 +4745,21 @@ function optFlowTodayHtml(o, phone) {
   const rows = (f.top || []).slice(0, 5).map((r) =>
     `<div class="opt-blk-row"><span class="t">${r[0] ? optKst(r[0], false) : "-"}</span><b>${optUsd(r[1])}</b><span class="legs">${new Date(r[2] - 16 * 3600e3).toISOString().slice(5, 10)} 만기 ${r[3] === "C" ? "콜" : "풋"} ${r[4]} · ${Math.round(r[5]).toLocaleString()}계약 · 마지막 $${Number(r[6]).toFixed(2)}</span></div>`).join("");
   return `<div class="opt-blk-sum"><span>오늘 <b class="opt-good">콜 ${f.call[0].toLocaleString()}계약 ${optUsd(f.call[1])}</b> · <b class="opt-bad">풋 ${f.put[0].toLocaleString()}계약 ${optUsd(f.put[1])}</b> · 풋/콜(명목) ${pc}</span>`
-    + (phone ? `<button type="button" class="opt-blk-btn" aria-expanded="${optBlkOpen}">${optBlkOpen ? "접기 ▴" : "목록 ▾"}</button>` : "") + `</div>` + (open ? `<div class="opt-blk-list">${rows}</div>` : "");
+    + (phone ? `<button type="button" class="opt-blk-btn" aria-expanded="${optBlkOpen}">${optBlkOpen ? "접기 ▴" : "목록 ▾"}</button>` : "") + `</div>` + optEqKpiHtml(o) + (open ? `<div class="opt-blk-list">${rows}</div>` : "");
+}
+// 2026-11-13 사용자 «saveticker(Unusual Whales) 옵션 칸을 CBOE 로 같은 칸»: 오늘 거래량·평소 대비 · 풋/콜 비중(계약) · 감마 노출 주요 레벨($/1%, 콜 +·풋 − 관례).
+//   계산 = scripts/cboe_option_summary_20261101.py(gex_levels · volume_vs_normal). 서술용 -- 방향 신호 아님.
+function optEqKpiHtml(o) {
+  const f = o.flow_today, vn = o.vol_norm, gx = o.gex, n = f.call[0] + f.put[0];
+  if (!(n > 0)) return "";
+  const cp = Math.round((100 * f.call[0]) / n), su = (v) => `${v >= 0 ? "+" : "−"}${optUsd(Math.abs(v))}`;
+  const lv = (a, cls) => (a || []).map(([k, v]) => `<span class="${cls}">${k}<small>${su(v)}</small></span>`).join("");
+  return `<div class="oq">`
+    + `<div class="oq-k"><i>오늘 옵션 거래량 · 전체 만기</i><b>${n.toLocaleString()}<small>계약</small></b>`
+    + (vn ? `<span title="지난 ${vn.days}거래일의 같은 시각(미 동부)까지 평균 ${vn.avg.toLocaleString()}계약">평소의 <b class="oq-x">${vn.ratio.toFixed(2)}배</b> <small>지난 ${vn.days}일 같은 시각</small></span>` : `<small>평소 기준 쌓는 중</small>`) + `</div>`
+    + `<div class="oq-k"><i>풋 / 콜 비중 · 거래량</i><div class="oq-bar" role="img" aria-label="콜 ${cp}% 풋 ${100 - cp}%"><span class="c" style="flex:${Math.max(cp, 12)}">콜 ${cp}%</span><span class="p" style="flex:${Math.max(100 - cp, 12)}">풋 ${100 - cp}%</span></div></div>`
+    + (gx ? `<div class="oq-k oq-g"><i>감마 노출 주요 레벨 · $/1% · 순 ${su(gx.net)}</i><div class="oq-gx">${lv(gx.pos, "opt-good")}${lv(gx.neg, "opt-bad")}</div></div>` : "")
+    + `</div>`;
 }
 const optClick = (e) => {
   if (e.target.closest(".opt-blk-btn")) {
