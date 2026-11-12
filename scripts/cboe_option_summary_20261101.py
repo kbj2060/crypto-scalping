@@ -105,7 +105,7 @@ def volume_vs_normal(sym_dir: Path, now_et: datetime, today_n: float, days: int 
     for d in sorted(pick)[-days:]:
         try:
             ops = json.loads(gzip.decompress(pick[d][1].read_bytes()))["data"]["options"]
-        except (OSError, ValueError, KeyError):
+        except (OSError, ValueError, KeyError, TypeError):
             continue
         vols.append(sum(float(o.get("volume") or 0) for o in ops))
     vols = [v for v in vols if v > 0]
@@ -216,8 +216,13 @@ def write_state(snapshot: Path, state: Path = STATE, rv7: bool = True) -> None:
     if rv7:
         opt["rv7"] = realized_vol_7d(data["symbol"])      # 2026-11-03 «IV−실현» 칸 -- 전엔 늘 «-» 였다
     ft0 = opt["flow_today"]   # 2026-11-13 «평소 대비 거래량» -- 스냅샷이 쌓인 폴더(<종목>/<UTC날짜>/<시각>.json.gz)의 지난 거래일 같은 시각
-    opt["vol_norm"] = volume_vs_normal(snapshot.parent.parent, datetime.strptime(data["last_trade_time"], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=ET),
-                                       ft0["call"][0] + ft0["put"][0])
+    # 검증(서브 에이전트): 시계는 **수집 시각**(파일 이름)으로 -- 지난날도 수집 시각으로 고르는데 오늘만 데이터 시각(15분 지연·장 뒤 15:59:59 고정)을 쓰면
+    #   장 마감 뒤 지난날 마지막 15분이 빠져 비율이 부풀었다(1.0 → 1.11). 파일 이름이 시각이 아니면(시험) 데이터 시각.
+    try:
+        clock = datetime.strptime(snapshot.parent.name + snapshot.name[:6], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc).astimezone(ET)
+    except ValueError:
+        clock = datetime.strptime(data["last_trade_time"], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=ET)
+    opt["vol_norm"] = volume_vs_normal(snapshot.parent.parent, clock, ft0["call"][0] + ft0["put"][0])
     opt = _clean(opt)
     try:
         cur = json.loads(state.read_text(encoding="utf-8"))["currencies"]
@@ -275,12 +280,24 @@ def _selftest() -> None:
     with tempfile.TemporaryDirectory() as td:       # 두 종목을 차례로 써도 서로 덮지 않는다
         st = Path(td) / "s.json"
         for sym in ("SNDK", "SOXL"):
-            snap = Path(td) / f"{sym}.json.gz"
+            (Path(td) / sym / "20261030").mkdir(parents=True, exist_ok=True)
+            snap = Path(td) / sym / "20261030" / "195959.json.gz"   # 수집 시각 꼴(<종목>/<UTC날짜>/<시각>) -- 평소 대비가 시험 폴더 밖(/tmp)을 훑지 않게
             snap.write_bytes(compress(json.dumps({"data": {"symbol": sym, "current_price": 100.0, "iv30": 70.0, "last_trade_time": "2026-10-30T15:59:59", "options": ops}}).encode()))
             write_state(snap, st, rv7=False)
         assert set(json.loads(st.read_text())["currencies"]) == {"SNDK", "SOXL"}
         write_state(snap, st, rv7=False)         # 같은 스냅샷을 또 써도 점이 겹쳐 쌓이지 않는다
         assert len(json.loads(st.read_text())["currencies"]["SOXL"]["options"]["flow_series"]) == 1
+    with tempfile.TemporaryDirectory() as td:       # 2026-11-13 장 마감 뒤: 오늘·지난날 모두 수집 시각으로 -- 지난날 16:20(ET) 최종 21 을 골라 비율 1.0
+        sd, st = Path(td) / "SNDK", Path(td) / "s.json"
+        for hhmmss, vol in (("195000", 19.0), ("202000", 21.0)):   # 10-29 15:50·16:20 ET(EDT)
+            (sd / "20261029").mkdir(parents=True, exist_ok=True)
+            (sd / "20261029" / f"{hhmmss}.json.gz").write_bytes(compress(json.dumps({"data": {"options": [{"volume": vol}]}}).encode()))
+        (sd / "20261030").mkdir(parents=True, exist_ok=True)
+        snap = sd / "20261030" / "203000.json.gz"                  # 오늘 16:30 ET 수집 · 데이터 시각은 15:59:59 에 멈춤
+        snap.write_bytes(compress(json.dumps({"data": {"symbol": "SNDK", "current_price": 100.0, "iv30": 70.0, "last_trade_time": "2026-10-30T15:59:59", "options": ops2}}).encode()))
+        write_state(snap, st, rv7=False)
+        vn = json.loads(st.read_text())["currencies"]["SNDK"]["options"]["vol_norm"]
+        assert vn["today"] == 21 and vn["ratio"] == 1.0, vn
     print("selftest OK")
 
 

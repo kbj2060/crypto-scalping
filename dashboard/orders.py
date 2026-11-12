@@ -916,6 +916,20 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             path.unlink(missing_ok=True)
         return out
 
+    def plan_from_current(plan: dict) -> dict | None:
+        """2026-11-13 검증(서브 에이전트): 선 주문 진입·추가가 체결된 뒤 TP 를 다시 걸 때 **지금 저장된 선**을 쓴다 -- 진입 때 계획으로 덮으면
+        대기(기다리기·지정가) 중에 지운 익절이 다시 걸리고 옮긴 선이 되돌아가고 다시 켠 손절이 꺼졌다. 크기만 합친 전량으로 바뀐다.
+        None = 다시 걸지 않는다(청산 진행 중 · 분할 조각 -- ponytail: 조각 크기 재조정은 미구현, 조각 포지션의 추가 진입은 미리보기에서 막힌다)."""
+        b = plan.get("bracket") or {}
+        key = bracket_key(plan["symbol"], plan["positionSide"])
+        cur = bracket_load().get(key)
+        if not b.get("lines") or not cur or not cur.get("lines"):
+            return plan
+        if cur.get("fired") or cur.get("tp_legs") or cur.get("sl_legs") or key in bracket_exiting:
+            return None
+        keep = {k: cur.get(k) for k in ("tp_price", "tp_level", "sl_price", "sl_level", "sl_name", "sl_up", "tp_off", "sl_off")}
+        return {**plan, "bracket": {**b, **keep}}
+
     async def entry_then_bracket(plan: dict, state: dict, wait_sec: float | None = None, limit: bool = False) -> None:
         """진입 → 체결이 있으면(부분 포함, 모든 종료 경로) TP·비상 스탑을 걸고 감시를 무장한다.
         wait_sec(2026-10-10 «기다리기»)면 첫 체결을 본 순간 한 번 더 건다 -- 60분 동안 든 몫을 무방비로 두지 않는다."""
@@ -924,7 +938,9 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         if wait_sec or limit:
             async def first_fill() -> None:
                 try:
-                    await arm_bracket(plan, state, add=False)   # 2026-10-20 첫 부분 체결로 물타기 크기를 재면 남은 여유 거의 전부가 걸린다
+                    p2 = plan_from_current(plan)
+                    if p2 is not None:
+                        await arm_bracket(p2, state, add=False)   # 2026-10-20 첫 부분 체결로 물타기 크기를 재면 남은 여유 거의 전부가 걸린다
                 except Exception as exc:  # noqa: BLE001 -- 대기는 계속(마감 때 다시 건다)
                     state["bracket"] = {"placed": False, "reason": f"{type(exc).__name__}: {exc}"}
             await settle(run_entry_stop(binance_session(), plan, state, lambda since: stop_touched(plan, since)) if limit and plan.get("stop")
@@ -934,7 +950,11 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             await settle(run_entry(binance_session(), plan, state), state)
         if float(state.get("filled") or 0.0) > 0:
             cur = bracket_load().get(bracket_key(plan["symbol"], plan["positionSide"])) or {}
-            if limit and (cur.get("mod") or cur.get("sl_off") or cur.get("tp_off") or cur.get("fired")):
+            if (plan.get("bracket") or {}).get("lines"):   # 선 주문 = 지금 저장된 선으로 합친 전량에 다시(위 plan_from_current) -- 대기 중 바뀐 선을 지키면서 TP 크기는 맞춘다
+                p2 = plan_from_current(plan)
+                if p2 is not None:
+                    await arm_bracket(p2, state)
+            elif limit and (cur.get("mod") or cur.get("sl_off") or cur.get("tp_off") or cur.get("fired")):
                 pass   # 검증 #2: 부분 체결 뒤 사용자가 옮긴 선·손절 해제·청산 진행(fired)을 옛 계획으로 덮어 되살리지 않는다
             else:
                 await arm_bracket(plan, state)
@@ -1537,6 +1557,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                     # 2026-11-12 익절을 지운(tp_off) 선 포지션도 늘린다 -- 익절은 꺼진 채(체결 뒤 익절 지정가 안 검) · 손절 해제·분할·청산 중은 그대로 막는다
                     # 2026-11-13 펜 메모 «손절/익절 없이도 추가 진입»: 손절을 지운(sl_off) 선 포지션도 늘린다 -- 지운 선은 꺼진 채(손절 감시 없음) · 분할·청산 중만 막는다
                     tp_off, sl_off = bool(prev and prev.get("tp_off")), bool(prev and prev.get("sl_off"))
+                    if rule_l:   # 2026-11-13 검증: 자동 규칙 크기는 −5% 거래소 손절을 전제로 잰다 -- 선 손절(최대 15%)·지운 손절이면 손실 한도가 틀린다
+                        return None, {}, {}, ({"error": "rule_on_lines", "detail": "선 주문 포지션에는 자동 규칙 크기를 쓰지 않습니다 — 비율(%)로 추가하세요"}, 409)
                     ok_prev = bool(prev and prev.get("lines") and (tp_off or (prev.get("tp_level") and prev.get("tp_price"))) and (sl_off or (prev.get("sl_level") and prev.get("sl_price")))
                                    and not prev.get("tp_legs") and not prev.get("sl_legs") and not prev.get("fired") and bracket_key(symbol, side) not in bracket_exiting)
                     if not ok_prev:
@@ -1555,9 +1577,13 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                                            "detail": str(exc) if not add_lines else f"기존 선이 지금가 기준으로 맞지 않아 추가 진입을 막습니다 — {exc}"}, 400)
                 if add_lines:   # 검사만 새 지금가로 했다 -- 걸리는 가격은 처음 무장한 값 그대로(basis 가 움직여도 선이 안 밀린다)
                     plan["bracket"].update(tp_price=prev.get("tp_price"), sl_price=prev.get("sl_price"), tp_level=prev.get("tp_level"), sl_level=prev.get("sl_level"),
-                                           sl_name=prev.get("sl_name") or plan["bracket"].get("sl_name"), tp_off=prev.get("tp_off"), sl_off=prev.get("sl_off"), sl_up=prev.get("sl_up", plan["bracket"].get("sl_up")))
+                                           sl_name=prev.get("sl_name") if prev.get("sl_off") else (prev.get("sl_name") or plan["bracket"].get("sl_name")),   # 검증: 지운 손절에 대역 이름을 저장하지 않는다
+                                           sl_pct=None if prev.get("sl_off") else round(100 * (float(prev["sl_level"]) / ref_ - 1), 2),   # 대역(±1%)이 아니라 실제 선 거리
+                                           tp_off=prev.get("tp_off"), sl_off=prev.get("sl_off"), sl_up=prev.get("sl_up", plan["bracket"].get("sl_up")))
                     plan["add_lines"] = True
-                    plan["notes"] = [*plan.get("notes", []), "추가 진입 — 기존 익절·손절선 그대로, 합친 전량에 익절 지정가를 다시 겁니다"]
+                    plan["notes"] = [*plan.get("notes", []), "추가 진입 — 기존 선 그대로 · "
+                                     + ("익절 지운 상태 그대로(지정가 안 걸음)" if prev.get("tp_off") else "합친 전량에 익절 지정가를 다시 겁니다")
+                                     + (" · 🔴손절 지운 상태 그대로(손절 감시 없음)" if prev.get("sl_off") else "")]
                 if limit_usdt:   # 2026-10-31 지정가 진입: 주문가 = 진입선(USDT) × basis · 롱은 내림 · 숏은 올림(메이커 쪽) · 호가를 넘으면(= 지금 체결) 막는다 · 명목은 지금가 크기 그대로 유지(수량만 가격비로 재계산)
                     tick, step = filters.get("tick") or 0.01, filters["step"]
                     lp = round((math.floor(limit_usdt * b_ / tick + 1e-9) if side == "LONG" else math.ceil(limit_usdt * b_ / tick - 1e-9)) * tick, 8)

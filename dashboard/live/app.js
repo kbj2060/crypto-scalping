@@ -26,9 +26,9 @@ const ASSET_CONFIG = {
   btc: { label: "BTC", symbol: "BTCUSDT", dp: 0 },
   xrp: { label: "XRP", symbol: "XRPUSDT", dp: 4 },
   sndk: { label: "SNDK", symbol: "SNDKUSDT", dp: 2 },   // 2026-11-01 Binance TradFi 주식 선물(주문 불가)
-  soxl: { label: "SOXL", symbol: "SOXLUSDT", dp: 2 },
+  soxl: { label: "SOXL", symbol: "SOXLUSDT", dp: 2 },   // 2026-11-02 Binance TradFi ETF 선물(주문 불가)
   skhynix: { label: "SKHYNIX", symbol: "SKHYNIXUSDT", dp: 2 },   // 2026-11-13 주식 선물(SK하이닉스 · 주문 불가)
-  mu: { label: "MU", symbol: "MUUSDT", dp: 2 },                  // 2026-11-13 주식 선물(마이크론 · 주문 불가)   // 2026-11-02 Binance TradFi ETF 선물(주문 불가)
+  mu: { label: "MU", symbol: "MUUSDT", dp: 2 },                  // 2026-11-13 주식 선물(마이크론 · 주문 불가)
 };
 // 풋프린트·1초 수급·OI·호가 히트맵을 서버가 실시간으로 만드는 코인(server.py FLOW_SPECS 와 같은 목록).
 const FLOW_ASSETS = new Set(["eth", "btc", "sol", "xrp", "sndk", "soxl", "skhynix", "mu"]);   // 2026-10-31 BTC 추가(주문은 11-04 부터 열림 -- 서버 MANUAL_EXEC_SYMBOLS btc→BTCUSDC)
@@ -3648,7 +3648,7 @@ function renderPnlTicker() {
   const ps = ((latestBinanceAccount || {}).positions || []).filter((p) => Math.abs(Number(p.qty) || 0) > 0);
   const tr = box.parentElement.getBoundingClientRect(), l = slot && slot.getBoundingClientRect().right - tr.left + 28, r = title && title.getBoundingClientRect().left - tr.left - 28;
   if (!ps.length || !title || title.parentElement !== mid || !(r - l >= 160)) { box.hidden = true; return; }
-  // 2026-11-12 사용자 «전광판 너비가 너무 길다 -- 종목 3개 정도»: 칸(132px) 셋 폭으로 고정. ponytail: 넷째 종목부터는 잘린다 -- 늘 넷 이상 들면 칸 폭을 줄이거나 칸끼리 넘기기
+  // 2026-11-12 사용자 «전광판 너비가 너무 길다 -- 종목 3개 정도»: 칸(132px) 셋 폭으로 고정. ponytail: 넷째 종목부터는 잘린다(CSS safe center = 넘치면 왼쪽부터 채움) -- 늘 넷 이상 들면 칸 폭을 줄이거나 칸끼리 넘기기
   //   사용자 «시장 열림·닫힘(세션)과 코인 이름 사이 가운데»: 상자를 그 틈 가운데에 · 칸도 상자 안 가운데(CSS justify-content)
   const w = Math.min(r - l, 3 * 132);
   box.hidden = false; box.style.left = `${Math.round((l + r - w) / 2)}px`; box.style.width = `${Math.round(w)}px`;
@@ -3670,6 +3670,7 @@ setInterval(() => {
     .map(([p, u]) => `${acctCoin(p.symbol)}${p.side === "LONG" ? "롱" : "숏"} ${u >= 0 ? "+" : "−"}$${Math.abs(u).toFixed(0)}`).join(" · ");
   const next = t ? `${t} | ${TAB_TITLE}` : TAB_TITLE;
   if (document.title !== next) document.title = next;
+  renderPnlTicker();   // 2026-11-13 검증: «청산» 보기에선 차트 그리기가 멈춰 전광판 숫자도 멈췄다 -- 탭 제목과 같은 박자로
 }, 1000);
 { const go = (e) => { const it = e.target.closest && e.target.closest(".pnl-tk .it"), tab = it && document.querySelector(`#snapshotAssetTabs .asset-tab[data-asset="${it.dataset.a}"]`); if (tab) tab.click(); };
   const tk = el("pnlTicker");
@@ -4477,7 +4478,8 @@ function optRealizedGamma(candles, nowS = Date.now() / 1000, ref = RG_REF, cut =
 }
 // 2026-09-28 네 코인(ETH·BTC 역옵션 · SOL·XRP USDC 선형옵션). DVOL 지수는 ETH·BTC 뿐 -- 나머지는 30일 ATM IV(iv30)로 폭을 잰다.
 function optData() {
-  const cur = activeSnapshotAsset ? String(activeSnapshotAsset).toUpperCase() : null;   // 2026-11-13 «주식류는 이렇게» -- 표 없이: 서버 옵션 묶음에 그 코인이 있으면 보인다(새 주식은 coin_config equity 만 켜면 된다)
+  const k = activeSnapshotAsset ? String(activeSnapshotAsset).toUpperCase() : null;
+  const cur = k && (!latestGex || !latestGex.currencies || k in latestGex.currencies) ? k : null;   // 2026-11-13 검증: 옵션 없는 코인(HYPE·SKHYNIX)이 «불러오는 중»에 멈추던 것 → «수집 안 함»   // 2026-11-13 «주식류는 이렇게» -- 표 없이: 서버 옵션 묶음에 그 코인이 있으면 보인다(새 주식은 coin_config equity 만 켜면 된다)
   const g = cur && latestGex && latestGex.available ? (latestGex.currencies || {})[cur] : null;
   const blocks = cur ? ((((latestGex || {}).block_trades || {}).by_coin || {})[cur] || []) : [];
   return { cur, g, o: g && g.options, blocks };
@@ -4826,7 +4828,7 @@ function renderOptions() {
   if (row) row.hidden = !o;
   optRowCols();
   if (!o) {
-    body.innerHTML = `<div class="opt-note">${!cur ? "Deribit 옵션은 ETH·BTC·SOL·XRP 만 수집합니다"
+    body.innerHTML = `<div class="opt-note">${!cur ? "이 코인은 옵션을 수집하지 않습니다 (Deribit ETH·BTC·SOL·XRP · CBOE 미국 상장 주식만)"
       : latestGex && latestGex.error ? `옵션 수집 지연 (${escapeHtml(latestGex.error)})` : "옵션 불러오는 중…"}</div>`;
     return;
   }
@@ -11038,12 +11040,12 @@ function manualEntryPlanHtml(data) {
     const f = acctPx;
     const pc = (v) => { const x = Number(v), t = Math.abs(x).toFixed(1); return (t === "0.0" ? "" : x > 0 ? "+" : "−") + t + "%"; };   // «-0.0%» 대신 0.0% · 유니코드 −
     parts.push(entryNote(
-      (br.tp_price ? `TP ${br.tp_name} ${f(br.tp_price)} (${pc(br.tp_pct)}) 지정가` : `TP 없음(${br.tp_name} 없음)`)
+      (br.tp_off ? "TP 지운 상태(추가 뒤에도 안 걸림)" : br.tp_price ? `TP ${br.tp_name} ${f(br.tp_price)} (${pc(br.tp_pct)}) 지정가` : `TP 없음(${br.tp_name} 없음)`)
       + " · "
-      + (br.sl_price ? `SL ${br.sl_name} ${f(br.sl_price)}${br.sl_pct == null ? "" : ` (${pc(br.sl_pct)})`} 5분봉 종가 이탈 시 청산`
+      + (br.sl_off ? "🔴SL 지운 상태 — 손절 감시 없음" : br.sl_price ? `SL ${br.sl_name} ${f(br.sl_price)}${br.sl_pct == null ? "" : ` (${pc(br.sl_pct)})`} 5분봉 종가 이탈 시 청산`
                        + ` · 비상 스탑 ${f(br.backstop_price)}`
                      : `🔴SL 없음(${br.sl_name} 없음)`),
-      br.sl_price ? "" : "bad"));
+      br.sl_price && !br.sl_off ? "" : "bad"));
   } else if (br) {
     parts.push(entryNote(`🔴TP/SL 을 못 겁니다 — ${br.reason || "청산맵 레벨 없음"}`, "bad"));
   }

@@ -215,6 +215,84 @@ class LinesAddSizeTest(LinesArmedGuardTest):
             self.assertTrue(armed["lines"] and armed["sl_off"] and armed["tp_resting"], armed)
         self._run(fn, acct=POS, run_entry=fake_entry, place_bracket=fake_bracket)
 
+    # 2026-11-13 서브 에이전트 검증 결함 재현(고친 뒤 통과해야 한다)
+    def _bstate(self):
+        return json.loads((server.LIVE_DIR / "manual_bracket_state.json").read_text("utf-8"))[f"{SYM}:LONG"]
+
+    def test_limit_add_on_sl_off_rearms_tp_on_full_size(self) -> None:
+        """지정가 추가 + 손절 지운 포지션: 첫 부분 체결 뒤 최종 재설정을 건너뛰어 TP 가 일부만 덮던 것."""
+        calls = []
+
+        async def fake_limit(_s, plan, state, on_fill=None, reprice=None, **_k):
+            state.update(filled=0.01); await on_fill()
+            state.update(phase="filled_maker", filled=float(plan["quantity"]))
+            return state
+
+        async def fake_bracket(_s, b, symbol, pside):
+            calls.append(dict(b)); return {"placed": True, "tp": {"placed": True, "price": b.get("tp_price")}}
+
+        async def fn(c):
+            self._armed({**self.SAVED, "sl_off": {"at": 1.0}})
+            body = await (await c.post("/api/manual-entry/submit?side=LONG&confirm=1&lev=20&pct=10&tp=2550&sl=2480&mode=limit&limit=2490")).json()
+            self.assertTrue(body.get("ok"), body)
+            for _ in range(60):
+                await asyncio.sleep(0.02)
+                if len(calls) >= 2:
+                    break
+            await asyncio.sleep(0.1)
+            self.assertEqual(len(calls), 2, "체결 뒤 합친 전량에 TP 를 다시 걸어야 한다")
+            self.assertTrue(self._bstate().get("sl_off"), "지운 손절은 꺼진 채")
+        self._run(fn, acct=POS, run_entry_limit=fake_limit, place_bracket=fake_bracket)
+
+    def test_wait_plain_add_keeps_user_changes_made_while_waiting(self) -> None:
+        """기다리기 일반 진입: 대기 중 사용자가 지운 익절을 진입 때 계획으로 되살리던 것."""
+        calls = []
+
+        async def fake_wait(_s, plan, state, wait_sec, on_fill=None):
+            state.update(filled=0.01); await on_fill()
+            st = json.loads((server.LIVE_DIR / "manual_bracket_state.json").read_text("utf-8"))
+            st[f"{SYM}:LONG"]["tp_off"] = {"at": 2.0}; st[f"{SYM}:LONG"]["tp_resting"] = False; st[f"{SYM}:LONG"]["sl_level"] = 2470.0
+            (server.LIVE_DIR / "manual_bracket_state.json").write_text(json.dumps(st), "utf-8")
+            state.update(phase="filled_maker", filled=float(plan["quantity"]))
+            return state
+
+        async def fake_bracket(_s, b, symbol, pside):
+            calls.append(dict(b)); return {"placed": True, "tp": {"placed": True, "price": b.get("tp_price")}}
+
+        async def fn(c):
+            self._armed(self.SAVED)
+            body = await (await c.post("/api/manual-entry/submit?side=LONG&confirm=1&lev=20&pct=10&mode=wait&wait_min=60")).json()
+            self.assertTrue(body.get("ok"), body)
+            for _ in range(60):
+                await asyncio.sleep(0.02)
+                if len(calls) >= 2:
+                    break
+            await asyncio.sleep(0.1)
+            s = self._bstate()
+            self.assertTrue(s.get("tp_off"), s)
+            self.assertEqual(s.get("sl_level"), 2470.0, "대기 중 옮긴 손절선이 되돌아가면 안 된다")
+            self.assertIsNone(calls[-1].get("tp_price"), "지운 익절을 다시 걸면 안 된다")
+        self._run(fn, acct=POS, run_entry_wait=fake_wait, place_bracket=fake_bracket)
+
+    def test_rule_sizing_refused_on_lines_position(self) -> None:
+        async def fn(c):
+            self._armed({**self.SAVED, "sl_off": {"at": 1.0}})
+            r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&rule=c")
+            self.assertEqual((r.status, (await r.json()).get("error")), (409, "rule_on_lines"))
+        self._run(fn, acct=POS)
+
+    def test_add_preview_shows_real_sl_distance_and_off_state(self) -> None:
+        async def fn(c):
+            self._armed({**self.SAVED, "sl_off": {"at": 1.0}})
+            b = await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10")).json()
+            br = b["plan"]["bracket"]
+            self.assertTrue(br["sl_off"] and br["sl_pct"] is None, br)
+            self.assertTrue(any("손절 지운 상태" in n for n in b["plan"]["notes"]), b["plan"]["notes"])
+            self._armed(self.SAVED)
+            br = (await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10")).json())["plan"]["bracket"]
+            self.assertTrue(br["sl_pct"] is not None and br["sl_pct"] < -0.5, br)   # 대역 −1.0 고정이 아니라 실제 2480 거리
+        self._run(fn, acct=POS)
+
     def test_add_on_tp_off_position_keeps_tp_off(self) -> None:
         # 2026-11-12 SOXL: 익절을 지운(tp_off) 선 포지션 -- 옛 익절선이 지금가 너머(2490 < 2500)여도 추가 진입 · 체결 뒤 익절 지정가 안 걸고 tp_off 유지
         calls = []

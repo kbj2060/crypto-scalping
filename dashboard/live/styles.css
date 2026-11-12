@@ -3100,7 +3100,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 /* 2026-11-12 펜 메모 보유 종목 전광판 시안 C(app.js renderPnlTicker): 위 = 코인·방향(작게) · 아래 = 미실현 손익(크게) · 왼쪽으로 초당 40px · 올리면 멈춤 */
 .topbar { position: relative; }
 /* 2026-11-12 사용자 «종목 칸 안에서 손익만 움직여야»: 종목 칸(코인·방향)은 제자리 · 그 칸 안 손익 숫자만 왼쪽으로 흐른다(같은 숫자 두 벌 −50% 이동 · 양 끝 흐림 · 올리면 멈춤) */
-.pnl-tk { position: absolute; top: 50%; transform: translateY(-50%); display: flex; justify-content: center; height: 42px; overflow: hidden; font-variant-numeric: tabular-nums; }   /* 상자는 세션~코인 이름 틈 가운데(JS) · 칸도 가운데 */
+.pnl-tk { position: absolute; top: 50%; transform: translateY(-50%); display: flex; justify-content: safe center; height: 42px; overflow: hidden; font-variant-numeric: tabular-nums; }   /* 상자는 세션~코인 이름 틈 가운데(JS) · 칸도 가운데 */
 .pnl-tk[hidden] { display: none; }
 .pnl-tk .it { flex: none; display: grid; align-content: center; width: 132px; padding: 0 16px; }
 .pnl-tk .it + .it { border-left: 1px solid var(--line); }

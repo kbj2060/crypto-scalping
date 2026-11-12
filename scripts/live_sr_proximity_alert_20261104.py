@@ -34,7 +34,8 @@ STALE_S = 180          # 1초 마지막 체결이 이보다 오래됐으면 그 
 REARM_X = 2.0
 COOLDOWN_S = 30 * 60
 FORGET_S = 2 * 3600    # 이 시간 안 보인 레벨 상태는 버린다
-THR_BP = {"eth": 20, "btc": 15, "sol": 25, "xrp": 25, "sndk": 45, "soxl": 90}
+THR_BP = {"eth": 20, "btc": 15, "sol": 25, "xrp": 25, "sndk": 45, "soxl": 90,
+          "skhynix": 45, "mu": 35}   # 2026-11-13 같은 규칙: vision 1시간봉 10-12~11-11 평일 고저폭 중앙 SKHYNIX 131 · MU 103bp 의 ~1/3 (같은 계산 SNDK 135 = 11-04 실측 134 재현)
 DEFAULT_THR_BP = 25
 
 

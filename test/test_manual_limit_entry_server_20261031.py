@@ -269,7 +269,8 @@ class LimitServerTest(ChartLinesTest):
                     break
                 await asyncio.sleep(0.05)
             await asyncio.sleep(0.3)
-            self.assertEqual(arms, [])   # 사용자가 옮긴 선(mod)을 옛 계획으로 덮어 다시 걸지 않는다
+            # 2026-11-13 바뀐 규칙: 사용자가 옮긴 선(mod)을 옛 계획으로 덮지 않되, **옮긴 선 그대로** 합친 전량에 다시 건다(전엔 아예 안 걸어 TP 가 일부만 덮었다)
+            self.assertEqual([(a["tp_level"], a["sl_level"]) for a in arms], [(2560.0, 2440.0)], arms)
         self._run(fn, run_entry_limit=fake_limit, place_bracket=fake_bracket)
 
     def test_restart_with_unreadable_account_keeps_file_and_says_so(self) -> None:
