@@ -8995,6 +8995,28 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
               `${mobileChart ? `max pain ${optQ(f.pain)}` : lab} ${y < mt ? "↑" : "↓"} (${f.pain >= px ? "+" : "−"}${optQ(Math.abs(f.pain - px))}$)`);
         }
       }
+      // 2026-11-13 사용자 «감마 플립·롱/숏감마를 풋프린트에도» (시안 C): 플립 = 청록 점선(화면 안일 때) · 오른쪽 가장자리 막대 = 가격대별 국면
+      //   (초록 롱감마 = 딜러 헤지가 움직임을 누름 · 빨강 숏감마 = 키움). 지금가 쪽 = 지금 국면, 플립 건너편 = 반대 -- 플립이 화면 밖이어도 막대가 국면을 보인다.
+      //   계산 = cboe_option_summary_20261101.py::gamma_flip(주식만 · CBOE). 🔴딜러 콜 매수·풋 매도 관례 가정 · 검증 안 됨(서술용).
+      const gm = o.gamma;
+      if (gm) {
+        const opp = (r) => (r === "long" ? "short" : "long"), nm = (r) => (r === "long" ? "롱감마" : "숏감마");
+        const yF = gm.flip != null ? yAt(gm.flip) : null, inV = yF != null && yF >= mt && yF <= plotBottom;
+        const ySplit = yF == null ? plotBottom : Math.max(mt, Math.min(plotBottom, yF));
+        const upR = gm.flip == null || px >= gm.flip ? gm.regime : opp(gm.regime), loR = opp(upR);
+        if (inV) {
+          add("line", { x1: ml, x2: ml + cw, y1: yF, y2: yF, stroke: "var(--option)", "stroke-opacity": 0.9, "stroke-width": 1.5, "stroke-dasharray": "7 4" });
+          if (gutOn) fpNotes.push({ val: gm.flip, label: "감마 플립", color: "var(--option)", title: `감마 플립 ${optQ(gm.flip)} · 위 ${nm(upR)} / 아래 ${nm(loR)} · 딜러 콜 매수·풋 매도 관례 가정 · 검증 안 됨` });
+          else add("text", { x: ml + 4, y: yF - 4, "font-size": fs, "font-weight": 700, fill: "var(--option)" }, `감마 플립 ${optQ(gm.flip)}`);   // 휴대폰은 왼쪽 -- 오른쪽은 추세·현재가 글자와 겹쳤다(시안 캡처)
+        }
+        const xb = ml + cw - 5;
+        [[mt, ySplit, upR], [ySplit, plotBottom, loR]].forEach(([a, b, r]) => {
+          if (b - a < 1) return;
+          const col = r === "long" ? "var(--good)" : "var(--bad)";
+          add("rect", { x: xb, y: a, width: 4, height: b - a, rx: 2, fill: col, opacity: 0.75 });
+          if (b - a > fs + 6) add("text", { x: xb - 5, y: a + fs + 3, "font-size": fs - 1, "font-weight": 700, fill: col, "text-anchor": "end" }, nm(r));
+        });
+      }
       const gridG = layerCache.get("grid")?.g;
       if (gridG && gridG.parentNode === svg) svg.insertBefore(og, gridG.nextSibling); else svg.appendChild(og);
       cvFromSvgLines(og, bgI, bgBehind, null);   // 2026-10-20 선은 bg 캔버스(칸 뒤) · 글자는 svg
