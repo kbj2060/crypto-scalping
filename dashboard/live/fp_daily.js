@@ -29,7 +29,8 @@
   // 이 폭부터 가격 칸(휴대폰은 7~12일 확대에서) · 2026-10-20 4시간봉은 1주(42봉 ≈ 24px)에서도 칸이 보이게 낮춘다(숫자는 칸에 들어갈 때만 -- drawCells)
   var cellMinPx = function (G) { return S.period === "4h" ? (G.narrow ? 6 : 16) : G.narrow ? 24 : 34; };
   var REFRESH_MS = 60000;
-  var LANES = [["delta", "델타"], ["turn", "거래대금"], ["oi", "OI"], ["liq", "청산"], ["lmap", "추정 청산"]];
+  // 2026-11-13 사용자 «1d 에 화면에 보이는 봉들의 CVD·OI 누적»(시안 B): 맨 위 «누적» 레인 = 보이는 첫 봉부터 CVD(흰선) · OI(주황선, 첫 봉 대비) -- 1초 수급 칸과 같은 색
+  var LANES = [["cum", "누적"], ["delta", "델타"], ["turn", "거래대금"], ["oi", "OI"], ["liq", "청산"], ["lmap", "추정 청산"]];
   // 2026-10-20 사용자 «4h 버튼 = 1주일을 4시간봉 풋프린트로» → «1d 에서 데이터 양만 4h 로»: 같은 그림·레인·청산 히트맵을 봉 길이만 바꿔 쓴다
   //   (서버 /api/footprint-4h · 지난 7일 + 형성 중 · OI = 칸 마지막 값 · 청산 = 칸 합 · 히트맵 = 칸 마감 시점). 시각 = 칸 시작(UTC 00·04·…시 = KST 09·13·…시).
   var PERIODS = {
@@ -381,6 +382,32 @@
     g.beginPath(); g.moveTo(cx + 0.5, yOf(D.h[i])); g.lineTo(cx + 0.5, yOf(D.l[i])); g.stroke();
   }
 
+  // 보이는 봉 [a, b] 누적: CVD = Σ(매수−매도) 달러 · OI = 보이는 첫 OI 대비 비율(끝 값은 마지막으로 OI 가 있는 봉)
+  function cumVis(a, b) {
+    var D = S.D, cvd = [], oi = [], s = 0, base = null, i;
+    for (i = a; i <= b && base == null; i++) if (D.oi[i] != null) base = D.oi[i];
+    for (i = a; i <= b; i++) {
+      s += D.bv[i] - D.sv[i]; cvd.push(s);
+      oi.push(base != null && D.oi[i] != null ? D.oi[i] / base - 1 : null);
+    }
+    var oiEnd = null, oiQ = null;
+    for (i = b; i >= a; i--) if (D.oi[i] != null) { oiEnd = oi[i - a]; oiQ = D.oi[i] - base; break; }
+    return { a: a, n: b - a + 1, cvd: cvd, oi: oi, cvdEnd: s, oiEnd: oiEnd, oiQ: oiQ };
+  }
+  function cumLine(g, xOf, cu, arr, y, h, col, zero) {   // 레인 안 제 축 · zero = 0 기준 점선(CVD)
+    var lo = Infinity, hi = -Infinity, i, v;
+    for (i = 0; i < arr.length; i++) if (arr[i] != null) { lo = Math.min(lo, arr[i]); hi = Math.max(hi, arr[i]); }
+    if (zero) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
+    if (!(hi > lo)) return;
+    var Y = function (v) { return y + h - 3 - (v - lo) / (hi - lo) * (h - 6); };
+    g.strokeStyle = col;
+    if (zero) { g.globalAlpha = 0.3; g.lineWidth = 1; g.setLineDash([2, 3]); g.beginPath(); g.moveTo(xOf(cu.a), Math.round(Y(0)) + 0.5); g.lineTo(xOf(cu.a + cu.n - 1), Math.round(Y(0)) + 0.5); g.stroke(); g.setLineDash([]); }
+    g.globalAlpha = 0.95; g.lineWidth = 1.8; g.lineJoin = "round"; g.beginPath();
+    var pen = false;
+    for (i = 0; i < arr.length; i++) { v = arr[i]; if (v == null) { pen = false; continue; } if (pen) g.lineTo(xOf(cu.a + i), Y(v)); else g.moveTo(xOf(cu.a + i), Y(v)); pen = true; }
+    g.stroke(); g.globalAlpha = 1;
+  }
+
   function laneVal(k, i) {
     var D = S.D;
     if (k === "delta") return D.bv[i] - D.sv[i];
@@ -418,6 +445,19 @@
       var k = lane[0], name = lane[1], y = G.lanes[k].y, h = G.lanes[k].h, i, v;
       g.strokeStyle = C.soft; g.lineWidth = 1;
       g.beginPath(); g.moveTo(G.L, y + 0.5); g.lineTo(G.L + G.plotW, y + 0.5); g.stroke();
+      if (k === "cum") {   // 막대 없음 -- 두 선은 이름표 줄(16px) 아래에만 · 숫자 = 보이는 봉 전체(호버와 무관)
+        var cu = cumVis(a, b), oiCol = css("--warn");
+        cumLine(g, xOf, cu, cu.cvd, y + 16, h - 16, C.text, true);
+        cumLine(g, xOf, cu, cu.oi, y + 16, h - 16, oiCol, false);
+        g.font = "700 12px " + C.sans; g.textAlign = "left"; g.textBaseline = "top";
+        var t0 = name + " ", t1 = (G.narrow ? "" : "보이는 ") + cu.n + "봉 · ", t2 = "CVD " + sgnUsd(cu.cvdEnd),   // 휴대폰은 짧게(OI 수량이 잘렸다)
+            t3 = "  OI " + (cu.oiEnd == null ? "모름" : pct(cu.oiEnd) + (G.narrow ? "" : " (" + (cu.oiQ >= 0 ? "+" : "−") + qty(Math.abs(cu.oiQ)) + " " + A().coin + ")")), xx = G.L + 4;
+        halo(g, C, t0, xx, y + 4, C.muted); xx += g.measureText(t0).width + 4;
+        halo(g, C, t1, xx, y + 4, C.muted); xx += g.measureText(t1).width;
+        halo(g, C, t2, xx, y + 4, C.text); xx += g.measureText(t2).width;
+        halo(g, C, t3, xx, y + 4, oiCol);
+        return;
+      }
       var mx = 0, oiLo = Infinity, oiHi = -Infinity;
       for (i = a; i <= b; i++) {
         v = laneVal(k, i);
@@ -658,6 +698,10 @@
     } else {
       html = "<b>" + lab(D.d[i]) + "</b><br>델타 " + laneText("delta", i) + " · 거래대금 " + laneText("turn", i) +
              "<br>OI " + laneText("oi", i) + "<br>청산 " + laneText("liq", i) + "<br>추정 청산(" + (S.period === "4h" ? "그 칸" : "그날") + " 마감 7일 지도) " + laneText("lmap", i);
+      if (v && i >= v.a) {   // 누적 레인 호버 = 보이는 첫 봉부터 이 봉까지
+        var cu = cumVis(v.a, i);
+        html += "<br>누적(" + lab(D.d[v.a]) + "~) CVD " + sgnUsd(cu.cvdEnd) + " · OI " + (cu.oiEnd == null ? "모름" : pct(cu.oiEnd));
+      }
     }
     if (html) tipShow(e.pageX, e.pageY, html); else tipHide();
     redraw();
