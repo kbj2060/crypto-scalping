@@ -3730,7 +3730,13 @@ function fitLayout() {
       const gb = box(g), last = Math.max(gb.bottom, ...[...c.children].map((k) => box(k).bottom)), vb = g.viewBox && g.viewBox.baseVal;
       return [gb.top - box(c).top + (last - gb.bottom) + padB(c), vb && vb.width ? (g.clientWidth * vb.height) / vb.width : gb.height];
     };
-    if (lane && flow && blk && lad && move) {
+    if (opt.classList.contains("opt-eq") && lad && move) {   // 2026-11-13 주식 카드: 아래 줄(만기·흐름)이 없다 -- 사다리가 «지금» 칸 위에서 카드 바닥까지
+      const lg = lad.querySelector("svg"), avail = box(opt).top + vh - padB(opt) - 12 - box(move).top;
+      if (lg) {
+        const [lx] = fix(lad), want = Math.max(200, avail - lx), gh = box(lg).height;
+        if (gh > 0 && Math.abs(want - gh) > 4) h = Math.max(200, Math.min(1400, Math.round((h * want) / gh)));
+      }
+    } else if (lane && flow && blk && lad && move) {
       // 2026-10-01(4) 배치(사용자 지시): 위 = 지금·실현감마 | 사다리 | 블록 거래·심리 · 아래 한 줄 = 만기 | 순매수 흐름(2026-10-02 감마 곡선 자리까지).
       //   아래 줄 차트 셋은 같은 배율 k(기본 0.85, 남는 칸의 34% 이내) · 사다리는 위 블록을 채운다. 원래(k=1) 높이 = 지금 높이 / 지금 k.
       const k0 = optChartK(), [la, ln] = fix(lane), [fa, fn] = fix(flow), [bn] = fix(blk);
@@ -4741,31 +4747,35 @@ function optBlkHtml(blocks, n24, phone, sum24 = null, max24 = null) {
   return `<div class="opt-blk-sum"><span>블록 24h <b>${n24 ?? blocks.length}건 · ${optUsd(tot)}</b> · 최대 ${optUsd(mx.notional_usd || 0)} ${optKst(mx.ts_ms, false)}</span>`
     + (phone ? `<button type="button" class="opt-blk-btn" aria-expanded="${optBlkOpen}">${optBlkOpen ? "접기 ▴" : "목록 ▾"}</button>` : "") + `</div>` + (open ? `<div class="opt-blk-list">${rows}</div>` : "");
 }
-// 2026-11-03 주식(SNDK·SOXL) «블록 거래» 자리 = 오늘 체결 요약(CBOE 는 체결 한 건씩을 안 준다 -- 계약별 오늘 거래량·마지막 체결가). 방향은 모른다.
+// 2026-11-03 주식(SNDK·SOXL) «블록 거래» 자리 = 오늘 큰 체결(CBOE 는 체결 한 건씩을 안 준다 -- 계약별 오늘 거래량·마지막 체결가). 방향은 모른다.
+// 2026-11-13 사용자 «주식 옵션 카드 최적화 -- 중요한 정보가 작은 칸에»: 오늘 합계·풋콜·감마는 카드 맨 위 큰 줄(optEqKpiHtml)로 올리고 이 칸은 큰 체결 목록만.
 function optFlowTodayHtml(o, phone) {
-  const f = o.flow_today;
-  if (!f || (!f.call[0] && !f.put[0])) return `<div class="opt-blk-sum"><span>오늘 체결 <b>없음</b> (장외·휴장)</span></div>`;
-  const pc = f.call[1] > 0 ? (f.put[1] / f.call[1]).toFixed(2) : "-", open = !phone || optBlkOpen;
-  const rows = (f.top || []).slice(0, 5).map((r) =>
+  const top = (o.flow_today || {}).top || [];
+  if (!top.length) return `<div class="opt-note">오늘 체결 없음 (장외·휴장)</div>`;
+  const open = !phone || optBlkOpen;
+  const rows = top.slice(0, 5).map((r) =>
     `<div class="opt-blk-row"><span class="t">${r[0] ? optKst(r[0], false) : "-"}</span><b>${optUsd(r[1])}</b><span class="legs">${new Date(r[2] - 16 * 3600e3).toISOString().slice(5, 10)} 만기 ${r[3] === "C" ? "콜" : "풋"} ${r[4]} · ${Math.round(r[5]).toLocaleString()}계약 · 마지막 $${Number(r[6]).toFixed(2)}</span></div>`).join("");
-  return `<div class="opt-blk-sum"><span>오늘 <b class="opt-good">콜 ${f.call[0].toLocaleString()}계약 ${optUsd(f.call[1])}</b> · <b class="opt-bad">풋 ${f.put[0].toLocaleString()}계약 ${optUsd(f.put[1])}</b> · 풋/콜(명목) ${pc}</span>`
-    + (phone ? `<button type="button" class="opt-blk-btn" aria-expanded="${optBlkOpen}">${optBlkOpen ? "접기 ▴" : "목록 ▾"}</button>` : "") + `</div>` + optEqKpiHtml(o) + (open ? `<div class="opt-blk-list">${rows}</div>` : "");
+  return (phone ? `<div class="opt-blk-sum"><span>명목 상위 ${Math.min(5, top.length)}건</span><button type="button" class="opt-blk-btn" aria-expanded="${optBlkOpen}">${optBlkOpen ? "접기 ▴" : "목록 ▾"}</button></div>` : "")
+    + (open ? `<div class="opt-blk-list">${rows}</div>` : "");
 }
-// 2026-11-13 사용자 «saveticker(Unusual Whales) 옵션 칸을 CBOE 로 같은 칸»: 오늘 거래량·평소 대비 · 풋/콜 비중(계약) · 감마 노출 주요 레벨($/1%, 콜 +·풋 − 관례).
+// 2026-11-13 사용자 «saveticker(Unusual Whales) 옵션 칸을 CBOE 로 같은 칸»: 오늘 거래량·평소 대비 · 풋/콜 · 감마 국면·플립 · 감마 노출 주요 레벨($/1%, 콜 +·풋 − 관례).
 //   계산 = scripts/cboe_option_summary_20261101.py(gex_levels · gamma_flip · volume_vs_normal). 서술용 -- 방향 신호 아님.
-//   2026-11-13 «롱감마·숏감마·감마 플립»: 같은 칸 머리에 국면(순 GEX 부호)과 플립 가격.
+//   2026-11-13 «카드 최적화»: 네 칸이 카드 맨 위 전폭 줄(.opt-kpi) -- 감마 국면을 레벨 칸에서 떼어 제 칸으로. 장외(거래 0)여도 감마 칸은 보인다.
 function optEqKpiHtml(o) {
-  const f = o.flow_today, vn = o.vol_norm, gx = o.gex, gm = o.gamma, n = f.call[0] + f.put[0];
-  if (!(n > 0)) return "";
-  const cp = Math.round((100 * f.call[0]) / n), su = (v) => `${v >= 0 ? "+" : "−"}${optUsd(Math.abs(v))}`;
+  const f = o.flow_today || { call: [0, 0], put: [0, 0] }, vn = o.vol_norm, gx = o.gex, gm = o.gamma, n = f.call[0] + f.put[0];
+  const su = (v) => `${v >= 0 ? "+" : "−"}${optUsd(Math.abs(v))}`;
   const lv = (a, cls) => (a || []).map(([k, v]) => `<span class="${cls}">${k}<small>${su(v)}</small></span>`).join("");
+  const cp = n > 0 ? Math.round((100 * f.call[0]) / n) : 0, pc = f.call[1] > 0 ? (f.put[1] / f.call[1]).toFixed(2) : "-";
   return `<div class="oq">`
-    + `<div class="oq-k"><i>오늘 옵션 거래량 · 전체 만기</i><b>${n.toLocaleString()}<small>계약</small></b>`
-    + (vn ? `<span title="지난 ${vn.days}거래일의 같은 시각(미 동부)까지 평균 ${vn.avg.toLocaleString()}계약">평소의 <b class="oq-x">${vn.ratio.toFixed(2)}배</b> <small>지난 ${vn.days}일 같은 시각</small></span>` : `<small>평소 기준 쌓는 중</small>`) + `</div>`
-    + `<div class="oq-k"><i>풋 / 콜 비중 · 거래량</i><div class="oq-bar" role="img" aria-label="콜 ${cp}% 풋 ${100 - cp}%"><span class="c" style="flex:${Math.max(cp, 12)}">콜 ${cp}%</span><span class="p" style="flex:${Math.max(100 - cp, 12)}">풋 ${100 - cp}%</span></div></div>`
-    + (gx ? `<div class="oq-k oq-g">${gm ? `<i title="롱감마 = 딜러 헤지가 움직임을 누르는 쪽 · 숏감마 = 키우는 쪽 · 플립 = 순 감마 노출이 0 이 되는 가격(블랙-숄즈로 가격을 옮겨 다시 계산) · 딜러가 콜은 사고 풋은 판다는 관례 가정 -- 실제 포지션은 모름 · 검증 안 됨">감마 국면 · 관례 가정 · 검증 안 됨</i>`
-      + `<b class="${gm.regime === "long" ? "opt-good" : "opt-bad"}">${gm.regime === "long" ? "롱감마" : "숏감마"}<small>${gm.flip != null ? `플립 $${gm.flip} (${gm.flip_pct > 0 ? "+" : "−"}${Math.abs(gm.flip_pct).toFixed(1)}%)` : "플립 없음 (±30% 안)"}</small></b>` : ""}`
-      + `<i>감마 노출 주요 레벨 · $/1% · 순 ${su(gx.net)}</i><div class="oq-gx">${lv(gx.pos, "opt-good")}${lv(gx.neg, "opt-bad")}</div></div>` : "")
+    + `<div class="oq-k"><i>오늘 옵션 거래량 · 전체 만기</i>` + (n > 0 ? `<b>${n.toLocaleString()}<small>계약</small></b>`
+      + (vn ? `<span title="지난 ${vn.days}거래일의 같은 시각(미 동부)까지 평균 ${vn.avg.toLocaleString()}계약">평소의 <b class="oq-x">${vn.ratio.toFixed(2)}배</b> <small>지난 ${vn.days}일 같은 시각</small></span>` : `<small>평소 기준 쌓는 중</small>`)
+      : `<b>-</b><small>오늘 체결 없음 (장외·휴장)</small>`) + `</div>`
+    + (n > 0 ? `<div class="oq-k"><i>풋 / 콜 · 거래량</i><div class="oq-bar" role="img" aria-label="콜 ${cp}% 풋 ${100 - cp}%"><span class="c" style="flex:${Math.max(cp, 12)}">콜 ${cp}%</span><span class="p" style="flex:${Math.max(100 - cp, 12)}">풋 ${100 - cp}%</span></div>`
+      + `<span class="oq-sub"><b class="opt-good">콜 ${optUsd(f.call[1])}</b> · <b class="opt-bad">풋 ${optUsd(f.put[1])}</b></span><span class="oq-sub">명목 풋/콜 ${pc}</span></div>` : "")
+    + (gm ? `<div class="oq-k oq-gm"><i title="롱감마 = 딜러 헤지가 움직임을 누르는 쪽 · 숏감마 = 키우는 쪽 · 플립 = 순 감마 노출이 0 이 되는 가격(블랙-숄즈로 가격을 옮겨 다시 계산) · 딜러가 콜은 사고 풋은 판다는 관례 가정 -- 실제 포지션은 모름 · 검증 안 됨">감마 국면 · 관례 가정 · 검증 안 됨</i>`
+      + `<b class="${gm.regime === "long" ? "opt-good" : "opt-bad"}">${gm.regime === "long" ? "롱감마" : "숏감마"}</b>`
+      + `<span class="oq-sub">${gm.flip != null ? `플립 <b>$${gm.flip}</b> <small>${gm.flip_pct > 0 ? "+" : "−"}${Math.abs(gm.flip_pct).toFixed(1)}%</small>` : "플립 없음 <small>±30% 안</small>"}</span>${gx ? `<span class="oq-sub">순 감마 노출 <b>${su(gx.net)}</b><small>/1%</small></span>` : ""}</div>` : "")
+    + (gx ? `<div class="oq-k oq-g"><i>감마 노출 주요 레벨 · $/1% 움직임</i><div class="oq-gx">${lv(gx.pos, "opt-good")}${lv(gx.neg, "opt-bad")}</div></div>` : "")
     + `</div>`;
 }
 const optClick = (e) => {
@@ -4820,7 +4830,7 @@ function optInfoParts(o, g, kv) {
   if (a1 != null && a7 != null) mood.push(kv("기간 구조 기울기", `1일−7일 ${sgnN(a1 - a7)}pt${a30 != null ? ` · 7일−30일 ${sgnN(a7 - a30)}pt` : ""}`, a1 > a7 ? "opt-warn" : ""));
   if (o.atm_spread_iv != null) mood.push(kv("ATM 호가 폭 · 7일 근처", `${o.atm_spread_iv.toFixed(1)} vol pt`));
   // 같은 스냅샷끼리만 잰다 -- 10분 묵은 선도가를 지금 바이낸스 가격과 견주면 그 사이 움직임이 섞였다(배포 직후 +30bp 로 보였다)
-  if (fr && fr.fwd && o.index) mood.push(kv("옵션 선도 − 지수 · 가까운 만기", `${sgnN((fr.fwd / o.index - 1) * 1e4)}bp`));
+  if (fr && fr.fwd && o.index && !o.src) mood.push(kv("옵션 선도 − 지수 · 가까운 만기", `${sgnN((fr.fwd / o.index - 1) * 1e4)}bp`));
   return { move: move.join(""), mood: mood.join("") };
 }
 function renderOptions() {
@@ -4836,6 +4846,10 @@ function renderOptions() {
     return;
   }
   const f = optFront(o), hrs = f ? (f.exp_ms - Date.now()) / 3.6e6 : null;
+  // 2026-11-13 사용자 «주식 옵션 카드 최적화»: 주식(CBOE)은 핵심 네 칸을 맨 위 큰 줄로 · 안 쓰는 칸(실현 감마 미검증 안내 · DVOL 안내 · IV−실현 · 선도−지수 · 만기 시간축) 뺀다
+  //   IV−실현은 연율 기준이 달라(실현 = 선물 1시간봉 × 24·365, IV = 거래일 기준) SOXL −114pt 처럼 늘 크게 음수였다.
+  const eq = !!o.src;
+  el("optCard")?.classList.toggle("opt-eq", eq);
   const s1d = optSigma(o, 86400), s5 = optSigma(o, 300);
   // 2026-09-29 사용자 지시: 예상 폭은 전부 DVOL 하나로(만기별 ATM IV 는 이력이 09-28 부터라 검정 불가였다).
   const sExp = f && hrs > 0 ? optSigma(o, hrs * 3600) : null;
@@ -4849,11 +4863,12 @@ function renderOptions() {
   const covHead = el("optCovHead");
   if (covHead) covHead.innerHTML = optHead(o);
   // 2026-09-30 검증: 갱신 실패·서버 상태 지연이면 마지막 값을 그대로 두되 «지연»을 먼저 말한다
-  body.innerHTML = (latestGex && latestGex.error ? `<div class="opt-note opt-warn">옵션 갱신 지연(${escapeHtml(String(latestGex.error))}) — 마지막으로 받은 값</div>` : "") + [   // 커버 줄은 제목 옆(#optCovHead) -- 아래에서 넣는다
+  body.innerHTML = (latestGex && latestGex.error ? `<div class="opt-note opt-warn">옵션 갱신 지연(${escapeHtml(String(latestGex.error))}) — 마지막으로 받은 값</div>` : "")
+    + (eq ? `<div class="opt-kpi">${optEqKpiHtml(o)}</div>` : "") + [   // 커버 줄은 제목 옆(#optCovHead) -- 아래에서 넣는다
     sec("move", "예상 폭", kv("24시간 1σ", s1d == null ? "-" : `${pm(s1d)} (${(optIv(o) / Math.sqrt(365)).toFixed(1)}%)`)
-      + kv("이번 5분 1σ", pm(s5)) + (o.dvol == null && o.iv30 != null ? `<div class="opt-note">DVOL 지수가 없는 코인 — 30일 ATM IV ${o.iv30.toFixed(0)}% 로 계산</div>` : "") + kv(f ? `다음 만기까지(${hrs.toFixed(0)}h)` : "다음 만기까지", pm(sExp))
-      + kv("IV(30일) − 실현(7일)", vrp == null ? "-" : `${vrp >= 0 ? "+" : ""}${vrp.toFixed(1)}pt`) + info.move),
-    sec(rgc ? rgc.tip : "rg", "실현 감마", !rg ? `<div class="opt-note">${rgc ? "5분봉 12시간치 대기" : `${Object.keys(RG_BY).join("·")} 만 검증 — 이 코인은 표시 안 함`}</div>`
+      + kv("이번 5분 1σ", pm(s5)) + (!eq && o.dvol == null && o.iv30 != null ? `<div class="opt-note">DVOL 지수가 없는 코인 — 30일 ATM IV ${o.iv30.toFixed(0)}% 로 계산</div>` : "") + kv(f ? `다음 만기까지(${hrs.toFixed(0)}h)` : "다음 만기까지", pm(sExp))
+      + (eq ? "" : kv("IV(30일) − 실현(7일)", vrp == null ? "-" : `${vrp >= 0 ? "+" : ""}${vrp.toFixed(1)}pt`)) + info.move),
+    eq ? "" : sec(rgc ? rgc.tip : "rg", "실현 감마", !rg ? `<div class="opt-note">${rgc ? "5분봉 12시간치 대기" : `${Object.keys(RG_BY).join("·")} 만 검증 — 이 코인은 표시 안 함`}</div>`
       : kv("12시간 자기상관", `${rg.v >= 0 ? "+" : "−"}${Math.abs(rg.v).toFixed(3)} · 2021~24 중 ${rg.pct < 50 ? `하위 ${Math.max(1, Math.round(rg.pct))}` : `상위 ${Math.max(1, Math.round(100 - rg.pct))}`}%`)
       + kv("국면", rg.side === "rev" ? "되돌림 쪽 · 롱감마형" : rg.side === "trend" ? "추세 쪽 · 숏감마형" : "보통", rg.side === "rev" ? "opt-good" : rg.side === "trend" ? "opt-warn" : "")
       + kv("다음 4시간 변동성", ((x) => `${rgWord(x)} · ${x}배`)(rgc.x[rg.side === "rev" ? 0 : rg.side === "trend" ? 2 : 1]))),
@@ -4867,16 +4882,18 @@ function renderOptions() {
   ].join("");
   renderPaper();   // 2026-10-04 옛 «옵션 요약» 자리(#mcWall) = 모의 판(사용자 지시). 옵션 범위·max pain·RR 은 머리 칩·Option 카드에 그대로
   // 2026-09-29 풋프린트 카드 맨 아래 반반(휴대폰은 위아래) -- 두 칸 폭이 같아 한 번 잰다.
-  if (laneBody && flowBody && laneBody.clientWidth > 0) {
+  // 주식: 만기 시간축(+120h)은 주간 만기 하나뿐이라 대부분 비었다 -- 그 자리를 큰 체결·누적이 쓴다. 숨기기는 폭 검사 앞에서(숨긴 칸은 폭 0 -- 주식 → 코인 전환 때 아래 줄을 안 다시 그렸다)
+  if (laneBody) laneBody.hidden = eq;
+  if (laneBody && flowBody && flowBody.clientWidth > 0) {
     const lw = Math.round(laneBody.clientWidth), fw = Math.round(flowBody.clientWidth) || lw, fl = ((((latestGex || {}).block_trades || {}).flow_by_coin || {})[cur]) || [];
     // 두 그림 제목은 같은 모양(청록 ? 버튼 + 범례, 2026-09-29 사용자 «제목 포맷 통일») -- 누르면 설명 팝업.
     const head = (k, title, legend) => `<div class="opt-flow-head"><button type="button" class="opt-q" ${helpAttrs(k)}>${title}<span aria-hidden="true">?</span></button>`
       + `<span class="opt-lane-legend">${legend}</span></div>`;
-    laneBody.innerHTML = head("lane", "옵션 만기 · 지금 ~ +120h", `<b class="opt-warn">막대</b> 만기 규모(명목) · pain · P/C(미결제) · <b class="opt-c">선</b> 만기별 ATM IV · KST`)
+    laneBody.innerHTML = eq ? "" : head("lane", "옵션 만기 · 지금 ~ +120h", `<b class="opt-warn">막대</b> 만기 규모(명목) · pain · P/C(미결제) · <b class="opt-c">선</b> 만기별 ATM IV · KST`)
       + optLaneSvg(o, lw);   // 2026-09-29 블록 점 제거(사용자 지시) -- 블록은 옵션 카드 «블록 거래» 칸만
     flowBody.innerHTML = (fl.length ? head("flow", "옵션 순매수 흐름 · 지난 24시간", `<b class="opt-good">콜</b> · <b class="opt-bad">풋</b> 매수−매도(${escapeHtml(cur)}) · <b class="opt-c">선</b> 체결 순델타(24h) 누적 · 테이커 기준${optNewTxt(fl.slice(0, -1)).replace(" · 미결제", " · 24h 미결제")}${fl.some((b) => b.liq > 0) ? ` · 강제청산 ${fmtNum(fl.reduce((a, b) => a + (b.liq || 0), 0), 0)}` : ""}`) + optFlowSvg(fl, fw) : o.src ? head("eqflow2", "오늘 체결 누적 · 콜·풋", `<b class="opt-good">콜</b> · <b class="opt-bad">풋</b> 명목(CBOE 지연)`) + optEqFlowSvg(o.flow_series, fw) : "");
     const bt = (latestGex || {}).block_trades || {};
-    if (blkBody) blkBody.innerHTML = o.src ? head("eqflow", "오늘 체결 · CBOE 지연", "") + optFlowTodayHtml(o, window.matchMedia("(max-width: 720px)").matches) : head("blocks", "블록 거래 · 지난 24시간", "")
+    if (blkBody) blkBody.innerHTML = o.src ? head("eqflow", "오늘 큰 체결 · 명목 상위", "") + optFlowTodayHtml(o, window.matchMedia("(max-width: 720px)").matches) : head("blocks", "블록 거래 · 지난 24시간", "")
       + (bt.available === false ? `<div class="opt-note opt-warn">블록 수집 지연 — 아래 목록은 마지막으로 받은 값</div>` : "")
       // 🔴`?.[` 는 CI 문법 검사(esprima)가 못 읽는다(2026-09-30 배포 막힘) -- `(x || {})[k]` 로 쓴다.
       + optBlkHtml(blocks, (bt.n_by_coin || {})[cur], window.matchMedia("(max-width: 720px)").matches,
@@ -4887,7 +4904,9 @@ function renderOptions() {
 
 // 2026-11-03 주식 «순매수 흐름» 자리 = 오늘 콜·풋 체결 누적(명목). 점은 수집기가 10분마다 한 점씩 쌓은 것 -- 방향(매수/매도)은 모른다. 값이 줄면 새 장이 시작된 것.
 function optEqFlowSvg(series, W) {
-  const s = (series || []).filter((p) => p && p.length === 3);
+  let s = (series || []).filter((p) => p && p.length === 3);
+  const cut = s.reduce((k, p, i) => (i && p[1] + p[2] < 0.5 * (s[i - 1][1] + s[i - 1][2]) ? i : k), 0);   // 2026-11-13 마지막 장만(새 장 = 누적이 반 아래로 떨어진 곳 -- CBOE 값 소폭 정정은 무시)
+  s = s.slice(cut);
   if (s.length < 2) return `<div class="opt-note">체결 곡선은 10분마다 한 점씩 쌓입니다 — 아직 ${s.length}점</div>`;
   const H = 150, x0 = 56, x1 = W - 16, y0 = 14, y1 = H - 22, t0 = s[0][0], t1 = s[s.length - 1][0], mx = Math.max(1, ...s.map((p) => Math.max(p[1], p[2])));
   const X = (t) => x0 + ((t - t0) / Math.max(1, t1 - t0)) * (x1 - x0), Y = (v) => y1 - (v / mx) * (y1 - y0);

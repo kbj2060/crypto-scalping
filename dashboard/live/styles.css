@@ -2470,6 +2470,20 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .oq-bar .p { background: color-mix(in srgb, var(--bad) 34%, transparent); padding-right: 6px; text-align: right; white-space: nowrap; }
 .oq-gx { display: flex; flex-wrap: wrap; gap: 3px 12px; font: 700 13px/1.35 var(--font-mono); }
 .oq-gx small { font-weight: 500; }
+/* 2026-11-13 사용자 «주식 옵션 카드 최적화 -- 중요한 정보가 작은 칸에»: 주식(.opt-eq)은 네 칸(거래량·풋콜·감마 국면·감마 레벨)이 카드 맨 위 전폭 줄 */
+.oq-sub { font-size: 12.5px; color: var(--muted); }
+.oq-sub b { font: 700 13px var(--font-mono); color: var(--text); }
+.opt-kpi .oq { grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(0, 1.6fr); gap: 10px; margin: 2px 0 14px; }
+.opt-kpi .oq-k { padding: 12px 14px; gap: 7px; }
+.opt-kpi .oq-k > b { font-size: 24px; }
+.opt-kpi .oq-gx { font-size: 14px; gap: 4px 14px; }
+@media (max-width: 720px) { .opt-kpi .oq { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .opt-kpi :is(.oq-g, .oq-gm) { grid-column: 1 / -1; } .opt-kpi .oq-k > b { font-size: 20px; } }
+@media (min-width: 721px) {
+  #optCard.opt-eq { grid-template-areas: "head head head head" "cov cov cov cov" "kpi kpi kpi kpi" "move ladder ladder blk" "mood ladder ladder flow"; }
+  #optCard #optBody > .opt-kpi { grid-area: kpi; }
+  #optCard.opt-eq #optBlkBody::before { content: "오늘 거래"; }
+}
+#optCard #optLaneBody[hidden] { display: none; }
 .opt-blk-btn { flex: none; min-height: 30px; padding: 0 12px; border-radius: 999px; background: none; cursor: pointer;
   border: 1px solid color-mix(in srgb, var(--option) 50%, transparent); color: var(--option); font: 600 12px/1 var(--font-sans); }
 .opt-blk-btn:focus-visible { outline: 2px solid var(--option); outline-offset: 2px; }
