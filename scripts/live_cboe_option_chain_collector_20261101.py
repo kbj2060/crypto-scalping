@@ -54,9 +54,15 @@ def collect(sym: str, out: Path = OUT, get=fetch, now: float | None = None) -> s
     return str(path)
 
 
+def symbols(argv: list[str]) -> list[str]:
+    """2026-11-13 사용자 «주식류는 이런식으로»: 인자 종목 + coin_config 의 equity 코인 전부(새 주식 코인을 넣으면 cron 을 안 고쳐도 모인다). 순서 유지·중복 제거."""
+    from coin_config import COIN_CONFIG
+    return list(dict.fromkeys([a.upper() for a in argv] + [k.upper() for k, v in COIN_CONFIG.items() if v.get("equity")]))
+
+
 def main(argv: list[str]) -> int:
     rc = 0
-    for sym in [a.upper() for a in argv] or ["SNDK"]:
+    for sym in symbols(argv):
         try:
             got = collect(sym)
             if got:      # 저장한 스냅샷을 대시보드 Option 카드용 요약으로(원본 저장이 먼저 -- 요약이 실패해도 원본은 남는다)
@@ -89,6 +95,7 @@ def _selftest() -> None:
         except OSError:
             pass
         assert not list(out.rglob("*.part")), "임시 파일이 남으면 안 된다"
+    assert symbols(["SNDK"])[:1] == ["SNDK"] and {"SNDK", "SOXL"} <= set(symbols([])) and len(symbols(["SOXL", "soxl"])) == len(set(symbols([]))), symbols([])
     print("selftest OK")
 
 

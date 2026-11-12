@@ -4475,7 +4475,7 @@ function optRealizedGamma(candles, nowS = Date.now() / 1000, ref = RG_REF, cut =
 }
 // 2026-09-28 네 코인(ETH·BTC 역옵션 · SOL·XRP USDC 선형옵션). DVOL 지수는 ETH·BTC 뿐 -- 나머지는 30일 ATM IV(iv30)로 폭을 잰다.
 function optData() {
-  const cur = { eth: "ETH", btc: "BTC", sol: "SOL", xrp: "XRP", sndk: "SNDK", soxl: "SOXL" }[activeSnapshotAsset] || null;
+  const cur = activeSnapshotAsset ? String(activeSnapshotAsset).toUpperCase() : null;   // 2026-11-13 «주식류는 이렇게» -- 표 없이: 서버 옵션 묶음에 그 코인이 있으면 보인다(새 주식은 coin_config equity 만 켜면 된다)
   const g = cur && latestGex && latestGex.available ? (latestGex.currencies || {})[cur] : null;
   const blocks = cur ? ((((latestGex || {}).block_trades || {}).by_coin || {})[cur] || []) : [];
   return { cur, g, o: g && g.options, blocks };

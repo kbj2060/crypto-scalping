@@ -91,6 +91,7 @@ COIN_CONFIG: dict[str, dict] = {
     },
     "sndk": {
         "binance_symbol": "SNDKUSDT",
+        "equity": True,   # 2026-11-13 주식류 = CBOE 지연 옵션 체인 자동 수집·옵션 카드 세 칸(scripts/live_cboe_option_chain_collector_20261101.py)
         # 2026-11-01 Binance TradFi 주식 선물. 전용 워커가 없어 아래 파일은 없다(모듈이 «파일 없음 = 빈 응답»으로 처리) --
         # 풋프린트·1초 수급·OI 는 테이프/ctx 수집기 데이터로 나오고, 신호 모듈들은 비어 있다. 현물도 없다(NO_SPOT_MARKET_SYMBOLS 와 같은 사정).
         "microstructure_db_path": ROOT / "data" / "live" / "microstructure_sndk.duckdb",
@@ -100,6 +101,7 @@ COIN_CONFIG: dict[str, dict] = {
     },
     "soxl": {
         "binance_symbol": "SOXLUSDT",
+        "equity": True,   # 2026-11-13 주식류 = CBOE 지연 옵션 체인 자동 수집·옵션 카드 세 칸(scripts/live_cboe_option_chain_collector_20261101.py)
         # 2026-11-02 Binance TradFi ETF 선물(SOXL, 반도체 3배). sndk 와 같은 사정 -- 전용 워커 없음·현물 없음.
         "microstructure_db_path": ROOT / "data" / "live" / "microstructure_soxl.duckdb",
         "microstructure_table": "microstructure_1m_soxl",
