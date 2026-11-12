@@ -3913,19 +3913,20 @@ function liqMapKnownUntilSec(map) {
 }
 
 // 2026-11-11 1주·1달 최대 고통(청산 탭과 같은 ±0.5% 묶음 · 지도 7·30일 모델) -- 풋프린트 지지·저항(1일 지도)에 없는 긴 주기.
-//   화면 안 = 옅은 ±0.5% 띠 + 점선 · 화면 밖 = 가장자리 꼬리표 «1주 고통 3%↑»(priceLabels 규칙) · 1주·1달이 같은 구간(±0.35%)이면 하나로. 서술용.
+//   화면 안 = 옅은 ±0.5% 띠 + 점선 · 화면 밖 = 가장자리 꼬리표 «1주 고통 3%↑»(priceLabels 규칙) · 주기끼리 같은 구간(±0.35%)이면 하나로(«1일·1주 고통»). 서술용.
+// 2026-11-12 사용자 «풋프린트에 최대 고통 라인도»: 1주·1달은 대개 화면 밖(SOXL −18%/+14%)이라 휴대폰에선 꼬리표까지 빠져 안 보였다 -- 화면 안에 드는 12시간·1일도 같은 방식으로 얹는다.
 function painFarLevels() {
   const cur = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), f = typeof window.liqPainFar === "function" ? window.liqPainFar(activeSnapshotAsset, cur) : null;
   if (!f) return [];
   const out = [];
-  [["1W", "1주"], ["1M", "1달"]].forEach(([k, nm]) => {
+  [["12H", "12h"], ["24H", "1일"], ["1W", "1주"], ["1M", "1달"]].forEach(([k, nm]) => {
     const q = f[k];
     if (!q) return;
     [[q.dn, "var(--liq-support)", "dn"], [q.up, "var(--liq-resistance)", "up"]].forEach(([z, color, sd]) => {
       if (!z) return;
       const same = out.find((o) => o.sd === sd && Math.abs(o.val / z.px - 1) <= 0.0035);
-      if (same) { same.label = same.label.replace("1주", "1주·1달"); return; }
-      out.push({ sd, val: z.px, color, label: `${nm} 고통 ${pctTxt(Math.round(z.p * 100))}`, priceLeft: true, dashed: true, width: 1, band: [z.px * 0.995, z.px * 1.005],
+      if (same) { same.nm += `·${nm}`; same.label = `${same.nm} 고통 ${same.pTxt}`; same.title = same.title.replace(/^\S+/, same.nm); return; }
+      out.push({ sd, nm, pTxt: pctTxt(Math.round(z.p * 100)), val: z.px, color, label: `${nm} 고통 ${pctTxt(Math.round(z.p * 100))}`, priceLeft: true, dashed: true, width: 1, band: [z.px * 0.995, z.px * 1.005],
                  title: `${nm} 최대 고통 구간 ${lineFmt(z.px * 0.995)}~${lineFmt(z.px * 1.005)} (${z.d >= 0 ? "+" : "−"}${Math.abs(z.d).toFixed(2)}%) · 24시간 안 닿을 확률 ${Math.round(z.p * 100)}% · 추정 · 서술용` });
     });
   });
@@ -9413,11 +9414,12 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     //   (실측). 익명 레벨은 플롯 안의 선·꺾쇠가 이미 «어느 행인가»를 말한다.
     // 2026-10-10 풋프린트는 현재가가 차트 안(호가 띠 끝)에 있어 줄에서 뺀다 -- 그 자리로 지지·저항이 덜 잘린다.
     // 2026-11-11 사용자 «모바일 최적화»: 꼬리표에 확률(«지지1 58%»)·최대 고통이 붙어 줄이 길어지자 위(먼 저항)부터 채우다 가까운 지지1 이 잘렸다 --
-    //   현재가에서 가까운 순으로 들어갈 만큼 고른 뒤 가격 순(위→아래)으로 싣는다 · 화면 밖 1주·1달 최대 고통은 뺀다(차트 안 선이 없고 가장 멀다).
+    //   현재가에서 가까운 순으로 들어갈 만큼 고른 뒤 가격 순(위→아래)으로 싣는다 · 화면 밖 최대 고통(12h~1달)은 뺀다(차트 안 선이 없고 가장 멀다).
     const row = priceLabels.filter((p) => p.label && !(footprint && p.label === "현재") && !(p.band && p.outOfView));
     const keep = new Set();
     let est = 3;
-    row.slice().sort((a, b) => Math.abs(a.val - currentPrice) - Math.abs(b.val - currentPrice)).forEach((p) => {
+    // 2026-11-12 12h·1일 최대 고통이 가까워 지지1 자리를 먹었다(SOXL 실측) -- 고통(band)은 지지·저항·진입을 다 실은 뒤 남는 자리에.
+    row.slice().sort((a, b) => (!!a.band - !!b.band) || Math.abs(a.val - currentPrice) - Math.abs(b.val - currentPrice)).forEach((p) => {
       const wEst = (`${p.label} ↑${fmtNum(p.val, pxDp())}`.length) * 6.4 + 9;
       if (est + wEst <= w - 3) { keep.add(p); est += wEst; }
     });
@@ -10275,6 +10277,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   if (footprint && svg.id === "candleSvgSnapshot" && ICE_ASSETS.has(activeSnapshotAsset) && candles.length > 1) iceMarks(svg, candles, xAt, yAt, bw, yMin, yMax, NS);   // 2026-10-16 시안 ①
   { const mn = mobileChart && svg.id === "candleSvgSnapshot" ? svg.querySelector('[data-live="label"][data-with-price="num"]') : null;
     if (mn && !mn.classList.contains("far-lbl")) svg.appendChild(mn); }   // 2026-10-10 휴대폰 현재가 숫자 = 호가 띠(◌ 표식) 위 맨 앞
+  if (footprint && !mobileChart && svg.id === "candleSvgSnapshot") svg.querySelectorAll(".far-lbl").forEach((n) => { if (n.parentNode === svg) svg.appendChild(n); });   // 2026-11-12 가장자리 꼬리표(«1주 고통 3%↑» 등)를 호가 막대가 덮어 글자가 가렸다 -- 맨 앞으로
   fpCvPaint(fpCv.bg); fpCvPaint(fpCv.fg);   // 2026-10-20 캔버스 두 장(fpCv) -- 칠하기는 레이아웃을 안 건드린다
   if (svg.id === "candleSvgSnapshot") post.push(renderLineTool);   // 2026-10-28 선 주문 상자 자리
   if (svg.id === "candleSvgSnapshot") post.push(renderArmedLines);   // 2026-10-29 들어간 선 주문(익절·손절) 자리

@@ -243,7 +243,7 @@
   };
   window.liqPainFar = function (a, P) {
     var E = allOf(a), R = painOf(E, P);
-    return R ? { "1W": R.per["1W"], "1M": R.per["1M"], unit: E.unit } : null;
+    return R ? { "12H": R.per["12H"], "24H": R.per["24H"], "1W": R.per["1W"], "1M": R.per["1M"], unit: E.unit } : null;   // 2026-11-12 12시간·1일 추가(풋프린트 «최대 고통 라인»)
   };
   var pullTxt = function (u) { return u == null ? "—" : "위 " + pc(u) + " : 아래 " + pc(1 - u); };
   CH.pain = function (el, w, h) {
