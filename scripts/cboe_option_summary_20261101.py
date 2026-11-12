@@ -50,9 +50,11 @@ def chain_frame(options: list[dict], now: float) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def flow_today(options: list[dict]) -> dict:
+def flow_today(options: list[dict], S: float = 0.0) -> dict:
     """오늘 체결 요약 -- CBOE 는 체결 한 건씩은 안 주고 계약별 «오늘 거래량 · 마지막 체결가»만 준다(블록 거래 대신 이걸 보인다).
-    명목 = 거래량 × 마지막 체결가(없으면 호가 중간) × 100 -- 근사다(체결가가 하루 중 달라졌다). 방향(매수/매도)은 모른다."""
+    명목 = 거래량 × 마지막 체결가(없으면 호가 중간) × 100 -- 근사다(체결가가 하루 중 달라졌다). 방향(매수/매도)은 모른다.
+    2026-11-13 사용자 «큰 체결 순위를 바꿔줘»: 상위 = 주식 환산 노출 |델타| × 거래량 × 100 × 지금가 순(행 끝 [7]). 명목 순은 이미 돈이 든
+    깊은 내가격 계약(값 대부분이 행사 가치)을 실제보다 크게 올렸다(SOXL 풋 200: 명목 $18.4M · 주식 환산 $8.8M)."""
     rows, tot = [], {"C": [0.0, 0.0], "P": [0.0, 0.0]}
     for o in options:
         m, vol = OPT_RE.match(o["option"]), float(o.get("volume") or 0)
@@ -65,8 +67,8 @@ def flow_today(options: list[dict]) -> dict:
         exp = datetime.strptime(m[1], "%y%m%d").replace(hour=16, tzinfo=ET)
         t = o.get("last_trade_time")
         rows.append([int(datetime.strptime(t, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=ET).timestamp() * 1000) if t else None, round(usd),
-                     int(exp.timestamp() * 1000), m[2], int(m[3]) / 1000, vol, px])
-    rows.sort(key=lambda r: -r[1])
+                     int(exp.timestamp() * 1000), m[2], int(m[3]) / 1000, vol, px, round(vol * abs(float(o.get("delta") or 0)) * MULT * S)])
+    rows.sort(key=lambda r: (-r[7], -r[1]))   # 델타가 없으면(0) 명목 순으로 뒤에
     return {"call": [round(tot["C"][0]), round(tot["C"][1])], "put": [round(tot["P"][0]), round(tot["P"][1])], "top": rows[:6]}
 
 
@@ -219,7 +221,7 @@ def summarize(data: dict, now: float | None = None) -> dict:
     for e in exps:
         e.pop("_g"); e.pop("_yrs")
     out["expiries"] = exps[:8]
-    out["flow_today"] = flow_today(data["options"])
+    out["flow_today"] = flow_today(data["options"], S)
     out["gex"] = gex_levels(data["options"], S, now)
     out["gamma"] = gamma_flip(data["options"], S, now)   # 2026-11-13 롱/숏 감마 국면 · 감마 플립
     out["cm"] = {str(d): D._const_maturity(exps, d) for d in (1, 7, 30, 60)}
@@ -293,9 +295,13 @@ def _selftest() -> None:
     assert _clean({"a": [float("nan"), 1.0]}) == {"a": [None, 1.0]}
     assert out["flow_today"]["call"] == [0, 0] and out["flow_today"]["top"] == []      # 거래량 0 이면 비어 있다
     ops2 = [dict(o, volume=(5.0 if o["option"].endswith("C00100000") else 2.0 if o["option"].endswith("P00090000") else 0.0),
-                 last_trade_price=3.0, last_trade_time="2026-10-30T15:00:00") for o in ops]
+                 last_trade_price=3.0, last_trade_time="2026-10-30T15:00:00", delta=(0.5 if "C" in o["option"][4:11] else -0.2)) for o in ops]
     ft = summarize({"symbol": "SNDK", "current_price": 100.0, "iv30": 70.0, "last_trade_time": "2026-10-30T15:59:59", "options": ops2}, now)["flow_today"]
     assert ft["call"][0] == 15 and ft["put"][0] == 6 and ft["top"][0][1] == 5 * 3.0 * 100 and ft["top"][0][3] == "C", ft   # 만기 셋 × 5 · 셋 × 2
+    assert ft["top"][0][7] == 5 * 0.5 * 100 * 100.0 and ft["top"][-1][7] == 2 * 0.2 * 100 * 100.0, ft   # 주식 환산 = 거래량 × |델타| × 100 × 지금가 · 풋도 양수
+    ft2 = flow_today([{"option": "SNDK261120P00200000", "volume": 10.0, "last_trade_price": 100.0, "delta": -1.0},     # 깊은 내가격 풋: 명목 $100k · 환산 $100k
+                      {"option": "SNDK261120C00100000", "volume": 40.0, "last_trade_price": 5.0, "delta": 0.5}], 100.0)  # 등가 콜: 명목 $20k · 환산 $200k
+    assert ft2["top"][0][3] == "C" and ft2["top"][0][1] == 20000 and ft2["top"][0][7] == 200000, ft2   # 명목이 작아도 노출이 크면 위
     # 감마 플립: 콜 110 · 풋 90 같은 미결제 → 위쪽 + · 아래쪽 − → 0 을 지나는 가격이 둘 사이 · 콜만 있으면 플립 없음·롱감마 · 풋만 → 숏감마
     gf = gamma_flip([{"option": "SNDK261120C00110000", "iv": 0.5, "open_interest": 100}, {"option": "SNDK261120P00090000", "iv": 0.5, "open_interest": 100}], 100.0, now)
     assert gf and 90 < gf["flip"] < 110 and gf["n"] == 2, gf
