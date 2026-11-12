@@ -1023,7 +1023,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         if add and REC_AUTO_ADD and (plan.get("rule") or {}).get("first"):
             state["add_order"] = {"placed": False, "pending": True}   # 화면 폴링이 물타기 지정가 결과까지 기다리게(손절 먼저 건 뒤 arm_rule_add)
         try:
-            state["bracket"] = await place_bracket(binance_session(), b, plan["symbol"], pside)
+            state["bracket"] = await place_bracket(binance_session(), {**b, "tp_price": None} if b.get("tp_off") else b, plan["symbol"], pside)   # 익절 지운 선에 추가 진입 = 익절 지정가 안 건다
         except Exception as exc:  # noqa: BLE001 -- 결과 칸은 반드시 채운다(화면 폴링이 이걸 기다린다)
             state["bracket"] = {"placed": False, "reason": f"{type(exc).__name__}: {exc}"}
         add = await arm_rule_add(plan, state) if add else None
@@ -1036,7 +1036,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                      "auto": bool(plan.get("rule")),
                      "lines": bool(b.get("lines")), "tp_level": b.get("tp_level"), "sl_up": b.get("sl_up"),   # 2026-10-28 선: 1초 체결가 닿음 감시 · sl_up = 올라 닿으면 손절(None = 측면 기본)
                      "tp_resting": bool(((state["bracket"] or {}).get("tp") or {}).get("placed")),   # 익절 지정가가 못 걸렸으면 닿을 때 서버가 peg 로
-                     "armed_at": time.time(), "placed": state["bracket"], "add_order": add}
+                     "armed_at": time.time(), "placed": state["bracket"], "add_order": add,
+                     **({"tp_off": b["tp_off"]} if b.get("tp_off") else {})}   # 2026-11-12 지운 익절은 추가 진입 뒤에도 꺼진 채
         bracket_save(st)
 
     async def arm_rule_add(plan: dict, state: dict) -> dict | None:
@@ -1465,8 +1466,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             #   물타기면 이미 무장된 규칙 손절을 그대로(물러나지 않는다). 손절 없이 연 포지션(바이낸스 앱 등)에 처음 거는 거면 기준 = 평단.
             prev = bracket_load().get(bracket_key(symbol, side)) if same else None
             if prev and prev.get("lines") and not lines:   # 2026-10-28 검증: 일반 진입이 선 익절을 지우고 −5% 거래소 스탑을 건다(사용자 «비상 스탑 없음»)
-                return None, {}, {}, ({"error": "lines_armed",
-                                       "detail": "선 주문 포지션입니다 — 같은 쪽 추가 진입은 막습니다(선 익절·손절이 지워지고 거래소 스탑이 걸리게 됩니다). 청산 뒤 다시"}, 409)
+                lines = (0.0, 0.0)   # 2026-11-12 사용자 «SOXL 추가 숏이 안 된다»: 막지 않고 선 추가 진입과 같은 길(무장된 선 그대로 · 크기만) -- 값은 아래에서 무장된 선으로 바뀐다
             p_in = float(book["bidPrice"] if side == "LONG" else book["askPrice"])   # 이번 주문 지정가(메이커 쪽)
             anchor, kind = ((float(same[0].get("entry_price") or 0.0), "평단") if same else (p_in, "첫 진입가"))
             stop_bracket = rec_rule_bracket({"position_side": side}, position_side=side, anchor_price=anchor or p_in,
@@ -1533,24 +1533,27 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 if same:
                     # 2026-11-03 사용자 «SLTP 로 추가 진입 -- 손절/익절 라인은 그대로 유지»: 같은 쪽 **선 포지션**이면 크기만 늘린다. 보낸 선은 무시하고 무장된 선(레벨·주문가)을 그대로 쓴다.
                     #   체결되면 place_bracket 이 옛 익절 지정가를 지우고 같은 가격으로 **합친 전량**에 다시 건다(물타기와 같은 길). 선 없는 포지션(규칙·앱)·손절 해제·청산 진행 중이면 예전처럼 막는다.
-                    ok_prev = bool(prev and prev.get("lines") and prev.get("tp_level") and prev.get("sl_level") and prev.get("tp_price") and prev.get("sl_price")
-                                   and not prev.get("sl_off") and not prev.get("tp_off") and not prev.get("tp_legs") and not prev.get("sl_legs") and not prev.get("fired") and bracket_key(symbol, side) not in bracket_exiting)
+                    # 2026-11-12 익절을 지운(tp_off) 선 포지션도 늘린다 -- 익절은 꺼진 채(체결 뒤 익절 지정가 안 검) · 손절 해제·분할·청산 중은 그대로 막는다
+                    tp_off = bool(prev and prev.get("tp_off"))
+                    ok_prev = bool(prev and prev.get("lines") and (tp_off or (prev.get("tp_level") and prev.get("tp_price"))) and prev.get("sl_level") and prev.get("sl_price")
+                                   and not prev.get("sl_off") and not prev.get("tp_legs") and not prev.get("sl_legs") and not prev.get("fired") and bracket_key(symbol, side) not in bracket_exiting)
                     if not ok_prev:
                         return None, {}, {}, ({"error": "lines_has_position",
                                                "detail": "같은 쪽 포지션이 이미 있어 선 진입을 막습니다 — 선 주문으로 연 포지션만 크기를 늘릴 수 있습니다(손절 해제·익절/손절 나눔·청산 진행 중이면 불가). 닫은 뒤 다시"}, 409)
-                    lines, add_lines = (float(prev["tp_level"]), float(prev["sl_level"])), True
+                    lines, add_lines = (0.0 if tp_off else float(prev["tp_level"]), float(prev["sl_level"])), True
                 if sec_prices(asset) is None:
                     return None, {}, {}, ({"error": "lines_no_feed", "detail": "이 코인은 1초 체결가가 없어 선 손절을 감시할 수 없습니다"}, 400)
                 b_ = await timed(lap, "basis", basis_for(book, asset))
                 try:   # 지정가면 선의 기준(방향·거리 검사)이 지금가가 아니라 진입 지정가다
-                    plan["bracket"] = line_bracket(position_side=side, ref_level=limit_usdt or p_in / b_, tp_level=lines[0], sl_level=lines[1],
+                    ref_ = limit_usdt or p_in / b_
+                    plan["bracket"] = line_bracket(position_side=side, ref_level=ref_, tp_level=lines[0] or ref_ * (1.01 if side == "LONG" else 0.99), sl_level=lines[1],   # 0 = 꺼진 익절(검사 통과 자리, 아래에서 무장값으로 덮음)
                                                    basis=b_, filters=filters)
                 except ValueError as exc:
                     return None, {}, {}, ({"error": "bad_lines" if not add_lines else "add_lines_out_of_range",
                                            "detail": str(exc) if not add_lines else f"기존 선이 지금가 기준으로 맞지 않아 추가 진입을 막습니다 — {exc}"}, 400)
                 if add_lines:   # 검사만 새 지금가로 했다 -- 걸리는 가격은 처음 무장한 값 그대로(basis 가 움직여도 선이 안 밀린다)
-                    plan["bracket"].update(tp_price=prev["tp_price"], sl_price=prev["sl_price"], tp_level=prev["tp_level"], sl_level=prev["sl_level"],
-                                           sl_name=prev.get("sl_name") or plan["bracket"].get("sl_name"))
+                    plan["bracket"].update(tp_price=prev.get("tp_price"), sl_price=prev["sl_price"], tp_level=prev.get("tp_level"), sl_level=prev["sl_level"],
+                                           sl_name=prev.get("sl_name") or plan["bracket"].get("sl_name"), tp_off=prev.get("tp_off"))
                     plan["add_lines"] = True
                     plan["notes"] = [*plan.get("notes", []), "추가 진입 — 기존 익절·손절선 그대로, 합친 전량에 익절 지정가를 다시 겁니다"]
                 if limit_usdt:   # 2026-10-31 지정가 진입: 주문가 = 진입선(USDT) × basis · 롱은 내림 · 숏은 올림(메이커 쪽) · 호가를 넘으면(= 지금 체결) 막는다 · 명목은 지금가 크기 그대로 유지(수량만 가격비로 재계산)

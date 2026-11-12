@@ -134,12 +134,16 @@ class LinesArmedGuardTest(ChartLinesTest):
             "symbol": SYM, "side": "LONG", "lines": True, "sl_level": 2480.0, "tp_level": 2550.0, "tp_resting": True,
             "backstop_price": None, "armed_at": 1000.0, **(extra or {})}}), "utf-8")
 
-    def test_plain_add_on_lines_position_is_blocked(self) -> None:
+    def test_plain_add_on_lines_position_keeps_lines(self) -> None:
+        # 2026-11-12 사용자 «SOXL 추가 숏이 안 된다»: 선 없는 일반 진입도 막지 않고 무장된 선 그대로 크기만 늘린다(거래소 스탑 없음)
         async def fn(c):
-            self._armed()
-            r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&rule=c")
-            self.assertEqual(r.status, 409, await r.json())
-            self.assertEqual((await r.json())["error"], "lines_armed")
+            self._armed({"tp_price": 2550.4, "sl_price": 2479.6})
+            r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10")
+            b = await r.json()
+            self.assertEqual(r.status, 200, b)
+            br = b["plan"]["bracket"]
+            self.assertTrue(b["plan"].get("add_lines") and br["lines"] and br["backstop_price"] is None, br)
+            self.assertEqual((br["tp_price"], br["sl_price"]), (2550.4, 2479.6), br)
         self._run(fn, acct=POS)
 
     def test_rearm_lines_watches_from_now_without_exchange_stop(self) -> None:
@@ -180,6 +184,36 @@ class LinesAddSizeTest(LinesArmedGuardTest):
             r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10&tp=2550&sl=2480")
             self.assertEqual(r.status, 409)
         self._run(fn, acct=POS)
+
+    def test_add_on_tp_off_position_keeps_tp_off(self) -> None:
+        # 2026-11-12 SOXL: 익절을 지운(tp_off) 선 포지션 -- 옛 익절선이 지금가 너머(2490 < 2500)여도 추가 진입 · 체결 뒤 익절 지정가 안 걸고 tp_off 유지
+        calls = []
+
+        async def fake_entry(_s, plan, state):
+            state.update(phase="filled_maker", filled=float(plan["quantity"]), quantity=float(plan["quantity"]))
+            return state
+
+        async def fake_bracket(_s, b, symbol, pside):
+            calls.append(dict(b))
+            return {"placed": True}
+
+        async def fn(c):
+            self._armed({**self.SAVED, "tp_level": 2490.0, "tp_off": {"at": 1.0}, "tp_resting": False})
+            r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10")
+            self.assertEqual(r.status, 200, await r.json())
+            body = await (await c.post("/api/manual-entry/submit?side=LONG&confirm=1&lev=20&pct=10")).json()
+            self.assertTrue(body.get("ok"), body)
+            for _ in range(60):
+                await asyncio.sleep(0.02)
+                if calls:
+                    break
+            self.assertEqual(len(calls), 1, calls)
+            self.assertIsNone(calls[0]["tp_price"], calls[0])
+            await asyncio.sleep(0.1)
+            armed = json.loads((server.LIVE_DIR / "manual_bracket_state.json").read_text("utf-8"))[f"{SYM}:LONG"]
+            self.assertTrue(armed["lines"] and armed["tp_off"] and not armed["tp_resting"], armed)
+            self.assertEqual((armed["sl_level"], armed["sl_price"], armed["tp_price"]), (2480.0, 2479.6, 2550.4), armed)
+        self._run(fn, acct=POS, run_entry=fake_entry, place_bracket=fake_bracket)
 
     def test_armed_lines_outside_current_price_are_refused(self) -> None:
         async def fn(c):
