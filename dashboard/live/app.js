@@ -3633,6 +3633,32 @@ function placeTopLeft() {
     else if (title.parentElement === mid) tools.before(title);   // 제자리(카드 머리)
   }
 }
+// 2026-11-12 펜 메모 «상단 빈 자리에 보유 종목 수익금 전광판(왼쪽으로 계속 흐름)» 시안 C(사용자 선택 · «코인·방향 + 큰 손익 숫자까지»): 넓은 화면 맨 위 세션 ~ 코인 이름 사이.
+//   자리는 그 둘 사이를 재서 준다(그리드 칸에 넣으면 가운데 코인 이름이 밀린다) · 종목이 바뀔 때만 다시 짓고 숫자는 제자리 갱신(흐름이 처음으로 튀지 않게).
+//   손익 = 그 코인 1초 체결가가 있으면 풋프린트 머리(renderFpPos)와 같은 식 · 없으면 계좌 폴링의 미실현(거래소 표시가 -- 몇 초 늦을 수 있다).
+function tickerPnl(p) {
+  const cur = Number(latestLivePriceByAsset[acctCoin(p.symbol).toLowerCase()] || 0), qty = Math.abs(Number(p.qty) || 0), en = cur > 0 ? entryUsdt(p, cur) : 0;
+  return en > 0 ? (cur - en) * qty * (String(p.side).toUpperCase() === "SHORT" ? -1 : 1) : Number(p.unrealized_pnl) || 0;
+}
+function renderPnlTicker() {
+  const box = el("pnlTicker"), slot = el("topLeftSlot"), title = el("fpCoinName"), mid = el("topCenterSlot");
+  if (!box) return;
+  const ps = ((latestBinanceAccount || {}).positions || []).filter((p) => Math.abs(Number(p.qty) || 0) > 0);
+  const tr = box.parentElement.getBoundingClientRect(), l = slot && slot.getBoundingClientRect().right - tr.left + 28, r = title && title.getBoundingClientRect().left - tr.left - 28;
+  if (!ps.length || !title || title.parentElement !== mid || !(r - l >= 160)) { box.hidden = true; return; }
+  box.hidden = false; box.style.left = `${Math.round(l)}px`; box.style.width = `${Math.round(r - l)}px`;
+  const su = (u) => `${u >= 0 ? "+" : "−"}$${Math.abs(u).toFixed(2)}`, run = box.firstElementChild;
+  const key = `${ps.map((p) => `${p.symbol}:${p.side}`).join("|")}@${Math.round((r - l) / 40)}`;
+  if (box.dataset.k !== key) {
+    box.dataset.k = key;
+    const one = ps.map((p) => `<span class="it" data-s="${p.symbol}:${p.side}"><i>${acctCoin(p.symbol)} ${p.side === "LONG" ? "롱" : "숏"}</i><b>${su(tickerPnl(p))}</b></span>`).join("");
+    run.innerHTML = one;
+    const half = one.repeat(Math.max(1, Math.ceil((r - l) / Math.max(1, run.scrollWidth))));
+    run.innerHTML = half + half;   // 두 벌 = −50% 이동이 이음매 없이 돈다
+    run.style.animationDuration = `${Math.max(8, run.scrollWidth / 2 / 40).toFixed(1)}s`;   // 초당 40px
+  }
+  ps.forEach((p) => { const u = tickerPnl(p); box.querySelectorAll(`[data-s="${p.symbol}:${p.side}"] b`).forEach((b) => { b.textContent = su(u); b.className = u >= 0 ? "good" : "bad"; }); });
+}
 if (TOP_TITLE_WIDE && TOP_TITLE_WIDE.addEventListener) TOP_TITLE_WIDE.addEventListener("change", placeTopLeft);
 if (PAGE_TABS_WIDE && PAGE_TABS_WIDE.addEventListener) PAGE_TABS_WIDE.addEventListener("change", placeTopLeft);   // 🔴CI 검사기(esprima)는 ?.( 를 못 읽는다
 
@@ -7174,6 +7200,7 @@ function renderSnapshotChart() {
   if (document.getElementById("fpCard")?.classList.contains("lq-on")) return;   // 2026-11-07 «청산» 보기는 차트를 가린다 -- 크기 0 으로 그리지 않는다(돌아올 때 liq_profile.js 가 다시 그린다)
   renderChartPan();
   renderFpPos();
+  renderPnlTicker();
   const svg = el("candleSvgSnapshot");
   if (!svg) return;
   const fullCandles = chartTfFull();   // 2026-10-20 1주일을 받았으면 그 앞에 붙은 것
@@ -7889,6 +7916,11 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     p.outOfView = p.offTop || p.offBottom;
     p.realY = p.outOfView ? (p.offTop ? mt + 2 : plotBottom - 2) : rawY;
   });
+  // 2026-11-12 사용자 «오른쪽 고통·지지·저항 칩이 너무 많다 -- 눈에 보이는 것만»: 데스크톱 풋프린트는 화면 밖 지지·저항·최대 고통 칩을 안 단다(휴대폰 아래 줄은 그대로)
+  if (footprint && !mobileChart) for (let i = priceLabels.length - 1; i >= 0; i--) {
+    const p = priceLabels[i];
+    if (p.outOfView && (p.band || /^(지지|저항)/.test(p.label || ""))) priceLabels.splice(i, 1);
+  }
 
   // 🔴2026-09-26 비평: 꼬리표가 겹치고 **순서가 뒤집혔다**(«↑ 2765» 가 2708.5 아래). 원인 둘 --
   //   ① 화면 밖 레벨을 같은 가장자리 픽셀(realY)로 정렬해 동점을 삽입순(가까운 것 먼저)으로 풀었다 →
@@ -8923,7 +8955,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           if (gutOn) fpNotes.push({ val: f.pain, label: "max pain", color: "var(--warn)", title: lab });
           else add("text", { x: ml + cw - 4, y: y - 4, "font-size": fs, "font-weight": 700, fill: "var(--warn)", "text-anchor": "end" }, mobileChart ? `max pain ${optQ(f.pain)}` : lab);   // 2026-10-01 휴대폰은 짧게(긴 글이 화면 밖으로 잘렸다)
         } else if (gutOn) {
-          fpNotes.push({ val: f.pain, label: "max pain", color: "var(--warn)", title: lab });
+          // 2026-11-12 사용자 «눈에 보이는 것만 칩»: 화면 밖 max pain 은 오른쪽 칩을 안 단다
         } else {
           add("text", { x: ml + cw - 10, y: y < mt ? mt + 2 * fs + 8 : plotBottom - fs - (mobileChart ? 24 : 8), "font-size": fs, "font-weight": 700, fill: "var(--warn)", "text-anchor": "end" },   // 10-30 왼쪽 위 VWAP 이름과 겹쳐 오른쪽 끝으로
               `${mobileChart ? `max pain ${optQ(f.pain)}` : lab} ${y < mt ? "↑" : "↓"} (${f.pain >= px ? "+" : "−"}${optQ(Math.abs(f.pain - px))}$)`);

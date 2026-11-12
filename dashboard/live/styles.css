@@ -3081,8 +3081,21 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .lt { position: absolute; inset: 0; pointer-events: none; z-index: 3; font: 600 11.5px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; }
 .lt[hidden] { display: none; }
 .lt-zone { position: absolute; }
-.lt-zone.up { background: color-mix(in srgb, var(--good) 14%, transparent); }
-.lt-zone.dn { background: color-mix(in srgb, var(--bad) 14%, transparent); }
+/* 2026-11-12 펜 메모 «SLTP 배경색 때문에 풋프린트 숫자가 안 보인다» 시안 A(사용자 선택): 플롯을 칠하지 않고 오른쪽 끝 7px 레일로만 구간을 말한다 */
+.lt-zone.up { box-shadow: inset -7px 0 0 color-mix(in srgb, var(--good) 70%, transparent); }
+.lt-zone.dn { box-shadow: inset -7px 0 0 color-mix(in srgb, var(--bad) 70%, transparent); }
+/* 2026-11-12 펜 메모 보유 종목 전광판 시안 C(app.js renderPnlTicker): 위 = 코인·방향(작게) · 아래 = 미실현 손익(크게) · 왼쪽으로 초당 40px · 올리면 멈춤 */
+.topbar { position: relative; }
+.pnl-tk { position: absolute; top: 50%; transform: translateY(-50%); height: 42px; overflow: hidden; font-variant-numeric: tabular-nums;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(90deg, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
+.pnl-tk[hidden] { display: none; }
+.pnl-tk .run { display: flex; width: max-content; height: 100%; align-items: center; animation: pnl-tk 20s linear infinite; }
+.pnl-tk:hover .run { animation-play-state: paused; }
+@keyframes pnl-tk { to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) { .pnl-tk .run { animation: none; } }
+.pnl-tk .it { display: grid; padding: 0 22px; border-right: 1px solid var(--line); white-space: nowrap; }
+.pnl-tk .it i { font: 600 11px/1.3 var(--font-sans); color: var(--muted); font-style: normal; letter-spacing: .02em; }
+.pnl-tk .it b { font: 700 18px/1.15 var(--font-mono); }
 /* .up = 익절~진입 · .dn = 손절~진입 띠(위아래가 아니라 선 기준) -- 숏도 색을 바꾸지 않는다(2026-10-30 숏에서 익절 띠가 빨갛던 것) */
 .lt-ln { position: absolute; height: 0; border-top: 1.5px dashed var(--good); }
 .lt-ln.sl { border-top-color: var(--bad); }
@@ -3164,7 +3177,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .lt-rrb button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 /* 2026-10-29 들어간 선 주문(#lineArmed): 실선 = 거래소·서버에 걸린 주문 · 띠는 선 주문 상자보다 옅게 · 보내는 중엔 흐리게 */
 .lt-armed .lt-ln { border-top-style: solid; }
-.lt-armed .lt-zone.up, .lt-armed .lt-zone.dn { opacity: .6; }
+.lt-armed .lt-zone.up, .lt-armed .lt-zone.dn { opacity: .75; }
 .lt-armed.busy .lt-tag[data-k] { opacity: .55; cursor: progress; }
 .lt-armed.locked .lt-tag[data-k] { opacity: .5; pointer-events: none; }   /* 진입 전 선 도구가 켜진 동안 */
 .lt-am-note { position: absolute; transform: translateY(-50%); font: 600 11px/1.2 var(--font-sans); color: var(--muted); white-space: nowrap; pointer-events: none; }

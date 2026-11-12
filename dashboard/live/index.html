@@ -28,7 +28,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
-  <link rel="stylesheet" href="styles.css?v=20261112-slcross1">
+  <link rel="stylesheet" href="styles.css?v=20261112-tk1">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -50,6 +50,7 @@
         <!-- 2026-10-16 펜 메모(3차): 넓은 화면 스냅샷 = 세션(아시아·유럽·미국) 왼쪽 · 운영 관리 화면 = 탭 (app.js placeTopLeft) · 좁은 화면은 비어 숨김 -->
         <div id="topLeftSlot" class="top-left-slot"></div>
         <div id="topCenterSlot" class="top-center-slot"></div>   <!-- 2026-10-16 펜 메모(3차): 넓은 화면 스냅샷 = 코인 탭(맨 위 가운데) -->
+        <div id="pnlTicker" class="pnl-tk" hidden role="marquee" aria-label="보유 종목 미실현 손익"><div class="run"></div></div>   <!-- 2026-11-12 펜 메모 전광판 시안 C (app.js renderPnlTicker) -->
         <!-- 2026-09-26 사용자 지시로 가운데 현재가·5분 변화·시계를 뺐다(가격은 차트·계좌 레일에 이미 있다). -->
         <!-- 2026-09-27 헤더 한 줄(사용자 지시) -- 원래 스냅샷 패널 첫 줄이었다. 다른 탭에서는 CSS 가 숨긴다. -->
         <div class="ops-panel-head snap-head">
@@ -621,7 +622,7 @@
   </div>
   <button type="button" id="ofabTab" class="ofab-tab" hidden aria-label="주문 버튼 꺼내기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg><i aria-hidden="true"></i><b>주문</b></button>
-  <script src="./app.js?v=20261112-mgn1"></script>
+  <script src="./app.js?v=20261112-tk1"></script>
   <script src="./fp_daily.js?v=20261031-btc"></script>
   <script src="./liq_profile.js?v=20261108-liqcurve2"></script>
   <script src="./liq_tab.js?v=20261112-swept1"></script>
