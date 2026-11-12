@@ -212,14 +212,23 @@
   var allOf = function (a) { return S.all && S.all.coins ? S.all.coins[a] || null : null; };
   var priceOf = function (a) { var p = typeof latestLivePriceByAsset === "undefined" ? 0 : Number(latestLivePriceByAsset[a] || 0), E = allOf(a); return a === asset() ? price() : p > 0 ? p : E ? E.price : 0; };
   var amt = function (E, v) { return E.unit === "share" ? pc(v, 1) + " 몫" : usd(v); };
-  function painOf(E, P) {
+  // 2026-11-12 사용자 «최대 고통은 지나가면 끝난 거 아니야? 왔다갔다하면 보였다 사라졌다»: 지금가 한 점으로만 거르면 봉우리 근처를 오갈 때 깜빡였다 --
+  //   서버 계산(마감 1시간봉까지 · 그 전에 쓸린 몫은 이미 빠짐) 뒤 5분봉 고가·저가가 한 번이라도 중심에 닿았으면 다음 계산(매시)까지 빼고 다음 봉우리를 쓴다.
+  //   5분봉이 없는 코인(코인별 표의 다른 코인)은 지금가만 본다. ponytail: 앱이 그 시각 뒤 봉을 다 갖고 있다고 가정(차트 이력 = 수십 시간 · 계산은 매시).
+  function sweptRange(a, E, P) {
+    var t0 = E.k3 && E.k3.length ? E.k3[E.k3.length - 1][0] + 3600 : Math.floor(E.generated_ms / 3600000) * 3600, hi = P, lo = P;
+    var cs = typeof candleHistoryByAsset === "undefined" ? null : candleHistoryByAsset[a];
+    (cs || []).forEach(function (c) { if (c.time >= t0 && c.high > 0 && c.low > 0) { hi = Math.max(hi, c.high); lo = Math.min(lo, c.low); } });
+    return { hi: hi, lo: lo };
+  }
+  function painOf(E, P, a) {
     if (!E || !E.per || !(P > 0) || !(E.sigma_d > 0)) return null;
-    var per = {};
+    var per = {}, sw = sweptRange(a || asset(), E, P);
     PERS.forEach(function (k) {
       var q = E.per[k]; if (!q) return;
       var lev = function (b) { var z = Math.abs(Math.log(b[0] / P)) / E.sigma_d; return { px: b[0], amt: b[1], d: (b[0] / P - 1) * 100, z: z, p: reach(z) }; };
       var pick = function (bins, below) {   // 지난 계산 뒤 가격이 중심을 지나간 봉우리는 뺀다 · 2등이 1등의 90% 이상이면 같이(«최대»가 사실상 동률)
-        var a = bins.filter(function (x) { return below ? x[0] < P : x[0] > P; }).sort(function (x, y) { return y[1] - x[1]; });
+        var a = bins.filter(function (x) { return below ? x[0] < sw.lo : x[0] > sw.hi; }).sort(function (x, y) { return y[1] - x[1]; });   // 지나간(닿은) 봉우리는 뺀다
         if (!a.length) return null;
         var o = lev(a[0]); if (a[1] && a[1][1] >= 0.9 * a[0][1]) o.alt = lev(a[1]);
         return o;
@@ -242,7 +251,7 @@
     return { p: reach(z), z: z };
   };
   window.liqPainFar = function (a, P) {
-    var E = allOf(a), R = painOf(E, P);
+    var E = allOf(a), R = painOf(E, P, a);
     return R ? { "12H": R.per["12H"], "24H": R.per["24H"], "1W": R.per["1W"], "1M": R.per["1M"], unit: E.unit } : null;   // 2026-11-12 12시간·1일 추가(풋프린트 «최대 고통 라인»)
   };
   var pullTxt = function (u) { return u == null ? "—" : "위 " + pc(u) + " : 아래 " + pc(1 - u); };
@@ -275,7 +284,7 @@
   };
   function coinRows() {
     var o = [];
-    Object.keys((S.all && S.all.coins) || {}).forEach(function (a) { var E = allOf(a), R = painOf(E, priceOf(a)), q = R && R.per[S.pp]; if (q) o.push({ a: a, E: E, q: q, nest: R.nest, old: Date.now() - E.generated_ms > STALE_MS }); });
+    Object.keys((S.all && S.all.coins) || {}).forEach(function (a) { var E = allOf(a), R = painOf(E, priceOf(a), a), q = R && R.per[S.pp]; if (q) o.push({ a: a, E: E, q: q, nest: R.nest, old: Date.now() - E.generated_ms > STALE_MS }); });
     return o;
   }
   CH.quad = function (el, w, h) {
