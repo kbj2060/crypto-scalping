@@ -176,7 +176,7 @@ class LinesAddSizeTest(LinesArmedGuardTest):
 
     def test_refused_when_stop_off_fired_or_not_lines(self) -> None:
         async def fn(c):
-            for extra in ({"sl_off": {"at": 1.0}}, {"fired": True}):
+            for extra in ({"fired": True},):   # 2026-11-13 손절 지운(sl_off) 포지션은 이제 늘린다(아래 시험)
                 self._armed({**self.SAVED, **extra})
                 r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10&tp=2550&sl=2480")
                 self.assertEqual(r.status, 409, extra); self.assertEqual((await r.json())["error"], "lines_has_position")
@@ -184,6 +184,36 @@ class LinesAddSizeTest(LinesArmedGuardTest):
             r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10&tp=2550&sl=2480")
             self.assertEqual(r.status, 409)
         self._run(fn, acct=POS)
+
+    def test_add_on_sl_off_position_keeps_sl_off(self) -> None:
+        # 2026-11-13 펜 메모 «손절/익절 없이도 추가 진입»: 손절을 지운 선 포지션(옛 손절선이 지금가 너머여도) -- 체결 뒤에도 sl_off 그대로 · 익절은 다시 건다
+        calls = []
+
+        async def fake_entry(_s, plan, state):
+            state.update(phase="filled_maker", filled=float(plan["quantity"]), quantity=float(plan["quantity"]))
+            return state
+
+        async def fake_bracket(_s, b, symbol, pside):
+            calls.append(dict(b))
+            return {"placed": True, "tp": {"placed": True, "price": b.get("tp_price")}}
+
+        async def fn(c):
+            self._armed({**self.SAVED, "sl_level": 2510.0, "sl_off": {"at": 1.0}})
+            r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10")
+            self.assertEqual(r.status, 200, await r.json())
+            body = await (await c.post("/api/manual-entry/submit?side=LONG&confirm=1&lev=20&pct=10")).json()
+            self.assertTrue(body.get("ok"), body)
+            for _ in range(60):
+                await asyncio.sleep(0.02)
+                if calls:
+                    break
+            self.assertEqual(len(calls), 1, calls)
+            self.assertEqual(calls[0]["tp_price"], 2550.4, calls[0])
+            self.assertIsNone(calls[0]["backstop_price"], calls[0])
+            await asyncio.sleep(0.1)
+            armed = json.loads((server.LIVE_DIR / "manual_bracket_state.json").read_text("utf-8"))[f"{SYM}:LONG"]
+            self.assertTrue(armed["lines"] and armed["sl_off"] and armed["tp_resting"], armed)
+        self._run(fn, acct=POS, run_entry=fake_entry, place_bracket=fake_bracket)
 
     def test_add_on_tp_off_position_keeps_tp_off(self) -> None:
         # 2026-11-12 SOXL: 익절을 지운(tp_off) 선 포지션 -- 옛 익절선이 지금가 너머(2490 < 2500)여도 추가 진입 · 체결 뒤 익절 지정가 안 걸고 tp_off 유지
