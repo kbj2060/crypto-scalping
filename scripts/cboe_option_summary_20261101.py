@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -71,7 +72,7 @@ def flow_today(options: list[dict]) -> dict:
 
 def gex_levels(options: list[dict], S: float, now: float) -> dict:
     """2026-11-13 사용자 «saveticker(Unusual Whales) 옵션 칸을 CBOE 로» -- 감마 노출 주요 레벨. 행사가별 순 GEX($/1% 움직임) =
-    Σ 감마 × 미결제 × 100 × S² × 0.01, 콜 +·풋 −(딜러가 콜은 사고 풋은 판다는 흔한 관례 -- 실제 딜러 포지션은 모른다). 전 만기 · 지금가 ±30%.
+    Σ 감마 × 미결제 × 100 × S² × 0.01, 콜 +·풋 −(딜러가 콜은 사고 풋은 판다는 흔한 관례 -- 실제 딜러 포지션은 모른다). 전 만기 · 순 합계는 전 행사가 · 레벨 목록은 지금가 ±30%.
     돌려주기 = {net: 합계, pos: 큰 + 행사가 3개, neg: 큰 − 행사가 3개} -- 각 [행사가, $]. 서술용."""
     by: dict[float, float] = {}
     for o in options:
@@ -79,12 +80,46 @@ def gex_levels(options: list[dict], S: float, now: float) -> dict:
         if not m or datetime.strptime(m[1], "%y%m%d").replace(hour=16, tzinfo=ET).timestamp() <= now:
             continue
         k = int(m[3]) / 1000
-        if abs(k / S - 1) > 0.30:
-            continue
         g = float(o.get("gamma") or 0) * float(o.get("open_interest") or 0) * MULT * S * S * 0.01
         by[k] = by.get(k, 0.0) + (g if m[2] == "C" else -g)
-    lv = sorted(by.items(), key=lambda kv: -abs(kv[1]))
+    # 순 합계는 전 행사가(감마 국면 gamma_flip 과 같은 계약 집합 -- ±30% 로 자르면 MU 처럼 먼 행사가 콜 몫이 빠져 부호가 뒤집힘) · 레벨 목록만 ±30%
+    lv = sorted(((k, v) for k, v in by.items() if abs(k / S - 1) <= 0.30), key=lambda kv: -abs(kv[1]))
     return {"net": round(sum(by.values())), "pos": [[k, round(v)] for k, v in lv if v > 0][:3], "neg": [[k, round(v)] for k, v in lv if v < 0][:3]}
+
+
+def gamma_flip(options: list[dict], S: float, now: float, span: float = 0.30, n: int = 241) -> dict | None:
+    """2026-11-13 사용자 «주식에서 롱감마·숏감마·감마 플립 데이터»: 가격을 지금가 ±30% 로 옮겨 가며 계약마다 블랙-숄즈 감마를 다시 계산
+    (그 계약의 CBOE IV · 남은 기간 · 금리·배당 0) → 순 GEX(S') = Σ 부호 × 감마 × 미결제 × 100 × S'² × 0.01 (gex_levels 와 같은 관례: 콜 +·풋 −).
+    국면 = 지금가의 순 GEX 부호(+ 롱감마 = 딜러 헤지가 움직임을 누름 · − 숏감마 = 키움) · 플립 = 순 GEX 가 0 을 지나는 가격 중 지금가에 가장 가까운 곳.
+    🔴관례 가정(딜러가 콜 매수·풋 매도) -- 실제 딜러 포지션은 모른다 · 검증 안 됨(서술용). IV 0(호가 없는 깊은 내가격)·미결제 0 계약은 뺀다(감마 ≈ 0).
+    돌려주기 = {net, regime: long|short, flip, flip_pct, n} 또는 None(계약 없음)."""
+    rows = []
+    for o in options:
+        m = OPT_RE.match(o["option"])
+        if not m:
+            continue
+        t = (datetime.strptime(m[1], "%y%m%d").replace(hour=16, tzinfo=ET).timestamp() - now) / (365 * 86400)
+        iv, oi = float(o.get("iv") or 0), float(o.get("open_interest") or 0)
+        if t > 0 and iv > 0 and oi > 0:
+            rows.append((int(m[3]) / 1000, iv, t, oi, 1.0 if m[2] == "C" else -1.0))
+    if not rows:
+        return None
+    K, iv, T, oi, sg = (np.array(c) for c in zip(*rows))
+
+    def net(x):   # x = 가격 배열 → 순 GEX 배열
+        x = np.asarray(x, float)[:, None]
+        sd = iv * np.sqrt(T)
+        d1 = (np.log(x / K) + 0.5 * sd * sd) / sd
+        g = np.exp(-0.5 * d1 * d1) / (np.sqrt(2 * np.pi) * x * sd)
+        return (sg * oi * g).sum(1) * MULT * x[:, 0] ** 2 * 0.01
+    grid = S * np.linspace(1 - span, 1 + span, n)
+    v = net(grid)
+    now_v = float(net([S])[0])
+    cross = np.nonzero(np.sign(v[:-1]) * np.sign(v[1:]) < 0)[0]
+    flips = [grid[i] - v[i] * (grid[i + 1] - grid[i]) / (v[i + 1] - v[i]) for i in cross]   # 선형 보간
+    flip = min(flips, key=lambda p: abs(p - S)) if flips else None
+    return {"net": round(now_v), "regime": "long" if now_v > 0 else "short", "flip": round(float(flip), 2) if flip else None,
+            "flip_pct": round((float(flip) / S - 1) * 100, 2) if flip else None, "n": len(rows)}
 
 
 def volume_vs_normal(sym_dir: Path, now_et: datetime, today_n: float, days: int = 10) -> dict | None:
@@ -186,6 +221,7 @@ def summarize(data: dict, now: float | None = None) -> dict:
     out["expiries"] = exps[:8]
     out["flow_today"] = flow_today(data["options"])
     out["gex"] = gex_levels(data["options"], S, now)
+    out["gamma"] = gamma_flip(data["options"], S, now)   # 2026-11-13 롱/숏 감마 국면 · 감마 플립
     out["cm"] = {str(d): D._const_maturity(exps, d) for d in (1, 7, 30, 60)}
     band = ch[(ch["strike"] >= S * 0.92) & (ch["strike"] <= S * 1.08)]
     usd_oi = band["open_interest"] * MULT * S
@@ -260,9 +296,18 @@ def _selftest() -> None:
                  last_trade_price=3.0, last_trade_time="2026-10-30T15:00:00") for o in ops]
     ft = summarize({"symbol": "SNDK", "current_price": 100.0, "iv30": 70.0, "last_trade_time": "2026-10-30T15:59:59", "options": ops2}, now)["flow_today"]
     assert ft["call"][0] == 15 and ft["put"][0] == 6 and ft["top"][0][1] == 5 * 3.0 * 100 and ft["top"][0][3] == "C", ft   # 만기 셋 × 5 · 셋 × 2
+    # 감마 플립: 콜 110 · 풋 90 같은 미결제 → 위쪽 + · 아래쪽 − → 0 을 지나는 가격이 둘 사이 · 콜만 있으면 플립 없음·롱감마 · 풋만 → 숏감마
+    gf = gamma_flip([{"option": "SNDK261120C00110000", "iv": 0.5, "open_interest": 100}, {"option": "SNDK261120P00090000", "iv": 0.5, "open_interest": 100}], 100.0, now)
+    assert gf and 90 < gf["flip"] < 110 and gf["n"] == 2, gf
+    assert gamma_flip([{"option": "SNDK261120C00110000", "iv": 0.5, "open_interest": 100}], 112.0, now)["regime"] == "long"
+    g2 = gamma_flip([{"option": "SNDK261120P00090000", "iv": 0.5, "open_interest": 100}], 95.0, now)
+    assert g2["regime"] == "short" and g2["flip"] is None, g2
+    assert gamma_flip([{"option": "SNDK261023C00110000", "iv": 0.5, "open_interest": 100}], 100.0, now) is None   # 지난 만기만 = 계약 없음
     gx = gex_levels([{"option": "SNDK261106C00100000", "gamma": 0.05, "open_interest": 10}, {"option": "SNDK261106P00090000", "gamma": 0.02, "open_interest": 30},
                      {"option": "SNDK261023C00100000", "gamma": 1.0, "open_interest": 999}], 100.0, now)   # 지난 만기(10-23)는 뺀다
     assert gx["pos"] == [[100.0, 5000]] and gx["neg"] == [[90.0, -6000]] and gx["net"] == -1000, gx   # 0.05×10×100×100²×0.01 = 5000
+    gx2 = gex_levels([{"option": "SNDK261106P00090000", "gamma": 0.02, "open_interest": 30}, {"option": "SNDK261106C00200000", "gamma": 0.02, "open_interest": 40}], 100.0, now)
+    assert gx2["net"] == 2000 and gx2["pos"] == [], gx2   # 먼 행사가(200)는 순 합계엔 들고 레벨 목록엔 안 든다
     import tempfile as _t
     with _t.TemporaryDirectory() as td:       # 평소 대비: 지난 거래일의 같은 시각 이전 마지막 스냅샷만 · 오늘·더 늦은 시각은 안 센다
         sd = Path(td)

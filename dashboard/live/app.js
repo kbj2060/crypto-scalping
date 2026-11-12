@@ -4752,9 +4752,10 @@ function optFlowTodayHtml(o, phone) {
     + (phone ? `<button type="button" class="opt-blk-btn" aria-expanded="${optBlkOpen}">${optBlkOpen ? "접기 ▴" : "목록 ▾"}</button>` : "") + `</div>` + optEqKpiHtml(o) + (open ? `<div class="opt-blk-list">${rows}</div>` : "");
 }
 // 2026-11-13 사용자 «saveticker(Unusual Whales) 옵션 칸을 CBOE 로 같은 칸»: 오늘 거래량·평소 대비 · 풋/콜 비중(계약) · 감마 노출 주요 레벨($/1%, 콜 +·풋 − 관례).
-//   계산 = scripts/cboe_option_summary_20261101.py(gex_levels · volume_vs_normal). 서술용 -- 방향 신호 아님.
+//   계산 = scripts/cboe_option_summary_20261101.py(gex_levels · gamma_flip · volume_vs_normal). 서술용 -- 방향 신호 아님.
+//   2026-11-13 «롱감마·숏감마·감마 플립»: 같은 칸 머리에 국면(순 GEX 부호)과 플립 가격.
 function optEqKpiHtml(o) {
-  const f = o.flow_today, vn = o.vol_norm, gx = o.gex, n = f.call[0] + f.put[0];
+  const f = o.flow_today, vn = o.vol_norm, gx = o.gex, gm = o.gamma, n = f.call[0] + f.put[0];
   if (!(n > 0)) return "";
   const cp = Math.round((100 * f.call[0]) / n), su = (v) => `${v >= 0 ? "+" : "−"}${optUsd(Math.abs(v))}`;
   const lv = (a, cls) => (a || []).map(([k, v]) => `<span class="${cls}">${k}<small>${su(v)}</small></span>`).join("");
@@ -4762,7 +4763,9 @@ function optEqKpiHtml(o) {
     + `<div class="oq-k"><i>오늘 옵션 거래량 · 전체 만기</i><b>${n.toLocaleString()}<small>계약</small></b>`
     + (vn ? `<span title="지난 ${vn.days}거래일의 같은 시각(미 동부)까지 평균 ${vn.avg.toLocaleString()}계약">평소의 <b class="oq-x">${vn.ratio.toFixed(2)}배</b> <small>지난 ${vn.days}일 같은 시각</small></span>` : `<small>평소 기준 쌓는 중</small>`) + `</div>`
     + `<div class="oq-k"><i>풋 / 콜 비중 · 거래량</i><div class="oq-bar" role="img" aria-label="콜 ${cp}% 풋 ${100 - cp}%"><span class="c" style="flex:${Math.max(cp, 12)}">콜 ${cp}%</span><span class="p" style="flex:${Math.max(100 - cp, 12)}">풋 ${100 - cp}%</span></div></div>`
-    + (gx ? `<div class="oq-k oq-g"><i>감마 노출 주요 레벨 · $/1% · 순 ${su(gx.net)}</i><div class="oq-gx">${lv(gx.pos, "opt-good")}${lv(gx.neg, "opt-bad")}</div></div>` : "")
+    + (gx ? `<div class="oq-k oq-g">${gm ? `<i title="롱감마 = 딜러 헤지가 움직임을 누르는 쪽 · 숏감마 = 키우는 쪽 · 플립 = 순 감마 노출이 0 이 되는 가격(블랙-숄즈로 가격을 옮겨 다시 계산) · 딜러가 콜은 사고 풋은 판다는 관례 가정 -- 실제 포지션은 모름 · 검증 안 됨">감마 국면 · 관례 가정 · 검증 안 됨</i>`
+      + `<b class="${gm.regime === "long" ? "opt-good" : "opt-bad"}">${gm.regime === "long" ? "롱감마" : "숏감마"}<small>${gm.flip != null ? `플립 $${gm.flip} (${gm.flip_pct > 0 ? "+" : "−"}${Math.abs(gm.flip_pct).toFixed(1)}%)` : "플립 없음 (±30% 안)"}</small></b>` : ""}`
+      + `<i>감마 노출 주요 레벨 · $/1% · 순 ${su(gx.net)}</i><div class="oq-gx">${lv(gx.pos, "opt-good")}${lv(gx.neg, "opt-bad")}</div></div>` : "")
     + `</div>`;
 }
 const optClick = (e) => {
