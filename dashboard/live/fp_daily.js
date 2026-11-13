@@ -446,14 +446,16 @@
   function lsVerdict(R, a, b) {
     var D = S.D, X = S.X || {}, ev = [];
     var f3 = [], i, j;
-    for (i = S.n - 1; i >= 0 && f3.length < 3; i--) { var fd = fundDay(D.d[i]); if (fd != null) f3.push(fd); }
+    // 2026-11-13 사용자 (가) «보이는 범위로 통일»: 펀딩도 보이는 마지막 봉에서 거꾸로 3일 · 분위 이력 = 그날까지 90일(전엔 늘 오늘 기준이라 과거를 보면 시점이 섞였다)
+    var fEnd = null;
+    for (i = b; i >= 0 && f3.length < 3; i--) { var fd = fundDay(D.d[i]); if (fd != null) { f3.push(fd); if (fEnd == null) fEnd = D.d[i]; } }
     if (f3.length) {
       var fm = f3.reduce(function (t, v) { return t + v; }, 0) / f3.length, hist = [];
-      Object.keys(X.bn_fund || {}).sort().slice(-90).forEach(function (d) { var v = fundDay(d); if (v != null) hist.push(v); });
+      Object.keys(X.bn_fund || {}).sort().filter(function (d) { return d <= fEnd; }).slice(-90).forEach(function (d) { var v = fundDay(d); if (v != null) hist.push(v); });
       var pr = hist.length >= 30 ? hist.filter(function (v) { return v <= fm; }).length / hist.length : null;
       var fv = pr != null ? (pr >= 0.7 ? 1 : pr <= 0.3 ? -1 : 0) : fm > F_BASE + 1e-5 ? 1 : fm < F_BASE - 1e-5 ? -1 : 0;   // 이력 30일 미만이면 0.01% 기준
       ev.push({ v: fv, s: "펀딩 " + (pr != null ? Math.round(pr * 100) + "분위" : fmtF(fm)),
-                l: "펀딩 3일 " + fmtF(fm) + "/8h(" + (pr != null ? "최근 " + hist.length + "일 중 " + Math.round(pr * 100) + "분위 · " : "") +
+                l: "펀딩 3일" + (fEnd !== D.d[S.n - 1] ? "(~" + fEnd.slice(5).replace("-", "/") + ")" : "") + " " + fmtF(fm) + "/8h(" + (pr != null ? "최근 " + hist.length + "일 중 " + Math.round(pr * 100) + "분위 · " : "") +
                    (fm < F_BASE - 1e-5 ? "0.01% 아래 = 선물 할인" : fm > F_BASE + 1e-5 ? "0.01% 위 = 선물 웃돈" : "0.01% = 현물 근처") + ")" });
     }
     var nl = 0, ns = 0, cv = 0, cl = 0;
@@ -479,7 +481,7 @@
     var vLines = nar ? [["롱·숏 " + V.word + " (" + V.cnt.replace("근거 ", "").replace("개 중", "중") + ")", vc], [V.ev.map(function (e) { return e.s + " " + tag(e); }).join(" · "), C.text]]
       : [["롱·숏 → " + V.word + " (" + V.cnt + ")", vc],
          [V.ev.map(function (e) { return e.l + " " + tag(e); }).join(" · "), C.text]];
-    var lines = !R || !(R.tot > 0) || R.avgL == null ? [[(S.PP === undefined || S.ppLoading) && !R ? "청산 대기 받는 중" : "청산 대기 없음 -- 보이는 봉이 포지션 모델 밖(최근 30일만 앎)이거나 받지 못함", C.muted]] : nar ? [["아래 롱 " + qty(R.lDn) + " " + c + " · 평균 진입 " + px(R.avgL) + " " + pct(P / R.avgL - 1), C.text],
+    var lines = !R || !(R.tot > 0) || R.avgL == null ? [[(S.PP === undefined || S.ppLoading) && !R ? "청산 대기 받는 중" : (nar ? "청산 대기 없음(모델 밖·최근 30일만)" : "청산 대기 없음 -- 보이는 봉이 포지션 모델 밖(최근 30일만 앎)이거나 받지 못함"), C.muted]] : nar ? [["아래 롱 " + qty(R.lDn) + " " + c + " · 평균 진입 " + px(R.avgL) + " " + pct(P / R.avgL - 1), C.text],
                        ["롱 청산 대기 " + usd(R.liqDn * P) + (tL ? " · 최대 " + px(tL.px) + " " + tL.d.toFixed(1) + "%" : ""), C.bad],
                        ["숏 청산 대기 " + usd(R.liqUp * P) + (tS ? " · 최대 " + px(tS.px) + " +" + tS.d.toFixed(1) + "%" : ""), C.good]]
       : [["추정 · 보이는 " + R.nVis + "봉에 열려 남은 계약 " + qty(R.tot) + " " + c + "(OI 의 " + Math.round(100 * R.tot / R.oi) + "%)" + (R.outN ? " · 앞 " + R.outN + "봉은 모델 밖(최근 30일만 앎)" : "") + " · 청산가 = 레버리지 10~100배 같은 비중", C.muted],
