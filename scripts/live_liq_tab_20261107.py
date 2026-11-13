@@ -30,7 +30,7 @@ from scripts.coin_config import COIN_CONFIG  # noqa: E402
 from scripts.live_liquidation_map_20260824 import LEVERAGE_TIERS, MAINTENANCE_MARGIN_RATE, compute_tier_profile  # noqa: E402
 
 LAKE, LIVE, HOT = ROOT / "data" / "lake", ROOT / "data" / "live", ROOT / "data" / "hot"
-WINDOWS = ((30, 90), (60, 90), (90, 90), (180, 180))   # (입력 일수, 표시 일수) -- 90일까지는 표시 창을 고정해 탭을 눌러도 축이 안 움직인다
+WINDOWS = ((7, 90), (30, 90), (60, 90), (90, 90), (180, 180))   # 2026-11-13 펜 메모 «매물 일봉별에 7일 지평도»   # (입력 일수, 표시 일수) -- 90일까지는 표시 창을 고정해 탭을 눌러도 축이 안 움직인다
 KEEP_DAYS = 370                                        # 180일 표시의 왼쪽 칸도 입력 180일을 다 채우려면 360일이 필요하다
 ROW_PCT, REAL_PCT = 0.004, 0.0025                      # 히트맵 칸 0.4% · 실측 위치 칸 0.25%
 HEAT_CUT = 0.1                                         # t < .1 은 화면 투명도(.85·t^2.5)로 안 보인다 -- 파일 크기를 줄인다

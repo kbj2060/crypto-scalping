@@ -1068,6 +1068,9 @@ function armedEl(box) {
   };
   h.addEventListener("pointerup", end); h.addEventListener("pointercancel", end);
   h.addEventListener("click", (e) => {   // 넘어간 손절 확인 상자
+    // 2026-11-13 펜 메모 «sltp 선 칩 오른쪽 ✕ = 선 지우기 · + = 1/n 로 더 나누기»: 진입가 팝업의 같은 버튼 함수(epLinePress·epLegPress)를 부른다 -- 새 주문 경로 없음
+    const la = e.target.closest(".lt-act");
+    if (la) { e.stopPropagation(); if (la.disabled) return; const p = la.dataset.leg ? epLegPress(la) : epLinePress(la); renderArmedLines(); Promise.resolve(p).finally(renderArmedLines); return; }
     const b = e.target.closest("[data-cf]");
     if (!b || !armedEdit || !armedEdit.cfm) return;
     e.stopPropagation();
@@ -1076,6 +1079,31 @@ function armedEl(box) {
   });
   box.appendChild(h);
   return h;
+}
+// 2026-11-13 펜 메모: 들어간 손절·익절 칩(조각 포함) 오른쪽 «+ ✕». ✕ = 두 번 누름(5초 · 조각이면 그 조각만, 남은 조각이 전량을 나눔 · 하나뿐이면 그 선 지우기)
+//   + = 초안 선(가장 먼 조각 너머 · 끌어 놓아야 걸림 · 조각들이 똑같이 1/n) · 최대 4조각 · 청산 중·수정 중엔 꺼짐. 끄는 중·확인 상자·선 도구·초안이 떠 있으면 숨김.
+function armedActs(h, a, legsOf, hide) {
+  let box = h.querySelector(".lt-acts-box");
+  if (!box) { box = document.createElement("div"); box.className = "lt-acts-box"; h.appendChild(box); }
+  box.hidden = hide;
+  if (hide) return;
+  const fired = !!a.b.fired, busy = epLnBusy || !!(armedEdit && armedEdit.busy), esc = escapeHtml(a.k), items = [];
+  ["tp", "sl"].forEach((k) => {
+    if (a.b[`${k}_off`] || !(a.b[`${k}_level`] > 0)) return;
+    const gs = legsOf[k], n = gs ? gs.length : 1, name = k === "tp" ? "익절" : "손절";
+    const tags = gs ? gs.map((g, i) => [h.querySelector(`.lt-legs .lt-tag.${k}[data-i="${i}"]`), i, g]) : [[h.querySelector(`.lt-tag.${k}:not(.lt-leg)`), null, null]];
+    tags.forEach(([t, i, g]) => {
+      if (!t || t.style.display === "none") return;
+      const id = i == null ? `${k}:off:${a.k}` : `leg:rm:${k}:${i}:${a.k}`, armed = epLnArm.k === id, dis = fired || busy || (g && g.fired) ? " disabled" : "";
+      const who = i == null ? `${name}선` : `${name} ${i + 1}`;
+      const rm = i == null ? `data-ln="${k}" data-act="off" data-key="${esc}"` : `data-leg="rm" data-kind="${k}" data-i="${i}" data-key="${esc}"`;
+      const add = n < 4 ? `<button type="button" class="lt-act add" data-ln="${k}" data-act="add" data-key="${esc}"${dis} title="${name}선 하나 더 — 초안을 끌어 놓으면 걸리고 ${n + 1}개가 똑같이 나눕니다" aria-label="${name}선 나누기 — 초안을 끌어 놓으면 ${n + 1}개로 나눔">+</button>` : "";
+      items.push({ t, html: `<span class="lt-acts ${k}">${add}<button type="button" class="lt-act x${armed ? " arm" : ""}" ${rm}${dis} title="${who} 지우기 — 두 번 누르기${i != null ? " · 남은 조각이 전량을 나눕니다" : ""}" aria-label="${armed ? `한 번 더 누르면 ${who}을 지웁니다` : `${who} 지우기 — 두 번 누르기`}">${armed ? "지우기?" : '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>'}</button></span>` });
+    });
+  });
+  const html = items.map((o) => o.html).join("");
+  if (box._h !== html) { box.innerHTML = html; box._h = html; }
+  [...box.children].forEach((s, j) => { const t = items[j].t; Object.assign(s.style, { left: t.offsetLeft + t.offsetWidth / 2 + 4 + "px", top: t.style.top }); });
 }
 function renderArmedLines() {
   renderLineDraft();   // 2026-11-11 선 추가 초안(들어간 선이 없어도 그린다)
@@ -1169,6 +1197,7 @@ function renderArmedLines() {
     for (let i = ts.length - 1; i >= 0; i--) ts[i].y = Math.min(ts[i].y, hi, i < ts.length - 1 ? ts[i + 1].y - GAP : hi);
     ts.forEach((o) => { o.t.style.top = o.y + "px"; });
   }
+  armedActs(h, a, { tp: tlegs, sl: slegs }, !!(armedDrag || (ed && (ed.cfm || ed.busy)) || lineTool || lineDraft));
   const ct = ed && ed.cfm ? h.querySelector(ed.sli != null ? `.lt-legs .lt-tag.sl[data-i="${ed.sli}"]` : ".lt-tag.sl:not(.lt-leg)") : null;
   renderSlCross(h, !!ct, a.side, ed && ed.sl, ct, top, bot, mob);
   const note = h.querySelector(".lt-am-note"), e = armedEdit;
@@ -1227,7 +1256,7 @@ async function epLegPress(b) {   // 2026-11-11 분할 익절·손절 조각: −
   let q;
   if (act === "rm") {
     const id = `leg:rm:${kind}:${i}:${key}`;
-    if (epLnArm.k !== id) { clearTimeout(epLnArm.t); epLnArm = { k: id, t: setTimeout(() => { epLnArm = { k: "", t: 0 }; redraw(); }, 5000) }; redraw(); return; }
+    if (epLnArm.k !== id) { clearTimeout(epLnArm.t); epLnArm = { k: id, t: setTimeout(() => { epLnArm = { k: "", t: 0 }; redraw(); renderArmedLines(); }, 5000) }; redraw(); return; }
     clearTimeout(epLnArm.t); epLnArm = { k: "", t: 0 }; q = `act=remove&i=${i}`;
   } else {
     const w = legs.map((g) => Math.max(1, Math.min(9, Math.round(Number(g.w) || 1))));
@@ -1258,7 +1287,7 @@ async function epLinePress(b) {
   const redraw = () => { const box = el("entryPop"), old = box && box.querySelector(".ep-lines"), pos = snapshotAccountPosition(); if (old && pos) old.outerHTML = epLinesHtml(pos) || ""; };
   if (epLnArm.k !== id) {
     clearTimeout(epLnArm.t);
-    epLnArm = { k: id, t: setTimeout(() => { epLnArm = { k: "", t: 0 }; redraw(); }, 5000) };
+    epLnArm = { k: id, t: setTimeout(() => { epLnArm = { k: "", t: 0 }; redraw(); renderArmedLines(); }, 5000) };
     redraw(); return;
   }
   clearTimeout(epLnArm.t); epLnArm = { k: "", t: 0 }; epLnBusy = true; redraw();

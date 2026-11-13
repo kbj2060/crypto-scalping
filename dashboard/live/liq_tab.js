@@ -1,12 +1,12 @@
 // 풋프린트 카드 «청산» 보기 -- 2026-11-07 사용자 시안 I: 남은 매물(전체) → 가격 사다리(±6% 확대) · 2026-11-08 누적 곡선은 풋프린트 청산 기둥으로 옮김(fpLiqCurve) ·
 // 아래 줄 = 오늘 누적 + 최대 고통 + 코인별 최대 고통(11-11 사용자: 24시간 5분 막대·자기 흥분 지수 뺌). 보기 토글은 liq_profile.js setView, 이 파일은 그린다.
-// 원천: 지도 = fpLiqColTp(1·7·30·90일, 지나간 칸 지움) · HL 고래·호가·60초 = latestMarketCtx · 5분봉 = /api/liquidation-5m-history ·
+// 원천: 지도 = fpLiqColTp(1·7·30·60·90·180일, 지나간 칸 지움) · HL 고래·호가·60초 = latestMarketCtx · 5분봉 = /api/liquidation-5m-history ·
 //   남은 매물·띠·실측 위치·탄력 = /api/liq-tab · 최대 고통 = /api/liq-tab?asset=all(cron scripts/live_liq_tab_20261107.py, 매시).
 // 지도·남은 매물은 가상 포지션 추정이다. 금액 눈금(OI×2)은 절대액이 아니다 -- 흰 선이 실제 터진 양. 전부 서술이고 신호가 아니다.
 // 🔴CI esprima: `?.(`·`?.[`·숫자 구분자 금지.
 (function () {
   "use strict";
-  var LADDER_R = 6, FINE = 400, BAR_POLL_MS = 30000, DATA_POLL_MS = 600000, TICK_MS = 5000, WINS = [30, 60, 90, 180], STACK_MQ = "(max-width:1100px)";
+  var LADDER_R = 6, FINE = 400, BAR_POLL_MS = 30000, DATA_POLL_MS = 600000, TICK_MS = 5000, WINS = [7, 30, 60, 90, 180], STACK_MQ = "(max-width:1100px)";
   var S = { on: false, asset: null, win: 60, pp: "24H", data: null, dataT: 0, all: null, allT: 0, bars: [], barsT: 0, built: "" };
   try { var saved = Number(localStorage.getItem("liqTabWin")); if (WINS.indexOf(saved) >= 0) S.win = saved; var sp = localStorage.getItem("liqPainPer"); if (/^(12H|24H|48H|3D|1W|2W|1M)$/.test(sp || "")) S.pp = sp; } catch (e) { /* 저장 못 해도 동작 */ }
   var $ = function (id) { return document.getElementById(id); };
@@ -171,7 +171,8 @@
   // 2026-11-13 펜 메모 «가격 사다리를 코인글래스 청산맵처럼 하나로 크게 · 지평 버튼으로 따로»: 원천 하나만 크게(머리 버튼 = 지도 90·30·7·1일 · 실측 7일 · HL 고래).
   //   가격 = 가로(±6%, 0.25% 칸) · 막대 = 그 칸 금액(레버리지 색 쌓기, 왼쪽 축) · 선 = 지금가에서 멀어지며 쌓은 누적(왼쪽 빨강 = 롱 청산 · 오른쪽 초록 = 숏 청산, 오른쪽 축).
   //   실측은 롱(빨강)·숏(초록) 쌓기 · HL 고래는 청산가마다 막대 하나. 누적 선은 지도만(실측은 이미 터진 양이라 «앞으로 쌓인 양»이 아니다).
-  var LAD = ["90", "30", "7", "1", "real", "hl"], LADLAB = { "90": "90일", "30": "30일", "7": "7일", "1": "1일", real: "실측 7일", hl: "HL 고래" };
+  // 2026-11-13 펜 메모 «청산맵도 180일까지 · 왼쪽 기간을 누르면 오른쪽도 같은 기간»: 60·180일 추가(왼쪽 남은 매물 7·30·60·90·180 과 짝) · 짧은 기간부터.
+  var LAD = ["1", "7", "30", "60", "90", "180", "real", "hl"], LADLAB = { "1": "1일", "7": "7일", "30": "30일", "60": "60일", "90": "90일", "180": "180일", real: "실측 7일", hl: "HL 고래" };
   try { var sl = localStorage.getItem("liqLadWin"); if (LAD.indexOf(sl) >= 0) S.lad = sl; } catch (e) { /* 저장 못 해도 동작 */ }
   if (!S.lad) S.lad = "7";
   CH.ladder = function (el, w, h) {
@@ -498,6 +499,11 @@
       var key = b.dataset.pp ? "pp" : b.dataset.lad ? "lad" : "win";
       if (key === "pp") S.pp = b.dataset.pp; else if (key === "lad") S.lad = b.dataset.lad; else { S.win = Number(b.dataset.win); S.heatKey = ""; }
       try { localStorage.setItem(key === "pp" ? "liqPainPer" : key === "lad" ? "liqLadWin" : "liqTabWin", String(S[key])); } catch (x) { /* 저장 못 해도 동작 */ }
+      if (key === "win" && LAD.indexOf(String(S.win)) >= 0) {   // 2026-11-13 펜 메모: 왼쪽 기간 = 오른쪽 청산맵 기간(버튼 상태까지)
+        S.lad = String(S.win);
+        try { localStorage.setItem("liqLadWin", S.lad); } catch (x) { /* 저장 못 해도 동작 */ }
+        host.querySelectorAll("[data-lad]").forEach(function (o) { o.setAttribute("aria-pressed", String(o.dataset.lad === S.lad)); });
+      }
       host.querySelectorAll("[data-" + key + "]").forEach(function (o) { o.setAttribute("aria-pressed", String(o === b)); });
       draw();
     });

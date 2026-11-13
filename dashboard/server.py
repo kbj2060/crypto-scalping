@@ -4720,7 +4720,7 @@ def make_app() -> web.Application:
         return web.json_response(payload, headers=NOCACHE)
 
     async def api_liquidation_tiers(request: web.Request) -> web.Response:
-        days = int(request.query.get("days", "1")) if request.query.get("days", "1") in ("1", "7", "30", "90") else 1   # 2026-11-13 90일(펜 메모 «기간을 더 늘려줘»)
+        days = int(request.query.get("days", "1")) if request.query.get("days", "1") in ("1", "7", "30", "60", "90", "180") else 1   # 2026-11-13 90일(펜 메모 «기간을 더 늘려줘») · 60·180일(펜 메모 «청산 차트도 180일까지», 1시간봉 4,322개 = 바이낸스 세 번)
         try:
             payload = await load_liquidation_tiers(_query_coin_asset(request), days)
         except web.HTTPBadGateway:

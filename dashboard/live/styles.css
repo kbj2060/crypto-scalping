@@ -3136,6 +3136,19 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
   padding: 5px 9px 5px 7px; border-radius: 7px; border: 1px solid currentColor; background: color-mix(in srgb, var(--chart-bg) 90%, transparent);
   font: inherit; color: var(--good); box-shadow: 0 2px 10px rgb(var(--shadow) / .28); pointer-events: auto; cursor: ns-resize; touch-action: none; user-select: none; }
 .lt-tag.sl { color: var(--bad); }
+/* 2026-11-13 펜 메모: 들어간 손절·익절 칩 오른쪽 + (1/n 로 나누기 초안) · ✕ (두 번 눌러 지우기) -- 칩과 같은 색·바탕 */
+.lt-acts-box { position: absolute; inset: 0; pointer-events: none; }
+.lt-acts { position: absolute; transform: translateY(-50%); display: inline-flex; gap: 3px; color: var(--good); pointer-events: auto; }
+.lt-acts.sl { color: var(--bad); }
+.lt-act { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 5px; border: 1px solid currentColor; border-radius: 999px;
+  background: color-mix(in srgb, var(--chart-bg) 90%, transparent); color: inherit; font: 700 13px/1 var(--font-mono); cursor: pointer;
+  box-shadow: 0 2px 8px rgb(var(--shadow) / .24); transition: background-color .12s ease; }
+.lt-act:hover { background: color-mix(in srgb, currentColor 18%, var(--chart-bg)); }
+.lt-act.x.arm { padding: 0 8px; border-color: var(--bad); background: var(--bad); color: var(--on-fill); font: 700 11px/1 var(--font-sans); }
+.lt-act:disabled { opacity: .4; cursor: default; }
+.lt-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (pointer: coarse) { .lt-act { min-width: 28px; height: 28px; } }
+@media (prefers-reduced-motion: reduce) { .lt-act { transition: none; } }
 .lt-tag.en { transform: translateY(-50%); color: var(--accent); border-style: dotted; box-shadow: none; }   /* 2026-10-31 끌 수 있는 진입선(지정가) */
 .lt-tag.en.lim { border-style: solid; box-shadow: 0 2px 10px rgb(var(--shadow) / .28); }
 .lt-tag.en.lt-mini.wait-c { transform: translate(-50%, -50%); }   /* 2026-11-04 펜 메모: 대기 라벨 가운데 */
@@ -3804,6 +3817,7 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
 .lq-seg button:hover { color: var(--text); }
 .lq-seg button[aria-pressed="true"] { background: rgb(var(--lift) / .16); color: var(--text); }
 .lq-seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (max-width: 720px) { .lq-seg { flex-wrap: wrap; justify-content: flex-end; border-radius: 14px; } }   /* 2026-11-13 청산맵 버튼 8개 -- 휴대폰에서 «HL 고래»가 잘렸다 */
 .lq-b { flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .lq-d { flex: 1 1 auto; min-height: 0; min-width: 0; position: relative; }
 .lq-d svg { position: absolute; inset: 0; display: block; }
