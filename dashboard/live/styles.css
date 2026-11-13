@@ -3137,15 +3137,17 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
   font: inherit; color: var(--good); box-shadow: 0 2px 10px rgb(var(--shadow) / .28); pointer-events: auto; cursor: ns-resize; touch-action: none; user-select: none; }
 .lt-tag.sl { color: var(--bad); }
 /* 2026-11-13 펜 메모 → 시안 A «붙은 캡슐»: 들어간 손절·익절 칩 오른쪽에 이어 붙은 [+ │ ✕] (칩 테두리가 이어진 한 덩어리 · 칩의 오른쪽 테두리가 칸막이) */
-.lt-tag.has-acts { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.lt-tag.lt-mini.has-acts, .lt-tag.has-acts { border-top-right-radius: 0; border-bottom-right-radius: 0; padding-right: 7px; }   /* 🔴.lt-tag.lt-mini(알약 999px)가 뒤에 있어 덮였다 -- 셋 묶은 선택자로 이긴다 */
 .lt-acts-box { position: absolute; inset: 0; pointer-events: none; }
 .lt-acts { position: absolute; transform: translateY(-50%); display: inline-flex; align-items: stretch; box-sizing: border-box; overflow: hidden;
-  border: 1px solid currentColor; border-left: 0; border-radius: 0 7px 7px 0; background: color-mix(in srgb, var(--chart-bg) 90%, transparent);
+  border: 1px solid currentColor; border-left: 0; border-radius: 0 999px 999px 0; background: color-mix(in srgb, var(--chart-bg) 90%, transparent);
   box-shadow: 0 2px 10px rgb(var(--shadow) / .28); color: var(--good); pointer-events: auto; }
 .lt-acts.sl { color: var(--bad); }
-.lt-act { display: inline-grid; place-items: center; min-width: 28px; padding: 0 8px; border: 0; border-left: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+.lt-act { display: inline-grid; place-items: center; min-width: 26px; padding: 0 7px; border: 0; border-left: 1px solid color-mix(in srgb, currentColor 35%, transparent);
   border-radius: 0; background: none; color: inherit; font: 700 13px/1 var(--font-mono); cursor: pointer; transition: background-color .12s ease; }
 .lt-act:first-child { border-left: 0; }
+.lt-act:last-child { padding-right: 10px; }   /* 알약 오른쪽 둥근 끝 몫 */
+.lt-act svg { width: 9px; height: 9px; }
 .lt-act:hover { background: color-mix(in srgb, currentColor 16%, transparent); }
 .lt-act.x.arm { padding: 0 10px; background: var(--bad); color: var(--on-fill); font: 700 11px/1 var(--font-sans); }
 .lt-act:disabled { opacity: .4; cursor: default; }
