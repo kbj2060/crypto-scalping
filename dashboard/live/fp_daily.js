@@ -591,15 +591,19 @@
       { n: "OKX 선물", s: "OKX 선", col: XC.okx, kind: "cvd", grp: "fut", v: mk(m("okx_fut")) },
       { n: "바이낸스 현물", s: "BN 현", col: XC.bn, dash: true, kind: "cvd", grp: "spot", v: mk(m("bn_spot")) },
       { n: "OKX 현물", s: "OKX 현", col: XC.okx, dash: true, kind: "cvd", grp: "spot", v: mk(m("okx_spot")) },
-      { n: "바이낸스", s: "BN", col: XC.bn, kind: "oi", v: mk(function (i) { return D.oi[i] != null ? D.oi[i] * D.c[i] : null; }) },
-      { n: "OKX", s: "OKX", col: XC.okx, kind: "oi", v: mk(m("okx_oi")) },
-      { n: "Bybit", s: "BYB", col: XC.bybit, kind: "oi", v: mk(m("bybit_oi")) },
+      // 2026-11-13 사용자 «OI 차트도 달러 → 포지션 개수(코인), 종가 말고 평균가로»: 바이낸스 = 원래 코인 수량 · OKX(달러로만 옴) = ÷ 그날 평균가
+      //   (바이낸스 선물 체결 VWAP = 거래대금 ÷ 수량) · Bybit = 서버가 곱한 바이낸스 현물 종가로 다시 나눠 원래 코인 수량.
+      { n: "바이낸스", s: "BN", col: XC.bn, kind: "oi", v: mk(function (i) { return D.oi[i] != null ? D.oi[i] : null; }) },
+      { n: "OKX", s: "OKX", col: XC.okx, kind: "oi", v: mk(function (i) { var o = X.okx_oi && X.okx_oi[D.d[i]], q = D.bq[i] + D.sq[i];
+          return o != null && q > 0 ? o / ((D.bv[i] + D.sv[i]) / q) : null; }) },
+      { n: "Bybit", s: "BYB", col: XC.bybit, kind: "oi", v: mk(function (i) { var o = X.bybit_oi && X.bybit_oi[D.d[i]], c0 = X.px && X.px[D.d[i]];
+          return o != null && c0 ? o / c0 : null; }) },
       { n: "바이낸스", s: "BN", col: XC.bn, kind: "fund", v: mk(m("bn_fund")) },
       { n: "OKX", s: "OKX", col: XC.okx, kind: "fund", v: mk(m("okx_fund")) },
       { n: "Bybit", s: "BYB", col: XC.bybit, kind: "fund", v: mk(m("bybit_fund")) }
     ];
   }
-  function xCum(se) {   // CVD = 보이는 첫 값부터 누적 · OI = 보이는 첫 값 대비 변화(달러)
+  function xCum(se) {   // CVD = 보이는 첫 값부터 누적(달러) · OI = 보이는 첫 값 대비 변화(코인 수량)
     var out = [], acc = 0, base = null;
     se.v.forEach(function (v) {
       if (v == null) { out.push(null); return; }
@@ -630,7 +634,7 @@
     halo(g, C, name, G.L + 4, y + 4, C.muted);
     var tw = g.measureText(name).width + 8;
     halo(g, C, k === "xfund" ? (G.narrow ? "그날 평균 · 점선 0.01%" : "그날 정산 평균(8시간마다 · %) · 점선 = 기본 0.01%(선물 ≈ 현물) · 아래 = 선물 할인(숏이 급함) · 위 = 선물 웃돈(롱이 급함)")
-      : k === "xoi" ? (G.narrow ? "첫 봉 대비" : "보이는 첫 봉 대비 변화(달러) · 노랑 바이낸스 · 분홍 OKX · 파랑 Bybit")
+      : k === "xoi" ? (G.narrow ? "첫 봉 대비 " + A().coin : "보이는 첫 봉 대비 변화(" + A().coin + " 수량 · 달러로만 오는 OKX 는 ÷ 그날 평균가) · 노랑 바이낸스 · 분홍 OKX · 파랑 Bybit")
       : (G.narrow ? (b - a + 1) + "봉 누적" : "보이는 " + (b - a + 1) + "봉 누적 · 실선 선물 · 점선 현물 · 굵은 선 = 합(모든 원천이 있는 날)") + (S.X === undefined && S.period === "1d" ? " · 불러오는 중" : ""), G.L + 4 + tw, y + 4, C.muted);
     if (!(hi > lo)) return;
     var Y = function (v) { return top + hh - (v - lo) / (hi - lo) * hh; };
@@ -656,7 +660,7 @@
       g.fillStyle = t.se.col; g.globalAlpha = t.se.dash ? 0.55 : 0.92; g.fillRect(x0, t.ty, w, th); g.globalAlpha = 1;
       g.fillStyle = "#111318"; g.textAlign = "left";
       if (!G.narrow) g.fillText(t.se.n, x0 + 3, t.ty + th / 2 + 0.5);   // 휴대폰(칸 58px)은 이름과 값이 겹쳤다 -- 값만(색이 거래소)
-      g.textAlign = "right"; g.fillText(k === "xfund" ? (G.narrow ? fmtF(t.v).replace("%", "") : fmtF(t.v)) : sgnUsd(t.v), x0 + w - 3, t.ty + th / 2 + 0.5);
+      g.textAlign = "right"; g.fillText(k === "xfund" ? (G.narrow ? fmtF(t.v).replace("%", "") : fmtF(t.v)) : k === "xoi" ? (t.v >= 0 ? "+" : "−") + cqty(Math.abs(t.v)) : sgnUsd(t.v), x0 + w - 3, t.ty + th / 2 + 0.5);
     });
     g.textAlign = "left"; g.textBaseline = "top";
     });
