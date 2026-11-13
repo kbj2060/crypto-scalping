@@ -1085,6 +1085,7 @@ function armedEl(box) {
 function armedActs(h, a, legsOf, hide) {
   let box = h.querySelector(".lt-acts-box");
   if (!box) { box = document.createElement("div"); box.className = "lt-acts-box"; h.appendChild(box); }
+  h.querySelectorAll(".lt-tag.has-acts").forEach((t) => t.classList.remove("has-acts"));
   box.hidden = hide;
   if (hide) return;
   const fired = !!a.b.fired, busy = epLnBusy || !!(armedEdit && armedEdit.busy), esc = escapeHtml(a.k), items = [];
@@ -1103,7 +1104,16 @@ function armedActs(h, a, legsOf, hide) {
   });
   const html = items.map((o) => o.html).join("");
   if (box._h !== html) { box.innerHTML = html; box._h = html; }
-  [...box.children].forEach((s, j) => { const t = items[j].t; Object.assign(s.style, { left: t.offsetLeft + t.offsetWidth / 2 + 4 + "px", top: t.style.top }); });
+  // 2026-11-13 시안 A «붙은 캡슐»: 칩 오른쪽 끝에 이어 붙여 [칩 │ + │ ✕] 한 덩어리 · 높이 = 칩 높이 · 오른쪽 끝을 넘으면 칩째 왼쪽으로(휴대폰에서 ✕ 가 잘렸다)
+  const lim = h.clientWidth - 6;
+  [...box.children].forEach((s, j) => {
+    const t = items[j].t;
+    t.classList.add("has-acts");
+    let l = t.offsetLeft + t.offsetWidth / 2;
+    const over = l + s.offsetWidth - lim;
+    if (over > 0) { t.style.left = t.offsetLeft - over + "px"; l -= over; }
+    Object.assign(s.style, { left: l + "px", top: t.style.top, height: t.offsetHeight + "px" });
+  });
 }
 function renderArmedLines() {
   renderLineDraft();   // 2026-11-11 선 추가 초안(들어간 선이 없어도 그린다)
@@ -1190,8 +1200,8 @@ function renderArmedLines() {
     + (pNow > 0 && qty ? ` <span class="lt-en-p ${pc}">${sg(upnl)}$${Math.abs(upnl).toFixed(2)}</span>` : "");
   // 2026-11-11 사용자 «모바일 최적화»: 휴대폰은 진입·익절·손절(조각 포함) 꼬리표가 같은 세로줄 근처라, 화면 밖 선들이 끝에 모이면 겹쳤다 --
   //   세로로 최소 간격만큼 떼어 놓는다(선은 제자리 · 위→아래 한 번 · 아래→위 한 번). 끄는 중엔 손가락을 따라가게 두지 않는다.
-  if (mob && !armedDrag) {
-    const ts = [...h.querySelectorAll(".lt-tag")].filter((t) => t.style.display !== "none" && t.style.top).map((t) => ({ t, y: parseFloat(t.style.top) })).sort((a, b) => a.y - b.y);
+  if (!armedDrag) {   // 2026-11-13: 데스크톱도(전엔 휴대폰만) -- 화면 밖 조각들이 위·아래 끝에 몰리면 칩과 «+ ✕» 가 서로 겹쳤다. 데스크톱 진입 꼬리표는 플롯 오른쪽 끝이라 뺀다
+    const ts = [...h.querySelectorAll(mob ? ".lt-tag" : ".lt-tag:not(.en)")].filter((t) => t.style.display !== "none" && t.style.top).map((t) => ({ t, y: parseFloat(t.style.top) })).sort((a, b) => a.y - b.y);
     const GAP = 26, lo = top + 11, hi = bot - 11;
     for (let i = 0; i < ts.length; i++) ts[i].y = Math.max(ts[i].y, lo, i ? ts[i - 1].y + GAP : lo);
     for (let i = ts.length - 1; i >= 0; i--) ts[i].y = Math.min(ts[i].y, hi, i < ts.length - 1 ? ts[i + 1].y - GAP : hi);
