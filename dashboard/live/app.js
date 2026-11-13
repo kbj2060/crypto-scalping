@@ -3791,6 +3791,18 @@ function fpLockSet(on) {
 el("fpLockBtn")?.addEventListener("click", () => fpLockSet(!document.documentElement.classList.contains("fp-lock")));
 // 2026-11-09 사용자 «디폴트 값을 잠금으로»: 휠 있는 기기는 처음부터 잠금(폰은 버튼이 없으니 안 잠근다) · 위 카드가 그려진 뒤(load) 맞춘다.
 if (!matchMedia("(hover: none)").matches) addEventListener("load", () => fpLockSet(true), { once: true });
+// 2026-11-13 펜 메모 «전체화면 아이콘 -- 오른쪽 칸이 접히고 왼쪽이 카드 전체»: renderCandleSvg 의 FPW 가 읽는다 · 넓은 화면(2단)에서만 버튼이 보인다 · 고른 상태는 기억
+function fpWideSet(on) {
+  const b = el("fpWideBtn"); if (!b) return;
+  document.documentElement.classList.toggle("fp-wide", on);
+  b.setAttribute("aria-pressed", String(on));
+  b.setAttribute("aria-label", on ? "오른쪽 칸 펼치기" : "차트 전체화면");
+  try { localStorage.setItem("fpWide", on ? "1" : "0"); } catch (e) { /* 기억은 편의 */ }
+  if (typeof scheduleSnapshotChartRender === "function") scheduleSnapshotChartRender();
+  window.dispatchEvent(new Event("resize"));   // 일봉·옵션 칸 등 폭을 재는 곳
+}
+el("fpWideBtn")?.addEventListener("click", () => fpWideSet(!document.documentElement.classList.contains("fp-wide")));
+try { if (localStorage.getItem("fpWide") === "1") fpWideSet(true); } catch (e) { /* 기억은 편의 */ }
 function railGo(id) {
   const t = el(id);
   if (!t) return;
@@ -7435,7 +7447,10 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   아래 본문은 전부 `w` 를 «플롯 폭»으로 쓰므로 한 줄도 안 바뀐다.
   const splitR = subOn ? Number(getComputedStyle(svg).getPropertyValue("--fp-split")) || 0 : 0;
   const SPLIT_GAP = 20;
-  const subW = splitR ? Math.round((wAll - SPLIT_GAP) * splitR) + FP_LEFT_SHIFT : wAll;   // 10-15 풋프린트를 왼쪽으로 옮긴 만큼 오른쪽 칸을 넓힌다(플롯 폭은 그대로 -- 아래 ml 도 같은 만큼 줄인다)
+  // 2026-11-13 펜 메모 «풋프린트에 전체화면 아이콘 -- 누르면 오른쪽 칸(1초 수급·시장 맥락)이 접히고 왼쪽이 카드 전체를»: 2단 배치는 그대로 두고 오른쪽 칸 폭만 0
+  //   (위 한 줄·체결/호가 기둥·차트 아래 띠는 2단 그대로) · 1초 수급·시장 맥락은 안 그린다(#mcBody 는 CSS 가 숨김). fpWideSet 이 켜고 끈다.
+  const FPW = !!splitR && document.documentElement.classList.contains("fp-wide");
+  const subW = splitR ? (FPW ? 0 : Math.round((wAll - SPLIT_GAP) * splitR) + FP_LEFT_SHIFT) : wAll;   // 10-15 풋프린트를 왼쪽으로 옮긴 만큼 오른쪽 칸을 넓힌다(플롯 폭은 그대로 -- 아래 ml 도 같은 만큼 줄인다)
   const w = splitR ? wAll - SPLIT_GAP - subW : wAll, subX = splitR ? w + SPLIT_GAP : 0;
   // 🔴SUB_TOTAL(아래)은 styles.css 의 #candleSvgSnapshot 높이와 **같이** 움직여야 한다 -- 상자가 작으면 가격 플롯이 눌린다
   //   (test_sub_panel_height_contract 가 두 파일을 대조한다). 1초 수급 400 = 가격 플롯과 같은 높이(2026-09-22 사용자 «너무 작아서»).
@@ -10284,7 +10299,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     // 2026-09-19 히트맵도 같은 캐시를 쓴다 -- 래스터는 3초마다 새 열이 오는데 캔들 전체
     // 리렌더(가격 틱)를 기다릴 이유가 없다(2bb2b2f1 이 프로파일/1초수급에 넣은 그 이유).
     // 2026-09-30 시안 Y(사용자 선택): ETH 는 오른쪽 칸 위 절반만 1초 수급, 아래 절반은 시장 맥락(#mcBody 를 그 자리에 겹쳐 놓는다).
-    const mcSplit = !!splitR && flowOn();   // 2026-10-04 SOL·XRP 도 시장 맥락(코인별)
+    const mcSplit0 = !!splitR && flowOn(), mcSplit = mcSplit0 && !FPW;   // 2026-10-04 SOL·XRP 도 시장 맥락(코인별) · 전체화면(FPW)은 오른쪽 칸을 접는다
     // 2026-09-30 1초 수급 높이 = 칸 − 시장 맥락의 **실제 내용 높이**(mcNeedH, renderMarketCtx 가 잰다) -- 한 화면 모드로 칸이 줄어도 시장 맥락이 스크롤 없이 다 들어간다.
     //   아직 못 쟀으면 47% · 1초 수급은 칸의 22% 아래로는 안 줄인다(2026-10-15 30 → 22%: ⑤ 예측 줄·⑥ 그래프 키운 몫, 사용자 «모자라면 수급 차트 높이를 줄여»).
     // 2026-10-01 바닥 = 전환 리본 바닥(사용자 «전환 리본까지 나머지 바닥을 맞춰») -- 시장 맥락·모의 판(옛 옵션 요약) 칸이 같은 선에서 끝난다
@@ -10294,7 +10309,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     { const fs = el("fpLineSwitch"), card = el("fpCard");   // 청산 밀도 범례(왼쪽 위, ~256px) 오른쪽
       if (fs && card) {
         // 2026-10-30 레이아웃 정리: 1단 데스크톱(≈1440, 1초 수급이 아래)도 같은 한 줄 -- 전엔 이 폭에서만 «지표» 버튼이 없고 LONG·SHORT 가 체결 기둥 머리에 끼어 호가 계기와 겹쳤다
-        const on = SUB_LEGEND_H > 0 && (mcSplit || (S1_BELOW && !mobileChart && flowOn()));
+        const on = SUB_LEGEND_H > 0 && (mcSplit0 || (S1_BELOW && !mobileChart && flowOn()));
         fs.classList.toggle("on", on);
         // 2026-10-16 펜 메모: 차트 바로 위 한 줄 = 청산 밀도(왼쪽) | 창 미니맵·실시간(가운데) | VWAP·세션·볼린저·주간 앵커(오른쪽 = 가격판 오른쪽 끝)
         const pan = el("chartPan"), home = el("fpPanHome");
@@ -10317,13 +10332,13 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       } }
     // 2026-10-15 아티팩트 댓글 «봉 시간은 수급 차트 위로, 남는 공간은 미니 체결 버블»: 수급 바닥 시각 줄(12px, renderSupply1s mb 16→4)을 버블에 넘긴다
     const s1Give = mcSplit ? 12 : 0, s1Hd = s1H - s1Give;
-    if (mcSplit && mcBubbleEl) { const bh = FP_BUB ? FP_BUB - 14 : floorY - (sub1sY + s1Hd + 12) - mcNeedH - 6;   // 11-10 띠 안(위 여백 8 · 아래 6)   // 10-30 버블 = 칸 − 아래 두 줄 내용 → 아래 두 줄 바닥 = 칸 바닥(지지·저항 칸 바닥)
+    if (mcSplit0 && mcBubbleEl) { const bh = FP_BUB ? FP_BUB - 14 : floorY - (sub1sY + s1Hd + 12) - mcNeedH - 6;   // 11-10 띠 안(위 여백 8 · 아래 6)   // 10-30 버블 = 칸 − 아래 두 줄 내용 → 아래 두 줄 바닥 = 칸 바닥(지지·저항 칸 바닥)
       const v = bh >= 60 ? `${bh}px` : "0px"; if (mcBubbleEl.style.height !== v) mcBubbleEl.style.height = v; mcBubbleEl.hidden = bh < 60; }
-    post.push(() => mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1Hd + 12, w: subW - 16, h: floorY - (sub1sY + s1Hd + 12) } : null,
-            mcSplit && TRADE_W ? (FP_BUB ? { x: ml, y: h - FP_BUB + 8, w: w - mr - ml, h: FP_BUB - 14 }   // 2026-11-10 차트 아래 전폭 체결 버블 띠(플롯 왼쪽 ~ 호가 칸 오른쪽)
+    post.push(() => mcPlace(svg, mcSplit0 ? { x: subX, y: sub1sY + s1Hd + 12, w: Math.max(0, subW - 16), h: floorY - (sub1sY + s1Hd + 12) } : null,   // 전체화면도 넓은 배치(mc-cmp)로 둔다 -- 풀면 머리 금리 띠·지지/저항 목록이 차트 아래로 튀어나왔다(CSS 가 #mcBody 를 숨김)
+            mcSplit0 && TRADE_W ? (FP_BUB ? { x: ml, y: h - FP_BUB + 8, w: w - mr - ml, h: FP_BUB - 14 }   // 2026-11-10 차트 아래 전폭 체결 버블 띠(플롯 왼쪽 ~ 호가 칸 오른쪽)
               : (() => { const y = plotBottom + 12;   // 2026-10-01(4) 프로파일 아래 = 2026-10-04 모의 판(renderPaper 가 채운다)
               return { x: tradeX0 + 4, y, w: REG_W - 8, h: floorY - y }; })()) : null));   // 10-26 레인 값 칸(옛 LANE_VAL_W 144)을 빼 지지/저항 칸이 제자리로
-    supply1sSubBox = {
+    supply1sSubBox = FPW ? null : {
       svg: subSvg("s1", subX, sub1sY, subW, s1Hd, sub1sKey(subW, s1Hd),
                   (g) => renderSupply1s({ svg: g, w: subW, h: s1Hd })),
       w: subW, h: s1Hd };

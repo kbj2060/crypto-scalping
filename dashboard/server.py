@@ -3200,15 +3200,14 @@ def make_app() -> web.Application:
 
     async def liq_klines_df(asset: str, limit: int, keep_forming: bool = False, interval: str = LIQUIDATION_MAP_INTERVAL) -> pd.DataFrame:
         """청산맵 입력 봉(기본 1시간, 10-11 부터 5분봉도). 진행 중인 봉은 버린다 -- keep_forming=True 면 남긴다(7·30일 막대)."""
-        raw = await fetch_binance_json(
-            "https://fapi.binance.com/fapi/v1/klines",
-            {
-                "symbol": COIN_CONFIG[asset]["binance_symbol"],
-                "interval": interval,
-                "limit": limit,
-            },
-            error_reason="liquidation_map_upstream_error",
-        )
+        url, q = "https://fapi.binance.com/fapi/v1/klines", {"symbol": COIN_CONFIG[asset]["binance_symbol"], "interval": interval, "limit": min(limit, 1500)}
+        raw = await fetch_binance_json(url, q, error_reason="liquidation_map_upstream_error")
+        while raw and len(raw) < limit:   # 2026-11-13 지도 90일(1시간봉 2,162개) -- 한 번 한도 1,500 이라 앞쪽을 endTime 으로 더 받는다
+            more = await fetch_binance_json(url, {**q, "limit": min(limit - len(raw), 1500), "endTime": int(raw[0][0]) - 1},
+                                            error_reason="liquidation_map_upstream_error")
+            if not more:
+                break
+            raw = more + raw
         cols = ["open_time", "open", "high", "low", "close", "volume", "close_time",
                 "quote_volume", "trades", "taker_buy_base", "taker_buy_quote", "ignore"]
         df = pd.DataFrame(raw, columns=cols)
@@ -4668,7 +4667,7 @@ def make_app() -> web.Application:
         return web.json_response(payload, headers=NOCACHE)
 
     async def api_liquidation_tiers(request: web.Request) -> web.Response:
-        days = int(request.query.get("days", "1")) if request.query.get("days", "1") in ("1", "7", "30") else 1
+        days = int(request.query.get("days", "1")) if request.query.get("days", "1") in ("1", "7", "30", "90") else 1   # 2026-11-13 90일(펜 메모 «기간을 더 늘려줘»)
         try:
             payload = await load_liquidation_tiers(_query_coin_asset(request), days)
         except web.HTTPBadGateway:

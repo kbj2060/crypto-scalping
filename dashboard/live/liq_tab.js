@@ -1,6 +1,6 @@
 // 풋프린트 카드 «청산» 보기 -- 2026-11-07 사용자 시안 I: 남은 매물(전체) → 가격 사다리(±6% 확대) · 2026-11-08 누적 곡선은 풋프린트 청산 기둥으로 옮김(fpLiqCurve) ·
 // 아래 줄 = 오늘 누적 + 최대 고통 + 코인별 최대 고통(11-11 사용자: 24시간 5분 막대·자기 흥분 지수 뺌). 보기 토글은 liq_profile.js setView, 이 파일은 그린다.
-// 원천: 지도 = fpLiqColTp(1·7·30일, 지나간 칸 지움) · HL 고래·호가·60초 = latestMarketCtx · 5분봉 = /api/liquidation-5m-history ·
+// 원천: 지도 = fpLiqColTp(1·7·30·90일, 지나간 칸 지움) · HL 고래·호가·60초 = latestMarketCtx · 5분봉 = /api/liquidation-5m-history ·
 //   남은 매물·띠·실측 위치·탄력 = /api/liq-tab · 최대 고통 = /api/liq-tab?asset=all(cron scripts/live_liq_tab_20261107.py, 매시).
 // 지도·남은 매물은 가상 포지션 추정이다. 금액 눈금(OI×2)은 절대액이 아니다 -- 흰 선이 실제 터진 양. 전부 서술이고 신호가 아니다.
 // 🔴CI esprima: `?.(`·`?.[`·숫자 구분자 금지.
@@ -168,36 +168,46 @@
     };
     return svg(w, h, s, "일봉별 남은 청산 매물 히트맵");
   };
+  // 2026-11-13 펜 메모 «가격 사다리를 세로가 아니라 가로 프로파일로 · 기간도 30일보다 더 길게»: 가격 = 가로(왼쪽 아래 → 오른쪽 위) · 원천마다 한 줄(위 → 아래 긴 기간부터)
+  //   · 막대 = 그 0.25% 칸 금액(위로 · 레버리지 색 쌓기) · 지도 90일 추가(서버 1시간봉 2,160개 = 바이낸스 한 번 1,500 한도라 두 번 받는다).
   CH.ladder = function (el, w, h) {
-    var P = price(), M = { "30": mapOf(30), "7": mapOf(7), "1": mapOf(1) }, real = realRows(P), m = ctx(), hl = m && m.hl_liq, R_ = LADDER_R;
-    if (!(P > 0) || !(M["1"] || M["7"] || M["30"])) return null;
-    var cols = ["30", "7", "1", "real", "hl"], LAB = { "30": "지도 30일", "7": "지도 7일", "1": "지도 1일", real: "실측 7일", hl: "HL 고래" }, narrow = w < 420, L = 50, Tp = 18, Bt = 6, gap = narrow ? 5 : 10, cw = (w - L - gap * cols.length) / cols.length, Y = function (d) { return Tp + (h - Tp - Bt) * (1 - (d + R_) / (2 * R_)); }, rh = Math.max((h - Tp - Bt) / (2 * R_ / 0.25) - 0.6, 1.2), s = "", LEV = ["--lev10", "--lev25", "--lev50", "--lev100"];   // 풋프린트 «청산» 기둥과 같은 레버리지 색(app.js TV) -- 위·아래는 현재가 위치와 누적 곡선이 말한다
-    for (var d = -R_; d <= R_; d += 1) if (d) s += line("lq-gl", L, w, Y(d), Y(d)) + txt("lq-ax", L - 5, Y(d) + 3, px(P * (1 + d / 100)), "end");
-    cols.forEach(function (c, ci) {
-      var x0 = L + gap + ci * (cw + gap); s += txt("lq-ax lq-axh", x0, 10, LAB[c]);
+    var P = price(), M = { "90": mapOf(90), "30": mapOf(30), "7": mapOf(7), "1": mapOf(1) }, real = realRows(P), m = ctx(), hl = m && m.hl_liq, R_ = LADDER_R;
+    if (!(P > 0) || !(M["1"] || M["7"] || M["30"] || M["90"])) return null;
+    var rows = ["90", "30", "7", "1", "real", "hl"], LAB = { "90": "지도 90일", "30": "지도 30일", "7": "지도 7일", "1": "지도 1일", real: "실측 7일", hl: "HL 고래" };
+    var narrow = w < 420, L = narrow ? 52 : 64, R = 8, Tp = 2, Bt = 18, gap = 6, rh = (h - Tp - Bt - gap * (rows.length - 1)) / rows.length;
+    var X = function (d) { return L + (w - L - R) * (d + R_) / (2 * R_); }, bw = Math.max((w - L - R) / (2 * R_ / 0.25) - 0.8, 1), s = "", LEV = ["--lev10", "--lev25", "--lev50", "--lev100"];   // 풋프린트 «청산» 기둥과 같은 레버리지 색
+    var sum = function (r) { return r[0] + r[1] + r[2] + r[3]; }, inR = function (g) { return Math.abs(g * 0.25) <= R_; };
+    for (var d = -R_; d <= R_; d += narrow ? 2 : 1) s += line("lq-gl", X(d), X(d), Tp, h - Bt) + (d ? txt("lq-ax", X(d), h - 4, px(P * (1 + d / 100)), "middle") : "");
+    rows.forEach(function (c, ri) {
+      var y0 = Tp + ri * (rh + gap), base = y0 + rh - 1, top = y0 + 14, hh = base - top, mx = 1, note = "";
+      s += line("lq-z", L, w - R, base, base) + txt("lq-ax lq-axh", 2, y0 + 11, LAB[c]);
       if (c === "real") {
-        var ks = Object.keys(real).filter(function (g) { return Math.abs(g * 0.25) <= R_; }), mr = Math.max.apply(null, ks.map(function (g) { return real[g][0] + real[g][1]; }).concat([1]));
-        ks.forEach(function (g) { var r = real[g], t = r[0] + r[1], ww = cw * Math.sqrt(t / mr), wl = t ? ww * r[0] / t : 0; if (r[0]) s += '<rect class="lq-lg" x="' + x0 + '" y="' + (Y(g * 0.25) - rh / 2) + '" width="' + wl + '" height="' + rh + '"/>'; if (r[1]) s += '<rect class="lq-sh" x="' + (x0 + wl) + '" y="' + (Y(g * 0.25) - rh / 2) + '" width="' + (ww - wl) + '" height="' + rh + '"/>'; });
-        if (cw > 120) s += txt("lq-ax", x0 + cw, 10, "최대 " + usd(mr), "end");
+        var ks = Object.keys(real).filter(inR); mx = Math.max.apply(null, ks.map(function (g) { return real[g][0] + real[g][1]; }).concat([1]));
+        ks.forEach(function (g) { var r = real[g], x = X(g * 0.25) - bw / 2, hl_ = hh * r[0] / mx, hs = hh * r[1] / mx; if (r[0]) s += '<rect class="lq-lg" x="' + x.toFixed(1) + '" y="' + (base - hl_).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + hl_.toFixed(1) + '"/>'; if (r[1]) s += '<rect class="lq-sh" x="' + x.toFixed(1) + '" y="' + (base - hl_ - hs).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + hs.toFixed(1) + '"/>'; });
+        note = "최대 " + usd(mx);
       } else if (c === "hl") {
-        var all = hl ? (hl.below || []).map(function (l) { return [l, "--bad"]; }).concat((hl.above || []).map(function (l) { return [l, "--good"]; })) : [], hm = Math.max.apply(null, all.map(function (q) { return q[0].usd; }).concat([1]));
-        all.forEach(function (q) { var dd = (q[0].px / P - 1) * 100; if (Math.abs(dd) > R_) return; var y = Y(dd), ww = Math.max(Math.min(cw * 0.55 * q[0].usd / hm, cw - 38), 2); s += '<line x1="' + x0 + '" x2="' + (x0 + ww) + '" y1="' + y + '" y2="' + y + '" stroke="var(' + q[1] + ')" stroke-width="3"/>' + txt("lq-ax t", x0 + ww + 4, y + 3, usd(q[0].usd)); });
+        var all = hl ? (hl.below || []).map(function (l) { return [l, "--bad"]; }).concat((hl.above || []).map(function (l) { return [l, "--good"]; })) : [];
+        mx = Math.max.apply(null, all.map(function (q) { return q[0].usd; }).concat([1]));
+        all.forEach(function (q) { var dd = (q[0].px / P - 1) * 100; if (Math.abs(dd) > R_) return; var x = X(dd), hv = Math.max(hh * q[0].usd / mx, 2); s += '<line x1="' + x + '" x2="' + x + '" y1="' + base + '" y2="' + (base - hv) + '" stroke="var(' + q[1] + ')" stroke-width="3"/>'; });
+        note = all.length ? "최대 " + usd(mx) : "없음";
       } else {
-        var mp = M[c]; if (!mp) return;
-        var ks2 = Object.keys(mp.rows).filter(function (g) { return Math.abs(g * 0.25) <= R_; }), sum = function (r) { return r[0] + r[1] + r[2] + r[3]; }, mx = Math.max.apply(null, ks2.map(function (g) { return sum(mp.rows[g]); }).concat([1]));
-        ks2.forEach(function (g) { var xx = x0; mp.rows[g].forEach(function (v, ti) { if (!v) return; var ww = cw * v / mx; s += '<rect fill="var(' + LEV[ti] + ')" x="' + xx.toFixed(1) + '" y="' + (Y(g * 0.25) - rh / 2).toFixed(1) + '" width="' + ww.toFixed(1) + '" height="' + rh.toFixed(1) + '"/>'; xx += ww; }); });
-        if (cw > 120) s += txt("lq-ax", x0 + cw, 10, "칸 최대 " + usd(mx), "end");
+        var mp = M[c]; if (!mp) { s += txt("lq-ax", L + 6, base - 4, "받는 중"); return; }
+        var ks2 = Object.keys(mp.rows).filter(inR); mx = Math.max.apply(null, ks2.map(function (g) { return sum(mp.rows[g]); }).concat([1]));
+        ks2.forEach(function (g) { var yy = base, x = (X(g * 0.25) - bw / 2).toFixed(1); mp.rows[g].forEach(function (v, ti) { if (!v) return; var hv = hh * v / mx; yy -= hv; s += '<rect fill="var(' + LEV[ti] + ')" x="' + x + '" y="' + yy.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + hv.toFixed(1) + '"/>'; }); });
+        note = "칸 최대 " + usd(mx);
       }
+      if (!narrow) s += txt("lq-ax", 2, y0 + 24, note);
     });
     var pos = typeof snapshotAccountPosition === "function" ? snapshotAccountPosition() : null, liq = pos && Number(pos.liquidation_price);
-    if (liq > 0 && Math.abs(liq / P - 1) * 100 <= R_) s += '<line x1="' + L + '" x2="' + w + '" y1="' + Y((liq / P - 1) * 100) + '" y2="' + Y((liq / P - 1) * 100) + '" stroke="var(--position)" stroke-width="1.5"/>' + txt("lq-ax t o", w - 2, Y((liq / P - 1) * 100) - 4, "내 청산가 " + px(liq), "end");
-    s += line("lq-px", 0, w, Y(0), Y(0)) + '<rect x="0" y="' + (Y(0) - 8) + '" width="' + (L - 4) + '" height="16" rx="3" fill="var(--accent)"/><text x="' + (L - 4) / 2 + '" y="' + (Y(0) + 3.5) + '" text-anchor="middle" class="lq-pxt">' + px(P) + "</text>";
-    el._hit = function (x, y) {
-      var dd = (1 - (y - Tp) / (h - Tp - Bt)) * 2 * R_ - R_, g = Math.round(dd / 0.25); if (!g) return "";
-      var row = function (k) { var r = M[k] && M[k].rows[g]; return r ? usd(r[0] + r[1] + r[2] + r[3]) : "—"; }, rr = real[g];
-      return px(P * (1 + g * 0.25 / 100)) + " · " + sgn(g * 0.25, 2) + "%<br>지도 30일 " + row("30") + " · 7일 " + row("7") + " · 1일 " + row("1") + (rr ? "<br>실측 7일 롱 " + usd(rr[0]) + " · 숏 " + usd(rr[1]) : "") + "<br>지도 금액은 OI×2 눈금 · 절대액 아님";
+    if (liq > 0 && Math.abs(liq / P - 1) * 100 <= R_) { var xl = X((liq / P - 1) * 100); s += '<line x1="' + xl + '" x2="' + xl + '" y1="' + Tp + '" y2="' + (h - Bt) + '" stroke="var(--position)" stroke-width="1.5"/>' + txt("lq-ax t o", xl + 4, Tp + 10, "내 청산가 " + px(liq)); }
+    var x0 = X(0);
+    s += line("lq-px", x0, x0, Tp, h - Bt) + '<rect x="' + (x0 - 30) + '" y="' + (h - Bt + 1) + '" width="60" height="16" rx="3" fill="var(--accent)"/><text x="' + x0 + '" y="' + (h - Bt + 12.5) + '" text-anchor="middle" class="lq-pxt">' + px(P) + "</text>";
+    el._hit = function (x) {
+      var dd = (x - L) / (w - L - R) * 2 * R_ - R_, g = Math.round(dd / 0.25); if (!g || Math.abs(dd) > R_) return "";
+      var row = function (k) { var r = M[k] && M[k].rows[g]; return r ? usd(sum(r)) : "—"; }, rr = real[g];
+      return px(P * (1 + g * 0.25 / 100)) + " · " + sgn(g * 0.25, 2) + "%<br>지도 90일 " + row("90") + " · 30일 " + row("30") + " · 7일 " + row("7") + " · 1일 " + row("1") + (rr ? "<br>실측 7일 롱 " + usd(rr[0]) + " · 숏 " + usd(rr[1]) : "") + "<br>지도 금액은 OI×2 눈금 · 절대액 아님";
     };
-    return svg(w, h, s, "가격 사다리: 지도 30일 7일 1일, 실측 7일, HL 고래 청산가");
+    return svg(w, h, s, "가격 사다리(가로): 지도 90·30·7·1일, 실측 7일, HL 고래 청산가");
   };
   // ── 최대 고통(2026-11-11 사용자 «코인글래스 청산 최대 고통 중 청산 탭에 넣을 수 있는 것 모두») ──────────
   // 주기마다 쪽별 ±0.5% 묶음 봉우리 3개 = cron 이 매시 서버 청산맵과 같은 함수로 계산(liq_tab_all.json · 금액이 사다리 지도와 같다).

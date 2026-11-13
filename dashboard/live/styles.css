@@ -3858,3 +3858,11 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
 .fp-lock-btn[aria-pressed="true"] .lk-open, .fp-lock-btn[aria-pressed="false"] .lk-shut { display: none; }
 html.fp-lock { overflow: hidden; scrollbar-gutter: stable; }
 @media (hover: none) { .fp-lock-btn { display: none; } }
+
+/* 2026-11-13 펜 메모 «풋프린트 전체화면 아이콘»(app.js fpWideSet): 넓은 화면(2단)에서만 · 켜면 오른쪽 칸(1초 수급·시장 맥락)을 접는다 -- 차트 폭은 renderCandleSvg(FPW)가 정한다 */
+#fpWideBtn { display: none; }
+#fpWideBtn[aria-pressed="false"] .wd-off, #fpWideBtn[aria-pressed="true"] .wd-on { display: none; }
+@media (min-width: 1700px) and (orientation: landscape) and (hover: hover) {
+  #fpWideBtn { display: inline-flex; }
+  html.fp-wide #mcBody { display: none !important; }
+}

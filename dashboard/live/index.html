@@ -201,6 +201,9 @@
             <!-- 2026-11-09 사용자 «차트를 보다 스크롤이 다음 카드로 내려간다 -- 카드 고정 버튼» (app.js fpLockSet) -->
             <button type="button" id="fpLockBtn" class="fp-lock-btn" aria-pressed="false" aria-label="카드 고정"
                     title="카드 고정 — 켜면 이 카드에 머뭅니다(휠·키보드로 페이지가 안 내려감 · 차트 줌·칸 스크롤은 그대로) · 왼쪽 내비로 옮기거나 다시 누르면 풀림"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="3" y="7.2" width="10" height="6.8" rx="1.6" fill="currentColor" stroke="none"/><path class="lk-shut" d="M5.2 7.2V5.1a2.8 2.8 0 0 1 5.6 0v2.1"/><path class="lk-open" d="M5.2 7.2V5.1a2.8 2.8 0 0 1 5.4-1"/></svg></button>
+            <!-- 2026-11-13 펜 메모 «전체화면 아이콘 -- 누르면 오른쪽 칸이 접히고 차트가 카드 전체» (app.js fpWideSet) -->
+            <button type="button" id="fpWideBtn" class="fp-lock-btn" aria-pressed="false" aria-label="차트 전체화면"
+                    title="차트 전체화면 — 오른쪽 칸(1초 수급·시장 맥락)을 접고 풋프린트를 카드 폭 전체로 · 다시 누르면 펼침"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g class="wd-on"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"/></g><g class="wd-off"><path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4"/></g></svg></button>
             <!-- 2026-11-04 펜 메모 «풋프린트 머리에 이 코인의 포지션» 시안 A(두 줄 글자 · 수량 뺌) -- app.js renderFpPos, 포지션 없으면 비움 -->
             <div id="fpPos" class="fp-pos" hidden></div>
             <!-- 2026-10-16 펜 메모 «나스닥·금리를 이전처럼 풋프린트 카드 상단으로»: 넓은 화면은 여기(1h…1d 오른쪽) · 좁은 화면은 시장 맥락 ⑥ 그대로 -->
