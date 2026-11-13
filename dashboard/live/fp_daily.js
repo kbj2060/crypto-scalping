@@ -312,6 +312,7 @@
     for (p = Math.ceil(lo / step) * step; p <= hi; p += step) { y = Math.round(yOf(p)) + 0.5; g.beginPath(); g.moveTo(G.L, y); g.lineTo(G.L + G.plotW, y); g.stroke(); }
     g.globalAlpha = 1;
     if (S.heatOn) drawHeat(g, G, C, a, b, row, xOf, bw, yOf);            // 봉 아래 배경
+    drawLiqWall(g, C, G, row, yOf);                                     // 2026-11-13 오른쪽 벽 반쪽 청산 프로파일(봉 뒤)
     for (i = a; i <= b; i++) {
       var x = xOf(i), up = D.c[i] >= D.o[i], col = up ? C.good : C.bad;
       var cell = cellMode ? S.cells.get(row + "|" + D.d[i]) : null;
@@ -343,6 +344,7 @@
     g.restore();
     S.after.forEach(function (f) { f(); });
     drawProfile(g, C, G, a, b, row, yOf);   // 플롯 잘라내기(G.L ~ G.L+plotW) 밖 칸이라 restore 뒤에
+    drawLiqSummary(g, C, G);
     var last = D.c[S.n - 1], lastY = last >= lo && last <= hi ? yOf(last) : -99;
     g.font = "600 12px " + C.sans; g.textAlign = "left"; g.textBaseline = "middle";
     for (p = Math.ceil(lo / step) * step; p <= hi; p += step) if (Math.abs(yOf(p) - lastY) > 14) halo(g, C, px(p), G.L + G.plotW + G.PW + 6, yOf(p), C.muted);
@@ -352,6 +354,77 @@
     }
     drawDates(g, C, G, a, b, xOf, bw);
     legend(S.hover ? S.hover.i : S.n - 1);
+  }
+
+  // 2026-11-13 사용자 «현재가 아래 어떤 포지션이 쌓였고 언제 청산되는지 -- 단위 맞춰 정확한 수치» → 방식 A(검증된 포지션 모델) · «차트 오른쪽 벽에 붙은 반쪽 청산 프로파일»:
+  //   남은 계약 = 서버 «포지션 프로파일»(/api/position-profile 30일 창: 5분 OI·거래량 모델 · 하이퍼리퀴드 실측 대비 7일 평균 진입가 오차 27bp · 롱/숏 나눔은 1~3일만 믿을 만함)
+  //   청산가 = 진입가 × (1 ∓ 1/레버리지 ± 0.5%) · 레버리지 10·20·25·50·75·100 같은 비중(서버 청산맵 가정) · 이미 지난 청산가 = 청산된 것으로 뺀다.
+  //   단위 = 코인 수량(바이낸스 OI 와 같은 단위) · 달러 = 수량 × 지금가 · % = 지금가 대비. 30일 넘은 계약(«옛 묶음», 가격 모름)은 빠진다 -- 요약에 몫을 적는다.
+  //   ponytail: 레버리지 비중·유지증거금은 고정 가정 -- 거래소 레버리지 분포를 받게 되면 그 비중으로.
+  var PP_LEVS = [10, 20, 25, 50, 75, 100], PP_MMR = 0.005;
+  function loadPP() {
+    if (S.ppLoading || (S.PP !== undefined && S.PP && S.PP.asset === S.asset && Date.now() - S.PPT < 60000) || (S.PP === null && S.PPA === S.asset && Date.now() - S.PPT < 300000)) return;
+    S.ppLoading = true; var asset = S.asset;
+    fetch("/api/position-profile?asset=" + asset + "&days=30", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { S.ppLoading = false; if (asset !== S.asset) return; S.PP = j && j.win ? Object.assign(j, { asset: asset }) : null; S.PPA = asset; S.PPT = Date.now(); redraw(); })
+      .catch(function () { S.ppLoading = false; S.PP = null; S.PPA = asset; S.PPT = Date.now(); });
+  }
+  function ppCalc(row) {
+    var J = S.PP, W = J && J.win && J.win["30"]; if (!W || !W.long || !W.short) return null;
+    var P = J.price, bw = J.bw, out = { P: P, liqL: new Map(), liqS: new Map(), lDn: 0, liqDn: 0, liqUp: 0, avgL: W.long.avg, tot: W.tot, oi: J.oi, row: row };
+    var add = function (m, price, q) { var k = Math.floor(price / row + 1e-9); m.set(k, (m.get(k) || 0) + q); };
+    [["long", true], ["short", false]].forEach(function (sd) {
+      var D_ = W[sd[0]], isL = sd[1];
+      D_.vals.forEach(function (q, i) {
+        if (!(q > 0)) return;
+        var e = (D_.lo + i + 0.5) * bw, w = q / PP_LEVS.length;
+        if (isL && e < P) out.lDn += q;
+        PP_LEVS.forEach(function (L) {
+          var lp = isL ? e * (1 - 1 / L + PP_MMR) : e * (1 + 1 / L - PP_MMR);
+          if (isL && lp < P) { add(out.liqL, lp, w); out.liqDn += w; }
+          if (!isL && lp > P) { add(out.liqS, lp, w); out.liqUp += w; }
+        });
+      });
+    });
+    return out;
+  }
+  function ppTop(m, row, P) { var b = null; m.forEach(function (q, k) { if (!b || q > b[1]) b = [k, q]; }); return b ? { px: (b[0] + 0.5) * row, q: b[1], d: ((b[0] + 0.5) * row / P - 1) * 100 } : null; }
+  // 오른쪽 벽에 붙은 반쪽 프로파일 -- 아래 빨강 = 롱 청산 대기 · 위 초록 = 숏 청산 대기 · 봉 뒤(가격 칸 잘라내기 안에서 봉보다 먼저)
+  function drawLiqWall(g, C, G, row, yOf) {
+    loadPP();
+    var R = S.PP && S.PP.asset === S.asset ? ppCalc(row) : null; S.ppR = R; if (!R) return;
+    var mx = 1e-9, xr = G.L + G.plotW, ww = Math.min(G.narrow ? 120 : 240, G.plotW * 0.22), top = G.top, bot = G.top + G.priceH;
+    R.liqL.forEach(function (q) { mx = Math.max(mx, q); }); R.liqS.forEach(function (q) { mx = Math.max(mx, q); });
+    [[R.liqL, C.bad], [R.liqS, C.good]].forEach(function (z) {
+      z[0].forEach(function (q, k) {
+        var yT = Math.max(top, yOf((k + 1) * row)), yB = Math.min(bot, yOf(k * row)); if (yB - yT < 1) return;
+        var w = ww * q / mx; g.fillStyle = z[1]; g.globalAlpha = 0.42;
+        g.fillRect(xr - w, yT + 0.5, w, Math.max(1, yB - yT - 1)); g.globalAlpha = 1;
+      });
+    });
+    var tL = ppTop(R.liqL, row, R.P), tS = ppTop(R.liqS, row, R.P);   // 가장 큰 칸 = 이름표(화면 안일 때)
+    g.font = "700 11px " + C.sans; g.textAlign = "right"; g.textBaseline = "middle";
+    [[tL, C.bad, "롱 청산"], [tS, C.good, "숏 청산"]].forEach(function (z) {
+      var t = z[0]; if (!t) return; var y = yOf(t.px); if (y < top + 8 || y > bot - 8) return;
+      halo(g, C, z[2] + " " + px(t.px) + " · " + (t.d >= 0 ? "+" : "") + t.d.toFixed(1) + "% · " + usd(t.q * R.P), xr - ww * t.q / mx - 6, y, z[1]);
+    });
+    g.textAlign = "left"; g.textBaseline = "top";
+  }
+  function drawLiqSummary(g, C, G) {   // 왼쪽 위 상자 -- 단위 맞춘 숫자(수량 · 달러 · %)
+    var R = S.ppR; if (!R) return;
+    var P = R.P, c = A().coin, tL = ppTop(R.liqL, R.row, P), tS = ppTop(R.liqS, R.row, P), nar = G.narrow;
+    var lines = nar ? [["아래 롱 " + qty(R.lDn) + " " + c + " · 평균 진입 " + px(R.avgL) + " " + pct(P / R.avgL - 1), C.text],
+                       ["롱 청산 대기 " + usd(R.liqDn * P) + (tL ? " · 최대 " + px(tL.px) + " " + tL.d.toFixed(1) + "%" : ""), C.bad],
+                       ["숏 청산 대기 " + usd(R.liqUp * P) + (tS ? " · 최대 " + px(tS.px) + " +" + tS.d.toFixed(1) + "%" : ""), C.good]]
+      : [["추정 · 최근 30일 계약 " + qty(R.tot) + " " + c + "(OI 의 " + Math.round(100 * R.tot / R.oi) + "%) · 청산가 = 레버리지 10~100배 같은 비중", C.muted],
+         ["지금가 아래 롱 " + qty(R.lDn) + " " + c + " · " + usd(R.lDn * P) + " · 롱 평균 진입 " + px(R.avgL) + " (" + pct(P / R.avgL - 1) + ")", C.text],
+         ["아래 롱 청산 대기 " + qty(R.liqDn) + " " + c + " · " + usd(R.liqDn * P) + (tL ? " · 최대 칸 " + px(tL.px) + " (" + tL.d.toFixed(1) + "%) " + usd(tL.q * P) : ""), C.bad],
+         ["위 숏 청산 대기 " + qty(R.liqUp) + " " + c + " · " + usd(R.liqUp * P) + (tS ? " · 최대 칸 " + px(tS.px) + " (+" + tS.d.toFixed(1) + "%) " + usd(tS.q * P) : ""), C.good]];
+    g.font = "700 " + (nar ? 10 : 12) + "px " + C.sans; g.textAlign = "left"; g.textBaseline = "top";
+    var lh = nar ? 13 : 16, bw_ = Math.min(G.plotW - 16, Math.max.apply(null, lines.map(function (t) { return g.measureText(t[0]).width; })) + 16), bx = G.L + 8, by = G.top + 8;
+    g.fillStyle = C.bg; g.globalAlpha = 0.86; g.fillRect(bx, by, bw_, lh * lines.length + 8); g.globalAlpha = 1;
+    g.strokeStyle = C.line; g.strokeRect(bx + 0.5, by + 0.5, bw_, lh * lines.length + 8);
+    lines.forEach(function (t, i) { halo(g, C, t[0], bx + 8, by + 4 + lh * i, t[1]); });
   }
 
   // 보이는 봉 합산 가격대 프로파일 -- 가운데 선 왼쪽 = 체결(매수+매도, 주황 · 최다 행 테두리) · 오른쪽 = 델타(매수−매도, 초록 +/빨강 −) · 옅은 띠 = 체결 70% 가치 영역.
@@ -840,7 +913,7 @@
     if ((period && period !== S.period) || (on && curAsset() !== S.asset)) {   // 봉 길이·코인이 바뀌면 받은 것·보던 자리를 비운다
       if (period) S.period = period;
       if (on) S.asset = curAsset();
-      S.X = undefined;
+      S.X = undefined; S.PP = undefined; S.ppR = null;
       S.D = null; S.n = 0; S.cells.clear(); S.heat.clear(); S.stale.clear(); S.want = null; S.heatWant = null; S.view = null; S.hover = null;
       syncPeriodUi();
     }
