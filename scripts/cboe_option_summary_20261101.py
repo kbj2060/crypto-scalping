@@ -67,7 +67,7 @@ def flow_today(options: list[dict], S: float = 0.0) -> dict:
         exp = datetime.strptime(m[1], "%y%m%d").replace(hour=16, tzinfo=ET)
         t = o.get("last_trade_time")
         rows.append([int(datetime.strptime(t, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=ET).timestamp() * 1000) if t else None, round(usd),
-                     int(exp.timestamp() * 1000), m[2], int(m[3]) / 1000, vol, px, round(vol * abs(float(o.get("delta") or 0)) * MULT * S)])
+                     int(exp.timestamp() * 1000), m[2], int(m[3]) / 1000, vol, px, round(vol * abs(dl if (dl := float(o.get("delta") or 0)) == dl else 0.0) * MULT * S)])   # 검증: NaN 델타가 요약 전체를 죽였다
     rows.sort(key=lambda r: (-r[7], -r[1]))   # 델타가 없으면(0) 명목 순으로 뒤에
     return {"call": [round(tot["C"][0]), round(tot["C"][1])], "put": [round(tot["P"][0]), round(tot["P"][1])], "top": rows[:6]}
 

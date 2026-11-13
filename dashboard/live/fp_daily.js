@@ -227,12 +227,14 @@
     var W = cv.clientWidth, H = cv.clientHeight, narrow = W < 560;
     var L = 8, R = narrow ? 52 : 66, axisH = 26, gap = 8;
     var laneH = Math.max(30, Math.round((H - axisH) * (narrow ? 0.07 : 0.055)));   // 2026-11-04 펜 메모 «차트 높이가 너무 낮다 -- 아래 막대 높이를 줄이고 차트를 늘려줘»: 레인 0.1 → 0.055(휴대폰 0.095 → 0.07) · 가격 차트 329 → ~500px(776px 상자 실측)
-    var units = LANES.reduce(function (t, l) { return t + (l[2] || 1); }, 0);
-    var priceH = H - axisH - units * laneH - LANES.length * gap - 6;
+    var units = LANES.reduce(function (t, l) { return t + (l[2] || 1); }, 0), fixed = axisH + LANES.length * gap + 6;
+    // 검증 11-13: 레인 9칸이 가격 칸을 데스크톱 500 → 351px · 휴대폰 → 197px 로 눌렀다 -- 가격 칸이 높이의 55% 아래로 안 가게 레인 한 칸을 줄인다
+    laneH = Math.max(14, Math.min(laneH, Math.floor((H - fixed - 0.55 * (H - axisH)) / units)));
+    var priceH = H - fixed - units * laneH;
     var lanes = {}, y = 6 + priceH + gap;
     LANES.forEach(function (l) { var hh = Math.round(laneH * (l[2] || 1)); lanes[l[0]] = { y: y, h: hh }; y += hh + gap; });
     // 2026-11-13 사용자 «1d 차트에도 오른쪽에 체결·델타 프로파일»: 플롯과 가격 눈금 사이 PW 칸(5분 차트 «체결 · 델타»와 같은 그림)
-    var PW = narrow ? 70 : 160;
+    var PW = narrow ? 56 : 160;   // 검증 11-13: 휴대폰 4h 3봉 칸 숫자가 1~2px 모자라던 폭 -- 70 → 56
     return { W: W, H: H, L: L, R: R, PW: PW, plotW: W - L - R - PW, top: 6, priceH: priceH, lanes: lanes, axisY: H - axisH, narrow: narrow };
   }
 
@@ -383,7 +385,7 @@
     var x0 = G.L + G.plotW + 6, PW = G.PW - 12, mid = x0 + PW / 2, top = G.top, bot = G.top + G.priceH;
     g.font = "700 " + (G.narrow ? 10 : 11) + "px " + C.sans; g.textAlign = "left"; g.textBaseline = "top";
     S.prof = null;
-    if (b - a >= 399) { halo(g, C, G.narrow ? "400일↑" : "체결 · 델타 — 400일 넘음", x0, top + 2, C.muted); return; }
+    if (b - a >= 399) { halo(g, C, G.narrow ? "400봉↑" : "체결 · 델타 — 400봉 넘음", x0, top + 2, C.muted); return; }
     var P = profAgg(a, b, row);
     S.prof = { P: P, x0: x0, x1: x0 + PW };
     g.save(); g.beginPath(); g.rect(x0 - 2, top, PW + 4, G.priceH); g.clip();
@@ -446,11 +448,11 @@
 
   // 다른 거래소 일봉(서버 /api/footprint-daily/xcvd · 1시간마다 갱신 · 주식은 빈 묶음) -- 1d 만(4h 는 바이낸스 선물 자체 열만)
   function loadX() {
-    if (S.period !== "1d" || S.X !== undefined) return;
-    S.X = null;
-    var asset = S.asset;
-    fetch("/api/footprint-daily/xcvd?" + Q(), { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : {}; })
-      .then(function (j) { if (asset === S.asset) { S.X = j || {}; redraw(); } }).catch(function () { S.X = {}; });
+    // 검증 11-13: 한 번만 받아 UTC 자정 뒤 합 선이 끊기고 오늘 값이 멈췄다 → 10분마다 다시(서버는 1시간 캐시) · 받는 동안은 옛 값 그대로
+    if (S.period !== "1d" || S.xLoading || (S.X !== undefined && Date.now() - (S.XT || 0) < 600000)) return;
+    S.xLoading = true;
+    var asset = S.asset, done = function (j) { S.xLoading = false; if (asset !== S.asset) return; S.X = j || {}; S.XT = Date.now(); redraw(); };
+    fetch("/api/footprint-daily/xcvd?" + Q(), { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : {}; }).then(done).catch(function () { done(S.X || {}); });
   }
   var XC = { bn: "#f0b90b", okx: "#d65bd6", bybit: "#4c8dff" };
   function xSeries(a, b) {
@@ -497,7 +499,7 @@
     halo(g, C, name, G.L + 4, y + 4, C.muted);
     var tw = g.measureText(name).width + 8;
     halo(g, C, k === "xoi" ? (G.narrow ? "첫 봉 대비" : "보이는 첫 봉 대비 변화(달러) · 노랑 바이낸스 · 분홍 OKX · 파랑 Bybit")
-      : (G.narrow ? (b - a + 1) + "봉 누적" : "보이는 " + (b - a + 1) + "봉 누적 · 실선 선물 · 점선 현물 · 굵은 선 = 합(모든 원천이 있는 날)") + (S.X == null && S.period === "1d" ? " · 불러오는 중" : ""), G.L + 4 + tw, y + 4, C.muted);
+      : (G.narrow ? (b - a + 1) + "봉 누적" : "보이는 " + (b - a + 1) + "봉 누적 · 실선 선물 · 점선 현물 · 굵은 선 = 합(모든 원천이 있는 날)") + (S.X === undefined && S.period === "1d" ? " · 불러오는 중" : ""), G.L + 4 + tw, y + 4, C.muted);
     if (!(hi > lo)) return;
     var Y = function (v) { return top + hh - (v - lo) / (hi - lo) * hh; };
     g.strokeStyle = C.line; g.setLineDash([2, 3]); g.lineWidth = 1; g.beginPath(); g.moveTo(G.L, Math.round(Y(0)) + 0.5); g.lineTo(G.L + G.plotW, Math.round(Y(0)) + 0.5); g.stroke(); g.setLineDash([]);
@@ -796,7 +798,7 @@
       var p = v.hi - (y - v.G.top) / v.G.priceH * (v.hi - v.lo);
       var cell = v.cellMode ? S.cells.get(v.row + "|" + D.d[i]) : null;
       if (cell) {
-        var k = Math.floor(p / v.row) - Math.floor(cell[0] / v.row);
+        var k = Math.floor(p / v.row + 1e-9) - Math.round(cell[0] / v.row);   // 검증 11-13: floor 는 XRP 칸 하한에서 한 칸 어긋났다
         if (k >= 0 && k < cell[1].length && cell[1][k] + cell[2][k] > 0) {
           var bq = cell[1][k], sq = cell[2][k], lo = cell[0] + k * v.row;
           html = "<b>" + lab(D.d[i]) + " · $" + px(lo) + "–" + px(lo + v.row) + "</b><br>매수 " + qty(bq) + " " + A().coin + " · 매도 " + qty(sq) +
@@ -805,7 +807,7 @@
       }
       var hh = S.heatOn ? S.heat.get(v.row + "|" + D.d[i]) : null;      // 히트맵 칸 = 추정 청산 금액(테두리 칸이 좁아 글자가 안 들어갈 때도 여기서 읽힌다)
       if (hh && hh[2]) {
-        var hk = Math.floor(p / v.row) - Math.floor(hh[0] / v.row);
+        var hk = Math.floor(p / v.row + 1e-9) - Math.round(hh[0] / v.row);
         if (hk >= 0 && hk < hh[2].length && hh[2][hk] > 0) {
           var hlo = hh[0] + hk * v.row, oiU = D.oi[i] != null ? D.oi[i] * D.c[i] : null, up = hlo + v.row / 2 >= D.c[i];
           html = (html ? html + "<br>" : "<b>" + lab(D.d[i]) + " · $" + px(hlo) + "–" + px(hlo + v.row) + "</b><br>") +

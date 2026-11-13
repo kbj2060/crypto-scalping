@@ -3866,3 +3866,6 @@ html.fp-lock { overflow: hidden; scrollbar-gutter: stable; }
   #fpWideBtn { display: inline-flex; }
   html.fp-wide #mcBody { display: none !important; }
 }
+@media (min-width: 721px) and (max-width: 1099px) {   /* 검증 11-13: 태블릿에서 주식 카드(.opt-eq)가 데스크톱 배치 + 태블릿 열 비율로 찌그러졌다 -- 태블릿 배치를 주식용으로 */
+  #optCard.opt-eq { grid-template-areas: "head head head head" "cov cov cov cov" "kpi kpi kpi kpi" "move ladder ladder ladder" "mood ladder ladder ladder" "blk blk blk blk" "flow flow flow flow"; }
+}

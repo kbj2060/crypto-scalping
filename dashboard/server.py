@@ -3202,12 +3202,14 @@ def make_app() -> web.Application:
         """청산맵 입력 봉(기본 1시간, 10-11 부터 5분봉도). 진행 중인 봉은 버린다 -- keep_forming=True 면 남긴다(7·30일 막대)."""
         url, q = "https://fapi.binance.com/fapi/v1/klines", {"symbol": COIN_CONFIG[asset]["binance_symbol"], "interval": interval, "limit": min(limit, 1500)}
         raw = await fetch_binance_json(url, q, error_reason="liquidation_map_upstream_error")
-        while raw and len(raw) < limit:   # 2026-11-13 지도 90일(1시간봉 2,162개) -- 한 번 한도 1,500 이라 앞쪽을 endTime 으로 더 받는다
+        while raw and len(raw) < limit and len(raw) % 1500 == 0:   # 2026-11-13 지도 90일(1시간봉 2,162개) -- 한 번 한도 1,500 이라 앞쪽을 endTime 으로 더 받는다 · 검증: 덜 찬 페이지 = 이력 끝(빈 호출 안 함)
             more = await fetch_binance_json(url, {**q, "limit": min(limit - len(raw), 1500), "endTime": int(raw[0][0]) - 1},
                                             error_reason="liquidation_map_upstream_error")
             if not more:
                 break
             raw = more + raw
+            if len(more) < 1500:
+                break
         cols = ["open_time", "open", "high", "low", "close", "volume", "close_time",
                 "quote_volume", "trades", "taker_buy_base", "taker_buy_quote", "ignore"]
         df = pd.DataFrame(raw, columns=cols)
@@ -3642,6 +3644,7 @@ def make_app() -> web.Application:
     #   받을 때마다 data/live/xcvd/<코인>.json 에 날짜별로 합쳐 쌓는다 -- OKX 처럼 이력이 짧은 원천도 앞으로는 길어진다. Bybit·Coinbase 현물·선물 CVD 는 공개 일봉에 매수/매도 구분이 없어 없다.
     XCVD_CCY = {"eth": "ETH", "btc": "BTC", "xrp": "XRP"}   # 주식(바이낸스 TradFi)은 현물·다른 거래소가 없다 -- 1d 자체 열만
     XCVD_KEYS = ("bn_spot", "okx_spot", "okx_fut", "okx_oi", "bybit_oi", "px")
+    XCVD_VER = 2   # 2 = OI 날짜 정정(아래) -- 옛 파일의 OI 칸은 하루 밀린 날짜라 버리고 다시 받는다
 
     async def _xcvd_refresh(a: str) -> dict:
         ccy, path = XCVD_CCY[a], LIVE_DIR / "xcvd" / f"{a}.json"
@@ -3649,6 +3652,8 @@ def make_app() -> web.Application:
             cur = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             cur = {}
+        if cur.get("v") != XCVD_VER:
+            cur = {k: v for k, v in cur.items() if k not in ("okx_oi", "bybit_oi")}
         new: dict[str, dict] = {k: {} for k in XCVD_KEYS}
         day = lambda ms: datetime.fromtimestamp(ms / 1000, timezone.utc).strftime("%Y-%m-%d")  # noqa: E731
         okx_day = lambda ms: day(int(ms) + 8 * 3600_000)  # noqa: E731
@@ -3670,19 +3675,23 @@ def make_app() -> web.Application:
                 pass
         try:
             for r in (await fetch_binance_json(f"{okx}/contracts/open-interest-volume", {"ccy": ccy, "period": "1D"}) or {}).get("data", []):
-                new["okx_oi"][okx_day(r[0])] = float(r[1])
+                new["okx_oi"][day(int(r[0]))] = float(r[1])   # 검증 11-13(서버 실측): 1D 값 = 그 ts 시각(UTC 16시) 스냅숏 -- 그 UTC 날짜에 붙인다(전엔 +8h 로 다음 날)
         except Exception:  # noqa: BLE001
             pass
         try:
             res = (await fetch_binance_json("https://api.bybit.com/v5/market/open-interest",
                                             {"category": "linear", "symbol": f"{ccy}USDT", "intervalTime": "1d", "limit": 200}) or {}).get("result") or {}
             for r in res.get("list", []):
-                d = day(int(r["timestamp"]))
+                d = day(int(r["timestamp"]) - 1)   # 검증 11-13(서버 실측): 1d 값 = 그날 00:00 스냅숏 = 전날 마감 → 전날에 붙인다(바이낸스 OI = 그날 마감과 같은 뜻)
                 if d in px:
                     new["bybit_oi"][d] = float(r["openInterest"]) * px[d]
         except Exception:  # noqa: BLE001
             pass
         out = {k: {**cur.get(k, {}), **new[k]} for k in XCVD_KEYS}
+        out["v"] = XCVD_VER
+        if not any(new[k] for k in XCVD_KEYS):   # 검증 11-13: 전부 실패를 1시간 «정상»으로 캐시했다 -- 던지면 swr 이 옛 응답을 내주고 곧 다시 시도한다
+            print(f"[xcvd] {a}: 모든 원천 실패 -- 쌓인 값만 있음", flush=True)
+            raise RuntimeError("xcvd_all_sources_failed")
         if any(new[k] for k in XCVD_KEYS):
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
@@ -3711,6 +3720,10 @@ def make_app() -> web.Application:
         if not frm or not to:
             raise web.HTTPBadRequest(reason="from_to")
         row = FPD[a].parse_row(request.query.get("row"))
+        if len(swr_store) > 800:   # 검증 11-13: 1d 프로파일이 줌마다 칸 키를 만든다(swr_store 는 안 비워짐) -- 오래된 칸 키 절반만 정리
+            old = sorted((v.get("ts", 0.0), k) for k, v in swr_store.items() if k.startswith(("fp_daily_cells_", "fp_4h_cells_")))
+            for _, k in old[: len(old) // 2]:
+                swr_store.pop(k, None)
         try:
             payload = await swr_cached(f"fp_daily_cells_{a}_{frm}_{to}_{row}", 30.0,
                                        lambda: asyncio.to_thread(fp_daily[a].cells_payload, time.time(), frm, to, row), max_stale=600.0)

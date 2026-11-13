@@ -174,12 +174,12 @@
     var P = price(), M = { "90": mapOf(90), "30": mapOf(30), "7": mapOf(7), "1": mapOf(1) }, real = realRows(P), m = ctx(), hl = m && m.hl_liq, R_ = LADDER_R;
     if (!(P > 0) || !(M["1"] || M["7"] || M["30"] || M["90"])) return null;
     var rows = ["90", "30", "7", "1", "real", "hl"], LAB = { "90": "지도 90일", "30": "지도 30일", "7": "지도 7일", "1": "지도 1일", real: "실측 7일", hl: "HL 고래" };
-    var narrow = w < 420, L = narrow ? 52 : 64, R = 8, Tp = 2, Bt = 18, gap = 6, rh = (h - Tp - Bt - gap * (rows.length - 1)) / rows.length;
+    var narrow = w < 420, L = narrow ? 52 : 86, R = 8, Tp = 2, Bt = 18, gap = 6, rh = (h - Tp - Bt - gap * (rows.length - 1)) / rows.length;   // 검증 11-13: 넓은 화면 L 64 → 86(«칸 최대 $12.3M» ≈75px 이 막대에 겹쳤다)
     var X = function (d) { return L + (w - L - R) * (d + R_) / (2 * R_); }, bw = Math.max((w - L - R) / (2 * R_ / 0.25) - 0.8, 1), s = "", LEV = ["--lev10", "--lev25", "--lev50", "--lev100"];   // 풋프린트 «청산» 기둥과 같은 레버리지 색
     var sum = function (r) { return r[0] + r[1] + r[2] + r[3]; }, inR = function (g) { return Math.abs(g * 0.25) <= R_; };
     for (var d = -R_; d <= R_; d += narrow ? 2 : 1) s += line("lq-gl", X(d), X(d), Tp, h - Bt) + (d ? txt("lq-ax", X(d), h - 4, px(P * (1 + d / 100)), "middle") : "");
     rows.forEach(function (c, ri) {
-      var y0 = Tp + ri * (rh + gap), base = y0 + rh - 1, top = y0 + 14, hh = base - top, mx = 1, note = "";
+      var y0 = Tp + ri * (rh + gap), base = y0 + rh - 1, top = y0 + 14, hh = Math.max(0, base - top), mx = 1, note = "";
       s += line("lq-z", L, w - R, base, base) + txt("lq-ax lq-axh", 2, y0 + 11, LAB[c]);
       if (c === "real") {
         var ks = Object.keys(real).filter(inR); mx = Math.max.apply(null, ks.map(function (g) { return real[g][0] + real[g][1]; }).concat([1]));

@@ -4790,7 +4790,7 @@ function optEqKpiHtml(o) {
       + `<span class="oq-sub"><b class="opt-good">콜 ${optUsd(f.call[1])}</b> · <b class="opt-bad">풋 ${optUsd(f.put[1])}</b></span><span class="oq-sub">명목 풋/콜 ${pc}</span></div>` : "")
     + (gm ? `<div class="oq-k oq-gm"><i title="롱감마 = 딜러 헤지가 움직임을 누르는 쪽 · 숏감마 = 키우는 쪽 · 플립 = 순 감마 노출이 0 이 되는 가격(블랙-숄즈로 가격을 옮겨 다시 계산) · 딜러가 콜은 사고 풋은 판다는 관례 가정 -- 실제 포지션은 모름 · 검증 안 됨">감마 국면 · 관례 가정 · 검증 안 됨</i>`
       + `<b class="${gm.regime === "long" ? "opt-good" : "opt-bad"}">${gm.regime === "long" ? "롱감마" : "숏감마"}</b>`
-      + `<span class="oq-sub">${gm.flip != null ? `플립 <b>$${gm.flip}</b> <small>${gm.flip_pct > 0 ? "+" : "−"}${Math.abs(gm.flip_pct).toFixed(1)}%</small>` : "플립 없음 <small>±30% 안</small>"}</span>${gx ? `<span class="oq-sub">순 감마 노출 <b>${su(gx.net)}</b><small>/1%</small></span>` : ""}</div>` : "")
+      + `<span class="oq-sub">${gm.flip != null ? `플립 <b>$${gm.flip}</b> <small>${gm.flip_pct > 0 ? "+" : "−"}${Math.abs(gm.flip_pct).toFixed(1)}%</small>` : "플립 없음 <small>±30% 안</small>"}</span><span class="oq-sub">순 감마 노출 <b>${su(gm.net)}</b><small>/1%</small></span></div>` : "")   // 검증 11-13: 국면과 같은 출처(BS) -- CBOE 감마 합(gx.net)은 부호가 어긋날 수 있었다
     + (gx ? `<div class="oq-k oq-g"><i>감마 노출 주요 레벨 · $/1% 움직임</i><div class="oq-gx">${lv(gx.pos, "opt-good")}${lv(gx.neg, "opt-bad")}</div></div>` : "")
     + `</div>`;
 }
@@ -4921,8 +4921,9 @@ function renderOptions() {
 // 2026-11-03 주식 «순매수 흐름» 자리 = 오늘 콜·풋 체결 누적(명목). 점은 수집기가 10분마다 한 점씩 쌓은 것 -- 방향(매수/매도)은 모른다. 값이 줄면 새 장이 시작된 것.
 function optEqFlowSvg(series, W) {
   let s = (series || []).filter((p) => p && p.length === 3);
-  const cut = s.reduce((k, p, i) => (i && p[1] + p[2] < 0.5 * (s[i - 1][1] + s[i - 1][2]) ? i : k), 0);   // 2026-11-13 마지막 장만(새 장 = 누적이 반 아래로 떨어진 곳 -- CBOE 값 소폭 정정은 무시)
-  s = s.slice(cut);
+  // 2026-11-13 마지막 장만 -- 검증: 값이 반 아래로 떨어진 곳으로 가르면 만기일 옵션값 붕괴에 오전이 잘렸다 → 마지막 점과 같은 미 동부 날짜만
+  const etDay = (ms) => new Date(ms).toLocaleDateString("en-CA", { timeZone: "America/New_York" }), lastDay = s.length ? etDay(s[s.length - 1][0]) : "";
+  s = s.filter((p) => etDay(p[0]) === lastDay);
   if (s.length < 2) return `<div class="opt-note">체결 곡선은 10분마다 한 점씩 쌓입니다 — 아직 ${s.length}점</div>`;
   const H = 150, x0 = 56, x1 = W - 16, y0 = 14, y1 = H - 22, t0 = s[0][0], t1 = s[s.length - 1][0], mx = Math.max(1, ...s.map((p) => Math.max(p[1], p[2])));
   const X = (t) => x0 + ((t - t0) / Math.max(1, t1 - t0)) * (x1 - x0), Y = (v) => y1 - (v / mx) * (y1 - y0);
@@ -7449,7 +7450,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   const SPLIT_GAP = 20;
   // 2026-11-13 펜 메모 «풋프린트에 전체화면 아이콘 -- 누르면 오른쪽 칸(1초 수급·시장 맥락)이 접히고 왼쪽이 카드 전체를»: 2단 배치는 그대로 두고 오른쪽 칸 폭만 0
   //   (위 한 줄·체결/호가 기둥·차트 아래 띠는 2단 그대로) · 1초 수급·시장 맥락은 안 그린다(#mcBody 는 CSS 가 숨김). fpWideSet 이 켜고 끈다.
-  const FPW = !!splitR && document.documentElement.classList.contains("fp-wide");
+  const FPW = !!splitR && document.documentElement.classList.contains("fp-wide") && matchMedia("(hover: hover)").matches;   // 검증: 버튼이 안 보이는 기기(터치)에서 접힌 채 고정되지 않게
   const subW = splitR ? (FPW ? 0 : Math.round((wAll - SPLIT_GAP) * splitR) + FP_LEFT_SHIFT) : wAll;   // 10-15 풋프린트를 왼쪽으로 옮긴 만큼 오른쪽 칸을 넓힌다(플롯 폭은 그대로 -- 아래 ml 도 같은 만큼 줄인다)
   const w = splitR ? wAll - SPLIT_GAP - subW : wAll, subX = splitR ? w + SPLIT_GAP : 0;
   // 🔴SUB_TOTAL(아래)은 styles.css 의 #candleSvgSnapshot 높이와 **같이** 움직여야 한다 -- 상자가 작으면 가격 플롯이 눌린다
@@ -9041,7 +9042,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         const opp = (r) => (r === "long" ? "short" : "long"), nm = (r) => (r === "long" ? "롱감마" : "숏감마");
         const yF = gm.flip != null ? yAt(gm.flip) : null, inV = yF != null && yF >= mt && yF <= plotBottom;
         const ySplit = yF == null ? plotBottom : Math.max(mt, Math.min(plotBottom, yF));
-        const upR = gm.flip == null || px >= gm.flip ? gm.regime : opp(gm.regime), loR = opp(upR);
+        const upR = gm.flip == null || gm.flip_pct <= 0 ? gm.regime : opp(gm.regime), loR = opp(upR);   // 검증 11-13: 위아래는 국면을 잰 스냅숏 가격(S) 기준 -- 실시간 px 로 가르면 플립을 막 건넌 순간 색이 뒤집혔다
         if (inV) {
           add("line", { x1: ml, x2: ml + cw, y1: yF, y2: yF, stroke: "var(--option)", "stroke-opacity": 0.9, "stroke-width": 1.5, "stroke-dasharray": "7 4" });
           if (gutOn) fpNotes.push({ val: gm.flip, label: "감마 플립", color: "var(--option)", title: `감마 플립 ${optQ(gm.flip)} · 위 ${nm(upR)} / 아래 ${nm(loR)} · 딜러 콜 매수·풋 매도 관례 가정 · 검증 안 됨` });
