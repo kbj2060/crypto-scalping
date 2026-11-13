@@ -367,11 +367,10 @@ def rec_rule_bracket(b: dict, *, position_side: str, anchor_price: float, basis:
 # 2026-10-28 사용자 «차트 위 익절·손절 선 2개를 끌어 놓고 진입 → peg · 둘 다 메이커로 청산 · 닿으면 닫기 · 비상 스탑 없음 · 안전장치(peg 마감 뒤 시장가) 유지».
 # 2026-11-11 사용자 «현재가에 최대한 붙여도 끌어 놓은 곳으로 바로»: 최소 거리(0.05%)를 뺐다 -- 방향(익절 = 수익 쪽)과 상한(오조작 방지)만 본다.
 #   붙인 익절 지정가가 그 사이 호가를 넘으면 post-only 가 거절(5022) → tp_resting False → 서버가 1초 닿음으로 닫는다 · 붙인 손절은 스프레드·다음 틱에 바로 닿을 수 있다(사용자 선택).
-LINE_MAX_PCT = 0.15   # 선이 현재가에서 15% 넘게 먼 건 오조작
 
 
 def line_bracket(*, position_side: str, ref_level: float, tp_level: float, sl_level: float, basis: float,
-                 filters: dict[str, float], sl_watch: bool = False, keep: tuple[str, ...] = ()) -> dict:
+                 filters: dict[str, float], sl_watch: bool = False) -> dict:
     """선 브래킷. **순수 함수**. 선(레벨) = USDT 차트 가격 · basis = 주문 심볼/USDT.
     익절 = 체결 직후 주문 심볼 post-only 지정가(place_bracket 의 tp_price) · 손절 = 서버가 1초 체결가로 닿음 판정 → peg 청산(거래소 스탑 없음)."""
     if not (ref_level > 0 and basis > 0 and tp_level > 0 and sl_level > 0):
@@ -382,16 +381,8 @@ def line_bracket(*, position_side: str, ref_level: float, tp_level: float, sl_le
     sl_up = sl_level > ref_level if sl_watch else not long_side
     if not ((ref_level < tp_level) if long_side else (tp_level < ref_level)) or not (sl_watch or ((sl_level < ref_level) if long_side else (ref_level < sl_level))):
         raise ValueError("롱은 익절선이 현재가 위·손절선이 아래, 숏은 반대여야 합니다" if not sl_watch else "롱은 익절선이 현재가 위, 숏은 아래여야 합니다")
-    # 2026-11-04 사용자 «규칙 손절폭 5% 를 SLTP 로 주문할 경우 제거»: 손절 상한이 규칙 손절폭(5%)이던 것을 익절과 같은 오조작 방지 범위(15% 안)로.
-    #   🔴자동 2× 크기가 맞춰 준 «손절 시 손실 한도»는 이제 선 거리만큼 커진다(2× 크기에 손절 10% 면 계좌 −20%).
-    # 2026-11-14 사용자 «SOXL 추가 진입이 안 된다»: 거리(15%)는 **새로 긋는 선**의 오조작 방지다 -- 이미 걸어 둔 선(keep = "tp"·"sl")은 가격이 멀어져도
-    #   거리로 막지 않는다(물타기·손절만 옮기기가 전부 막혔다: 익절 64.31 이 SOXL 54.9 에서 +17%). 방향(롱 익절은 위)은 그대로 본다.
-    for k, name, lv, hi in (("tp", "익절", tp_level, LINE_MAX_PCT), ("sl", "손절", sl_level, LINE_MAX_PCT)):
-        if k in keep:
-            continue
-        d = abs(lv / ref_level - 1)
-        if d > hi:
-            raise ValueError(f"{name}선이 현재가에서 {100 * d:.2f}% — {100 * hi:g}% 안이어야 합니다")
+    # 2026-11-14 사용자 «±15% 제한 자체를 제거»: 거리 검사(10-28 오조작 방지 15% · 11-04 손절 5% → 15%)를 없앴다 -- 방향(롱 익절은 위)만 본다.
+    #   🔴멀리 놓은 손절은 그만큼 손실이 커진다(자동 2× 크기에 손절 15% = 계좌 −30%) -- 화면이 놓은 가격 그대로 건다.
     tick = filters.get("tick") or 0.01
     tp = tp_level * basis   # 익절 지정가는 선보다 불리하지 않게(롱 올림 · 숏 내림)
     tp = round((math.ceil(tp / tick - 1e-9) if long_side else math.floor(tp / tick + 1e-9)) * tick, 8)

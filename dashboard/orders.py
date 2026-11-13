@@ -1560,7 +1560,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                     # 2026-11-12 익절을 지운(tp_off) 선 포지션도 늘린다 -- 익절은 꺼진 채(체결 뒤 익절 지정가 안 검) · 손절 해제·분할·청산 중은 그대로 막는다
                     # 2026-11-13 펜 메모 «손절/익절 없이도 추가 진입»: 손절을 지운(sl_off) 선 포지션도 늘린다 -- 지운 선은 꺼진 채(손절 감시 없음) · 분할·청산 중만 막는다
                     tp_off, sl_off = bool(prev and prev.get("tp_off")), bool(prev and prev.get("sl_off"))
-                    if rule_l:   # 2026-11-13 검증: 자동 규칙 크기는 −5% 거래소 손절을 전제로 잰다 -- 선 손절(최대 15%)·지운 손절이면 손실 한도가 틀린다
+                    if rule_l:   # 2026-11-13 검증: 자동 규칙 크기는 −5% 거래소 손절을 전제로 잰다 -- 선 손절(거리 제한 없음, 11-14)·지운 손절이면 손실 한도가 틀린다
                         return None, {}, {}, ({"error": "rule_on_lines", "detail": "선 주문 포지션에는 자동 규칙 크기를 쓰지 않습니다 — 비율(%)로 추가하세요"}, 409)
                     ok_prev = bool(prev and prev.get("lines") and (tp_off or (prev.get("tp_level") and prev.get("tp_price"))) and (sl_off or (prev.get("sl_level") and prev.get("sl_price")))
                                    and not prev.get("tp_legs") and not prev.get("sl_legs") and not prev.get("fired") and bracket_key(symbol, side) not in bracket_exiting)
@@ -1574,7 +1574,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 try:   # 지정가면 선의 기준(방향·거리 검사)이 지금가가 아니라 진입 지정가다
                     ref_ = limit_usdt or p_in / b_
                     plan["bracket"] = line_bracket(position_side=side, ref_level=ref_, tp_level=lines[0] or ref_ * (1.01 if side == "LONG" else 0.99), sl_level=lines[1] or ref_ * (0.99 if side == "LONG" else 1.01),   # 0 = 꺼진 선(검사 통과 자리, 아래에서 무장값으로 덮음)
-                                                   basis=b_, filters=filters, keep=("tp", "sl") if add_lines else ())   # 2026-11-14 추가 진입 = 이미 걸린 선 -- 거리(15%)로 막지 않는다(방향만)
+                                                   basis=b_, filters=filters)
                 except ValueError as exc:
                     return None, {}, {}, ({"error": "bad_lines" if not add_lines else "add_lines_out_of_range",
                                            "detail": str(exc) if not add_lines else f"기존 선이 지금가 기준으로 맞지 않아 추가 진입을 막습니다 — {exc}"}, 400)
@@ -2442,14 +2442,13 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         v = request.query.get("slup")
         return True if v == "1" else False if v == "0" else None
 
-    def check_lines(side: str, ref: float, basis: float, filters: dict, tp: float | None, sl: float | None, slup: bool | None = None,
-                    keep: tuple[str, ...] = ()) -> dict:
+    def check_lines(side: str, ref: float, basis: float, filters: dict, tp: float | None, sl: float | None, slup: bool | None = None) -> dict:
         """line_bracket(진입·수정과 같은 검사, sl_watch) 을 한쪽 선만으로도 -- 없는 쪽(None)은 늘 통과하는 자리(지금가 ±1%)를 넣고 그 칸은 호출부가 안 쓴다.
-        ponytail: 대역 값을 넣는 꼼수 -- 검사 규칙을 두 벌로 베끼지 않으려고. line_bracket 의 범위(15% 안)가 ±1% 를 빼면 여기도 바꾼다."""
+        ponytail: 대역 값을 넣는 꼼수 -- 검사 규칙을 두 벌로 베끼지 않으려고. line_bracket 이 지금가 바로 옆(±1%)을 막게 되면 여기도 바꾼다."""
         # 2026-11-12 검토 «손절 방향 뒤집힘»: 서버 지금가(1초 체결, 최대 5초 묵음)로 방향을 정하면 손절을 지금가 바로 옆에 놓는 순간 이미 넘어간 가격 기준으로
         #   거꾸로(롱인데 «올라 닿으면») 저장돼 가격이 계속 빠져도 안 쏜다 -- 화면이 놓은 순간의 방향(slup)이 있으면 그걸 쓴다(이미 넘어간 손절 = 다음 틱에 쏜다).
         up = side == "LONG"
-        nb = line_bracket(position_side=side, ref_level=ref, basis=basis, filters=filters, sl_watch=True, keep=keep,
+        nb = line_bracket(position_side=side, ref_level=ref, basis=basis, filters=filters, sl_watch=True,
                           tp_level=tp if tp else ref * (1.01 if up else 0.99), sl_level=sl if sl else ref * (0.99 if up else 1.01))
         if sl and slup is not None:
             nb["sl_up"] = slup
@@ -2555,7 +2554,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
     async def api_manual_bracket_modify(request: web.Request) -> web.Response:
         """2026-10-29 사용자 «이미 들어간 SLTP 선은 풋프린트에 계속 · 선을 끌면 그대로 주문 수정». 선 무장(lines)만 -- 일반 진입의 −5% 거래소 스탑은 안 건드린다.
         익절 = 우리 post-only 지정가를 지우고 새 가격·포지션 전량으로 다시(place_bracket, 비상 스탑 없음) · 손절 = 서버 감시 레벨만(거래소 주문 없음).
-        검사 = 진입 때와 같은 line_bracket(지금가 기준 방향·거리 15% 안, 2026-11-11 최소 거리 없앰) -- 2026-11-04 진입가 기준 규칙 손절폭(5%) 한도는 뺐다.
+        검사 = 진입 때와 같은 line_bracket(지금가 기준 방향만 · 11-11 최소 거리 · 11-14 15% 상한 없앰) -- 2026-11-04 진입가 기준 규칙 손절폭(5%) 한도는 뺐다.
         🔴익절 지우기가 실패하면 아무것도 안 바꾼다 · 지운 뒤 새 지정가를 못 걸면 tp_resting False(서버가 1초 닿음으로 닫는다 -- 무방비 아님) ·
         이미 쏜(fired) 무장은 거절 · watch_from = 지금(옮기기 전 지나간 가격으로 바로 닫지 않게). 방어 = 진입과 같다(POST + confirm=1 + 게이트 + 주문 잠금 busy_or)."""
         if request.query.get("confirm") != "1":
@@ -2584,10 +2583,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         tp_off, sl_off = bool(b.get("tp_off")), bool(b.get("sl_off"))   # 2026-11-11 지운 선(진입 팝업)은 검사·갱신하지 않는다 -- 옛 값이 범위를 벗어나 남은 선 수정까지 막지 않게
         try:
             ref, basis, filters = await lines_quote(symbol, asset)
-            # 2026-11-14: 안 옮긴 선(지금 걸린 값 그대로 = 단일 선 또는 조각 중 하나)은 거리(15%)로 막지 않는다 -- 손절만 끌어도 멀어진 익절 때문에 거절됐다
-            same = lambda v, k: any(abs(v - float(x)) <= 1e-9 for x in [b.get(f"{k}_level")] + [g.get("level") for g in b.get(f"{k}_legs") or []] if x)  # noqa: E731
-            keep = tuple(k for k, v in (("tp", lines[0]), ("sl", lines[1])) if same(v, k))
-            nb = check_lines(side, ref, basis, filters, None if tp_off else lines[0], None if sl_off else lines[1], query_slup(request), keep=keep)
+            nb = check_lines(side, ref, basis, filters, None if tp_off else lines[0], None if sl_off else lines[1], query_slup(request))
         except ValueError as exc:
             return web.json_response({"ok": False, "error": "bad_lines", "detail": str(exc)}, status=400)
         except Exception as exc:  # noqa: BLE001 -- 시세·필터를 못 읽으면 아무것도 안 바꾼다
@@ -2743,8 +2739,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 book = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker", {"symbol": symbol}, error_reason="book_ticker_failed")
                 basis, filters = await basis_for(book, exec_asset_of(symbol) or "eth"), await load_filters(binance_session(), symbol)
                 ref = float(book["askPrice" if (plan["positionSide"] == "LONG") == (action == "market") else "bidPrice"]) / basis   # 체결될 쪽 호가(USDT): 시장가 = 반대편 · peg = 내 쪽
-                line_bracket(position_side=plan["positionSide"], ref_level=ref, tp_level=float(br["tp_level"]), sl_level=float(br["sl_level"]), basis=basis, filters=filters,
-                             keep=("tp", "sl") if plan.get("add_lines") else ())   # 2026-11-14 추가 진입 대기 = 이미 걸린 선 -- 거리로 막지 않는다
+                line_bracket(position_side=plan["positionSide"], ref_level=ref, tp_level=float(br["tp_level"]), sl_level=float(br["sl_level"]), basis=basis, filters=filters)
             except ValueError as exc:
                 print(f"wait-action {action}: 거절 lines_off {exc}", flush=True)
                 return web.json_response({"ok": False, "error": "lines_off", "detail": f"지금 호가 기준으로 익절·손절선이 맞지 않아 {'시장가' if action == 'market' else 'peg'}로 넣지 않습니다 — {exc}"}, status=409)

@@ -79,7 +79,8 @@ class ChartLinesTest(unittest.TestCase):
             self.assertEqual((await get("&tp=abc&sl=2480"))[0], 400)
             self.assertEqual((await get("&tp=2500.5&sl=2499.5"))[0], 200)    # 2026-11-11 현재가에 붙인 선(0.02%)도 받는다 -- 최소 거리 없앰
             self.assertEqual((await get("&tp=2550&sl=2300"))[0], 200)        # 2026-11-04 손절 8% -- 규칙 손절폭 5% 한도를 뺐다
-            self.assertEqual((await get("&tp=2550&sl=2100"))[0], 400)        # 지금가에서 16% > 15% (오조작 방지 범위는 익절과 같다)
+            self.assertEqual((await get("&tp=2550&sl=2100"))[0], 200)        # 2026-11-14 사용자 «±15% 제한 자체를 제거» -- 손절 16% 도 받는다
+            self.assertEqual((await get("&tp=3000&sl=2480"))[0], 200)        # 익절 +20% 도
         self._run(fn)
 
     def test_direct_pct_lines(self) -> None:   # 2026-10-30 SLTP = 직접(증거금 %) -- rule 없이 선만, 계좌 2× 규칙 상한 없음
@@ -472,12 +473,12 @@ class LineModifyTest(ChartLinesTest):
         self._run(fn, acct=acct, **({"place_bracket": place} if place else {}))
         return out
 
-    def test_move_sl_with_far_armed_tp(self) -> None:   # 2026-11-14: 안 옮긴 익절이 +17% 여도 손절만 옮기기는 된다 · 새로 옮기는 선은 그대로 15% 검사
+    def test_move_sl_with_far_armed_tp(self) -> None:   # 2026-11-14: 익절이 +17% 여도 손절만 옮기기는 된다(거리 제한 없음 · 방향만)
         o = self._mod("&tp=2930&sl=2450", armed={"tp_level": 2930.0, "tp_price": 2930.6})
         self.assertEqual(o["status"], 200, o["body"])
         self.assertEqual((o["state"]["sl_level"], o["state"]["tp_level"]), (2450.0, 2930.0), o["state"])
-        o = self._mod("&tp=2950&sl=2450", armed={"tp_level": 2930.0, "tp_price": 2930.6})
-        self.assertEqual((o["status"], o["body"].get("error")), (400, "bad_lines"), o["body"])
+        o = self._mod("&tp=2930&sl=1900", armed={"tp_level": 2930.0, "tp_price": 2930.6})   # 손절 −24% 도 받는다(사용자 «제한 자체를 제거»)
+        self.assertEqual((o["status"], o["state"]["sl_level"]), (200, 1900.0), o["body"])
 
     def test_move_tp_replaces_resting_order_and_watches_from_now(self) -> None:
         calls = []
