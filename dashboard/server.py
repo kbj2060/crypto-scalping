@@ -3643,7 +3643,7 @@ def make_app() -> web.Application:
     #   · OKX 계약 OI(달러, 180일) · Bybit 선형 OI(코인 × 종가). OKX 1D 는 UTC+8 경계 → ts+8h 의 UTC 날짜에 붙인다.
     #   받을 때마다 data/live/xcvd/<코인>.json 에 날짜별로 합쳐 쌓는다 -- OKX 처럼 이력이 짧은 원천도 앞으로는 길어진다. Bybit·Coinbase 현물·선물 CVD 는 공개 일봉에 매수/매도 구분이 없어 없다.
     XCVD_CCY = {"eth": "ETH", "btc": "BTC", "xrp": "XRP"}   # 주식(바이낸스 TradFi)은 현물·다른 거래소가 없다 -- 1d 자체 열만
-    XCVD_KEYS = ("bn_spot", "okx_spot", "okx_fut", "okx_oi", "bybit_oi", "px")
+    XCVD_KEYS = ("bn_spot", "okx_spot", "okx_fut", "okx_oi", "bybit_oi", "px", "bn_fund", "okx_fund", "bybit_fund")
     XCVD_VER = 2   # 2 = OI 날짜 정정(아래) -- 옛 파일의 OI 칸은 하루 밀린 날짜라 버리고 다시 받는다
 
     async def _xcvd_refresh(a: str) -> dict:
@@ -3687,6 +3687,24 @@ def make_app() -> web.Application:
                     new["bybit_oi"][d] = float(r["openInterest"]) * px[d]
         except Exception:  # noqa: BLE001
             pass
+        # 2026-11-13 사용자 «펀딩까지 해서 롱 우세·숏 우세를 더 정확히» -- 거래소별 정산 펀딩의 그날 평균(UTC 날짜 · 8시간 1회 정산 기준 값 그대로).
+        #   이력 한도(11-13 서버 실측): 바이낸스 500건(~166일) · OKX 400건(~95일) · Bybit 200건(~66일) -- 날짜별로 쌓아 길어진다.
+        #   ponytail: 세 코인 모두 8시간 정산(서버 실측 간격 7~8h). 4시간 정산 종목을 넣으면 그날 평균 × 2 로 8시간 환산해야 한다.
+        for key, url, prm, path_, tk in (
+                ("bn_fund", "https://fapi.binance.com/fapi/v1/fundingRate", {"symbol": f"{ccy}USDT", "limit": 1000}, (), "fundingTime"),
+                ("okx_fund", "https://www.okx.com/api/v5/public/funding-rate-history", {"instId": f"{ccy}-USDT-SWAP", "limit": 400}, ("data",), "fundingTime"),
+                ("bybit_fund", "https://api.bybit.com/v5/market/funding/history", {"category": "linear", "symbol": f"{ccy}USDT", "limit": 200},
+                 ("result", "list"), "fundingRateTimestamp")):
+            try:
+                rows = await fetch_binance_json(url, prm) or []
+                for k_ in path_:
+                    rows = (rows or {}).get(k_) or []
+                acc: dict[str, list[float]] = {}
+                for r in rows:
+                    acc.setdefault(day(int(r[tk])), []).append(float(r["fundingRate"]))
+                new[key] = {d: sum(v) / len(v) for d, v in acc.items()}
+            except Exception:  # noqa: BLE001
+                pass
         out = {k: {**cur.get(k, {}), **new[k]} for k in XCVD_KEYS}
         out["v"] = XCVD_VER
         if not any(new[k] for k in XCVD_KEYS):   # 검증 11-13: 전부 실패를 1시간 «정상»으로 캐시했다 -- 던지면 swr 이 옛 응답을 내주고 곧 다시 시도한다

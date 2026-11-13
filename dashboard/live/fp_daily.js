@@ -31,7 +31,8 @@
   var REFRESH_MS = 60000;
   // 2026-11-13 사용자 «1d 차트에 킹피셔처럼 현물/선물 CVD·OI 를 거래소별로»(시안 B) + «누적 레인은 제거»: 레인 = CVD 거래소별(5칸) · OI 거래소별(3칸) · 델타.
   //   거래대금·OI 막대·청산·추정 청산 레인은 화면에서 뺐다(값은 호버 툴팁에 그대로). 세 번째 칸 = 높이 배수.
-  var LANES = [["xcvd", "CVD · 거래소별", 5], ["xoi", "OI · 거래소별", 3], ["delta", "델타"]];
+  //   2026-11-13 사용자 «펀딩까지 해서 롱 우세·숏 우세를 더 정확히» → 펀딩 거래소별(2칸) 추가.
+  var LANES = [["xcvd", "CVD · 거래소별", 5], ["xoi", "OI · 거래소별", 3], ["xfund", "펀딩 · 거래소별", 2], ["delta", "델타"]];
   // 2026-10-20 사용자 «4h 버튼 = 1주일을 4시간봉 풋프린트로» → «1d 에서 데이터 양만 4h 로»: 같은 그림·레인·청산 히트맵을 봉 길이만 바꿔 쓴다
   //   (서버 /api/footprint-4h · 지난 7일 + 형성 중 · OI = 칸 마지막 값 · 청산 = 칸 합 · 히트맵 = 칸 마감 시점). 시각 = 칸 시작(UTC 00·04·…시 = KST 09·13·…시).
   var PERIODS = {
@@ -344,7 +345,7 @@
     g.restore();
     S.after.forEach(function (f) { f(); });
     drawProfile(g, C, G, a, b, row, yOf);   // 플롯 잘라내기(G.L ~ G.L+plotW) 밖 칸이라 restore 뒤에
-    drawLiqSummary(g, C, G);
+    drawLiqSummary(g, C, G, a, b);
     var last = D.c[S.n - 1], lastY = last >= lo && last <= hi ? yOf(last) : -99;
     g.font = "600 12px " + C.sans; g.textAlign = "left"; g.textBaseline = "middle";
     for (p = Math.ceil(lo / step) * step; p <= hi; p += step) if (Math.abs(yOf(p) - lastY) > 14) halo(g, C, px(p), G.L + G.plotW + G.PW + 6, yOf(p), C.muted);
@@ -371,7 +372,7 @@
   }
   function ppCalc(row) {
     var J = S.PP, W = J && J.win && J.win["30"]; if (!W || !W.long || !W.short) return null;
-    var P = J.price, bw = J.bw, out = { P: P, liqL: new Map(), liqS: new Map(), lDn: 0, liqDn: 0, liqUp: 0, avgL: W.long.avg, tot: W.tot, oi: J.oi, row: row };
+    var P = J.price, bw = J.bw, out = { P: P, liqL: new Map(), liqS: new Map(), lDn: 0, liqDn: 0, liqUp: 0, avgL: W.long.avg, tot: W.tot, oi: J.oi, row: row, lT: W.long.tot, sT: W.short.tot };
     var add = function (m, price, q) { var k = Math.floor(price / row + 1e-9); m.set(k, (m.get(k) || 0) + q); };
     [["long", true], ["short", false]].forEach(function (sd) {
       var D_ = W[sd[0]], isL = sd[1];
@@ -410,9 +411,54 @@
     });
     g.textAlign = "left"; g.textBaseline = "top";
   }
-  function drawLiqSummary(g, C, G) {   // 왼쪽 위 상자 -- 단위 맞춘 숫자(수량 · 달러 · %)
+  // 2026-11-13 «롱·숏 우세» -- 근거 셋이 각자 롱/숏/중립을 낸다(합치지 않고 셋 다 보인다).
+  //   선물은 롱 계약 수 = 숏 계약 수라 «우세» = 누가 더 급하게 열었고(사분면·포지션 모델) 누가 웃돈을 내나(펀딩).
+  //   ① 펀딩: 최근 3일 거래소 평균 vs 기본 0.01%/8h -- 세 거래소 모두 «웃돈 + clamp(0.01% − 웃돈, ±0.05%)» 식이라 0.01% = 선물이 현물 근처,
+  //      아래 = 선물 할인(숏이 급함) · 위 = 선물 웃돈(롱이 급함). 문턱 ±0.001%p. 2026 은 대부분 아래(ETH 바이낸스 중앙 0.0038%) -- 분위로 «평소 대비»를 같이 적는다.
+  //   ② 가격×OI 사분면(보이는 봉, 바이낸스 선물 · 코인 수량): 그날 OI 변화 부호 × 그날 델타 부호 → 새 롱 · 새 숏 · 숏 커버 · 롱 정리.
+  //      롱 순증 = 새 롱 − 롱 정리 · 숏 순증 = 새 숏 − 숏 커버 · 차이가 네 칸 합의 10% 미만이면 중립. ponytail: 일 단위라 그날 안 섞임은 못 본다.
+  //   ③ 30일 포지션 모델: 남은 롱 몫 > 55% 롱 · < 45% 숏.
+  var F_BASE = 1e-4;
+  function fmtF(v) { return (v >= 0 ? "+" : "−") + Math.abs(v * 100).toFixed(4) + "%"; }
+  function fundDay(d) {   // 그날 거래소 평균(있는 것만)
+    var X = S.X || {}, t = 0, n = 0;
+    ["bn_fund", "okx_fund", "bybit_fund"].forEach(function (k) { var v = X[k] && X[k][d]; if (v != null) { t += v; n++; } });
+    return n ? t / n : null;
+  }
+  function lsVerdict(R, a, b) {
+    var D = S.D, X = S.X || {}, ev = [];
+    var f3 = [], i, j;
+    for (i = S.n - 1; i >= 0 && f3.length < 3; i--) { var fd = fundDay(D.d[i]); if (fd != null) f3.push(fd); }
+    if (f3.length) {
+      var fm = f3.reduce(function (t, v) { return t + v; }, 0) / f3.length, hist = [];
+      Object.keys(X.bn_fund || {}).forEach(function (d) { var v = fundDay(d); if (v != null) hist.push(v); });
+      var pr = hist.length >= 30 ? hist.filter(function (v) { return v <= fm; }).length / hist.length : null;
+      ev.push({ v: fm > F_BASE + 1e-5 ? 1 : fm < F_BASE - 1e-5 ? -1 : 0, s: "펀딩 3일 " + fmtF(fm),
+                l: "펀딩 3일 " + fmtF(fm) + "/8h(" + (fm < F_BASE - 1e-5 ? "0.01% 아래 = 선물 할인" : fm > F_BASE + 1e-5 ? "0.01% 위 = 선물 웃돈" : "0.01% = 현물 근처") +
+                   (pr != null ? " · " + hist.length + "일 중 " + Math.round(pr * 100) + "분위" : "") + ")" });
+    }
+    var nl = 0, ns = 0, cv = 0, cl = 0;
+    for (j = Math.max(a, 1); j <= b; j++) {
+      if (D.oi[j] == null || D.oi[j - 1] == null) continue;
+      var dOI = D.oi[j] - D.oi[j - 1], dl = D.bq[j] - D.sq[j];
+      if (dOI > 0) { if (dl > 0) nl += dOI; else ns += dOI; } else if (dl > 0) cv -= dOI; else cl -= dOI;
+    }
+    var gross = nl + ns + cv + cl, netL = nl - cl, netS = ns - cv, c = A().coin, sq_ = function (v) { return (v >= 0 ? "+" : "−") + qty(Math.abs(v)); };
+    if (gross > 0) ev.push({ v: Math.abs(netL - netS) < 0.1 * gross ? 0 : netL > netS ? 1 : -1, s: "사분면",
+      l: "사분면 " + (b - Math.max(a, 1) + 1) + "봉(바이낸스 선물) 롱 순증 " + sq_(netL) + " · 숏 순증 " + sq_(netS) + " " + c });
+    if (R.lT + R.sT > 0) { var sh = R.lT / (R.lT + R.sT);
+      ev.push({ v: sh > 0.55 ? 1 : sh < 0.45 ? -1 : 0, s: "계약 롱 " + Math.round(sh * 100) + "%", l: "30일 남은 계약 롱 " + Math.round(sh * 100) + "%" }); }
+    var up = ev.filter(function (e) { return e.v > 0; }).length, dn = ev.filter(function (e) { return e.v < 0; }).length, ne = ev.length - up - dn;
+    var word = up && dn ? "엇갈림" : up >= 2 ? "롱 우세" : dn >= 2 ? "숏 우세" : up ? "롱 쪽 약하게" : dn ? "숏 쪽 약하게" : "중립";
+    return { word: word, side: up && dn ? 0 : up - dn, cnt: "근거 " + ev.length + "개 중 롱 " + up + " · 숏 " + dn + " · 중립 " + ne, ev: ev };
+  }
+  function drawLiqSummary(g, C, G, a, b) {   // 왼쪽 위 상자 -- 단위 맞춘 숫자(수량 · 달러 · %)
     var R = S.ppR; if (!R) return;
+    var V = lsVerdict(R, a, b), vc = V.side > 0 ? C.good : V.side < 0 ? C.bad : C.text, tag = function (e) { return (e.v > 0 ? "롱" : e.v < 0 ? "숏" : "중립"); };
     var P = R.P, c = A().coin, tL = ppTop(R.liqL, R.row, P), tS = ppTop(R.liqS, R.row, P), nar = G.narrow;
+    var vLines = nar ? [["롱·숏 " + V.word + " (" + V.cnt.replace("근거 ", "").replace("개 중", "중") + ")", vc], [V.ev.map(function (e) { return e.s + " " + tag(e); }).join(" · "), C.text]]
+      : [["롱·숏 → " + V.word + " (" + V.cnt + ")", vc],
+         [V.ev.map(function (e) { return e.l + " " + tag(e); }).join(" · "), C.text]];
     var lines = nar ? [["아래 롱 " + qty(R.lDn) + " " + c + " · 평균 진입 " + px(R.avgL) + " " + pct(P / R.avgL - 1), C.text],
                        ["롱 청산 대기 " + usd(R.liqDn * P) + (tL ? " · 최대 " + px(tL.px) + " " + tL.d.toFixed(1) + "%" : ""), C.bad],
                        ["숏 청산 대기 " + usd(R.liqUp * P) + (tS ? " · 최대 " + px(tS.px) + " +" + tS.d.toFixed(1) + "%" : ""), C.good]]
@@ -420,6 +466,7 @@
          ["지금가 아래 롱 " + qty(R.lDn) + " " + c + " · " + usd(R.lDn * P) + " · 롱 평균 진입 " + px(R.avgL) + " (" + pct(P / R.avgL - 1) + ")", C.text],
          ["아래 롱 청산 대기 " + qty(R.liqDn) + " " + c + " · " + usd(R.liqDn * P) + (tL ? " · 최대 칸 " + px(tL.px) + " (" + tL.d.toFixed(1) + "%) " + usd(tL.q * P) : ""), C.bad],
          ["위 숏 청산 대기 " + qty(R.liqUp) + " " + c + " · " + usd(R.liqUp * P) + (tS ? " · 최대 칸 " + px(tS.px) + " (+" + tS.d.toFixed(1) + "%) " + usd(tS.q * P) : ""), C.good]];
+    lines = vLines.concat(lines);
     g.font = "700 " + (nar ? 10 : 12) + "px " + C.sans; g.textAlign = "left"; g.textBaseline = "top";
     var lh = nar ? 13 : 16, bw_ = Math.min(G.plotW - 16, Math.max.apply(null, lines.map(function (t) { return g.measureText(t[0]).width; })) + 16), bx = G.L + 8, by = G.top + 8;
     g.fillStyle = C.bg; g.globalAlpha = 0.86; g.fillRect(bx, by, bw_, lh * lines.length + 8); g.globalAlpha = 1;
@@ -539,7 +586,10 @@
       { n: "OKX 현물", s: "OKX 현", col: XC.okx, dash: true, kind: "cvd", grp: "spot", v: mk(m("okx_spot")) },
       { n: "바이낸스", s: "BN", col: XC.bn, kind: "oi", v: mk(function (i) { return D.oi[i] != null ? D.oi[i] * D.c[i] : null; }) },
       { n: "OKX", s: "OKX", col: XC.okx, kind: "oi", v: mk(m("okx_oi")) },
-      { n: "Bybit", s: "BYB", col: XC.bybit, kind: "oi", v: mk(m("bybit_oi")) }
+      { n: "Bybit", s: "BYB", col: XC.bybit, kind: "oi", v: mk(m("bybit_oi")) },
+      { n: "바이낸스", s: "BN", col: XC.bn, kind: "fund", v: mk(m("bn_fund")) },
+      { n: "OKX", s: "OKX", col: XC.okx, kind: "fund", v: mk(m("okx_fund")) },
+      { n: "Bybit", s: "BYB", col: XC.bybit, kind: "fund", v: mk(m("bybit_fund")) }
     ];
   }
   function xCum(se) {   // CVD = 보이는 첫 값부터 누적 · OI = 보이는 첫 값 대비 변화(달러)
@@ -552,10 +602,10 @@
   }
   function drawX(g, C, G, a, b, xOf, k, name, y, h) {
     var all = xSeries(a, b), pick = all.filter(function (se) {
-      return se.kind === (k === "xoi" ? "oi" : "cvd");
+      return se.kind === (k === "xoi" ? "oi" : k === "xfund" ? "fund" : "cvd");
     });
-    var lines = pick.map(function (se) { return { se: se, c: xCum(se) }; }).filter(function (l) { return l.c.some(function (v) { return v != null; }); });
-    if (k !== "xoi") {   // 합 = 그날 모든 원천이 있는 날만(원천마다 시작일이 달라 섞으면 계단이 생긴다)
+    var lines = pick.map(function (se) { return { se: se, c: se.kind === "fund" ? se.v : xCum(se) }; }).filter(function (l) { return l.c.some(function (v) { return v != null; }); });
+    if (k === "xcvd") {   // 합 = 그날 모든 원천이 있는 날만(원천마다 시작일이 달라 섞으면 계단이 생긴다)
       [["fut", "선물 합", C.text], ["spot", "현물 합", css("--spot")]].forEach(function (gp) {
         var mem = pick.filter(function (se) { return se.grp === gp[0]; });
         if (mem.length < 2) return;
@@ -568,14 +618,17 @@
     }
     var top = y + 18, hh = h - 22, lo = 0, hi = 0;
     lines.forEach(function (l) { l.c.forEach(function (v) { if (v != null) { lo = Math.min(lo, v); hi = Math.max(hi, v); } }); });
+    if (k === "xfund") hi = Math.max(hi, F_BASE * 1.2);   // 기본 0.01% 선이 늘 보이게
     g.font = "700 12px " + C.sans; g.textAlign = "left"; g.textBaseline = "top";
     halo(g, C, name, G.L + 4, y + 4, C.muted);
     var tw = g.measureText(name).width + 8;
-    halo(g, C, k === "xoi" ? (G.narrow ? "첫 봉 대비" : "보이는 첫 봉 대비 변화(달러) · 노랑 바이낸스 · 분홍 OKX · 파랑 Bybit")
+    halo(g, C, k === "xfund" ? (G.narrow ? "그날 평균 · 점선 0.01%" : "그날 정산 평균(8시간마다 · %) · 점선 = 기본 0.01%(선물 ≈ 현물) · 아래 = 선물 할인(숏이 급함) · 위 = 선물 웃돈(롱이 급함)")
+      : k === "xoi" ? (G.narrow ? "첫 봉 대비" : "보이는 첫 봉 대비 변화(달러) · 노랑 바이낸스 · 분홍 OKX · 파랑 Bybit")
       : (G.narrow ? (b - a + 1) + "봉 누적" : "보이는 " + (b - a + 1) + "봉 누적 · 실선 선물 · 점선 현물 · 굵은 선 = 합(모든 원천이 있는 날)") + (S.X === undefined && S.period === "1d" ? " · 불러오는 중" : ""), G.L + 4 + tw, y + 4, C.muted);
     if (!(hi > lo)) return;
     var Y = function (v) { return top + hh - (v - lo) / (hi - lo) * hh; };
     g.strokeStyle = C.line; g.setLineDash([2, 3]); g.lineWidth = 1; g.beginPath(); g.moveTo(G.L, Math.round(Y(0)) + 0.5); g.lineTo(G.L + G.plotW, Math.round(Y(0)) + 0.5); g.stroke(); g.setLineDash([]);
+    if (k === "xfund") { g.strokeStyle = C.muted; g.setLineDash([5, 4]); g.beginPath(); g.moveTo(G.L, Math.round(Y(F_BASE)) + 0.5); g.lineTo(G.L + G.plotW, Math.round(Y(F_BASE)) + 0.5); g.stroke(); g.setLineDash([]); }
     var tags = [];
     lines.forEach(function (l) {
       g.strokeStyle = l.se.col; g.lineWidth = l.se.sum ? 2.6 : 1.6; g.globalAlpha = l.se.sum ? 1 : 0.9; g.setLineDash(l.se.dash ? [5, 3] : []);
@@ -596,7 +649,7 @@
       g.fillStyle = t.se.col; g.globalAlpha = t.se.dash ? 0.55 : 0.92; g.fillRect(x0, t.ty, w, th); g.globalAlpha = 1;
       g.fillStyle = "#111318"; g.textAlign = "left";
       if (!G.narrow) g.fillText(t.se.n, x0 + 3, t.ty + th / 2 + 0.5);   // 휴대폰(칸 58px)은 이름과 값이 겹쳤다 -- 값만(색이 거래소)
-      g.textAlign = "right"; g.fillText(sgnUsd(t.v), x0 + w - 3, t.ty + th / 2 + 0.5);
+      g.textAlign = "right"; g.fillText(k === "xfund" ? (G.narrow ? fmtF(t.v).replace("%", "") : fmtF(t.v)) : sgnUsd(t.v), x0 + w - 3, t.ty + th / 2 + 0.5);
     });
     g.textAlign = "left"; g.textBaseline = "top";
     });
@@ -889,7 +942,8 @@
       }
     } else {
       html = "<b>" + lab(D.d[i]) + "</b><br>델타 " + laneText("delta", i) + " · 거래대금 " + laneText("turn", i) +
-             "<br>OI " + laneText("oi", i) + "<br>청산 " + laneText("liq", i) + "<br>추정 청산(" + (S.period === "4h" ? "그 칸" : "그날") + " 마감 7일 지도) " + laneText("lmap", i);
+             "<br>OI " + laneText("oi", i) + (S.X && S.X.bn_fund ? "<br>펀딩(그날 평균/8h) " + [["바이낸스", "bn_fund"], ["OKX", "okx_fund"], ["Bybit", "bybit_fund"]].map(function (z) {
+               var v = S.X[z[1]] && S.X[z[1]][D.d[i]]; return z[0] + " " + (v == null ? "-" : fmtF(v)); }).join(" · ") : "") + "<br>청산 " + laneText("liq", i) + "<br>추정 청산(" + (S.period === "4h" ? "그 칸" : "그날") + " 마감 7일 지도) " + laneText("lmap", i);
     }
     if (html) tipShow(e.pageX, e.pageY, html); else tipHide();
     redraw();
