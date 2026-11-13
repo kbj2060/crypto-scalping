@@ -168,46 +168,67 @@
     };
     return svg(w, h, s, "일봉별 남은 청산 매물 히트맵");
   };
-  // 2026-11-13 펜 메모 «가격 사다리를 세로가 아니라 가로 프로파일로 · 기간도 30일보다 더 길게»: 가격 = 가로(왼쪽 아래 → 오른쪽 위) · 원천마다 한 줄(위 → 아래 긴 기간부터)
-  //   · 막대 = 그 0.25% 칸 금액(위로 · 레버리지 색 쌓기) · 지도 90일 추가(서버 1시간봉 2,160개 = 바이낸스 한 번 1,500 한도라 두 번 받는다).
+  // 2026-11-13 펜 메모 «가격 사다리를 코인글래스 청산맵처럼 하나로 크게 · 지평 버튼으로 따로»: 원천 하나만 크게(머리 버튼 = 지도 90·30·7·1일 · 실측 7일 · HL 고래).
+  //   가격 = 가로(±6%, 0.25% 칸) · 막대 = 그 칸 금액(레버리지 색 쌓기, 왼쪽 축) · 선 = 지금가에서 멀어지며 쌓은 누적(왼쪽 빨강 = 롱 청산 · 오른쪽 초록 = 숏 청산, 오른쪽 축).
+  //   실측은 롱(빨강)·숏(초록) 쌓기 · HL 고래는 청산가마다 막대 하나. 누적 선은 지도만(실측은 이미 터진 양이라 «앞으로 쌓인 양»이 아니다).
+  var LAD = ["90", "30", "7", "1", "real", "hl"], LADLAB = { "90": "90일", "30": "30일", "7": "7일", "1": "1일", real: "실측 7일", hl: "HL 고래" };
+  try { var sl = localStorage.getItem("liqLadWin"); if (LAD.indexOf(sl) >= 0) S.lad = sl; } catch (e) { /* 저장 못 해도 동작 */ }
+  if (!S.lad) S.lad = "7";
   CH.ladder = function (el, w, h) {
-    var P = price(), M = { "90": mapOf(90), "30": mapOf(30), "7": mapOf(7), "1": mapOf(1) }, real = realRows(P), m = ctx(), hl = m && m.hl_liq, R_ = LADDER_R;
-    if (!(P > 0) || !(M["1"] || M["7"] || M["30"] || M["90"])) return null;
-    var rows = ["90", "30", "7", "1", "real", "hl"], LAB = { "90": "지도 90일", "30": "지도 30일", "7": "지도 7일", "1": "지도 1일", real: "실측 7일", hl: "HL 고래" };
-    var narrow = w < 420, L = narrow ? 52 : 86, R = 8, Tp = 2, Bt = 18, gap = 6, rh = (h - Tp - Bt - gap * (rows.length - 1)) / rows.length;   // 검증 11-13: 넓은 화면 L 64 → 86(«칸 최대 $12.3M» ≈75px 이 막대에 겹쳤다)
-    var X = function (d) { return L + (w - L - R) * (d + R_) / (2 * R_); }, bw = Math.max((w - L - R) / (2 * R_ / 0.25) - 0.8, 1), s = "", LEV = ["--lev10", "--lev25", "--lev50", "--lev100"];   // 풋프린트 «청산» 기둥과 같은 레버리지 색
-    var sum = function (r) { return r[0] + r[1] + r[2] + r[3]; }, inR = function (g) { return Math.abs(g * 0.25) <= R_; };
-    for (var d = -R_; d <= R_; d += narrow ? 2 : 1) s += line("lq-gl", X(d), X(d), Tp, h - Bt) + (d ? txt("lq-ax", X(d), h - 4, px(P * (1 + d / 100)), "middle") : "");
-    rows.forEach(function (c, ri) {
-      var y0 = Tp + ri * (rh + gap), base = y0 + rh - 1, top = y0 + 14, hh = Math.max(0, base - top), mx = 1, note = "";
-      s += line("lq-z", L, w - R, base, base) + txt("lq-ax lq-axh", 2, y0 + 11, LAB[c]);
-      if (c === "real") {
-        var ks = Object.keys(real).filter(inR); mx = Math.max.apply(null, ks.map(function (g) { return real[g][0] + real[g][1]; }).concat([1]));
-        ks.forEach(function (g) { var r = real[g], x = X(g * 0.25) - bw / 2, hl_ = hh * r[0] / mx, hs = hh * r[1] / mx; if (r[0]) s += '<rect class="lq-lg" x="' + x.toFixed(1) + '" y="' + (base - hl_).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + hl_.toFixed(1) + '"/>'; if (r[1]) s += '<rect class="lq-sh" x="' + x.toFixed(1) + '" y="' + (base - hl_ - hs).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + hs.toFixed(1) + '"/>'; });
-        note = "최대 " + usd(mx);
-      } else if (c === "hl") {
-        var all = hl ? (hl.below || []).map(function (l) { return [l, "--bad"]; }).concat((hl.above || []).map(function (l) { return [l, "--good"]; })) : [];
-        mx = Math.max.apply(null, all.map(function (q) { return q[0].usd; }).concat([1]));
-        all.forEach(function (q) { var dd = (q[0].px / P - 1) * 100; if (Math.abs(dd) > R_) return; var x = X(dd), hv = Math.max(hh * q[0].usd / mx, 2); s += '<line x1="' + x + '" x2="' + x + '" y1="' + base + '" y2="' + (base - hv) + '" stroke="var(' + q[1] + ')" stroke-width="3"/>'; });
-        note = all.length ? "최대 " + usd(mx) : "없음";
-      } else {
-        var mp = M[c]; if (!mp) { s += txt("lq-ax", L + 6, base - 4, "받는 중"); return; }
-        var ks2 = Object.keys(mp.rows).filter(inR); mx = Math.max.apply(null, ks2.map(function (g) { return sum(mp.rows[g]); }).concat([1]));
-        ks2.forEach(function (g) { var yy = base, x = (X(g * 0.25) - bw / 2).toFixed(1); mp.rows[g].forEach(function (v, ti) { if (!v) return; var hv = hh * v / mx; yy -= hv; s += '<rect fill="var(' + LEV[ti] + ')" x="' + x + '" y="' + yy.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + hv.toFixed(1) + '"/>'; }); });
-        note = "칸 최대 " + usd(mx);
-      }
-      if (!narrow) s += txt("lq-ax", 2, y0 + 24, note);
+    var P = price(), k = S.lad, R_ = LADDER_R, narrow = w < 420;
+    if (!(P > 0)) return null;
+    var L = narrow ? 44 : 62, R = narrow ? 44 : 62, Tp = 26, Bt = 22, ch = h - Tp - Bt, xr = w - R;
+    var X = function (d) { return L + (xr - L) * (d + R_) / (2 * R_); }, bw = Math.max((xr - L) / (2 * R_ / 0.25) - 1, 1), LEV = ["--lev10", "--lev25", "--lev50", "--lev100"];
+    var inR = function (g) { return Math.abs(g * 0.25) <= R_; }, bars = [], mp = null, s = "", head = "";
+    if (k === "real") {
+      var real = realRows(P);
+      Object.keys(real).filter(inR).forEach(function (g) { var r = real[g]; bars.push({ g: +g, d: g * 0.25, parts: [[r[0], "var(--bad)"], [r[1], "var(--good)"]], tot: r[0] + r[1] }); });
+    } else if (k === "hl") {
+      var m = ctx(), hl = m && m.hl_liq;
+      if (hl) (hl.below || []).map(function (l) { return [l, "var(--bad)"]; }).concat((hl.above || []).map(function (l) { return [l, "var(--good)"]; })).forEach(function (q) {
+        var dd = (q[0].px / P - 1) * 100; if (Math.abs(dd) <= R_) bars.push({ g: Math.round(dd / 0.25), d: dd, parts: [[q[0].usd, q[1]]], tot: q[0].usd, px: q[0].px });
+      });
+    } else {
+      mp = mapOf(Number(k)); if (!mp) return null;
+      Object.keys(mp.rows).filter(inR).forEach(function (g) { var r = mp.rows[g]; bars.push({ g: +g, d: g * 0.25, parts: r.map(function (v, ti) { return [v, "var(" + LEV[ti] + ")"]; }), tot: r[0] + r[1] + r[2] + r[3] }); });
+    }
+    var mx = Math.max.apply(null, bars.map(function (b) { return b.tot; }).concat([1])) * 1.08, Y = function (v) { return Tp + ch * (1 - v / mx); };
+    ticks(mx, 4).forEach(function (v) { s += line("lq-gl", L, xr, Y(v), Y(v)) + txt("lq-ax", L - 6, Y(v) + 3, usd(v), "end"); });
+    for (var d = -R_; d <= R_; d += narrow ? 2 : 1) s += (d ? line("lq-gl", X(d), X(d), Tp, Tp + ch) + txt("lq-ax", X(d), h - 6, px(P * (1 + d / 100)), "middle") : "");
+    s += line("lq-z", L, xr, Tp + ch, Tp + ch);
+    bars.forEach(function (b) {
+      var x = X(b.d) - (k === "hl" ? 1.5 : bw / 2), yy = Tp + ch, ww = k === "hl" ? 3 : bw;
+      b.parts.forEach(function (pp) { if (!(pp[0] > 0)) return; var hv = ch * pp[0] / mx; yy -= hv; s += '<rect fill="' + pp[1] + '" x="' + x.toFixed(1) + '" y="' + yy.toFixed(1) + '" width="' + ww.toFixed(1) + '" height="' + Math.max(hv, k === "hl" ? 2 : 0).toFixed(1) + '"/>'; });
     });
+    var cumL = 0, cumS = 0;
+    if (mp) {   // 누적 = 지금가에서 그 가격까지(0.1% 칸 누적 배열 mapOf.dn/up) · 오른쪽 축
+      cumL = cumAt(mp, -R_); cumS = cumAt(mp, R_);
+      var cmx = Math.max(cumL, cumS, 1) * 1.08, YC = function (v) { return Tp + ch * (1 - v / cmx); }, st = narrow ? 0.2 : 0.1;
+      [[-1, cumL, "var(--bad)"], [1, cumS, "var(--good)"]].forEach(function (z) {
+        var pts = []; for (var q = 0; q <= R_ + 1e-9; q += st) pts.push([X(z[0] * q), YC(cumAt(mp, z[0] * q))]);
+        s += '<path d="' + path(pts) + "L" + pts[pts.length - 1][0].toFixed(1) + " " + (Tp + ch) + "L" + X(0).toFixed(1) + " " + (Tp + ch) + 'Z" fill="' + z[2] + '" opacity=".10"/>'
+          + '<path d="' + path(pts) + '" fill="none" stroke="' + z[2] + '" stroke-width="2"/>';
+      });
+      ticks(cmx, 4).forEach(function (v) { s += txt("lq-ax", xr + 6, YC(v) + 3, usd(v)); });
+      head = narrow ? "누적 롱 " + usd(cumL) + " · 숏 " + usd(cumS) : "누적 롱 청산(아래 " + R_ + "%) " + usd(cumL) + " · 숏 청산(위 " + R_ + "%) " + usd(cumS) + (cumL + cumS > 0 ? " · 롱 몫 " + pc(cumL / (cumL + cumS)) : "");
+    } else if (k === "real") {
+      var rl = 0, rs = 0; bars.forEach(function (b) { rl += b.parts[0][0]; rs += b.parts[1][0]; }); head = "7일 실제 청산 ±" + R_ + "% · 롱 " + usd(rl) + " · 숏 " + usd(rs);
+    } else head = bars.length ? "HL 고래 청산가 " + bars.length + "개 · 최대 " + usd(mx / 1.08) : "HL 고래 청산가가 ±" + R_ + "% 안에 없음";
+    s += txt("lq-ax lq-axh o", L + 6, 14, head) + (mp && !narrow ? txt("lq-ax o", xr, 14, "막대 = 칸(왼쪽 축) · 선 = 누적(오른쪽 축)", "end") : "");
     var pos = typeof snapshotAccountPosition === "function" ? snapshotAccountPosition() : null, liq = pos && Number(pos.liquidation_price);
-    if (liq > 0 && Math.abs(liq / P - 1) * 100 <= R_) { var xl = X((liq / P - 1) * 100); s += '<line x1="' + xl + '" x2="' + xl + '" y1="' + Tp + '" y2="' + (h - Bt) + '" stroke="var(--position)" stroke-width="1.5"/>' + txt("lq-ax t o", xl + 4, Tp + 10, "내 청산가 " + px(liq)); }
+    if (liq > 0 && Math.abs(liq / P - 1) * 100 <= R_) { var xl = X((liq / P - 1) * 100); s += '<line x1="' + xl + '" x2="' + xl + '" y1="' + Tp + '" y2="' + (Tp + ch) + '" stroke="var(--position)" stroke-width="1.5"/>' + txt("lq-ax t o", xl + 4, Tp + 12, "내 청산가 " + px(liq)); }
     var x0 = X(0);
-    s += line("lq-px", x0, x0, Tp, h - Bt) + '<rect x="' + (x0 - 30) + '" y="' + (h - Bt + 1) + '" width="60" height="16" rx="3" fill="var(--accent)"/><text x="' + x0 + '" y="' + (h - Bt + 12.5) + '" text-anchor="middle" class="lq-pxt">' + px(P) + "</text>";
+    s += line("lq-px", x0, x0, Tp, Tp + ch) + '<rect x="' + (x0 - 30) + '" y="' + (h - Bt + 2) + '" width="60" height="16" rx="3" fill="var(--accent)"/><text x="' + x0 + '" y="' + (h - Bt + 13.5) + '" text-anchor="middle" class="lq-pxt">' + px(P) + "</text>";
     el._hit = function (x) {
-      var dd = (x - L) / (w - L - R) * 2 * R_ - R_, g = Math.round(dd / 0.25); if (!g || Math.abs(dd) > R_) return "";
-      var row = function (k) { var r = M[k] && M[k].rows[g]; return r ? usd(sum(r)) : "—"; }, rr = real[g];
-      return px(P * (1 + g * 0.25 / 100)) + " · " + sgn(g * 0.25, 2) + "%<br>지도 90일 " + row("90") + " · 30일 " + row("30") + " · 7일 " + row("7") + " · 1일 " + row("1") + (rr ? "<br>실측 7일 롱 " + usd(rr[0]) + " · 숏 " + usd(rr[1]) : "") + "<br>지도 금액은 OI×2 눈금 · 절대액 아님";
+      var dd = (x - L) / (xr - L) * 2 * R_ - R_; if (Math.abs(dd) > R_) return "";
+      var g = Math.round(dd / 0.25), hd = px(P * (1 + g * 0.25 / 100)) + " · " + sgn(g * 0.25, 2) + "%";
+      if (k === "hl") { var nb = bars.filter(function (b) { return Math.abs(b.d - dd) <= 0.25; }); return nb.length ? hd + "<br>" + nb.map(function (b) { return "청산가 " + px(b.px) + " · " + usd(b.tot); }).join("<br>") : ""; }
+      var b = bars.find(function (q) { return q.g === g; }); if (!g) return "";
+      var t = hd + "<br>" + (b ? (k === "real" ? "롱 " + usd(b.parts[0][0]) + " · 숏 " + usd(b.parts[1][0]) : "칸 " + usd(b.tot) + " (10배 " + usd(b.parts[0][0]) + " · 20~25배 " + usd(b.parts[1][0]) + " · 50배 " + usd(b.parts[2][0]) + " · 75~100배 " + usd(b.parts[3][0]) + ")") : "칸 0");
+      if (mp) t += "<br>지금가에서 여기까지 누적 " + (g < 0 ? "롱 " : "숏 ") + usd(cumAt(mp, g * 0.25)) + "<br>지도 금액은 OI×2 눈금 · 절대액 아님";
+      return t;
     };
-    return svg(w, h, s, "가격 사다리(가로): 지도 90·30·7·1일, 실측 7일, HL 고래 청산가");
+    return svg(w, h, s, "청산맵 " + LADLAB[k] + ": 가격별 청산 금액과 누적");
   };
   // ── 최대 고통(2026-11-11 사용자 «코인글래스 청산 최대 고통 중 청산 탭에 넣을 수 있는 것 모두») ──────────
   // 주기마다 쪽별 ±0.5% 묶음 봉우리 3개 = cron 이 매시 서버 청산맵과 같은 함수로 계산(liq_tab_all.json · 금액이 사다리 지도와 같다).
@@ -402,11 +423,12 @@
     var host = $("lqTab"); if (!host) return;
     var seg = '<div class="lq-seg" role="group" aria-label="남은 매물 입력 기간">' + WINS.map(function (w) { return '<button type="button" data-win="' + w + '" aria-pressed="' + (S.win === w) + '">' + w + "일</button>"; }).join("") + "</div>";
     var segP = '<div class="lq-seg" role="group" aria-label="최대 고통 주기">' + PERS.map(function (k) { return '<button type="button" data-pp="' + k + '" aria-pressed="' + (S.pp === k) + '">' + PLAB[k] + "</button>"; }).join("") + "</div>";
+    var segL = '<div class="lq-seg" role="group" aria-label="청산맵 원천">' + LAD.map(function (k) { return '<button type="button" data-lad="' + k + '" aria-pressed="' + (S.lad === k) + '">' + LADLAB[k] + "</button>"; }).join("") + "</div>";
     var H = function (t, tag, cls, right) { return "<header><h4>" + t + '</h4><span class="lq-tag ' + cls + '">' + tag + "</span>" + (right || "") + "</header>"; };
     host.innerHTML = '<div class="lq-now" id="lqNow"></div><div class="lq-cols">'
       + '<div class="lq-row lq-top">'
       + '<section class="lq-p lq-f-rem">' + H("남은 매물 일봉별", "파생·서술", "der", seg) + '<div class="lq-b"><div id="lqRemKpi"></div>' + d_("remain", 300, "남은 매물 계산 전입니다") + '<div class="lq-leg" id="lqRemLeg"></div></div></section>'
-      + '<section class="lq-p lq-f-lad">' + H("가격 사다리 ±" + LADDER_R + "%", "추정", "est", "<small>칸 0.25%</small>") + '<div class="lq-b">' + d_("ladder", 560, "지도를 받는 중입니다") + '<div class="lq-leg" id="lqLadLeg"></div></div></section>'
+      + '<section class="lq-p lq-f-lad">' + H("청산맵 ±" + LADDER_R + "%", "추정", "est", segL) + '<div class="lq-b">' + d_("ladder", 560, "지도를 받는 중입니다") + '<div class="lq-leg" id="lqLadLeg"></div></div></section>'
       + "</div>"
       + '<div class="lq-row lq-bot">'   // 2026-11-11 사용자: 24시간 5분 막대·자기 흥분 지수 추이를 빼고 그 자리에 최대 고통·코인별을 크게
       + '<section class="lq-p lq-f-tod">' + H("오늘 누적", "실측", "real", '<small id="lqTodLab"></small>') + '<div class="lq-b">' + d_("today", 160, "오늘 기록이 아직 없습니다") + "</div></section>"
@@ -426,7 +448,10 @@
     var age = S.data ? (Date.now() - S.data.generated_ms) / 3600000 : null;
     fill("lqRemLeg", "<span>칸 = 그날 마감 기준 지난 " + S.win + "일 입력 중 아직 안 닿은 청산가 · 진할수록 많음</span><span>오른쪽 = 오늘 남은 양</span><span>아래 띠 = 그 날 만든 양 중 지금까지 남은 비율</span>" + (age != null && age > 3 ? '<span class="lq-warn">' + age.toFixed(0) + "시간 전 계산</span>" : ""));
     var pos = typeof snapshotAccountPosition === "function" ? snapshotAccountPosition() : null, liq = pos && Number(pos.liquidation_price);
-    fill("lqLadLeg", "<span><i class=\"lq-sw\" style=\"background:var(--lev10)\"></i>10배</span><span><i class=\"lq-sw\" style=\"background:var(--lev25)\"></i>20~25배</span><span><i class=\"lq-sw\" style=\"background:var(--lev50)\"></i>50배</span><span><i class=\"lq-sw\" style=\"background:var(--lev100)\"></i>75~100배</span><span>지도 눈금 = OI×2 · 절대액 아님</span><span>실측 = 바이낸스 7일 체결 위치</span>" + (liq > 0 && P > 0 ? "<span>내 청산가 " + px(liq) + "(" + sgn((liq / P - 1) * 100, 1) + "%)</span>" : ""));
+    var sw_ = function (c, t) { return '<span><i class="lq-sw" style="background:var(' + c + ')"></i>' + t + "</span>"; };
+    fill("lqLadLeg", (S.lad === "real" ? sw_("--bad", "롱 청산") + sw_("--good", "숏 청산") + "<span>바이낸스 7일 실제 체결 위치</span>"
+      : S.lad === "hl" ? sw_("--bad", "아래 = 롱") + sw_("--good", "위 = 숏") + "<span>하이퍼리퀴드 고래 포지션 청산가</span>"
+      : sw_("--lev10", "10배") + sw_("--lev25", "20~25배") + sw_("--lev50", "50배") + sw_("--lev100", "75~100배") + "<span>선 = 지금가부터 누적(빨강 롱 · 초록 숏)</span><span>지도 눈금 = OI×2 · 절대액 아님</span>") + (liq > 0 && P > 0 ? "<span>내 청산가 " + px(liq) + "(" + sgn((liq / P - 1) * 100, 1) + "%)</span>" : ""));
     var E = allOf(asset()), pAge = E ? (Date.now() - E.generated_ms) / 60000 : null;
     fill("lqPainKpi", painKpi());
     fill("lqPainLeg", E ? "<span>띠 = 지도 " + PLAB[S.pp] + "(사다리와 같은 모델)의 ±0.5% 묶음 최대</span><span>도달 = 하루 σ " + pc(E.sigma_d, 1) + " 무작위 보행</span><span>오른쪽 7줄 = 주기별 · 굵기 = 금액</span><span>" + (E.unit === "share" ? "금액 = 주기 합 대비 몫" : "금액 = OI×2 눈금") + " · 서술용</span>" + (pAge > 90 ? '<span class="lq-warn">' + (pAge / 60).toFixed(0) + "시간 전 계산</span>" : "") : "");
@@ -467,10 +492,10 @@
   function init() {
     var host = $("lqTab"); if (!host) return;
     host.addEventListener("click", function (e) {
-      var b = e.target.closest("[data-win],[data-pp]"); if (!b) return;
-      var key = b.dataset.pp ? "pp" : "win";
-      if (key === "pp") S.pp = b.dataset.pp; else { S.win = Number(b.dataset.win); S.heatKey = ""; }
-      try { localStorage.setItem(key === "pp" ? "liqPainPer" : "liqTabWin", String(S[key])); } catch (x) { /* 저장 못 해도 동작 */ }
+      var b = e.target.closest("[data-win],[data-pp],[data-lad]"); if (!b) return;
+      var key = b.dataset.pp ? "pp" : b.dataset.lad ? "lad" : "win";
+      if (key === "pp") S.pp = b.dataset.pp; else if (key === "lad") S.lad = b.dataset.lad; else { S.win = Number(b.dataset.win); S.heatKey = ""; }
+      try { localStorage.setItem(key === "pp" ? "liqPainPer" : key === "lad" ? "liqLadWin" : "liqTabWin", String(S[key])); } catch (x) { /* 저장 못 해도 동작 */ }
       host.querySelectorAll("[data-" + key + "]").forEach(function (o) { o.setAttribute("aria-pressed", String(o === b)); });
       draw();
     });

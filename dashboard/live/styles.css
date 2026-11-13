@@ -3773,7 +3773,7 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
 .lq-cols { display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-height: 0; background: var(--soft-line); border: 1px solid var(--soft-line); border-radius: 12px; overflow: hidden; }
 .lq-row { display: flex; gap: 1px; min-height: 0; min-width: 0; }
 .lq-top { flex: 1.25 1 0; } .lq-bot { flex: 1 1 0; min-height: 330px; }   /* 11-11 아래 줄 = 최대 고통·코인별을 크게(옛 216px 띠) */
-.lq-f-rem { flex: 1.66 1 0; } .lq-f-lad { flex: 1.2 1 0; } .lq-f-tod { flex: 0.9 1 0; } .lq-f-pain { flex: 2.1 1 0; } .lq-f-co { flex: 1.7 1 0; }
+.lq-f-rem { flex: 1.4 1 0; } .lq-f-lad { flex: 1.6 1 0; } .lq-f-tod { flex: 0.9 1 0; } .lq-f-pain { flex: 2.1 1 0; } .lq-f-co { flex: 1.7 1 0; }
 .lq-b.lq-pain-in { flex-direction: row; gap: 14px; }
 @media (max-width: 1440px) { .lq-f-tod { flex-grow: 0.7; } .lq-pain-side { flex-basis: 200px; } }   /* 폭 1280: 고통 사다리 봉 자리를 남긴다 */ .lq-pain-side { flex: 0 0 236px; display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; overflow: hidden; }
 /* 2026-11-11 최대 고통: 지표 2×2(폭 1280 에서 4열이면 글이 잘렸다) · 가까운 쪽·인력 글 · 표시 꼬리표 · 코인별 표 */

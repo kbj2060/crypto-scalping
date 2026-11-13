@@ -476,7 +476,7 @@
     lines = vLines.concat(lines);
     g.font = "700 " + (nar ? 10 : 12) + "px " + C.sans; g.textAlign = "left"; g.textBaseline = "top";
     var lh = nar ? 13 : 16, bw_ = Math.min(G.plotW - 16, Math.max.apply(null, lines.map(function (t) { return g.measureText(t[0]).width; })) + 16), bx = G.L + 8, by = G.top + 8;
-    g.fillStyle = C.bg; g.globalAlpha = 0.86; g.fillRect(bx, by, bw_, lh * lines.length + 8); g.globalAlpha = 1;
+    g.fillStyle = css("--bg") || C.bg; g.globalAlpha = 0.9; g.fillRect(bx, by, bw_, lh * lines.length + 8); g.globalAlpha = 1;   // 펜 메모 11-13: 밝은 테마 --chart-bg 는 반투명(.42)이라 상자가 비쳤다 → 불투명 --bg
     g.strokeStyle = C.line; g.strokeRect(bx + 0.5, by + 0.5, bw_, lh * lines.length + 8);
     lines.forEach(function (t, i) { halo(g, C, t[0], bx + 8, by + 4 + lh * i, t[1]); });
   }
@@ -582,6 +582,12 @@
     fetch("/api/footprint-daily/xcvd?" + Q(), { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : {}; }).then(done).catch(function () { done(S.X || {}); });
   }
   var XC = { bn: "#f0b90b", okx: "#d65bd6", bybit: "#4c8dff" };
+  function inkOn(col) {   // 바탕색(#rgb·#rrggbb·rgb()) 밝기 → 글자색. 못 읽으면 어두운 글자
+    var c = String(col).trim(), m = c.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i), r, g_, b;
+    if (m) { var hx = m[1].length === 3 ? m[1].replace(/./g, "$&$&") : m[1]; r = parseInt(hx.slice(0, 2), 16); g_ = parseInt(hx.slice(2, 4), 16); b = parseInt(hx.slice(4, 6), 16); }
+    else { m = c.match(/rgba?\(\s*([\d.]+)[ ,]+([\d.]+)[ ,]+([\d.]+)/); if (!m) return "#111318"; r = +m[1]; g_ = +m[2]; b = +m[3]; }
+    return 0.299 * r + 0.587 * g_ + 0.114 * b > 128 ? "#111318" : "#ffffff";
+  }
   function xSeries(a, b) {
     var D = S.D, X = S.X || {}, i;
     var mk = function (fn) { var v = []; for (i = a; i <= b; i++) v.push(fn(i)); return v; };
@@ -657,8 +663,10 @@
     S.after.push(function () {   // 이름표 칸은 플롯 잘라내기 밖 -- restore 뒤에 그린다
     g.font = "700 10px " + C.sans; g.textBaseline = "middle";
     tags.forEach(function (t) {
-      g.fillStyle = t.se.col; g.globalAlpha = t.se.dash ? 0.55 : 0.92; g.fillRect(x0, t.ty, w, th); g.globalAlpha = 1;
-      g.fillStyle = "#111318"; g.textAlign = "left";
+      // 2026-11-13 펜 메모 «글래스(밝은) 모드에서 이름표 배경이 안 보임»: 선물 합(--text)·현물 합(--spot)은 밝은 테마에서 어두운 색인데 글자도 어두운 색 고정이었다
+      //   → 글자색 = 바탕 밝기로(어두운 바탕 = 흰 글자) · 점선(현물) 바탕 0.55 → 0.78(밝은 화면에서 흐려 바탕이 안 보였다).
+      g.fillStyle = t.se.col; g.globalAlpha = t.se.dash ? 0.78 : 0.92; g.fillRect(x0, t.ty, w, th); g.globalAlpha = 1;
+      g.fillStyle = inkOn(t.se.col); g.textAlign = "left";
       if (!G.narrow) g.fillText(t.se.n, x0 + 3, t.ty + th / 2 + 0.5);   // 휴대폰(칸 58px)은 이름과 값이 겹쳤다 -- 값만(색이 거래소)
       g.textAlign = "right"; g.fillText(k === "xfund" ? (G.narrow ? fmtF(t.v).replace("%", "") : fmtF(t.v)) : k === "xoi" ? (t.v >= 0 ? "+" : "−") + cqty(Math.abs(t.v)) : sgnUsd(t.v), x0 + w - 3, t.ty + th / 2 + 0.5);
     });
@@ -1063,6 +1071,9 @@
     else if (saved === "4h") setOn(true, "4h");
   }
 
+  // 2026-11-13 펜 메모 «글래스 모드에서 이름표 배경이 안 보임»: 색은 그릴 때 getComputedStyle 로 읽는다 -- 테마를 바꿔도 다음 갱신(최대 1분)까지
+  //   옛 테마 색(다크의 흰 «선물 합» 등)이 밝은 바탕 위에 남았다 → data-theme 이 바뀌면 바로 다시 그린다.
+  if (typeof MutationObserver === "function") new MutationObserver(function () { if (S.on) redraw(); }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   window.fpDailyActive = function () { return S.on; };   // 시험 하네스가 켜짐을 읽는다
   window.fpDailyPeriod = function () { return S.period; };   // 2026-10-20 탭 선택 칸(app.js renderChartWindowTabs) -- 1d | 4h
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
