@@ -133,7 +133,8 @@ def live_at(oi_1s: dict[int, float], t: int, tol: int = 30) -> float | None:
     return oi_1s[max(ks)] if ks else None
 
 
-def payload(book: Book, now_s: int, price: float, forming=None, bw: float = 1.0, windows=WINDOWS) -> dict:
+def payload(book: Book, now_s: int, price: float, forming=None, bw: float = 1.0, windows=WINDOWS, rng: tuple[int, int] | None = None) -> dict:
+    """rng = (시작 초, 끝 초) 면 win["range"] = 그 사이에 열려 지금 남은 계약(2026-11-13 1d 화면 «보이는 봉으로»). 30일 넘는 앞쪽은 장부에 없다."""
     t, h, l, x, xl, xs = book.snapshot(forming)
 
     def dist(m, q):
@@ -142,10 +143,12 @@ def payload(book: Book, now_s: int, price: float, forming=None, bw: float = 1.0,
         return {"lo": lo, "vals": np.round(vals, 1).tolist(), "tot": round(tot, 1),
                 "avg": round(float(((np.arange(len(vals)) + lo + 0.5) * bw * vals).sum() / tot), 6) if tot > 0 else None}   # XRP $1.3 -- 2자리면 칸 폭보다 거칠다
     win = {}
-    for d in windows:
-        m = t >= now_s - d * 86400
-        win[str(d)] = {**dist(m, x), "hours": round(float(m.sum()) / 12, 1),   # 실제로 덮은 시간(30일이 덜 찼으면 작다)
-                       "long": dist(m, xl), "short": dist(m, xs)}
+    masks = [(str(d), t >= now_s - d * 86400) for d in windows] + ([("range", (t >= rng[0]) & (t < rng[1]))] if rng else [])
+    for key, m in masks:
+        win[key] = {**dist(m, x), "hours": round(float(m.sum()) / 12, 1),   # 실제로 덮은 시간(30일이 덜 찼으면 작다)
+                    "long": dist(m, xl), "short": dist(m, xs)}
+    if rng:
+        win["range"]["first_s"] = int(t[0]) if len(t) else None   # 장부가 아는 가장 앞 봉 -- 화면이 «보이는 봉 중 모델 밖» 몫을 적는다
     return {"asof": int(now_s), "price": price, "oi": book.oi, "bw": bw, "win": win,
             "basis": "추정(5분 OI·거래량 · 회전+나이 가중 닫기 · 롱·숏 = 손바뀜을 직전 1h·24h 수익으로 가른 근사) -- 실측 포지션 아님, 지도로만"}
 
@@ -174,6 +177,8 @@ if __name__ == "__main__":
     assert np.allclose(c.x, L[1:], rtol=1e-9, atol=1e-6), "연구 루프와 다름"
     p = payload(b, n * 300, float(px[-1])); assert set(p["win"]) == {"1", "7", "30"} and p["win"]["30"]["hours"] == 720.0
     assert set(payload(b, n * 300, float(px[-1]), windows=(7,))["win"]) == {"7"}
+    pr = payload(b, n * 300, float(px[-1]), windows=(30,), rng=(0, n * 300 + 1))["win"]   # 보이는 봉 창: 30일 전부를 덮으면 30일 창과 같다
+    assert abs(pr["range"]["tot"] - pr["30"]["tot"]) < 1e-6 * pr["30"]["tot"] and pr["range"]["first_s"] == int(b.t[0])
     # ⑥ 롱·숏: 장부마다 합 = OI · 30일 접힘 · 연구판(s 를 numpy 로 따로 내 회전만 2s·v 로 민 장부, 10-21 연구·10-22 시안 사본과 같은 식)과 같은 값
     assert abs(b.xl.sum() + b.old_l - b.oi) < 1e-3 and abs(b.xs.sum() + b.old_s - b.oi) < 1e-3 and len(b.xl) == RING
     e = Book(); c5 = px.copy(); n2 = 700

@@ -3739,7 +3739,7 @@ def make_app() -> web.Application:
             raise web.HTTPBadRequest(reason="from_to")
         row = FPD[a].parse_row(request.query.get("row"))
         if len(swr_store) > 800:   # 검증 11-13: 1d 프로파일이 줌마다 칸 키를 만든다(swr_store 는 안 비워짐) -- 오래된 칸 키 절반만 정리
-            old = sorted((v.get("ts", 0.0), k) for k, v in swr_store.items() if k.startswith(("fp_daily_cells_", "fp_4h_cells_")))
+            old = sorted((v.get("ts", 0.0), k) for k, v in swr_store.items() if k.startswith(("fp_daily_cells_", "fp_4h_cells_", "position_profile:")))
             for _, k in old[: len(old) // 2]:
                 swr_store.pop(k, None)
         try:
@@ -4657,14 +4657,27 @@ def make_app() -> web.Application:
             raise web.HTTPNotFound(reason="flow_off")
         q = request.query.get("days")                                    # 화면이 고른 창 하나만(없으면 셋 다) -- 매초 30일 칸 배정·전송을 아낀다
         wins = (int(q),) if q in ("1", "7", "30") else pprof.WINDOWS
+        # 2026-11-13 사용자 «1d 청산 프로파일도 보이는 봉으로 재계산»: ?from_s=&to_s= 면 그 사이에 열려 남은 계약(win.range) 하나만.
+        #   신뢰경계: 정수 · 4시간 격자로 내림(캐시 키 수 제한) · 최근 31일 ~ 내일 안 · from < to.
+        rng = None
+        if request.query.get("from_s") is not None:
+            try:
+                f_s, t_s = (int(request.query.get(k, "")) // 14400 * 14400 for k in ("from_s", "to_s"))
+            except ValueError:
+                raise web.HTTPBadRequest(reason="bad_range") from None
+            now_i = int(time.time())
+            f_s, t_s = max(f_s, now_i - 31 * 86400), min(t_s, now_i + 86400)
+            if f_s >= t_s:
+                raise web.HTTPBadRequest(reason="bad_range")
+            rng, wins = (f_s, t_s), ()
 
         async def produce() -> dict[str, Any]:
             st = await pos_ensure(asset)
             forming, px = pos_forming(asset, st)
             bw = 1.0 if asset == "eth" else flows[asset].spec.bucket   # 2026-10-20 칸 폭: ETH $1(≈2.5bp) · 다른 코인 = 풋프린트 칸(XRP 0.0003 ≈2.3bp)
-            return pprof.payload(st["book"], int(time.time()), px, forming, bw=bw, windows=wins)   # 1~4ms -- 상태와 같은 루프에서(밀기와 엇갈리지 않게)
+            return pprof.payload(st["book"], int(time.time()), px, forming, bw=bw, windows=wins, rng=rng)   # 1~4ms -- 상태와 같은 루프에서(밀기와 엇갈리지 않게)
         try:
-            payload = await swr_cached(f"position_profile:{asset}:{','.join(map(str, wins))}", POSITION_PROFILE_CACHE_SECONDS, produce,
+            payload = await swr_cached(f"position_profile:{asset}:{','.join(map(str, wins))}:{rng}", POSITION_PROFILE_CACHE_SECONDS, produce,
                                        max_stale=STALE_GRACE_SECONDS)
         except web.HTTPException:
             return web.json_response({"error": "position_profile_upstream_error"}, status=web.HTTPBadGateway.status_code, headers=NOCACHE)
