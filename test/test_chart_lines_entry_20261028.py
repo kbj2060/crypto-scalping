@@ -323,6 +323,16 @@ class LinesAddSizeTest(LinesArmedGuardTest):
             self.assertEqual((armed["sl_level"], armed["sl_price"], armed["tp_price"]), (2480.0, 2479.6, 2550.4), armed)
         self._run(fn, acct=POS, run_entry=fake_entry, place_bracket=fake_bracket)
 
+    def test_far_armed_tp_does_not_block_add(self) -> None:   # 2026-11-14 SOXL: 걸린 익절이 지금가에서 +17% -- 거리(15%)로 막지 않는다(방향은 아래 시험대로 본다)
+        async def fn(c):
+            self._armed({**self.SAVED, "tp_level": 2930.0, "tp_price": 2930.6})
+            r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10&tp=2550&sl=2480")
+            body = await r.json()
+            self.assertEqual(r.status, 200, body)
+            self.assertTrue(body["plan"].get("add_lines"), body)
+            self.assertEqual(body["plan"]["bracket"]["tp_level"], 2930.0, body)
+        self._run(fn, acct=POS)
+
     def test_armed_lines_outside_current_price_are_refused(self) -> None:
         async def fn(c):
             self._armed({**self.SAVED, "tp_level": 2490.0})                                      # 익절선이 지금가(≈2500) 아래 = 이미 지난 선
@@ -461,6 +471,13 @@ class LineModifyTest(ChartLinesTest):
             out["state"] = json.loads((server.LIVE_DIR / "manual_bracket_state.json").read_text("utf-8"))[f"{SYM}:LONG"]
         self._run(fn, acct=acct, **({"place_bracket": place} if place else {}))
         return out
+
+    def test_move_sl_with_far_armed_tp(self) -> None:   # 2026-11-14: 안 옮긴 익절이 +17% 여도 손절만 옮기기는 된다 · 새로 옮기는 선은 그대로 15% 검사
+        o = self._mod("&tp=2930&sl=2450", armed={"tp_level": 2930.0, "tp_price": 2930.6})
+        self.assertEqual(o["status"], 200, o["body"])
+        self.assertEqual((o["state"]["sl_level"], o["state"]["tp_level"]), (2450.0, 2930.0), o["state"])
+        o = self._mod("&tp=2950&sl=2450", armed={"tp_level": 2930.0, "tp_price": 2930.6})
+        self.assertEqual((o["status"], o["body"].get("error")), (400, "bad_lines"), o["body"])
 
     def test_move_tp_replaces_resting_order_and_watches_from_now(self) -> None:
         calls = []
