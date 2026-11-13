@@ -3637,6 +3637,68 @@ def make_app() -> web.Application:
         except Exception:  # noqa: BLE001 -- 1시간봉을 못 받아도 소급본 날은 그린다
             return None
 
+    # 2026-11-13 사용자 «1d 차트에 킹피셔처럼 현물/선물 CVD·OI 를 거래소별로»(시안 B): 다른 거래소 일봉 델타·OI. 바이낸스 선물 델타·OI 는 1d 자체 열(bv/sv/oi).
+    #   원천(공개 REST, 1시간마다): 바이낸스 현물 일봉 테이커 매수(2×매수 − 거래대금, USDT) · OKX rubik 테이커(현물 = 코인 수량 × 종가, 계약 = 달러 · 180/72일)
+    #   · OKX 계약 OI(달러, 180일) · Bybit 선형 OI(코인 × 종가). OKX 1D 는 UTC+8 경계 → ts+8h 의 UTC 날짜에 붙인다.
+    #   받을 때마다 data/live/xcvd/<코인>.json 에 날짜별로 합쳐 쌓는다 -- OKX 처럼 이력이 짧은 원천도 앞으로는 길어진다. Bybit·Coinbase 현물·선물 CVD 는 공개 일봉에 매수/매도 구분이 없어 없다.
+    XCVD_CCY = {"eth": "ETH", "btc": "BTC", "xrp": "XRP"}   # 주식(바이낸스 TradFi)은 현물·다른 거래소가 없다 -- 1d 자체 열만
+    XCVD_KEYS = ("bn_spot", "okx_spot", "okx_fut", "okx_oi", "bybit_oi", "px")
+
+    async def _xcvd_refresh(a: str) -> dict:
+        ccy, path = XCVD_CCY[a], LIVE_DIR / "xcvd" / f"{a}.json"
+        try:
+            cur = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            cur = {}
+        new: dict[str, dict] = {k: {} for k in XCVD_KEYS}
+        day = lambda ms: datetime.fromtimestamp(ms / 1000, timezone.utc).strftime("%Y-%m-%d")  # noqa: E731
+        okx_day = lambda ms: day(int(ms) + 8 * 3600_000)  # noqa: E731
+        try:
+            for r in await fetch_binance_json("https://api.binance.com/api/v3/klines", {"symbol": f"{ccy}USDT", "interval": "1d", "limit": 1000}) or []:
+                new["bn_spot"][day(r[0])] = 2 * float(r[10]) - float(r[7])
+                new["px"][day(r[0])] = float(r[4])
+        except Exception:  # noqa: BLE001 -- 원천 하나가 죽어도 나머지·쌓인 값은 그대로
+            pass
+        px = {**cur.get("px", {}), **new["px"]}
+        okx = "https://www.okx.com/api/v5/rubik/stat"
+        for it, key in (("SPOT", "okx_spot"), ("CONTRACTS", "okx_fut")):
+            try:
+                for r in (await fetch_binance_json(f"{okx}/taker-volume", {"ccy": ccy, "instType": it, "period": "1D"}) or {}).get("data", []):
+                    d, v = okx_day(r[0]), float(r[2]) - float(r[1])          # [ts, 매도, 매수]
+                    if it == "CONTRACTS" or d in px:
+                        new[key][d] = v if it == "CONTRACTS" else v * px[d]
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            for r in (await fetch_binance_json(f"{okx}/contracts/open-interest-volume", {"ccy": ccy, "period": "1D"}) or {}).get("data", []):
+                new["okx_oi"][okx_day(r[0])] = float(r[1])
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            res = (await fetch_binance_json("https://api.bybit.com/v5/market/open-interest",
+                                            {"category": "linear", "symbol": f"{ccy}USDT", "intervalTime": "1d", "limit": 200}) or {}).get("result") or {}
+            for r in res.get("list", []):
+                d = day(int(r["timestamp"]))
+                if d in px:
+                    new["bybit_oi"][d] = float(r["openInterest"]) * px[d]
+        except Exception:  # noqa: BLE001
+            pass
+        out = {k: {**cur.get(k, {}), **new[k]} for k in XCVD_KEYS}
+        if any(new[k] for k in XCVD_KEYS):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(out), encoding="utf-8")
+            tmp.replace(path)
+        return out
+
+    async def api_footprint_daily_xcvd(request: web.Request) -> web.Response:
+        """거래소별 일봉 델타·OI(1d 화면 «CVD·OI 거래소별» 레인). 주식은 빈 묶음(화면이 바이낸스 선물만 그린다)."""
+        a = _fpd_asset(request)
+        if a not in XCVD_CCY:
+            return web.json_response({}, headers=NOCACHE)
+        payload = await swr_cached(f"fp_xcvd_{a}", 3600.0, lambda: _xcvd_refresh(a), max_stale=6 * 3600.0)
+        return web.json_response(payload, headers=NOCACHE)
+
     async def api_footprint_daily(request: web.Request) -> web.Response:
         """일봉 요약 전체(열 묶음). ?since=YYYY-MM-DD 면 그날부터만(화면의 1분 갱신용)."""
         a, since = _fpd_asset(request), _iso_day(request.query.get("since"))
@@ -4726,6 +4788,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/footprint-week", api_footprint_week)
     app.router.add_get("/api/footprint-daily", api_footprint_daily)
     app.router.add_get("/api/footprint-daily/cells", api_footprint_daily_cells)
+    app.router.add_get("/api/footprint-daily/xcvd", api_footprint_daily_xcvd)
     app.router.add_get("/api/footprint-daily/heat", api_footprint_daily_heat)
     app.router.add_get("/api/footprint-4h", api_footprint_4h)
     app.router.add_get("/api/footprint-4h/cells", api_footprint_4h_cells)

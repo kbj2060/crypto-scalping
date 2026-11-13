@@ -29,8 +29,9 @@
   // 이 폭부터 가격 칸(휴대폰은 7~12일 확대에서) · 2026-10-20 4시간봉은 1주(42봉 ≈ 24px)에서도 칸이 보이게 낮춘다(숫자는 칸에 들어갈 때만 -- drawCells)
   var cellMinPx = function (G) { return S.period === "4h" ? (G.narrow ? 6 : 16) : G.narrow ? 24 : 34; };
   var REFRESH_MS = 60000;
-  // 2026-11-13 사용자 «1d 에 화면에 보이는 봉들의 CVD·OI 누적»(시안 B): 맨 위 «누적» 레인 = 보이는 첫 봉부터 CVD(흰선) · OI(주황선, 첫 봉 대비) -- 1초 수급 칸과 같은 색
-  var LANES = [["cum", "누적"], ["delta", "델타"], ["turn", "거래대금"], ["oi", "OI"], ["liq", "청산"], ["lmap", "추정 청산"]];
+  // 2026-11-13 사용자 «1d 차트에 킹피셔처럼 현물/선물 CVD·OI 를 거래소별로»(시안 B) + «누적 레인은 제거»: 레인 = CVD 거래소별(5칸) · OI 거래소별(3칸) · 델타.
+  //   거래대금·OI 막대·청산·추정 청산 레인은 화면에서 뺐다(값은 호버 툴팁에 그대로). 세 번째 칸 = 높이 배수.
+  var LANES = [["xcvd", "CVD · 거래소별", 5], ["xoi", "OI · 거래소별", 3], ["delta", "델타"]];
   // 2026-10-20 사용자 «4h 버튼 = 1주일을 4시간봉 풋프린트로» → «1d 에서 데이터 양만 4h 로»: 같은 그림·레인·청산 히트맵을 봉 길이만 바꿔 쓴다
   //   (서버 /api/footprint-4h · 지난 7일 + 형성 중 · OI = 칸 마지막 값 · 청산 = 칸 합 · 히트맵 = 칸 마감 시점). 시각 = 칸 시작(UTC 00·04·…시 = KST 09·13·…시).
   var PERIODS = {
@@ -226,9 +227,10 @@
     var W = cv.clientWidth, H = cv.clientHeight, narrow = W < 560;
     var L = 8, R = narrow ? 52 : 66, axisH = 26, gap = 8;
     var laneH = Math.max(30, Math.round((H - axisH) * (narrow ? 0.07 : 0.055)));   // 2026-11-04 펜 메모 «차트 높이가 너무 낮다 -- 아래 막대 높이를 줄이고 차트를 늘려줘»: 레인 0.1 → 0.055(휴대폰 0.095 → 0.07) · 가격 차트 329 → ~500px(776px 상자 실측)
-    var priceH = H - axisH - LANES.length * (laneH + gap) - 6;
+    var units = LANES.reduce(function (t, l) { return t + (l[2] || 1); }, 0);
+    var priceH = H - axisH - units * laneH - LANES.length * gap - 6;
     var lanes = {}, y = 6 + priceH + gap;
-    LANES.forEach(function (l) { lanes[l[0]] = { y: y, h: laneH }; y += laneH + gap; });
+    LANES.forEach(function (l) { var hh = Math.round(laneH * (l[2] || 1)); lanes[l[0]] = { y: y, h: hh }; y += hh + gap; });
     // 2026-11-13 사용자 «1d 차트에도 오른쪽에 체결·델타 프로파일»: 플롯과 가격 눈금 사이 PW 칸(5분 차트 «체결 · 델타»와 같은 그림)
     var PW = narrow ? 70 : 160;
     return { W: W, H: H, L: L, R: R, PW: PW, plotW: W - L - R - PW, top: 6, priceH: priceH, lanes: lanes, axisY: H - axisH, narrow: narrow };
@@ -327,6 +329,7 @@
       }
     }
     g.restore();
+    loadX(); S.after = [];
     drawLanes(g, C, G, a, b, xOf, bw);
     if (S.hover && S.hover.i >= a && S.hover.i <= b) {          // 호버 십자선
       g.strokeStyle = C.muted; g.globalAlpha = 0.55; g.lineWidth = 1; g.setLineDash([2, 3]);
@@ -336,6 +339,7 @@
       g.setLineDash([]); g.globalAlpha = 1;
     }
     g.restore();
+    S.after.forEach(function (f) { f(); });
     drawProfile(g, C, G, a, b, row, yOf);   // 플롯 잘라내기(G.L ~ G.L+plotW) 밖 칸이라 restore 뒤에
     var last = D.c[S.n - 1], lastY = last >= lo && last <= hi ? yOf(last) : -99;
     g.font = "600 12px " + C.sans; g.textAlign = "left"; g.textBaseline = "middle";
@@ -440,30 +444,87 @@
     g.beginPath(); g.moveTo(cx + 0.5, yOf(D.h[i])); g.lineTo(cx + 0.5, yOf(D.l[i])); g.stroke();
   }
 
-  // 보이는 봉 [a, b] 누적: CVD = Σ(매수−매도) 달러 · OI = 보이는 첫 OI 대비 비율(끝 값은 마지막으로 OI 가 있는 봉)
-  function cumVis(a, b) {
-    var D = S.D, cvd = [], oi = [], s = 0, base = null, i;
-    for (i = a; i <= b && base == null; i++) if (D.oi[i] != null) base = D.oi[i];
-    for (i = a; i <= b; i++) {
-      s += D.bv[i] - D.sv[i]; cvd.push(s);
-      oi.push(base != null && D.oi[i] != null ? D.oi[i] / base - 1 : null);
-    }
-    var oiEnd = null, oiQ = null;
-    for (i = b; i >= a; i--) if (D.oi[i] != null) { oiEnd = oi[i - a]; oiQ = D.oi[i] - base; break; }
-    return { a: a, n: b - a + 1, cvd: cvd, oi: oi, cvdEnd: s, oiEnd: oiEnd, oiQ: oiQ };
+  // 다른 거래소 일봉(서버 /api/footprint-daily/xcvd · 1시간마다 갱신 · 주식은 빈 묶음) -- 1d 만(4h 는 바이낸스 선물 자체 열만)
+  function loadX() {
+    if (S.period !== "1d" || S.X !== undefined) return;
+    S.X = null;
+    var asset = S.asset;
+    fetch("/api/footprint-daily/xcvd?" + Q(), { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (j) { if (asset === S.asset) { S.X = j || {}; redraw(); } }).catch(function () { S.X = {}; });
   }
-  function cumLine(g, xOf, cu, arr, y, h, col, zero) {   // 레인 안 제 축 · zero = 0 기준 점선(CVD)
-    var lo = Infinity, hi = -Infinity, i, v;
-    for (i = 0; i < arr.length; i++) if (arr[i] != null) { lo = Math.min(lo, arr[i]); hi = Math.max(hi, arr[i]); }
-    if (zero) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
+  var XC = { bn: "#f0b90b", okx: "#d65bd6", bybit: "#4c8dff" };
+  function xSeries(a, b) {
+    var D = S.D, X = S.X || {}, i;
+    var mk = function (fn) { var v = []; for (i = a; i <= b; i++) v.push(fn(i)); return v; };
+    var m = function (key) { return function (i) { var o = X[key]; var v = o ? o[D.d[i]] : null; return v == null ? null : v; }; };
+    return [
+      { n: "바이낸스 선물", s: "BN 선", col: XC.bn, kind: "cvd", grp: "fut", v: mk(function (i) { return D.bv[i] - D.sv[i]; }) },
+      { n: "OKX 선물", s: "OKX 선", col: XC.okx, kind: "cvd", grp: "fut", v: mk(m("okx_fut")) },
+      { n: "바이낸스 현물", s: "BN 현", col: XC.bn, dash: true, kind: "cvd", grp: "spot", v: mk(m("bn_spot")) },
+      { n: "OKX 현물", s: "OKX 현", col: XC.okx, dash: true, kind: "cvd", grp: "spot", v: mk(m("okx_spot")) },
+      { n: "바이낸스", s: "BN", col: XC.bn, kind: "oi", v: mk(function (i) { return D.oi[i] != null ? D.oi[i] * D.c[i] : null; }) },
+      { n: "OKX", s: "OKX", col: XC.okx, kind: "oi", v: mk(m("okx_oi")) },
+      { n: "Bybit", s: "BYB", col: XC.bybit, kind: "oi", v: mk(m("bybit_oi")) }
+    ];
+  }
+  function xCum(se) {   // CVD = 보이는 첫 값부터 누적 · OI = 보이는 첫 값 대비 변화(달러)
+    var out = [], acc = 0, base = null;
+    se.v.forEach(function (v) {
+      if (v == null) { out.push(null); return; }
+      if (se.kind === "oi") { if (base == null) base = v; out.push(v - base); } else { acc += v; out.push(acc); }
+    });
+    return out;
+  }
+  function drawX(g, C, G, a, b, xOf, k, name, y, h) {
+    var all = xSeries(a, b), pick = all.filter(function (se) {
+      return se.kind === (k === "xoi" ? "oi" : "cvd");
+    });
+    var lines = pick.map(function (se) { return { se: se, c: xCum(se) }; }).filter(function (l) { return l.c.some(function (v) { return v != null; }); });
+    if (k !== "xoi") {   // 합 = 그날 모든 원천이 있는 날만(원천마다 시작일이 달라 섞으면 계단이 생긴다)
+      [["fut", "선물 합", C.text], ["spot", "현물 합", css("--spot")]].forEach(function (gp) {
+        var mem = pick.filter(function (se) { return se.grp === gp[0]; });
+        if (mem.length < 2) return;
+        var acc = 0, c = mem[0].v.map(function (_, j) {
+          if (mem.some(function (se) { return se.v[j] == null; })) return null;
+          acc += mem.reduce(function (t, se) { return t + se.v[j]; }, 0); return acc;
+        });
+        if (c.some(function (v) { return v != null; })) lines.push({ se: { n: gp[1], s: gp[1].replace(" 합", "합"), col: gp[2], sum: true }, c: c });
+      });
+    }
+    var top = y + 18, hh = h - 22, lo = 0, hi = 0;
+    lines.forEach(function (l) { l.c.forEach(function (v) { if (v != null) { lo = Math.min(lo, v); hi = Math.max(hi, v); } }); });
+    g.font = "700 12px " + C.sans; g.textAlign = "left"; g.textBaseline = "top";
+    halo(g, C, name, G.L + 4, y + 4, C.muted);
+    var tw = g.measureText(name).width + 8;
+    halo(g, C, k === "xoi" ? (G.narrow ? "첫 봉 대비" : "보이는 첫 봉 대비 변화(달러) · 노랑 바이낸스 · 분홍 OKX · 파랑 Bybit")
+      : (G.narrow ? (b - a + 1) + "봉 누적" : "보이는 " + (b - a + 1) + "봉 누적 · 실선 선물 · 점선 현물 · 굵은 선 = 합(모든 원천이 있는 날)") + (S.X == null && S.period === "1d" ? " · 불러오는 중" : ""), G.L + 4 + tw, y + 4, C.muted);
     if (!(hi > lo)) return;
-    var Y = function (v) { return y + h - 3 - (v - lo) / (hi - lo) * (h - 6); };
-    g.strokeStyle = col;
-    if (zero) { g.globalAlpha = 0.3; g.lineWidth = 1; g.setLineDash([2, 3]); g.beginPath(); g.moveTo(xOf(cu.a), Math.round(Y(0)) + 0.5); g.lineTo(xOf(cu.a + cu.n - 1), Math.round(Y(0)) + 0.5); g.stroke(); g.setLineDash([]); }
-    g.globalAlpha = 0.95; g.lineWidth = 1.8; g.lineJoin = "round"; g.beginPath();
-    var pen = false;
-    for (i = 0; i < arr.length; i++) { v = arr[i]; if (v == null) { pen = false; continue; } if (pen) g.lineTo(xOf(cu.a + i), Y(v)); else g.moveTo(xOf(cu.a + i), Y(v)); pen = true; }
-    g.stroke(); g.globalAlpha = 1;
+    var Y = function (v) { return top + hh - (v - lo) / (hi - lo) * hh; };
+    g.strokeStyle = C.line; g.setLineDash([2, 3]); g.lineWidth = 1; g.beginPath(); g.moveTo(G.L, Math.round(Y(0)) + 0.5); g.lineTo(G.L + G.plotW, Math.round(Y(0)) + 0.5); g.stroke(); g.setLineDash([]);
+    var tags = [];
+    lines.forEach(function (l) {
+      g.strokeStyle = l.se.col; g.lineWidth = l.se.sum ? 2.6 : 1.6; g.globalAlpha = l.se.sum ? 1 : 0.9; g.setLineDash(l.se.dash ? [5, 3] : []);
+      g.beginPath(); var pen = false, last = null;
+      l.c.forEach(function (v, j) { if (v == null) { pen = false; return; } var xx = xOf(a + j), yy = Y(v); if (pen) g.lineTo(xx, yy); else g.moveTo(xx, yy); pen = true; last = v; });
+      g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
+      if (last != null) tags.push({ y: Y(last), v: last, se: l.se });
+    });
+    // 오른쪽 이름표(킹피셔식 색 상자) -- 끝 값 높이에서 겹치면 아래로 민다
+    tags.sort(function (p, q) { return p.y - q.y; });
+    var th = 14, x0 = G.L + G.plotW + 6, w = G.PW - 12, yy0 = top - 2;
+    tags.forEach(function (t) { t.ty = Math.max(yy0, t.y - th / 2); yy0 = t.ty + th + 1; });
+    var over = yy0 - (top + hh + 4);
+    if (over > 0) tags.forEach(function (t) { t.ty -= over; });
+    S.after.push(function () {   // 이름표 칸은 플롯 잘라내기 밖 -- restore 뒤에 그린다
+    g.font = "700 10px " + C.sans; g.textBaseline = "middle";
+    tags.forEach(function (t) {
+      g.fillStyle = t.se.col; g.globalAlpha = t.se.dash ? 0.55 : 0.92; g.fillRect(x0, t.ty, w, th); g.globalAlpha = 1;
+      g.fillStyle = "#111318"; g.textAlign = "left";
+      if (!G.narrow) g.fillText(t.se.n, x0 + 3, t.ty + th / 2 + 0.5);   // 휴대폰(칸 58px)은 이름과 값이 겹쳤다 -- 값만(색이 거래소)
+      g.textAlign = "right"; g.fillText(sgnUsd(t.v), x0 + w - 3, t.ty + th / 2 + 0.5);
+    });
+    g.textAlign = "left"; g.textBaseline = "top";
+    });
   }
 
   function laneVal(k, i) {
@@ -503,19 +564,7 @@
       var k = lane[0], name = lane[1], y = G.lanes[k].y, h = G.lanes[k].h, i, v;
       g.strokeStyle = C.soft; g.lineWidth = 1;
       g.beginPath(); g.moveTo(G.L, y + 0.5); g.lineTo(G.L + G.plotW, y + 0.5); g.stroke();
-      if (k === "cum") {   // 막대 없음 -- 두 선은 이름표 줄(16px) 아래에만 · 숫자 = 보이는 봉 전체(호버와 무관)
-        var cu = cumVis(a, b), oiCol = css("--warn");
-        cumLine(g, xOf, cu, cu.cvd, y + 16, h - 16, C.text, true);
-        cumLine(g, xOf, cu, cu.oi, y + 16, h - 16, oiCol, false);
-        g.font = "700 12px " + C.sans; g.textAlign = "left"; g.textBaseline = "top";
-        var t0 = name + " ", t1 = (G.narrow ? "" : "보이는 ") + cu.n + "봉 · ", t2 = "CVD " + sgnUsd(cu.cvdEnd),   // 휴대폰은 짧게(OI 수량이 잘렸다)
-            t3 = "  OI " + (cu.oiEnd == null ? "모름" : pct(cu.oiEnd) + (G.narrow ? "" : " (" + (cu.oiQ >= 0 ? "+" : "−") + qty(Math.abs(cu.oiQ)) + " " + A().coin + ")")), xx = G.L + 4;
-        halo(g, C, t0, xx, y + 4, C.muted); xx += g.measureText(t0).width + 4;
-        halo(g, C, t1, xx, y + 4, C.muted); xx += g.measureText(t1).width;
-        halo(g, C, t2, xx, y + 4, C.text); xx += g.measureText(t2).width;
-        halo(g, C, t3, xx, y + 4, oiCol);
-        return;
-      }
+      if (k.charAt(0) === "x") { drawX(g, C, G, a, b, xOf, k, name, y, h); return; }
       var mx = 0, oiLo = Infinity, oiHi = -Infinity;
       for (i = a; i <= b; i++) {
         v = laneVal(k, i);
@@ -766,10 +815,6 @@
     } else {
       html = "<b>" + lab(D.d[i]) + "</b><br>델타 " + laneText("delta", i) + " · 거래대금 " + laneText("turn", i) +
              "<br>OI " + laneText("oi", i) + "<br>청산 " + laneText("liq", i) + "<br>추정 청산(" + (S.period === "4h" ? "그 칸" : "그날") + " 마감 7일 지도) " + laneText("lmap", i);
-      if (v && i >= v.a) {   // 누적 레인 호버 = 보이는 첫 봉부터 이 봉까지
-        var cu = cumVis(v.a, i);
-        html += "<br>누적(" + lab(D.d[v.a]) + "~) CVD " + sgnUsd(cu.cvdEnd) + " · OI " + (cu.oiEnd == null ? "모름" : pct(cu.oiEnd));
-      }
     }
     if (html) tipShow(e.pageX, e.pageY, html); else tipHide();
     redraw();
@@ -793,6 +838,7 @@
     if ((period && period !== S.period) || (on && curAsset() !== S.asset)) {   // 봉 길이·코인이 바뀌면 받은 것·보던 자리를 비운다
       if (period) S.period = period;
       if (on) S.asset = curAsset();
+      S.X = undefined;
       S.D = null; S.n = 0; S.cells.clear(); S.heat.clear(); S.stale.clear(); S.want = null; S.heatWant = null; S.view = null; S.hover = null;
       syncPeriodUi();
     }
