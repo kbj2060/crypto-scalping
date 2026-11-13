@@ -33,6 +33,8 @@
   //   거래대금·OI 막대·청산·추정 청산 레인은 화면에서 뺐다(값은 호버 툴팁에 그대로). 세 번째 칸 = 높이 배수.
   //   2026-11-13 사용자 «펀딩까지 해서 롱 우세·숏 우세를 더 정확히» → 펀딩 거래소별(2칸) 추가.
   var LANES = [["xcvd", "CVD · 거래소별", 5], ["xoi", "OI · 거래소별", 3], ["xfund", "펀딩 · 거래소별", 2], ["delta", "델타"]];
+  //   검증 11-13: 4h·주식은 펀딩 자료가 없어 빈 레인 2칸이 가격 칸을 깎았다 → 펀딩 자료가 있을 때만 펀딩 레인.
+  function lanesNow() { return LANES.filter(function (l) { return l[0] !== "xfund" || !!(S.X && S.X.bn_fund && Object.keys(S.X.bn_fund).length); }); }
   // 2026-10-20 사용자 «4h 버튼 = 1주일을 4시간봉 풋프린트로» → «1d 에서 데이터 양만 4h 로»: 같은 그림·레인·청산 히트맵을 봉 길이만 바꿔 쓴다
   //   (서버 /api/footprint-4h · 지난 7일 + 형성 중 · OI = 칸 마지막 값 · 청산 = 칸 합 · 히트맵 = 칸 마감 시점). 시각 = 칸 시작(UTC 00·04·…시 = KST 09·13·…시).
   var PERIODS = {
@@ -228,12 +230,12 @@
     var W = cv.clientWidth, H = cv.clientHeight, narrow = W < 560;
     var L = 8, R = narrow ? 52 : 66, axisH = 26, gap = 8;
     var laneH = Math.max(30, Math.round((H - axisH) * (narrow ? 0.07 : 0.055)));   // 2026-11-04 펜 메모 «차트 높이가 너무 낮다 -- 아래 막대 높이를 줄이고 차트를 늘려줘»: 레인 0.1 → 0.055(휴대폰 0.095 → 0.07) · 가격 차트 329 → ~500px(776px 상자 실측)
-    var units = LANES.reduce(function (t, l) { return t + (l[2] || 1); }, 0), fixed = axisH + LANES.length * gap + 6;
+    var LN = lanesNow(), units = LN.reduce(function (t, l) { return t + (l[2] || 1); }, 0), fixed = axisH + LN.length * gap + 6;
     // 검증 11-13: 레인 9칸이 가격 칸을 데스크톱 500 → 351px · 휴대폰 → 197px 로 눌렀다 -- 가격 칸이 높이의 55% 아래로 안 가게 레인 한 칸을 줄인다
     laneH = Math.max(14, Math.min(laneH, Math.floor((H - fixed - 0.55 * (H - axisH)) / units)));
     var priceH = H - fixed - units * laneH;
     var lanes = {}, y = 6 + priceH + gap;
-    LANES.forEach(function (l) { var hh = Math.round(laneH * (l[2] || 1)); lanes[l[0]] = { y: y, h: hh }; y += hh + gap; });
+    LN.forEach(function (l) { var hh = Math.round(laneH * (l[2] || 1)); lanes[l[0]] = { y: y, h: hh }; y += hh + gap; });
     // 2026-11-13 사용자 «1d 차트에도 오른쪽에 체결·델타 프로파일»: 플롯과 가격 눈금 사이 PW 칸(5분 차트 «체결 · 델타»와 같은 그림)
     var PW = narrow ? 56 : 160;   // 검증 11-13: 휴대폰 4h 3봉 칸 숫자가 1~2px 모자라던 폭 -- 70 → 56
     return { W: W, H: H, L: L, R: R, PW: PW, plotW: W - L - R - PW, top: 6, priceH: priceH, lanes: lanes, axisY: H - axisH, narrow: narrow };
@@ -313,7 +315,10 @@
     for (p = Math.ceil(lo / step) * step; p <= hi; p += step) { y = Math.round(yOf(p)) + 0.5; g.beginPath(); g.moveTo(G.L, y); g.lineTo(G.L + G.plotW, y); g.stroke(); }
     g.globalAlpha = 1;
     if (S.heatOn) drawHeat(g, G, C, a, b, row, xOf, bw, yOf);            // 봉 아래 배경
-    drawLiqWall(g, C, G, row, yOf, a, b);                                     // 2026-11-13 오른쪽 벽 반쪽 청산 프로파일(봉 뒤)
+    // 검증 11-13: 그리기 범위 a..b 는 양끝에 반쯤 걸친 봉까지라 «보이는 N봉»·to_s 에 화면 밖 봉이 섞였다 -- 중심이 플롯 안인 봉만
+    var va = Math.max(0, Math.ceil(S.i0 - 0.5)), vb = Math.min(S.n - 1, Math.floor(S.i0 + S.span - 0.5));
+    if (vb < va) { va = a; vb = b; }
+    drawLiqWall(g, C, G, row, yOf, va, vb);                                     // 2026-11-13 오른쪽 벽 반쪽 청산 프로파일(봉 뒤)
     for (i = a; i <= b; i++) {
       var x = xOf(i), up = D.c[i] >= D.o[i], col = up ? C.good : C.bad;
       var cell = cellMode ? S.cells.get(row + "|" + D.d[i]) : null;
@@ -345,7 +350,7 @@
     g.restore();
     S.after.forEach(function (f) { f(); });
     drawProfile(g, C, G, a, b, row, yOf);   // 플롯 잘라내기(G.L ~ G.L+plotW) 밖 칸이라 restore 뒤에
-    drawLiqSummary(g, C, G, a, b);
+    drawLiqSummary(g, C, G, va, vb);
     var last = D.c[S.n - 1], lastY = last >= lo && last <= hi ? yOf(last) : -99;
     g.font = "600 12px " + C.sans; g.textAlign = "left"; g.textBaseline = "middle";
     for (p = Math.ceil(lo / step) * step; p <= hi; p += step) if (Math.abs(yOf(p) - lastY) > 14) halo(g, C, px(p), G.L + G.plotW + G.PW + 6, yOf(p), C.muted);
@@ -369,17 +374,19 @@
   function loadPP(a, b) {
     var D = S.D, f = keySec(D.d[a]), t = keySec(D.d[b]) + (S.period === "4h" ? 14400 : 86400), key = S.asset + "|" + f + "|" + t;
     if (S.ppLoading || (S.PPK === key && Date.now() - S.PPT < (S.PP ? 60000 : 300000))) return;
-    S.ppLoading = true; var asset = S.asset;
-    var done = function (j) { S.ppLoading = false; if (asset !== S.asset) return;
-      S.PP = j && j.win && j.win.range ? Object.assign(j, { asset: asset, from_s: f, to_s: t, nVis: b - a + 1 }) : (S.PP && S.PP.asset === asset ? S.PP : null);
+    S.ppLoading = true; var asset = S.asset, per = S.period;
+    // 검증 11-13: ①실패·400(보이는 봉이 31일보다 앞)에 옛 범위 그림을 «보이는 봉» 이름으로 남겼다 → null(요약이 «모델 밖» 줄)
+    //   ②받는 동안 1d↔4h 를 바꾸면 늦은 응답이 새 봉 길이에 들어갔다 → 봉 길이도 확인 · 버린 뒤엔 다시 그려 새 범위를 받게
+    var done = function (j) { S.ppLoading = false; if (asset !== S.asset || per !== S.period) { redraw(); return; }
+      S.PP = j && j.win && j.win.range ? Object.assign(j, { asset: asset, from_s: f, to_s: t, nVis: b - a + 1 }) : null;
       S.PPK = key; S.PPT = Date.now(); redraw(); };
     fetch("/api/position-profile?asset=" + asset + "&from_s=" + f + "&to_s=" + t, { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; })
       .then(done).catch(function () { done(null); });
   }
   function ppCalc(row) {
-    var J = S.PP, W = J && J.win && J.win.range; if (!W || !W.long || !W.short) return null;
+    var J = S.PP, W = J && J.win && J.win.range; if (!W || !W.long || !W.short || !(J.price > 0)) return null;   // 검증 11-13: 서버 1초 링이 비면 price = null
     var P = J.price, bw = J.bw, out = { P: P, liqL: new Map(), liqS: new Map(), lDn: 0, liqDn: 0, liqUp: 0, avgL: W.long.avg, tot: W.tot, oi: J.oi, row: row, lT: W.long.tot, sT: W.short.tot,
-      nVis: J.nVis, outN: W.first_s && J.from_s < W.first_s ? Math.min(J.nVis, Math.ceil((W.first_s - J.from_s) / (S.period === "4h" ? 14400 : 86400))) : 0 };
+      nVis: J.nVis, outN: W.first_s && J.from_s < W.first_s ? Math.min(J.nVis, Math.floor((W.first_s - J.from_s) / (S.period === "4h" ? 14400 : 86400))) : 0 };
     var add = function (m, price, q) { var k = Math.floor(price / row + 1e-9); m.set(k, (m.get(k) || 0) + q); };
     [["long", true], ["short", false]].forEach(function (sd) {
       var D_ = W[sd[0]], isL = sd[1];
@@ -425,6 +432,10 @@
   //   ② 가격×OI 사분면(보이는 봉, 바이낸스 선물 · 코인 수량): 그날 OI 변화 부호 × 그날 델타 부호 → 새 롱 · 새 숏 · 숏 커버 · 롱 정리.
   //      롱 순증 = 새 롱 − 롱 정리 · 숏 순증 = 새 숏 − 숏 커버 · 차이가 네 칸 합의 10% 미만이면 중립. ponytail: 일 단위라 그날 안 섞임은 못 본다.
   //   ③ 30일 포지션 모델: 남은 롱 몫 > 55% 롱 · < 45% 숏.
+  //   🔴2026-11-13 사용자 «롱 우세가 한 번도 없다»: ①을 기본 0.01% 대비로 판정했더니 2026 ETH 167일 중 163일 «숏»(3일 평균이 0.01% 를 한 번도 안 넘음)
+  //     → 롱 우세(근거 2개 롱)가 구조적으로 거의 불가능했다. ①을 «평소 대비» = 최근 90일 그날 평균 중 3일 평균의 분위(≥70 롱 · ≤30 숏)로 바꿨다.
+  //     같은 167일 재계산: 펀딩 표 롱 41 · 중립 74 · 숏 23 → 판정 롱 쪽 약하게 34 · 숏 쪽 약하게 39 · 숏 우세 21 · 엇갈림 24 · 중립 18 · 롱 우세 2
+  //     (롱 우세가 드문 건 그 기간 사분면이 실제로 숏 쪽이었기 때문). 0.01% 대비 절대 위치(선물 할인/웃돈)는 글로 같이 적는다.
   var F_BASE = 1e-4;
   function fmtF(v) { return (v >= 0 ? "+" : "−") + Math.abs(v * 100).toFixed(4) + "%"; }
   function fundDay(d) {   // 그날 거래소 평균(있는 것만)
@@ -438,11 +449,12 @@
     for (i = S.n - 1; i >= 0 && f3.length < 3; i--) { var fd = fundDay(D.d[i]); if (fd != null) f3.push(fd); }
     if (f3.length) {
       var fm = f3.reduce(function (t, v) { return t + v; }, 0) / f3.length, hist = [];
-      Object.keys(X.bn_fund || {}).forEach(function (d) { var v = fundDay(d); if (v != null) hist.push(v); });
+      Object.keys(X.bn_fund || {}).sort().slice(-90).forEach(function (d) { var v = fundDay(d); if (v != null) hist.push(v); });
       var pr = hist.length >= 30 ? hist.filter(function (v) { return v <= fm; }).length / hist.length : null;
-      ev.push({ v: fm > F_BASE + 1e-5 ? 1 : fm < F_BASE - 1e-5 ? -1 : 0, s: "펀딩 3일 " + fmtF(fm),
-                l: "펀딩 3일 " + fmtF(fm) + "/8h(" + (fm < F_BASE - 1e-5 ? "0.01% 아래 = 선물 할인" : fm > F_BASE + 1e-5 ? "0.01% 위 = 선물 웃돈" : "0.01% = 현물 근처") +
-                   (pr != null ? " · " + hist.length + "일 중 " + Math.round(pr * 100) + "분위" : "") + ")" });
+      var fv = pr != null ? (pr >= 0.7 ? 1 : pr <= 0.3 ? -1 : 0) : fm > F_BASE + 1e-5 ? 1 : fm < F_BASE - 1e-5 ? -1 : 0;   // 이력 30일 미만이면 0.01% 기준
+      ev.push({ v: fv, s: "펀딩 " + (pr != null ? Math.round(pr * 100) + "분위" : fmtF(fm)),
+                l: "펀딩 3일 " + fmtF(fm) + "/8h(" + (pr != null ? "최근 " + hist.length + "일 중 " + Math.round(pr * 100) + "분위 · " : "") +
+                   (fm < F_BASE - 1e-5 ? "0.01% 아래 = 선물 할인" : fm > F_BASE + 1e-5 ? "0.01% 위 = 선물 웃돈" : "0.01% = 현물 근처") + ")" });
     }
     var nl = 0, ns = 0, cv = 0, cl = 0;
     for (j = Math.max(a, 1); j <= b; j++) {
@@ -453,20 +465,21 @@
     var gross = nl + ns + cv + cl, netL = nl - cl, netS = ns - cv, c = A().coin, sq_ = function (v) { return (v >= 0 ? "+" : "−") + qty(Math.abs(v)); };
     if (gross > 0) ev.push({ v: Math.abs(netL - netS) < 0.1 * gross ? 0 : netL > netS ? 1 : -1, s: "사분면",
       l: "사분면 " + (b - Math.max(a, 1) + 1) + "봉(바이낸스 선물) 롱 순증 " + sq_(netL) + " · 숏 순증 " + sq_(netS) + " " + c });
-    if (R.lT + R.sT > 0) { var sh = R.lT / (R.lT + R.sT);
+    if (R && R.lT + R.sT > 0) { var sh = R.lT / (R.lT + R.sT);
       ev.push({ v: sh > 0.55 ? 1 : sh < 0.45 ? -1 : 0, s: "계약 롱 " + Math.round(sh * 100) + "%", l: "보이는 봉 남은 계약 롱 " + Math.round(sh * 100) + "%" }); }
     var up = ev.filter(function (e) { return e.v > 0; }).length, dn = ev.filter(function (e) { return e.v < 0; }).length, ne = ev.length - up - dn;
     var word = up && dn ? "엇갈림" : up >= 2 ? "롱 우세" : dn >= 2 ? "숏 우세" : up ? "롱 쪽 약하게" : dn ? "숏 쪽 약하게" : "중립";
     return { word: word, side: up && dn ? 0 : up - dn, cnt: "근거 " + ev.length + "개 중 롱 " + up + " · 숏 " + dn + " · 중립 " + ne, ev: ev };
   }
   function drawLiqSummary(g, C, G, a, b) {   // 왼쪽 위 상자 -- 단위 맞춘 숫자(수량 · 달러 · %)
-    var R = S.ppR; if (!R) return;
+    var R = S.ppR;   // 검증 11-13: 프로파일이 실패(503·404·모델 밖)해도 펀딩·사분면 판정은 그린다
+    if (!R && !(S.X && S.X.bn_fund) && S.period !== "1d") return;
     var V = lsVerdict(R, a, b), vc = V.side > 0 ? C.good : V.side < 0 ? C.bad : C.text, tag = function (e) { return (e.v > 0 ? "롱" : e.v < 0 ? "숏" : "중립"); };
-    var P = R.P, c = A().coin, tL = ppTop(R.liqL, R.row, P), tS = ppTop(R.liqS, R.row, P), nar = G.narrow;
+    var P = R ? R.P : 0, c = A().coin, tL = R ? ppTop(R.liqL, R.row, P) : null, tS = R ? ppTop(R.liqS, R.row, P) : null, nar = G.narrow;
     var vLines = nar ? [["롱·숏 " + V.word + " (" + V.cnt.replace("근거 ", "").replace("개 중", "중") + ")", vc], [V.ev.map(function (e) { return e.s + " " + tag(e); }).join(" · "), C.text]]
       : [["롱·숏 → " + V.word + " (" + V.cnt + ")", vc],
          [V.ev.map(function (e) { return e.l + " " + tag(e); }).join(" · "), C.text]];
-    var lines = !(R.tot > 0) || R.avgL == null ? [["보이는 봉은 포지션 모델 밖(최근 30일만 앎) -- 청산 대기 없음", C.muted]] : nar ? [["아래 롱 " + qty(R.lDn) + " " + c + " · 평균 진입 " + px(R.avgL) + " " + pct(P / R.avgL - 1), C.text],
+    var lines = !R || !(R.tot > 0) || R.avgL == null ? [[(S.PP === undefined || S.ppLoading) && !R ? "청산 대기 받는 중" : "청산 대기 없음 -- 보이는 봉이 포지션 모델 밖(최근 30일만 앎)이거나 받지 못함", C.muted]] : nar ? [["아래 롱 " + qty(R.lDn) + " " + c + " · 평균 진입 " + px(R.avgL) + " " + pct(P / R.avgL - 1), C.text],
                        ["롱 청산 대기 " + usd(R.liqDn * P) + (tL ? " · 최대 " + px(tL.px) + " " + tL.d.toFixed(1) + "%" : ""), C.bad],
                        ["숏 청산 대기 " + usd(R.liqUp * P) + (tS ? " · 최대 " + px(tS.px) + " +" + tS.d.toFixed(1) + "%" : ""), C.good]]
       : [["추정 · 보이는 " + R.nVis + "봉에 열려 남은 계약 " + qty(R.tot) + " " + c + "(OI 의 " + Math.round(100 * R.tot / R.oi) + "%)" + (R.outN ? " · 앞 " + R.outN + "봉은 모델 밖(최근 30일만 앎)" : "") + " · 청산가 = 레버리지 10~100배 같은 비중", C.muted],
@@ -708,6 +721,7 @@
   function drawLanes(g, C, G, a, b, xOf, bw) {
     var D = S.D, w = Math.max(1, Math.min(bw * 0.62, 44)), hi = S.hover ? S.hover.i : S.n - 1;
     LANES.forEach(function (lane) {
+      if (!G.lanes[lane[0]]) return;
       var k = lane[0], name = lane[1], y = G.lanes[k].y, h = G.lanes[k].h, i, v;
       g.strokeStyle = C.soft; g.lineWidth = 1;
       g.beginPath(); g.moveTo(G.L, y + 0.5); g.lineTo(G.L + G.plotW, y + 0.5); g.stroke();

@@ -95,7 +95,7 @@
       });
     });
     for (var i = 1; i <= FINE; i++) { fineDn[i] += fineDn[i - 1]; fineUp[i] += fineUp[i - 1]; }
-    return { rows: rows, dn: fineDn, up: fineUp };
+    return { rows: rows, dn: fineDn, up: fineUp, unit: tp.unit };
   }
   var cumAt = function (m, d) { var i = Math.min(FINE, Math.round(Math.abs(d) / 0.1)); return d < 0 ? m.dn[i] : m.up[i]; };
   function realRows(P) {   // 7일 실측을 지금 가격의 ±0.25% 칸으로
@@ -179,7 +179,8 @@
     if (!(P > 0)) return null;
     var L = narrow ? 44 : 62, R = narrow ? 44 : 62, Tp = 26, Bt = 22, ch = h - Tp - Bt, xr = w - R;
     var X = function (d) { return L + (xr - L) * (d + R_) / (2 * R_); }, bw = Math.max((xr - L) / (2 * R_ / 0.25) - 1, 1), LEV = ["--lev10", "--lev25", "--lev50", "--lev100"];
-    var inR = function (g) { return Math.abs(g * 0.25) <= R_; }, bars = [], mp = null, s = "", head = "";
+    var inR = function (g) { return Math.abs(g * 0.25) <= R_; }, bars = [], mp = null, s = "", head = "", fu = usd;
+    if (k === "real" && !(S.data && S.data.real)) return null;   // 검증 11-13: 실측 자료 전엔 «롱 $0 · 숏 $0» 대신 빈 상태(받는 중)
     if (k === "real") {
       var real = realRows(P);
       Object.keys(real).filter(inR).forEach(function (g) { var r = real[g]; bars.push({ g: +g, d: g * 0.25, parts: [[r[0], "var(--bad)"], [r[1], "var(--good)"]], tot: r[0] + r[1] }); });
@@ -190,10 +191,11 @@
       });
     } else {
       mp = mapOf(Number(k)); if (!mp) return null;
+      if (mp.unit === "share") fu = function (v) { return pc(v, v >= 0.1 ? 0 : 1); };   // 검증 11-13: OI 없는 종목 지도 = 몫(합 1) -- 달러로 적으면 «$0»
       Object.keys(mp.rows).filter(inR).forEach(function (g) { var r = mp.rows[g]; bars.push({ g: +g, d: g * 0.25, parts: r.map(function (v, ti) { return [v, "var(" + LEV[ti] + ")"]; }), tot: r[0] + r[1] + r[2] + r[3] }); });
     }
-    var mx = Math.max.apply(null, bars.map(function (b) { return b.tot; }).concat([1])) * 1.08, Y = function (v) { return Tp + ch * (1 - v / mx); };
-    ticks(mx, 4).forEach(function (v) { s += line("lq-gl", L, xr, Y(v), Y(v)) + txt("lq-ax", L - 6, Y(v) + 3, usd(v), "end"); });
+    var mx = Math.max.apply(null, bars.map(function (b) { return b.tot; }).concat([1e-12])) * 1.08, Y = function (v) { return Tp + ch * (1 - v / mx); };
+    if (bars.length) ticks(mx, 4).forEach(function (v) { s += line("lq-gl", L, xr, Y(v), Y(v)) + txt("lq-ax", L - 6, Y(v) + 3, fu(v), "end"); });
     for (var d = -R_; d <= R_; d += narrow ? 2 : 1) s += (d ? line("lq-gl", X(d), X(d), Tp, Tp + ch) + txt("lq-ax", X(d), h - 6, px(P * (1 + d / 100)), "middle") : "");
     s += line("lq-z", L, xr, Tp + ch, Tp + ch);
     bars.forEach(function (b) {
@@ -203,18 +205,18 @@
     var cumL = 0, cumS = 0;
     if (mp) {   // 누적 = 지금가에서 그 가격까지(0.1% 칸 누적 배열 mapOf.dn/up) · 오른쪽 축
       cumL = cumAt(mp, -R_); cumS = cumAt(mp, R_);
-      var cmx = Math.max(cumL, cumS, 1) * 1.08, YC = function (v) { return Tp + ch * (1 - v / cmx); }, st = narrow ? 0.2 : 0.1;
+      var cmx = Math.max(cumL, cumS, 1e-12) * 1.08, YC = function (v) { return Tp + ch * (1 - v / cmx); }, st = narrow ? 0.2 : 0.1;
       [[-1, cumL, "var(--bad)"], [1, cumS, "var(--good)"]].forEach(function (z) {
         var pts = []; for (var q = 0; q <= R_ + 1e-9; q += st) pts.push([X(z[0] * q), YC(cumAt(mp, z[0] * q))]);
         s += '<path d="' + path(pts) + "L" + pts[pts.length - 1][0].toFixed(1) + " " + (Tp + ch) + "L" + X(0).toFixed(1) + " " + (Tp + ch) + 'Z" fill="' + z[2] + '" opacity=".10"/>'
           + '<path d="' + path(pts) + '" fill="none" stroke="' + z[2] + '" stroke-width="2"/>';
       });
-      ticks(cmx, 4).forEach(function (v) { s += txt("lq-ax", xr + 6, YC(v) + 3, usd(v)); });
-      head = narrow ? "누적 롱 " + usd(cumL) + " · 숏 " + usd(cumS) : "누적 롱 청산(아래 " + R_ + "%) " + usd(cumL) + " · 숏 청산(위 " + R_ + "%) " + usd(cumS) + (cumL + cumS > 0 ? " · 롱 몫 " + pc(cumL / (cumL + cumS)) : "");
+      ticks(cmx, 4).forEach(function (v) { s += txt("lq-ax", xr + 6, YC(v) + 3, fu(v)); });
+      head = narrow ? "누적 롱 " + fu(cumL) + " · 숏 " + fu(cumS) : "누적 롱 청산(아래 " + R_ + "%) " + fu(cumL) + " · 숏 청산(위 " + R_ + "%) " + fu(cumS) + (cumL + cumS > 0 ? " · 롱 몫 " + pc(cumL / (cumL + cumS)) : "");
     } else if (k === "real") {
       var rl = 0, rs = 0; bars.forEach(function (b) { rl += b.parts[0][0]; rs += b.parts[1][0]; }); head = "7일 실제 청산 ±" + R_ + "% · 롱 " + usd(rl) + " · 숏 " + usd(rs);
-    } else head = bars.length ? "HL 고래 청산가 " + bars.length + "개 · 최대 " + usd(mx / 1.08) : "HL 고래 청산가가 ±" + R_ + "% 안에 없음";
-    s += txt("lq-ax lq-axh o", L + 6, 14, head) + (mp && !narrow ? txt("lq-ax o", xr, 14, "막대 = 칸(왼쪽 축) · 선 = 누적(오른쪽 축)", "end") : "");
+    } else head = bars.length ? "HL 고래 청산가 " + bars.length + "개 · 최대 " + fu(mx / 1.08) : "HL 고래 청산가가 ±" + R_ + "% 안에 없음";
+    s += txt("lq-ax lq-axh o", L + 6, 14, head) + (mp && w >= 760 ? txt("lq-ax o", xr, 14, "막대 = 칸(왼쪽 축) · 선 = 누적(오른쪽 축)", "end") : "")   // 검증 11-13: 420~600px 에서 머리 글과 겹침;
     var pos = typeof snapshotAccountPosition === "function" ? snapshotAccountPosition() : null, liq = pos && Number(pos.liquidation_price);
     if (liq > 0 && Math.abs(liq / P - 1) * 100 <= R_) { var xl = X((liq / P - 1) * 100); s += '<line x1="' + xl + '" x2="' + xl + '" y1="' + Tp + '" y2="' + (Tp + ch) + '" stroke="var(--position)" stroke-width="1.5"/>' + txt("lq-ax t o", xl + 4, Tp + 12, "내 청산가 " + px(liq)); }
     var x0 = X(0);
@@ -223,9 +225,9 @@
       var dd = (x - L) / (xr - L) * 2 * R_ - R_; if (Math.abs(dd) > R_) return "";
       var g = Math.round(dd / 0.25), hd = px(P * (1 + g * 0.25 / 100)) + " · " + sgn(g * 0.25, 2) + "%";
       if (k === "hl") { var nb = bars.filter(function (b) { return Math.abs(b.d - dd) <= 0.25; }); return nb.length ? hd + "<br>" + nb.map(function (b) { return "청산가 " + px(b.px) + " · " + usd(b.tot); }).join("<br>") : ""; }
-      var b = bars.find(function (q) { return q.g === g; }); if (!g) return "";
-      var t = hd + "<br>" + (b ? (k === "real" ? "롱 " + usd(b.parts[0][0]) + " · 숏 " + usd(b.parts[1][0]) : "칸 " + usd(b.tot) + " (10배 " + usd(b.parts[0][0]) + " · 20~25배 " + usd(b.parts[1][0]) + " · 50배 " + usd(b.parts[2][0]) + " · 75~100배 " + usd(b.parts[3][0]) + ")") : "칸 0");
-      if (mp) t += "<br>지금가에서 여기까지 누적 " + (g < 0 ? "롱 " : "숏 ") + usd(cumAt(mp, g * 0.25)) + "<br>지도 금액은 OI×2 눈금 · 절대액 아님";
+      var b = bars.find(function (q) { return q.g === g; }); if (!g && k !== "real") return "";   // 검증 11-13: 실측은 지금가 칸(g=0)도 그린다
+      var t = hd + "<br>" + (b ? (k === "real" ? "롱 " + usd(b.parts[0][0]) + " · 숏 " + usd(b.parts[1][0]) : "칸 " + fu(b.tot) + " (10배 " + fu(b.parts[0][0]) + " · 20~25배 " + fu(b.parts[1][0]) + " · 50배 " + fu(b.parts[2][0]) + " · 75~100배 " + fu(b.parts[3][0]) + ")") : "칸 0");
+      if (mp && g) t += "<br>지금가에서 여기까지 누적 " + (g < 0 ? "롱 " : "숏 ") + fu(cumAt(mp, g * 0.25)) + "<br>" + (mp.unit === "share" ? "지도 = 주기 합 대비 몫" : "지도 금액은 OI×2 눈금 · 절대액 아님");
       return t;
     };
     return svg(w, h, s, "청산맵 " + LADLAB[k] + ": 가격별 청산 금액과 누적");

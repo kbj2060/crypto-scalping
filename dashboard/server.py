@@ -3644,7 +3644,7 @@ def make_app() -> web.Application:
     #   받을 때마다 data/live/xcvd/<코인>.json 에 날짜별로 합쳐 쌓는다 -- OKX 처럼 이력이 짧은 원천도 앞으로는 길어진다. Bybit·Coinbase 현물·선물 CVD 는 공개 일봉에 매수/매도 구분이 없어 없다.
     XCVD_CCY = {"eth": "ETH", "btc": "BTC", "xrp": "XRP"}   # 주식(바이낸스 TradFi)은 현물·다른 거래소가 없다 -- 1d 자체 열만
     XCVD_KEYS = ("bn_spot", "okx_spot", "okx_fut", "okx_oi", "bybit_oi", "px", "bn_fund", "okx_fund", "bybit_fund")
-    XCVD_VER = 2   # 2 = OI 날짜 정정(아래) -- 옛 파일의 OI 칸은 하루 밀린 날짜라 버리고 다시 받는다
+    XCVD_VER = 3   # 2 = OI 날짜 정정(아래) -- 옛 파일의 OI 칸은 하루 밀린 날짜라 버리고 다시 받는다 · 3 = 펀딩 부분 일 덮어쓰기 정정(아래) -- 펀딩 칸 버리고 다시
 
     async def _xcvd_refresh(a: str) -> dict:
         ccy, path = XCVD_CCY[a], LIVE_DIR / "xcvd" / f"{a}.json"
@@ -3652,8 +3652,10 @@ def make_app() -> web.Application:
             cur = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             cur = {}
-        if cur.get("v") != XCVD_VER:
+        if (cur.get("v") or 0) < 2:
             cur = {k: v for k, v in cur.items() if k not in ("okx_oi", "bybit_oi")}
+        if (cur.get("v") or 0) < 3:
+            cur = {k: v for k, v in cur.items() if k not in ("bn_fund", "okx_fund", "bybit_fund")}
         new: dict[str, dict] = {k: {} for k in XCVD_KEYS}
         day = lambda ms: datetime.fromtimestamp(ms / 1000, timezone.utc).strftime("%Y-%m-%d")  # noqa: E731
         okx_day = lambda ms: day(int(ms) + 8 * 3600_000)  # noqa: E731
@@ -3702,9 +3704,15 @@ def make_app() -> web.Application:
                 acc: dict[str, list[float]] = {}
                 for r in rows:
                     acc.setdefault(day(int(r[tk])), []).append(float(r["fundingRate"]))
-                new[key] = {d: sum(v) / len(v) for d, v in acc.items()}
-            except Exception:  # noqa: BLE001
-                pass
+                # 검증 11-13: 원천은 최근 N건만 준다 -- 창 맨 앞 날은 정산 일부(3건 → 2 → 1)만 남아, 쌓아 둔 온전한 평균을 그 부분 평균이
+                #   덮었다(마지막엔 16시 1건 값으로 굳음). 하루 정산 수(가장 많은 날)를 다 가진 날 + 오늘(형성 중)만 쓴다.
+                full = max((len(v) for v in acc.values()), default=0)
+                last = max(acc, default=None)
+                new[key] = {d: sum(v) / len(v) for d, v in acc.items() if len(v) == full or d == last}
+                if not new[key]:
+                    print(f"[xcvd] {a}: {key} 원천 빈 응답(오류 코드일 수 있음) -- 쌓인 값만 씀", flush=True)   # 검증 11-13: OKX·Bybit 는 오류도 HTTP 200 + 빈 목록
+            except Exception as exc:  # noqa: BLE001
+                print(f"[xcvd] {a}: {key} 실패 {exc!r}"[:200], flush=True)
         out = {k: {**cur.get(k, {}), **new[k]} for k in XCVD_KEYS}
         out["v"] = XCVD_VER
         if not any(new[k] for k in XCVD_KEYS):   # 검증 11-13: 전부 실패를 1시간 «정상»으로 캐시했다 -- 던지면 swr 이 옛 응답을 내주고 곧 다시 시도한다
@@ -4666,7 +4674,8 @@ def make_app() -> web.Application:
             except ValueError:
                 raise web.HTTPBadRequest(reason="bad_range") from None
             now_i = int(time.time())
-            f_s, t_s = max(f_s, now_i - 31 * 86400), min(t_s, now_i + 86400)
+            g4 = lambda v: v // 14400 * 14400   # noqa: E731 -- 검증 11-13: 하한을 격자에 안 맞춰 «31일 전»이 초 단위로 남아 캐시 키가 매초 새로 생겼다
+            f_s, t_s = max(f_s, g4(now_i - 31 * 86400)), min(t_s, g4(now_i + 86400))
             if f_s >= t_s:
                 raise web.HTTPBadRequest(reason="bad_range")
             rng, wins = (f_s, t_s), ()
