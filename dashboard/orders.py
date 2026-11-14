@@ -936,8 +936,12 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
     async def keep_rearm(plan: dict, state: dict) -> None:
         """2026-11-14 사용자 «추가 진입 = 기존 포지션 SLTP 조건 그대로»: 무장(선·나눈 조각·지운 선·서버 감시 손절)은 그대로 두고
         익절 지정가 수량만 합친 전량으로 다시 건다(partial_exit_rearm_tp = 부분 청산 뒤와 같은 함수 · 조각이면 조각 무게대로). 손절은 서버 감시라 크기가 따로 없다."""
-        if not bracket_load().get(bracket_key(plan["symbol"], plan["positionSide"])):
-            state["bracket"] = {"kept": True, "note": "기존 포지션에 익절·손절이 없어 그대로 둡니다"}
+        cur = bracket_load().get(bracket_key(plan["symbol"], plan["positionSide"]))
+        if not cur:   # 검증 11-14(high): 대기 중 포지션이 닫혀 무장이 지워진 뒤 체결 = 새 포지션 -- 그대로 두면 무방비. 계획에 복사한 선으로 다시 무장
+            await arm_bracket(plan, state, add=False)
+            return
+        if any(g.get("fired") for g in cur.get("sl_legs") or []):   # 검증 11-14: 손절 조각 청산 중 -- 그 청산 뒤 다시 걸기와 겹쳐 익절이 두 벌 걸리지 않게 이쪽은 건너뛴다
+            state["bracket"] = {"kept": True, "note": "기존 익절·손절 그대로 · 손절 조각 청산 중이라 익절 수량은 그 뒤에 맞춥니다"}
             return
         await partial_exit_rearm_tp(plan, state)
         r = state.get("tp_rearm") or {}
@@ -1510,12 +1514,14 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 lines = (0.0, 0.0)   # 2026-11-12 사용자 «SOXL 추가 숏이 안 된다»: 막지 않고 선 추가 진입과 같은 길(무장된 선 그대로 · 크기만) -- 값은 아래에서 무장된 선으로 바뀐다
             # 2026-11-14 사용자 «포지션 추가에 익절/손절 라인이 왜 있어야 하나 -- 기존 포지션 SLTP 조건 그대로 추가 진입만»:
             #   같은 쪽 포지션이 있으면 보낸 선은 쓰지 않는다. 선 없는 포지션(규칙 손절 · 앱 진입)에 선 도구로 왔으면 일반 추가 진입(아래 규칙 손절은 기존 것 그대로 · 무장 없으면 없는 그대로).
+            dropped_lines = False
             if same and lines and not (prev and prev.get("lines")):
                 if limit_usdt:
                     return None, {}, {}, ({"error": "add_limit_unsupported",
                                            "detail": "선 주문으로 연 포지션이 아니라 지정가 추가 진입은 아직 안 됩니다 — 진입선 없이(peg) 추가하세요"}, 409)
                 lines = None
-            if same and prev and (prev.get("fired") or bracket_key(symbol, side) in bracket_exiting):
+                dropped_lines = True
+            if same and prev and (prev.get("fired") or bracket_key(symbol, side) in bracket_exiting or any(g.get("fired") for g in prev.get("sl_legs") or [])):
                 return None, {}, {}, ({"error": "exiting", "detail": "이 포지션의 청산이 진행 중입니다 — 끝난 뒤 다시"}, 409)
             p_in = float(book["bidPrice"] if side == "LONG" else book["askPrice"])   # 이번 주문 지정가(메이커 쪽)
             anchor, kind = ((float(same[0].get("entry_price") or 0.0), "평단") if same else (p_in, "첫 진입가"))
@@ -1578,6 +1584,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             _rx = (plan["trade_plan"] or {}).get("prescription") or {}
             _lv = (_rx.get("exchange_leverage") or {}) if _rx.get("available") else {}
             plan["bracket"] = stop_bracket
+            if same and dropped_lines:   # 검증 11-14: 보낸 선을 조용히 버리지 않는다
+                plan["notes"] = [*plan.get("notes", []), "추가 진입 — 선 주문 포지션이 아니라 끌어 놓은 익절·손절선은 쓰지 않습니다(기존 손절 그대로)"]
             if lines:   # 2026-10-28 차트 선(익절, 손절 · USDT): 거래소 스탑 없이 익절 = post-only 지정가 · 손절 = 1초 체결가 닿음 → peg 청산
                 add_lines = False
                 if same:
@@ -2764,7 +2772,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 book = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker", {"symbol": symbol}, error_reason="book_ticker_failed")
                 basis, filters = await basis_for(book, exec_asset_of(symbol) or "eth"), await load_filters(binance_session(), symbol)
                 ref = float(book["askPrice" if (plan["positionSide"] == "LONG") == (action == "market") else "bidPrice"]) / basis   # 체결될 쪽 호가(USDT): 시장가 = 반대편 · peg = 내 쪽
-                line_bracket(position_side=plan["positionSide"], ref_level=ref, tp_level=float(br["tp_level"]), sl_level=float(br["sl_level"]), basis=basis, filters=filters)
+                if not plan.get("add_keep"):   # 검증 11-14: 추가 진입 = 기존 무장 그대로(선 검사 없음 · 지운 선은 None)
+                    line_bracket(position_side=plan["positionSide"], ref_level=ref, tp_level=float(br["tp_level"]), sl_level=float(br["sl_level"]), basis=basis, filters=filters)
             except ValueError as exc:
                 print(f"wait-action {action}: 거절 lines_off {exc}", flush=True)
                 return web.json_response({"ok": False, "error": "lines_off", "detail": f"지금 호가 기준으로 익절·손절선이 맞지 않아 {'시장가' if action == 'market' else 'peg'}로 넣지 않습니다 — {exc}"}, status=409)

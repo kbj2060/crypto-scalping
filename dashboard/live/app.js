@@ -406,13 +406,17 @@ const lineStop = (t, p) => { if (t.placed) return !!t.stopP; const s = lineSide(
 const lineDig = (v) => (v >= 100 ? 2 : 4);   // XRP(~2.5) 는 소수 넷째 자리 -- 둘째 자리로 자르면 선이 0.2% 옮겨진 채 나간다(10-28 검증)
 const lineFmt = (v) => Number(v).toLocaleString("en-US", { minimumFractionDigits: lineDig(v), maximumFractionDigits: lineDig(v) });
 const linePx = (v) => v.toFixed(lineDig(v));
+function execPosSide(want) {   // 주문 심볼(USDC 등)에 그 방향 포지션이 있으면 want, 없으면 ""
+  const sym = execSymbolFor(activeSnapshotAsset) || (activeSnapshotAsset === "eth" ? "ETHUSDC" : "");
+  return sym && (latestBinanceAccount?.positions || []).some((p) => p.symbol === sym && String(p.side).toUpperCase() === want && Number(p.qty)) ? want : "";
+}
 function lineToolToggle(want) {   // 2026-10-30 사용자 «롱만 나오고 숏 진입 방법이 없다 → SLTP 버튼을 롱/숏으로»
   const G = chartGeo, p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), cur = lineTool && p > 0 ? lineSide(lineTool, p) : "";
   if (lineTool && lineTool.placed) return;   // 대기 주문이 걸린 동안은 «주문 취소»로만 끈다
   if (lineTool && cur === want) { lineTool = null; renderLineTool(); return; }   // 같은 쪽을 다시 누르면 끈다
   if (!G || !(G.ymax > G.ymin) || !(p > 0)) return;
   if (lineTool && lineTool.add) lineTool = null;   // 추가 진입 도구에서 반대쪽을 누르면 새 선 도구로(기존 선은 거울로 못 옮긴다)
-  const arm = armedLinesNow(), pos = snapshotAccountPosition(), pside = pos && Number(pos.qty) ? String(pos.side).toUpperCase() : "";
+  const arm = armedLinesNow(), pside = execPosSide(want);   // 검증 11-14: snapshotAccountPosition 은 주문 심볼 포지션이 없으면 차트 심볼(봇)로 떨어지고 헤지면 첫 다리만 봤다
   // 2026-11-14 사용자 «포지션 추가는 기존 SLTP 조건 그대로 추가 진입만»: 같은 쪽 포지션이 있으면(선 무장이 없어도) 추가 진입 도구 -- 익절·손절선을 요구하지 않는다(서버도 보낸 선을 안 쓴다)
   if (!lineTool && pside === want) {
     const p1 = want === "LONG" ? 1 : -1;
@@ -450,7 +454,7 @@ function linePreview() {   // 크기는 서버 미리보기(증거금 linePct %)
     if (!t || t.placed) return;   // 대기 주문은 서버가 크기를 이미 정했다
     if (!side) { t.plan = null; t.err = "익절과 손절이 현재가 양쪽에 있어야 합니다"; renderLineTool(); return; }
     try {
-      const d = await manualEntryFetch(side, "entry", { rule: "", pct: linePct, tp: t.add ? "" : linePx(t.tp), sl: t.add ? "" : linePx(t.sl), limit: t.entry > 0 ? linePx(t.entry) : "", stop: lineStop(t, p) });
+      const d = await manualEntryFetch(side, "entry", { rule: "", pct: linePct, tp: linePx(t.tp), sl: linePx(t.sl), limit: t.entry > 0 ? linePx(t.entry) : "", stop: lineStop(t, p) });
       if (lineTool !== t || seq !== linePrevSeq) return;
       t.plan = d.ok ? d.plan : null; t.err = d.ok ? (d.plan.blocked || "") : (d.detail || d.error || "미리보기 실패");
     } catch (e) { if (lineTool === t && seq === linePrevSeq) { t.plan = null; t.err = "미리보기 실패"; } }
@@ -464,7 +468,7 @@ function lineFire() {   // 미리보기 → 오는 즉시 발주(manualFireOnPre
   t.fail = ""; const lim = t.entry > 0;   // 지정가 = 접수가 확인될 때까지 선을 둔다(manualEntrySubmit 이 placed 로) · peg = 현행대로 바로 지운다
   const stp = lim && lineStop(t, p);
   ofabWatchResult(); ofabSay(escapeHtml(`${side === "LONG" ? "롱" : "숏"} ${stp ? "감시 " : lim ? "지정가 " : ""}선 주문 — ${HOLD_FIRE_MS ? "미리보기 받는 중…" : "주문 전송 중…"}`));
-  const ov = { rule: "", pct: linePct, tp: t.add ? "" : linePx(t.tp), sl: t.add ? "" : linePx(t.sl), fresh: true, limit: lim ? linePx(t.entry) : "", stop: stp };
+  const ov = { rule: "", pct: linePct, tp: linePx(t.tp), sl: linePx(t.sl), fresh: true, limit: lim ? linePx(t.entry) : "", stop: stp };   // 검증 11-14: 추가 모드도 선을 같이 보낸다(서버는 같은 쪽이면 무장된 조건을 쓴다) -- 비우면 지정가가 400 · 집행이 «기다리기» 드롭다운을 따라갔다
   if (!HOLD_FIRE_MS) manualFireNow(side, "entry", ov);   // 즉시 모드 -- 미리보기 없이 바로
   else { manualFireOnPreview = true; manualEntryPreview(side, "entry", ov); }
   renderLineTool();   // peg 도 선은 서버가 받았다고 한 뒤(manualEntrySubmit)에 거둔다 -- 거절되면 사유를 이 팝업에 남긴다
@@ -742,7 +746,7 @@ function renderLineTool() {
   h.hidden = !show;
   if (!show) return;
   const t = lineTool, pr = box.getBoundingClientRect(), mob = isMobileChartMode();
-  if (t.add && !(snapshotAccountPosition() && String(snapshotAccountPosition().side).toUpperCase() === t.addSide && Number(snapshotAccountPosition().qty))) t.add = false;   // 추가할 포지션이 사라졌으면(청산) 보통 선 도구로
+  if (t.add && execPosSide(t.addSide) !== t.addSide) t.add = false;   // 추가할 포지션이 사라졌으면(청산) 보통 선 도구로
   h.classList.toggle("lt-add", !!t.add);   // 추가 진입: 익절·손절선은 기존 것 그대로라 도구 쪽 선·꼬리표·손익비 버튼은 숨긴다(들어간 선 오버레이가 이미 그린다)
   const X = (x) => m.a * x + m.e - pr.left, Yv = (v) => G.mt + (G.ymax - v) * (G.pb - G.mt) / (G.ymax - G.ymin);
   const top = m.d * G.mt + m.f - pr.top, bot = m.d * G.pb + m.f - pr.top, Y = (v) => m.d * Yv(v) + m.f - pr.top;
@@ -1106,7 +1110,11 @@ function armedActs(h, a, legsOf, hide) {
     });
   });
   const html = items.map((o) => o.html).join("");
-  if (box._h !== html) { box.innerHTML = html; box._h = html; }
+  if (box._h !== html) {
+    const ae = document.activeElement, fk = ae && box.contains(ae) ? [ae.dataset.leg, ae.dataset.ln, ae.dataset.act, ae.dataset.kind, ae.dataset.i].join("|") : null;
+    box.innerHTML = html; box._h = html;
+    if (fk) { const nb = [...box.querySelectorAll(".lt-act")].find((b) => [b.dataset.leg, b.dataset.ln, b.dataset.act, b.dataset.kind, b.dataset.i].join("|") === fk); if (nb) nb.focus(); }   // 검증 11-14: 키보드로 ✕ 두 번 누르기
+  }
   // 2026-11-13 시안 A «붙은 캡슐»: 칩 오른쪽 끝에 이어 붙여 [칩 │ + │ ✕] 한 덩어리 · 높이 = 칩 높이 · 오른쪽 끝을 넘으면 칩째 왼쪽으로(휴대폰에서 ✕ 가 잘렸다)
   const lim = h.clientWidth - 6;
   [...box.children].forEach((s, j) => {

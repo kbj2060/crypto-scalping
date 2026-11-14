@@ -456,7 +456,7 @@
       var fv = pr != null ? (pr >= 0.7 ? 1 : pr <= 0.3 ? -1 : 0) : fm > F_BASE + 1e-5 ? 1 : fm < F_BASE - 1e-5 ? -1 : 0;   // 이력 30일 미만이면 0.01% 기준
       var fh = Object.keys(X.bn_fund || {}).sort().filter(function (d) { return d <= fEnd; }).slice(-30).map(function (d) { return fundDay(d); }).filter(function (v) { return v != null; });
       ev.push({ k: "fund", fm: fm, pr: pr, fh: fh, fEnd: fEnd, v: fv, s: "펀딩 " + (pr != null ? Math.round(pr * 100) + "분위" : fmtF(fm)),
-                l: "펀딩 3일" + (fEnd !== D.d[S.n - 1] ? "(~" + fEnd.slice(5).replace("-", "/") + ")" : "") + " " + fmtF(fm) + "/8h(" + (pr != null ? "최근 " + hist.length + "일 중 " + Math.round(pr * 100) + "분위 · " : "") +
+                l: "펀딩 3일" + (b < S.n - 1 ? "(~" + fEnd.slice(5).replace("-", "/") + ")" : "") + " " + fmtF(fm) + "/8h(" + (pr != null ? "최근 " + hist.length + "일 중 " + Math.round(pr * 100) + "분위 · " : "") +
                    (fm < F_BASE - 1e-5 ? "0.01% 아래 = 선물 할인" : fm > F_BASE + 1e-5 ? "0.01% 위 = 선물 웃돈" : "0.01% = 현물 근처") + ")" });
     }
     var nl = 0, ns = 0, cv = 0, cl = 0, daily = [];
@@ -499,9 +499,10 @@
     var Q = byK.quad;
     if (Q) {
       var qmx = Math.max.apply(null, Q.daily.map(function (r) { return r[2]; }).concat([1])), NM = { nl: "새 롱", ns: "새 숏", cv: "숏 커버", cl: "롱 정리" };
-      var cells = Q.daily.map(function (r) { var s_ = Math.round(6 + 10 * Math.sqrt(r[2] / qmx)); return '<i class="' + r[1] + '" style="width:' + s_ + "px;height:" + s_ + 'px" title="' + r[0] + " " + NM[r[1]] + " " + qty(r[2]) + " " + c + '"></i>'; }).join("");
+      var QN = 40, qd = Q.daily.slice(-QN);   // 검증 11-14: 6개월·전체면 칸이 2,000px 넘게 이어져 옆 칸을 덮었다 -- 최근 40칸만(합계는 보이는 봉 전체)
+      var cells = qd.map(function (r) { var s_ = Math.round(6 + 10 * Math.sqrt(r[2] / qmx)); return '<i class="' + r[1] + '" style="width:' + s_ + "px;height:" + s_ + 'px" title="' + r[0] + " " + NM[r[1]] + " " + qty(r[2]) + " " + c + '"></i>'; }).join("");
       var sg = function (v) { return (v >= 0 ? "+" : "−") + qty(Math.abs(v)); };
-      h += '<div class="rb-q" title="' + esc(Q.l) + '"><span class="t">사분면 ' + Q.n + "봉 · 꽉 찬 칸 = 새로 열림 · 빈 칸 = 정리 · 크기 = OI 변화 · 롱 " + sg(Q.netL) + " 숏 " + sg(Q.netS) + " " + c + " " + tag(Q.v) + '</span><span class="qd">' + cells + "</span></div>";
+      h += '<div class="rb-q" title="' + esc(Q.l) + '"><span class="t">사분면 ' + Q.n + "봉" + (Q.daily.length > QN ? "(칸 = 최근 " + QN + "봉)" : "") + " · 꽉 찬 칸 = 새로 열림 · 빈 칸 = 정리 · 크기 = OI 변화 · 롱 " + sg(Q.netL) + " 숏 " + sg(Q.netS) + " " + c + " " + tag(Q.v) + '</span><span class="qd">' + cells + "</span></div>";
     }
     var M = byK.model;
     if (R && R.tot > 0 && R.avgL != null) {
@@ -1024,6 +1025,7 @@
       if (period) S.period = period;
       if (on) S.asset = curAsset();
       S.X = undefined; S.PP = undefined; S.ppR = null; S.PPK = null;
+      var rb_ = $("fpdRibbon"); if (rb_) { rb_.innerHTML = ""; rb_._h = ""; }   // 검증 11-14: 받는 동안 옛 코인 판정이 남았다
       S.D = null; S.n = 0; S.cells.clear(); S.heat.clear(); S.stale.clear(); S.want = null; S.heatWant = null; S.view = null; S.hover = null;
       syncPeriodUi();
     }

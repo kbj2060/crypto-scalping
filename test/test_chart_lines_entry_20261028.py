@@ -329,6 +329,38 @@ class LinesAddSizeTest(LinesArmedGuardTest):
             self.assertEqual((armed["sl_level"], armed["sl_price"], armed["tp_price"]), (2480.0, 2479.6, 2550.4), armed)
         self._run(fn, acct=POS, run_entry=fake_entry, place_bracket=fake_bracket)
 
+    def test_bracket_cleared_while_wait_add_pending_rearms(self) -> None:   # 검증 11-14(high): 대기 중 무장이 지워진 뒤 체결 = 새 포지션 -- 계획의 선으로 다시 무장(무방비 금지)
+        calls = []
+
+        async def fake_wait(_s, plan, state, wait_sec, on_fill=None):
+            (server.LIVE_DIR / "manual_bracket_state.json").write_text("{}", "utf-8")   # 감시 루프 clear 가 무장을 지운 직후 peg 체결
+            state.update(filled=0.01); await on_fill()
+            state.update(phase="filled_maker", filled=float(plan["quantity"]))
+            return state
+
+        async def fake_bracket(_s, b, symbol, pside, **k):
+            calls.append(dict(b)); return {"placed": True, "tp": {"placed": True, "price": b.get("tp_price")}}
+
+        async def fn(c):
+            self._armed(self.SAVED)
+            body = await (await c.post("/api/manual-entry/submit?side=LONG&confirm=1&lev=20&pct=10&mode=wait&wait_min=60")).json()
+            self.assertTrue(body.get("ok"), body)
+            await asyncio.sleep(0.5)
+            st = json.loads((server.LIVE_DIR / "manual_bracket_state.json").read_text("utf-8"))
+            self.assertIn(f"{SYM}:LONG", st, "새로 열린 포지션에 무장이 없다(무방비)")
+            self.assertEqual((st[f"{SYM}:LONG"]["sl_level"], st[f"{SYM}:LONG"]["tp_price"]), (2480.0, 2550.4), st)
+        self._run(fn, acct=POS, run_entry_wait=fake_wait, place_bracket=fake_bracket)
+
+    def test_line_tool_limit_add_keeps_lines(self) -> None:   # 검증 11-14: 추가 도구가 선을 비워 보내 지정가가 400 이던 것 -- 선(자리값)을 같이 보내고 서버는 무장된 조건을 쓴다
+        async def fn(c):
+            self._armed(self.SAVED)
+            r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10&tp=2600&sl=2400&limit=2490")
+            b = await r.json()
+            self.assertEqual(r.status, 200, b)
+            self.assertTrue(b["plan"].get("add_keep") and b["plan"].get("limit"), b["plan"])
+            self.assertEqual((b["plan"]["bracket"]["tp_level"], b["plan"]["bracket"]["sl_level"]), (2550.0, 2480.0))
+        self._run(fn, acct=POS)
+
     def test_far_armed_tp_does_not_block_add(self) -> None:   # 2026-11-14 SOXL: 걸린 익절이 지금가에서 +17% -- 거리(15%)로 막지 않는다(방향은 아래 시험대로 본다)
         async def fn(c):
             self._armed({**self.SAVED, "tp_level": 2930.0, "tp_price": 2930.6})

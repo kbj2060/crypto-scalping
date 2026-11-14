@@ -3063,7 +3063,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .fpd-rib:empty { display: none; }
 .fpd-rib > div { display: flex; flex-direction: column; justify-content: center; gap: 4px; min-width: 0; padding: 0 14px; border-left: 1px solid var(--soft-line); }
 .fpd-rib > div:first-child { padding-left: 2px; border-left: 0; }
-.fpd-rib .rb-q { flex: 1 1 auto; }
+.fpd-rib .rb-q { flex: 1 1 auto; overflow: hidden; }
 .fpd-rib .t { flex: 0 0 auto; overflow: hidden; color: var(--muted); font: 500 10.5px/1.25 var(--font-sans); white-space: nowrap; text-overflow: ellipsis; }
 .fpd-rib .t b { font-weight: 700; }
 .fpd-rib .w { font: 700 15px/1.1 var(--font-sans); white-space: nowrap; }
