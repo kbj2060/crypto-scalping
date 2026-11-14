@@ -6,7 +6,7 @@
 // 🔴CI esprima: `?.(`·`?.[`·숫자 구분자 금지.
 (function () {
   "use strict";
-  var LADDER_R = 6, FINE = 400, BAR_POLL_MS = 30000, DATA_POLL_MS = 600000, TICK_MS = 5000, WINS = [7, 30, 60, 90, 180], STACK_MQ = "(max-width:1100px)";
+  var LADDER_R = 6, FINE = 1000, F4 = 400, BAR_POLL_MS = 30000, DATA_POLL_MS = 600000, TICK_MS = 5000, WINS = [7, 30, 60, 90, 180], STACK_MQ = "(max-width:1100px)";
   var S = { on: false, asset: null, win: 60, pp: "24H", data: null, dataT: 0, all: null, allT: 0, bars: [], barsT: 0, built: "" };
   try { var saved = Number(localStorage.getItem("liqTabWin")); if (WINS.indexOf(saved) >= 0) S.win = saved; var sp = localStorage.getItem("liqPainPer"); if (/^(12H|24H|48H|3D|1W|2W|1M)$/.test(sp || "")) S.pp = sp; } catch (e) { /* 저장 못 해도 동작 */ }
   var $ = function (id) { return document.getElementById(id); };
@@ -125,16 +125,16 @@
     return svg(w, h, s, "오늘 5분 누적 청산과 지난 날들의 같은 시각 띠");
   };
   // 남은 매물 히트맵 -- 그림 규칙은 일봉 히트맵(fp_daily.js drawHeat)과 같다: 투명도 .85×t^2.5 · densityColor. 칸값 t 는 서버가 98분위로 눌러 준다.
-  function heatUrl(rm, w, h, cw, x0, Y, clip) {
-    var key = [asset(), S.win, w, h, S.data.generated_ms, document.documentElement.dataset.theme || ""].join("|");
+  function heatUrl(rm, w, h, cw, x0, Y, clip, vk) {
+    var dp = S.rvBusy ? 1 : 2, key = [asset(), S.win, w, h, S.data.generated_ms, document.documentElement.dataset.theme || "", vk, dp].join("|");
     if (S.heatKey === key) return S.heatUrl;
-    var cv = document.createElement("canvas"), dp = 2; cv.width = w * dp; cv.height = h * dp;
+    var cv = document.createElement("canvas"); cv.width = w * dp; cv.height = h * dp;
     var g = cv.getContext("2d"); g.scale(dp, dp); g.beginPath(); g.rect(clip[0], clip[1], clip[2], clip[3]); g.clip();
     rm.cols.forEach(function (c, i) {
       if (!c.length) return;
       var xa = Math.floor(x0 + i * cw), xb = Math.floor(x0 + (i + 1) * cw);
       for (var k = 1; k < c.length; k++) {
-        var t = c[k] / 1000; if (!(t > 0)) continue;
+        var t = c[k] / 1000; if (!(t > 0) || xb < clip[0] || xa > clip[0] + clip[2]) continue;
         var cell = c[0] + k - 1, top = Math.floor(Y(rm.lo + (cell + 1) * rm.row)), bot = Math.ceil(Y(rm.lo + cell * rm.row));
         g.globalAlpha = 0.85 * Math.pow(t, 2.5); g.fillStyle = densityColor(t); g.fillRect(xa, top, xb - xa, Math.max(1, bot - top));
       }
@@ -142,29 +142,49 @@
     S.heatKey = key; S.heatUrl = cv.toDataURL();
     return S.heatUrl;
   }
+  // 2026-11-15 펜 메모 «풋프린트 차트처럼 자유롭게 움직이고 마우스 올린 선을 가격선으로»: 보기 = S.rv {i0(왼쪽 날 번호, 소수), span(보이는 날 수), yOff(가격 이동), yk(가격 폭 배율)}.
+  //   끌기 = 좌우·위아래 · 휠 = 날 확대(가로로 밀거나 Shift = 이동 · 왼쪽 가격축 위 = 가격 확대) · 두 손가락 = 확대 · 두 번 클릭 = 처음 보기(조작은 init). 사다리 ±6% 상자는 청산맵이 기간 전체를 보이게 되어 뺐다.
+  function remView(n) {
+    if (!S.rv || S.rv.n !== n) S.rv = { n: n, i0: 0, span: n, yOff: 0, yk: 1 };
+    var v = S.rv; v.span = Math.max(5, Math.min(n + 4, v.span)); v.i0 = Math.max(3 - v.span, Math.min(n - 3, v.i0)); v.yk = Math.max(0.1, Math.min(10, v.yk));
+    return v;
+  }
   CH.remain = function (el, w, h) {
     var D = S.data, rm = D && D.remain[String(S.win)]; if (!rm || !rm.cols || !rm.cols.length) return null;
-    var P = price(), days = D.days.slice(-rm.view), n = days.length, prof = w < 300 ? 36 : 52, sh = h < 240 ? 26 : 40, L = 44, R = prof + 6, Tp = 6, Bt = 15, xr = w - R;
-    var lo = Math.min.apply(null, days.map(function (d) { return d[3]; })) * 0.985, hi = Math.max.apply(null, days.map(function (d) { return d[2]; })) * 1.015, cw = (xr - L) / days.length, X = function (i) { return L + (i + 0.5) * cw; }, ch = h - Bt - sh - Tp, Y = function (p) { return Tp + ch * (1 - (p - lo) / (hi - lo)); }, s = "";
+    var P = price(), days = D.days.slice(-rm.view), n = days.length, prof = w < 300 ? 36 : 52, sh = h < 240 ? 26 : 40, L = 44, R = prof + 6, Tp = 6, Bt = 15, xr = w - R, ch = h - Bt - sh - Tp;
+    var v = remView(n), cw = (xr - L) / v.span, X = function (i) { return L + (i - v.i0 + 0.5) * cw; }, a = Math.max(0, Math.floor(v.i0)), b = Math.min(n - 1, Math.ceil(v.i0 + v.span) - 1);
+    var vis = b >= a ? days.slice(a, b + 1) : days, lo0 = Math.min.apply(null, vis.map(function (d) { return d[3]; })) * 0.985, hi0 = Math.max.apply(null, vis.map(function (d) { return d[2]; })) * 1.015;
+    var md = (lo0 + hi0) / 2 + v.yOff, hf = (hi0 - lo0) / 2 * v.yk, lo = md - hf, hi = md + hf, Y = function (p) { return Tp + ch * (1 - (p - lo) / (hi - lo)); }, s = "";
+    el._g = { L: L, xr: xr, Tp: Tp, ch: ch, cw: cw, k: (hi - lo) / ch };
     var st = niceStep(hi - lo, 5); for (var p = Math.ceil(lo / st) * st; p < hi; p += st) s += line("lq-gl", L, xr, Y(p), Y(p)) + txt("lq-ax", L - 5, Y(p) + 3, px(p), "end");
-    s += '<image href="' + heatUrl({ lo: rm.lo, row: rm.row, cols: rm.cols.slice(-n) }, w, h, cw, L, Y, [L, Tp, xr - L, ch]) + '" x="0" y="0" width="' + w + '" height="' + h + '" preserveAspectRatio="none"/>';
-    days.forEach(function (d, i) { var x = X(i), up = d[4] >= d[1]; s += line("lq-wk", x, x, Y(d[2]), Y(d[3])) + '<rect class="' + (up ? "lq-cu" : "lq-cd") + '" x="' + (x - cw * 0.3) + '" y="' + Y(Math.max(d[1], d[4])) + '" width="' + Math.max(cw * 0.6, 1) + '" height="' + Math.max(Math.abs(Y(d[1]) - Y(d[4])), 1) + '"/>'; });
+    s += '<defs><clipPath id="lqRemClip"><rect x="' + L + '" y="' + Tp + '" width="' + (xr - L) + '" height="' + (h - Bt - Tp) + '"/></clipPath></defs><g clip-path="url(#lqRemClip)">';
+    s += '<image href="' + heatUrl({ lo: rm.lo, row: rm.row, cols: rm.cols.slice(-n) }, w, h, cw, L - v.i0 * cw, Y, [L, Tp, xr - L, ch], [v.i0, v.span, lo, hi].map(function (q) { return q.toFixed(3); }).join(",")) + '" x="0" y="0" width="' + w + '" height="' + h + '" preserveAspectRatio="none"/>';
+    for (var i = a; i <= b; i++) { var d = days[i], x = X(i), up = d[4] >= d[1]; s += line("lq-wk", x, x, Y(d[2]), Y(d[3])) + '<rect class="' + (up ? "lq-cu" : "lq-cd") + '" x="' + (x - cw * 0.3) + '" y="' + Y(Math.max(d[1], d[4])) + '" width="' + Math.max(cw * 0.6, 1) + '" height="' + Math.max(Math.abs(Y(d[1]) - Y(d[4])), 1) + '"/>'; }
     if (S.win < n - 1) { var xs = X(n - 1 - S.win); s += '<line x1="' + xs + '" x2="' + xs + '" y1="' + Tp + '" y2="' + (Tp + ch) + '" stroke="var(--accent)" stroke-dasharray="2 3" opacity=".7"/>' + txt("lq-ax o", xs + 4, Tp + 11, "오늘 지도 입력 시작 · " + S.win + "일 전"); }
-    var ba = LADDER_R / 100, yT = Y(P * (1 + ba)), yB = Y(P * (1 - ba));
-    s += '<rect x="' + L + '" y="' + yT + '" width="' + (xr - L) + '" height="' + (yB - yT) + '" fill="color-mix(in srgb,var(--accent) 9%,transparent)" stroke="color-mix(in srgb,var(--accent) 45%,transparent)" stroke-dasharray="4 3"/>' + txt("lq-ax t o", L + 5, yT + 12, "사다리 ±" + LADDER_R + "%");
-    s += line("lq-px", L, xr, Y(P), Y(P)) + txt("lq-ax t o", xr + 7, Y(P) - 3, px(P));
+    var y0 = Tp + ch + 6 + (sh - 6) / 2, hh = (sh - 6) / 2 - 1, bw = Math.max(cw * 0.74, 0.8);
+    for (i = a; i <= b; i++) { var dd = days[i], op = i < n - 1 - S.win ? 0.22 : 0.85; s += '<rect class="lq-sh" opacity="' + op + '" x="' + (X(i) - bw / 2) + '" y="' + (y0 - hh * dd[6]) + '" width="' + bw + '" height="' + hh * dd[6] + '"/><rect class="lq-lg" opacity="' + op + '" x="' + (X(i) - bw / 2) + '" y="' + y0 + '" width="' + bw + '" height="' + hh * dd[5] + '"/>'; }
+    s += "</g>";
+    if (P > lo && P < hi) s += line("lq-px", L, xr, Y(P), Y(P)) + txt("lq-ax t o", xr + 7, Y(P) - 3, px(P));
     var pr = (rm.prof || []).filter(function (q) { return q[0] > lo && q[0] < hi; }), pm = Math.max.apply(null, pr.map(function (q) { return q[2]; }).concat([1e-9])), bh = Math.max(ch / ((hi - lo) / (P * 0.01)) - 1, 1.5);
     pr.forEach(function (q) { s += '<rect class="' + (q[1] ? "lq-sh" : "lq-lg") + '" opacity=".8" x="' + (xr + 5) + '" y="' + (Y(q[0]) - bh / 2) + '" width="' + (prof - 10) * q[2] / pm + '" height="' + bh + '"/>'; });
-    var y0 = Tp + ch + 6 + (sh - 6) / 2, hh = (sh - 6) / 2 - 1, bw = Math.max(cw * 0.74, 0.8);
     s += line("lq-z", L, xr, y0, y0) + txt("lq-ax", L - 5, y0 - hh / 2 + 3, "위", "end") + txt("lq-ax", L - 5, y0 + hh / 2 + 3, "아래", "end");
-    days.forEach(function (d, i) { var op = i < n - 1 - S.win ? 0.22 : 0.85; s += '<rect class="lq-sh" opacity="' + op + '" x="' + (X(i) - bw / 2) + '" y="' + (y0 - hh * d[6]) + '" width="' + bw + '" height="' + hh * d[6] + '"/><rect class="lq-lg" opacity="' + op + '" x="' + (X(i) - bw / 2) + '" y="' + y0 + '" width="' + bw + '" height="' + hh * d[5] + '"/>'; });
-    [0, Math.floor(days.length / 3), Math.floor(2 * days.length / 3), days.length - 1].forEach(function (i) { s += txt("lq-ax", X(i), h - 3, days[i][0].slice(5), i === 0 ? "start" : i === days.length - 1 ? "end" : "middle"); });
+    if (b >= a) { var nl = Math.min(4, b - a + 1); for (var q = 0; q < nl; q++) { var di = nl < 2 ? a : Math.round(a + (b - a) * q / (nl - 1)); s += txt("lq-ax", Math.max(L, Math.min(xr, X(di))), h - 3, days[di][0].slice(5), q === 0 ? "start" : q === nl - 1 ? "end" : "middle"); } }
+    // 십자 가격선(마우스 위치) -- 조작마다 SVG 를 다시 만들지 않고 이 묶음의 속성만 옮긴다(el._xh)
+    s += '<g class="lq-xh" visibility="hidden"><line class="lq-xl" x1="' + L + '" x2="' + xr + '"/><line class="lq-xl" y1="' + Tp + '" y2="' + (h - Bt) + '"/><rect x="1" width="' + (L - 3) + '" height="16" rx="3" fill="var(--accent)"/><text class="lq-pxt" x="' + ((L - 2) / 2) + '" text-anchor="middle"></text></g>';
+    var dayAt = function (x) { return Math.floor((x - L) / cw + v.i0); };
+    el._xh = function (x, y) {
+      var g = el.querySelector(".lq-xh"); if (!g) return;
+      var on = x >= L && x <= xr && y >= Tp && y <= Tp + ch; g.setAttribute("visibility", on ? "visible" : "hidden"); if (!on) return;
+      var ln = g.querySelectorAll("line"), xi = X(Math.max(0, Math.min(n - 1, dayAt(x)))), lb = g.querySelector("rect"), t = g.querySelector("text");
+      ln[0].setAttribute("y1", y); ln[0].setAttribute("y2", y); ln[1].setAttribute("x1", xi); ln[1].setAttribute("x2", xi);
+      lb.setAttribute("y", y - 8); t.setAttribute("y", y + 3.5); t.textContent = px(lo + (hi - lo) * (1 - (y - Tp) / ch));
+    };
     el._hit = function (x, y) {
-      var i = Math.floor((x - L) / cw), d = days[i]; if (!d) return "";
+      var i = dayAt(x), d = days[i]; if (!d || x < L || x > xr) return "";
       var head = d[0] + " · 고 " + px(d[2]) + " · 저 " + px(d[3]) + " · 종 " + px(d[4]);
       if (y > Tp + ch) return head + "<br>그날 만든 양 중 지금까지 남음: 위 " + pc(d[6]) + " · 아래 " + pc(d[5]);
-      var pp = lo + (hi - lo) * (1 - (y - Tp) / ch), c = rm.cols[rm.cols.length - n + i], cell = Math.floor((pp - rm.lo) / rm.row), v = c && c.length && cell >= c[0] ? c[cell - c[0] + 1] : 0;
-      return head + "<br>" + px(pp) + " 부근 진하기 " + ((v || 0) / 10).toFixed(0) + "%(이 탭 안 상대값)";
+      var pp = lo + (hi - lo) * (1 - (y - Tp) / ch), c = rm.cols[rm.cols.length - n + i], cell = Math.floor((pp - rm.lo) / rm.row), vv = c && c.length && cell >= c[0] ? c[cell - c[0] + 1] : 0;
+      return head + "<br>" + px(pp) + " 부근 진하기 " + ((vv || 0) / 10).toFixed(0) + "%(이 탭 안 상대값)" + '<br><span style="opacity:.7">끌기 = 이동 · 휠 = 확대 · 두 번 클릭 = 처음 보기</span>';
     };
     return svg(w, h, s, "일봉별 남은 청산 매물 히트맵");
   };
@@ -175,29 +195,43 @@
   var LAD = ["1", "7", "30", "60", "90", "180", "real", "hl"], LADLAB = { "1": "1일", "7": "7일", "30": "30일", "60": "60일", "90": "90일", "180": "180일", real: "실측 7일", hl: "HL 고래" };
   try { var sl = localStorage.getItem("liqLadWin"); if (LAD.indexOf(sl) >= 0) S.lad = sl; } catch (e) { /* 저장 못 해도 동작 */ }
   if (!S.lad) S.lad = "7";
+  // 2026-11-15 펜 메모 «코인글래스 청산맵처럼 해당 지평의 고점과 저점의 청산맵을 다 보여줘 · 지금은 중간에 잘린 것 같다»: 가로 = 고른 기간 일봉의 저가~고가(±1% 여유, 최소 ±6%) ·
+  //   실측·HL 은 7일. 칸이 화면에 너무 촘촘하면 0.25% → 0.5·1·2% 로 묶는다. 일봉은 /api/liq-tab days(매시) + 지금가.
+  function ladRange(k, P) {
+    var nd = k === "real" || k === "hl" ? 7 : Number(k), lo = P * (1 - LADDER_R / 100), hi = P * (1 + LADDER_R / 100), cap = FINE / 10;
+    (S.data && S.data.days ? S.data.days.slice(-nd) : []).forEach(function (d) { lo = Math.min(lo, d[3]); hi = Math.max(hi, d[2]); });
+    return [Math.max(-cap, (lo / P - 1) * 100 - 1), Math.min(cap, (hi / P - 1) * 100 + 1)];
+  }
   CH.ladder = function (el, w, h) {
-    var P = price(), k = S.lad, R_ = LADDER_R, narrow = w < 420;
+    var P = price(), k = S.lad, narrow = w < 420;
     if (!(P > 0)) return null;
-    var L = narrow ? 44 : 62, R = narrow ? 44 : 62, Tp = 26, Bt = 22, ch = h - Tp - Bt, xr = w - R;
-    var X = function (d) { return L + (xr - L) * (d + R_) / (2 * R_); }, bw = Math.max((xr - L) / (2 * R_ / 0.25) - 1, 1), LEV = ["--lev10", "--lev25", "--lev50", "--lev100"];
-    var inR = function (g) { return Math.abs(g * 0.25) <= R_; }, bars = [], mp = null, s = "", head = "", fu = usd;
+    var L = narrow ? 44 : 62, R = narrow ? 44 : 62, Tp = 26, Bt = 22, ch = h - Tp - Bt, xr = w - R, rg = ladRange(k, P), dLo = rg[0], dHi = rg[1], sp = dHi - dLo;
+    var X = function (d) { return L + (xr - L) * (d - dLo) / sp; }, stp = [0.25, 0.5, 1, 2].find(function (q) { return sp / q <= (xr - L) / 3; }) || 2, bw = Math.max((xr - L) * stp / sp - 1, 1), LEV = ["--lev10", "--lev25", "--lev50", "--lev100"];
+    var inR = function (d) { return d >= dLo && d <= dHi; }, bars = [], mp = null, s = "", head = "", fu = usd, bk = {};
+    var add = function (d, parts) {   // 0.25% 칸을 화면 칸(stp)으로 묶는다
+      if (!inR(d)) return;
+      var G = Math.round(d / stp) || 0, o = bk[G] || (bk[G] = { g: G, d: G * stp, parts: parts.map(function (q) { return [0, q[1]]; }), tot: 0 });
+      parts.forEach(function (q, j) { o.parts[j][0] += q[0]; o.tot += q[0]; });
+    };
     if (k === "real" && !(S.data && S.data.real)) return null;   // 검증 11-13: 실측 자료 전엔 «롱 $0 · 숏 $0» 대신 빈 상태(받는 중)
     if (k === "real") {
       var real = realRows(P);
-      Object.keys(real).filter(inR).forEach(function (g) { var r = real[g]; bars.push({ g: +g, d: g * 0.25, parts: [[r[0], "var(--bad)"], [r[1], "var(--good)"]], tot: r[0] + r[1] }); });
+      Object.keys(real).forEach(function (g) { var r = real[g]; add(g * 0.25, [[r[0], "var(--bad)"], [r[1], "var(--good)"]]); });
     } else if (k === "hl") {
       var m = ctx(), hl = m && m.hl_liq;
       if (hl) (hl.below || []).map(function (l) { return [l, "var(--bad)"]; }).concat((hl.above || []).map(function (l) { return [l, "var(--good)"]; })).forEach(function (q) {
-        var dd = (q[0].px / P - 1) * 100; if (Math.abs(dd) <= R_) bars.push({ g: Math.round(dd / 0.25), d: dd, parts: [[q[0].usd, q[1]]], tot: q[0].usd, px: q[0].px });
+        var dd = (q[0].px / P - 1) * 100; if (inR(dd)) bars.push({ g: Math.round(dd / stp), d: dd, parts: [[q[0].usd, q[1]]], tot: q[0].usd, px: q[0].px });
       });
     } else {
       mp = mapOf(Number(k)); if (!mp) return null;
       if (mp.unit === "share") fu = function (v) { return pc(v, v >= 0.1 ? 0 : 1); };   // 검증 11-13: OI 없는 종목 지도 = 몫(합 1) -- 달러로 적으면 «$0»
-      Object.keys(mp.rows).filter(inR).forEach(function (g) { var r = mp.rows[g]; bars.push({ g: +g, d: g * 0.25, parts: r.map(function (v, ti) { return [v, "var(" + LEV[ti] + ")"]; }), tot: r[0] + r[1] + r[2] + r[3] }); });
+      Object.keys(mp.rows).forEach(function (g) { add(g * 0.25, mp.rows[g].map(function (v, ti) { return [v, "var(" + LEV[ti] + ")"]; })); });
     }
+    if (k !== "hl") bars = Object.keys(bk).map(function (G) { return bk[G]; });
     var mx = Math.max.apply(null, bars.map(function (b) { return b.tot; }).concat([1e-12])) * 1.08, Y = function (v) { return Tp + ch * (1 - v / mx); };
     if (bars.length) ticks(mx, 4).forEach(function (v) { s += line("lq-gl", L, xr, Y(v), Y(v)) + txt("lq-ax", L - 6, Y(v) + 3, fu(v), "end"); });
-    for (var d = -R_; d <= R_; d += narrow ? 2 : 1) s += (d ? line("lq-gl", X(d), X(d), Tp, Tp + ch) + txt("lq-ax", X(d), h - 6, px(P * (1 + d / 100)), "middle") : "");
+    var pLo = P * (1 + dLo / 100), pHi = P * (1 + dHi / 100), pst = niceStep(pHi - pLo, narrow ? 6 : 9);
+    for (var pq = Math.ceil(pLo / pst) * pst; pq < pHi; pq += pst) { var xq = X((pq / P - 1) * 100); if (Math.abs(xq - X(0)) > 36) s += line("lq-gl", xq, xq, Tp, Tp + ch) + txt("lq-ax", xq, h - 6, px(pq), "middle"); }
     s += line("lq-z", L, xr, Tp + ch, Tp + ch);
     bars.forEach(function (b) {
       var x = X(b.d) - (k === "hl" ? 1.5 : bw / 2), yy = Tp + ch, ww = k === "hl" ? 3 : bw;
@@ -205,30 +239,30 @@
     });
     var cumL = 0, cumS = 0;
     if (mp) {   // 누적 = 지금가에서 그 가격까지(0.1% 칸 누적 배열 mapOf.dn/up) · 오른쪽 축
-      cumL = cumAt(mp, -R_); cumS = cumAt(mp, R_);
-      var cmx = Math.max(cumL, cumS, 1e-12) * 1.08, YC = function (v) { return Tp + ch * (1 - v / cmx); }, st = narrow ? 0.2 : 0.1;
-      [[-1, cumL, "var(--bad)"], [1, cumS, "var(--good)"]].forEach(function (z) {
-        var pts = []; for (var q = 0; q <= R_ + 1e-9; q += st) pts.push([X(z[0] * q), YC(cumAt(mp, z[0] * q))]);
+      cumL = cumAt(mp, dLo); cumS = cumAt(mp, dHi);
+      var cmx = Math.max(cumL, cumS, 1e-12) * 1.08, YC = function (v) { return Tp + ch * (1 - v / cmx); }, st = Math.max(0.1, sp / (narrow ? 150 : 400));
+      [[-1, cumL, "var(--bad)", -dLo], [1, cumS, "var(--good)", dHi]].forEach(function (z) {
+        var pts = []; for (var q = 0; q <= z[3] + 1e-9; q += st) pts.push([X(z[0] * q), YC(cumAt(mp, z[0] * q))]);
         s += '<path d="' + path(pts) + "L" + pts[pts.length - 1][0].toFixed(1) + " " + (Tp + ch) + "L" + X(0).toFixed(1) + " " + (Tp + ch) + 'Z" fill="' + z[2] + '" opacity=".10"/>'
           + '<path d="' + path(pts) + '" fill="none" stroke="' + z[2] + '" stroke-width="2"/>';
       });
       ticks(cmx, 4).forEach(function (v) { s += txt("lq-ax", xr + 6, YC(v) + 3, fu(v)); });
-      head = narrow ? "누적 롱 " + fu(cumL) + " · 숏 " + fu(cumS) : "누적 롱 청산(아래 " + R_ + "%) " + fu(cumL) + " · 숏 청산(위 " + R_ + "%) " + fu(cumS) + (cumL + cumS > 0 ? " · 롱 몫 " + pc(cumL / (cumL + cumS)) : "");
+      head = narrow ? "누적 롱 " + fu(cumL) + " · 숏 " + fu(cumS) : "누적 롱 청산(" + px(pLo) + "까지) " + fu(cumL) + " · 숏 청산(" + px(pHi) + "까지) " + fu(cumS) + (cumL + cumS > 0 ? " · 롱 몫 " + pc(cumL / (cumL + cumS)) : "");
     } else if (k === "real") {
-      var rl = 0, rs = 0; bars.forEach(function (b) { rl += b.parts[0][0]; rs += b.parts[1][0]; }); head = "7일 실제 청산 ±" + R_ + "% · 롱 " + usd(rl) + " · 숏 " + usd(rs);
-    } else head = bars.length ? "HL 고래 청산가 " + bars.length + "개 · 최대 " + fu(mx / 1.08) : "HL 고래 청산가가 ±" + R_ + "% 안에 없음";
+      var rl = 0, rs = 0; bars.forEach(function (b) { rl += b.parts[0][0]; rs += b.parts[1][0]; }); head = "7일 실제 청산 " + px(pLo) + "~" + px(pHi) + " · 롱 " + usd(rl) + " · 숏 " + usd(rs);
+    } else head = bars.length ? "HL 고래 청산가 " + bars.length + "개 · 최대 " + fu(mx / 1.08) : "HL 고래 청산가가 " + px(pLo) + "~" + px(pHi) + " 안에 없음";
     s += txt("lq-ax lq-axh o", L + 6, 14, head) + (mp && w >= 760 ? txt("lq-ax o", xr, 14, "막대 = 칸(왼쪽 축) · 선 = 누적(오른쪽 축)", "end") : "")   // 검증 11-13: 420~600px 에서 머리 글과 겹침;
     var pos = typeof snapshotAccountPosition === "function" ? snapshotAccountPosition() : null, liq = pos && Number(pos.liquidation_price);
-    if (liq > 0 && Math.abs(liq / P - 1) * 100 <= R_) { var xl = X((liq / P - 1) * 100); s += '<line x1="' + xl + '" x2="' + xl + '" y1="' + Tp + '" y2="' + (Tp + ch) + '" stroke="var(--position)" stroke-width="1.5"/>' + txt("lq-ax t o", xl + 4, Tp + 12, "내 청산가 " + px(liq)); }
+    if (liq > 0 && inR((liq / P - 1) * 100)) { var xl = X((liq / P - 1) * 100); s += '<line x1="' + xl + '" x2="' + xl + '" y1="' + Tp + '" y2="' + (Tp + ch) + '" stroke="var(--position)" stroke-width="1.5"/>' + txt("lq-ax t o", xl + 4, Tp + 12, "내 청산가 " + px(liq)); }
     var x0 = X(0);
     s += line("lq-px", x0, x0, Tp, Tp + ch) + '<rect x="' + (x0 - 30) + '" y="' + (h - Bt + 2) + '" width="60" height="16" rx="3" fill="var(--accent)"/><text x="' + x0 + '" y="' + (h - Bt + 13.5) + '" text-anchor="middle" class="lq-pxt">' + px(P) + "</text>";
     el._hit = function (x) {
-      var dd = (x - L) / (xr - L) * 2 * R_ - R_; if (Math.abs(dd) > R_) return "";
-      var g = Math.round(dd / 0.25), hd = px(P * (1 + g * 0.25 / 100)) + " · " + sgn(g * 0.25, 2) + "%";
-      if (k === "hl") { var nb = bars.filter(function (b) { return Math.abs(b.d - dd) <= 0.25; }); return nb.length ? hd + "<br>" + nb.map(function (b) { return "청산가 " + px(b.px) + " · " + usd(b.tot); }).join("<br>") : ""; }
-      var b = bars.find(function (q) { return q.g === g; }); if (!g && k !== "real") return "";   // 검증 11-13: 실측은 지금가 칸(g=0)도 그린다
+      var dd = dLo + (x - L) / (xr - L) * sp; if (!inR(dd)) return "";
+      var g = Math.round(dd / stp) || 0, hd = px(P * (1 + g * stp / 100)) + " · " + sgn(g * stp, 2) + "%";
+      if (k === "hl") { var nb = bars.filter(function (b) { return Math.abs(b.d - dd) <= Math.max(stp, 0.25); }); return nb.length ? hd + "<br>" + nb.map(function (b) { return "청산가 " + px(b.px) + " · " + usd(b.tot); }).join("<br>") : ""; }
+      var b = bars.find(function (q) { return q.g === g; }); if (!g && !b) return "";
       var t = hd + "<br>" + (b ? (k === "real" ? "롱 " + usd(b.parts[0][0]) + " · 숏 " + usd(b.parts[1][0]) : "칸 " + fu(b.tot) + " (10배 " + fu(b.parts[0][0]) + " · 20~25배 " + fu(b.parts[1][0]) + " · 50배 " + fu(b.parts[2][0]) + " · 75~100배 " + fu(b.parts[3][0]) + ")") : "칸 0");
-      if (mp && g) t += "<br>지금가에서 여기까지 누적 " + (g < 0 ? "롱 " : "숏 ") + fu(cumAt(mp, g * 0.25)) + "<br>" + (mp.unit === "share" ? "지도 = 주기 합 대비 몫" : "지도 금액은 세 거래소 OI×2 눈금 · 절대액 아님");
+      if (mp && g) t += "<br>지금가에서 여기까지 누적 " + (g < 0 ? "롱 " : "숏 ") + fu(cumAt(mp, g * stp)) + "<br>" + (mp.unit === "share" ? "지도 = 주기 합 대비 몫" : "지도 금액은 세 거래소 OI×2 눈금 · 절대액 아님");
       return t;
     };
     return svg(w, h, s, "청산맵 " + LADLAB[k] + ": 가격별 청산 금액과 누적");
@@ -363,7 +397,7 @@
   //   가로 = 로그 4자리, 코인마다 지도 크기에 맞춘다. 2026-11-08 사용자: 바닥선 = 오른쪽 세로선(x1) -- 레버리지 막대와 같은 선에서 왼쪽으로 자란다. app.js 청산 기둥이 부른다. 돌려주는 것 = { svg, hit(가격) → 툴팁 글 }.
   window.fpLiqCurve = function (x0, x1, top, bot, yAt, yMin, yMax, win) {
     var P = price(), M = { "1": mapOf(1), "7": mapOf(7), "30": mapOf(30) }, B = S.data && S.data.beta, m = ctx(), mx = 0;
-    ["1", "7", "30"].forEach(function (k) { if (M[k]) mx = Math.max(mx, M[k].dn[FINE], M[k].up[FINE]); });
+    ["1", "7", "30"].forEach(function (k) { if (M[k]) mx = Math.max(mx, M[k].dn[F4], M[k].up[F4]); });   // 기둥 곡선 눈금은 옛 ±40% 그대로(11-15 FINE 을 100% 로 넓힘)
     if (!(P > 0) || !(mx > 0)) return null;
     var hi = Math.pow(10, Math.ceil(Math.log10(mx))), lo = hi / 1e4, L = x0 + 2, W = x1 - x0 - 8, s = "";
     var X = function (v) { return x1 - W * Math.log10(Math.max(v, lo) / lo) / 4; }, Y = function (p) { return Math.max(top, Math.min(bot, yAt(p))); }, inView = function (p) { return p >= yMin && p <= yMax; };
@@ -374,7 +408,7 @@
       if (!M[k]) return;
       [[-1, "--bad"], [1, "--good"]].forEach(function (q) {
         var a = [];
-        for (var i = 1; i <= FINE; i++) {
+        for (var i = 1; i <= F4; i++) {
           var dd = q[0] * i / 10, p = P * (1 + dd / 100);
           if (q[0] > 0 ? p < yMin : p > yMax) continue;   // 현재가가 화면 밖이면 화면 끝부터
           a.push([X(cumAt(M[k], dd)), Y(p)]);
@@ -396,7 +430,7 @@
     if (bk && bps) bps.forEach(function (bp, j) { [[-1, bk.bid[j]], [1, bk.ask[j]]].forEach(function (q) { var pp = P * (1 + q[0] * bp / 1e4), x = X(q[1] * P), y = Y(pp); if (inView(pp)) s += '<rect x="' + (x - 2.5) + '" y="' + (y - 2.5) + '" width="5" height="5" fill="var(--warn)" stroke="var(--chart-bg)" transform="rotate(45 ' + x + " " + y + ')"/>'; }); });
     var hl = m && m.hl_liq; if (hl) (hl.below || []).concat(hl.above || []).forEach(function (l) { if (inView(l.px)) s += '<circle cx="' + X(l.usd) + '" cy="' + Y(l.px) + '" r="3.5" fill="none" stroke="var(--accent)" stroke-width="1.3"/>'; });
     return { svg: s, hit: function (p) {
-      var dd = Math.round((p / P - 1) * 1000) / 10; if (!dd || Math.abs(dd) > FINE / 10) return "";
+      var dd = Math.round((p / P - 1) * 1000) / 10; if (!dd || Math.abs(dd) > F4 / 10) return "";
       var v = function (k) { return M[k] ? usd(cumAt(M[k], dd)) : "—"; };
       return px(p) + " · " + sgn(dd, 1) + "%까지 누적 청산<br>지도 1일 " + v("1") + " · 7일 " + v("7") + " · 30일 " + v("30") + (B ? "<br>실측 탄력으로는 " + usd((dd < 0 ? B.dn : B.up) * Math.abs(dd)) : "")
         + '<br><span style="opacity:.7">굵은 선 1일 · 가는 선 7일 · 점선 30일 · 흰 선 실측 탄력 · 마름모 호가 · 원 HL 고래<br>추정 지도(세 거래소 OI×2 눈금) · 절대액 아님 · 지도로만</span>';
@@ -431,7 +465,7 @@
     host.innerHTML = '<div class="lq-now" id="lqNow"></div><div class="lq-cols">'
       + '<div class="lq-row lq-top">'
       + '<section class="lq-p lq-f-rem">' + H("남은 매물 일봉별", "파생·서술", "der", seg) + '<div class="lq-b"><div id="lqRemKpi"></div>' + d_("remain", 300, "남은 매물 계산 전입니다") + '<div class="lq-leg" id="lqRemLeg"></div></div></section>'
-      + '<section class="lq-p lq-f-lad">' + H("청산맵 ±" + LADDER_R + "%", "추정", "est", segL) + '<div class="lq-b">' + d_("ladder", 560, "지도를 받는 중입니다") + '<div class="lq-leg" id="lqLadLeg"></div></div></section>'
+      + '<section class="lq-p lq-f-lad">' + H("청산맵", "추정", "est", segL) + '<div class="lq-b">' + d_("ladder", 560, "지도를 받는 중입니다") + '<div class="lq-leg" id="lqLadLeg"></div></div></section>'
       + "</div>"
       + '<div class="lq-row lq-bot">'   // 2026-11-11 사용자: 24시간 5분 막대·자기 흥분 지수 추이를 빼고 그 자리에 최대 고통·코인별을 크게
       + '<section class="lq-p lq-f-tod">' + H("오늘 누적", "실측", "real", '<small id="lqTodLab"></small>') + '<div class="lq-b">' + d_("today", 160, "오늘 기록이 아직 없습니다") + "</div></section>"
@@ -462,13 +496,19 @@
     fill("lqCoLab", S.all ? PLAB[S.pp] + " 주기 · 노란 칸 = 양방향 협공(둘 다 도달 50% 이상)" : "");
     var B = S.data && S.data.band; fill("lqTodLab", "5분 누적" + (B ? " · 띠 = 지난 " + B.n + "일" : S.data ? " · 비교 띠는 기록 7일부터" : ""));
     host.querySelectorAll(".lq-d").forEach(function (el) { el.style.height = stack ? el.dataset.mh + "px" : ""; });
-    host.querySelectorAll(".lq-d").forEach(function (el) {
-      var r = el.getBoundingClientRect(), w = Math.round(r.width), h = Math.round(r.height);
-      if (!(w > 0 && h > 0)) return;
-      el._hit = null;
-      var out = CH[el.dataset.d](el, w, h);
-      el.innerHTML = out || '<p class="lq-empty">' + el.dataset.empty + "</p>";
-    });
+    host.querySelectorAll(".lq-d").forEach(drawEl);
+  }
+  function drawEl(el) {
+    var r = el.getBoundingClientRect(), w = Math.round(r.width), h = Math.round(r.height);
+    if (!(w > 0 && h > 0)) return;
+    el._hit = null; el._xh = null;
+    var out = CH[el.dataset.d](el, w, h);
+    el.innerHTML = out || '<p class="lq-empty">' + el.dataset.empty + "</p>";
+    if (el._xh && S.xh && S.xh.el === el) el._xh(S.xh.x, S.xh.y);   // 5초 갱신·끌기 뒤에도 가격선이 마우스에 남는다
+  }
+  function drawRem() {
+    if (S.rvRaf) return;
+    S.rvRaf = requestAnimationFrame(function () { S.rvRaf = 0; var el = document.querySelector('#lqTab .lq-d[data-d="remain"]'); if (el) drawEl(el); });
   }
   function tick() {
     if (document.hidden) return;
@@ -482,7 +522,7 @@
   // 코인을 바꾼 순간: 옛 코인 숫자를 바로 지우고, 지도 7·30일은 응답이 늦으니 잠시 뒤 한두 번 더 그린다.
   function watchAsset() {
     if (S.asset === asset()) return;
-    S.asset = asset(); S.data = null; S.bars = []; S.barsT = 0; S.heatKey = "";
+    S.asset = asset(); S.data = null; S.bars = []; S.barsT = 0; S.heatKey = ""; S.rv = null;
     draw(); fetchData(true);
     if (S.on) { fetchBars(true); fetchAll(false); setTimeout(draw, 900); setTimeout(draw, 2200); }
   }
@@ -497,7 +537,7 @@
     host.addEventListener("click", function (e) {
       var b = e.target.closest("[data-win],[data-pp],[data-lad]"); if (!b) return;
       var key = b.dataset.pp ? "pp" : b.dataset.lad ? "lad" : "win";
-      if (key === "pp") S.pp = b.dataset.pp; else if (key === "lad") S.lad = b.dataset.lad; else { S.win = Number(b.dataset.win); S.heatKey = ""; }
+      if (key === "pp") S.pp = b.dataset.pp; else if (key === "lad") S.lad = b.dataset.lad; else { S.win = Number(b.dataset.win); S.heatKey = ""; S.rv = null; }
       try { localStorage.setItem(key === "pp" ? "liqPainPer" : key === "lad" ? "liqLadWin" : "liqTabWin", String(S[key])); } catch (x) { /* 저장 못 해도 동작 */ }
       if (key === "win" && LAD.indexOf(String(S.win)) >= 0) {   // 2026-11-13 펜 메모: 왼쪽 기간 = 오른쪽 청산맵 기간(버튼 상태까지)
         S.lad = String(S.win);
@@ -508,11 +548,61 @@
       draw();
     });
     host.addEventListener("mousemove", function (e) {
-      if (typeof showTooltip !== "function") return;
-      var d = e.target.closest(".lq-d"), r = d && d.getBoundingClientRect(), t = d && d._hit ? d._hit(e.clientX - r.left, e.clientY - r.top) : "";
+      var d = e.target.closest(".lq-d"), r = d && d.getBoundingClientRect();
+      if (S.xh && S.xh.el !== d && S.xh.el._xh) S.xh.el._xh(-1, -1);
+      S.xh = d && d._xh ? { el: d, x: e.clientX - r.left, y: e.clientY - r.top } : null;
+      if (S.xh) d._xh(S.xh.x, S.xh.y);
+      if (typeof showTooltip !== "function" || S.drag) return;
+      var t = d && d._hit ? d._hit(e.clientX - r.left, e.clientY - r.top) : "";
       if (t) showTooltip(e.pageX, e.pageY, t); else hideTooltip();
     });
-    host.addEventListener("mouseleave", function () { if (typeof hideTooltip === "function") hideTooltip(); });
+    host.addEventListener("mouseleave", function () { if (S.xh && S.xh.el._xh) S.xh.el._xh(-1, -1); S.xh = null; if (typeof hideTooltip === "function") hideTooltip(); });
+    // 남은 매물 조작(fp_daily.js bindCanvas 와 같은 손맛): 마우스 끌기 = 날·가격 이동 · 터치 한 손가락 = 날 이동(세로는 페이지 스크롤) · 두 손가락 = 날 확대
+    var remEl = function (e) { return e.target.closest && e.target.closest('.lq-d[data-d="remain"]'); }, pts = {};
+    var npts = function () { return Object.keys(pts).length; };
+    host.addEventListener("pointerdown", function (e) {
+      var d = remEl(e); if (!d || !d._g || !S.rv || (e.pointerType === "mouse" && e.button !== 0)) return;
+      pts[e.pointerId] = e.clientX;
+      var v = S.rv, g = d._g, ids = Object.keys(pts);
+      if (ids.length === 2) {
+        var x1 = pts[ids[0]], x2 = pts[ids[1]], r = d.getBoundingClientRect();
+        S.drag = { el: d, pinch: true, dist: Math.max(20, Math.abs(x1 - x2)), span: v.span, i0: v.i0, at: v.i0 + ((x1 + x2) / 2 - r.left - g.L) / g.cw };
+      } else S.drag = { el: d, x: e.clientX, y: e.clientY, i0: v.i0, yOff: v.yOff, cw: g.cw, k: e.pointerType === "mouse" ? g.k : 0, id: e.pointerId, moved: false };
+    });
+    host.addEventListener("pointermove", function (e) {
+      var D = S.drag; if (!D || !(e.pointerId in pts)) return;
+      pts[e.pointerId] = e.clientX;
+      var v = S.rv;
+      if (D.pinch) {
+        if (npts() < 2) return;
+        var ids = Object.keys(pts), dist = Math.max(20, Math.abs(pts[ids[0]] - pts[ids[1]])), span = Math.max(5, Math.min(v.n + 4, D.span * D.dist / dist));
+        v.i0 = D.at - (D.at - D.i0) * span / D.span; v.span = span;
+      } else {
+        var dx = e.clientX - D.x, dy = e.clientY - D.y;
+        if (!D.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+        if (!D.moved) { D.moved = true; try { D.el.setPointerCapture(D.id); } catch (x) { /* 이미 놓음 */ } D.el.classList.add("panning"); S.rvBusy = true; if (typeof hideTooltip === "function") hideTooltip(); }
+        v.i0 = D.i0 - dx / D.cw; v.yOff = D.yOff + dy * D.k;   // 아래로 끌면 위쪽 가격(풋프린트와 같다)
+      }
+      S.rvBusy = true; drawRem();
+    });
+    var endPt = function (e) {
+      if (!(e.pointerId in pts)) return;
+      delete pts[e.pointerId];
+      if (npts()) return;
+      if (S.drag) S.drag.el.classList.remove("panning");
+      var was = S.rvBusy; S.drag = null; S.rvBusy = false; if (was) drawRem();   // 놓으면 2배 해상도로 다시
+    };
+    host.addEventListener("pointerup", endPt); host.addEventListener("pointercancel", endPt);
+    host.addEventListener("wheel", function (e) {
+      var d = remEl(e); if (!d || !d._g || !S.rv) return;
+      e.preventDefault();
+      var v = S.rv, g = d._g, r = d.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+      if (x < g.L) { var f = Math.exp(e.deltaY * 0.0015), pAt = (g.Tp + g.ch / 2 - y) * g.k; v.yOff += pAt * (1 - f); v.yk *= f; }   // 왼쪽 가격축 위 = 가격 확대(마우스 가격 고정)
+      else if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey) v.i0 += (e.deltaX || e.deltaY) / g.cw;
+      else { var at = v.i0 + (x - g.L) / g.cw, span = Math.max(5, Math.min(v.n + 4, v.span * Math.exp(e.deltaY * 0.0015))); v.i0 = at - (at - v.i0) * span / v.span; v.span = span; }
+      drawRem();
+    }, { passive: false });
+    host.addEventListener("dblclick", function (e) { if (remEl(e)) { S.rv = null; drawRem(); } });
     if (typeof ResizeObserver === "function") { var rt = 0; new ResizeObserver(function () { clearTimeout(rt); rt = setTimeout(draw, 120); }).observe(host); }
     window.addEventListener("fpview", function (e) { setOn(e.detail === "liq"); });
     if (document.body && $("fpCard") && $("fpCard").classList.contains("lq-on")) setOn(true);
