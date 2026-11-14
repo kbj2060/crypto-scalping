@@ -5609,7 +5609,7 @@ const API_MARKET_CTX_URL = "/api/market-context";
 const MARKET_CTX_POLL_MS = 1000;   // 2026-10-03 5초 -> 1초(사용자 «1초 원천은 화면도 1초») -- 호가 벽·스프레드·계기·BTC 동행은 서버 1초 루프 · 응답 중앙 14ms·3KB(서버 실측)
 let latestMarketCtx = null, marketCtxLastFetchAt = 0;
 let latestMacroEvents = null;        // renderMacroCalendar 가 채운다 -- 카드의 «다음 주요 일정». null = 아직 못 받음(«없음»과 다르다)
-const mcLine = { st: {}, poc: true, vwap: true, veto: true, bb: false, wvwap: false, vsess: false, ema5: false, ema20: false, vwma: false };   // 2026-10-26 펜 메모: 이동평균 셋(기본 끔)   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
+const mcLine = { st: {}, poc: true, vwap: true, veto: true, sma50: true, bb: false, wvwap: false, vsess: false, ema5: false, ema20: false, vwma: false };   // 2026-10-26 펜 메모: 이동평균 셋(기본 끔)   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
 try { Object.assign(mcLine, JSON.parse(localStorage.getItem("mcLine") || "{}")); } catch (err) { /* 기억은 편의 */ }
 if (mcLine.vwW) { mcLine.st = { ...mcLine.st, vwap: { w: mcLine.vwW, d: mcLine.vwD, c: mcLine.vwC } }; delete mcLine.vwW; delete mcLine.vwD; delete mcLine.vwC; }   // 10-29 오전판(VWAP 전용 줄)에서 고른 값 옮김
 // 2026-09-30 사용자 «세션은 미국·유럽·아시아 시장 VWAP 으로» -- vsess 켜면 지금 시장 세션 개장(현지 시각, 서머타임 반영)부터 센 VWAP.
@@ -5618,7 +5618,8 @@ if (mcLine.vwW) { mcLine.st = { ...mcLine.st, vwap: { w: mcLine.vwW, d: mcLine.v
 //   기본 = 그 선의 원래 굵기·모양·색(LINE_DEF). 추세 veto 기본 색 = 측면 색(롱만 초록·숏만 빨강) · 주간·앵커 VWAP 기본 모양 = 세 줄 각자 · 밴드(±σ·veto 테두리)는 그대로.
 const LINE_DEF = { ema5: ["EMA 5", 1.2, "none", "var(--ma-ema5)"], ema20: ["EMA 20", 1.4, "none", "var(--ma-ema20)"], vwma: ["VWMA 100", 1.6, "none", "var(--ma-vwma)"],
   bb: ["볼린저", 1, "3 3", "var(--muted)"], veto: ["추세 veto", 2, "none", "var(--muted)"], vwap: ["VWAP", 2, "none", "var(--ink)"],
-  wvwap: ["주간·앵커 VWAP", 1.2, "8 4", "var(--ink)"], poc: ["POC 선", 1.5, "none", "var(--amber)"] };
+  wvwap: ["주간·앵커 VWAP", 1.2, "8 4", "var(--ink)"], poc: ["POC 선", 1.5, "none", "var(--amber)"],
+  sma50: ["일봉 SMA50", 1.6, "10 4", "var(--muted)"] };   // 2026-11-15 기본 색 = 측면 색(veto 와 같은 규약)
 const LS_DASH = { solid: ["none", "실선"], dash: ["6 3", "파선"], dot: ["2 3", "점선"] };
 const LS_COL = { ink: ["var(--ink)", "흰색"], muted: ["var(--muted)", "회색"], warn: ["var(--warn)", "주황"], option: ["var(--option)", "청록"] };
 // 그 선의 지금 모양 -- w·d·c 는 기본값을 덮어 부르는 쪽(veto 측면 색 · 앵커 줄별 모양)이 줄 수 있다
@@ -5636,7 +5637,7 @@ function lineCfgHtml(k) {
   return `<span class="mc-vw-t">${nm}</span>`
     + grp("w", "굵기", [["", "기본", key(w0, "none", "var(--text)")], ["1", "얇게", key(1, "none", "var(--text)")], ["2", "보통", key(2, "none", "var(--text)")], ["3", "굵게", key(3, "none", "var(--text)")]])
     + grp("d", "모양", [["", "기본", key(2, d0, "var(--text)")], ...Object.entries(LS_DASH).map(([v, [dd, t]]) => [v, t, key(2, dd, "var(--text)")])])
-    + grp("c", "색", [["", k === "veto" ? "측면 색" : "기본", dot(k === "veto" ? "linear-gradient(90deg, var(--good) 50%, var(--bad) 50%)" : c0)], ...Object.entries(LS_COL).map(([v, [cc, t]]) => [v, t, dot(cc)])]);
+    + grp("c", "색", [["", k === "veto" || k === "sma50" ? "측면 색" : "기본", dot(k === "veto" || k === "sma50" ? "linear-gradient(90deg, var(--good) 50%, var(--bad) 50%)" : c0)], ...Object.entries(LS_COL).map(([v, [cc, t]]) => [v, t, dot(cc)])]);
 }
 function mcVwapOf(c) {
   if (mcLine.vsess) return c && c.svwap ? { vwap: c.svwap, vsd: c.svsd || 0, seg: c.sstart, name: c.sname || "세션" } : null;
@@ -6007,14 +6008,14 @@ function renderMarketCtx() {
     + `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4.5h6.5M12.5 4.5H14M2 11.5h1.5M7.5 11.5H14"/><circle cx="10.5" cy="4.5" r="1.8"/><circle cx="5.5" cy="11.5" r="1.8"/></svg></button>`;
   const lineSw = `<div class="mc-switch"><span class="mc-switch-t">차트에 그리기</span>`
       + `<span class="mc-sw-g mc-sw-ma">${[["ema5", "EMA 5", "종가 지수이동평균 5봉"], ["ema20", "EMA 20", "종가 지수이동평균 20봉"], ["vwma", "VWMA 100", "거래량 가중 이동평균 100봉 · 거래량 = 바이낸스 5분봉"]]
-        .map(([k, nm, t]) => swChip(k, nm, 1, t) + gear(k)).join("")}${swChip("bb", "볼린저", 1, "20봉 · 2σ") + gear("bb")}${swChip("veto", "추세 veto", 1, "SMA144 ±1×ATR 히스테리시스 밴드 · 롱만/숏만 꼬리표") + gear("veto")}</span>`
+        .map(([k, nm, t]) => swChip(k, nm, 1, t) + gear(k)).join("")}${swChip("bb", "볼린저", 1, "20봉 · 2σ") + gear("bb")}${swChip("veto", "추세 veto", 1, "SMA144 ±1×ATR 히스테리시스 밴드 · 롱만/숏만 꼬리표") + gear("veto")}${swChip("sma50", "일봉 SMA50", 1, "전날까지 완결 일봉 50개 평균 · 지금가가 위 = 롱 추세(숏 자제) · 아래 = 숏 추세 · 색 = 측면") + gear("sma50")}</span>`
       + `<span class="mc-sw-g"><span class="mc-chip-pair">${swChip("vwap", "VWAP ±σ", 1)}${swChip("vsess", "세션 시작부터", "", "끄면 하루(UTC 00시부터) · 켜면 지금 시장 세션 개장부터(아시아·유럽·미국)", true)}</span>${gear("vwap")}`
       + `${swChip("wvwap", "주간·앵커 VWAP", 1)}${gear("wvwap")}</span>`
       // 2026-10-29 사용자 «5분봉 거래량 제일 많은 부분을 이은 선도 on/off» -- 봉별 POC 선(기본 켬 · 봉마다 POC 테두리는 그대로)
       + `<span class="mc-sw-g">${swChip("poc", "POC 선", 1, "봉마다 가장 많이 거래된 가격(POC)을 이은 선 · 봉 안 POC 테두리는 그대로")}${gear("poc")}</span>`
       + `<div class="mc-cfg"${lineCfg ? "" : " hidden"}>${lineCfg ? lineCfgHtml(lineCfg) : ""}</div></div>`;
   // 2026-10-28 펜 메모 «지표 아이콘 버튼을 누르면 이 지표 버튼들이 팝업으로 나와 추가/제거» -- 넓은 화면 줄 = 버튼 하나(켠 개수) · 칩·입력·저장은 그대로 팝업 안
-  const indOn = ["ema5", "ema20", "vwma", "bb", "veto", "vwap", "wvwap", "poc"].filter((k) => mcLine[k]).length;
+  const indOn = ["ema5", "ema20", "vwma", "bb", "veto", "sma50", "vwap", "wvwap", "poc"].filter((k) => mcLine[k]).length;
   const fsRow = G.cmpW || (flowOn() && !!el("fpMobRow"));   // 10-30 1단 데스크톱도(위 한 줄) -- 휴대폰은 머리 줄 · 넓은 화면은 위 한 줄   // 옛 index.html(줄 없음)이면 칩을 시장 맥락에 그대로   // 2026-10-28 사용자 «모바일도 데스크탑처럼» -- 휴대폰 흐름 코인도 버튼 + 팝업(#fpMobRow)
   if (!fsRow) fpIndOpen = false;   // 버튼 줄이 없는 화면으로 가면 닫힌 채로(돌아왔을 때 저절로 열려 있지 않게)
   const fsEl = el("fpLineSwitch"), fsHtml = fsRow ? `<button type="button" class="fp-ind-btn" aria-haspopup="true" aria-expanded="${fpIndOpen}" aria-controls="fpIndPop">`
@@ -8846,6 +8847,36 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
             lastY = y;
             mk(svg, "text", { x: ml + 4, y: (y - 3).toFixed(1), "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: "var(--muted)", "pointer-events": "none" }).textContent = nm;
           });
+      }
+      // ③ 일봉 SMA50(2026-11-15 사용자 «일봉 SMA50 도 풋프린트 지표 리스트에») -- /api/trend 의 sma50(그날 종가가 알려진 다음 날 00:00 UTC 부터 같은 값 = 날마다 계단).
+      //   «롱 추세면 숏 금지» 검정(docs/experiments/trend_filter_bundle_20261115.md)의 기준선 -- 통과 후보 등급(맞는 방향 · 유의 아님).
+      //   색 = 측면(지금가가 위 = 초록 롱 추세 · 아래 = 빨강 숏 추세). 일봉 평균이라 5분 창에선 대개 화면 밖 -- 그때도 «지금 어느 측면인가»는 왼쪽 위·아래 끝 꼬리표로 읽힌다(veto 와 같은 규약).
+      const s50 = mcLine.sma50 && latestTrend?.ok && Array.isArray(latestTrend.sma50) ? latestTrend.sma50 : null;
+      const lastClose50 = Number((candles[candles.length - 1] || {}).close);
+      if (s50 && s50.length && lastClose50 > 0) {
+        const at50 = (ms) => { let v = null; for (const e of s50) { if (e.t <= ms) v = e.v; else break; } return v; };
+        const vals = candles.map((c) => at50(c.time * 1000)), v50 = vals[vals.length - 1];
+        if (v50 > 0) {
+          const up = lastClose50 > v50, S = lineSt("sma50", 1.6, "10 4", up ? "var(--good)" : "var(--bad)"), col = S.c;
+          const dp = (ASSET_CONFIG[activeSnapshotAsset] || {}).dp ?? 1, side = up ? "롱 추세" : "숏 추세";
+          const tip = `일봉 SMA50 ${v50.toFixed(dp)} — 전날까지 완결 일봉 50개 평균. 지금가가 ${up ? "위" : "아래"} = ${side}(${up ? "숏" : "롱"} 자제 참고). `
+            + "우리 검정: 롱 추세일 때 잡은 숏이 평균적으로 더 나빴지만 유의하지는 않다(통과 후보) — 진입 신호가 아니라 거르개 참고.";
+          const pts = [];
+          vals.forEach((v, i) => {
+            if (!(v > 0)) return;
+            if (i > 0 && vals[i - 1] > 0 && vals[i - 1] !== v) pts.push(`${xAt(i).toFixed(1)},${yAt(vals[i - 1]).toFixed(1)}`, `${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`);   // 날이 바뀐 곳은 수직으로 잇는다
+            pts.push(`${cx(i)},${yAt(v).toFixed(1)}`);
+          });
+          pl(pts, { stroke: col, "stroke-opacity": 0.8, "stroke-width": S.w, "stroke-dasharray": S.d }, tip);
+          const y50 = yAt(v50), above = y50 <= mt + 8, below = y50 >= plotBottom - 2;
+          if (!above && !below && gutOn) fpNotes.push({ val: v50, label: `SMA50·${up ? "롱" : "숏"}`, color: col });
+          else {
+            const t = mk(svg, "text", { x: ml + 4, y: (above ? mt + 11 : below ? plotBottom - 5 : y50 - 3).toFixed(1), "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: col,
+                                        stroke: "var(--chart-bg)", "stroke-width": 4, "stroke-linejoin": "round", "paint-order": "stroke" });
+            t.textContent = `${above ? "↑ " : below ? "↓ " : ""}일봉 SMA50 ${v50.toFixed(dp)} · ${side}`;
+            const tt = document.createElementNS(NS, "title"); tt.textContent = tip; t.appendChild(tt);   // textContent 가 지우므로 글 뒤에 단다
+          }
+        }
       }
       // ④ HL 고래 실측 청산가 -- 추정 청산맵(배경)과 따로, 거래소가 준 실제 청산가(추적 300주소)
       const mc = latestMarketCtx && latestMarketCtx.available && latestMarketCtx.asset === activeSnapshotAsset ? latestMarketCtx : null;
