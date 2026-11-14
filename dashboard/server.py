@@ -2674,6 +2674,30 @@ def make_app() -> web.Application:
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
         return web.json_response(payload, headers=NOCACHE)
 
+    async def api_swing_lines(request: web.Request) -> web.Response:   # 2026-11-15 풋프린트 지표 «1h·30m 스윙»(dashboard/swing_lines.py)
+        """1시간·30분 완결 봉으로 «아직 안 깨진 큰 스윙 고점·저점»과 마지막 구조 돌파. 봉이 30분마다 바뀌므로 120초 캐시 ·
+        klines 499개(가중치 2) × 2 -- 1시간 20일 · 30분 10일(스윙은 앞뒤 50봉이라 최근 피벗이면 충분)."""
+        asset = str(request.query.get("asset") or "eth").lower()
+        if asset not in MARKET_SYMBOLS:
+            raise web.HTTPBadRequest(reason="unsupported_asset")
+        async def produce() -> dict[str, Any]:
+            from dashboard.swing_lines import swing_state
+            out: dict[str, Any] = {"ok": True}
+            now_ms = time.time() * 1000
+            for tf in ("1h", "30m"):
+                raw = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines",
+                                               {"symbol": MARKET_SYMBOLS[asset], "interval": tf, "limit": 499},
+                                               error_reason="swing_upstream_error")
+                done = [r for r in raw if int(r[6]) < now_ms]   # 형성 중 봉은 뺀다(판정은 마감 봉)
+                out[tf] = swing_state([float(r[2]) for r in done], [float(r[3]) for r in done], [float(r[4]) for r in done],
+                                      [int(r[6]) + 1 for r in done])
+            return out
+        try:
+            payload = await swr_cached(f"swing_{asset}", 120.0, produce, max_stale=STALE_GRACE_SECONDS)
+        except Exception as exc:  # noqa: BLE001 -- 선만 비고 나머지는 산다
+            payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+        return web.json_response(payload, headers=NOCACHE)
+
     async def api_dir_signals(request: web.Request) -> web.Response:   # 2026-10-15 지평 사다리 7일·4~13주(코인 무관, BTC 기준)
         """일 단위 신호 둘(dashboard/dir_signals.py) -- 하루 한 번 바뀌므로 1시간 캐시 · 원천 실패 땐 하루까지 묵은 값."""
         try:
@@ -4883,6 +4907,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/macro-calendar", api_macro_calendar)
     app.router.add_get("/api/situation", api_situation)
     app.router.add_get("/api/trend", api_trend)
+    app.router.add_get("/api/swing-lines", api_swing_lines)   # 2026-11-15 풋프린트 지표 «1h·30m 스윙»
     app.router.add_get("/api/dir-signals", api_dir_signals)
     app.router.add_get("/api/regime-band", api_regime_band)
     app.router.add_get("/api/risk-radar", api_risk_radar)

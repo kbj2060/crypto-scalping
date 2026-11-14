@@ -1478,6 +1478,9 @@ const API_TREND_URL = "/api/trend";
 const TREND_POLL_MS = 60000;
 let latestTrend = null;
 let trendLastFetchAt = 0;
+// 2026-11-15 사용자 «5분 차트에서도 1시간과 30분 큰 스윙 선을 지표로 겹쳐» -- /api/swing-lines(dashboard/swing_lines.py · 서버 120초 캐시) · 켰을 때만 60초마다
+const API_SWING_URL = "/api/swing-lines";
+let latestSwing = null, swingLastFetchAt = 0;
 // 2026-10-15 지평 사다리의 일 단위 신호 둘(/api/dir-signals, dashboard/dir_signals.py) -- 코인 무관(BTC 기준), 서버 1시간 캐시
 const DIR_SIG_POLL_MS = 600000;
 let latestDirSig = null;
@@ -1772,7 +1775,7 @@ async function setActiveSnapshotAsset(asset) {
   latestChartMarkers = null; chartMarkersLastFetchAt = 0;
   latestPositionProfile = null; posProfileFetchAt = 0;   // 2026-10-20 포지션 보기도 코인별
   // 2026-10-04 시장 맥락·추세 칩도 코인별(서버 ?asset=) -- 옛 코인 값을 새 코인 이름 아래 두지 않는다.
-  latestMarketCtx = null; marketCtxLastFetchAt = 0; latestTrend = null; trendLastFetchAt = 0;
+  latestMarketCtx = null; marketCtxLastFetchAt = 0; latestTrend = null; trendLastFetchAt = 0; latestSwing = null; swingLastFetchAt = 0;
   renderMarketCtx();   // 옛 코인 카드를 다음 폴링(최대 1초)까지 두지 않는다
   renderPaper();
 
@@ -5184,6 +5187,23 @@ async function refreshTrend() {
   if (asset !== activeSnapshotAsset) return;   // 그 사이 코인이 바뀌었다
   latestTrend = got;
 }
+async function refreshSwing() {   // 2026-11-15 «1h·30m 스윙» -- 검증한 4코인만(OB_ASSETS)
+  if (activePageTab !== "snapshot" || document.hidden || !(mcLine.sw1h || mcLine.sw30m) || !OB_ASSETS.has(activeSnapshotAsset)) return;
+  const now = Date.now();
+  if (now - swingLastFetchAt < TREND_POLL_MS) return;
+  swingLastFetchAt = now;
+  const asset = activeSnapshotAsset;
+  let got;
+  try {
+    const res = await fetch(`${API_SWING_URL}?asset=${asset}`, { cache: "no-cache" });
+    got = res.ok ? await res.json() : { ok: false, reason: `HTTP ${res.status}` };
+  } catch (error) {
+    got = { ok: false, reason: "fetch_failed" };
+  }
+  if (asset !== activeSnapshotAsset) return;
+  latestSwing = Object.assign(got, { asset });
+  if (typeof scheduleSnapshotChartRender === "function") scheduleSnapshotChartRender();
+}
 
 // 2026-10-16 사용자 «같이 해서 시안» → «배포»(시안 ①): 칸별 아이스버그(/api/iceberg = scripts/live_eth_iceberg_20261016, 30초 · ETH 만).
 //   표시 전용 -- 신호·알림 아님. 연구 28일 23건 15분 +7.6bp[2.6,15.0] → 전진 150건이면 판정(research_eth_dom_levels_absorption_20261016 --judge).
@@ -5609,7 +5629,7 @@ const API_MARKET_CTX_URL = "/api/market-context";
 const MARKET_CTX_POLL_MS = 1000;   // 2026-10-03 5초 -> 1초(사용자 «1초 원천은 화면도 1초») -- 호가 벽·스프레드·계기·BTC 동행은 서버 1초 루프 · 응답 중앙 14ms·3KB(서버 실측)
 let latestMarketCtx = null, marketCtxLastFetchAt = 0;
 let latestMacroEvents = null;        // renderMacroCalendar 가 채운다 -- 카드의 «다음 주요 일정». null = 아직 못 받음(«없음»과 다르다)
-const mcLine = { st: {}, poc: true, vwap: true, veto: true, sma50: true, ob: true, fvg: false, bb: false, wvwap: false, vsess: false, ema5: false, ema20: false, vwma: false };   // 2026-10-26 펜 메모: 이동평균 셋(기본 끔)   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
+const mcLine = { st: {}, poc: true, vwap: true, veto: true, sma50: true, sw1h: true, sw30m: false, ob: true, fvg: false, bb: false, wvwap: false, vsess: false, ema5: false, ema20: false, vwma: false };   // 2026-10-26 펜 메모: 이동평균 셋(기본 끔)   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
 try { Object.assign(mcLine, JSON.parse(localStorage.getItem("mcLine") || "{}")); } catch (err) { /* 기억은 편의 */ }
 if (mcLine.vwW) { mcLine.st = { ...mcLine.st, vwap: { w: mcLine.vwW, d: mcLine.vwD, c: mcLine.vwC } }; delete mcLine.vwW; delete mcLine.vwD; delete mcLine.vwC; }   // 10-29 오전판(VWAP 전용 줄)에서 고른 값 옮김
 // 2026-09-30 사용자 «세션은 미국·유럽·아시아 시장 VWAP 으로» -- vsess 켜면 지금 시장 세션 개장(현지 시각, 서머타임 반영)부터 센 VWAP.
@@ -5619,7 +5639,8 @@ if (mcLine.vwW) { mcLine.st = { ...mcLine.st, vwap: { w: mcLine.vwW, d: mcLine.v
 const LINE_DEF = { ema5: ["EMA 5", 1.2, "none", "var(--ma-ema5)"], ema20: ["EMA 20", 1.4, "none", "var(--ma-ema20)"], vwma: ["VWMA 100", 1.6, "none", "var(--ma-vwma)"],
   bb: ["볼린저", 1, "3 3", "var(--muted)"], veto: ["추세 veto", 2, "none", "var(--muted)"], vwap: ["VWAP", 2, "none", "var(--ink)"],
   wvwap: ["주간·앵커 VWAP", 1.2, "8 4", "var(--ink)"], poc: ["POC 선", 1.5, "none", "var(--amber)"],
-  sma50: ["일봉 SMA50", 1.6, "10 4", "var(--muted)"] };   // 2026-11-15 기본 색 = 측면 색(veto 와 같은 규약)
+  sma50: ["일봉 SMA50", 1.6, "10 4", "var(--muted)"],
+  sw1h: ["1h 스윙", 1.5, "12 4", "var(--ink)"], sw30m: ["30m 스윙", 1.2, "4 3", "var(--ink)"] };   // 2026-11-15 큰 스윙 선   // 2026-11-15 기본 색 = 측면 색(veto 와 같은 규약)
 const LS_DASH = { solid: ["none", "실선"], dash: ["6 3", "파선"], dot: ["2 3", "점선"] };
 const LS_COL = { ink: ["var(--ink)", "흰색"], muted: ["var(--muted)", "회색"], warn: ["var(--warn)", "주황"], option: ["var(--option)", "청록"] };
 // 그 선의 지금 모양 -- w·d·c 는 기본값을 덮어 부르는 쪽(veto 측면 색 · 앵커 줄별 모양)이 줄 수 있다
@@ -6015,15 +6036,18 @@ function renderMarketCtx() {
       + `<span class="mc-sw-g">${swChip("poc", "POC 선", 1, "봉마다 가장 많이 거래된 가격(POC)을 이은 선 · 봉 안 POC 테두리는 그대로")}${gear("poc")}</span>`
       + `<span class="mc-sw-g">${swChip("ob", "오더블록", 0, "큰 스윙(앞뒤 50봉) 구조 돌파의 오더블록 · 15분봉(100봉 = 25시간, 실선) · 5분 보기엔 5분봉(100봉 ≈ 8시간, 파선)도 함께 · 아직 안 닿은 것만 · 지금가 위·아래 하나씩 · 닿으면 버팀/깨짐 표시 뒤 지움 · ETH·BTC·SOL·XRP")}`
       + `${swChip("fvg", "FVG 15m", 0, "15분봉 공정가 갭 · 생긴 뒤 100봉 안·아직 안 닿은 것 중 지금가 위·아래 하나씩 · 효과가 작아(버팀 42% vs 무작위 40%) 기본 끔")}</span>`
+      // 2026-11-15 사용자 «5분 차트에서도 1시간과 30분 큰 스윙 선을 지표로 겹쳐» -- 어느 차트 지평이든 같은 선(판정은 그 봉 종가)
+      + `<span class="mc-sw-g">${swChip("sw1h", "1h 스윙", 1, "1시간봉 큰 스윙(앞뒤 50봉) 중 아직 안 깨진 고점·저점 · 1시간 종가로 넘으면 구조 돌파 · 돌파 뒤 깬 쪽 2 ATR 먼저 약 53%(무작위 49%) · 추세 전환 신호 아님 · ETH·BTC·SOL·XRP")}${gear("sw1h")}`
+      + `${swChip("sw30m", "30m 스윙", 1, "30분봉 큰 스윙(앞뒤 50봉) 중 아직 안 깨진 고점·저점 · 30분 종가로 넘으면 구조 돌파 · 돌파 뒤 깬 쪽 2 ATR 먼저 약 53%(무작위 49%) · ETH·BTC·SOL·XRP")}${gear("sw30m")}</span>`
       + `<div class="mc-cfg"${lineCfg ? "" : " hidden"}>${lineCfg ? lineCfgHtml(lineCfg) : ""}</div></div>`;
   // 2026-10-28 펜 메모 «지표 아이콘 버튼을 누르면 이 지표 버튼들이 팝업으로 나와 추가/제거» -- 넓은 화면 줄 = 버튼 하나(켠 개수) · 칩·입력·저장은 그대로 팝업 안
-  const indOn = ["ema5", "ema20", "vwma", "bb", "veto", "sma50", "vwap", "wvwap", "poc", "ob", "fvg"].filter((k) => mcLine[k]).length;
+  const indOn = ["ema5", "ema20", "vwma", "bb", "veto", "sma50", "sw1h", "sw30m", "vwap", "wvwap", "poc", "ob", "fvg"].filter((k) => mcLine[k]).length;
   const fsRow = G.cmpW || (flowOn() && !!el("fpMobRow"));   // 10-30 1단 데스크톱도(위 한 줄) -- 휴대폰은 머리 줄 · 넓은 화면은 위 한 줄   // 옛 index.html(줄 없음)이면 칩을 시장 맥락에 그대로   // 2026-10-28 사용자 «모바일도 데스크탑처럼» -- 휴대폰 흐름 코인도 버튼 + 팝업(#fpMobRow)
   if (!fsRow) fpIndOpen = false;   // 버튼 줄이 없는 화면으로 가면 닫힌 채로(돌아왔을 때 저절로 열려 있지 않게)
   const fsEl = el("fpLineSwitch"), fsHtml = fsRow ? `<button type="button" class="fp-ind-btn" aria-haspopup="true" aria-expanded="${fpIndOpen}" aria-controls="fpIndPop">`
     + `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 12.5l4-4.5 3 2.5 6-6.5"/><path d="M1.5 14.5h13"/></svg>지표<b>${indOn}</b></button>`
     + `<div class="fp-ind-pop" id="fpIndPop" aria-label="차트에 그릴 지표"${fpIndOpen ? "" : ' hidden=""'}>`
-    + lineSw.replace('<span class="mc-switch-t">차트에 그리기</span>', '<span class="mc-switch-t">이동평균·밴드 · VWAP · POC · 오더블록 — 눌러서 켜고 끄기</span>') + `</div>` : "";
+    + lineSw.replace('<span class="mc-switch-t">차트에 그리기</span>', '<span class="mc-switch-t">이동평균·밴드 · VWAP · POC · 오더블록 · 스윙 — 눌러서 켜고 끄기</span>') + `</div>` : "";
   // 🔴setH(직렬화한 innerHTML 과 비교)는 여기서 매번 다시 썼다 -- `checked`→`checked=""`·`<path/>`→`</path>` 라 늘 달라 클릭·포커스가 씹혔다(10-28 검증). 마지막으로 쓴 글과 비교한다.
   if (fsEl && fsEl._h !== fsHtml) {
     const ae = document.activeElement, ds = ae?.dataset || {};
@@ -8984,6 +9008,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       // ③ 일봉 SMA50(2026-11-15 사용자 «일봉 SMA50 도 풋프린트 지표 리스트에») -- /api/trend 의 sma50(그날 종가가 알려진 다음 날 00:00 UTC 부터 같은 값 = 날마다 계단).
       //   «롱 추세면 숏 금지» 검정(docs/experiments/trend_filter_bundle_20261115.md)의 기준선 -- 통과 후보 등급(맞는 방향 · 유의 아님).
       //   색 = 측면(지금가가 위 = 초록 롱 추세 · 아래 = 빨강 숏 추세). 일봉 평균이라 5분 창에선 대개 화면 밖 -- 그때도 «지금 어느 측면인가»는 왼쪽 위·아래 끝 꼬리표로 읽힌다(veto 와 같은 규약).
+      const edgeL = { top: 0, bot: 0 };   // 왼쪽 위·아래 끝 꼬리표 쌓기(일봉 SMA50 → 1h·30m 스윙 순) · 아래 끝은 플롯 안에 겹친 레인(LANE_IN) 위
       const s50 = mcLine.sma50 && latestTrend?.ok && Array.isArray(latestTrend.sma50) ? latestTrend.sma50 : null;
       const lastClose50 = Number((candles[candles.length - 1] || {}).close);
       if (s50 && s50.length && lastClose50 > 0) {
@@ -9004,12 +9029,56 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           const y50 = yAt(v50), above = y50 <= mt + 8, below = y50 >= plotBottom - 2;
           if (!above && !below && gutOn) fpNotes.push({ val: v50, label: `SMA50·${up ? "롱" : "숏"}`, color: col });
           else {
-            const t = mk(svg, "text", { x: ml + 4, y: (above ? mt + 11 : below ? plotBottom - 5 : y50 - 3).toFixed(1), "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: col,
+            const t = mk(svg, "text", { x: ml + 4, y: (above ? mt + 11 + 13 * edgeL.top++ : below ? plotBottom - LANE_IN - 5 - 13 * edgeL.bot++ : y50 - 3).toFixed(1), "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: col,
                                         stroke: "var(--chart-bg)", "stroke-width": 4, "stroke-linejoin": "round", "paint-order": "stroke" });
             t.textContent = `${above ? "↑ " : below ? "↓ " : ""}일봉 SMA50 ${v50.toFixed(dp)} · ${side}`;
             const tt = document.createElementNS(NS, "title"); tt.textContent = tip; t.appendChild(tt);   // textContent 가 지우므로 글 뒤에 단다
           }
         }
+      }
+      // ③ 1h·30m 큰 스윙 선(2026-11-15 사용자 «5분 차트에서도 1시간과 30분 큰 스윙 선을 지표로 겹쳐») -- /api/swing-lines.
+      //   선 = 아직 안 깨진 큰 스윙(앞뒤 50봉) 고점·저점 · 판정은 그 봉(1h·30m) 종가 -- 지금가가 넘었어도 마감 전이면 «마감 대기».
+      //   검증(docs/experiments/choch_swing_2atr_confirm_20261115.md): 돌파 뒤 깬 쪽 2 ATR 먼저 1h 52.8%·30m 53.1% vs 무작위 약 49% · BOS 도 같음(전환 정보 아님) · 5분봉 자신은 +1.3pp 로 작아 1h·30m 을 겹친다.
+      const sw = latestSwing && latestSwing.ok && latestSwing.asset === activeSnapshotAsset ? latestSwing : null;
+      if (sw) {
+        const dp = (ASSET_CONFIG[activeSnapshotAsset] || {}).dp ?? 1;
+        const px = Number(latestLivePriceByAsset[activeSnapshotAsset]) || Number((candles[candles.length - 1] || {}).close);
+        const idxAt = (ms) => { const i = candles.findIndex((c) => c.time * 1000 >= ms); return i < 0 ? null : i; };
+        [["sw1h", "1h"], ["sw30m", "30m"]].filter(([k]) => mcLine[k]).forEach(([k, tf]) => {
+          const st = sw[tf] || {}, S = lineSt(k);
+          [["hi", "고", 1], ["lo", "저", -1]].forEach(([side, nm, d]) => {
+            const lv = st[side];
+            if (!lv || !(lv.price > 0)) return;
+            const wait = px > 0 && (d > 0 ? px > lv.price : px < lv.price);   // 넘었지만 그 봉이 아직 마감 전
+            const tip = `${tf} 큰 스윙 ${nm}점 ${lv.price.toFixed(dp)} (앞뒤 50봉 · 아직 안 깨짐) — ${tf} 봉 종가로 ${d > 0 ? "넘으면" : "깨면"} 구조 돌파.`
+              + (wait ? ` 지금가가 넘었다 — ${tf} 봉 마감 대기(마감해야 돌파).` : "")
+              + ` 우리 검정: 돌파 뒤 깬 쪽 2 ATR 먼저 약 53%(무작위 49%) — 추세 전환 신호 아님·참고.`;
+            const y = yAt(lv.price), i0 = idxAt(lv.known_t), x0 = i0 == null ? ml : Math.max(ml, xAt(i0));
+            if (i0 != null || lv.known_t <= candles[0].time * 1000) mk(lines, "line", { x1: x0.toFixed(1), x2: ml + cw, y1: y.toFixed(1), y2: y.toFixed(1), stroke: S.c,
+              "stroke-opacity": wait ? 0.9 : 0.55, "stroke-dasharray": S.d, "stroke-width": S.w }, tip);
+            const lab = `${tf} 스윙 ${nm}${wait ? "·마감 대기" : ""}`, above = y <= mt + 8, below = y >= plotBottom - 2;
+            if (!above && !below) {
+              if (gutOn) { fpNotes.push({ val: lv.price, label: lab, color: S.c }); return; }
+              const t = mk(svg, "text", { x: ml + 4, y: (y - 3).toFixed(1), "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: "var(--muted)", "pointer-events": "none" });
+              t.textContent = lab; return;
+            }
+            const t = mk(svg, "text", { x: ml + 4, y: (above ? mt + 11 + 13 * edgeL.top++ : plotBottom - LANE_IN - 5 - 13 * edgeL.bot++).toFixed(1), "font-size": mobileChart ? 9 : 10,
+                                        "font-weight": 700, fill: "var(--muted)", stroke: "var(--chart-bg)", "stroke-width": 4, "stroke-linejoin": "round", "paint-order": "stroke" });
+            t.textContent = `${above ? "↑" : "↓"} ${tf} 스윙 ${nm} ${lv.price.toFixed(dp)}`;
+            const tt = document.createElementNS(NS, "title"); tt.textContent = tip; t.appendChild(tt);
+          });
+          const lb = st.last_break, ib = lb ? idxAt(lb.t) : null;   // 돌파가 알려진 시각(그 봉 마감) 뒤 첫 봉 · 창보다 오래됐으면 0 이 나와 아래 ib > 0 에서 빠진다
+          if (lb && ib != null && ib > 0) {
+            const col = lb.dir > 0 ? "var(--good)" : "var(--bad)", yb = yAt(lb.level);
+            if (yb > mt + 8 && yb < plotBottom - 2) {
+              const t = mk(svg, "text", { x: xAt(ib).toFixed(1), y: (yb + (lb.dir > 0 ? -5 : 13)).toFixed(1), "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: col, "text-anchor": "middle",
+                                          stroke: "var(--chart-bg)", "stroke-width": 4, "stroke-linejoin": "round", "paint-order": "stroke" });
+              t.textContent = `${tf} ${lb.dir > 0 ? "↑" : "↓"} 돌파`;
+              const tt = document.createElementNS(NS, "title"); tt.textContent = `${tf} 큰 스윙 ${lb.dir > 0 ? "고점" : "저점"} ${lb.level.toFixed(dp)} 를 ${tf} 종가로 깸(${lb.kind}). 우리 검정: 깬 쪽 2 ATR 먼저 약 53%(무작위 49%) — 그 뒤 방향은 반반.`;
+              t.appendChild(tt);
+            }
+          }
+        });
       }
       // ④ HL 고래 실측 청산가 -- 추정 청산맵(배경)과 따로, 거래소가 준 실제 청산가(추적 300주소)
       const mc = latestMarketCtx && latestMarketCtx.available && latestMarketCtx.asset === activeSnapshotAsset ? latestMarketCtx : null;
@@ -10809,6 +10878,7 @@ async function tick() {
       refreshPositionProfile();      // 2026-10-10 체결 기둥 «포지션» 보기 (켤 때만 1초)
       refreshSituation();            // 2026-09-21 상황 읽기 · 30분 (5초, ETH 만)
       refreshTrend();                // 2026-09-28 30분 카드 추세 칸 (60초, 일봉)
+      refreshSwing();                // 2026-11-15 «1h·30m 스윙» 지표(켰을 때만 60초)
       refreshIceberg();              // 2026-10-16 풋프린트 칸별 아이스버그 (30초, ETH · 검증 중 · 신호 아님)
       refreshDirSig();               // 2026-10-15 지평 사다리 7일·4~13주 (10분, 서버 1시간 캐시)
       refreshPredRecord();           // 2026-11-03 ⑤ 예측 줄 아래 적중 기록·4h 상대 강도 (1분, 서버가 쌓은 기록)
