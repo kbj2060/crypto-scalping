@@ -14,7 +14,8 @@ MODE = {"px": None, "wait": False}
 def payload():
     px, now = MODE["px"], int(time.time() * 1000)
     hi = px * (0.997 if MODE["wait"] else 1.002)
-    st = lambda f: {"hi": {"price": hi * f, "pivot_t": now - 3 * 864e5, "known_t": now - 864e5}, "lo": {"price": px * 0.9 * f, "pivot_t": now - 5 * 864e5, "known_t": now - 3 * 864e5},
+    kt = now + 864e5 if MODE.get("future") else now - 864e5
+    st = lambda f: {"hi": {"price": hi * f, "pivot_t": now - 3 * 864e5, "known_t": kt}, "lo": {"price": px * 0.9 * f, "pivot_t": now - 5 * 864e5, "known_t": kt if MODE.get("future") else now - 3 * 864e5},
                     "last_break": {"dir": 1, "kind": "BOS", "level": px * 0.997, "t": now - 30 * 60e3}, "trend": 1, "asof_t": now}
     return {"ok": True, "1h": st(1.0), "30m": st(1.001)}
 
@@ -76,6 +77,13 @@ with sync_playwright() as p:
             if case == "30m":
                 check(any(l["title"].startswith("30m") for l in r["lines"]), f"{name}/30m: 30m 선도 그림")
             pg.screenshot(path=f"{SP}/fp_swing_{name}_{case}.png", full_page=False)
+        # 11-15 감사 수정 확인: 창 끝보다 늦게 알려진 스윙은 그리지 않는다(지나간 화면의 미래 정보)
+        MODE["future"] = True
+        pg.evaluate("() => { latestSwing = null; swingLastFetchAt = 0; }"); pg.wait_for_timeout(8000)
+        r = pg.evaluate(JS)
+        check(not any(l["title"].startswith("1h") for l in r["lines"]) and not any(t.startswith("↓ 1h 스윙 저") or t.startswith("1h 스윙") for t in r["texts"] + r["gut"]),
+              f"{name}/future: 창 끝 뒤에 알려진 스윙은 선·이름표 없음")
+        MODE["future"] = False
         ctx.close()
     b.close()
 print("FAILS", fails)

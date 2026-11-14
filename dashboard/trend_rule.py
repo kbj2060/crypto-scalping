@@ -56,7 +56,7 @@ def trend_payload(closes: Sequence[float], close_times_ms: Sequence[int]) -> dic
             "size": round(size, 3), "age_days": age, "lookbacks": list(LOOKBACKS), "f1": f1,
             # 2026-11-15 «일봉 SMA50» 차트 선(풋프린트 지표 팝업) -- t = 그 일봉 종가가 알려지는 시각(다음 날 00:00 UTC), v = 그날까지 50일 평균.
             #   «롱 추세면 숏 금지» 검정(docs/experiments/trend_filter_bundle_20261115.md)의 기준선 -- 통과 후보 등급(유의 아님)
-            "sma50": [{"t": int(close_times_ms[i]), "v": round(sum(c[i - 49:i + 1]) / 50, 6)} for i in range(max(49, n - 14), n)]}
+            "sma50": [{"t": int(close_times_ms[i]), "v": round(sum(c[i - 49:i + 1]) / 50, 6), "c": c[i]} for i in range(max(49, n - 14), n)]}   # c = 그날 종가(측면 판정 = c > v, 11-15 감사)
 
 
 if __name__ == "__main__":
@@ -64,7 +64,7 @@ if __name__ == "__main__":
     up = [100 * 1.01 ** i for i in range(120)]
     p = trend_payload(up, list(range(120)))
     assert p["ok"] and p["signal"] == 1.0 and p["ups"] == 5 and p["size"] > 0, p
-    assert len(p["sma50"]) == 14 and abs(p["sma50"][-1]["v"] - sum(up[-50:]) / 50) < 1e-6 and p["sma50"][-1]["t"] == 119, p["sma50"][-1]
+    assert len(p["sma50"]) == 14 and abs(p["sma50"][-1]["v"] - sum(up[-50:]) / 50) < 1e-6 and p["sma50"][-1]["t"] == 119 and p["sma50"][-1]["c"] == up[-1], p["sma50"][-1]
     assert all(v["flip_price"] == up[120 - v["L"]] for v in p["votes"]), p["votes"]
     assert p["age_days"] >= 29, p["age_days"]
     q = trend_payload(list(reversed(up)), list(range(120)))

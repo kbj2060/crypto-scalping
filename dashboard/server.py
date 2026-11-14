@@ -2675,8 +2675,10 @@ def make_app() -> web.Application:
         return web.json_response(payload, headers=NOCACHE)
 
     async def api_swing_lines(request: web.Request) -> web.Response:   # 2026-11-15 풋프린트 지표 «1h·30m 스윙»(dashboard/swing_lines.py)
-        """1시간·30분 완결 봉으로 «아직 안 깨진 큰 스윙 고점·저점»과 마지막 구조 돌파. 봉이 30분마다 바뀌므로 120초 캐시 ·
-        klines 499개(가중치 2) × 2 -- 1시간 20일 · 30분 10일(스윙은 앞뒤 50봉이라 최근 피벗이면 충분)."""
+        """1시간·30분 완결 봉으로 «아직 안 깨진 큰 스윙 고점·저점»과 마지막 구조 돌파. 60초 캐시(봉 마감 뒤 늦어도 ~2분) ·
+        klines 1000개(가중치 5) × 2 -- 1시간 41일 · 30분 20일.
+        🔴11-15 감사: 창 시작에서 구조를 새로 세우므로 연구(2022~ 이어 계산)와 BOS/CHoCH 구분이 13% 가량 다르다(499봉 실측) -- 화면은 구분을 쓰지 않는다.
+        선(안 깨진 고·저)은 1000봉이면 거의 같다. ponytail: 확정 상태를 이어 붙이는 계산은 필요해지면."""
         asset = str(request.query.get("asset") or "eth").lower()
         if asset not in MARKET_SYMBOLS:
             raise web.HTTPBadRequest(reason="unsupported_asset")
@@ -2684,16 +2686,24 @@ def make_app() -> web.Application:
             from dashboard.swing_lines import swing_state
             out: dict[str, Any] = {"ok": True}
             now_ms = time.time() * 1000
+            errs = []
             for tf in ("1h", "30m"):
-                raw = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines",
-                                               {"symbol": MARKET_SYMBOLS[asset], "interval": tf, "limit": 499},
-                                               error_reason="swing_upstream_error")
+                try:                                            # 11-15 감사: 한쪽 실패가 다른 쪽 선까지 지우지 않게
+                    raw = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines",
+                                                   {"symbol": MARKET_SYMBOLS[asset], "interval": tf, "limit": 1000},
+                                                   error_reason="swing_upstream_error")
+                except Exception as exc:  # noqa: BLE001
+                    out[tf] = None; errs.append(f"{tf}: {type(exc).__name__}"); continue
                 done = [r for r in raw if int(r[6]) < now_ms]   # 형성 중 봉은 뺀다(판정은 마감 봉)
                 out[tf] = swing_state([float(r[2]) for r in done], [float(r[3]) for r in done], [float(r[4]) for r in done],
                                       [int(r[6]) + 1 for r in done])
+            if len(errs) == 2:
+                raise RuntimeError("; ".join(errs))
+            if errs:
+                out["partial"] = errs
             return out
         try:
-            payload = await swr_cached(f"swing_{asset}", 120.0, produce, max_stale=STALE_GRACE_SECONDS)
+            payload = await swr_cached(f"swing_{asset}", 60.0, produce, max_stale=STALE_GRACE_SECONDS)
         except Exception as exc:  # noqa: BLE001 -- 선만 비고 나머지는 산다
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
         return web.json_response(payload, headers=NOCACHE)

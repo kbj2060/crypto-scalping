@@ -5201,6 +5201,7 @@ async function refreshSwing() {   // 2026-11-15 «1h·30m 스윙» -- 검증한 
     got = { ok: false, reason: "fetch_failed" };
   }
   if (asset !== activeSnapshotAsset) return;
+  if (!got.ok && latestSwing && latestSwing.ok && latestSwing.asset === asset) return;   // 11-15 감사: 실패하면 마지막 정상값을 지키고 다음 주기에 다시
   latestSwing = Object.assign(got, { asset });
   if (typeof scheduleSnapshotChartRender === "function") scheduleSnapshotChartRender();
 }
@@ -6029,7 +6030,7 @@ function renderMarketCtx() {
     + `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4.5h6.5M12.5 4.5H14M2 11.5h1.5M7.5 11.5H14"/><circle cx="10.5" cy="4.5" r="1.8"/><circle cx="5.5" cy="11.5" r="1.8"/></svg></button>`;
   const lineSw = `<div class="mc-switch"><span class="mc-switch-t">차트에 그리기</span>`
       + `<span class="mc-sw-g mc-sw-ma">${[["ema5", "EMA 5", "종가 지수이동평균 5봉"], ["ema20", "EMA 20", "종가 지수이동평균 20봉"], ["vwma", "VWMA 100", "거래량 가중 이동평균 100봉 · 거래량 = 바이낸스 5분봉"]]
-        .map(([k, nm, t]) => swChip(k, nm, 1, t) + gear(k)).join("")}${swChip("bb", "볼린저", 1, "20봉 · 2σ") + gear("bb")}${swChip("veto", "추세 veto", 1, "SMA144 ±1×ATR 히스테리시스 밴드 · 롱만/숏만 꼬리표") + gear("veto")}${swChip("sma50", "일봉 SMA50", 1, "전날까지 완결 일봉 50개 평균 · 지금가가 위 = 롱 추세(숏 자제) · 아래 = 숏 추세 · 색 = 측면") + gear("sma50")}</span>`
+        .map(([k, nm, t]) => swChip(k, nm, 1, t) + gear(k)).join("")}${swChip("bb", "볼린저", 1, "20봉 · 2σ") + gear("bb")}${swChip("veto", "추세 veto", 1, "SMA144 ±1×ATR 히스테리시스 밴드 · 롱만/숏만 꼬리표") + gear("veto")}${swChip("sma50", "일봉 SMA50", 1, "전날까지 완결 일봉 50개 평균 · 전날 종가가 위 = 롱 추세(숏 자제) · 아래 = 숏 추세 · 색 = 측면(하루 동안 그대로)") + gear("sma50")}</span>`
       + `<span class="mc-sw-g"><span class="mc-chip-pair">${swChip("vwap", "VWAP ±σ", 1)}${swChip("vsess", "세션 시작부터", "", "끄면 하루(UTC 00시부터) · 켜면 지금 시장 세션 개장부터(아시아·유럽·미국)", true)}</span>${gear("vwap")}`
       + `${swChip("wvwap", "주간·앵커 VWAP", 1)}${gear("wvwap")}</span>`
       // 2026-10-29 사용자 «5분봉 거래량 제일 많은 부분을 이은 선도 on/off» -- 봉별 POC 선(기본 켬 · 봉마다 POC 테두리는 그대로)
@@ -9015,11 +9016,13 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       const lastClose50 = Number((candles[candles.length - 1] || {}).close);
       if (s50 && s50.length && lastClose50 > 0) {
         const at50 = (ms) => { let v = null; for (const e of s50) { if (e.t <= ms) v = e.v; else break; } return v; };
+        const ent50 = (ms) => { let x = null; for (const e of s50) { if (e.t <= ms) x = e; else break; } return x; };
         const vals = candles.map((c) => at50(c.time * 1000)), v50 = vals[vals.length - 1];
+        const e50 = ent50(candles[candles.length - 1].time * 1000), dc = e50 && Number(e50.c) > 0 ? Number(e50.c) : null;   // 11-15 감사: 측면 = 전날 종가 vs 전날까지 SMA50(검정 정의) · 옛 서버(c 없음)면 지금가
         if (v50 > 0) {
-          const up = lastClose50 > v50, S = lineSt("sma50", 1.6, "10 4", up ? "var(--good)" : "var(--bad)"), col = S.c;
+          const up = (dc ?? lastClose50) > v50, S = lineSt("sma50", 1.6, "10 4", up ? "var(--good)" : "var(--bad)"), col = S.c;
           const dp = (ASSET_CONFIG[activeSnapshotAsset] || {}).dp ?? 1, side = up ? "롱 추세" : "숏 추세";
-          const tip = `일봉 SMA50 ${v50.toFixed(dp)} — 전날까지 완결 일봉 50개 평균. 지금가가 ${up ? "위" : "아래"} = ${side}(${up ? "숏" : "롱"} 자제 참고). `
+          const tip = `일봉 SMA50 ${v50.toFixed(dp)} — 전날까지 완결 일봉 50개 평균. ${dc ? `전날 종가 ${dc.toFixed(dp)}` : "지금가"}가 ${up ? "위" : "아래"} = ${side}(${up ? "숏" : "롱"} 자제 참고 · 하루 동안 그대로). `
             + "우리 검정: 롱 추세일 때 잡은 숏이 평균적으로 더 나빴지만 유의하지는 않다(통과 후보) — 진입 신호가 아니라 거르개 참고.";
           const pts = [];
           vals.forEach((v, i) => {
@@ -9051,17 +9054,19 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           [["hi", "고", 1], ["lo", "저", -1]].forEach(([side, nm, d]) => {
             const lv = st[side];
             if (!lv || !(lv.price > 0)) return;
-            const wait = px > 0 && (d > 0 ? px > lv.price : px < lv.price);   // 넘었지만 그 봉이 아직 마감 전
+            const i0 = idxAt(lv.known_t);
+            if (i0 == null) return;   // 11-15 감사: 창 끝보다 늦게 알려진 스윙(지나간 화면) = 그때는 몰랐던 값 -- 선도 이름표도 안 그린다
+            const wait = chartPanEnd == null && px > 0 && (d > 0 ? px > lv.price : px < lv.price);   // 넘었지만 그 봉이 아직 마감 전 · 실시간 보기만
             const tip = `${tf} 큰 스윙 ${nm}점 ${lv.price.toFixed(dp)} (앞뒤 50봉 · 아직 안 깨짐) — ${tf} 봉 종가로 ${d > 0 ? "넘으면" : "깨면"} 구조 돌파.`
               + (wait ? ` 지금가가 넘었다 — ${tf} 봉 마감 대기(마감해야 돌파).` : "")
               + ` 우리 검정: 돌파 뒤 깬 쪽 2 ATR 먼저 약 53%(무작위 49%) — 추세 전환 신호 아님·참고.`;
-            const y = yAt(lv.price), i0 = idxAt(lv.known_t), x0 = i0 == null ? ml : Math.max(ml, xAt(i0));
-            if (i0 != null || lv.known_t <= candles[0].time * 1000) mk(lines, "line", { x1: x0.toFixed(1), x2: ml + cw, y1: y.toFixed(1), y2: y.toFixed(1), stroke: S.c,
+            const y = yAt(lv.price), x0 = Math.max(ml, xAt(i0));
+            mk(lines, "line", { x1: x0.toFixed(1), x2: ml + cw, y1: y.toFixed(1), y2: y.toFixed(1), stroke: S.c,
               "stroke-opacity": wait ? 0.9 : 0.55, "stroke-dasharray": S.d, "stroke-width": S.w }, tip);
             const lab = `${tf} 스윙 ${nm}${wait ? "·마감 대기" : ""}`, above = y <= mt + 8, below = y >= plotBottom - 2;
             if (!above && !below) {
               if (gutOn) { fpNotes.push({ val: lv.price, label: lab, color: S.c }); return; }
-              const t = mk(svg, "text", { x: ml + 4, y: (y - 3).toFixed(1), "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: "var(--muted)", "pointer-events": "none" });
+              const t = mk(svg, "text", { class: "edge-l", x: ml + 4, y: (y - 3).toFixed(1), "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: "var(--muted)", "pointer-events": "none" });
               t.textContent = lab; return;
             }
             const t = mk(svg, "text", { class: "edge-l", x: ml + 4, y: (above ? mt + 11 + 13 * edgeL.top++ : plotBottom - LANE_IN - 5 - 13 * edgeL.bot++).toFixed(1), "font-size": mobileChart ? 9 : 10,
@@ -9076,7 +9081,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
               const t = mk(svg, "text", { x: xAt(ib).toFixed(1), y: (yb + (lb.dir > 0 ? -5 : 13)).toFixed(1), "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: col, "text-anchor": "middle",
                                           stroke: "var(--chart-bg)", "stroke-width": 4, "stroke-linejoin": "round", "paint-order": "stroke" });
               t.textContent = `${tf} ${lb.dir > 0 ? "↑" : "↓"} 돌파`;
-              const tt = document.createElementNS(NS, "title"); tt.textContent = `${tf} 큰 스윙 ${lb.dir > 0 ? "고점" : "저점"} ${lb.level.toFixed(dp)} 를 ${tf} 종가로 깸(${lb.kind}). 우리 검정: 깬 쪽 2 ATR 먼저 약 53%(무작위 49%) — 그 뒤 방향은 반반.`;
+              const tt = document.createElementNS(NS, "title"); tt.textContent = `${tf} 큰 스윙 ${lb.dir > 0 ? "고점" : "저점"} ${lb.level.toFixed(dp)} 를 ${tf} 종가로 깸. 우리 검정: 깬 쪽 2 ATR 먼저 약 53%(무작위 49%) — 그 뒤 방향은 반반.`;
               t.appendChild(tt);
             }
           }
