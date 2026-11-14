@@ -3703,6 +3703,11 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
 /* 2026-11-03 SLTP 선 주문 꼬리표 소형(사용자 «라벨이 커서 청산 프로파일이 안 보인다», 시안 B): 알약 · 금액/포지션만 */
 .lt-tag.lt-mini { padding: 2px 7px 2px 5px; gap: 3px; border-radius: 999px; font: 700 11.5px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; }
 .lt-tag.lt-mini .lt-grip { width: 4px; height: 8px; }
+/* 2026-11-14 사용자 «모바일에서 sltp 칩의 이동 버튼이 너무 작다»: 터치 기기는 칩(끌기 대상)·손잡이 점을 키운다 -- 붙은 «+ ✕» 칸 높이도 칩을 따라 커진다 */
+@media (pointer: coarse) {
+  .lt-tag.lt-mini:not(.en) { padding: 8px 12px 8px 9px; gap: 6px; font-size: 13px; }
+  .lt-tag.lt-mini:not(.en) .lt-grip { width: 8px; height: 16px; background: radial-gradient(circle, currentColor 1.5px, transparent 1.8px) 0 0 / 4px 5.4px; opacity: .9; }
+}
 .lt-tag.en.lt-mini { transform: translateY(-50%); width: auto; }
 
 /* 2026-11-03 SLTP 추가 진입(기존 익절·손절선 그대로): 도구 쪽 선·꼬리표·띠·손익비 버튼은 숨긴다 -- 들어간 선(#lineArmed)이 이미 그린다 */

@@ -1213,7 +1213,7 @@ function renderArmedLines() {
   //   세로로 최소 간격만큼 떼어 놓는다(선은 제자리 · 위→아래 한 번 · 아래→위 한 번). 끄는 중엔 손가락을 따라가게 두지 않는다.
   if (!armedDrag) {   // 2026-11-13: 데스크톱도(전엔 휴대폰만) -- 화면 밖 조각들이 위·아래 끝에 몰리면 칩과 «+ ✕» 가 서로 겹쳤다. 데스크톱 진입 꼬리표는 플롯 오른쪽 끝이라 뺀다
     const ts = [...h.querySelectorAll(mob ? ".lt-tag" : ".lt-tag:not(.en)")].filter((t) => t.style.display !== "none" && t.style.top).map((t) => ({ t, y: parseFloat(t.style.top) })).sort((a, b) => a.y - b.y);
-    const GAP = 26, lo = top + 11, hi = bot - 11;
+    const GAP = mob ? 40 : 26, lo = top + (mob ? 18 : 11), hi = bot - (mob ? 18 : 11);   // 2026-11-14 휴대폰 칩을 키워(높이 ~34px) 간격도 넓힘
     for (let i = 0; i < ts.length; i++) ts[i].y = Math.max(ts[i].y, lo, i ? ts[i - 1].y + GAP : lo);
     for (let i = ts.length - 1; i >= 0; i--) ts[i].y = Math.min(ts[i].y, hi, i < ts.length - 1 ? ts[i + 1].y - GAP : hi);
     ts.forEach((o) => { o.t.style.top = o.y + "px"; });
