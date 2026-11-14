@@ -12,6 +12,7 @@ from __future__ import annotations
 import itertools
 import json
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -35,6 +36,35 @@ GRID = list(itertools.product((5, 50), (0.5, 1.0, 2.0), (0.0, 0.5), (16, 96), (0
 NAME = lambda g: f"N{g[0]}_tp{g[1]}_sl{g[2]}_H{g[3]}_tr{g[4]}"
 COST = {"strict": (2.0, 2.0, 6.0), "lenient": (0.0, 0.0, 6.0)}   # (진입 메이커, 익절 메이커, 시장가 편도)
 SEED = 20261115
+R2 = os.environ.get("OB_ROUND") == "2"   # 2라운드 손익비 재설계: docs/prereg/ob_retest_rr_20261115.md (42796489)
+if R2:
+    OUT = ROOT / "tmp/ob_retest_rr_20261115"
+    GRID = list(itertools.product((5, 50), ("mid", "a50", "a25"), ("2R", "3R", "leg"), (16, 96), (0, 1)))
+    NAME = lambda g: f"N{g[0]}_sl{g[1]}_tp{g[2]}_H{g[3]}_tr{g[4]}"
+
+
+def levels(d, btm, top, atr, leg, g, r2=None):
+    """지정가·존 먼 쪽·손절·익절. 1라운드 g=(N, 익절 ATR, 손절 여유 ATR, H, 추세) · 2라운드 g=(N, 손절 방식, 익절 방식, H, 추세)."""
+    r2 = R2 if r2 is None else r2
+    lim = np.where(d > 0, top, btm); far = np.where(d > 0, btm, top)
+    a, b = g[1], g[2]
+    if not r2:
+        return lim, far, far - d * b * atr, lim + d * a * atr
+    sl = {"mid": (btm + top) / 2, "a50": lim - d * 0.5 * atr, "a25": lim - d * 0.25 * atr}[a]
+    r = np.abs(lim - sl)
+    return lim, far, sl, {"2R": lim + d * 2 * r, "3R": lim + d * 3 * r, "leg": leg}[b]
+
+
+@njit(cache=True)
+def leg_ext(h, l, T, d, btm, top):
+    """돌파 다리 끝값: OB 봉(가장 최근 [저가,고가] 일치 봉) ~ 돌파 봉 T 의 최고가(롱)/최저가(숏). T 에 알려짐."""
+    out = np.empty(len(T))
+    for k in range(len(T)):
+        t = T[k]; j = t - 1
+        while j > 0 and not (l[j] == btm[k] and h[j] == top[k]):
+            j -= 1
+        out[k] = h[j:t + 1].max() if d[k] > 0 else l[j:t + 1].min()
+    return out
 
 
 # ── 1분 체결 시뮬레이터 ─────────────────────────────────────────────────────
@@ -98,7 +128,8 @@ def coin_data(k1: pd.DataFrame) -> dict:
         ev = SM.structure(B["h"], B["l"], B["c"], SM.pivots(B["h"], N, True), SM.pivots(B["l"], N, False), N)
         T = ev[:, 0].astype(int); d = ev[:, 1]; btm, top = ev[:, 4], ev[:, 5]; atr = B["atr"][T]; cT = B["c"][T]
         ok = np.isfinite(btm) & np.isfinite(top) & (top > btm) & np.isfinite(atr) & (atr > 0) & np.where(d > 0, cT > top, cT < btm)
-        S[N] = pd.DataFrame(dict(T=T, d=d, btm=btm, top=top, atr=atr, typ=ev[:, 2], known=B["t"][T] + MS15))[ok].reset_index(drop=True)
+        S[N] = pd.DataFrame(dict(T=T, d=d, btm=btm, top=top, atr=atr, typ=ev[:, 2], known=B["t"][T] + MS15,
+                                 leg=leg_ext(B["h"], B["l"], T, d, btm, top)))[ok].reset_index(drop=True)
     day = pd.Series(k1.c.to_numpy(), index=pd.to_datetime(k1.t, unit="ms")).resample("D").last().ffill()   # 빠진 날이 SMA50 을 50일 지우지 않게
     tr = np.sign(day - day.rolling(50).mean())                      # 일봉 d 마감 뒤에 알려짐
     tr.index = tr.index.values.astype("datetime64[ms]").astype(np.int64) + 86_400_000   # 알려지는 시각 = 그날 마감
@@ -122,8 +153,7 @@ def run_cfg(D: dict, g, lo: int, hi: int, shift: bool = False, leak: int = 0) ->
     if shift:                                                       # 대조 A: 가격에서 먼 쪽으로 한 칸
         hgt = top - btm
         btm, top = np.where(d > 0, btm - hgt, top), np.where(d > 0, btm, top + hgt)
-    lim = np.where(d > 0, top, btm); far = np.where(d > 0, btm, top)
-    sl = far - d * slb * atr; tp = lim + d * tpk * atr
+    lim, far, sl, tp = levels(d, btm, top, atr, s.leg.to_numpy(), g)
     exp_t = s.known.to_numpy() + W_PEND * MS15
     m0 = s.m0.to_numpy(np.int64) if not leak else np.searchsorted(D["t1"], s.known.to_numpy() - MS15).astype(np.int64)   # 양성 대조: 돌파 봉 시작부터 미리 앎
     r = sim(D["t1"], D["h1"], D["l1"], D["c1"], m0, d.astype(float), lim, far, sl, tp, exp_t.astype(np.int64), H, leak)
@@ -165,7 +195,7 @@ def recon(D: dict, g, lo: int, hi: int, rng, n=200) -> str:
     t1 = pd.Series(D["t1"]); bad = 0
     for _, r in T.sample(min(n, len(T)), random_state=int(rng.integers(1 << 30))).iterrows():
         q = s.iloc[int(r.sig)]; d = q.d
-        lim = q.top if d > 0 else q.btm; sl = (q.btm - slb * q.atr) if d > 0 else (q.top + slb * q.atr); tp = lim + d * tpk * q.atr
+        lim, _, sl, tp = (float(x) for x in levels(d, q.btm, q.top, q.atr, q.leg, g))
         w = np.arange(int(q.m0), len(t1))
         hit = (D["l1"][w] < lim) if d > 0 else (D["h1"][w] > lim)
         mf = int(w[np.argmax(hit)])
@@ -414,7 +444,15 @@ def selftest() -> None:
     Lg = L.copy(); Lg[5] = 90.0; Hg = h.copy(); Hg[5] = 95.0
     r = one(l=Lg, h=Hg, tp=200.0)
     assert r[0, 6] == 1 and r[0, 5] == 95.0                         # 분 전체가 손절가 아래면 그 분 고가로 체결
-    assert len(GRID) == 48
+    one_ = lambda *a: [float(x) for x in levels(*a)]
+    assert one_(1.0, 98.0, 100.0, 4.0, 110.0, (5, 1.0, 0.5, 16, 0), False) == [100, 98, 96, 104]          # 1라운드 식
+    assert one_(1.0, 98.0, 100.0, 4.0, 110.0, (5, "a50", "2R", 16, 0), True) == [100, 98, 98, 104]
+    assert one_(1.0, 98.0, 100.0, 4.0, 110.0, (5, "mid", "3R", 16, 0), True) == [100, 98, 99, 103]
+    assert one_(1.0, 98.0, 100.0, 4.0, 110.0, (5, "a25", "leg", 16, 0), True) == [100, 98, 99, 110]
+    assert one_(-1.0, 100.0, 102.0, 4.0, 90.0, (5, "a25", "2R", 16, 0), True) == [100, 102, 101, 98]
+    hh = np.array([5, 9, 7, 6, 8, 10.]); ll = hh - 2; ll[3] = 3.0                               # OB 봉 3 [3,6] · 돌파 봉 5
+    assert leg_ext(hh, ll, np.array([5]), np.array([1.0]), np.array([3.0]), np.array([6.0]))[0] == 10.0
+    assert len(GRID) == (72 if R2 else 48)
     print("selftest ok")
 
 
