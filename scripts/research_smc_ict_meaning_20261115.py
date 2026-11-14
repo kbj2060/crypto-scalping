@@ -327,10 +327,14 @@ def judge(real: pd.DataFrame, plc: pd.DataFrame) -> dict:
                 dd = rng.choice(ud, len(ud))
                 sel = np.concatenate([ix[u] for u in dd])
                 bs.append(y[sel].mean())
-                if p2c:
-                    s2 = np.concatenate([ix2[u] for u in dd if u in ix2]) if any(u in ix2 for u in dd) else np.array([], int)
-                    if len(s2):
-                        bs2.append(bs[-1] - p2_rate(r2.iloc[s2], cell, eqd[sel] if eqd is not None else None))
+            if p2c:                                    # 짝 비교는 두 쪽 날짜의 합집합에서 함께 뽑는다(11-15 채점 뒤 수정: 실제 날만 뽑으면 P2 만 있는 날이 빠져 치우침)
+                uu = np.union1d(ud, np.unique(d2day))
+                for _ in range(2000):
+                    dd = rng.choice(uu, len(uu))
+                    sel = np.concatenate([ix[u] for u in dd if u in ix] or [np.array([], int)])
+                    s2 = np.concatenate([ix2[u] for u in dd if u in ix2] or [np.array([], int)])
+                    if len(sel) and len(s2):
+                        bs2.append(y[sel].mean() - p2_rate(r2.iloc[s2], cell, eqd[sel] if eqd is not None else None))
             se = math.sqrt(np.var(bs, ddof=1) + pk.var(ddof=1) / len(pk))
             diff = R - Pbar
             row = dict(n=int(len(r)), per_day=round(len(r) / len(ud), 2) if len(ud) else 0, real=round(R, 4), p1=round(Pbar, 4), p1_n=int(p["count"].sum() / max(len(pk), 1)),
@@ -388,6 +392,17 @@ def run() -> None:
         print(kk_, {x: v[x] for x in ("n", "real", "p1", "diff_pp", "lo90_pp", "p2", "diff2_pp", "pass", "candidate", "reversed") if x in v})
 
 
+def rejudge() -> None:
+    """저장된 사건으로 판정만 다시(정의·자료 그대로)."""
+    E, PA = pd.read_parquet(OUT / "events.parquet"), pd.read_parquet(OUT / "placebo_agg.parquet")
+    d = json.load(open(OUT / "result.json"))
+    d["result"] = judge(E, PA)
+    json.dump(d, open(OUT / "result.json", "w"), ensure_ascii=False, indent=1, default=float)
+    for k, v in d["result"].items():
+        if "p2" in v or k.split("|")[0] in MAIN_TFS:
+            print(k, {x: v.get(x) for x in ("n", "real", "p1", "p2", "diff_pp", "lo90_pp", "diff2_pp", "lo90_2_pp", "pass", "candidate", "reversed")})
+
+
 # ── 자체 점검 ────────────────────────────────────────────────────────────────
 def selftest() -> None:
     # 스윙: 가운데 봉만
@@ -423,4 +438,4 @@ def selftest() -> None:
 
 
 if __name__ == "__main__":
-    {"selftest": selftest, "run": run}[sys.argv[1]]()
+    {"selftest": selftest, "run": run, "judge": rejudge}[sys.argv[1]]()
