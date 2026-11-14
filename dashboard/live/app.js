@@ -5609,7 +5609,7 @@ const API_MARKET_CTX_URL = "/api/market-context";
 const MARKET_CTX_POLL_MS = 1000;   // 2026-10-03 5초 -> 1초(사용자 «1초 원천은 화면도 1초») -- 호가 벽·스프레드·계기·BTC 동행은 서버 1초 루프 · 응답 중앙 14ms·3KB(서버 실측)
 let latestMarketCtx = null, marketCtxLastFetchAt = 0;
 let latestMacroEvents = null;        // renderMacroCalendar 가 채운다 -- 카드의 «다음 주요 일정». null = 아직 못 받음(«없음»과 다르다)
-const mcLine = { st: {}, poc: true, vwap: true, veto: true, sma50: true, bb: false, wvwap: false, vsess: false, ema5: false, ema20: false, vwma: false };   // 2026-10-26 펜 메모: 이동평균 셋(기본 끔)   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
+const mcLine = { st: {}, poc: true, vwap: true, veto: true, sma50: true, ob: true, fvg: false, bb: false, wvwap: false, vsess: false, ema5: false, ema20: false, vwma: false };   // 2026-10-26 펜 메모: 이동평균 셋(기본 끔)   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
 try { Object.assign(mcLine, JSON.parse(localStorage.getItem("mcLine") || "{}")); } catch (err) { /* 기억은 편의 */ }
 if (mcLine.vwW) { mcLine.st = { ...mcLine.st, vwap: { w: mcLine.vwW, d: mcLine.vwD, c: mcLine.vwC } }; delete mcLine.vwW; delete mcLine.vwD; delete mcLine.vwC; }   // 10-29 오전판(VWAP 전용 줄)에서 고른 값 옮김
 // 2026-09-30 사용자 «세션은 미국·유럽·아시아 시장 VWAP 으로» -- vsess 켜면 지금 시장 세션 개장(현지 시각, 서머타임 반영)부터 센 VWAP.
@@ -6013,15 +6013,17 @@ function renderMarketCtx() {
       + `${swChip("wvwap", "주간·앵커 VWAP", 1)}${gear("wvwap")}</span>`
       // 2026-10-29 사용자 «5분봉 거래량 제일 많은 부분을 이은 선도 on/off» -- 봉별 POC 선(기본 켬 · 봉마다 POC 테두리는 그대로)
       + `<span class="mc-sw-g">${swChip("poc", "POC 선", 1, "봉마다 가장 많이 거래된 가격(POC)을 이은 선 · 봉 안 POC 테두리는 그대로")}${gear("poc")}</span>`
+      + `<span class="mc-sw-g">${swChip("ob", "오더블록 15m", 0, "15분봉 큰 스윙(앞뒤 50봉) 구조 돌파의 오더블록 · 생긴 뒤 100봉(25시간) 안·아직 안 닿은 것만 · 지금가 위·아래 하나씩 · 닿으면 버팀/깨짐 표시 뒤 지움 · ETH·BTC·SOL·XRP")}`
+      + `${swChip("fvg", "FVG 15m", 0, "15분봉 공정가 갭 · 안 메운 것 중 지금가 위·아래 하나씩 · 효과가 작아(버팀 42% vs 무작위 40%) 기본 끔")}</span>`
       + `<div class="mc-cfg"${lineCfg ? "" : " hidden"}>${lineCfg ? lineCfgHtml(lineCfg) : ""}</div></div>`;
   // 2026-10-28 펜 메모 «지표 아이콘 버튼을 누르면 이 지표 버튼들이 팝업으로 나와 추가/제거» -- 넓은 화면 줄 = 버튼 하나(켠 개수) · 칩·입력·저장은 그대로 팝업 안
-  const indOn = ["ema5", "ema20", "vwma", "bb", "veto", "sma50", "vwap", "wvwap", "poc"].filter((k) => mcLine[k]).length;
+  const indOn = ["ema5", "ema20", "vwma", "bb", "veto", "sma50", "vwap", "wvwap", "poc", "ob", "fvg"].filter((k) => mcLine[k]).length;
   const fsRow = G.cmpW || (flowOn() && !!el("fpMobRow"));   // 10-30 1단 데스크톱도(위 한 줄) -- 휴대폰은 머리 줄 · 넓은 화면은 위 한 줄   // 옛 index.html(줄 없음)이면 칩을 시장 맥락에 그대로   // 2026-10-28 사용자 «모바일도 데스크탑처럼» -- 휴대폰 흐름 코인도 버튼 + 팝업(#fpMobRow)
   if (!fsRow) fpIndOpen = false;   // 버튼 줄이 없는 화면으로 가면 닫힌 채로(돌아왔을 때 저절로 열려 있지 않게)
   const fsEl = el("fpLineSwitch"), fsHtml = fsRow ? `<button type="button" class="fp-ind-btn" aria-haspopup="true" aria-expanded="${fpIndOpen}" aria-controls="fpIndPop">`
     + `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 12.5l4-4.5 3 2.5 6-6.5"/><path d="M1.5 14.5h13"/></svg>지표<b>${indOn}</b></button>`
     + `<div class="fp-ind-pop" id="fpIndPop" aria-label="차트에 그릴 지표"${fpIndOpen ? "" : ' hidden=""'}>`
-    + lineSw.replace('<span class="mc-switch-t">차트에 그리기</span>', '<span class="mc-switch-t">이동평균·밴드 · VWAP · POC — 눌러서 켜고 끄기</span>') + `</div>` : "";
+    + lineSw.replace('<span class="mc-switch-t">차트에 그리기</span>', '<span class="mc-switch-t">이동평균·밴드 · VWAP · POC · 오더블록 — 눌러서 켜고 끄기</span>') + `</div>` : "";
   // 🔴setH(직렬화한 innerHTML 과 비교)는 여기서 매번 다시 썼다 -- `checked`→`checked=""`·`<path/>`→`</path>` 라 늘 달라 클릭·포커스가 씹혔다(10-28 검증). 마지막으로 쓴 글과 비교한다.
   if (fsEl && fsEl._h !== fsHtml) {
     const ae = document.activeElement, ds = ae?.dataset || {};
@@ -6304,7 +6306,7 @@ const FP_WEEK_REFRESH_MS = 6 * 3600e3;
 const fpWeekFor = () => (fpWeek && fpWeek.asset === activeSnapshotAsset ? fpWeek : null);
 const fpWantWeek = () => chartTfK > 1 || fpZoomed() || chartPanEnd != null;   // 라이브 12시간 밖이 필요한 보기
 async function maybeFetchFpWeek() {
-  if (!flowOn() || fpWeekInFlight === activeSnapshotAsset || !fpWantWeek()) return;
+  if (!flowOn() || fpWeekInFlight === activeSnapshotAsset || !(fpWantWeek() || obWant())) return;   // 11-15 오더블록은 15분봉 1주일이 필요하다(5분 보기에서도)
   const now = Date.now(), asset = activeSnapshotAsset;
   if ((fpWeekFor() && now - fpWeekAt < FP_WEEK_REFRESH_MS) || now - fpWeekTriedAt < 30000) return;   // 실패면 30초 뒤 다시
   fpWeekInFlight = asset; fpWeekTriedAt = now;
@@ -7063,6 +7065,121 @@ function measIdx(bars, t) {   // 봉 시각 → 봉 번호(소수) -- 화면 밖
   let lo = 0, hi = n - 1;
   while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (bars[mid].time <= t) lo = mid; else hi = mid; }
   return lo + (t - bars[lo].time) / (bars[hi].time - bars[lo].time);
+}
+// ── 오더블록·FVG (2026-11-15 사용자 «C로 진행» -- 후지모토 세션 SMC 의미 검증 정의 그대로) ──
+//   원천 = scripts/research_smc_ict_meaning_20261115.py(브랜치 claude/fujimoto-126-trading-analysis-724dd5) pivots·structure·fvgs·hold_race 의 인과판.
+//   15분봉(5분봉 셋 · 마지막 묶음 = 형성 중이라 구조·FVG 탄생엔 안 씀) · 스윙 = 앞뒤 50봉 최고/최저(p+50 에 알려짐) · 종가가 안 깨진 확정 스윙을 넘으면 구조 돌파 ·
+//   OB = 스윙 다음 봉~돌파 직전 봉 중 저가 최저(하락은 고가 최고) 봉의 [저가, 고가](꼬리 포함·색 조건 없음).
+//   검증(4코인 2022~2026-11): 첫 닿음 버팀 68.9% vs 무작위 61.1%·옆 띠 64.9% -- 100봉 안 첫 닿음만 셌다 → 그 밖·닿은 존은 근거가 없어 지운다.
+//   FVG = 가운데 봉 같은 색 & high[i-1] < low[i+1] · 효과 +1pp 뿐(기본 끔). 매매 통과 없음 = 참고 표시(문구에 «전환»·«신호» 금지).
+const OB_ASSETS = new Set(["eth", "btc", "sol", "xrp"]);   // 검증한 코인만(주식은 미검증)
+const obWant = () => (mcLine.ob || mcLine.fvg) && OB_ASSETS.has(activeSnapshotAsset);
+const OB_N = 50, OB_LIFE = 100, M15 = 900;
+let obMemo = null;
+function obFvgCalc(c5) {
+  const z5 = c5[c5.length - 1];
+  if (obMemo && obMemo.src === c5 && obMemo.n === c5.length && obMemo.z === z5 && obMemo.zc === z5.close) return obMemo.out;
+  const B = [];
+  for (const c of c5) {   // ponytail: 빠진 5분봉이 있는 묶음도 그대로 씀(연구는 1분 꽉 찬 봉만) -- 수집 구멍이 잦아지면 k<3 묶음을 빼기
+    const T = c.time - (c.time % M15), b = B[B.length - 1];
+    if (!b || b.t !== T) B.push({ t: T, o: +c.open, h: +c.high, l: +c.low, c: +c.close });
+    else { b.h = Math.max(b.h, +c.high); b.l = Math.min(b.l, +c.low); b.c = +c.close; }
+  }
+  const n = B.length, closed = n - 1, ob = [], fv = [];
+  const piv = (p, hi) => { for (let j = p - OB_N; j <= p + OB_N; j++) if (hi ? B[j].h > B[p].h : B[j].l < B[p].l) return false; return true; };
+  let top = 0, topI = -1, topX = true, btm = 0, btmI = -1, btmX = true;
+  for (let t = 0; t < closed; t++) {
+    const p = t - OB_N;
+    if (p >= OB_N) { if (piv(p, true)) { top = B[p].h; topI = p; topX = false; } if (piv(p, false)) { btm = B[p].l; btmI = p; btmX = false; } }
+    if (!topX && B[t].c > top) {
+      let k = t - 1; if (t - topI > 1) { k = topI + 1; for (let j = k; j < t; j++) if (B[j].l <= B[k].l) k = j; }
+      ob.push({ d: 1, t0: B[k].t, k: t, lo: B[k].l, hi: B[k].h }); topX = true;
+    }
+    if (!btmX && B[t].c < btm) {
+      let k = t - 1; if (t - btmI > 1) { k = btmI + 1; for (let j = k; j < t; j++) if (B[j].h >= B[k].h) k = j; }
+      ob.push({ d: -1, t0: B[k].t, k: t, lo: B[k].l, hi: B[k].h }); btmX = true;
+    }
+  }
+  const tr = B.map((b, i) => (i ? Math.max(b.h, B[i - 1].c) - Math.min(b.l, B[i - 1].c) : b.h - b.l));
+  for (const z of ob) {   // 100봉 안 첫 닿음 → 닿음 봉부터 종가가 먼 쪽 너머 = 깨짐 · 다음 봉부터 가까운 끝 ± ATR14 = 버팀(hold_race)
+    z.age = closed - 1 - z.k;
+    for (let j = z.k + 1; j < Math.min(n, z.k + 1 + OB_LIFE); j++) {
+      const b = B[j];
+      if (z.d > 0 ? b.l <= z.hi : b.h >= z.lo) { z.ti = j; break; }
+      if (z.d > 0 ? b.c < z.lo : b.c > z.hi) { z.dead = true; break; }
+    }
+    if (z.ti == null) continue;
+    let a = 0; for (let j = Math.max(0, z.ti - 13); j <= z.ti; j++) a += tr[j] / (z.ti - Math.max(0, z.ti - 13) + 1);
+    for (let j = z.ti; j < Math.min(n, z.ti + 1 + OB_LIFE); j++) {
+      const b = B[j];
+      if (z.d > 0 ? b.c < z.lo : b.c > z.hi) { z.res = "깨짐"; z.rt = b.t; break; }
+      if (j > z.ti && (z.d > 0 ? b.h >= z.hi + a : b.l <= z.lo - a)) { z.res = "버팀"; z.rt = b.t; break; }
+    }
+  }
+  for (let i = 1; i + 1 < closed; i++) {
+    const a = B[i - 1], m = B[i], c = B[i + 1];
+    let z = null;
+    if (a.h < c.l && m.c > m.o) z = { d: 1, t0: m.t, lo: a.h, hi: c.l };
+    if (a.l > c.h && m.c < m.o) z = { d: -1, t0: m.t, lo: c.h, hi: a.l };
+    if (!z) continue;
+    for (let j = i + 2; j < n && z.hi > z.lo; j++) { if (z.d > 0) z.hi = Math.max(z.lo, Math.min(z.hi, B[j].l)); else z.lo = Math.min(z.hi, Math.max(z.lo, B[j].h)); }   // 메운 만큼 줄임
+    if (z.hi > z.lo) fv.push(z);
+  }
+  const out = { ob, fv, B };
+  obMemo = { src: c5, n: c5.length, z: z5, zc: z5.close, out };
+  return out;
+}
+function renderObFvg() {
+  const svg = el("candleSvgSnapshot"), G = chartGeo;
+  svg?.querySelector("#obfvg")?.remove();
+  const c5 = chartFull();
+  if (!svg || !obWant() || fpAltOn() || !G || !G.bars.length || !(G.ymax > G.ymin) || c5.length < 4 * OB_N) return;
+  const R = obFvgCalc(c5), P = Number(c5[c5.length - 1].close), slot = G.cw / G.n, xr = G.ml + G.cw, ch = G.pb - G.mt;
+  const xT = (t) => G.ml + (measIdx(G.bars, t) + G.off) * slot, yP = (v) => G.mt + (G.ymax - v) * ch / (G.ymax - G.ymin);
+  const NSV = "http://www.w3.org/2000/svg", mk = (tag, a, txt) => { const e = document.createElementNS(NSV, tag); for (const k in a) e.setAttribute(k, a[k]); if (txt != null) e.textContent = txt; return e; };
+  const col = (z) => (z.d > 0 ? "var(--good)" : "var(--bad)"), f0 = (v) => v.toLocaleString("en-US", { maximumSignificantDigits: 5 });
+  const g = mk("g", { id: "obfvg", "pointer-events": "none" }); svg.appendChild(g);   // getBBox 는 문서 안에서만 잰다
+  const defs = mk("defs", {}), clip = mk("clipPath", { id: "obClip" });
+  clip.appendChild(mk("rect", { x: G.ml, y: G.mt, width: G.cw, height: ch })); defs.appendChild(clip);
+  for (const [id, c] of [["obHg", "var(--good)"], ["obHb", "var(--bad)"]]) {
+    const p = mk("pattern", { id, width: 6, height: 6, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" });
+    p.appendChild(mk("line", { x1: 0, y1: 0, x2: 0, y2: 6, stroke: c, "stroke-width": 1.2, "stroke-opacity": 0.55 })); defs.appendChild(p);
+  }
+  g.appendChild(defs);
+  const body = mk("g", { "clip-path": "url(#obClip)" }); g.appendChild(body);
+  const pill = (x, y, txt, z, anchor, solid) => {
+    const r = mk("rect", { rx: 4, fill: solid ? col(z) : "var(--chart-bg)", "fill-opacity": 0.92, stroke: col(z), "stroke-opacity": 0.85 });
+    const t = mk("text", { x, y: y + 0.5, "text-anchor": anchor, "dominant-baseline": "middle", fill: solid ? "var(--on-fill)" : col(z), "font-size": 11, "font-weight": 650, "font-family": "var(--font-sans)" }, txt);
+    g.appendChild(r); g.appendChild(t);
+    const b = t.getBBox(); r.setAttribute("x", b.x - 5); r.setAttribute("y", b.y - 2); r.setAttribute("width", b.width + 10); r.setAttribute("height", b.height + 4);
+  };
+  const near = (arr) => [arr.filter((z) => z.hi < P).sort((a, b) => b.hi - a.hi)[0], arr.filter((z) => z.lo > P).sort((a, b) => a.lo - b.lo)[0]].filter(Boolean);
+  const inY = (z) => z.hi >= G.ymin && z.lo <= G.ymax, x0Of = (z) => Math.max(G.ml, xT(z.t0));
+  if (mcLine.fvg) for (const z of near(R.fv)) {
+    const x0 = x0Of(z), y0 = yP(z.hi), y1 = yP(z.lo);
+    body.appendChild(mk("rect", { x: x0, y: y0, width: Math.max(0, xr - x0), height: Math.max(1, y1 - y0), fill: `url(#${z.d > 0 ? "obHg" : "obHb"})` }));
+    const right = x0 > G.ml + G.cw * 0.6;
+    if (inY(z)) pill(right ? x0 - 8 : x0 + 8, (y0 + y1) / 2, "FVG · 버팀 42% (무작위 40%)", z, right ? "end" : "start", false);
+  }
+  if (!mcLine.ob) return;
+  const live = R.ob.filter((z) => z.ti == null && !z.dead && z.age <= OB_LIFE);
+  const left = (z) => { const h = (OB_LIFE - z.age) / 4; return h >= 1 ? `${Math.round(h)}시간 남음` : `${Math.max(15, Math.round(h * 60))}분 남음`; };
+  const nb = near(live);
+  for (const z of nb) {
+    const x0 = x0Of(z), y0 = yP(z.hi), y1 = yP(z.lo), h = Math.max(2, y1 - y0);
+    body.appendChild(mk("rect", { x: x0, y: y0, width: Math.max(0, xr - x0), height: h, fill: col(z), "fill-opacity": 0.14, stroke: col(z), "stroke-opacity": 0.75 }));
+    body.appendChild(mk("rect", { x: x0, y: y0, width: 3, height: h, fill: col(z) }));
+    if (inY(z)) pill(x0 + 12, Math.max(G.mt + 10, Math.min(G.pb - 10, y0 + 11)), `${z.d > 0 ? "지지" : "저항"} OB 15m · 닿으면 버팀 약 69% (무작위 61%) · ${left(z)}`, z, "start", true);
+  }
+  for (const z of nb) if (!inY(z)) {   // 화면 밖 = 위·아래 가장자리 꼬리표
+    const up = z.lo > G.ymax, pct = ((up ? z.lo : z.hi) / P - 1) * 100;
+    pill(G.ml + G.cw / 2, up ? G.mt + 12 : G.pb - 12, `${up ? "↑" : "↓"} ${z.d > 0 ? "지지" : "저항"} OB${isMobileChartMode() ? "" : " 15m"} ${f0(z.lo)}–${f0(z.hi)} (${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}%)${isMobileChartMode() ? "" : ` · ${left(z)}`}`, z, "middle", false);   // 휴대폰은 짧게(위 가장자리 꼬리표를 덜 가리게)
+  }
+  const tEnd = R.B[R.B.length - 1].t + M15;
+  for (const z of R.ob) if (z.res && z.rt >= tEnd - 2 * 3600) {   // 닿고 판정 난 존 = 닿은 자리에 결과 2시간 뒤 지움
+    const x = xT(R.B[z.ti].t) + slot / 2, y = yP(z.d > 0 ? z.hi : z.lo);
+    if (x >= G.ml && x <= xr && y >= G.mt && y <= G.pb) pill(x, y, z.res, z, "middle", z.res === "버팀");
+  }
 }
 function measDur(s) {   // 25분 · 1시간 30분 · 2일 3시간
   const m = Math.round(s / 60), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mi = m % 60;
@@ -10598,6 +10715,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   fpCvPaint(fpCv.bg); fpCvPaint(fpCv.fg);   // 2026-10-20 캔버스 두 장(fpCv) -- 칠하기는 레이아웃을 안 건드린다
   if (svg.id === "candleSvgSnapshot") post.push(renderLineTool);   // 2026-10-28 선 주문 상자 자리
   if (svg.id === "candleSvgSnapshot") post.push(renderArmedLines);   // 2026-10-29 들어간 선 주문(익절·손절) 자리
+  if (svg.id === "candleSvgSnapshot") post.push(renderObFvg);   // 2026-11-15 오더블록·FVG(시안 C)
   if (svg.id === "candleSvgSnapshot") post.push(renderMeasure);   // 2026-11-07 Shift+드래그 측정 박스
   post.forEach((f) => f());   // 화면 상자를 재는 HTML 배치(위 ③) -- svg 를 다 쌓은 뒤 한 번만 배치된다
   // 2026-10-01 프로파일 오른쪽 끝 가격 이름과 겹치는 호가 벽 수량 글자(«11.8k»)는 숨긴다(사용자 지시) -- 층 캐시라 매번 되살린 뒤 다시 판정
