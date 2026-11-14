@@ -6013,8 +6013,8 @@ function renderMarketCtx() {
       + `${swChip("wvwap", "주간·앵커 VWAP", 1)}${gear("wvwap")}</span>`
       // 2026-10-29 사용자 «5분봉 거래량 제일 많은 부분을 이은 선도 on/off» -- 봉별 POC 선(기본 켬 · 봉마다 POC 테두리는 그대로)
       + `<span class="mc-sw-g">${swChip("poc", "POC 선", 1, "봉마다 가장 많이 거래된 가격(POC)을 이은 선 · 봉 안 POC 테두리는 그대로")}${gear("poc")}</span>`
-      + `<span class="mc-sw-g">${swChip("ob", "오더블록 15m", 0, "15분봉 큰 스윙(앞뒤 50봉) 구조 돌파의 오더블록 · 생긴 뒤 100봉(25시간) 안·아직 안 닿은 것만 · 지금가 위·아래 하나씩 · 닿으면 버팀/깨짐 표시 뒤 지움 · ETH·BTC·SOL·XRP")}`
-      + `${swChip("fvg", "FVG 15m", 0, "15분봉 공정가 갭 · 안 메운 것 중 지금가 위·아래 하나씩 · 효과가 작아(버팀 42% vs 무작위 40%) 기본 끔")}</span>`
+      + `<span class="mc-sw-g">${swChip("ob", "오더블록", 0, "큰 스윙(앞뒤 50봉) 구조 돌파의 오더블록 · 5분 보기 = 5분봉(생긴 뒤 100봉 ≈ 8시간) · 30분·1시간 보기 = 15분봉(100봉 = 25시간) · 아직 안 닿은 것만 · 지금가 위·아래 하나씩 · 닿으면 버팀/깨짐 표시 뒤 지움 · ETH·BTC·SOL·XRP")}`
+      + `${swChip("fvg", "FVG 15m", 0, "15분봉 공정가 갭 · 생긴 뒤 100봉 안·아직 안 닿은 것 중 지금가 위·아래 하나씩 · 효과가 작아(버팀 42% vs 무작위 40%) 기본 끔")}</span>`
       + `<div class="mc-cfg"${lineCfg ? "" : " hidden"}>${lineCfg ? lineCfgHtml(lineCfg) : ""}</div></div>`;
   // 2026-10-28 펜 메모 «지표 아이콘 버튼을 누르면 이 지표 버튼들이 팝업으로 나와 추가/제거» -- 넓은 화면 줄 = 버튼 하나(켠 개수) · 칩·입력·저장은 그대로 팝업 안
   const indOn = ["ema5", "ema20", "vwma", "bb", "veto", "sma50", "vwap", "wvwap", "poc", "ob", "fvg"].filter((k) => mcLine[k]).length;
@@ -7075,13 +7075,16 @@ function measIdx(bars, t) {   // 봉 시각 → 봉 번호(소수) -- 화면 밖
 const OB_ASSETS = new Set(["eth", "btc", "sol", "xrp"]);   // 검증한 코인만(주식은 미검증)
 const obWant = () => (mcLine.ob || mcLine.fvg) && OB_ASSETS.has(activeSnapshotAsset);
 const OB_N = 50, OB_LIFE = 100, M15 = 900;
-let obMemo = null;
-function obFvgCalc(c5) {
+const obMemo = {};   // 봉 크기(초)별
+// 2026-11-15 사용자 «추천대로» -- 5분 보기 = 5분봉 큰 스윙(앞뒤 50봉 ≈ 4시간 · 3시간 창에 맞는 크기), 30분·1시간 보기 = 15분봉. 연구 2라운드: 5분 버팀 66.4% vs 무작위 59.6%·옆 띠 64.3%(4,368건) · 15분 68.9/61.1/64.9 -- 지평끼리 차이는 오차 안.
+const OB_STAT = { 300: ["5m", 66, 60], 900: ["15m", 69, 61] };
+function obFvgCalc(c5, M) {
   const z5 = c5[c5.length - 1];
-  if (obMemo && obMemo.src === c5 && obMemo.n === c5.length && obMemo.z === z5 && obMemo.zc === z5.close) return obMemo.out;
+  const mm = obMemo[M];
+  if (mm && mm.src === c5 && mm.n === c5.length && mm.z === z5 && mm.zc === z5.close && mm.zh === z5.high && mm.zl === z5.low) return mm.out;   // 형성 봉 고저는 제자리에서 바뀐다(닿음 판정)
   const B = [];
   for (const c of c5) {   // ponytail: 빠진 5분봉이 있는 묶음도 그대로 씀(연구는 1분 꽉 찬 봉만) -- 수집 구멍이 잦아지면 k<3 묶음을 빼기
-    const T = c.time - (c.time % M15), b = B[B.length - 1];
+    const T = c.time - (c.time % M), b = B[B.length - 1];
     if (!b || b.t !== T) B.push({ t: T, o: +c.open, h: +c.high, l: +c.low, c: +c.close });
     else { b.h = Math.max(b.h, +c.high); b.l = Math.min(b.l, +c.low); b.c = +c.close; }
   }
@@ -7116,17 +7119,18 @@ function obFvgCalc(c5) {
       if (j > z.ti && (z.d > 0 ? b.h >= z.hi + a : b.l <= z.lo - a)) { z.res = "버팀"; z.rt = b.t; break; }
     }
   }
-  for (let i = 1; i + 1 < closed; i++) {
+  for (let i = 1; M === M15 && i + 1 < closed; i++) {   // FVG 는 15분봉만(5분 FVG 는 코인 엇갈림으로 불통과)
     const a = B[i - 1], m = B[i], c = B[i + 1];
     let z = null;
     if (a.h < c.l && m.c > m.o) z = { d: 1, t0: m.t, lo: a.h, hi: c.l };
     if (a.l > c.h && m.c < m.o) z = { d: -1, t0: m.t, lo: c.h, hi: a.l };
     if (!z) continue;
-    for (let j = i + 2; j < n && z.hi > z.lo; j++) { if (z.d > 0) z.hi = Math.max(z.lo, Math.min(z.hi, B[j].l)); else z.lo = Math.min(z.hi, Math.max(z.lo, B[j].h)); }   // 메운 만큼 줄임
-    if (z.hi > z.lo) fv.push(z);
+    let hit = closed - 1 - (i + 1) >= OB_LIFE;   // 검증 = 생긴 뒤 100봉 안 첫 닿음 -- 그 밖·이미 닿은(일부라도 메운) 갭은 근거가 없어 뺀다(리뷰 11-15)
+    for (let j = i + 2; !hit && j < n; j++) hit = z.d > 0 ? B[j].l <= z.hi : B[j].h >= z.lo;
+    if (!hit) fv.push(z);
   }
   const out = { ob, fv, B };
-  obMemo = { src: c5, n: c5.length, z: z5, zc: z5.close, out };
+  obMemo[M] = { src: c5, n: c5.length, z: z5, zc: z5.close, zh: z5.high, zl: z5.low, out };
   return out;
 }
 function renderObFvg() {
@@ -7134,11 +7138,11 @@ function renderObFvg() {
   svg?.querySelector("#obfvg")?.remove();
   const c5 = chartFull();
   if (!svg || !obWant() || fpAltOn() || !G || !G.bars.length || !(G.ymax > G.ymin) || c5.length < 4 * OB_N) return;
-  const R = obFvgCalc(c5), P = Number(c5[c5.length - 1].close), slot = G.cw / G.n, xr = G.ml + G.cw, ch = G.pb - G.mt;
+  const Mob = chartTfK === 1 ? 300 : M15, R = obFvgCalc(c5, Mob), Rf = obFvgCalc(c5, M15), [tfN, pHold, pRnd] = OB_STAT[Mob], P = Number(c5[c5.length - 1].close), slot = G.cw / G.n, xr = G.ml + G.cw, ch = G.pb - G.mt;
   const xT = (t) => G.ml + (measIdx(G.bars, t) + G.off) * slot, yP = (v) => G.mt + (G.ymax - v) * ch / (G.ymax - G.ymin);
   const NSV = "http://www.w3.org/2000/svg", mk = (tag, a, txt) => { const e = document.createElementNS(NSV, tag); for (const k in a) e.setAttribute(k, a[k]); if (txt != null) e.textContent = txt; return e; };
   const col = (z) => (z.d > 0 ? "var(--good)" : "var(--bad)"), f0 = (v) => v.toLocaleString("en-US", { maximumSignificantDigits: 5 });
-  const g = mk("g", { id: "obfvg", "pointer-events": "none" }); svg.appendChild(g);   // getBBox 는 문서 안에서만 잰다
+  const g = mk("g", { id: "obfvg", "pointer-events": "none" }); svg.appendChild(g);
   const defs = mk("defs", {}), clip = mk("clipPath", { id: "obClip" });
   clip.appendChild(mk("rect", { x: G.ml, y: G.mt, width: G.cw, height: ch })); defs.appendChild(clip);
   for (const [id, c] of [["obHg", "var(--good)"], ["obHb", "var(--bad)"]]) {
@@ -7147,37 +7151,37 @@ function renderObFvg() {
   }
   g.appendChild(defs);
   const body = mk("g", { "clip-path": "url(#obClip)" }); g.appendChild(body);
-  const pill = (x, y, txt, z, anchor, solid) => {
-    const r = mk("rect", { rx: 4, fill: solid ? col(z) : "var(--chart-bg)", "fill-opacity": 0.92, stroke: col(z), "stroke-opacity": 0.85 });
-    const t = mk("text", { x, y: y + 0.5, "text-anchor": anchor, "dominant-baseline": "middle", fill: solid ? "var(--on-fill)" : col(z), "font-size": 11, "font-weight": 650, "font-family": "var(--font-sans)" }, txt);
-    g.appendChild(r); g.appendChild(t);
-    const b = t.getBBox(); r.setAttribute("x", b.x - 5); r.setAttribute("y", b.y - 2); r.setAttribute("width", b.width + 10); r.setAttribute("height", b.height + 4);
+  const pill = (x, y, txt, z, anchor, solid) => {   // 폭은 캔버스로 잰다(getBBox = 꼬리표마다 강제 레이아웃 · 리뷰) · 플롯 안으로 밀어 넣는다(프로파일 칸 침범 방지)
+    const w = measureTextW(txt, '650 11px "Pretendard Variable", Pretendard, sans-serif') + 10, h = 17;
+    const L = Math.max(G.ml + 2, Math.min(xr - 2 - w, anchor === "start" ? x - 5 : anchor === "end" ? x + 5 - w : x - w / 2)), T = Math.max(G.mt + 1, Math.min(G.pb - 1 - h, y - h / 2));
+    g.appendChild(mk("rect", { x: L, y: T, width: w, height: h, rx: 4, fill: solid ? col(z) : "var(--chart-bg)", "fill-opacity": 0.92, stroke: col(z), "stroke-opacity": 0.85 }));
+    g.appendChild(mk("text", { x: L + w / 2, y: T + h / 2 + 0.5, "text-anchor": "middle", "dominant-baseline": "middle", fill: solid ? "var(--on-fill)" : col(z), "font-size": 11, "font-weight": 650, "font-family": "var(--font-sans)" }, txt));
   };
   const near = (arr) => [arr.filter((z) => z.hi < P).sort((a, b) => b.hi - a.hi)[0], arr.filter((z) => z.lo > P).sort((a, b) => a.lo - b.lo)[0]].filter(Boolean);
-  const inY = (z) => z.hi >= G.ymin && z.lo <= G.ymax, x0Of = (z) => Math.max(G.ml, xT(z.t0));
-  if (mcLine.fvg) for (const z of near(R.fv)) {
+  const inY = (z) => z.hi >= G.ymin && z.lo <= G.ymax, x0Of = (z) => Math.max(G.ml, xT(z.t0)), born = (z) => xT(z.t0) < xr - 6;   // born = 보이는 창 안에서 이미 생긴 존(과거로 옮긴 보기에선 나중 존을 안 그린다)
+  if (mcLine.fvg) for (const z of near(Rf.fv)) {
     const x0 = x0Of(z), y0 = yP(z.hi), y1 = yP(z.lo);
     body.appendChild(mk("rect", { x: x0, y: y0, width: Math.max(0, xr - x0), height: Math.max(1, y1 - y0), fill: `url(#${z.d > 0 ? "obHg" : "obHb"})` }));
     const right = x0 > G.ml + G.cw * 0.6;
-    if (inY(z)) pill(right ? x0 - 8 : x0 + 8, (y0 + y1) / 2, "FVG · 버팀 42% (무작위 40%)", z, right ? "end" : "start", false);
+    if (inY(z) && born(z)) pill(right ? x0 - 8 : x0 + 8, (y0 + y1) / 2, "FVG · 버팀 42% (무작위 40%)", z, right ? "end" : "start", false);
   }
   if (!mcLine.ob) return;
-  const live = R.ob.filter((z) => z.ti == null && !z.dead && z.age <= OB_LIFE);
-  const left = (z) => { const h = (OB_LIFE - z.age) / 4; return h >= 1 ? `${Math.round(h)}시간 남음` : `${Math.max(15, Math.round(h * 60))}분 남음`; };
+  const live = R.ob.filter((z) => z.ti == null && !z.dead && z.age < OB_LIFE);   // age 100 = 닿음 검사 창(k+1..k+100)이 다 마감 → 수명 끝(리뷰)
+  const left = (z) => { const h = (OB_LIFE - z.age) * Mob / 3600; return h >= 1 ? `${Math.round(h)}시간 남음` : `${Math.max(15, Math.round(h * 60))}분 남음`; };
   const nb = near(live);
   for (const z of nb) {
     const x0 = x0Of(z), y0 = yP(z.hi), y1 = yP(z.lo), h = Math.max(2, y1 - y0);
     body.appendChild(mk("rect", { x: x0, y: y0, width: Math.max(0, xr - x0), height: h, fill: col(z), "fill-opacity": 0.14, stroke: col(z), "stroke-opacity": 0.75 }));
     body.appendChild(mk("rect", { x: x0, y: y0, width: 3, height: h, fill: col(z) }));
-    if (inY(z)) pill(x0 + 12, Math.max(G.mt + 10, Math.min(G.pb - 10, y0 + 11)), `${z.d > 0 ? "지지" : "저항"} OB 15m · 닿으면 버팀 약 69% (무작위 61%) · ${left(z)}`, z, "start", true);
+    if (inY(z) && born(z)) pill(x0 + 12, y0 + 11, `${z.d > 0 ? "지지" : "저항"} OB ${tfN} · 닿으면 버팀 약 ${pHold}% (무작위 ${pRnd}%) · ${left(z)}`, z, "start", true);
   }
-  for (const z of nb) if (!inY(z)) {   // 화면 밖 = 위·아래 가장자리 꼬리표
+  for (const z of nb) if (!inY(z) && chartPanEnd == null) {   // 화면 밖 = 위·아래 가장자리 꼬리표(지금 보기만 -- 과거 구간 세로 범위로 «위/아래»를 가르면 틀린다)
     const up = z.lo > G.ymax, pct = ((up ? z.lo : z.hi) / P - 1) * 100;
-    pill(G.ml + G.cw / 2, up ? G.mt + 12 : G.pb - 12, `${up ? "↑" : "↓"} ${z.d > 0 ? "지지" : "저항"} OB${isMobileChartMode() ? "" : " 15m"} ${f0(z.lo)}–${f0(z.hi)} (${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}%)${isMobileChartMode() ? "" : ` · ${left(z)}`}`, z, "middle", false);   // 휴대폰은 짧게(위 가장자리 꼬리표를 덜 가리게)
+    pill(G.ml + G.cw / 2, up ? G.mt + 12 : G.pb - 12, `${up ? "↑" : "↓"} ${z.d > 0 ? "지지" : "저항"} OB${isMobileChartMode() ? "" : ` ${tfN}`} ${f0(z.lo)}–${f0(z.hi)} (${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}%)${isMobileChartMode() ? "" : ` · ${left(z)}`}`, z, "middle", false);   // 휴대폰은 짧게(위 가장자리 꼬리표를 덜 가리게)
   }
-  const tEnd = R.B[R.B.length - 1].t + M15;
-  for (const z of R.ob) if (z.res && z.rt >= tEnd - 2 * 3600) {   // 닿고 판정 난 존 = 닿은 자리에 결과 2시간 뒤 지움
-    const x = xT(R.B[z.ti].t) + slot / 2, y = yP(z.d > 0 ? z.hi : z.lo);
+  const tEnd = R.B[R.B.length - 1].t + Mob;
+  for (const z of R.ob) if (z.res && z.rt + Mob >= tEnd - 2 * 3600) {   // 닿고 판정 난 존 = 닿은 자리에 결과 2시간 뒤 지움
+    const x = xT(R.B[z.ti].t + Mob / 2), y = yP(z.d > 0 ? z.hi : z.lo);
     if (x >= G.ml && x <= xr && y >= G.mt && y <= G.pb) pill(x, y, z.res, z, "middle", z.res === "버팀");
   }
 }
