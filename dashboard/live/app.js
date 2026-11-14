@@ -664,13 +664,18 @@ function fpLineBtnEl(card) {
   b.innerHTML = '<button type="button" data-lines="LONG" aria-pressed="false" title="LONG SLTP — 익절선 위·손절선 아래로 놓고 peg 메이커로 진입(증거금 % 직접)">'
     + '<span>LONG</span></button>'
     + '<button type="button" data-lines="SHORT" aria-pressed="false" title="SHORT SLTP — 익절선 아래·손절선 위로 놓고 peg 메이커로 진입(증거금 % 직접)">'
-    + '<span>SHORT</span></button><i class="ind" aria-hidden="true"></i>';
+    + '<span>SHORT</span></button>'
+    // 2026-11-14 펜 메모 시안 C «포지션 청산·SLTP 지우기/추가를 진입 라벨 대신 LONG/SHORT 옆 단추에서»: 누르면 탭 아래 한 줄 도구막대(#entryPop) -- pmSync 가 보이기·손익 글자를 맞춘다
+    + '<i class="pm-sep" aria-hidden="true" hidden></i><button type="button" class="pm-tab" data-pm hidden aria-expanded="false" aria-haspopup="dialog" title="포지션 관리 — 청산 25·50·100% · 손절·익절선 지우기·추가·나누기"></button>'
+    + '<i class="ind" aria-hidden="true"></i>';
   b.addEventListener("pointerdown", (e) => e.stopPropagation());
   b.addEventListener("click", (e) => {
     const k = e.target.closest("[data-lines]");
     e.stopPropagation();
+    if (e.target.closest("[data-pm]")) { if (fpIndOpen) fpIndSet(false); if (el("entryPop")) entryPopClose(); else entryPopOpen(0, 0); return; }
     if (!k) return;
     if (fpIndOpen) fpIndSet(false);
+    entryPopClose();   // 선 도구와 관리 막대가 같은 자리에 겹치지 않게(검증 6)
     lineToolToggle(k.dataset.lines);
   });
   card.appendChild(b);
@@ -1127,7 +1132,8 @@ function armedActs(h, a, legsOf, hide) {
   });
 }
 function renderArmedLines() {
-  renderLineDraft();   // 2026-11-11 선 추가 초안(들어간 선이 없어도 그린다)
+  renderLineDraft();
+  pmSync();   // 2026-11-14 MANAGE 탭(포지션 관리 막대) -- 선 무장이 없어도   // 2026-11-11 선 추가 초안(들어간 선이 없어도 그린다)
   const svg = el("candleSvgSnapshot"), G = chartGeo, box = svg && svg.parentElement, m = svg && svg.getScreenCTM();
   const a = armedLinesNow(), show = !!(a && G && m && G.ymax > G.ymin && !fpAltOn() && orderCoinOk());
   const h = show ? armedEl(box) : el("lineArmed");
@@ -1197,7 +1203,10 @@ function renderArmedLines() {
       tg.classList.toggle("cross", cr); lh.querySelector(`.lt-ln.${k}[data-i="${i}"]`).classList.toggle("cross", cr);
     });
   });
-  set(".lt-ln.en", { left: x0 + "px", width: Rp - x0 + "px", top: yE + "px" });
+  // 2026-11-14 펜 메모 «진입선을 차트 끝까지 · 진입선이 «진입» 칩 위를 긋지 않게»: 플롯 왼쪽 끝 ~ 오른쪽 끝(프로파일까지), 같은 높이의 svg «진입» 글자가 있으면 그 앞 6px 에서 멈춘다
+  const enR = svg.querySelector("text[data-en]")?.getBoundingClientRect(), enX = enR && Math.abs((enR.top + enR.bottom) / 2 - pr.top - yE) < 12 ? enR.left - pr.left - 6 : null;
+  const enEnd = enX != null && enX > L + 40 ? Math.min(Rp, enX) : Rp;   // 글자가 플롯 왼쪽 여백에 있으면(풋프린트 없음) 무시 -- 선이 0폭이 되던 것(검증 2)
+  set(".lt-ln.en", { left: L + "px", width: Math.max(0, enEnd - L) + "px", top: yE + "px" });
   const pNow = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), upnl = pNow > 0 ? (pNow - en) * qty * sgn : 0, lv = Number(a.p.leverage) || 0;
   const im = lv > 0 ? qty * en / lv : 0, sg = (v) => (v >= 0 ? "+" : "−");   // 증거금 = 명목 ÷ 레버(거래소 ROE 분모)
   const enTag = set(".lt-tag.en", { left: (mob ? x0 + 6 : R + MARKER_W * m.a + 4) + "px", top: yE + "px" });   // 2026-11-04 펜 메모 «진입한 뒤 포지션 라벨을 SLTP 박스 안 말고 진입 주황 삼각형 옆에»: 삼각형(플롯 오른쪽 끝) 바로 오른쪽
@@ -1206,6 +1215,7 @@ function renderArmedLines() {
   // 2026-11-03 사용자 «진입 라벨이 큰 박스로 청산 프로파일을 가린다 · short +$1 처럼 포지션이랑 수익금만»: 한 줄 작은 알약 «SHORT +$10.52» -- 진입가·증거금 수익률은 툴팁.
   //   체결 기둥·청산 프로파일 칸(lane)으로 안 들어간다(진입선 왼쪽 끝).
   enTag.classList.add("lt-mini"); enTag.classList.remove("lane"); enTag.style.width = "";
+  enTag.style.display = "none";   // 2026-11-14 펜 메모 «진입 라벨 제거» -- 손익·청산 메뉴는 MANAGE 탭(pmSync·entryPopOpen)
   enTag.title = `${a.side === "SHORT" ? "SHORT" : "LONG"} 진입 ${lineFmt(en)}${im > 0 && pNow > 0 && qty ? ` · 증거금 ${sg(upnl)}${Math.abs(100 * upnl / im).toFixed(1)}%` : ""} — 누르면 청산 메뉴`;
   enTag.innerHTML = `${a.side === "SHORT" ? "SHORT" : "LONG"}`
     + (pNow > 0 && qty ? ` <span class="lt-en-p ${pc}">${sg(upnl)}$${Math.abs(upnl).toFixed(2)}</span>` : "");
@@ -1224,7 +1234,7 @@ function renderArmedLines() {
   const note = h.querySelector(".lt-am-note"), e = armedEdit;
   note.textContent = e && e.busy ? "주문 수정 중…" : e && e.err ? `수정 실패 — ${e.err}` : e && e.hint ? (Date.now() - e.okAt < 3000 ? e.hint : "")
     : e && e.okAt && Date.now() - e.okAt < 6000 ? (e.warn ? `수정됨 — ${e.warn}` : e.tpOk === false ? "수정됨 — 익절 지정가를 못 걸어 서버가 닿으면 닫습니다" : "수정됨")
-    : lineTool ? "선 주문 도구를 닫으면 들어간 선을 옮길 수 있습니다" : slOff || tpOff ? `${[slOff && "손절", tpOff && "익절"].filter(Boolean).join("·")} 없음 — 추가 = 진입가 라벨 팝업` : "";
+    : lineTool ? "선 주문 도구를 닫으면 들어간 선을 옮길 수 있습니다" : slOff || tpOff ? `${[slOff && "손절", tpOff && "익절"].filter(Boolean).join("·")} 없음 — 추가 = 위 MANAGE 탭` : "";
   note.className = `lt-am-note${e && (e.err || e.warn) ? " bad" : ""}`;
   Object.assign(note.style, { left: x0 + 6 + "px", top: Math.min(bot - 14, yE + 16) + "px" });
   if (e && e.err && !e.errShownAt) e.errShownAt = Date.now();
@@ -1233,41 +1243,67 @@ function renderArmedLines() {
 // 2026-11-01 사용자 «이미 진입한 경우 진입가 라벨을 누르면 팝업 -- 청산 내용»: 차트 오른쪽 주황 «진입» 배지(또는 들어간 선의 진입 꼬리표)를 누르면
 //   평단·미실현 손익·청산가(강제청산) 거리 + 25/50/100% 청산 버튼. 버튼은 **새 경로가 아니라** 기존 청산 미리보기(manualExitPreview)를 열어 주문 패널의
 //   «확인» 두 번을 그대로 거친다(여기서 바로 주문이 나가지 않는다). 가격은 전부 USDT 환산(entryUsdt 의 basis).
-function entryPopClose() { el("entryPop")?.remove(); }
+function entryPopClose() { el("entryPop")?.remove(); el("fpLineBtn")?.querySelector("[data-pm]")?.setAttribute("aria-expanded", "false"); }
+function pmPnl(pos) {   // 지금가 기준 미실현(차트 단위 평단) -- 막대·단추가 같은 값
+  const cur = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), en = entryUsdt(pos, cur), sgn = String(pos.side).toUpperCase() === "SHORT" ? -1 : 1;
+  return cur > 0 && en > 0 ? (cur - en) * Math.abs(Number(pos.qty)) * sgn : 0;
+}
+function pmSync() {   // renderArmedLines 마다 -- 포지션이 없거나 다른 화면이면 숨기고 막대도 닫는다
+  const b = el("fpLineBtn")?.querySelector("[data-pm]");
+  if (!b) return;
+  const pos = snapshotAccountPosition(), on = !!(pos && Number(pos.qty) && orderCoinOk() && !fpAltOn());
+  b.hidden = !on; b.previousElementSibling.hidden = !on;
+  if (!on) { if (el("entryPop")) entryPopClose(); return; }
+  const up = pmPnl(pos), mob = isMobileChartMode(), pc = up >= 0 ? "good" : "bad";
+  if (b._mob !== mob) { b._mob = mob; b.innerHTML = `${mob ? "" : "<span>MANAGE</span>"}<b></b><svg class="pm-car" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`; }   // 뼈대는 한 번 -- 매 틱 innerHTML 을 갈면 누르는 중 대상이 떨어져 click 이 씹힐 수 있다(검증 3)
+  const bv = b.querySelector("b"), pn = `${up >= 0 ? "+" : "−"}$${Math.abs(up).toFixed(mob ? 0 : 2)}`;
+  if (bv.textContent !== pn) bv.textContent = pn;
+  if (bv.className !== pc) bv.className = pc;
+  const d = el("entryPop");
+  if (!d) return;
+  const pk = `${pos.symbol}:${String(pos.side).toUpperCase()}`;
+  if (d.dataset.pk && d.dataset.pk !== pk) { entryPopClose(); return; }   // 포지션이 바뀌면 옛 방향 청산 단추를 남기지 않는다(검증 1)
+  const pv = d.querySelector(".pm-pn");
+  if (pv) { const t = `${up >= 0 ? "+" : "−"}$${Math.abs(up).toFixed(2)}`; if (pv.textContent !== t) { pv.textContent = t; pv.className = `pm-v pm-pn ${pc}`; } }
+  // 검증 1: 차트 캡슐 ✕ 무장·계좌 갱신(조각 체결·합침)을 막대 «선» 칸에도 -- 무장 키·바쁨·무장 상태가 바뀌면 다시 그린다(다른 쪽 무장만 보고 한 번에 지우는 일 방지)
+  const sig = JSON.stringify([epLnArm.k, epLnBusy, (latestBinanceAccount?.bracket_armed || {})[pk] || null]);
+  if (d._sig !== sig) {
+    d._sig = sig;
+    const old = d.querySelector(".ep-lines"), nu = epLinesHtml(pos) || "";
+    if (old) old.outerHTML = nu; else if (nu) d.insertAdjacentHTML("beforeend", nu);
+  }
+}
 // 2026-11-11 사용자 «손절선 지우기·익절선 지우기 버튼은 진입가 팝업에»: 선(SLTP)으로 들어간 포지션만. 두 번 눌러(5초 무장) 서버에 보낸다 -- 주문이 아니라 걸린 선을 끄는 것.
 //   손절 = /api/manual-bracket/disarm·rearm(선 손절은 거래소 스탑 없음 · 서버 감시만 끔/켬) · 익절 = /api/manual-bracket/tp?act=off|on(우리 익절 지정가만 지움 · 저장된 가격으로 다시 검).
 //   지운 선은 차트에 안 그린다 · 다시 켜기는 같은 자리. 청산 진행 중(fired)엔 못 누른다(서버도 409).
 let epLnArm = { k: "", t: 0 }, epLnBusy = false;
-function epLinesHtml(pos) {
+function epLinesHtml(pos) {   // 2026-11-14 시안 C: 도구막대 «선» 칸 -- 단추 data-* 는 그대로(epLinePress·epLegPress)
   const k = `${pos.symbol}:${String(pos.side).toUpperCase()}`, b = (latestBinanceAccount?.bracket_armed || {})[k];
   if (b && !b.lines) return "";   // 규칙 손절(거래소 −5% 스탑) 포지션 -- 선을 섞지 않는다(서버도 409)
-  const off = (leg) => !b || !!b[`${leg}_off`] || !(b[`${leg}_level`] > 0), fired = !!(b && b.fired);
-  const btn = (leg, name) => {
-    if (off(leg)) return `<button type="button" data-ln="${leg}" data-act="add" data-key="${escapeHtml(k)}"${fired || epLnBusy ? " disabled" : ""} title="${name}선 초안을 차트에 띄웁니다 — 끌어 놓는 순간 걸립니다">${name}선 추가</button>`;
-    const id = `${leg}:off:${k}`, armed = epLnArm.k === id;
-    return `<button type="button" data-ln="${leg}" data-act="off" data-key="${escapeHtml(k)}" class="${armed ? "arm" : ""}"${fired || epLnBusy ? " disabled" : ""}`
-      + ` title="${name}선 지우기 — 서버 감시를 끄고 차트에서 지웁니다. 두 번 누르기">${armed ? "한 번 더" : `${name}선 지우기`}</button>`;
-  };
+  const off = (leg) => !b || !!b[`${leg}_off`] || !(b[`${leg}_level`] > 0), fired = !!(b && b.fired), ek = escapeHtml(k);
   const dis = fired || epLnBusy ? " disabled" : "", legsOf = (kd) => (b && !off(kd) && Array.isArray(b[`${kd}_legs`]) && b[`${kd}_legs`].length > 1 ? b[`${kd}_legs`] : null);
-  const rowsOf = (kd) => {
-    const gs = legsOf(kd), name = kd === "tp" ? "익절" : "손절";
-    if (!gs) return "";
-    const tw = gs.reduce((s2, g) => s2 + (Number(g.w) || 1), 0);
-    return `<div class="ep-legs ${kd}" role="list" aria-label="나눈 ${name}">${gs.map((g, i) => {
-      const id = `leg:rm:${kd}:${i}:${k}`, armed = epLnArm.k === id, pct = Math.round(100 * (Number(g.w) || 1) / tw), da = `data-kind="${kd}" data-i="${i}" data-key="${escapeHtml(k)}"`;
-      return `<div class="ep-leg ${kd}" role="listitem"><span>${name} ${i + 1}</span><b>${lineFmt(g.level)}</b><em${g.merged ? ' title="조각이 최소 주문보다 작아 다음 조각에 합쳐졌습니다"' : ""}>${g.merged ? "합침" : g.fired ? "청산 중" : pct + "%"}</em>`
-        + `<button type="button" data-leg="minus" ${da} aria-label="${name} ${i + 1} 비율 줄이기"${dis}>−</button>`
-        + `<button type="button" data-leg="plus" ${da} aria-label="${name} ${i + 1} 비율 늘리기"${dis}>+</button>`
-        + `<button type="button" data-leg="rm" ${da} class="x${armed ? " arm" : ""}" aria-label="${armed ? `한 번 더 누르면 이 ${name}선을 지웁니다` : `${name} ${i + 1} 지우기 — 두 번 누르기`}"${dis}>${armed ? "한 번 더" : '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>'}</button></div>`;
-    }).join("")}</div>`;
+  const xBtn = (attrs, armed, label, d = dis) => `<button type="button" ${attrs} class="x${armed ? " arm" : ""}"${d} aria-label="${armed ? `한 번 더 누르면 ${label}을 지웁니다` : `${label} 지우기 — 두 번 누르기`}" title="${label} 지우기 — 두 번 누르기">${armed ? "지우기?" : '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>'}</button>`;
+  const chips = (kd) => {
+    const name = kd === "tp" ? "익절" : "손절", gs = legsOf(kd);
+    if (off(kd)) return `<button type="button" class="pm-add ${kd}" data-ln="${kd}" data-act="add" data-key="${ek}"${dis} title="${name}선 초안을 차트에 띄웁니다 — 끌어 놓는 순간 걸립니다">+ ${name}</button>`;
+    if (!gs) return `<span class="pm-chip ${kd}">${name} <b>${lineFmt(b[`${kd}_level`])}</b>${xBtn(`data-ln="${kd}" data-act="off" data-key="${ek}"`, epLnArm.k === `${kd}:off:${k}`, `${name}선`)}</span>`;
+    const tw = gs.reduce((s2, g) => s2 + (g.merged ? 0 : Number(g.w) || 1), 0) || 1;   // 차트 칩과 같은 몫(합친 조각 뺌)
+    return gs.map((g, i) => {
+      const dis = fired || epLnBusy || g.fired ? " disabled" : "";   // 청산 중인 조각은 차트 캡슐처럼 막는다
+      const da = `data-kind="${kd}" data-i="${i}" data-key="${ek}"`, pct = Math.round(100 * (Number(g.w) || 1) / tw);
+      return `<span class="pm-chip ${kd}">${name}${i + 1} <b>${lineFmt(g.level)}</b>`
+        + `<button type="button" class="st" data-leg="minus" ${da} aria-label="${name} ${i + 1} 비율 줄이기"${dis}>−</button>`
+        + `<em${g.merged ? ' title="조각이 최소 주문보다 작아 다음 조각에 합쳐졌습니다"' : ""}>${g.merged ? "합침" : g.fired ? "청산 중" : pct + "%"}</em>`
+        + `<button type="button" class="st" data-leg="plus" ${da} aria-label="${name} ${i + 1} 비율 늘리기"${dis}>+</button>`
+        + xBtn(`data-leg="rm" ${da}`, epLnArm.k === `leg:rm:${kd}:${i}:${k}`, `${name} ${i + 1}`, dis) + "</span>";
+    }).join("") + `<button type="button" class="pm-all${epLnArm.k === `${kd}:off:${k}` ? " arm" : ""}" data-ln="${kd}" data-act="off" data-key="${ek}"${dis} title="${name}선 모두 지우기 — 두 번 누르기">${epLnArm.k === `${kd}:off:${k}` ? "한 번 더" : `${name} 모두 지우기`}</button>`;
   };
-  const moreOf = (kd) => {
+  const more = (kd) => {
     const gs = legsOf(kd), n = gs ? gs.length : off(kd) ? 0 : 1, name = kd === "tp" ? "익절" : "손절";
-    return n >= 1 && n < 4 ? `<button type="button" class="ep-more ${kd}" data-ln="${kd}" data-act="add" data-key="${escapeHtml(k)}"${dis} title="${name}선을 하나 더 그어 포지션을 나눠 ${name}합니다 — 초안을 끌어 놓으면 걸리고 조각들이 똑같이 나눕니다">${name} 나누기 +</button>` : "";
+    return n >= 1 && n < 4 ? `<button type="button" class="pm-add ${kd}" data-ln="${kd}" data-act="add" data-key="${ek}"${dis} title="${name}선을 하나 더 그어 포지션을 나눠 ${name}합니다 — 초안을 끌어 놓으면 걸리고 조각들이 똑같이 나눕니다">+ ${name} 나누기</button>` : "";
   };
-  const mores = moreOf("sl") + moreOf("tp");
-  return `<div class="ep-lines"><div class="ep-ln" role="group" aria-label="손절·익절 선">${btn("sl", legsOf("sl") ? "손절 모두" : "손절")}${btn("tp", legsOf("tp") ? "익절 모두" : "익절")}</div>`
-    + `${rowsOf("sl")}${rowsOf("tp")}${mores ? `<div class="ep-mores">${mores}</div>` : ""}${fired ? "<small>청산 진행 중 — 선을 못 바꿉니다</small>" : ""}</div>`;
+  return `<div class="ep-lines pm-g" role="group" aria-label="손절·익절 선"><span class="pm-lab">선</span>${chips("sl")}${chips("tp")}${more("sl")}${more("tp")}`
+    + `${fired ? "<small>청산 진행 중 — 선을 못 바꿉니다</small>" : ""}</div>`;
 }
 async function epLegPress(b) {   // 2026-11-11 분할 익절·손절 조각: −/+ = 무게 1칸(1~9) · ✕ = 두 번 눌러 그 조각만 지움(나머지가 전량을 나눔)
   if (b.disabled || epLnBusy) return;
@@ -1335,20 +1371,28 @@ function entryPopOpen(x, y) {
   if (!pos || !Number(pos.qty) || !orderCoinOk()) return;
   const en = entryUsdt(pos, cur), k = en > 0 ? Number(pos.entry_price) / en : 1;   // k = 환산 basis(USDC ÷ USDT)
   const sgn = String(pos.side).toUpperCase() === "SHORT" ? -1 : 1, qty = Math.abs(Number(pos.qty)), mk = Number(pos.mark_price) || 0;
-  const up = mk > 0 ? (mk - Number(pos.entry_price)) * qty * sgn : 0, liq = Number(pos.liquidation_price) > 0 ? Number(pos.liquidation_price) / k : 0;
+  const up = pmPnl(pos) || (mk > 0 ? (mk - Number(pos.entry_price)) * qty * sgn : 0), liq = Number(pos.liquidation_price) > 0 ? Number(pos.liquidation_price) / k : 0;
   const dist = liq > 0 && cur > 0 ? Math.abs(cur - liq) / cur * 100 : null, sg = (v) => (v >= 0 ? "+" : "−");
   const d = document.createElement("div");
-  d.id = "entryPop"; d.className = "entry-pop"; d.setAttribute("role", "dialog");
-  d.innerHTML = `<b>${sgn < 0 ? "SHORT" : "LONG"} ${escapeHtml(String(pos.symbol))}</b>`
-    + `<dl><dt>평단</dt><dd>${lineFmt(en)}</dd><dt>수량</dt><dd>${qty}</dd>`
-    + `<dt>미실현</dt><dd class="${up >= 0 ? "good" : "bad"}">${sg(up)}$${Math.abs(up).toFixed(2)}</dd>`
-    + `<dt>청산가</dt><dd>${liq > 0 ? `${lineFmt(liq)}${dist != null ? ` · ${dist.toFixed(1)}% 남음` : ""}` : "없음"}</dd></dl>`
-    + `<div class="ep-btns">${[25, 50, 100].map((v) => `<button type="button" data-pct="${v}" aria-label="${v}% 청산"><i class="hold-fill" aria-hidden="true"></i><span>${v}%</span></button>`).join("")}</div>`
-    + `<small>누르면 바로 청산 주문이 나갑니다</small>` + epLinesHtml(pos);
+  // 2026-11-14 펜 메모 시안 C: 팝업 → LONG/SHORT 옆 MANAGE 탭 아래 한 줄 도구막대 [방향·수량·손익 | 청산 25·50·100 | 선 칩]. 단추·처리기(꾹·탭·두 번 지우기)는 예전 그대로.
+  d.id = "entryPop"; d.className = "entry-pop pm-strip"; d.setAttribute("role", "dialog"); d.setAttribute("aria-label", "포지션 관리");
+  d.dataset.pk = `${pos.symbol}:${String(pos.side).toUpperCase()}`;
+  const holdTip = "마우스 = 꾹 눌러 게이지가 차면 청산 · 터치·키보드 = 누르면 바로 청산 주문";
+  d.innerHTML = `<div class="pm-g" title="평단 ${lineFmt(en)} · 청산가 ${liq > 0 ? lineFmt(liq) : "없음"}"><span class="pm-lab ${sgn < 0 ? "bad" : "good"}">${sgn < 0 ? "SHORT" : "LONG"}</span><span class="pm-v">${qty} ${coinUnit()}</span>`
+    + `<span class="pm-v pm-pn ${up >= 0 ? "good" : "bad"}">${sg(up)}$${Math.abs(up).toFixed(2)}</span>`
+    + `<span class="pm-sub">평단 ${lineFmt(en)} · 청산가 ${liq > 0 ? `${lineFmt(liq)}${dist != null ? ` (${dist.toFixed(1)}%)` : ""}` : "없음"}</span></div>`
+    + `<div class="pm-g ep-btns" title="${holdTip}"><span class="pm-lab">청산</span>${[25, 50, 100].map((v) => `<button type="button" data-pct="${v}" aria-label="${v}% 청산 — ${holdTip}"><i class="hold-fill" aria-hidden="true"></i><span>${v}%</span></button>`).join("")}</div>`
+    + epLinesHtml(pos);
   document.body.appendChild(d);
-  const r = d.getBoundingClientRect();
-  d.style.left = Math.max(8, Math.min(innerWidth - r.width - 8, x - r.width - 12)) + "px";
-  d.style.top = Math.max(8, Math.min(innerHeight - r.height - 8, y - r.height / 2)) + "px";
+  const r = d.getBoundingClientRect(), pb = el("fpLineBtn")?.querySelector("[data-pm]"), ar = pb && !pb.hidden ? pb.getBoundingClientRect() : null;
+  if (ar && ar.width) {   // 탭 바로 아래 가운데(화면 밖이면 안쪽으로) · 휴대폰은 양옆 8px
+    pb.setAttribute("aria-expanded", "true");
+    d.style.left = Math.max(8, Math.min(innerWidth - r.width - 8, ar.left + ar.width / 2 - r.width / 2)) + "px";
+    d.style.top = ar.bottom + 8 + "px";
+  } else {
+    d.style.left = Math.max(8, Math.min(innerWidth - r.width - 8, x - r.width - 12)) + "px";
+    d.style.top = Math.max(8, Math.min(innerHeight - r.height - 8, y - r.height / 2)) + "px";
+  }
   // 플로팅 청산 버튼과 같은 규약: 마우스 = 꾹(왼쪽→오른쪽 게이지, HOLD_FIRE_MS) · 터치·키보드 = 탭 → 미리보기 → 패널에서 확인
   const side = String(pos.side).toUpperCase(), ovOf = (b, pt) => ({ pct: Number(b.dataset.pct), src: `ep-${pt}` });   // src = 2026-11-12 주문 요청 기록(서버 order_requests.jsonl)에 «진입가 팝업·마우스/터치/키보드»
   let touched = false, released = false;
@@ -9448,6 +9492,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     // 이름이 없는 것(30분 시나리오 목표 «↑56%»)은 왼쪽으로 옮길 때 sub 를 이름으로 쓴다.
     const leftName = mobileChart && footprint ? "" : p.label || (priceLeft && p.sub ? p.sub : "");   // 모바일 풋프린트는 아래 한 줄만
     const txt = leftName ? document.createElementNS(NS, "text") : null;
+    if (txt && p.label === "진입") txt.setAttribute("data-en", "1");   // 2026-11-14 들어간 진입선(#lineArmed)이 이 글자 앞에서 멈춘다(renderArmedLines)
     // 2026-09-28 풋프린트 현재가는 **채운 태그**(사용자 «현재가 라벨을 더 크게») -- 13px(모바일 12) 어두운 글자, 왼쪽 끝에서
     //   시작해 필요하면 플롯 안으로 조금 들어간다(가격 태그 관례). 빠른 갱신(updateLivePriceFast)이 글자·폭·높이를 같이 옮긴다.
     const nowTag = p.label === "현재" && !!footprint && !!txt;

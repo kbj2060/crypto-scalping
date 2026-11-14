@@ -3920,3 +3920,41 @@ html.fp-lock { overflow: hidden; scrollbar-gutter: stable; }
 @media (min-width: 721px) and (max-width: 1099px) {   /* 검증 11-13: 태블릿에서 주식 카드(.opt-eq)가 데스크톱 배치 + 태블릿 열 비율로 찌그러졌다 -- 태블릿 배치를 주식용으로 */
   #optCard.opt-eq { grid-template-areas: "head head head head" "cov cov cov cov" "kpi kpi kpi kpi" "move ladder ladder ladder" "mood ladder ladder ladder" "blk blk blk blk" "flow flow flow flow"; }
 }
+
+/* 2026-11-14 펜 메모 시안 C: LONG/SHORT 옆 MANAGE 탭 + 탭 아래 한 줄 포지션 도구막대(#entryPop.pm-strip) */
+.fp-line-btn .pm-sep { align-self: center; width: 1px; height: 16px; background: var(--line); }
+.fp-line-btn button.pm-tab { white-space: nowrap; }
+.fp-line-btn button.pm-tab::before { width: 7px; height: 7px; border-radius: 2px; transform: rotate(45deg); background: var(--accent); }
+.fp-line-btn button.pm-tab b { margin-left: 8px; font: 700 12px var(--font-mono); font-variant-numeric: tabular-nums; }
+.fp-line-btn button.pm-tab b.good { color: var(--good); } .fp-line-btn button.pm-tab b.bad { color: var(--bad); }
+.fp-line-btn button.pm-tab[aria-expanded="true"] { color: var(--text); }
+.fp-line-btn .pm-car { margin-left: 6px; width: 9px; height: 9px; flex: none; transition: transform .16s ease; }
+.fp-line-btn [aria-expanded="true"] .pm-car { transform: rotate(180deg); }
+.fp-mob-row .fp-line-btn button.pm-tab { padding: 0 8px; } .fp-mob-row .fp-line-btn button.pm-tab b { margin-left: 4px; }
+.entry-pop.pm-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 0; width: auto; max-width: calc(100vw - 16px); padding: 7px 10px 7px 14px; white-space: nowrap; font: 600 12px var(--font-sans); }
+.pm-strip .pm-g { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pm-strip .pm-g + .pm-g { margin-left: 14px; padding-left: 14px; border-left: 1px solid var(--soft-line); }
+.pm-strip .pm-lab { color: var(--muted); font: 700 10.5px var(--font-sans); letter-spacing: .06em; margin-right: 2px; }
+.pm-strip .pm-lab.good { color: var(--good); } .pm-strip .pm-lab.bad { color: var(--bad); }
+.pm-strip .pm-v { font: 700 12px var(--font-mono); font-variant-numeric: tabular-nums; }
+.pm-strip .pm-v.good { color: var(--good); } .pm-strip .pm-v.bad { color: var(--bad); }
+.pm-strip .pm-sub { display: none; color: var(--muted); font: 600 11px var(--font-mono); font-variant-numeric: tabular-nums; }
+.entry-pop.pm-strip .ep-btns button { flex: none; min-width: 48px; height: 28px; padding: 0 10px; }
+.pm-strip .pm-add { height: 28px; padding: 0 11px; border-radius: 7px; border: 1px dashed color-mix(in srgb, var(--good) 55%, transparent); background: none; color: var(--good); font: 600 11.5px var(--font-sans); cursor: pointer; }
+.pm-strip .pm-add.sl { border-color: color-mix(in srgb, var(--bad) 55%, transparent); color: var(--bad); }
+.pm-strip .pm-chip { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 3px 0 10px; border-radius: 999px; border: 1px solid currentColor; color: var(--good); font: 600 11.5px var(--font-sans); }
+.pm-strip .pm-chip.sl { color: var(--bad); }
+.pm-strip .pm-chip b { font: 700 11.5px var(--font-mono); font-variant-numeric: tabular-nums; }
+.pm-strip .pm-chip em { min-width: 2.6em; text-align: center; font: 700 11px var(--font-mono); font-style: normal; font-variant-numeric: tabular-nums; }
+.pm-strip .pm-chip button { display: inline-grid; place-items: center; height: 22px; min-width: 22px; padding: 0 5px; border: 0; border-radius: 999px; background: none; color: inherit; font: 700 12px var(--font-mono); cursor: pointer; }
+.pm-strip .pm-chip button.st { background: color-mix(in srgb, currentColor 10%, transparent); }   /* −/+ 가 가운뎃점처럼 안 보이게 */
+.pm-strip .pm-chip button:hover, .pm-strip .pm-add:hover, .pm-strip .pm-all:hover { background: color-mix(in srgb, currentColor 14%, transparent); }
+.pm-strip .pm-chip button.x.arm { background: var(--bad); color: var(--on-fill); font: 700 10.5px var(--font-sans); padding: 0 8px; }
+.pm-strip .pm-all { height: 28px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line); background: none; color: var(--text); font: 600 11px var(--font-sans); cursor: pointer; }
+.pm-strip .pm-all.arm { background: var(--bad); border-color: var(--bad); color: var(--on-fill); }
+.pm-strip button:disabled { opacity: .45; cursor: default; }
+.pm-strip button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.pm-strip small { color: var(--muted); font-size: 10.5px; }
+@media (pointer: coarse) { .pm-strip .pm-chip, .pm-strip .pm-add, .pm-strip .pm-all, .entry-pop.pm-strip .ep-btns button { height: 34px; } .pm-strip .pm-chip button { height: 28px; min-width: 28px; } }
+@media (max-width: 720px) { .entry-pop.pm-strip { left: 8px !important; right: 8px; white-space: normal; } .pm-strip .pm-g + .pm-g { margin-left: 0; padding-left: 0; border-left: 0; } .pm-strip .pm-g { width: 100%; } .pm-strip .pm-sub { display: block; width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .fp-line-btn .pm-car { transition: none; } }
