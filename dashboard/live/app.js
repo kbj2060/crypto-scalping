@@ -398,7 +398,8 @@ let lineDrag = null, lineHold = 0, linePrevT = 0, linePt = "", linePrevSeq = 0; 
 // 2026-10-31 사용자 «현재가 peg 말고 가격선을 정해 limit 으로 기다리게 · 그 선도 끌어 주문 수정»: t.entry = 진입 지정가(null = 지금가 peg, 현행).
 //   방향·손익비·손절 손실은 진입선(ref)이 기준 -- 지정가면 ref = entry. 롱 지정가는 지금가 아래 · 숏 지정가는 위(메이커)여야 하고 넘으면 peg 로 되돌린다.
 const lineRef = (t, p) => (t.entry > 0 ? t.entry : p);
-const lineSide = (t, p) => { const r = lineRef(t, p); return t.tp > r && t.sl < r ? "LONG" : t.tp < r && t.sl > r ? "SHORT" : ""; };
+const lineSide = (t, p) => { if (t.add && t.addSide) return t.addSide; const r = lineRef(t, p);   // 2026-11-14 추가 진입 = 포지션 방향 그대로(선 위치로 정하지 않는다)
+   return t.tp > r && t.sl < r ? "LONG" : t.tp < r && t.sl > r ? "SHORT" : ""; };
 // 2026-11-09 사용자 «롱은 위에서 롱 · 숏은 아래서 숏을 감시하다가 걸게»: 진입선이 롱 = 지금가 위 · 숏 = 아래면 «감시 진입»(서버 run_entry_stop -- 1초 체결가가 선에 닿으면 peg 따라가기, 시장가 없음).
 //   걸린 뒤엔 서버가 정한 종류(stopP)를 따른다 -- 가격이 선을 지나가도 지정가로 바뀌어 보이지 않게.
 const lineStop = (t, p) => { if (t.placed) return !!t.stopP; const s = lineSide(t, p); return t.entry > 0 && ((s === "LONG" && t.entry > p) || (s === "SHORT" && t.entry < p)); };
@@ -411,9 +412,11 @@ function lineToolToggle(want) {   // 2026-10-30 사용자 «롱만 나오고 숏
   if (lineTool && cur === want) { lineTool = null; renderLineTool(); return; }   // 같은 쪽을 다시 누르면 끈다
   if (!G || !(G.ymax > G.ymin) || !(p > 0)) return;
   if (lineTool && lineTool.add) lineTool = null;   // 추가 진입 도구에서 반대쪽을 누르면 새 선 도구로(기존 선은 거울로 못 옮긴다)
-  const arm = armedLinesNow();
-  if (!lineTool && arm && arm.side === want) {   // 2026-11-03 사용자 «SLTP 로 추가 진입 · 손절/익절 라인은 그대로»: 같은 쪽 선 포지션이면 무장된 선을 그대로 잡고 크기만 늘린다(서버도 보낸 선을 무시하고 무장된 선을 쓴다)
-    lineTool = { tp: arm.b.tp_level, sl: arm.b.sl_level, plan: null, err: "", asset: activeSnapshotAsset, add: true };
+  const arm = armedLinesNow(), pos = snapshotAccountPosition(), pside = pos && Number(pos.qty) ? String(pos.side).toUpperCase() : "";
+  // 2026-11-14 사용자 «포지션 추가는 기존 SLTP 조건 그대로 추가 진입만»: 같은 쪽 포지션이 있으면(선 무장이 없어도) 추가 진입 도구 -- 익절·손절선을 요구하지 않는다(서버도 보낸 선을 안 쓴다)
+  if (!lineTool && pside === want) {
+    const p1 = want === "LONG" ? 1 : -1;
+    lineTool = { tp: arm && arm.b.tp_level > 0 ? arm.b.tp_level : p * (1 + 0.02 * p1), sl: arm && arm.b.sl_level > 0 ? arm.b.sl_level : p * (1 - 0.02 * p1), plan: null, err: "", asset: activeSnapshotAsset, add: true, addSide: want };
     renderLineTool(); linePreview(); lineToolReveal(); return;
   }
   if (cur && lineTool) Object.assign(lineTool, { tp: Math.max(0.01, 2 * p - lineTool.tp), sl: Math.max(0.01, 2 * p - lineTool.sl), entry: lineTool.entry ? Math.max(0.01, 2 * p - lineTool.entry) : null, plan: null, err: "", arm: 0 });   // 반대쪽 = 지금가 기준 거울(거리 그대로)
@@ -447,7 +450,7 @@ function linePreview() {   // 크기는 서버 미리보기(증거금 linePct %)
     if (!t || t.placed) return;   // 대기 주문은 서버가 크기를 이미 정했다
     if (!side) { t.plan = null; t.err = "익절과 손절이 현재가 양쪽에 있어야 합니다"; renderLineTool(); return; }
     try {
-      const d = await manualEntryFetch(side, "entry", { rule: "", pct: linePct, tp: linePx(t.tp), sl: linePx(t.sl), limit: t.entry > 0 ? linePx(t.entry) : "", stop: lineStop(t, p) });
+      const d = await manualEntryFetch(side, "entry", { rule: "", pct: linePct, tp: t.add ? "" : linePx(t.tp), sl: t.add ? "" : linePx(t.sl), limit: t.entry > 0 ? linePx(t.entry) : "", stop: lineStop(t, p) });
       if (lineTool !== t || seq !== linePrevSeq) return;
       t.plan = d.ok ? d.plan : null; t.err = d.ok ? (d.plan.blocked || "") : (d.detail || d.error || "미리보기 실패");
     } catch (e) { if (lineTool === t && seq === linePrevSeq) { t.plan = null; t.err = "미리보기 실패"; } }
@@ -461,7 +464,7 @@ function lineFire() {   // 미리보기 → 오는 즉시 발주(manualFireOnPre
   t.fail = ""; const lim = t.entry > 0;   // 지정가 = 접수가 확인될 때까지 선을 둔다(manualEntrySubmit 이 placed 로) · peg = 현행대로 바로 지운다
   const stp = lim && lineStop(t, p);
   ofabWatchResult(); ofabSay(escapeHtml(`${side === "LONG" ? "롱" : "숏"} ${stp ? "감시 " : lim ? "지정가 " : ""}선 주문 — ${HOLD_FIRE_MS ? "미리보기 받는 중…" : "주문 전송 중…"}`));
-  const ov = { rule: "", pct: linePct, tp: linePx(t.tp), sl: linePx(t.sl), fresh: true, limit: lim ? linePx(t.entry) : "", stop: stp };
+  const ov = { rule: "", pct: linePct, tp: t.add ? "" : linePx(t.tp), sl: t.add ? "" : linePx(t.sl), fresh: true, limit: lim ? linePx(t.entry) : "", stop: stp };
   if (!HOLD_FIRE_MS) manualFireNow(side, "entry", ov);   // 즉시 모드 -- 미리보기 없이 바로
   else { manualFireOnPreview = true; manualEntryPreview(side, "entry", ov); }
   renderLineTool();   // peg 도 선은 서버가 받았다고 한 뒤(manualEntrySubmit)에 거둔다 -- 거절되면 사유를 이 팝업에 남긴다
@@ -739,7 +742,7 @@ function renderLineTool() {
   h.hidden = !show;
   if (!show) return;
   const t = lineTool, pr = box.getBoundingClientRect(), mob = isMobileChartMode();
-  if (t.add && !armedLinesNow()) t.add = false;   // 추가할 포지션이 사라졌으면(청산) 보통 선 도구로
+  if (t.add && !(snapshotAccountPosition() && String(snapshotAccountPosition().side).toUpperCase() === t.addSide && Number(snapshotAccountPosition().qty))) t.add = false;   // 추가할 포지션이 사라졌으면(청산) 보통 선 도구로
   h.classList.toggle("lt-add", !!t.add);   // 추가 진입: 익절·손절선은 기존 것 그대로라 도구 쪽 선·꼬리표·손익비 버튼은 숨긴다(들어간 선 오버레이가 이미 그린다)
   const X = (x) => m.a * x + m.e - pr.left, Yv = (v) => G.mt + (G.ymax - v) * (G.pb - G.mt) / (G.ymax - G.ymin);
   const top = m.d * G.mt + m.f - pr.top, bot = m.d * G.pb + m.f - pr.top, Y = (v) => m.d * Yv(v) + m.f - pr.top;
@@ -11761,6 +11764,8 @@ function manualEntryStateText(state) {
   if (br && (br.tp || br.backstop)) {
     const leg = (name, x) => !x ? "" : x.placed ? `${name} ${x.price} 걸림` : `🔴${name} 실패 (${x.error || "?"})`;
     rows.push([leg("TP", br.tp), leg("비상 스탑", br.backstop)].filter(Boolean).join(" · "));
+  } else if (br && br.kept) {   // 2026-11-14 추가 진입 = 기존 익절·손절 그대로
+    rows.push(br.note || "기존 익절·손절 그대로");
   } else if (br && br.disabled) {
     rows.push(br.unprotected ? "🔴SL/TP 끔 — 이 포지션엔 손절이 없습니다(거래소 스탑·서버 감시 없음)" : "SL/TP 끔 — 걸지 않았습니다(기존 SL/TP 는 그대로)");
   } else if (state?.trigger === "bracket_sl") {

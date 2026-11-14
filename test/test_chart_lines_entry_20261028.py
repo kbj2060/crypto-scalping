@@ -95,10 +95,12 @@ class ChartLinesTest(unittest.TestCase):
             self.assertAlmostEqual(pl["margin_usdt"] / eq, 0.10, delta=0.01, msg=(pl["margin_usdt"], eq))
         self._run(fn)
 
-    def test_same_side_position_blocks_lines(self) -> None:
+    def test_same_side_position_ignores_sent_lines(self) -> None:   # 2026-11-14 사용자 «포지션 추가에 라인이 왜 필요하나»: 같은 쪽 포지션(선 무장 없음)엔 보낸 선을 버리고 일반 추가 진입
         async def fn(c):
             r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&rule=c&tp=2550&sl=2480")
-            self.assertEqual(r.status, 409, await r.json())
+            b = await r.json()
+            self.assertEqual(r.status, 200, b)
+            self.assertFalse(b["plan"]["bracket"].get("lines"), b["plan"]["bracket"])   # 무장 없는 포지션 = 평단 −5% 손절(10-20 XRP 무방비 사고 뒤 규칙) 그대로
         self._run(fn, acct=POS)
 
     def test_fill_places_only_tp_and_arms_lines(self) -> None:
@@ -175,15 +177,19 @@ class LinesAddSizeTest(LinesArmedGuardTest):
             self.assertTrue(br["lines"] and br["backstop_price"] is None, br)
         self._run(fn, acct=POS)
 
-    def test_refused_when_stop_off_fired_or_not_lines(self) -> None:
+    def test_refused_when_fired_and_line_tool_on_plain_position_adds(self) -> None:
         async def fn(c):
-            for extra in ({"fired": True},):   # 2026-11-13 손절 지운(sl_off) 포지션은 이제 늘린다(아래 시험)
-                self._armed({**self.SAVED, **extra})
-                r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10&tp=2550&sl=2480")
-                self.assertEqual(r.status, 409, extra); self.assertEqual((await r.json())["error"], "lines_has_position")
-            self._armed({**self.SAVED, "lines": False})                                         # 선 없는 포지션(규칙·앱)은 예전처럼 막는다
+            self._armed({**self.SAVED, "fired": True})                                           # 청산 진행 중은 막는다
             r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10&tp=2550&sl=2480")
-            self.assertEqual(r.status, 409)
+            self.assertEqual((r.status, (await r.json())["error"]), (409, "exiting"))
+            # 2026-11-14 사용자 «포지션 추가에 라인이 왜 필요하나»: 선 없는 포지션(규칙 손절)에 선 도구로 와도 보낸 선은 버리고 일반 추가 진입(기존 손절 그대로)
+            self._armed({**self.SAVED, "lines": False, "rule": True})
+            r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10&tp=2550&sl=2480")
+            b = await r.json()
+            self.assertEqual(r.status, 200, b)
+            self.assertFalse(b["plan"]["bracket"].get("lines"), b["plan"]["bracket"])
+            r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10&tp=2550&sl=2480&limit=2490")   # 선 없는 포지션의 지정가 추가는 아직 안 됨
+            self.assertEqual((r.status, (await r.json())["error"]), (409, "add_limit_unsupported"))
         self._run(fn, acct=POS)
 
     def test_add_on_sl_off_position_keeps_sl_off(self) -> None:
@@ -210,7 +216,7 @@ class LinesAddSizeTest(LinesArmedGuardTest):
                     break
             self.assertEqual(len(calls), 1, calls)
             self.assertEqual(calls[0]["tp_price"], 2550.4, calls[0])
-            self.assertIsNone(calls[0]["backstop_price"], calls[0])
+            self.assertIsNone(calls[0].get("backstop_price"), calls[0])   # 2026-11-14 추가 진입 = 익절 수량만 다시(keep_rearm)
             await asyncio.sleep(0.1)
             armed = json.loads((server.LIVE_DIR / "manual_bracket_state.json").read_text("utf-8"))[f"{SYM}:LONG"]
             self.assertTrue(armed["lines"] and armed["sl_off"] and armed["tp_resting"], armed)
@@ -272,7 +278,7 @@ class LinesAddSizeTest(LinesArmedGuardTest):
             s = self._bstate()
             self.assertTrue(s.get("tp_off"), s)
             self.assertEqual(s.get("sl_level"), 2470.0, "대기 중 옮긴 손절선이 되돌아가면 안 된다")
-            self.assertIsNone(calls[-1].get("tp_price"), "지운 익절을 다시 걸면 안 된다")
+            self.assertEqual(len(calls), 1, "지운 익절을 다시 걸면 안 된다 -- 첫 체결 때 수량 맞춤 한 번뿐(2026-11-14 keep_rearm)")
         self._run(fn, acct=POS, run_entry_wait=fake_wait, place_bracket=fake_bracket)
 
     def test_rule_sizing_refused_on_lines_position(self) -> None:
@@ -316,8 +322,7 @@ class LinesAddSizeTest(LinesArmedGuardTest):
                 await asyncio.sleep(0.02)
                 if calls:
                     break
-            self.assertEqual(len(calls), 1, calls)
-            self.assertIsNone(calls[0]["tp_price"], calls[0])
+            self.assertEqual(calls, [], "익절 지운 포지션 = 추가 진입 뒤에도 거래소에 아무것도 안 건다(2026-11-14 keep_rearm)")
             await asyncio.sleep(0.1)
             armed = json.loads((server.LIVE_DIR / "manual_bracket_state.json").read_text("utf-8"))[f"{SYM}:LONG"]
             self.assertTrue(armed["lines"] and armed["tp_off"] and not armed["tp_resting"], armed)
@@ -334,11 +339,12 @@ class LinesAddSizeTest(LinesArmedGuardTest):
             self.assertEqual(body["plan"]["bracket"]["tp_level"], 2930.0, body)
         self._run(fn, acct=POS)
 
-    def test_armed_lines_outside_current_price_are_refused(self) -> None:
+    def test_armed_lines_past_current_price_still_add(self) -> None:   # 2026-11-14 사용자 «추가 진입 = 기존 조건 그대로»: 선 검사(방향 포함)를 하지 않는다
         async def fn(c):
             self._armed({**self.SAVED, "tp_level": 2490.0})                                      # 익절선이 지금가(≈2500) 아래 = 이미 지난 선
             r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10&tp=2550&sl=2480")
-            self.assertEqual(r.status, 400, await r.json()); self.assertEqual((await r.json())["error"], "add_lines_out_of_range")
+            b = await r.json()
+            self.assertEqual(r.status, 200, b); self.assertEqual(b["plan"]["bracket"]["tp_level"], 2490.0, b)
         self._run(fn, acct=POS)
 
     def test_fill_rearms_same_lines_on_whole_position(self) -> None:
@@ -361,7 +367,7 @@ class LinesAddSizeTest(LinesArmedGuardTest):
                 if calls:
                     break
             self.assertEqual(len(calls), 1, calls)
-            self.assertEqual((calls[0]["tp_price"], calls[0]["sl_price"], calls[0]["tp_level"], calls[0]["sl_level"]), (2550.4, 2479.6, 2550.0, 2480.0), calls[0])
+            self.assertEqual(calls[0], {"tp_price": 2550.4}, calls[0])   # 2026-11-14 추가 진입 = 무장은 그대로 · 익절 지정가만 합친 수량으로
             await asyncio.sleep(0.1)
             armed = json.loads((server.LIVE_DIR / "manual_bracket_state.json").read_text("utf-8"))[f"{SYM}:LONG"]
             self.assertTrue(armed["lines"] and armed["tp_resting"], armed)
@@ -730,12 +736,30 @@ class TpLadderTest(ChartLinesTest):
         self.assertEqual(self._post("tp-legs?act=remove&i=0", {}, [])["body"]["error"], "no_legs")
         self.assertEqual(self._post("tp-legs?act=remove&i=0", {**self.LEGS, "fired": True}, [])["status"], 409)
 
-    def test_same_side_add_entry_blocked_with_ladder(self) -> None:
+    def test_same_side_add_keeps_ladder(self) -> None:   # 2026-11-14 «추가 진입 = 기존 조건 그대로»: 나눈 익절 조각 그대로 · 체결 뒤 조각을 합친 수량으로 다시
+        calls = []
+
+        async def fake_entry(_s, plan, state):
+            state.update(phase="filled_maker", filled=float(plan["quantity"]), quantity=float(plan["quantity"]))
+            return state
+
         async def fn(c):
             self._armed({"tp_price": 2550.4, "sl_price": 2479.6, "sl_name": "선 손절 2480.00", **self.LEGS})
-            r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10&tp=2600&sl=2400")
-            self.assertEqual((r.status, (await r.json())["error"]), (409, "lines_has_position"))
-        self._run(fn, acct=POS)
+            r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10&tp=2600&sl=2400")   # 보낸 선은 쓰지 않는다
+            b = await r.json()
+            self.assertEqual(r.status, 200, b)
+            self.assertTrue(b["plan"].get("add_keep"), b["plan"])
+            body = await (await c.post("/api/manual-entry/submit?side=LONG&confirm=1&lev=20&pct=10")).json()
+            self.assertTrue(body.get("ok"), body)
+            for _ in range(80):
+                await asyncio.sleep(0.02)
+                if calls:
+                    break
+            self.assertEqual(calls, [[(2550.0, 1.0), (2600.0, 1.0)]])
+            await asyncio.sleep(0.1)
+            st = json.loads((server.LIVE_DIR / "manual_bracket_state.json").read_text("utf-8"))[f"{SYM}:LONG"]
+            self.assertEqual((len(st["tp_legs"]), st["sl_level"], st["sl_price"]), (2, 2480.0, 2479.6), st)
+        self._run(fn, acct=POS, run_entry=fake_entry, place_tp_ladder=self._ladder(calls))
 
 
 class SlLadderTest(ChartLinesTest):
