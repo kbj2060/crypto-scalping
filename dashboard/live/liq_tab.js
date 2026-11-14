@@ -208,9 +208,13 @@
     var L = narrow ? 44 : 62, R = narrow ? 44 : 62, Tp = 26, Bt = 22, ch = h - Tp - Bt, xr = w - R, rg = ladRange(k, P), dLo = rg[0], dHi = rg[1], sp = dHi - dLo;
     var X = function (d) { return L + (xr - L) * (d - dLo) / sp; }, stp = [0.25, 0.5, 1, 2].find(function (q) { return sp / q <= (xr - L) / 3; }) || 2, bw = Math.max((xr - L) * stp / sp - 1, 1), LEV = ["--lev10", "--lev25", "--lev50", "--lev100"];
     var inR = function (d) { return d >= dLo && d <= dHi; }, bars = [], mp = null, s = "", head = "", fu = usd, bk = {};
-    var add = function (d, parts) {   // 0.25% 칸을 화면 칸(stp)으로 묶는다
+    // 0.25% 칸을 화면 칸(stp)으로 묶는다 -- 쪽마다 따로(검증 11-15: Math.round 묶음은 0 칸에 롱·숏이 섞이고 막대가 0.125% 밀렸다).
+    //   묶음 G = ±k : 지금가에서 k번째 stp 폭(0.25 칸 r 은 ceil(|r|·0.25/stp)) · 그림 자리 = 담긴 0.25 칸들의 가운데 · 0 = 지금가 칸(실측만)
+    var gOf = function (d) { var r = Math.round(d / 0.25); return r ? (r > 0 ? 1 : -1) * Math.ceil(Math.abs(r) * 0.25 / stp - 1e-9) : 0; };
+    var dOf = function (G) { return G ? (G > 0 ? 1 : -1) * ((Math.abs(G) - 1) * stp + (stp + 0.25) / 2) : 0; };
+    var add = function (d, parts) {
       if (!inR(d)) return;
-      var G = Math.round(d / stp) || 0, o = bk[G] || (bk[G] = { g: G, d: G * stp, parts: parts.map(function (q) { return [0, q[1]]; }), tot: 0 });
+      var G = gOf(d), o = bk[G] || (bk[G] = { g: G, d: dOf(G), parts: parts.map(function (q) { return [0, q[1]]; }), tot: 0 });
       parts.forEach(function (q, j) { o.parts[j][0] += q[0]; o.tot += q[0]; });
     };
     if (k === "real" && !(S.data && S.data.real)) return null;   // 검증 11-13: 실측 자료 전엔 «롱 $0 · 숏 $0» 대신 빈 상태(받는 중)
@@ -220,7 +224,7 @@
     } else if (k === "hl") {
       var m = ctx(), hl = m && m.hl_liq;
       if (hl) (hl.below || []).map(function (l) { return [l, "var(--bad)"]; }).concat((hl.above || []).map(function (l) { return [l, "var(--good)"]; })).forEach(function (q) {
-        var dd = (q[0].px / P - 1) * 100; if (inR(dd)) bars.push({ g: Math.round(dd / stp), d: dd, parts: [[q[0].usd, q[1]]], tot: q[0].usd, px: q[0].px });
+        var dd = (q[0].px / P - 1) * 100; if (inR(dd)) bars.push({ g: gOf(dd), d: dd, parts: [[q[0].usd, q[1]]], tot: q[0].usd, px: q[0].px });
       });
     } else {
       mp = mapOf(Number(k)); if (!mp) return null;
@@ -258,7 +262,7 @@
     s += line("lq-px", x0, x0, Tp, Tp + ch) + '<rect x="' + (x0 - 30) + '" y="' + (h - Bt + 2) + '" width="60" height="16" rx="3" fill="var(--accent)"/><text x="' + x0 + '" y="' + (h - Bt + 13.5) + '" text-anchor="middle" class="lq-pxt">' + px(P) + "</text>";
     el._hit = function (x) {
       var dd = dLo + (x - L) / (xr - L) * sp; if (!inR(dd)) return "";
-      var g = Math.round(dd / stp) || 0, hd = px(P * (1 + g * stp / 100)) + " · " + sgn(g * stp, 2) + "%";
+      var g = gOf(dd), hd = px(P * (1 + dOf(g) / 100)) + " · " + sgn(dOf(g), 2) + "%";
       if (k === "hl") { var nb = bars.filter(function (b) { return Math.abs(b.d - dd) <= Math.max(stp, 0.25); }); return nb.length ? hd + "<br>" + nb.map(function (b) { return "청산가 " + px(b.px) + " · " + usd(b.tot); }).join("<br>") : ""; }
       var b = bars.find(function (q) { return q.g === g; }); if (!g && !b) return "";
       var t = hd + "<br>" + (b ? (k === "real" ? "롱 " + usd(b.parts[0][0]) + " · 숏 " + usd(b.parts[1][0]) : "칸 " + fu(b.tot) + " (10배 " + fu(b.parts[0][0]) + " · 20~25배 " + fu(b.parts[1][0]) + " · 50배 " + fu(b.parts[2][0]) + " · 75~100배 " + fu(b.parts[3][0]) + ")") : "칸 0");
@@ -421,7 +425,7 @@
     var k0 = M[win] ? String(win) : M["1"] ? "1" : M["7"] ? "7" : "30";   // 고른 막대 기간으로 화면 끝까지 얼마나 쌓였나 -- 5분 창처럼 좁으면 곡선보다 이 숫자가 먼저 읽힌다
     [[-1, B && B.dn, (1 - yMin / P) * 100, bot - 16, bot - 5, "↓"], [1, B && B.up, (yMax / P - 1) * 100, top + 34, top + 22, "↑"]].forEach(function (q) {
       if (!(q[2] > 0)) return;
-      s += txt("lq-ax t o", L, q[4], q[5] + " " + k0 + "일 " + usd(cumAt(M[k0], q[0] * q[2])));
+      s += txt("lq-ax t o", L, q[4], q[5] + " " + k0 + "일 " + usd(cumAt(M[k0], q[0] * Math.min(q[2], F4 / 10))));   // 곡선과 같은 ±40% 까지(11-15 FINE 100%)
       if (!q[1]) return;
       if (q[2] > 0.5) s += '<path class="lq-ln" d="' + path([[X(q[1] * 0.5), Y(P * (1 + q[0] * 0.005))], [X(q[1] * q[2]), Y(P * (1 + q[0] * q[2] / 100))]]) + '"/>';
       s += txt("lq-ax o", L, q[3], "1%당 " + usd(q[1]));
@@ -567,7 +571,10 @@
       if (ids.length === 2) {
         var x1 = pts[ids[0]], x2 = pts[ids[1]], r = d.getBoundingClientRect();
         S.drag = { el: d, pinch: true, dist: Math.max(20, Math.abs(x1 - x2)), span: v.span, i0: v.i0, at: v.i0 + ((x1 + x2) / 2 - r.left - g.L) / g.cw };
-      } else S.drag = { el: d, x: e.clientX, y: e.clientY, i0: v.i0, yOff: v.yOff, cw: g.cw, k: e.pointerType === "mouse" ? g.k : 0, id: e.pointerId, moved: false };
+      } else {
+        S.drag = { el: d, x: e.clientX, y: e.clientY, i0: v.i0, yOff: v.yOff, cw: g.cw, k: e.pointerType === "mouse" ? g.k : 0, id: e.pointerId, moved: false };
+        if (e.pointerType === "mouse") try { d.setPointerCapture(e.pointerId); } catch (x) { /* 이미 놓음 */ }   // 검증 11-15: 4px 안에서 칸 밖으로 나가 놓으면 pointerup 이 안 와 S.drag 가 남아 툴팁이 멈췄다
+      }
     });
     host.addEventListener("pointermove", function (e) {
       var D = S.drag; if (!D || !(e.pointerId in pts)) return;

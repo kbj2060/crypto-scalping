@@ -3909,12 +3909,13 @@ function fpWideSet(on) {
   window.dispatchEvent(new Event("resize"));   // 일봉·옵션 칸 등 폭을 재는 곳
 }
 el("fpWideBtn")?.addEventListener("click", () => fpWideSet(!document.documentElement.classList.contains("fp-wide")));
-// 2026-11-15 시안 B: 전체화면은 카드가 창을 덮으니 Esc 로 나간다 -- 열린 팝업(관리 막대·코인 고르기·대화상자)이 있으면 그것만 닫히게 둔다
+// 2026-11-15 시안 B: 전체화면은 카드가 창을 덮으니 Esc 로 나간다 -- Esc 를 먼저 쓰는 것(관리 막대·선 초안·선 확인·지표 팝업·측정·코인 고르기·주문 캡슐·대화상자)이
+//   열려 있으면 그것만 닫히게 둔다. 🔴검증 11-15: 그 처리기들은 document 에서 먼저 닫아 버려(preventDefault 없음) window 에서 보면 이미 없다 -- 그래서 캡처 단계에서 미리 본다.
 addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || e.defaultPrevented || !document.documentElement.classList.contains("fp-wide")) return;
-  if (document.querySelector("#entryPop, .asset-pop:not([hidden]), dialog[open]")) return;
-  fpWideSet(false);
-});
+  const busy = el("entryPop") || lineDraft || armedEdit?.cfm || fpIndOpen || document.querySelector(".ms-x, .asset-pop:not([hidden]), dialog[open]") || el("ofab")?.contains(document.activeElement);
+  if (!busy) fpWideSet(false);
+}, true);
 try { if (localStorage.getItem("fpWide") === "1") fpWideSet(true); } catch (e) { /* 기억은 편의 */ }
 function railGo(id) {
   const t = el(id);

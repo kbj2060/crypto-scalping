@@ -3944,6 +3944,7 @@ html.fp-lock { overflow: hidden; scrollbar-gutter: stable; }
     box-shadow: 0 6px 20px rgb(0 0 0 / .35); }
   html.fp-wide #fpCard .chart-head-left { flex: 0 0 auto; flex-wrap: nowrap; gap: 8px; }
   html.fp-wide #fpCard .card-title, html.fp-wide #fpCard #fpRates, html.fp-wide #fpCard #fpPos { display: none !important; }
+  html.fp-wide .entry-pop { z-index: 870; }   /* 검증 11-15: 관리 막대(#entryPop, body 에 붙는 fixed z 60)가 전체화면 카드(860) 뒤에 깔려 안 보였다 */
 }
 @media (min-width: 721px) and (max-width: 1099px) {   /* 검증 11-13: 태블릿에서 주식 카드(.opt-eq)가 데스크톱 배치 + 태블릿 열 비율로 찌그러졌다 -- 태블릿 배치를 주식용으로 */
   #optCard.opt-eq { grid-template-areas: "head head head head" "cov cov cov cov" "kpi kpi kpi kpi" "move ladder ladder ladder" "mood ladder ladder ladder" "blk blk blk blk" "flow flow flow flow"; }
