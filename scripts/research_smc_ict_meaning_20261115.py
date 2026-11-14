@@ -21,10 +21,11 @@ from numba import njit
 ROOT = Path(__file__).resolve().parents[1]
 BV = Path("/home/kbj20/crypto-scalping/data/binance_vision")
 SK = Path(os.environ.get("SCRATCH_K", "/nonexistent"))
-OUT = ROOT / "tmp/smc_ict_meaning_20261115"
+R2 = os.environ.get("SMC_ROUND") == "2"               # 2라운드: docs/prereg/smc_ict_meaning_horizons_20261115.md (2a097e82)
+OUT = ROOT / ("tmp/smc_ict_meaning_20261115" + ("_r2" if R2 else ""))
 COINS = ["ETH", "BTC", "SOL", "XRP"]
-TFS = {"15m": 15, "1h": 60, "4h": 240}
-MAIN_TFS = ("15m", "1h")
+TFS = {"5m": 5, "30m": 30, "4h": 240, "1d": 1440} if R2 else {"15m": 15, "1h": 60, "4h": 240}
+MAIN_TFS = tuple(TFS) if R2 else ("15m", "1h")
 NPLACEBO, SEED = 20, 20261115
 W_TOUCH, W_RACE, W_FILL, W_SWEEP = 100, 100, 50, 100
 END = int(pd.Timestamp("2026-11-14", tz="UTC").value // 10**6)
@@ -258,7 +259,7 @@ def events(B: dict, rng, with_p2: bool) -> list[dict]:
                     add(f"{name}S7", s, y, vol=vr)
     day = t // 86_400_000
     ud, first = np.unique(day, return_index=True)
-    for q in range(1, len(ud)):
+    for q in range(1, len(ud) if B["ms"] < 86_400_000 else 1):   # 1일 봉엔 전일 고저 없음
         if ud[q] - ud[q - 1] != 1:
             continue
         a, b0 = first[q - 1], first[q]
@@ -316,10 +317,11 @@ def judge(real: pd.DataFrame, plc: pd.DataFrame) -> dict:
             rate = lambda g: g["sum"].sum() / g["count"].sum()
             pk = p.groupby("draw").apply(rate)
             R = r.y.mean(); Pbar = pk.mean()
-            day = (r.tk // 86_400_000).to_numpy(); ud = np.unique(day); ix = {u: np.flatnonzero(day == u) for u in ud}
+            blk = max(86_400_000, 24 * TFS[tf] * 60_000)   # 블록 max(1일, 24봉) -- 15분·1시간은 1일 그대로
+            day = (r.tk // blk).to_numpy(); ud = np.unique(day); ix = {u: np.flatnonzero(day == u) for u in ud}
             y = r.y.to_numpy()
             p2c = P2OF.get(cell); r2 = real[(real.tf == tf) & (real.cell == p2c)] if p2c else None
-            d2day = (r2.tk // 86_400_000).to_numpy() if p2c else None
+            d2day = (r2.tk // blk).to_numpy() if p2c else None
             ix2 = {u: np.flatnonzero(d2day == u) for u in np.unique(d2day)} if p2c else None
             eqd = r.dist.to_numpy() if cell == "S6" else None
             bs, bs2 = [], []
@@ -337,7 +339,7 @@ def judge(real: pd.DataFrame, plc: pd.DataFrame) -> dict:
                         bs2.append(y[sel].mean() - p2_rate(r2.iloc[s2], cell, eqd[sel] if eqd is not None else None))
             se = math.sqrt(np.var(bs, ddof=1) + pk.var(ddof=1) / len(pk))
             diff = R - Pbar
-            row = dict(n=int(len(r)), per_day=round(len(r) / len(ud), 2) if len(ud) else 0, real=round(R, 4), p1=round(Pbar, 4), p1_n=int(p["count"].sum() / max(len(pk), 1)),
+            row = dict(n=int(len(r)), per_day=round(len(r) / len(np.unique(r.tk // 86_400_000)), 2), real=round(R, 4), p1=round(Pbar, 4), p1_n=int(p["count"].sum() / max(len(pk), 1)),
                        diff_pp=round(100 * diff, 2), lo90_pp=round(100 * (diff - 1.2816 * se), 2), p_one=float(1 - norm.cdf(diff / se)) if se > 0 else 1.0,
                        p_rev=float(norm.cdf(diff / se)) if se > 0 else 1.0)
             if p2c:
