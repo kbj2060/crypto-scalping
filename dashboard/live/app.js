@@ -7175,7 +7175,12 @@ function renderObFvg() {
   }
   g.appendChild(defs);
   const body = mk("g", { "clip-path": "url(#obClip)" }); g.appendChild(body);
-  const placed = [...svg.querySelectorAll(".edge-l")].map((t) => { const q = t.getBBox(); return [q.x - 2, q.y - 2, q.width + 4]; });   // 왼쪽 끝 SMA50·스윙 꼬리표 자리도 피한다(11-15 스윙선 세션 제보)
+  // 남의 글자 자리도 피한다: 왼쪽 끝 SMA50·스윙 꼬리표(.edge-l, 스윙선 세션 제보) + 휴대폰 현재가 숫자(오른쪽 끝 · 리뷰 11-15) -- getBBox 대신 속성·캔버스 폭(강제 레이아웃 없음)
+  const placed = [...svg.querySelectorAll('.edge-l, [data-live="label"][data-with-price="num"]')].map((t) => {
+    const fs = +t.getAttribute("font-size") || 10, x = +t.getAttribute("x") || 0, y = +t.getAttribute("y") || 0, an = t.getAttribute("text-anchor");
+    const w = measureTextW(t.textContent || "", `800 ${fs}px "Pretendard Variable", Pretendard, sans-serif`) + 4;
+    return [an === "end" ? x - w : an === "middle" ? x - w / 2 : x - 2, y - fs - 1, w];
+  });
   const pill = (x, y, txt, z, anchor, solid) => {   // 폭은 캔버스로 잰다(getBBox = 꼬리표마다 강제 레이아웃 · 리뷰) · 플롯 안으로 밀어 넣는다(프로파일 칸 침범 방지)
     const w = measureTextW(txt, '650 11px "Pretendard Variable", Pretendard, sans-serif') + 10, h = 17;
     const L = Math.max(G.ml + 2, Math.min(xr - 2 - w, anchor === "start" ? x - 5 : anchor === "end" ? x + 5 - w : x - w / 2));
@@ -7215,7 +7220,7 @@ function renderObFvg() {
       const up = z.lo > G.ymax, pct = ((up ? z.lo : z.hi) / P - 1) * 100, k = edge[up ? "up" : "dn"]++, mob = isMobileChartMode(), pc = `${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}%`;
       // 휴대폰 = 오른쪽 끝·둘째 줄·짧게(11-15 스윙선 세션 제보: 가운데 알림이 왼쪽 끝 일봉 SMA50·스윙 꼬리표와 오른쪽 위 추세 veto 글을 덮었다)
       const yy = (mob ? 32 : 12) + 20 * k;
-      pill(mob ? xr - 6 : G.ml + G.cw / 2, up ? G.mt + yy : G.pb - yy, mob ? `${up ? "↑" : "↓"} ${z.d > 0 ? "지지" : "저항"} OB ${tfN} ${pc}` : `${up ? "↑" : "↓"} ${z.d > 0 ? "지지" : "저항"} OB ${tfN} ${f0(z.lo)}–${f0(z.hi)} (${pc}) · ${left(z)}`, z, mob ? "end" : "middle", false);
+      pill(mob ? xr - 6 : G.ml + G.cw / 2, up ? G.mt + yy : G.pb - yy, mob ? `${up ? "↑" : "↓"} ${z.d > 0 ? "지지" : "저항"} OB ${tfN} ${f0(up ? z.lo : z.hi)} ${pc}` : `${up ? "↑" : "↓"} ${z.d > 0 ? "지지" : "저항"} OB ${tfN} ${f0(z.lo)}–${f0(z.hi)} (${pc}) · ${left(z)}`, z, mob ? "end" : "middle", false);
     }
     const tEnd = R.B[R.B.length - 1].t + M;
     for (const z of R.ob) if (z.res && z.rt + M >= tEnd - 2 * 3600) {   // 닿고 판정 난 존 = 닿은 자리에 결과 2시간 뒤 지움
