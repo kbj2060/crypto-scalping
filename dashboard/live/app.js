@@ -846,7 +846,7 @@ function reach24(v) {
   return r ? Math.round(r.p * 100) : null;
 }
 const pctTxt = (r) => (r < 1 ? "<1%" : `${r}%`);   // 0% 는 «절대 안 닿음»으로 읽혀서
-const reachSpan = (v) => { const r = reach24(v); return r == null ? "" : `<span class="lt-rc">24h ${pctTxt(r)}</span>`; };
+const reachSpan = (v) => { const r = reach24(v); return r == null ? "" : `<span class="lt-m">24h ${pctTxt(r)}</span>`; };   // 2026-11-14 펜 메모 «칩 글자 제각각»: 금액 뒤 덧말은 전부 .lt-m(같은 굵기·흐림·가운뎃점)
 const reachTitle = (v) => { const r = reach24(v); return r == null ? "" : ` · 24시간 안 닿을 확률 ${pctTxt(r)}(하루 변동성 · 무작위 보행 가정)`; };
 function armedBasis(b, dflt = 1) {   // 주문 심볼(USDC) ÷ 차트(USDT) -- 손절 → 익절 → 서버가 적은 basis
   return b.sl_price > 0 && b.sl_level > 0 ? b.sl_price / b.sl_level : b.tp_price > 0 && b.tp_level > 0 ? b.tp_price / b.tp_level : Number(b.basis) || dflt;
@@ -1105,7 +1105,7 @@ function armedActs(h, a, legsOf, hide) {
       const id = i == null ? `${k}:off:${a.k}` : `leg:rm:${k}:${i}:${a.k}`, armed = epLnArm.k === id, dis = fired || busy || (g && g.fired) ? " disabled" : "";
       const who = i == null ? `${name}선` : `${name} ${i + 1}`;
       const rm = i == null ? `data-ln="${k}" data-act="off" data-key="${esc}"` : `data-leg="rm" data-kind="${k}" data-i="${i}" data-key="${esc}"`;
-      const add = n < 4 ? `<button type="button" class="lt-act add" data-ln="${k}" data-act="add" data-key="${esc}"${dis} title="${name}선 하나 더 — 초안을 끌어 놓으면 걸리고 ${n + 1}개가 똑같이 나눕니다" aria-label="${name}선 나누기 — 초안을 끌어 놓으면 ${n + 1}개로 나눔">+</button>` : "";
+      const add = n < 4 ? `<button type="button" class="lt-act add" data-ln="${k}" data-act="add" data-key="${esc}"${dis} title="${name}선 하나 더 — 초안을 끌어 놓으면 걸리고 ${n + 1}개가 똑같이 나눕니다" aria-label="${name}선 나누기 — 초안을 끌어 놓으면 ${n + 1}개로 나눔"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>` : "";
       items.push({ t, html: `<span class="lt-acts ${k}">${add}<button type="button" class="lt-act x${armed ? " arm" : ""}" ${rm}${dis} title="${who} 지우기 — 두 번 누르기${i != null ? " · 남은 조각이 전량을 나눕니다" : ""}" aria-label="${armed ? `한 번 더 누르면 ${who}을 지웁니다` : `${who} 지우기 — 두 번 누르기`}">${armed ? "지우기?" : '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>'}</button></span>` });
     });
   });
@@ -1160,9 +1160,9 @@ function renderArmedLines() {
     const amt = qty ? `${d * sgn >= 0 ? "+" : "−"}$${Math.abs((v - en) * qty).toFixed(1)}` : `${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%`;
     // 2026-11-10 사용자 «롱 손절을 현재가 위(숏은 아래)로 놓으면 감시하다 peg 손절»: 지금가 반대쪽 손절 = «감시»(올라/내려 닿으면 peg 청산). 끄는 중엔 지금가로, 놓은 뒤엔 서버 sl_up 으로.
     const pN = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), up = ed && pN > 0 ? v > pN : a.b.sl_up == null ? a.side === "SHORT" : !!a.b.sl_up, watch = k === "sl" && up === (a.side === "LONG");
-    const st = k === "tp" ? (a.b.tp_resting ? "" : " · 서버 감시") : (a.b.sl_off ? " · 꺼짐" : watch ? " · 감시" : "");
+    const st = k === "tp" ? (a.b.tp_resting ? "" : "서버 감시") : (a.b.sl_off ? "꺼짐" : watch ? "감시" : "");
     tag.classList.add("lt-mini");
-    tag.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${off}${amt}${st}${reachSpan(v)}`;
+    tag.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${off}${amt}${st ? `<span class="lt-m">${st}</span>` : ""}${reachSpan(v)}`;
     tag.title = `${k === "tp" ? "익절" : "손절"} ${lineFmt(v)} (${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%)${reachTitle(v)}${watch ? ` — 지금가 ${up ? "위" : "아래"} 손절: 가격이 ${up ? "올라" : "내려"} 닿으면 peg 로 청산` : ""}`;
     tag.setAttribute("aria-label", `${k === "tp" ? "익절" : "손절"}선 ${lineFmt(v)}${watch ? ` · ${up ? "올라" : "내려"} 닿으면 청산` : ""} — 위아래로 끌어 놓으면 주문이 그 가격으로 바뀝니다`);
     tag.disabled = !!(armedEdit && armedEdit.busy);
@@ -1186,8 +1186,8 @@ function renderArmedLines() {
       Object.assign(tg.style, { left: cx + "px", top: clampY(y) + "px" });
       const amt = qty ? `${d * sgn >= 0 ? "+" : "−"}$${Math.abs((v - en) * qty * share).toFixed(1)}` : `${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%`;
       const watch = k === "sl" && (g.up == null ? a.side === "SHORT" : !!g.up) === (a.side === "LONG");
-      const st = k === "tp" ? (g.merged ? " · 합침" : g.resting ? "" : " · 서버 감시") : (g.fired ? " · 청산 중" : watch ? " · 감시" : "");
-      tg.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${off}${amt} · ${pc_}%${st}${reachSpan(v)}`;
+      const st = k === "tp" ? (g.merged ? "합침" : g.resting ? "" : "서버 감시") : (g.fired ? "청산 중" : watch ? "감시" : "");
+      tg.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${off}${amt}<span class="lt-m">${pc_}%</span>${st ? `<span class="lt-m">${st}</span>` : ""}${reachSpan(v)}`;
       tg.title = `${name} ${i + 1} ${lineFmt(v)} (${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%) · 포지션의 ${pc_}%${reachTitle(v)}`
         + (k === "tp" ? (g.merged ? " — 조각이 최소 주문보다 작아 다음 조각에 합쳐졌습니다" : g.resting ? "" : " — 지정가를 못 걸어 서버가 닿으면 닫습니다(전량)")
           : " — 닿으면 이 몫만 peg 로 청산(남은 손절선이 하나면 전량)");
@@ -5251,7 +5251,7 @@ let latestBoxHold = null, boxHoldLastFetchAt = 0;
 // 2026-10-20 XRP 전용 모델(30분·1시간 통과 · 4시간 불통과 = 서버 ok false) -- 박스 줄·차트 1h 박스선이 그 코인 값만 쓴다
 const BOX_ASSETS = new Set(["eth", "xrp", "btc", "sol"]);   // 10-31 BTC·SOL 30분·1h 통과(4h 는 불통과 → 서버가 칸을 끈다)
 const boxNow = () => (latestBoxHold && latestBoxHold.ok && (latestBoxHold.asset || "eth") === activeSnapshotAsset ? latestBoxHold : null);
-const BOX_ON_CHART = true;    // 2026-10-16 사용자 «B로 배포» → 10-26 미래 칸 상자(renderCandleSvg «미래 상자»)
+const BOX_ON_CHART = false;   // 2026-10-16 사용자 «B로 배포» → 10-26 미래 칸 상자(renderCandleSvg «미래 상자») → 2026-11-14 펜 메모 «캔들 오른쪽 변동성 박스와 차트는 안 본다 · 제거 · 오른쪽 빈 칸 끌기는 그대로»: 미래 칸 상자·가격 경로(E2)·옵션 부채꼴 셋 다 끔(되살리려면 true)
 const BOX_STALE_MS = 180e3;   // 10-16 리뷰: 기준가가 3분 넘게 묵으면 «지연»·차트 선 숨김(30분 박스는 3분 뒤 9%가 이미 깨져 있다)
 async function refreshBoxHold() {
   if (activePageTab !== "snapshot" || document.hidden || !BOX_ASSETS.has(activeSnapshotAsset)) return;
@@ -5559,7 +5559,7 @@ MC_TIPS.q_fc = "지평 = 지금에서 멀리. «지금 추세»만 예측이 아
   + "횡보·추세 = 앞으로 4시간 안에 종가가 가장 가까운 지지~저항 띠(청산맵·S/R)를 벗어날 확률(BTC·ETH·SOL·XRP 4코인 HGB · 매 시 정각 갱신) · 표본 밖 정확도 68.7%(띠 폭÷변동성 기하만 쓴 기준선 61.8%) · 미학습 5코인 66.6% · 확신 0.8↑ 95% · 방향은 말하지 않음 · 참고용(전진 판정 전). 7일 예측(코인베이스 프리미엄)은 이 칸으로 대체.\n"
   + "4~13주 = Macro Trend 카드(달러지수·순유동성 등 지표별 13주 변화 · ETF 이후 기준).\n"
   + "변동성 = 4시간 실현변동성 QX4(ETH·XRP·BTC·SOL 4코인 HGB·MLP 결합 · 2026-10-26 배포 · 굴림 3창 옛 GBM 이김) · 방향 정보 없음 · 표시 전용(주문 크기에 안 씀). "
-  + "ETH 차트 미래 칸 옵션 색 부채꼴 = QX4I(QX4 + 직전 정시 옵션 ATM IV 보정 · 조건부 채택, 전진 판정 2027-01-22) ±1σ — 이 줄 σ 와 조금 다를 수 있다. XRP 부채꼴 = IV 보정 없는 QX4 ±1σ(이 줄 σ 와 같다).\n"
+  + "\n"
   + "셋 다 참고용 — 전진 판정 전."
   + "주황 «깨질 쪽» = 학습 기간(2022~24) 예측의 하위 20% 밑 · «머물 쪽» = 상위 20% 위 · 그 사이 «보통» · «벗어남» = 지금가가 이미 띠 밖 · «지연» = 기준가가 3분 넘게 묵음(차트 선도 숨김). 방향 정보는 없다 — 어느 쪽으로 깨질지는 모른다.\n"
   + "우리 검정(ETH 4.7년, 2022~24 학습 · 2025·2026 따로 채점): AUC .75~.78 · 보정 오차 10분위 최대 3~6.4pp · 하위 10% 유지 3~5% ↔ 상위 10% 61~71%. "
@@ -9118,7 +9118,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   주황 = «깨질 쪽» 또는 이미 벗어남 · 화면 끝에서 잘리면 꺾쇠 · 묵은 값(3분↑)은 안 그림 · 글자 «30분 유지 9%»(휴대폰 «30분 9%»).
   // 2026-10-29 시안 E2 «가격 경로»(아래 «호가벽» 앞 블록) -- 재료가 다 신선하면 그 선이 미래 칸을 맡고 박스 상자·옵션 부채꼴은 안 그린다
   const fcFresh = (o, k) => !!(o && o.ok && Date.now() - o[k] <= 15 * 60e3), fcBox = boxNow();
-  const fcPath = isSnapshotChart && footprint && activeSnapshotAsset === "eth" && candles.length > 0 && currentPrice > 0
+  const fcPath = BOX_ON_CHART && isSnapshotChart && footprint && activeSnapshotAsset === "eth" && candles.length > 0 && currentPrice > 0
     && fcFresh(dirShortNow(), "decided_at_ms") && !!(latestDirShort.pred && latestDirShort.pred["15m"] && latestDirShort.pred["1h"])
     && fcFresh(dir4hNow(), "decided_at_ms") && fcFresh(latestVol4h, "asof_ms") && latestVol4h.asset === "eth" && Number.isFinite(latestVol4h.sig4h_iv_pct)
     && !!fcBox && Date.now() - fcBox.asof_ms <= BOX_STALE_MS && Object.values(fcBox.scales || {}).some((x) => x && x.ok);
@@ -9174,7 +9174,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   박스(직사각형 = 유지 확률)와 구별되게 옵션 색 실선 · 묵은 값(15분↑)은 안 그림 · 화면 끝에서 잘리면 꺾쇠.
   // 2026-10-31 XRP 도(감사표 A-1 #2): XRP 는 옵션 IV 보정이 없어 QX4 σ(sig4h_pct) 그대로 -- 모양·색 같고 글자에서 «옵션 IV»만 뺀다.
   const vKey = { eth: "sig4h_iv_pct", btc: "sig4h_iv_pct", xrp: "sig4h_pct", sol: "sig4h_pct" }[activeSnapshotAsset];   // 코인 -> 부채꼴 σ 칸(10-31 BTC QX4I 통과 · SOL IV 없음)
-  const vI = !fcPath && isSnapshotChart && footprint && vKey && latestVol4h && latestVol4h.ok && latestVol4h.asset === activeSnapshotAsset
+  const vI = BOX_ON_CHART && !fcPath && isSnapshotChart && footprint && vKey && latestVol4h && latestVol4h.ok && latestVol4h.asset === activeSnapshotAsset
     && Number.isFinite(latestVol4h[vKey]) && Date.now() - latestVol4h.asof_ms <= 900e3 ? latestVol4h : null;
   const vIv = vKey === "sig4h_iv_pct", vSig = vI ? vI[vKey] : 0;
   if (vI && vI.px > 0 && candles.length) {
