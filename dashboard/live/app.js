@@ -3903,12 +3903,18 @@ function fpWideSet(on) {
   const b = el("fpWideBtn"); if (!b) return;
   document.documentElement.classList.toggle("fp-wide", on);
   b.setAttribute("aria-pressed", String(on));
-  b.setAttribute("aria-label", on ? "오른쪽 칸 펼치기" : "차트 전체화면");
+  b.setAttribute("aria-label", on ? "전체화면 나가기 (Esc)" : "차트 전체화면"); b.title = b.getAttribute("aria-label");
   try { localStorage.setItem("fpWide", on ? "1" : "0"); } catch (e) { /* 기억은 편의 */ }
   if (typeof scheduleSnapshotChartRender === "function") scheduleSnapshotChartRender();
   window.dispatchEvent(new Event("resize"));   // 일봉·옵션 칸 등 폭을 재는 곳
 }
 el("fpWideBtn")?.addEventListener("click", () => fpWideSet(!document.documentElement.classList.contains("fp-wide")));
+// 2026-11-15 시안 B: 전체화면은 카드가 창을 덮으니 Esc 로 나간다 -- 열린 팝업(관리 막대·코인 고르기·대화상자)이 있으면 그것만 닫히게 둔다
+addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || e.defaultPrevented || !document.documentElement.classList.contains("fp-wide")) return;
+  if (document.querySelector("#entryPop, .asset-pop:not([hidden]), dialog[open]")) return;
+  fpWideSet(false);
+});
 try { if (localStorage.getItem("fpWide") === "1") fpWideSet(true); } catch (e) { /* 기억은 편의 */ }
 function railGo(id) {
   const t = el(id);
