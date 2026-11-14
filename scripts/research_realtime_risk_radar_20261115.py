@@ -17,6 +17,7 @@ COINS = ["ETH", "BTC", "SOL", "XRP"]
 SPLIT = {"train": ("2024-01-08", "2026-01-01"), "val": ("2026-01-01", "2026-06-01"), "test": ("2026-06-01", "2026-10-28")}
 WIN = {"lrv1": 1, "lrv5": 5, "lrv15": 15, "lrv60": 60, "lrv240": 240, "lrv1d": 1440, "lrv7d": 10080}
 SEED, B = 20261115, 2000
+TOUCH_K = np.round(np.arange(0.25, 4.01, 0.25), 2)                               # 꼬리표 «15분 안 닿을 확률» 표의 거리(σ̂ 배수)
 
 
 def load(c):
@@ -236,7 +237,11 @@ def export(path=ROOT / "dashboard/risk_radar_params_20261115.json"):
         q80, q95 = np.quantile(exc[okx], [.8, .95])
         v0 = F["b0sd"] ** 2 * 15 / 60; ok0 = tr & np.isfinite(v0) & np.isfinite(y15) & (v0 > 0)
         cb0 = float(np.nanmean(y15[ok0] ** 2 / v0[ok0]))                          # 기준선 B0(7일 1시간 σ 고정)의 학습 눈금 -- 연구 scale() 과 같은 값
-        P["coins"][c] = dict(beta15=b15.tolist(), c15=float(c15), beta60=b60.tolist(), c60=float(c60), q80=float(q80), q95=float(q95), cb0=cb0)
+        up, dn = (hmax / cl - 1) / np.sqrt(f15), (1 - lmin / cl) / np.sqrt(f15); okt = tr & np.isfinite(up) & np.isfinite(dn)
+        one = np.r_[up[okt], dn[okt]]                                                # 한쪽 선 «15분 안 닿을 확률»(위·아래 합침, 학습 구간) -- 꼬리표용
+        P["touch_k"] = TOUCH_K.tolist()
+        P["coins"][c] = dict(beta15=b15.tolist(), c15=float(c15), beta60=b60.tolist(), c60=float(c60), q80=float(q80), q95=float(q95), cb0=cb0,
+                             touch=[float((one >= k).mean()) for k in TOUCH_K])
         print(c, "c15", round(c15, 4), "q80", round(q80, 3), "q95", round(q95, 3))
     path.write_text(json.dumps(P, indent=1))
     print("→", path)

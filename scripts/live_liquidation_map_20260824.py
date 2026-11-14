@@ -135,7 +135,8 @@ def _m5_until(m5: tuple, t: int) -> tuple:
     return m5[0][:p], {c: v[:p] for c, v in m5[1].items()}
 
 
-def _prepare_common(df: pd.DataFrame, current_price: float, m5: tuple | None = None) -> dict | None:
+def _prepare_common(df: pd.DataFrame, current_price: float, m5: tuple | None = None,
+                    halflife_h: float | None = RECENCY_HALFLIFE_HOURS) -> dict | None:
     """The weighting/survival-filter arithmetic shared by every compute_raw_bins() call regardless
     of which entry-price array is used -- split out 2026-08-26 so compute_spliced_levels()/
     compute_spliced_heatmap_history() can run their mid-priced and close-priced passes over the
@@ -152,7 +153,7 @@ def _prepare_common(df: pd.DataFrame, current_price: float, m5: tuple | None = N
     ts = pd.to_datetime(d["timestamp"], utc=True)
     now = ts.iloc[-1]
     age_hours = (now - ts).dt.total_seconds().to_numpy() / 3600.0
-    recency_weight = np.exp(-age_hours / RECENCY_HALFLIFE_HOURS)
+    recency_weight = np.exp(-age_hours / halflife_h) if halflife_h else np.ones(len(age_hours))   # None = 감쇠 끔(2026-11-15 60·90·180일 지도)
     base_weight = volume * recency_weight
 
     n = len(d)
@@ -574,12 +575,12 @@ TIER_GROUPS = (("10", (10,)), ("20~25", (20, 25)), ("50", (50,)), ("75~100", (75
 
 
 def compute_tier_profile(df: pd.DataFrame, current_price: float, oi_usd: float | None = None,
-                         df_5m: pd.DataFrame | None = None) -> dict | None:
+                         df_5m: pd.DataFrame | None = None, halflife_h: float | None = RECENCY_HALFLIFE_HOURS) -> dict | None:
     """{bin_width, lo(첫 칸 번호), current_price, unit, tiers: [{name, values[]}]} -- values[k] = 칸 lo+k 의 값.
     칸 가격 = 번호 × bin_width. 롱 청산은 현재가 아래, 숏 청산은 위에만 남는다(생존 필터). 없으면 None.
     규모: 모델 가중치 자체는 «거래대금×최근성»이라 달러로 읽으면 실제 청산 규모로 오해된다 -- oi_usd(현재 OI 달러)가 있으면
     모든 칸 합 = 2×OI(계약마다 롱·숏 한 쪽씩)가 되게 맞춘다(unit "oi_usd", 양쪽 비대칭은 모델 그대로). 없으면 합 = 1(unit "share")."""
-    common = _prepare_common(df, current_price, _bar_arrays(df_5m) if df_5m is not None and len(df_5m) else None)
+    common = _prepare_common(df, current_price, _bar_arrays(df_5m) if df_5m is not None and len(df_5m) else None, halflife_h)
     if common is None:
         return None
     d = df.reset_index(drop=True)
@@ -632,6 +633,8 @@ if __name__ == "__main__":
     assert tp["unit"] == "share" and abs(sum(sum(t["values"]) for t in tp["tiers"]) - 1) < 1e-5
     t2 = compute_tier_profile(df_, cp, oi_usd=1e9)
     assert t2["unit"] == "oi_usd" and abs(sum(sum(t["values"]) for t in t2["tiers"]) - 2e9) < 1e3
+    c_on, c_off = _prepare_common(df_, cp), _prepare_common(df_, cp, halflife_h=None)   # 감쇠 끔 = 가중치가 거래량 그대로(2026-11-15 60·90·180일)
+    assert np.allclose(c_off["base_weight"], df_["volume"].to_numpy(dtype="float64")) and c_on["base_weight"][0] < c_off["base_weight"][0]
     print("selftest OK -- 레버리지 구간 넷 · 현재가 칸 비어 있음 · 짧은 입력 None · 단위(share 합 1 · oi_usd 합 2×OI)")
 
     # 자체점검 2 (2026-10-11 5분 경계 이력): 합성 5분봉 40시간 -> 1시간봉은 그 묶음

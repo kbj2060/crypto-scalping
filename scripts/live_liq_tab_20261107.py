@@ -143,16 +143,25 @@ def remain_kpi(r: pd.DataFrame, last_day: int, win: int, price: float, row: floa
 
 
 def oi_usd(symbol: str, price: float) -> float | None:
-    """hot oi_1s 마지막 OI × 가격 -- 서버 청산맵(liq_oi_usd)과 같은 원천. 없으면 None(금액 대신 몫)."""
-    try:
-        c = sqlite3.connect(f"file:{HOT / 'binance_ctx.sqlite'}?mode=ro", uri=True, timeout=5)
+    """마지막 OI(코인) × 가격 -- 서버 청산맵(liq_oi_usd)과 같은 원천·같은 합: 2026-11-15 바이낸스 + OKX + 바이비트(10분 안 값만).
+    바이낸스가 없으면 None(금액 대신 몫)."""
+    def last(db: str, sql: str, args: list):
         try:
-            r = c.execute("select open_interest from oi_1s where symbol = ? order by ts_ms desc limit 1", [symbol.lower()]).fetchone()
-        finally:
-            c.close()
-    except sqlite3.Error:
+            c = sqlite3.connect(f"file:{HOT / db}?mode=ro", uri=True, timeout=5)
+            try:
+                r = c.execute(sql, args).fetchone()
+            finally:
+                c.close()
+        except sqlite3.Error:
+            return None
+        return float(r[0]) if r and r[0] else None
+    bn = last("binance_ctx.sqlite", "select open_interest from oi_1s where symbol = ? order by ts_ms desc limit 1", [symbol.lower()])
+    if bn is None:
         return None
-    return float(r[0]) * price if r and r[0] else None
+    since, base = int(time.time() * 1000) - 600_000, symbol[:-4] if symbol.upper().endswith("USDT") else symbol
+    ok = last("okx_ctx.sqlite", "select oi_base from okx_oi where inst = ? and ts_ms >= ? order by ts_ms desc limit 1", [f"{base.upper()}-USDT-SWAP", since])
+    by = last("bybit_ctx.sqlite", "select oi_base from bybit_oi where inst = ? and ts_ms >= ? order by ts_ms desc limit 1", [symbol.upper(), since])
+    return (bn + (ok or 0.0) + (by or 0.0)) * price
 
 
 def peaks(v: np.ndarray, px: np.ndarray) -> list:
@@ -360,7 +369,19 @@ def selftest() -> None:
     gx = 100 * (1 + 0.001 * np.arange(-40, 41)); gv = np.zeros(81); gv[10] = 2.5; gv[60] = gv[61] = 1.5
     pk = peaks(gv, gx)
     assert len(pk) == 2 and abs(pk[0][0] - (gx[60] + gx[61]) / 2) < 1e-6 and pk[0][1] == 3 and abs(pk[1][0] - gx[10]) < 1e-6 and pk[1][1] == 2.5, pk
-    print("selftest OK -- 첫 닿음 · 인과(뒤 봉 무관) · 쓸린 칸 사라짐 · 입력 기간 · 부호화 · KPI · 실측 탄력 · 최대 고통")
+    # 금액 눈금 = 세 거래소 OI 합(2026-11-15): 바이낸스 10 + OKX 3 + 바이비트 2(오래된 바이비트 값은 빠짐 → 13)
+    import tempfile
+    global HOT
+    keep, now_ms = HOT, int(time.time() * 1000)
+    with tempfile.TemporaryDirectory() as td:
+        HOT = Path(td)
+        for db, ddl, row in (("binance_ctx.sqlite", "create table oi_1s(symbol, ts_ms, open_interest)", ("ethusdt", now_ms, 10.0)),
+                             ("okx_ctx.sqlite", "create table okx_oi(inst, ts_ms, oi_base)", ("ETH-USDT-SWAP", now_ms, 3.0)),
+                             ("bybit_ctx.sqlite", "create table bybit_oi(inst, ts_ms, oi_base)", ("ETHUSDT", now_ms - 3_600_000, 2.0))):
+            c = sqlite3.connect(HOT / db); c.execute(ddl); c.execute(f"insert into {ddl.split()[2].split('(')[0]} values (?,?,?)", row); c.commit(); c.close()
+        assert oi_usd("ETHUSDT", 2.0) == 26.0 and oi_usd("SOLUSDT", 2.0) is None
+    HOT = keep
+    print("selftest OK -- 첫 닿음 · 인과(뒤 봉 무관) · 쓸린 칸 사라짐 · 입력 기간 · 부호화 · KPI · 실측 탄력 · 최대 고통 · OI 세 거래소 합")
 
 
 def main() -> int:
