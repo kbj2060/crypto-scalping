@@ -625,7 +625,7 @@ function lineSyncWait(w) {
     return;
   }
   if (!(br.tp_level > 0 && br.sl_level > 0 && pl.limit?.usdt > 0)) return;
-  if (!lineTool && (w.asset || "eth") === activeSnapshotAsset) lineTool = { placed: true, asset: w.asset || "eth", plan: null, err: "" };   // 새로고침·다른 기기에서 걸린 주문도 다시 잇는다
+  if (!lineTool && (w.asset || "eth") === activeSnapshotAsset) lineTool = { placed: true, asset: w.asset || "eth", plan: null, err: "", add: !!pl.add_keep, addSide: String(pl.positionSide || "").toUpperCase() || undefined };   // 추가 진입 대기면 add 도 되살린다(도구 쪽 가짜 익절·손절선을 안 그리고 들어간 선을 끌 수 있게)   // 새로고침·다른 기기에서 걸린 주문도 다시 잇는다
   const t = lineTool;
   if (!t || !t.placed || lineDrag || t.busy) return;
   Object.assign(t, { tp: br.tp_level, sl: br.sl_level, entry: (w.pegged || w.triggered) && w.limit_price > 0 && pl.limit.price > 0 ? w.limit_price * pl.limit.usdt / pl.limit.price : pl.limit.usdt, px: Number(w.limit_price) || 0, amended: Number(w.amends || 0), stopP: !!(w.stop || pl.stop), trig: !!(w.triggered || w.pegged) });
@@ -843,6 +843,8 @@ function renderLineTool() {
 //   꼬리표를 끌어 **놓는 순간** POST /api/manual-bracket/modify(익절·손절 둘 다, USDT 차트 가격) -- 서버가 지금가 기준 방향·거리(진입과 같은 line_bracket)와
 //   진입가 기준 손절 한도(규칙 손절폭)를 검사하고 익절 지정가를 다시 건다. 실패하면 선을 서버 값으로 되돌리고 사유를 띄운다. 요청 중엔 못 끈다.
 //   진입가(USDC 주문 심볼) → 차트(USDT) = 진입가 ÷ basis, basis = 무장 손절 주문가 ÷ 손절 레벨(서버가 같은 basis 로 만든 값).
+// 2026-11-14 사용자 «추가 진입 대기 중에도 sltp 라인 조정»: 걸어 둔 추가 진입(지정가·감시 대기)은 들어간 선을 막지 않는다 -- 서버는 체결 순간 지금 걸린 선으로 수량만 맞춘다(keep_rearm)
+const lineToolBlocksArmed = () => !!lineTool && !(lineTool.add && lineTool.placed);
 let armedEdit = null, armedDrag = null;   // armedEdit = {key, tp, sl, busy, err, okAt} -- 끄는 중·보내는 중·결과
 // 2026-11-11 사용자 «청산 탭 데이터를 풋프린트에»: 24시간 안 닿을 확률(청산 탭 최대 고통과 같은 하루 σ·무작위 보행 · 1년 재현 예측 26.7% vs 실제 25.8%).
 //   SLTP·지지·저항 꼬리표에 붙인다 -- 거리를 확률로 바꾼 것일 뿐 방향 신호가 아니다. 데이터가 없으면(청산 탭 파일 전) 빈 글.
@@ -1045,7 +1047,7 @@ function armedEl(box) {
   h.addEventListener("pointerdown", (e) => {
     e.stopPropagation();
     const tag = e.target.closest(".lt-tag[data-k]"), a = armedLinesNow();
-    if (!tag || !a || (armedEdit && (armedEdit.busy || armedEdit.cfm)) || lineTool) return;   // 확인 상자가 떠 있으면 먼저 답한다 · 진입 전 선 도구가 켜져 있으면 들어간 선은 못 끈다(꼬리표가 겹쳐 실주문을 잘못 고치지 않게, 검토 S4)
+    if (!tag || !a || (armedEdit && (armedEdit.busy || armedEdit.cfm)) || lineToolBlocksArmed()) return;   // 확인 상자가 떠 있으면 먼저 답한다 · 진입 전 선 도구가 켜져 있으면 들어간 선은 못 끈다(꼬리표가 겹쳐 실주문을 잘못 고치지 않게, 검토 S4)
     const ti = tag.dataset.i != null ? Number(tag.dataset.i) : null, kk = tag.dataset.k, arr = a.b[`${kk}_legs`], leg = ti != null && Array.isArray(arr) ? arr[ti] : null;   // 분할 익절·손절 조각을 잡았다
     armedEdit = { key: a.k, k: kk, tp: kk === "tp" && leg ? leg.level : a.b.tp_level, sl: kk === "sl" && leg ? leg.level : a.b.sl_level,
                   tpi: kk === "tp" && leg ? ti : null, sli: kk === "sl" && leg ? ti : null, y0: e.clientY, t0: performance.now(), touch: e.pointerType === "touch" };
@@ -1151,7 +1153,7 @@ function renderArmedLines() {
   const Rp = !mob && fpProfileSpan ? Math.max(R, X(fpProfileSpan[1])) : R;   // 2026-11-04 펜 메모 «익절·손절·진입 선을 프로파일(델타·TPO·호가 칸)까지 연장»: 가로선만 오른쪽 끝(호가 띠 끝)까지 · 상자·꼬리표 자리는 그대로
   const yE = clampY(Y(en)), yT = clampY(Y(tp)), yS = clampY(Y(sl));
   const set = (sel, css) => { const n = h.querySelector(sel); if (n) Object.assign(n.style, css); return n; };
-  h.classList.toggle("short", a.side === "SHORT"); h.classList.toggle("busy", !!(armedEdit && armedEdit.busy)); h.classList.toggle("locked", !!lineTool); h.classList.toggle("adding", !!(lineTool && lineTool.add));   // 2026-11-14 사용자 «추가 진입할 때는 sltp 제거 · 기존 sltp 그대로 비중만»: 추가 진입 도구가 켜진 동안 들어간 익절·손절선(띠·칩·조각·+✕)을 숨긴다 -- 서버도 같은 쪽 추가는 선을 안 바꾼다(add_keep)
+  h.classList.toggle("short", a.side === "SHORT"); h.classList.toggle("busy", !!(armedEdit && armedEdit.busy)); h.classList.toggle("locked", lineToolBlocksArmed()); h.classList.toggle("adding", !!(lineTool && lineTool.add && !lineTool.placed));   // 2026-11-14 사용자 «추가 진입할 때는 sltp 제거 · 기존 sltp 그대로 비중만»: 추가 진입 도구가 켜진 동안 들어간 익절·손절선(띠·칩·조각·+✕)을 숨긴다 -- 서버도 같은 쪽 추가는 선을 안 바꾼다(add_keep)
   set(".lt-zone.up", { left: x0 + "px", width: w + "px", top: Math.min(yT, yE) + "px", height: Math.abs(yE - yT) + "px" });
   const slOff = !!a.b.sl_off, tpOff = !!a.b.tp_off;   // 2026-11-11 진입가 팝업에서 지운 선 -- 그 선·띠·꼬리표를 안 그린다
   set(".lt-zone.up", { display: tpOff ? "none" : "" });
@@ -1228,13 +1230,13 @@ function renderArmedLines() {
     for (let i = ts.length - 1; i >= 0; i--) ts[i].y = Math.min(ts[i].y, hi, i < ts.length - 1 ? ts[i + 1].y - GAP : hi);
     ts.forEach((o) => { o.t.style.top = o.y + "px"; });
   }
-  armedActs(h, a, { tp: tlegs, sl: slegs }, !!(armedDrag || (ed && (ed.cfm || ed.busy)) || lineTool || lineDraft));
+  armedActs(h, a, { tp: tlegs, sl: slegs }, !!(armedDrag || (ed && (ed.cfm || ed.busy)) || lineToolBlocksArmed() || lineDraft));
   const ct = ed && ed.cfm ? h.querySelector(ed.sli != null ? `.lt-legs .lt-tag.sl[data-i="${ed.sli}"]` : ".lt-tag.sl:not(.lt-leg)") : null;
   renderSlCross(h, !!ct, a.side, ed && ed.sl, ct, top, bot, mob);
   const note = h.querySelector(".lt-am-note"), e = armedEdit;
   note.textContent = e && e.busy ? "주문 수정 중…" : e && e.err ? `수정 실패 — ${e.err}` : e && e.hint ? (Date.now() - e.okAt < 3000 ? e.hint : "")
     : e && e.okAt && Date.now() - e.okAt < 6000 ? (e.warn ? `수정됨 — ${e.warn}` : e.tpOk === false ? "수정됨 — 익절 지정가를 못 걸어 서버가 닿으면 닫습니다" : "수정됨")
-    : lineTool ? (lineTool.add ? "" : "선 주문 도구를 닫으면 들어간 선을 옮길 수 있습니다") : slOff || tpOff ? `${[slOff && "손절", tpOff && "익절"].filter(Boolean).join("·")} 없음 — 추가 = 위 MANAGE 탭` : "";
+    : lineTool ? (lineTool.add ? (lineTool.placed ? "추가 진입 대기 중 — 익절·손절선을 끌면 그 선으로 체결됩니다" : "") : "선 주문 도구를 닫으면 들어간 선을 옮길 수 있습니다") : slOff || tpOff ? `${[slOff && "손절", tpOff && "익절"].filter(Boolean).join("·")} 없음 — 추가 = 위 MANAGE 탭` : "";
   note.className = `lt-am-note${e && (e.err || e.warn) ? " bad" : ""}`;
   Object.assign(note.style, { left: x0 + 6 + "px", top: Math.min(bot - 14, yE + 16) + "px" });
   if (e && e.err && !e.errShownAt) e.errShownAt = Date.now();

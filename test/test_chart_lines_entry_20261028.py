@@ -251,6 +251,39 @@ class LinesAddSizeTest(LinesArmedGuardTest):
             self.assertTrue(self._bstate().get("sl_off"), "지운 손절은 꺼진 채")
         self._run(fn, acct=POS, run_entry_limit=fake_limit, place_bracket=fake_bracket)
 
+    def test_limit_add_waiting_allows_line_modify(self) -> None:   # 2026-11-14 사용자 «추가 진입 대기 중에도 sltp 라인 조정»: 대기(지정가) 중 손절선 수정이 409 없이 되고 체결 뒤에도 그 선 그대로
+        calls, go = [], asyncio.Event()
+
+        async def fake_limit(_s, plan, state, on_fill=None, reprice=None, **_k):
+            await go.wait()
+            state.update(filled=0.01); await on_fill()
+            state.update(phase="filled_maker", filled=float(plan["quantity"]))
+            return state
+
+        async def fake_bracket(_s, b, symbol, pside):
+            calls.append(dict(b)); return {"placed": True, "tp": {"placed": True, "price": b.get("tp_price")}}
+
+        async def fn(c):
+            self._armed(self.SAVED)
+            body = await (await c.post("/api/manual-entry/submit?side=LONG&confirm=1&lev=20&pct=10&tp=2550&sl=2480&mode=limit&limit=2490")).json()
+            self.assertTrue(body.get("ok") and body.get("wait"), body)
+            await asyncio.sleep(0.05)
+            r = await c.post(f"/api/manual-bracket/modify?side=LONG&symbol={SYM}&confirm=1&tp=2550&sl=2470")
+            self.assertEqual(r.status, 200, await r.json())
+            self.assertEqual(self._bstate().get("sl_level"), 2470.0)
+            w = (await (await c.get("/api/manual-entry/status?asset=eth")).json()).get("wait") or {}
+            self.assertTrue((w.get("plan") or {}).get("add_keep") and (w.get("plan") or {}).get("positionSide") == "LONG", w)   # 화면이 새로고침 뒤 «추가 진입 대기»를 되살리는 근거(lineSyncWait)
+            go.set()
+            for _ in range(80):
+                await asyncio.sleep(0.02)
+                if self._bstate().get("tp_rearm") or len(calls) >= 3:
+                    break
+            await asyncio.sleep(0.15)
+            s = self._bstate()
+            self.assertEqual(s.get("sl_level"), 2470.0, "대기 중 옮긴 손절선이 체결 뒤 되돌아가면 안 된다")
+            self.assertEqual(s.get("tp_level"), 2550.0, s)
+        self._run(fn, acct=POS, run_entry_limit=fake_limit, place_bracket=fake_bracket)
+
     def test_wait_plain_add_keeps_user_changes_made_while_waiting(self) -> None:
         """기다리기 일반 진입: 대기 중 사용자가 지운 익절을 진입 때 계획으로 되살리던 것."""
         calls = []
