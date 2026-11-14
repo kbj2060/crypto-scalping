@@ -7096,11 +7096,11 @@ function obFvgCalc(c5, M) {
     if (p >= OB_N) { if (piv(p, true)) { top = B[p].h; topI = p; topX = false; } if (piv(p, false)) { btm = B[p].l; btmI = p; btmX = false; } }
     if (!topX && B[t].c > top) {
       let k = t - 1; if (t - topI > 1) { k = topI + 1; for (let j = k; j < t; j++) if (B[j].l <= B[k].l) k = j; }
-      ob.push({ d: 1, t0: B[k].t, k: t, lo: B[k].l, hi: B[k].h }); topX = true;
+      ob.push({ d: 1, t0: B[k].t, tk: B[t].t + M, k: t, lo: B[k].l, hi: B[k].h }); topX = true;
     }
     if (!btmX && B[t].c < btm) {
       let k = t - 1; if (t - btmI > 1) { k = btmI + 1; for (let j = k; j < t; j++) if (B[j].h >= B[k].h) k = j; }
-      ob.push({ d: -1, t0: B[k].t, k: t, lo: B[k].l, hi: B[k].h }); btmX = true;
+      ob.push({ d: -1, t0: B[k].t, tk: B[t].t + M, k: t, lo: B[k].l, hi: B[k].h }); btmX = true;   // tk = 알려진 시각(돌파 봉 마감)
     }
   }
   const tr = B.map((b, i) => (i ? Math.max(b.h, B[i - 1].c) - Math.min(b.l, B[i - 1].c) : b.h - b.l));
@@ -7108,12 +7108,11 @@ function obFvgCalc(c5, M) {
     z.age = closed - 1 - z.k;
     for (let j = z.k + 1; j < Math.min(n, z.k + 1 + OB_LIFE); j++) {
       const b = B[j];
-      if (z.d > 0 ? b.l <= z.hi : b.h >= z.lo) { z.ti = j; break; }
-      if (z.d > 0 ? b.c < z.lo : b.c > z.hi) { z.dead = true; break; }
+      if (z.d > 0 ? b.l <= z.hi : b.h >= z.lo) { z.ti = j; break; }   // (종가가 먼 끝 너머면 같은 봉 고저가 먼저 닿는다 -- 닿기 전 무효는 없다)
     }
     if (z.ti == null) continue;
     let a = 0; for (let j = Math.max(0, z.ti - 13); j <= z.ti; j++) a += tr[j] / (z.ti - Math.max(0, z.ti - 13) + 1);
-    for (let j = z.ti; j < Math.min(n, z.ti + 1 + OB_LIFE); j++) {
+    for (let j = z.ti; j < Math.min(closed, z.ti + 1 + OB_LIFE); j++) {   // 판정은 마감 봉만(연구와 같음 · 형성 봉 종가로 «깨짐»이 떴다 사라지는 깜빡임 방지 -- 리뷰)
       const b = B[j];
       if (z.d > 0 ? b.c < z.lo : b.c > z.hi) { z.res = "깨짐"; z.rt = b.t; break; }
       if (j > z.ti && (z.d > 0 ? b.h >= z.hi + a : b.l <= z.lo - a)) { z.res = "버팀"; z.rt = b.t; break; }
@@ -7122,8 +7121,8 @@ function obFvgCalc(c5, M) {
   for (let i = 1; M === M15 && i + 1 < closed; i++) {   // FVG 는 15분봉만(5분 FVG 는 코인 엇갈림으로 불통과)
     const a = B[i - 1], m = B[i], c = B[i + 1];
     let z = null;
-    if (a.h < c.l && m.c > m.o) z = { d: 1, t0: m.t, lo: a.h, hi: c.l };
-    if (a.l > c.h && m.c < m.o) z = { d: -1, t0: m.t, lo: c.h, hi: a.l };
+    if (a.h < c.l && m.c > m.o) z = { d: 1, t0: m.t, tk: c.t + M, lo: a.h, hi: c.l };
+    if (a.l > c.h && m.c < m.o) z = { d: -1, t0: m.t, tk: c.t + M, lo: c.h, hi: a.l };
     if (!z) continue;
     let hit = closed - 1 - (i + 1) >= OB_LIFE;   // 검증 = 생긴 뒤 100봉 안 첫 닿음 -- 그 밖·이미 닿은(일부라도 메운) 갭은 근거가 없어 뺀다(리뷰 11-15)
     for (let j = i + 2; !hit && j < n; j++) hit = z.d > 0 ? B[j].l <= z.hi : B[j].h >= z.lo;
@@ -7151,33 +7150,41 @@ function renderObFvg() {
   }
   g.appendChild(defs);
   const body = mk("g", { "clip-path": "url(#obClip)" }); g.appendChild(body);
+  const placed = [];
   const pill = (x, y, txt, z, anchor, solid) => {   // 폭은 캔버스로 잰다(getBBox = 꼬리표마다 강제 레이아웃 · 리뷰) · 플롯 안으로 밀어 넣는다(프로파일 칸 침범 방지)
     const w = measureTextW(txt, '650 11px "Pretendard Variable", Pretendard, sans-serif') + 10, h = 17;
-    const L = Math.max(G.ml + 2, Math.min(xr - 2 - w, anchor === "start" ? x - 5 : anchor === "end" ? x + 5 - w : x - w / 2)), T = Math.max(G.mt + 1, Math.min(G.pb - 1 - h, y - h / 2));
-    g.appendChild(mk("rect", { x: L, y: T, width: w, height: h, rx: 4, fill: solid ? col(z) : "var(--chart-bg)", "fill-opacity": 0.92, stroke: col(z), "stroke-opacity": 0.85 }));
+    const L = Math.max(G.ml + 2, Math.min(xr - 2 - w, anchor === "start" ? x - 5 : anchor === "end" ? x + 5 - w : x - w / 2));
+    const cl = (t) => Math.max(G.mt + 1, Math.min(G.pb - 1 - h, t)), T0 = cl(y - h / 2);
+    const hit = (t) => placed.some((q) => L < q[0] + q[2] && q[0] < L + w && t < q[1] + h + 2 && q[1] < t + h + 2);
+    let T = T0;
+    for (const o of [19, -19, 38, -38, 57, -57]) { if (!hit(T)) break; T = cl(T0 + o); }   // 15m·5m·판정·가장자리 꼬리표끼리 겹치면 한 줄씩 비킨다(리뷰)
+    placed.push([L, T, w]);
+    g.appendChild(mk("rect", { x: L, y: T, width: w, height: h, rx: 4, fill: solid ? col(z) : "var(--bg)", "fill-opacity": 0.94, stroke: col(z), "stroke-opacity": 0.85 }));
     g.appendChild(mk("text", { x: L + w / 2, y: T + h / 2 + 0.5, "text-anchor": "middle", "dominant-baseline": "middle", fill: solid ? "var(--on-fill)" : col(z), "font-size": 11, "font-weight": 650, "font-family": "var(--font-sans)" }, txt));
   };
   const near = (arr) => [arr.filter((z) => z.hi < P).sort((a, b) => b.hi - a.hi)[0], arr.filter((z) => z.lo > P).sort((a, b) => a.lo - b.lo)[0]].filter(Boolean);
-  const inY = (z) => z.hi >= G.ymin && z.lo <= G.ymax, x0Of = (z) => Math.max(G.ml, xT(z.t0)), born = (z) => xT(z.t0) < xr - 6;   // born = 보이는 창 안에서 이미 생긴 존(과거로 옮긴 보기에선 나중 존을 안 그린다)
+  const inY = (z) => z.hi >= G.ymin && z.lo <= G.ymax, x0Of = (z) => Math.max(G.ml, xT(z.t0)), born = (z) => xT(z.tk) <= xr + 0.5;   // born = 보이는 창 끝까지 이미 알려진 존(돌파 봉 마감 기준 -- 과거로 옮긴 보기에선 그때 없던 존을 안 그린다 · 리뷰)
   if (mcLine.fvg) for (const z of near(Rf.fv)) {
+    if (!born(z)) continue;
     const x0 = x0Of(z), y0 = yP(z.hi), y1 = yP(z.lo);
     body.appendChild(mk("rect", { x: x0, y: y0, width: Math.max(0, xr - x0), height: Math.max(1, y1 - y0), fill: `url(#${z.d > 0 ? "obHg" : "obHb"})` }));
     const right = x0 > G.ml + G.cw * 0.6;
-    if (inY(z) && born(z)) pill(right ? x0 - 8 : x0 + 8, (y0 + y1) / 2, "FVG · 버팀 42% (무작위 40%)", z, right ? "end" : "start", false);
+    if (inY(z)) pill(right ? x0 - 8 : x0 + 8, (y0 + y1) / 2, "FVG · 버팀 42% (무작위 40%)", z, right ? "end" : "start", false);
   }
   if (!mcLine.ob) return;
   // 11-15 사용자 «15분봉·5분봉 큰 스윙 둘 다 5분봉에» -- 5분 보기 = 15분(실선·채운 꼬리표·존 위쪽) + 5분(파선·연한 칠·빈 꼬리표·존 아래쪽) · 30분/1시간 보기 = 15분만
   const edge = { up: 0, dn: 0 };   // 가장자리 알림 쌓기(위·아래 각각)
   for (const M of chartTfK === 1 ? [M15, 300] : [M15]) {
     const R = obFvgCalc(c5, M), [tfN, pHold, pRnd] = OB_STAT[M], big = M === M15;
-    const live = R.ob.filter((z) => z.ti == null && !z.dead && z.age < OB_LIFE);   // age 100 = 닿음 검사 창(k+1..k+100)이 다 마감 → 수명 끝(리뷰)
+    const live = R.ob.filter((z) => z.ti == null && z.age < OB_LIFE);   // age 100 = 닿음 검사 창(k+1..k+100)이 다 마감 → 수명 끝(리뷰)
     const left = (z) => { const h = (OB_LIFE - z.age) * M / 3600; return h >= 1 ? `${Math.round(h)}시간 남음` : `${Math.max(5, Math.round(h * 60))}분 남음`; };
     const nb = near(live);
     for (const z of nb) {
+      if (!born(z)) continue;
       const x0 = x0Of(z), y0 = yP(z.hi), y1 = yP(z.lo), h = Math.max(2, y1 - y0);
       body.appendChild(mk("rect", { x: x0, y: y0, width: Math.max(0, xr - x0), height: h, fill: col(z), "fill-opacity": big ? 0.14 : 0.08, stroke: col(z), "stroke-opacity": big ? 0.75 : 0.6, "stroke-dasharray": big ? "none" : "4 3" }));
       body.appendChild(mk("rect", { x: x0, y: y0, width: big ? 3 : 2, height: h, fill: col(z) }));
-      if (inY(z) && born(z)) pill(x0 + 12, big ? y0 + 11 : y1 - 11, `${z.d > 0 ? "지지" : "저항"} OB ${tfN} · 닿으면 버팀 약 ${pHold}% (무작위 ${pRnd}%) · ${left(z)}`, z, "start", big);
+      if (inY(z)) pill(x0 + 12, big ? y0 + 11 : y1 - 11, `${z.d > 0 ? "지지" : "저항"} OB ${tfN} · 닿으면 버팀 약 ${pHold}% (무작위 ${pRnd}%) · ${left(z)}`, z, "start", big);
     }
     for (const z of nb) if (!inY(z) && chartPanEnd == null) {   // 화면 밖 = 위·아래 가장자리 꼬리표(지금 보기만 -- 과거 구간 세로 범위로 «위/아래»를 가르면 틀린다)
       const up = z.lo > G.ymax, pct = ((up ? z.lo : z.hi) / P - 1) * 100, k = edge[up ? "up" : "dn"]++;
