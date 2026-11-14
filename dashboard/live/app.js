@@ -6013,7 +6013,7 @@ function renderMarketCtx() {
       + `${swChip("wvwap", "주간·앵커 VWAP", 1)}${gear("wvwap")}</span>`
       // 2026-10-29 사용자 «5분봉 거래량 제일 많은 부분을 이은 선도 on/off» -- 봉별 POC 선(기본 켬 · 봉마다 POC 테두리는 그대로)
       + `<span class="mc-sw-g">${swChip("poc", "POC 선", 1, "봉마다 가장 많이 거래된 가격(POC)을 이은 선 · 봉 안 POC 테두리는 그대로")}${gear("poc")}</span>`
-      + `<span class="mc-sw-g">${swChip("ob", "오더블록", 0, "큰 스윙(앞뒤 50봉) 구조 돌파의 오더블록 · 5분 보기 = 5분봉(생긴 뒤 100봉 ≈ 8시간) · 30분·1시간 보기 = 15분봉(100봉 = 25시간) · 아직 안 닿은 것만 · 지금가 위·아래 하나씩 · 닿으면 버팀/깨짐 표시 뒤 지움 · ETH·BTC·SOL·XRP")}`
+      + `<span class="mc-sw-g">${swChip("ob", "오더블록", 0, "큰 스윙(앞뒤 50봉) 구조 돌파의 오더블록 · 15분봉(100봉 = 25시간, 실선) · 5분 보기엔 5분봉(100봉 ≈ 8시간, 파선)도 함께 · 아직 안 닿은 것만 · 지금가 위·아래 하나씩 · 닿으면 버팀/깨짐 표시 뒤 지움 · ETH·BTC·SOL·XRP")}`
       + `${swChip("fvg", "FVG 15m", 0, "15분봉 공정가 갭 · 생긴 뒤 100봉 안·아직 안 닿은 것 중 지금가 위·아래 하나씩 · 효과가 작아(버팀 42% vs 무작위 40%) 기본 끔")}</span>`
       + `<div class="mc-cfg"${lineCfg ? "" : " hidden"}>${lineCfg ? lineCfgHtml(lineCfg) : ""}</div></div>`;
   // 2026-10-28 펜 메모 «지표 아이콘 버튼을 누르면 이 지표 버튼들이 팝업으로 나와 추가/제거» -- 넓은 화면 줄 = 버튼 하나(켠 개수) · 칩·입력·저장은 그대로 팝업 안
@@ -7138,7 +7138,7 @@ function renderObFvg() {
   svg?.querySelector("#obfvg")?.remove();
   const c5 = chartFull();
   if (!svg || !obWant() || fpAltOn() || !G || !G.bars.length || !(G.ymax > G.ymin) || c5.length < 4 * OB_N) return;
-  const Mob = chartTfK === 1 ? 300 : M15, R = obFvgCalc(c5, Mob), Rf = obFvgCalc(c5, M15), [tfN, pHold, pRnd] = OB_STAT[Mob], P = Number(c5[c5.length - 1].close), slot = G.cw / G.n, xr = G.ml + G.cw, ch = G.pb - G.mt;
+  const Rf = obFvgCalc(c5, M15), P = Number(c5[c5.length - 1].close), slot = G.cw / G.n, xr = G.ml + G.cw, ch = G.pb - G.mt;
   const xT = (t) => G.ml + (measIdx(G.bars, t) + G.off) * slot, yP = (v) => G.mt + (G.ymax - v) * ch / (G.ymax - G.ymin);
   const NSV = "http://www.w3.org/2000/svg", mk = (tag, a, txt) => { const e = document.createElementNS(NSV, tag); for (const k in a) e.setAttribute(k, a[k]); if (txt != null) e.textContent = txt; return e; };
   const col = (z) => (z.d > 0 ? "var(--good)" : "var(--bad)"), f0 = (v) => v.toLocaleString("en-US", { maximumSignificantDigits: 5 });
@@ -7166,23 +7166,28 @@ function renderObFvg() {
     if (inY(z) && born(z)) pill(right ? x0 - 8 : x0 + 8, (y0 + y1) / 2, "FVG · 버팀 42% (무작위 40%)", z, right ? "end" : "start", false);
   }
   if (!mcLine.ob) return;
-  const live = R.ob.filter((z) => z.ti == null && !z.dead && z.age < OB_LIFE);   // age 100 = 닿음 검사 창(k+1..k+100)이 다 마감 → 수명 끝(리뷰)
-  const left = (z) => { const h = (OB_LIFE - z.age) * Mob / 3600; return h >= 1 ? `${Math.round(h)}시간 남음` : `${Math.max(15, Math.round(h * 60))}분 남음`; };
-  const nb = near(live);
-  for (const z of nb) {
-    const x0 = x0Of(z), y0 = yP(z.hi), y1 = yP(z.lo), h = Math.max(2, y1 - y0);
-    body.appendChild(mk("rect", { x: x0, y: y0, width: Math.max(0, xr - x0), height: h, fill: col(z), "fill-opacity": 0.14, stroke: col(z), "stroke-opacity": 0.75 }));
-    body.appendChild(mk("rect", { x: x0, y: y0, width: 3, height: h, fill: col(z) }));
-    if (inY(z) && born(z)) pill(x0 + 12, y0 + 11, `${z.d > 0 ? "지지" : "저항"} OB ${tfN} · 닿으면 버팀 약 ${pHold}% (무작위 ${pRnd}%) · ${left(z)}`, z, "start", true);
-  }
-  for (const z of nb) if (!inY(z) && chartPanEnd == null) {   // 화면 밖 = 위·아래 가장자리 꼬리표(지금 보기만 -- 과거 구간 세로 범위로 «위/아래»를 가르면 틀린다)
-    const up = z.lo > G.ymax, pct = ((up ? z.lo : z.hi) / P - 1) * 100;
-    pill(G.ml + G.cw / 2, up ? G.mt + 12 : G.pb - 12, `${up ? "↑" : "↓"} ${z.d > 0 ? "지지" : "저항"} OB${isMobileChartMode() ? "" : ` ${tfN}`} ${f0(z.lo)}–${f0(z.hi)} (${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}%)${isMobileChartMode() ? "" : ` · ${left(z)}`}`, z, "middle", false);   // 휴대폰은 짧게(위 가장자리 꼬리표를 덜 가리게)
-  }
-  const tEnd = R.B[R.B.length - 1].t + Mob;
-  for (const z of R.ob) if (z.res && z.rt + Mob >= tEnd - 2 * 3600) {   // 닿고 판정 난 존 = 닿은 자리에 결과 2시간 뒤 지움
-    const x = xT(R.B[z.ti].t + Mob / 2), y = yP(z.d > 0 ? z.hi : z.lo);
-    if (x >= G.ml && x <= xr && y >= G.mt && y <= G.pb) pill(x, y, z.res, z, "middle", z.res === "버팀");
+  // 11-15 사용자 «15분봉·5분봉 큰 스윙 둘 다 5분봉에» -- 5분 보기 = 15분(실선·채운 꼬리표·존 위쪽) + 5분(파선·연한 칠·빈 꼬리표·존 아래쪽) · 30분/1시간 보기 = 15분만
+  const edge = { up: 0, dn: 0 };   // 가장자리 알림 쌓기(위·아래 각각)
+  for (const M of chartTfK === 1 ? [M15, 300] : [M15]) {
+    const R = obFvgCalc(c5, M), [tfN, pHold, pRnd] = OB_STAT[M], big = M === M15;
+    const live = R.ob.filter((z) => z.ti == null && !z.dead && z.age < OB_LIFE);   // age 100 = 닿음 검사 창(k+1..k+100)이 다 마감 → 수명 끝(리뷰)
+    const left = (z) => { const h = (OB_LIFE - z.age) * M / 3600; return h >= 1 ? `${Math.round(h)}시간 남음` : `${Math.max(5, Math.round(h * 60))}분 남음`; };
+    const nb = near(live);
+    for (const z of nb) {
+      const x0 = x0Of(z), y0 = yP(z.hi), y1 = yP(z.lo), h = Math.max(2, y1 - y0);
+      body.appendChild(mk("rect", { x: x0, y: y0, width: Math.max(0, xr - x0), height: h, fill: col(z), "fill-opacity": big ? 0.14 : 0.08, stroke: col(z), "stroke-opacity": big ? 0.75 : 0.6, "stroke-dasharray": big ? "none" : "4 3" }));
+      body.appendChild(mk("rect", { x: x0, y: y0, width: big ? 3 : 2, height: h, fill: col(z) }));
+      if (inY(z) && born(z)) pill(x0 + 12, big ? y0 + 11 : y1 - 11, `${z.d > 0 ? "지지" : "저항"} OB ${tfN} · 닿으면 버팀 약 ${pHold}% (무작위 ${pRnd}%) · ${left(z)}`, z, "start", big);
+    }
+    for (const z of nb) if (!inY(z) && chartPanEnd == null) {   // 화면 밖 = 위·아래 가장자리 꼬리표(지금 보기만 -- 과거 구간 세로 범위로 «위/아래»를 가르면 틀린다)
+      const up = z.lo > G.ymax, pct = ((up ? z.lo : z.hi) / P - 1) * 100, k = edge[up ? "up" : "dn"]++;
+      pill(G.ml + G.cw / 2, up ? G.mt + 12 + 20 * k : G.pb - 12 - 20 * k, `${up ? "↑" : "↓"} ${z.d > 0 ? "지지" : "저항"} OB ${tfN} ${f0(z.lo)}–${f0(z.hi)} (${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}%)${isMobileChartMode() ? "" : ` · ${left(z)}`}`, z, "middle", false);   // 휴대폰은 남은 시간 뺌
+    }
+    const tEnd = R.B[R.B.length - 1].t + M;
+    for (const z of R.ob) if (z.res && z.rt + M >= tEnd - 2 * 3600) {   // 닿고 판정 난 존 = 닿은 자리에 결과 2시간 뒤 지움
+      const x = xT(R.B[z.ti].t + M / 2), y = yP(z.d > 0 ? z.hi : z.lo);
+      if (x >= G.ml && x <= xr && y >= G.mt && y <= G.pb) pill(x, y, `${z.res} ${tfN}`, z, "middle", z.res === "버팀");
+    }
   }
 }
 function measDur(s) {   // 25분 · 1시간 30분 · 2일 3시간
