@@ -53,7 +53,7 @@ def events(k: pd.DataFrame, tf: str, minutes: int) -> list[dict]:
             kk = p + N
             if kk + H24 >= n:
                 continue
-            d = rev if kind in ("D", "P2") else -rev          # 숨은 다이버전스 = 지속(추세 쪽)
+            d = rev                                           # 11-15 감사 수정: 숨은 다이버전스도 같은 부호 -- 고점 쪽 HID(더 낮은 고점·더 높은 RSI) = 하락 지속 = rev(−1), 저점 쪽 = 상승 지속(+1). 이전 «-rev» 는 추세 반대쪽을 쟀다(보조 칸만, 주 판정 D·P2 무관)
             y1 = SM.first_hit_race(h, l, c, atr, kk, d, WR)
             pre = {"D": "", "P2": "P2", "HID": "HID_"}[kind]
             if y1 >= 0:
