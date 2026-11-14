@@ -127,7 +127,7 @@ from scripts.live_liquidation_5m_signal_20260825 import (  # noqa: E402
 # robustness). compute_liquidation_levels()/compute_heatmap_history() are unchanged and still
 # importable (other research scripts still use them as the close-only reference) -- only this
 # dashboard entry point moved.
-from scripts.live_liquidation_map_20260824 import compute_spliced_levels, compute_spliced_heatmap_history_5m, compute_tier_profile, latest_window_5m  # noqa: E402
+from scripts.live_liquidation_map_20260824 import compute_spliced_levels, compute_spliced_heatmap_history_5m, compute_tier_profile, latest_window_5m, RECENCY_HALFLIFE_HOURS  # noqa: E402
 # 2026-09-20 «미시 참고» 카드의 계산부(순수 함수 + 자체점검). 서버는 값을 모아 넣기만 한다.
 from dashboard import micro_ref as mref  # noqa: E402
 from dashboard import position_profile as pprof  # noqa: E402
@@ -140,6 +140,7 @@ from dashboard.dir_signals import dir_signals_payload, vol4h_from_klines, open_r
 from dashboard import acct_notes  # noqa: E402 -- 계좌 카드 날짜별 메모(2026-11-04)
 from dashboard import pred_record  # noqa: E402 -- ⑤ 예측 줄 아래 «적중 기록»·«4h 상대 강도»(2026-11-03)
 from dashboard.regime_band import regime_band_payload  # noqa: E402 -- ⑤ 예측 줄 «횡보·추세» 칸(2026-11-02, 전진 기록 크론이 쌓은 마지막 행)
+from dashboard.risk_radar import risk_radar_payload  # noqa: E402 -- ⑤ 예측 줄 «15분 폭»·«앞 1시간» + 꼬리표 «15분 N%»(2026-11-15, 매분 크론이 쓴 파일)
 from dashboard.box_hold import BUNDLES as box_hold_bundles, payload as box_hold_payload, with_qx4i as box_hold_with_qx4i  # noqa: E402 -- 박스 유지 확률(2026-10-16, 방향 아님 · 10-20 XRP)
 from scripts.live_push_notifier_20260904 import PUSH_KINDS  # noqa: E402 -- 알림 센터 «무엇을 보내나»(2026-10-05)
 from scripts.ops_watchdog import send_telegram  # noqa: E402 -- 지지·저항 뚫림 알림(2026-10-25)
@@ -2688,6 +2689,13 @@ def make_app() -> web.Application:
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
         return web.json_response(payload, headers=NOCACHE)
 
+    async def api_risk_radar(request: web.Request) -> web.Response:   # 2026-11-15 ⑤ «15분 폭»·«앞 1시간» + 꼬리표 «15분 N%» (매분 크론 파일 -- 계산 없음)
+        try:
+            payload = await swr_cached("risk_radar", 10.0, lambda: asyncio.to_thread(risk_radar_payload), max_stale=120.0)
+        except Exception as exc:  # noqa: BLE001
+            payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+        return web.json_response(payload, headers=NOCACHE)
+
     _liq_tab_files: dict[str, tuple[int, bytes]] = {}
 
     async def api_liq_tab(request: web.Request) -> web.Response:
@@ -3224,13 +3232,24 @@ def make_app() -> web.Application:
         return df
 
     def liq_oi_usd(asset: str, current_price: float) -> float | None:
-        """현재 OI(바이낸스, 계약 = 코인) × 가격. hot 에 없는 코인(BTC·HYPE)은 None -> 청산맵 비율 단위."""
+        """현재 OI(코인) × 가격 -- 2026-11-15 바이낸스 + OKX + 바이비트 합(코인글래스 세션 추천: «바이낸스 OI × 2» 눈금이 실제 시장보다 작게 보였다 ·
+        지도 모양은 바이낸스 그대로, 금액 눈금만). 바이낸스가 없으면 None -> 청산맵 비율 단위. OKX·바이비트는 10분 안 값만 더한다(멈춘 수집기 값 금지)."""
+        sym = COIN_CONFIG[asset]["binance_symbol"]
         try:
-            r = read_rows(BINANCE_CTX_DB, "SELECT open_interest FROM oi_1s WHERE symbol = ? ORDER BY ts_ms DESC LIMIT 1",
-                          [COIN_CONFIG[asset]["binance_symbol"].lower()])   # oi_1s 심볼은 소문자
+            r = read_rows(BINANCE_CTX_DB, "SELECT open_interest FROM oi_1s WHERE symbol = ? ORDER BY ts_ms DESC LIMIT 1", [sym.lower()])   # oi_1s 심볼은 소문자
         except Exception:  # noqa: BLE001
             return None
-        return float(r[0][0]) * current_price if r and r[0][0] else None
+        if not (r and r[0][0]):
+            return None
+        coins, since = float(r[0][0]), int(time.time() * 1000) - 600_000
+        base = sym[:-4] if sym.endswith("USDT") else sym
+        for path, tbl, key in ((OKX_CTX_DB_PATH, "okx_oi", f"{base}-USDT-SWAP"), (BYBIT_CTX_DB, "bybit_oi", sym)):   # oi_base = 코인(둘 다)
+            try:
+                x = _read_only_rows(path, f"SELECT oi_base FROM {tbl} WHERE inst = ? AND ts_ms >= ? ORDER BY ts_ms DESC LIMIT 1", [key, since]) if path.exists() else []
+            except Exception:  # noqa: BLE001
+                x = []
+            coins += float(x[0][0]) if x and x[0][0] else 0.0
+        return coins * current_price
 
     async def load_liquidation_tiers(asset: str, days: int) -> dict[str, Any]:
         """2026-10-08 청산맵 보기 기간 1·7·30일(사용자 (나), 코인글래스처럼) -- 같은 모델(compute_tier_profile)을 창만 늘려 돌린다.
@@ -3239,8 +3258,9 @@ def make_app() -> web.Application:
             df = (await liq_klines_df(asset, days * 24 + 2, keep_forming=True)).tail(days * 24).reset_index(drop=True)
             cp = float(df["close"].iloc[-1]) if len(df) else 0.0
             oi_usd = await asyncio.to_thread(liq_oi_usd, asset, cp)
-            tp = await asyncio.to_thread(compute_tier_profile, df, cp, oi_usd)
-            return {"days": days, "tier_profile": tp, "generated_at": datetime.now(timezone.utc).isoformat()}
+            # 2026-11-15 코인글래스 세션 추천: 60·90·180일은 최근성 감쇠 끔(정확도 같음 +.005 · 180일이 30일과 똑같아 보이던 문제) -- 1·7·30일은 그대로
+            tp = await asyncio.to_thread(compute_tier_profile, df, cp, oi_usd, None, None if days >= 60 else RECENCY_HALFLIFE_HOURS)
+            return {"days": days, "tier_profile": tp, "decay": days < 60, "generated_at": datetime.now(timezone.utc).isoformat()}
         return await swr_cached(f"liquidation_tiers:{asset}:{days}", LIQUIDATION_MAP_CACHE_SECONDS, produce,
                                 max_stale=STALE_GRACE_SECONDS)
 
@@ -4865,6 +4885,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/trend", api_trend)
     app.router.add_get("/api/dir-signals", api_dir_signals)
     app.router.add_get("/api/regime-band", api_regime_band)
+    app.router.add_get("/api/risk-radar", api_risk_radar)
     app.router.add_get("/api/liq-tab", api_liq_tab)
     app.router.add_get("/api/vol-forecast", api_vol_forecast)
     app.router.add_get("/api/dir4h", api_dir4h)

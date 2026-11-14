@@ -3369,6 +3369,14 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .d4g .z.up { right: 0; border-radius: 0 2px 2px 0; background: color-mix(in srgb, var(--good) 45%, transparent); }
 .d4g u { position: absolute; top: 50%; width: 8px; height: 8px; border-radius: 50%; background: var(--text); transform: translate(-50%, -50%); }
 .d4g u.ago { width: 7px; height: 7px; background: none; border: 1.5px solid var(--muted); box-sizing: border-box; }
+/* 2026-11-15 시안 C «15분 폭»·«앞 1시간»: 크기라 방향색 대신 조용 = 흑연 · 격함 = 주황, 오른쪽 칸 = 금액·기준 두 줄 · 급변 = 주황 칩(글만) */
+.d4g .z.rq { left: 0; border-radius: 2px 0 0 2px; background: color-mix(in srgb, var(--muted) 34%, transparent); }
+.d4g .z.rl { right: 0; border-radius: 0 2px 2px 0; background: color-mix(in srgb, var(--warn) 45%, transparent); }
+.fc-t .rr-sub { display: block; margin-top: 2px; font: 600 11px/1.3 var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.fz-r .rr-r { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; font: 600 11.5px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.rr-r .rr-v { color: var(--text); }
+.rr-r .rr-v2 { font: 600 11px/1 var(--font-mono); color: var(--muted); }
+.rr-r .rr-al { font: 700 11px/1 var(--font-sans); font-style: normal; color: var(--warn); padding: 3px 7px; border-radius: 7px; border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 13%, transparent); }
 .mc-fc > h4 > .mc-q1 { margin-left: auto; flex: none; }
 /* 2026-10-16 «지금 추세» 시안 A: 기간 이름 붙은 표 */
 .fc-cnt { font-size: 11px; font-weight: 700; color: var(--muted); margin-left: 2px; }

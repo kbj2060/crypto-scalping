@@ -2,7 +2,7 @@
 // 아래 줄 = 오늘 누적 + 최대 고통 + 코인별 최대 고통(11-11 사용자: 24시간 5분 막대·자기 흥분 지수 뺌). 보기 토글은 liq_profile.js setView, 이 파일은 그린다.
 // 원천: 지도 = fpLiqColTp(1·7·30·60·90·180일, 지나간 칸 지움) · HL 고래·호가·60초 = latestMarketCtx · 5분봉 = /api/liquidation-5m-history ·
 //   남은 매물·띠·실측 위치·탄력 = /api/liq-tab · 최대 고통 = /api/liq-tab?asset=all(cron scripts/live_liq_tab_20261107.py, 매시).
-// 지도·남은 매물은 가상 포지션 추정이다. 금액 눈금(OI×2)은 절대액이 아니다 -- 흰 선이 실제 터진 양. 전부 서술이고 신호가 아니다.
+// 지도·남은 매물은 가상 포지션 추정이다. 금액 눈금(세 거래소 OI×2 -- 2026-11-15 바이낸스·OKX·바이비트 합)은 절대액이 아니다 -- 흰 선이 실제 터진 양. 전부 서술이고 신호가 아니다.
 // 🔴CI esprima: `?.(`·`?.[`·숫자 구분자 금지.
 (function () {
   "use strict";
@@ -228,7 +228,7 @@
       if (k === "hl") { var nb = bars.filter(function (b) { return Math.abs(b.d - dd) <= 0.25; }); return nb.length ? hd + "<br>" + nb.map(function (b) { return "청산가 " + px(b.px) + " · " + usd(b.tot); }).join("<br>") : ""; }
       var b = bars.find(function (q) { return q.g === g; }); if (!g && k !== "real") return "";   // 검증 11-13: 실측은 지금가 칸(g=0)도 그린다
       var t = hd + "<br>" + (b ? (k === "real" ? "롱 " + usd(b.parts[0][0]) + " · 숏 " + usd(b.parts[1][0]) : "칸 " + fu(b.tot) + " (10배 " + fu(b.parts[0][0]) + " · 20~25배 " + fu(b.parts[1][0]) + " · 50배 " + fu(b.parts[2][0]) + " · 75~100배 " + fu(b.parts[3][0]) + ")") : "칸 0");
-      if (mp && g) t += "<br>지금가에서 여기까지 누적 " + (g < 0 ? "롱 " : "숏 ") + fu(cumAt(mp, g * 0.25)) + "<br>" + (mp.unit === "share" ? "지도 = 주기 합 대비 몫" : "지도 금액은 OI×2 눈금 · 절대액 아님");
+      if (mp && g) t += "<br>지금가에서 여기까지 누적 " + (g < 0 ? "롱 " : "숏 ") + fu(cumAt(mp, g * 0.25)) + "<br>" + (mp.unit === "share" ? "지도 = 주기 합 대비 몫" : "지도 금액은 세 거래소 OI×2 눈금 · 절대액 아님");
       return t;
     };
     return svg(w, h, s, "청산맵 " + LADLAB[k] + ": 가격별 청산 금액과 누적");
@@ -399,7 +399,7 @@
       var dd = Math.round((p / P - 1) * 1000) / 10; if (!dd || Math.abs(dd) > FINE / 10) return "";
       var v = function (k) { return M[k] ? usd(cumAt(M[k], dd)) : "—"; };
       return px(p) + " · " + sgn(dd, 1) + "%까지 누적 청산<br>지도 1일 " + v("1") + " · 7일 " + v("7") + " · 30일 " + v("30") + (B ? "<br>실측 탄력으로는 " + usd((dd < 0 ? B.dn : B.up) * Math.abs(dd)) : "")
-        + '<br><span style="opacity:.7">굵은 선 1일 · 가는 선 7일 · 점선 30일 · 흰 선 실측 탄력 · 마름모 호가 · 원 HL 고래<br>추정 지도(OI×2 눈금) · 절대액 아님 · 지도로만</span>';
+        + '<br><span style="opacity:.7">굵은 선 1일 · 가는 선 7일 · 점선 30일 · 흰 선 실측 탄력 · 마름모 호가 · 원 HL 고래<br>추정 지도(세 거래소 OI×2 눈금) · 절대액 아님 · 지도로만</span>';
     } };
   };
 
@@ -454,10 +454,10 @@
     var sw_ = function (c, t) { return '<span><i class="lq-sw" style="background:var(' + c + ')"></i>' + t + "</span>"; };
     fill("lqLadLeg", (S.lad === "real" ? sw_("--bad", "롱 청산") + sw_("--good", "숏 청산") + "<span>바이낸스 7일 실제 체결 위치</span>"
       : S.lad === "hl" ? sw_("--bad", "아래 = 롱") + sw_("--good", "위 = 숏") + "<span>하이퍼리퀴드 고래 포지션 청산가</span>"
-      : sw_("--lev10", "10배") + sw_("--lev25", "20~25배") + sw_("--lev50", "50배") + sw_("--lev100", "75~100배") + "<span>선 = 지금가부터 누적(빨강 롱 · 초록 숏)</span><span>지도 눈금 = OI×2 · 절대액 아님</span>") + (liq > 0 && P > 0 ? "<span>내 청산가 " + px(liq) + "(" + sgn((liq / P - 1) * 100, 1) + "%)</span>" : ""));
+      : sw_("--lev10", "10배") + sw_("--lev25", "20~25배") + sw_("--lev50", "50배") + sw_("--lev100", "75~100배") + "<span>선 = 지금가부터 누적(빨강 롱 · 초록 숏)</span><span>지도 눈금 = 세 거래소 OI×2 · 절대액 아님</span>") + (liq > 0 && P > 0 ? "<span>내 청산가 " + px(liq) + "(" + sgn((liq / P - 1) * 100, 1) + "%)</span>" : ""));
     var E = allOf(asset()), pAge = E ? (Date.now() - E.generated_ms) / 60000 : null;
     fill("lqPainKpi", painKpi());
-    fill("lqPainLeg", E ? "<span>띠 = 지도 " + PLAB[S.pp] + "(사다리와 같은 모델)의 ±0.5% 묶음 최대</span><span>도달 = 하루 σ " + pc(E.sigma_d, 1) + " 무작위 보행</span><span>오른쪽 7줄 = 주기별 · 굵기 = 금액</span><span>" + (E.unit === "share" ? "금액 = 주기 합 대비 몫" : "금액 = OI×2 눈금") + " · 서술용</span>" + (pAge > 90 ? '<span class="lq-warn">' + (pAge / 60).toFixed(0) + "시간 전 계산</span>" : "") : "");
+    fill("lqPainLeg", E ? "<span>띠 = 지도 " + PLAB[S.pp] + "(사다리와 같은 모델)의 ±0.5% 묶음 최대</span><span>도달 = 하루 σ " + pc(E.sigma_d, 1) + " 무작위 보행</span><span>오른쪽 7줄 = 주기별 · 굵기 = 금액</span><span>" + (E.unit === "share" ? "금액 = 주기 합 대비 몫" : "금액 = 세 거래소 OI×2 눈금") + " · 서술용</span>" + (pAge > 90 ? '<span class="lq-warn">' + (pAge / 60).toFixed(0) + "시간 전 계산</span>" : "") : "");
     fill("lqCoTbl", coinTable());
     fill("lqCoLab", S.all ? PLAB[S.pp] + " 주기 · 노란 칸 = 양방향 협공(둘 다 도달 50% 이상)" : "");
     var B = S.data && S.data.band; fill("lqTodLab", "5분 누적" + (B ? " · 띠 = 지난 " + B.n + "일" : S.data ? " · 비교 띠는 기록 7일부터" : ""));

@@ -853,8 +853,19 @@ function reach24(v) {
   return r ? Math.round(r.p * 100) : null;
 }
 const pctTxt = (r) => (r < 1 ? "<1%" : `${r}%`);   // 0% 는 «절대 안 닿음»으로 읽혀서
-const reachSpan = (v) => { const r = reach24(v); return r == null ? "" : `<span class="lt-m">24h ${pctTxt(r)}</span>`; };   // 2026-11-14 펜 메모 «칩 글자 제각각»: 금액 뒤 덧말은 전부 .lt-m(같은 굵기·흐림·가운뎃점)
-const reachTitle = (v) => { const r = reach24(v); return r == null ? "" : ` · 24시간 안 닿을 확률 ${pctTxt(r)}(하루 변동성 · 무작위 보행 가정)`; };
+// 2026-11-15 시안 C(사용자 선택): 손절·익절 꼬리표 = «15분 안 닿을 확률»(1분 갱신 15분 σ̂ 의 몇 배 거리인지 → 학습 구간 표, 2026-06~10 표본 밖 1~2%p 일치).
+//   위험 레이더가 없거나(코인 밖·지연) 하면 예전 24h 로 -- 24h 는 툴팁에 남긴다.
+function reach15(v) {
+  const o = riskRadarNow(), K = latestRiskRadar && latestRiskRadar.touch_k, T = o && o.touch;
+  const p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
+  if (!o || !K || !T || !(p > 0) || !(o.sigma15_pct > 0) || !(v > 0)) return null;
+  const k = Math.abs(v / p - 1) * 100 / o.sigma15_pct;
+  if (k <= K[0]) return Math.round(T[0] * 100);
+  for (let i = 1; i < K.length; i++) if (k <= K[i]) return Math.round((T[i - 1] + (k - K[i - 1]) / (K[i] - K[i - 1]) * (T[i] - T[i - 1])) * 100);
+  return Math.round(T[T.length - 1] * 100);
+}
+const reachSpan = (v) => { const r15 = reach15(v); if (r15 != null) return `<span class="lt-m">15분 ${pctTxt(r15)}</span>`; const r = reach24(v); return r == null ? "" : `<span class="lt-m">24h ${pctTxt(r)}</span>`; };   // 2026-11-14 펜 메모 «칩 글자 제각각»: 금액 뒤 덧말은 전부 .lt-m(같은 굵기·흐림·가운뎃점)
+const reachTitle = (v) => { const r15 = reach15(v), r = reach24(v); return (r15 == null ? "" : ` · 15분 안 닿을 확률 ${pctTxt(r15)}(1분마다 갱신되는 15분 변동성 예측)`) + (r == null ? "" : ` · 24시간 안 닿을 확률 ${pctTxt(r)}(하루 변동성 · 무작위 보행 가정)`); };
 function armedBasis(b, dflt = 1) {   // 주문 심볼(USDC) ÷ 차트(USDT) -- 손절 → 익절 → 서버가 적은 basis
   return b.sl_price > 0 && b.sl_level > 0 ? b.sl_price / b.sl_level : b.tp_price > 0 && b.tp_level > 0 ? b.tp_price / b.tp_level : Number(b.basis) || dflt;
 }
@@ -5375,6 +5386,23 @@ async function refreshRegimeBand() {
     if (res.ok) latestRegimeBand = await res.json();
   } catch (error) { /* 다음 주기에 다시 -- 받아 둔 값은 그대로 */ }
 }
+// 2026-11-15 시안 C: 위험 레이더(/api/risk-radar = 서버 크론 scripts/live_risk_radar_20261115.py 가 매분 쓴 파일, 화면은 계산 안 함)
+const RISK_RADAR_POLL_MS = 30000;
+let latestRiskRadar = null, riskRadarLastFetchAt = 0;
+async function refreshRiskRadar() {
+  if (activePageTab !== "snapshot" || document.hidden) return;
+  const now = Date.now();
+  if (now - riskRadarLastFetchAt < RISK_RADAR_POLL_MS) return;
+  riskRadarLastFetchAt = now;
+  try {
+    const res = await fetch("/api/risk-radar", { cache: "no-cache" });
+    if (res.ok) latestRiskRadar = await res.json();
+  } catch (error) { /* 다음 주기에 다시 -- 받아 둔 값은 그대로 */ }
+}
+function riskRadarNow() {
+  const r = latestRiskRadar, o = r && r.ok && !r.stale ? (r.coins || {})[activeSnapshotAsset] : null;
+  return o && o.valid && !o.error ? o : null;
+}
 // 2026-11-03 사용자 «아래 띠 B로 · 상대 강도는 x·y 축 반대로 · 적중 기록은 나머지 예측들도»: ⑤ 예측 줄 아래 «적중 기록»(15분·1시간·4시간 방향 + 횡보·추세)과
 //   «4h 상대 강도»(x = 코인, y = 평균 대비 지난 4h 수익 bp 세로 막대). 값은 서버가 예측을 낼 때마다 쌓은 기록(/api/pred-record = dashboard/pred_record.py) -- 화면은 계산 안 함.
 //   적중 = 그 순간 화면이 신호(분위 ≥80 롱 · ≤20 숏 · 4h 문턱 밖)로 보여 준 결정이 지평 뒤 종가로 맞았나. 연구: docs/experiments/dashboard_candidates_forward_20261103.md
@@ -5423,6 +5451,31 @@ function predXsecHtml() {
   const ic = pr.xsec && pr.xsec.n ? `기록 전진 IC ${pr.xsec.ic >= 0 ? "+" : "−"}${Math.abs(pr.xsec.ic).toFixed(2)}(${pr.xsec.n}회)` : "전진 기록 쌓는 중";
   return `<div class="pr-strip"><div class="pr-h" title="9코인 평균 대비 지난 4h 수익(bp) · 막대 위 = 평균보다 강함">4h 상대 강도</div><div class="xs-row">${cols}</div>`
     + `<div class="pr-note" title="반전 쪽: 높은 코인이 이후 4h 약세 쪽 · 연구 IC −.03(전진 70일) · ${ic} — 약한 경향, 비용 후 매매 근거 아님">높은 쪽 → 이후 약세 · ${ic}</div></div>`;
+}
+// 2026-11-15 시안 C(사용자 선택): «15분 폭»(1분 갱신 HAR-1m · 15분 안 최대 이동 80%·95% 띠) · «앞 1시간»(예측 ÷ 평소, 조용 ≤0.7 · 격함 ≥1.5).
+//   크기만 말한다(방향 없음). 급변 경고는 검정 불통과라 숫자 보정 없이 글만.
+function rrCells(cell) {
+  const on = DIRSHORT_ASSETS.has(activeSnapshotAsset), o = riskRadarNow(), r = latestRiskRadar;
+  const why = !on ? "ETH·BTC·SOL·XRP 전용" : !r ? "불러오는 중" : !r.ok ? (r.reason || "준비 안 됨") : r.stale ? "지연" : "기록 대기";
+  const tip15 = "15분 폭 — 지금부터 15분 안 최대 이동이 ± 이 안에 머물 확률 80%(95% 는 아래). 1분마다 다시 계산(직전 1·5·15·60·240분·1일·7일 변동성 + 시각, 2024~25 학습).\n"
+    + "2026-06~10 표본 밖: 80% 띠 포함률 80.2% · 95% 띠 94.4% · 오차는 7일 고정 σ 의 절반. 방향은 말하지 않는다.\n"
+    + "급변 = 1분 움직임이 예측의 4배 이상 또는 5분 변동성 3배 이상(15분 동안 표시) — 그 뒤 15분은 평소의 1.3~1.6배였고 모델 숫자보다 넓게 잡아야 한다(경고만 · 검정 불통과).";
+  const tip60 = "앞 1시간 — 다음 1시간 예측 폭 ÷ 직전 30일 평소(1시간 변동성 중앙값). 0.7배 이하 조용 · 1.5배 이상 격함 · 그 사이 보통.\n"
+    + "2026-06~10 표본 밖: 조용 판정 96~98% 가 실제로 평소보다 작았고, 격함 판정 96~98% 가 평소보다 컸다(«평소의 1.5배가 된다»는 뜻은 아님). 방향은 말하지 않는다.";
+  if (!o) return cell("15분 폭", "flat", "-", why, tip15, "", "", null) + cell("앞 1시간", "flat", "-", why, tip60, "", "", null);
+  const f2 = (x) => x.toFixed(2), px = Number(latestLivePriceByAsset[activeSnapshotAsset] || o.price);
+  const usd = (pct) => { const x = px * pct / 100; return "$" + (x >= 100 ? x.toFixed(0) : x >= 1 ? x.toFixed(1) : x.toPrecision(3)); };
+  const al = o.alert && o.alert.active, q = o.band80_pct / o.sigma15_pct;
+  const b0 = o.baseline7d_sigma15_pct != null ? `<small class="rr-v2">7일 기준 ±${f2(o.baseline7d_sigma15_pct * q)}%</small>` : "";
+  const right15 = (al ? `<em class="rr-al">급변 ${o.alert.minutes_ago}분 전 · 넓게</em>` : `<span class="rr-v">${usd(o.band80_pct)}</span>`) + b0;
+  const c15 = cell("15분 폭", al ? "trd" : "flat", `±${f2(o.band80_pct)}%`, `80% ±${usd(o.band80_pct)} · 95% ±${f2(o.band95_pct)}% (${usd(o.band95_pct)})`,
+    tip15, "", `<small class="rr-sub">95% ±${f2(o.band95_pct)}%</small>`, null, `<span class="rr-r">${right15}</span>`);
+  const X = (x) => Math.max(0, Math.min(100, 50 + Math.log(x) / Math.log(2.5) * 50)).toFixed(1);   // 1 가운데 · 0.4~2.5배 로그
+  const st = o.state60 || "-", ratio = o.ratio60;
+  const g = ratio ? `<span class="d4g" aria-hidden="true"><i class="z rq" style="width:${X(0.7)}%"></i><i class="z rl" style="left:${X(1.5)}%"></i><u style="left:${X(ratio)}%"></u></span>` : "";
+  const c60 = cell("앞 1시간", st === "격함" ? "trd" : "flat", st, ratio ? `평소의 ${f2(ratio)}배 · 1시간 σ ${f2(o.sigma60_pct)}%` : why, tip60, g, "", null,
+    ratio ? `<span class="rr-r"><span class="rr-v">평소의 ${f2(ratio)}배</span><small class="rr-v2">1시간 σ ${f2(o.sigma60_pct)}%</small></span>` : "");
+  return c15 + c60;
 }
 // ⑤ 예측 줄(시장 맥락 판 아래, 사용자 시안 B): 지금 추세 → 15분·1시간 예측(10-28) → 4h 예측(+변동성) → 7일(4~13주는 10-28 Macro Trend 카드로). sec = renderMarketCtx 의 판 틀(? 설명).
 function fcRowHtml(sec) {
@@ -5526,7 +5579,7 @@ function fcRowHtml(sec) {
          : cell("지금 추세", "flat now", "-", "불러오는 중", "지금 추세"))
     + sCell("15m", "15분", 3, 1) + sCell("1h", "1시간", 12, 2)
     + cell("4h 예측", g4 && !old4 ? cls(g4.signal) : "flat", g4 ? word(g4.signal) : "-", d4Sub, d4Tip, d4Gauge, "", "4h")
-    + rbCell
+    + rbCell + rrCells(cell)
     + `</div>${predXsecHtml()}</div>`;   // 2026-10-28 사용자 «4~13주 예측은 Macro Trend 카드로 대체» -- z91 칸 뺌(서버 계산·전진 판정 2027-06 은 그대로)
 }
 
@@ -10587,6 +10640,7 @@ async function tick() {
       refreshIceberg();              // 2026-10-16 풋프린트 칸별 아이스버그 (30초, ETH · 검증 중 · 신호 아님)
       refreshDirSig();               // 2026-10-15 지평 사다리 7일·4~13주 (10분, 서버 1시간 캐시)
       refreshPredRecord();           // 2026-11-03 ⑤ 예측 줄 아래 적중 기록·4h 상대 강도 (1분, 서버가 쌓은 기록)
+      refreshRiskRadar();            // 2026-11-15 ⑤ «15분 폭»·«앞 1시간» + 꼬리표 «15분 N%» (30초, 서버 크론이 매분 쓴 파일)
       refreshRegimeBand();           // 2026-11-02 ⑤ 예측 줄 «횡보·추세» (5분, 서버 크론이 매 시 쌓은 마지막 행 · ETH·BTC·SOL·XRP)
       refreshVol4h();                // 2026-10-15 ⑤ 예측 판 4h 변동성 (5분, ETH)
       refreshDir4h();                // 2026-10-15 ⑤ 예측 판 4h 방향 (2분, ETH·SOL·XRP · 서버 5분 캐시)
