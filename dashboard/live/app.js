@@ -1151,7 +1151,7 @@ function renderArmedLines() {
   const Rp = !mob && fpProfileSpan ? Math.max(R, X(fpProfileSpan[1])) : R;   // 2026-11-04 펜 메모 «익절·손절·진입 선을 프로파일(델타·TPO·호가 칸)까지 연장»: 가로선만 오른쪽 끝(호가 띠 끝)까지 · 상자·꼬리표 자리는 그대로
   const yE = clampY(Y(en)), yT = clampY(Y(tp)), yS = clampY(Y(sl));
   const set = (sel, css) => { const n = h.querySelector(sel); if (n) Object.assign(n.style, css); return n; };
-  h.classList.toggle("short", a.side === "SHORT"); h.classList.toggle("busy", !!(armedEdit && armedEdit.busy)); h.classList.toggle("locked", !!lineTool);
+  h.classList.toggle("short", a.side === "SHORT"); h.classList.toggle("busy", !!(armedEdit && armedEdit.busy)); h.classList.toggle("locked", !!lineTool); h.classList.toggle("adding", !!(lineTool && lineTool.add));   // 2026-11-14 사용자 «추가 진입할 때는 sltp 제거 · 기존 sltp 그대로 비중만»: 추가 진입 도구가 켜진 동안 들어간 익절·손절선(띠·칩·조각·+✕)을 숨긴다 -- 서버도 같은 쪽 추가는 선을 안 바꾼다(add_keep)
   set(".lt-zone.up", { left: x0 + "px", width: w + "px", top: Math.min(yT, yE) + "px", height: Math.abs(yE - yT) + "px" });
   const slOff = !!a.b.sl_off, tpOff = !!a.b.tp_off;   // 2026-11-11 진입가 팝업에서 지운 선 -- 그 선·띠·꼬리표를 안 그린다
   set(".lt-zone.up", { display: tpOff ? "none" : "" });
@@ -1234,7 +1234,7 @@ function renderArmedLines() {
   const note = h.querySelector(".lt-am-note"), e = armedEdit;
   note.textContent = e && e.busy ? "주문 수정 중…" : e && e.err ? `수정 실패 — ${e.err}` : e && e.hint ? (Date.now() - e.okAt < 3000 ? e.hint : "")
     : e && e.okAt && Date.now() - e.okAt < 6000 ? (e.warn ? `수정됨 — ${e.warn}` : e.tpOk === false ? "수정됨 — 익절 지정가를 못 걸어 서버가 닿으면 닫습니다" : "수정됨")
-    : lineTool ? "선 주문 도구를 닫으면 들어간 선을 옮길 수 있습니다" : slOff || tpOff ? `${[slOff && "손절", tpOff && "익절"].filter(Boolean).join("·")} 없음 — 추가 = 위 MANAGE 탭` : "";
+    : lineTool ? (lineTool.add ? "" : "선 주문 도구를 닫으면 들어간 선을 옮길 수 있습니다") : slOff || tpOff ? `${[slOff && "손절", tpOff && "익절"].filter(Boolean).join("·")} 없음 — 추가 = 위 MANAGE 탭` : "";
   note.className = `lt-am-note${e && (e.err || e.warn) ? " bad" : ""}`;
   Object.assign(note.style, { left: x0 + 6 + "px", top: Math.min(bot - 14, yE + 16) + "px" });
   if (e && e.err && !e.errShownAt) e.errShownAt = Date.now();

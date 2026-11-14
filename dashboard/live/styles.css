@@ -3254,6 +3254,8 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .lt-armed .lt-zone.up, .lt-armed .lt-zone.dn { opacity: .75; }
 .lt-armed.busy .lt-tag[data-k] { opacity: .55; cursor: progress; }
 .lt-armed.locked .lt-tag[data-k] { opacity: .5; pointer-events: none; }   /* 진입 전 선 도구가 켜진 동안 */
+.lt-armed.adding .lt-zone, .lt-armed.adding .lt-ln.tp, .lt-armed.adding .lt-ln.sl, .lt-armed.adding .lt-tag.tp, .lt-armed.adding .lt-tag.sl,
+.lt-armed.adding .lt-legs, .lt-armed.adding .lt-acts-box, .lt-armed.adding .lt-sl-cross { display: none; }   /* 2026-11-14 추가 진입 = 비중만 -- 기존 익절·손절은 그대로 걸려 있고 화면에서만 잠시 숨김 */
 .lt-am-note { position: absolute; transform: translateY(-50%); font: 600 11px/1.2 var(--font-sans); color: var(--muted); white-space: nowrap; pointer-events: none; }
 .lt-am-note.bad { color: var(--bad); white-space: normal; max-width: 60%; }
 /* 2026-11-12 시안 5: 지금가를 넘어간 손절 = 경보색 점선 + 확인 상자(답하기 전엔 안 보냄) */
