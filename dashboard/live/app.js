@@ -7174,7 +7174,7 @@ function renderObFvg() {
   }
   g.appendChild(defs);
   const body = mk("g", { "clip-path": "url(#obClip)" }); g.appendChild(body);
-  const placed = [];
+  const placed = [...svg.querySelectorAll(".edge-l")].map((t) => { const q = t.getBBox(); return [q.x - 2, q.y - 2, q.width + 4]; });   // 왼쪽 끝 SMA50·스윙 꼬리표 자리도 피한다(11-15 스윙선 세션 제보)
   const pill = (x, y, txt, z, anchor, solid) => {   // 폭은 캔버스로 잰다(getBBox = 꼬리표마다 강제 레이아웃 · 리뷰) · 플롯 안으로 밀어 넣는다(프로파일 칸 침범 방지)
     const w = measureTextW(txt, '650 11px "Pretendard Variable", Pretendard, sans-serif') + 10, h = 17;
     const L = Math.max(G.ml + 2, Math.min(xr - 2 - w, anchor === "start" ? x - 5 : anchor === "end" ? x + 5 - w : x - w / 2));
@@ -7211,8 +7211,10 @@ function renderObFvg() {
       if (inY(z)) pill(x0 + 12, big ? y0 + 11 : y1 - 11, `${z.d > 0 ? "지지" : "저항"} OB ${tfN} · 닿으면 버팀 약 ${pHold}% (무작위 ${pRnd}%) · ${left(z)}`, z, "start", big);
     }
     for (const z of nb) if (!inY(z) && chartPanEnd == null) {   // 화면 밖 = 위·아래 가장자리 꼬리표(지금 보기만 -- 과거 구간 세로 범위로 «위/아래»를 가르면 틀린다)
-      const up = z.lo > G.ymax, pct = ((up ? z.lo : z.hi) / P - 1) * 100, k = edge[up ? "up" : "dn"]++;
-      pill(G.ml + G.cw / 2, up ? G.mt + 12 + 20 * k : G.pb - 12 - 20 * k, `${up ? "↑" : "↓"} ${z.d > 0 ? "지지" : "저항"} OB ${tfN} ${f0(z.lo)}–${f0(z.hi)} (${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}%)${isMobileChartMode() ? "" : ` · ${left(z)}`}`, z, "middle", false);   // 휴대폰은 남은 시간 뺌
+      const up = z.lo > G.ymax, pct = ((up ? z.lo : z.hi) / P - 1) * 100, k = edge[up ? "up" : "dn"]++, mob = isMobileChartMode(), pc = `${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}%`;
+      // 휴대폰 = 오른쪽 끝·둘째 줄·짧게(11-15 스윙선 세션 제보: 가운데 알림이 왼쪽 끝 일봉 SMA50·스윙 꼬리표와 오른쪽 위 추세 veto 글을 덮었다)
+      const yy = (mob ? 32 : 12) + 20 * k;
+      pill(mob ? xr - 6 : G.ml + G.cw / 2, up ? G.mt + yy : G.pb - yy, mob ? `${up ? "↑" : "↓"} ${z.d > 0 ? "지지" : "저항"} OB ${tfN} ${pc}` : `${up ? "↑" : "↓"} ${z.d > 0 ? "지지" : "저항"} OB ${tfN} ${f0(z.lo)}–${f0(z.hi)} (${pc}) · ${left(z)}`, z, mob ? "end" : "middle", false);
     }
     const tEnd = R.B[R.B.length - 1].t + M;
     for (const z of R.ob) if (z.res && z.rt + M >= tEnd - 2 * 3600) {   // 닿고 판정 난 존 = 닿은 자리에 결과 2시간 뒤 지움
@@ -9029,7 +9031,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           const y50 = yAt(v50), above = y50 <= mt + 8, below = y50 >= plotBottom - 2;
           if (!above && !below && gutOn) fpNotes.push({ val: v50, label: `SMA50·${up ? "롱" : "숏"}`, color: col });
           else {
-            const t = mk(svg, "text", { x: ml + 4, y: (above ? mt + 11 + 13 * edgeL.top++ : below ? plotBottom - LANE_IN - 5 - 13 * edgeL.bot++ : y50 - 3).toFixed(1), "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: col,
+            const t = mk(svg, "text", { class: "edge-l", x: ml + 4, y: (above ? mt + 11 + 13 * edgeL.top++ : below ? plotBottom - LANE_IN - 5 - 13 * edgeL.bot++ : y50 - 3).toFixed(1), "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: col,
                                         stroke: "var(--chart-bg)", "stroke-width": 4, "stroke-linejoin": "round", "paint-order": "stroke" });
             t.textContent = `${above ? "↑ " : below ? "↓ " : ""}일봉 SMA50 ${v50.toFixed(dp)} · ${side}`;
             const tt = document.createElementNS(NS, "title"); tt.textContent = tip; t.appendChild(tt);   // textContent 가 지우므로 글 뒤에 단다
@@ -9062,7 +9064,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
               const t = mk(svg, "text", { x: ml + 4, y: (y - 3).toFixed(1), "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: "var(--muted)", "pointer-events": "none" });
               t.textContent = lab; return;
             }
-            const t = mk(svg, "text", { x: ml + 4, y: (above ? mt + 11 + 13 * edgeL.top++ : plotBottom - LANE_IN - 5 - 13 * edgeL.bot++).toFixed(1), "font-size": mobileChart ? 9 : 10,
+            const t = mk(svg, "text", { class: "edge-l", x: ml + 4, y: (above ? mt + 11 + 13 * edgeL.top++ : plotBottom - LANE_IN - 5 - 13 * edgeL.bot++).toFixed(1), "font-size": mobileChart ? 9 : 10,
                                         "font-weight": 700, fill: "var(--muted)", stroke: "var(--chart-bg)", "stroke-width": 4, "stroke-linejoin": "round", "paint-order": "stroke" });
             t.textContent = `${above ? "↑" : "↓"} ${tf} 스윙 ${nm} ${lv.price.toFixed(dp)}`;
             const tt = document.createElementNS(NS, "title"); tt.textContent = tip; t.appendChild(tt);
