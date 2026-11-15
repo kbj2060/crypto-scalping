@@ -255,14 +255,20 @@ def fit(split, arm, df=None):
     od = OUT / split; (od / "models").mkdir(parents=True, exist_ok=True)
     out, meta = [], {}
     for name, col, kind in G.TARGETS:
-        tr, va = df[(df.split == "train") & df[col].notna()], df[(df.split == "val") & df[col].notna()]
+        mf = od / "models" / f"arm{arm}_{name}.txt"
+        if mf.exists():                                                # 이어 하기: 저장 모델(이미 조기 종료된 것)로 예측만
+            m = lgb.Booster(model_file=str(mf)); m.best_iteration = 0; tr = va = ()
+        else:
+            m = None
+            tr, va = df[(df.split == "train") & df[col].notna()], df[(df.split == "val") & df[col].notna()]
         params = dict(learning_rate=0.05, num_leaves=63, min_data_in_leaf=200, feature_fraction=0.8, bagging_fraction=0.8, bagging_freq=1,
                       lambda_l2=1.0, num_threads=int(os.environ.get("TAPEINFO_THREADS", 6)), seed=SEED, verbose=-1,
                       **({"objective": "multiclass", "num_class": 3} if kind == "multi" else {"objective": "binary"} if kind == "bin" else {"objective": "regression"}))
-        m = lgb.train(params, lgb.Dataset(tr[X], tr[col]), 2000, valid_sets=[lgb.Dataset(va[X], va[col])],
-                      callbacks=[lgb.early_stopping(100, verbose=False)])
-        m.save_model(str(od / "models" / f"arm{arm}_{name}.txt"), num_iteration=m.best_iteration)
-        ev = df[df.split.isin(["val", "test"]) & df[col].notna()]
+        if m is None:
+            m = lgb.train(params, lgb.Dataset(tr[X], tr[col]), 2000, valid_sets=[lgb.Dataset(va[X], va[col])],
+                          callbacks=[lgb.early_stopping(100, verbose=False)])
+            m.save_model(str(mf), num_iteration=m.best_iteration)
+        ev = df[(df.split == "test") & df[col].notna()]                 # 시험 행만 저장(메모리 — val+test 31칸 concat 에서 11G 초과로 죽음)
         p = m.predict(ev[X], num_iteration=m.best_iteration)
         o = ev[["t", "coin", "split"]].copy(); o["target"] = name
         if kind == "multi":
@@ -272,9 +278,11 @@ def fit(split, arm, df=None):
         imp = dict(zip(X, m.feature_importance("gain")))
         meta[name] = dict(best_iter=int(m.best_iteration), n_train=len(tr), n_val=len(va),
                           top_gain=sorted(imp, key=imp.get, reverse=True)[:8])
-        out.append(o); print(split, arm, name, meta[name]["best_iter"], flush=True)
-    P = pd.concat(out); P["coin"] = P.coin.astype(str); P["split"] = P.split.astype(str)
-    P.to_parquet(od / f"pred_{arm}.parquet")
+        o["coin"] = o.coin.astype(str); o["split"] = o.split.astype(str)
+        out.append(o); del tr, va; print(split, arm, name, meta[name]["best_iter"], flush=True)
+    if out:
+        P = pd.concat(out); del out; P["target"] = P.target.astype("category")
+        P.to_parquet(od / f"pred_{arm}.parquet")
     json.dump(meta, open(od / f"meta_{arm}.json", "w"), indent=1)
 
 
