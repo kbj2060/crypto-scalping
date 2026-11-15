@@ -3,14 +3,17 @@
 
   selftest   손계산 봉으로 Aroon·터틀 수프·RSI2 사건 단언
   run        4코인 × 15분·1시간(+4시간 보조) 실제 + 기하 위약 20벌 + 지표별 실제 가격 대조 → tmp/connors_aroon_soup_bundle_20261116/
+  run2       안 본 코인 5종(5분봉 CSV) 재현 — 사전등록 docs/prereg/rsi2_pullback_r2_newcoins_20261116.md (주 칸 G1 15분)
 실행·판정 뼈대는 research_classic_indicator_bundle_20261115.run 그대로(events·KEYS·OUT 만 바꿈).
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from numpy.lib.stride_tricks import sliding_window_view as swv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -99,5 +102,40 @@ def run() -> None:
     CB.run()
 
 
+def run2() -> None:
+    import research_orb_meaning_20261115 as OR
+    out = OUT.parent / "rsi2_pullback_r2_newcoins_20261116"; out.mkdir(parents=True, exist_ok=True)
+    rows, aggs = [], []
+    for ci, coin in enumerate(OR.NEW):
+        k = OR.load5(coin)
+        for draw in range(-1, SM.NPLACEBO):
+            kk = k if draw < 0 else SM.placebo(k, SM.SEED + 10000 + 1000 * ci + draw)
+            k1 = kk.assign(t=kk.t // 5)                       # 쌍봉·CCI 2라운드와 같은 5분 → «1분» 눈금 묶음
+            for tf, mnt in CB.TFS.items():
+                B = SM.bars(k1, mnt // 5); B["t"] = B["t"] * 5; B["ms"] *= 5
+                ev = pd.DataFrame(events(B, tf, draw < 0)).assign(coin=coin, tf=tf, draw=draw)
+                if draw < 0:
+                    rows.append(ev)
+                elif len(ev):
+                    aggs.append(ev.assign(hh=ev.tk >= SM.SPLIT).groupby(["coin", "tf", "draw", "cell", "hh"]).y.agg(["sum", "count"]).reset_index())
+            print(coin, draw, flush=True)
+    E, PA = pd.concat(rows, ignore_index=True), pd.concat(aggs, ignore_index=True)
+    E.to_parquet(out / "events.parquet"); PA.to_parquet(out / "placebo_agg.parquet")
+    SM.TFS, SM.COINS = CB.TFS, list(OR.NEW)
+    SM.MAIN_TFS, SM.CELLS, SM.P2OF = ("15m",), ["G1"], {"G1": "P3G1"}
+    main = SM.judge(E, PA)
+    for v in main.values():                                  # 코인 ≥ 4/5 — judge 는 3 고정이라 다시 셈 · Holm 밖 칸 = 보조
+        if "holm" not in v:
+            continue
+        ok = sum(x > 0 for x in v["coin_diff_pp"].values()) >= 4 and all(x > 0 for x in v["half_diff_pp"].values())
+        v["pass"] = bool(v["holm"] and v["lo90_pp"] > 0 and v.get("lo90_2_pp", -1) > 0 and ok)
+        v["candidate"] = bool(v["diff_pp"] > 0 and v.get("diff2_pp", -1) > 0 and ok)
+    aux = {}
+    for c_ in ("G1_2atr", "G3", "G2"):
+        SM.MAIN_TFS, SM.CELLS, SM.P2OF = (), [c_], {c_: "P3" + c_}
+        aux.update(SM.judge(E, PA))
+    json.dump(dict(main=main, aux=aux), open(out / "result.json", "w"), ensure_ascii=False, indent=1, default=float)
+
+
 if __name__ == "__main__":
-    {"selftest": selftest, "run": run}[sys.argv[1]]()
+    {"selftest": selftest, "run": run, "run2": run2}[sys.argv[1]]()
