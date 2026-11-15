@@ -82,6 +82,66 @@ def run():
     print(json.dumps(P, indent=1, ensure_ascii=False))
 
 
+def band():
+    """B2 배포 준비: 1분봉 거래대금(V, 라이브 klines 와 같은 원천) 판 vs 레이더 · 위약(V 하루 전) · aggTrade 판(N) 참고 → 띠 재보정·포함률·조용/격함."""
+    rng = np.random.default_rng(RR.SEED); R = {}; pooled = {}
+    for c in RR.COINS:
+        cl, hi, lo, m0 = RR.load(c)
+        F = RR.features(cl, m0); M, day = RR.masks(F["mins"]); tr, te = M["train"], M["test"]
+        RR.vol_features(F, RR.load_qv(c))
+        for k in RR.VWIN:
+            F["z" + k] = np.r_[np.full(1440, np.nan), F[k][:-1440]]
+        F.update({k: v for k, v in extra(c, F["mins"]).items() if k[0] == "N"})
+        W, V = list(RR.WIN), list(RR.VWIN)
+        arms = {"H": W, "HV": W + V, "HVZ": W + ["z" + k for k in V], "HN": W + [k for k in F if str(k).startswith("N")]}
+        hmax = np.r_[pd.Series(hi[::-1]).rolling(15, min_periods=15).max().to_numpy()[::-1][1:], np.nan]
+        lmin = np.r_[pd.Series(lo[::-1]).rolling(15, min_periods=15).min().to_numpy()[::-1][1:], np.nan]
+        R[c] = {}
+        for H in (15, 60):
+            y = RR.target(F["r2"], H)
+            f = {a: RR.fit_predict(F, y, tr, cols)[0] for a, cols in arms.items()}
+            ok = te & np.isfinite(y) & np.all([np.isfinite(v) for v in f.values()], 0)
+            q = {a: RR.qlike(y[ok] ** 2, v[ok]) for a, v in f.items()}
+            r = {"n": int(ok.sum()), "qlike": {a: float(v.mean()) for a, v in q.items()}}
+            for a, b in (("HV", "H"), ("HVZ", "H"), ("HN", "H"), ("HN", "HV")):
+                d = q[a] - q[b]; dm = pd.Series(d).groupby(day[ok]).mean()
+                bs = np.array([rng.choice(dm.values, len(dm)).mean() for _ in range(RR.B)])
+                r[f"{a}-{b}"] = dict(rel=float(d.mean() / q[b].mean()), up90=float(np.quantile(bs, .9)), days_better=float((dm < 0).mean()))
+                pooled.setdefault((H, a, b), []).append(pd.DataFrame({"day": day[ok], "d": d, "base": q[b]}))
+            if H == 15:                                                   # 띠: 학습 분위 → 시험 포함률(레이더 coin_run·export 와 같은 식)
+                for a in ("H", "HV"):
+                    exc = np.maximum(hmax / cl - 1, 1 - lmin / cl) / np.sqrt(f[a]); okx = np.isfinite(exc)
+                    q80, q95 = np.quantile(exc[tr & okx], [.8, .95])
+                    up, dn = (hmax / cl - 1) / np.sqrt(f[a]), (1 - lmin / cl) / np.sqrt(f[a])
+                    tt, ts = tr & np.isfinite(up) & np.isfinite(dn), te & np.isfinite(up) & np.isfinite(dn)
+                    one_tr, one_te = np.r_[up[tt], dn[tt]], np.r_[up[ts], dn[ts]]
+                    tg = np.abs([(one_tr >= k).mean() - (one_te >= k).mean() for k in RR.TOUCH_K])
+                    w80 = np.nanmedian(np.sqrt(f[a][te]) * q80) * 100
+                    r[f"band_{a}"] = dict(q80=float(q80), q95=float(q95), cover80=float((exc[te & okx] <= q80).mean()),
+                                          cover95=float((exc[te & okx] <= q95).mean()), width80_med_pct=float(w80), touch_gap_max_pp=float(tg.max() * 100))
+            else:                                                         # 앞 1시간 조용/격함 정확도(레이더 coin_run 과 같은 식)
+                mins = F["mins"]; s60, k60 = RR.wsum(F["r2"], 60)
+                past = np.where((k60 == 0) & ((mins + 1) % 60 == 0), np.sqrt(s60), np.nan); pidx = np.flatnonzero(np.isfinite(past))
+                uh = pd.Series(past[pidx]).rolling(720, min_periods=600).median().to_numpy()
+                last = np.searchsorted(pidx, np.arange(len(cl)), "right") - 1
+                usual = np.where(last >= 0, uh[np.maximum(last, 0)], np.nan)
+                for a in ("H", "HV"):
+                    okr = te & np.isfinite(y) & np.isfinite(usual) & np.isfinite(f[a]); rt = np.sqrt(f[a]) / usual; big = y > usual
+                    qs, lb = okr & (rt <= .7), okr & (rt >= 1.5)
+                    r[f"regime_{a}"] = dict(quiet_acc=float((~big[qs]).mean()), quiet_cov=float(qs.sum() / okr.sum()),
+                                            loud_acc=float(big[lb].mean()), loud_cov=float(lb.sum() / okr.sum()))
+            R[c][H] = r
+            print(c, H, json.dumps({k: v for k, v in r.items() if k != "n"}, ensure_ascii=False, default=lambda x: round(x, 4)), flush=True)
+    P = {}
+    for (H, a, b), parts in pooled.items():
+        D = pd.concat(parts); g = D.groupby("day").d.agg(["sum", "count"]); idx = rng.integers(0, len(g), (RR.B, len(g)))
+        m = g["sum"].values[idx].sum(1) / g["count"].values[idx].sum(1)
+        P[f"{H}:{a}-{b}"] = dict(rel=float(D.d.mean() / D.base.mean()), up90=float(np.quantile(m, .9)),
+                                coins_better=int(sum(R[c][H][f"{a}-{b}"]["rel"] < 0 for c in RR.COINS)))
+    json.dump(dict(per_coin=R, pooled=P), open(TR / "radar_band.json", "w"), indent=1, ensure_ascii=False)
+    print(json.dumps(P, indent=1, ensure_ascii=False))
+
+
 def selftest():
     mins = np.arange(100, 110)
     F = pd.DataFrame({"t": (mins + 1) * 60})                     # frame 행 t = 분 m 끝 → m = t/60 − 1
@@ -90,4 +150,4 @@ def selftest():
 
 
 if __name__ == "__main__":
-    {"selftest": selftest, "run": run}[sys.argv[1] if len(sys.argv) > 1 else "selftest"]()
+    {"selftest": selftest, "run": run, "band": band}[sys.argv[1] if len(sys.argv) > 1 else "selftest"]()

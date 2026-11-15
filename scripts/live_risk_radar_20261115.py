@@ -2,7 +2,7 @@
 """실시간 위험 레이더 1분 워커 (2026-11-15) -- 배포 대기 A10 · 결과 docs/experiments/realtime_risk_radar_20261115.md.
 
 매분 마감 직후: 4코인 선물 1분봉(닫힌 봉만)을 캐시에 이어 붙이고, 연구와 같은 함수(research_realtime_risk_radar_20261115.features·design)와
-동결 계수(dashboard/risk_radar_params_20261115.json)로 마지막 분의
+동결 계수(dashboard/risk_radar_params_20261116.json, B2 거래대금 포함)로 마지막 분의
   · 다음 15분 σ̂ · «15분 안 머물 확률 80%·95%» 띠 · 현행 화면 σ(7일 1시간 고정, 비교용)
   · 앞 1시간 조용/보통/격함(예측 ÷ 직전 30일 1시간 중앙값)
   · 급변 경보(1분 |r| ≥ 4σ̂ 또는 5분 RV ≥ 3배 · 30분 중복 제거 · 15분 동안 켜 둠 -- 불통과 항목이라 «경고»만)
@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import binance_ban_guard  # noqa: E402,F401 -- 공용 밴 가드: requests 를 감싸 418/429 뒤엔 바이낸스 REST 를 내보내지 않는다
 import research_realtime_risk_radar_20261115 as R  # noqa: E402
 
-PARAMS = ROOT / "dashboard/risk_radar_params_20261115.json"
+PARAMS = ROOT / "dashboard/risk_radar_params_20261116.json"   # B2(11-16): + 거래대금 5창 · 옛 계수 _20261115.json 은 되돌리기용
 CACHE = ROOT / "data/live/risk_radar"
 LATEST = ROOT / "data/live/risk_radar_latest.json"
 LOG = ROOT / "data/live/risk_radar_forward.jsonl"
@@ -49,7 +49,7 @@ def save(df: pd.DataFrame, path: Path) -> None:
 
 
 def read_cache(path: Path) -> pd.DataFrame:
-    empty = pd.DataFrame({"t": pd.Series(dtype="int64"), **{k: pd.Series(dtype="float64") for k in "hlc"}})
+    empty = pd.DataFrame({"t": pd.Series(dtype="int64"), **{k: pd.Series(dtype="float64") for k in ("h", "l", "c", "v")}})
     if not path.exists():
         return empty
     try:
@@ -64,13 +64,15 @@ def update_cache(coin: str, now_ms: int, fetch=rest, path: Path | None = None) -
     path = path or CACHE / f"{coin}_1m.parquet"
     df = read_cache(path)
     start = int(df.t.iloc[-1]) if len(df) else (now_ms // MIN - KEEP) * MIN   # 마지막 봉을 한 번 더 받아 덮는다(경계 직후 덜 닫힌 봉 교정)
+    if len(df) and ("v" not in df or df.v.tail(1441).isna().any()):          # 거래대금 없는 옛 캐시 → 1일+ 다시 받아 덮는다(VWIN 최장 1440분)
+        start = min(start, int(df.t.iloc[-1]) - 1500 * MIN)
     while start < now_ms - MIN:
         lim = 1000 if now_ms - start > 99 * MIN else 99            # 평소엔 1분 몇 개(가중치 1)
         k = fetch(f"{coin}USDT", start, lim)
         k = [x for x in k if x[6] < now_ms]                         # 닫힌 봉만
         if not k:
             break
-        new = pd.DataFrame({"t": [x[0] for x in k], "h": [float(x[2]) for x in k], "l": [float(x[3]) for x in k], "c": [float(x[4]) for x in k]})
+        new = pd.DataFrame({"t": [x[0] for x in k], "h": [float(x[2]) for x in k], "l": [float(x[3]) for x in k], "c": [float(x[4]) for x in k], "v": [float(x[5]) for x in k]})
         df = pd.concat([df, new]).drop_duplicates("t", keep="last").sort_values("t").tail(KEEP).reset_index(drop=True)
         save(df, path)                                              # 쪽마다 저장(백필 중 실패해도 받은 만큼 남음)
         if k[-1][0] + MIN <= start:
@@ -84,7 +86,7 @@ def update_cache(coin: str, now_ms: int, fetch=rest, path: Path | None = None) -
 def grid(df: pd.DataFrame):
     m0, m1 = int(df.t.iloc[0]) // MIN, int(df.t.iloc[-1]) // MIN
     g = df.assign(m=df.t // MIN).set_index("m").reindex(range(m0, m1 + 1))
-    return g.c.to_numpy(float), g.h.to_numpy(float), g.l.to_numpy(float), m0
+    return g.c.to_numpy(float), g.h.to_numpy(float), g.l.to_numpy(float), m0, (g.v * g.c).to_numpy(float)   # 거래대금 = 연구 load_qv 와 같은 v×c
 
 
 def usual60(F: dict) -> np.ndarray:
@@ -97,9 +99,12 @@ def usual60(F: dict) -> np.ndarray:
     return np.where(last >= 0, uh[np.maximum(last, 0)], np.nan) if len(uh) else np.full(len(mins), np.nan)
 
 
-def compute(cl, hi, lo, m0, p: dict, P: dict) -> dict:
+def compute(cl, hi, lo, m0, p: dict, P: dict, qv=None) -> dict:
     """배열 전체에 대해 예측(인과) → 마지막 분 결과 + 전체 배열(대조용)."""
-    F = R.features(cl, m0); X = R.design(F, P["cols"])
+    F = R.features(cl, m0)
+    if any(c in R.VWIN for c in P["cols"]):
+        R.vol_features(F, qv)
+    X = R.design(F, P["cols"])
     f15 = p["c15"] * np.exp(2 * X @ np.array(p["beta15"])); f60 = p["c60"] * np.exp(2 * X @ np.array(p["beta60"]))
     us = usual60(F)
     sig1 = np.sqrt(np.r_[np.nan, f15[:-1]]) / np.sqrt(15); f5 = np.r_[np.full(5, np.nan), f15[:-5]]
@@ -130,8 +135,8 @@ def main(now_ms: int | None = None, fetch=rest) -> int:
     for coin, p in P["coins"].items():
         try:                                                        # 한 코인 실패가 나머지를 막지 않게
             df = update_cache(coin, now_ms, fetch)
-            cl, hi, lo, m0 = grid(df)
-            out, _ = compute(cl, hi, lo, m0, p, P)
+            cl, hi, lo, m0, qv = grid(df)
+            out, _ = compute(cl, hi, lo, m0, p, P, qv)
             out["data_age_s"] = round(now_ms / 1000 - (m0 + len(cl)) * 60, 1)
         except Exception as e:
             out = dict(error=f"{type(e).__name__}: {str(e)[:200]}", valid=False)
@@ -152,15 +157,15 @@ def selftest():
     P = json.loads(PARAMS.read_text())
     if (R.VIS / "klines1m").exists():
         for coin in ("ETH", "XRP"):
-            cl, hi, lo, m0 = R.load(coin); p = P["coins"][coin]
-            _, full = compute(cl, hi, lo, m0, p, P)
-            F = R.features(cl, m0); X = R.design(F, P["cols"])
+            cl, hi, lo, m0 = R.load(coin); qv = R.load_qv(coin); p = P["coins"][coin]
+            _, full = compute(cl, hi, lo, m0, p, P, qv)
+            F = R.vol_features(R.features(cl, m0), qv); X = R.design(F, P["cols"])
             ref = p["c15"] * np.exp(2 * X @ np.array(p["beta15"]))
             assert np.allclose(full["f15"], ref, equal_nan=True)
             nu = 0
             for i in (len(cl) - 120000, len(cl) - 60000, len(cl) - 5000):   # 서버처럼 31일만 들고 있을 때 마지막 분 값
                 a = i - KEEP + 1
-                o, _ = compute(cl[a:i + 1], hi[a:i + 1], lo[a:i + 1], m0 + a, p, P)
+                o, _ = compute(cl[a:i + 1], hi[a:i + 1], lo[a:i + 1], m0 + a, p, P, qv[a:i + 1])
                 if np.isfinite(full["f15"][i]):
                     assert np.isclose(o["sigma15_pct"], np.sqrt(full["f15"][i]) * 100), coin
                 if not np.isnan(cl[a:i + 1]).any():                     # 구멍 없는 31일이면 연구 값과 같아야 함(구멍이 있으면 600~719시간 중앙값 -- 서버 장애 때만)
@@ -175,6 +180,8 @@ def selftest():
         pth = Path(td) / "x.parquet"
         d1 = update_cache("ETH", base, fake, pth); assert len(d1) <= KEEP and d1.t.iloc[-1] + MIN - 1 < base
         d2 = update_cache("ETH", base + 3 * MIN, fake, pth); assert d2.t.iloc[-1] == d1.t.iloc[-1] + 3 * MIN and d2.t.is_monotonic_increasing and not d2.t.duplicated().any()
+        d1.drop(columns="v").to_parquet(pth); d4 = update_cache("ETH", base + 3 * MIN, fake, pth)              # 거래대금 없는 옛 캐시 → 꼬리 다시 받아 채움
+        assert d4.v.tail(1441).notna().all() and not d4.t.duplicated().any()
         pth.write_bytes(b"broken"); d3 = update_cache("ETH", base, fake, pth); assert len(d3) > 0 and pth.with_suffix(".bad").exists()   # 깨진 캐시 → 치우고 다시 백필
         g = globals(); keep = (g["CACHE"], g["LATEST"], g["LOG"])                                       # main: 한 코인 실패가 나머지를 막지 않음 · NaN 없는 json
         g["CACHE"], g["LATEST"], g["LOG"] = Path(td) / "c", Path(td) / "l.json", Path(td) / "f.jsonl"

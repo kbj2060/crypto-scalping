@@ -20,13 +20,35 @@ SEED, B = 20261115, 2000
 TOUCH_K = np.round(np.arange(0.25, 4.01, 0.25), 2)                               # 꼬리표 «15분 안 닿을 확률» 표의 거리(σ̂ 배수)
 
 
-def load(c):
+VWIN = {"lqv1": 1, "lqv5": 5, "lqv15": 15, "lqv60": 60, "lqv1d": 1440}             # 2026-11-16 B2: 거래대금(1분봉 v×c) 창
+
+
+def _kl(c):
     fs = sorted(glob.glob(str(VIS / f"klines1m/{c}USDT-1m-2023-12.parquet"))) + sorted(glob.glob(str(VIS / f"klines1m/{c}USDT-1m-202[4-6]-*.parquet"))) \
         + sorted(glob.glob(str(VIS / f"klines1m_daily/{c}USDT-1m-2026-*.parquet")))
     k = pd.concat([pd.read_parquet(f) for f in fs]).drop_duplicates("t").sort_values("t")
     m0, m1 = int(k.t.iloc[0]) // 60000, int(k.t.iloc[-1]) // 60000
-    g = k.assign(m=k.t // 60000).set_index("m").reindex(range(m0, m1 + 1))         # 빈 분 = NaN
+    return k.assign(m=k.t // 60000).set_index("m").reindex(range(m0, m1 + 1)), m0   # 빈 분 = NaN
+
+
+def load(c):
+    g, m0 = _kl(c)
     return g.c.to_numpy(), g.h.to_numpy(), g.l.to_numpy(), m0
+
+
+def load_qv(c):
+    """load(c) 와 같은 분 격자의 거래대금(v×c, USDT)."""
+    g, _ = _kl(c)
+    return (g.v * g.c).to_numpy()
+
+
+def vol_features(F, qv):
+    """분 t 까지 거래대금 로그 합(lrv 와 같은 결측 규칙) -- F 에 VWIN 열을 더한다."""
+    for nm, w in VWIN.items():
+        s, k = wsum(qv, w)
+        ok = (k == 0) if w <= 240 else (k <= 0.05 * w)
+        F[nm] = np.where(ok, np.log(np.maximum(s * w / np.maximum(w - k, 1), 1.0)), np.nan)
+    return F
 
 
 def wsum(x, w):
@@ -223,14 +245,18 @@ def run():
     print("판정", json.dumps(P, ensure_ascii=False, default=float))
 
 
-def export(path=ROOT / "dashboard/risk_radar_params_20261115.json"):
-    """서빙용 동결 계수: 학습 구간(2024-01-08~2025-12) 적합 그대로. 코인별 15분·60분 β·눈금 c·15분 띠 분위."""
-    P = dict(source="scripts/research_realtime_risk_radar_20261115.py export", prereg="docs/prereg/realtime_risk_radar_20261115.md",
-             cols=list(WIN), cells=48, quiet=0.7, loud=1.5, alert_k=4.0, alert_k5=3.0, alert_dedupe_min=30, coins={})
+def export(path=ROOT / "dashboard/risk_radar_params_20261115.json", vol=False):
+    """서빙용 동결 계수: 학습 구간(2024-01-08~2025-12) 적합 그대로. 코인별 15분·60분 β·눈금 c·15분 띠 분위.
+    vol=True: + 거래대금 VWIN 열(B2, docs/experiments/radar_hawkes_20261116.md) → dashboard/risk_radar_params_20261116.json."""
+    cols = list(WIN) + (list(VWIN) if vol else [])
+    P = dict(source="scripts/research_realtime_risk_radar_20261115.py export" + (" vol" if vol else ""), prereg="docs/prereg/realtime_risk_radar_20261115.md",
+             cols=cols, cells=48, quiet=0.7, loud=1.5, alert_k=4.0, alert_k5=3.0, alert_dedupe_min=30, coins={})
     for c in COINS:
         cl, hi, lo, m0 = load(c); F = features(cl, m0); M, _ = masks(F["mins"]); tr = M["train"]
+        if vol:
+            vol_features(F, load_qv(c))
         y15, y60 = target(F["r2"], 15), target(F["r2"], 60)
-        f15, b15, c15 = fit_predict(F, y15, tr, list(WIN)); _, b60, c60 = fit_predict(F, y60, tr, list(WIN))
+        f15, b15, c15 = fit_predict(F, y15, tr, cols); _, b60, c60 = fit_predict(F, y60, tr, cols)
         hmax = np.r_[pd.Series(hi[::-1]).rolling(15, min_periods=15).max().to_numpy()[::-1][1:], np.nan]
         lmin = np.r_[pd.Series(lo[::-1]).rolling(15, min_periods=15).min().to_numpy()[::-1][1:], np.nan]
         exc = np.maximum(hmax / cl - 1, 1 - lmin / cl) / np.sqrt(f15); okx = tr & np.isfinite(exc)
@@ -256,6 +282,12 @@ def selftest():
     for k in (*WIN, "b0sd", "cell"):
         a, b = F[k][:20001], G[k][:20001]
         assert np.allclose(a[np.isfinite(a)], b[np.isfinite(a)]) and (np.isfinite(a) == np.isfinite(b)).all(), k   # 피쳐는 과거만
+    qv = rng.uniform(1e5, 1e6, len(c)); qv2 = qv.copy(); qv2[20001:] *= 50              # 거래대금 창도 과거만
+    vf, vg = vol_features({}, qv), vol_features({}, qv2)
+    for k in VWIN:
+        a, b = vf[k][:20001], vg[k][:20001]
+        assert np.allclose(a[np.isfinite(a)], b[np.isfinite(a)]) and (np.isfinite(a) == np.isfinite(b)).all(), k
+    assert np.isclose(vf["lqv60"][15000], np.log(qv[14941:15001].sum()))
     r = np.diff(np.log(c), prepend=np.nan); t = 15000
     assert np.isclose(target(r * r, 15)[t], np.sqrt((r[t + 1:t + 16] ** 2).sum()))
     assert np.isclose(np.exp(F["lrv60"][t]), np.sqrt((r[t - 59:t + 1] ** 2).sum()))
@@ -268,4 +300,5 @@ def selftest():
 
 
 if __name__ == "__main__":
-    {"selftest": selftest, "run": run, "export": export}[sys.argv[1] if len(sys.argv) > 1 else "selftest"]()
+    {"selftest": selftest, "run": run, "export": export,
+     "export_vol": lambda: export(ROOT / "dashboard/risk_radar_params_20261116.json", vol=True)}[sys.argv[1] if len(sys.argv) > 1 else "selftest"]()

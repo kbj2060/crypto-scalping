@@ -1,7 +1,7 @@
 """⑤ 예측 줄 «15분 폭»·«앞 1시간» + 손절·익절 꼬리표 «15분 N%» (2026-11-15, 시안 C · 배포 대기 A10).
 
 값은 서버 크론 scripts/live_risk_radar_20261115.py 가 매분 쓰는 data/live/risk_radar_latest.json 을 그대로 읽는다(화면·서버는 계산 안 함).
-꼬리표 확률 표(touch_k → coins.x.touch)는 동결 계수 dashboard/risk_radar_params_20261115.json 에서 붙인다.
+꼬리표 확률 표(touch_k → coins.x.touch)는 동결 계수 dashboard/risk_radar_params_20261116.json 에서 붙인다.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LATEST = ROOT / "data/live/risk_radar_latest.json"
-PARAMS = ROOT / "dashboard/risk_radar_params_20261115.json"
+PARAMS = ROOT / "dashboard/risk_radar_params_20261116.json"   # 워커와 같은 계수(B2)
 STALE_S = 180                                 # 워커가 3분 넘게 못 쓰면 화면은 «지연»
 
 
