@@ -123,5 +123,30 @@ def selftest() -> None:
     print("selftest ok")
 
 
+def diag() -> None:
+    """채점 뒤 진단(판정 안 씀): 미결을 빼고 «결판 난 경주»만의 이어짐 비율 · 결판 비율. 실제 가격만."""
+    out = {}
+    for coin in SM.COINS:
+        B = SM.bars(SM.load_1m(f"{coin}USDT"), 5); h, l, c, t = B["h"], B["l"], B["c"], B["t"]
+        S = starts(int(t[0]), int(t[-1]))
+        for kind, ss in S.items():
+            ix = np.searchsorted(t, ss); ok = (ix < len(t)) & (t[np.clip(ix, 0, len(t) - 1)] == ss)
+            for s0, i0 in zip(ss[ok], ix[ok]):
+                for tf, L in LS.items():
+                    o = orb(B, int(s0), L, int(i0))
+                    if o is None:
+                        continue
+                    b, d, W = o; ref = c[b]; res = 0
+                    for j in range(b + 1, min(b + WIN, len(c) - 1) + 1):
+                        bad = (l[j] <= ref - W) if d == 1 else (h[j] >= ref + W)
+                        good = (h[j] >= ref + W) if d == 1 else (l[j] <= ref - W)
+                        if bad: res = -1; break
+                        if good: res = 1; break
+                    a = out.setdefault(f"{tf}|{kind}", [0, 0, 0]); a[0] += res == 1; a[1] += res == -1; a[2] += 1
+        print(coin, flush=True)
+    r = {k: dict(n=v[2], decided=round((v[0] + v[1]) / v[2], 4), win_given_decided=round(v[0] / max(1, v[0] + v[1]), 4)) for k, v in out.items()}
+    json.dump(r, open(OUT / "diag_decided.json", "w"), ensure_ascii=False, indent=1); print(r)
+
+
 if __name__ == "__main__":
-    {"selftest": selftest, "run": run}[sys.argv[1]]()
+    {"selftest": selftest, "run": run, "diag": diag}[sys.argv[1]]()
