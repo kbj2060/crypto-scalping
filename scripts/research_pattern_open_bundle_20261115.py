@@ -127,10 +127,20 @@ def run2() -> None:
             print(coin, draw, flush=True)
     E, PA = pd.concat(rows, ignore_index=True), pd.concat(aggs, ignore_index=True)
     E.to_parquet(out / "events.parquet"); PA.to_parquet(out / "placebo_agg.parquet")
+    judge2()
+
+
+def judge2() -> None:
+    """run2 저장 사건으로 판정만(채점 뒤 4시간 보조 칸 KeyError 수정 — 판정 기준 변경 없음)."""
+    import research_orb_meaning_20261115 as OR
+    out = OUT.parent / "double_top_r2_newcoins_20261116"
+    E, PA = pd.read_parquet(out / "events.parquet"), pd.read_parquet(out / "placebo_agg.parquet")
     SM.TFS, SM.COINS = CB.TFS, list(OR.NEW)
     SM.MAIN_TFS, SM.CELLS, SM.P2OF = ("15m", "1h"), ["D1"], {"D1": "P3D1"}
     main = SM.judge(E, PA)
     for v in main.values():                                  # 코인 ≥ 4/5 — judge 는 3 고정이라 다시 셈
+        if "holm" not in v:                                  # 4시간 = 보조(Holm 밖)
+            continue
         ok = sum(x > 0 for x in v["coin_diff_pp"].values()) >= 4 and all(x > 0 for x in v["half_diff_pp"].values())
         v["pass"] = bool(v["holm"] and v["lo90_pp"] > 0 and v.get("lo90_2_pp", -1) > 0 and ok)
         v["candidate"] = bool(v["diff_pp"] > 0 and v.get("diff2_pp", -1) > 0 and ok)
@@ -150,4 +160,4 @@ def selftest2() -> None:
 
 
 if __name__ == "__main__":
-    {"selftest": selftest, "run": run, "run2": run2, "selftest2": selftest2}[sys.argv[1]]()
+    {"selftest": selftest, "run": run, "run2": run2, "judge2": judge2, "selftest2": selftest2}[sys.argv[1]]()
