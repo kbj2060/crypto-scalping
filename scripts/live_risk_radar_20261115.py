@@ -44,6 +44,49 @@ def rest(symbol: str, start_ms: int, limit: int) -> list:
     return r.json()
 
 
+DVOL_URL = "https://www.deribit.com/api/v2/public/get_volatility_index_data"   # 2026-11-16 IV(1시간 식, ETH·BTC) -- 바이낸스 IP 와 무관
+IV_KEEP_H = 900                                                                 # 30일 분위(720시간) + 여유
+
+
+def dvol_rest(coin: str, start_ms: int, end_ms: int) -> list:
+    import requests
+    r = requests.get(DVOL_URL, params=dict(currency=coin, start_timestamp=start_ms, end_timestamp=end_ms, resolution="3600"), timeout=20)
+    r.raise_for_status()
+    return r.json()["result"]["data"]                                          # [[봉 시작 ms, o, h, l, c], ...]
+
+
+def update_dvol(coin: str, now_ms: int, fetch=dvol_rest, path: Path | None = None) -> pd.DataFrame:
+    """DVOL 시간봉 캐시(ts·close·got). 마지막 봉이 끝나면(또는 비었으면) 그 앞 3시간부터 다시 받아 덮는다 -- 시간에 한 번꼴.
+    got = 받은 시각: 끝나기 전에 받은 봉(형성 중 값)은 아래 dvol_series 가 안 쓴다."""
+    path = path or CACHE / f"{coin}_dvol.parquet"
+    try:
+        df = pd.read_parquet(path) if path.exists() else None
+    except Exception:
+        df = None
+    if df is None or not len(df):
+        df = pd.DataFrame({"ts": pd.Series(dtype="int64"), "close": pd.Series(dtype="float64"), "got": pd.Series(dtype="int64")})
+    if len(df) and now_ms < int(df.ts.max()) + 3600_000:
+        return df
+    start = int(df.ts.max()) - 3 * 3600_000 if len(df) else now_ms - IV_KEEP_H * 3600_000
+    rows = []
+    while start < now_ms:                                                        # 500시간씩
+        end = min(now_ms, start + 500 * 3600_000)
+        rows += [(int(x[0]), float(x[4])) for x in fetch(coin, start, end)]
+        start = end
+    if rows:
+        new = pd.DataFrame(rows, columns=["ts", "close"]).assign(got=now_ms)
+        df = pd.concat([df, new]).drop_duplicates("ts", keep="last").sort_values("ts")
+        df = df[df.ts >= now_ms - IV_KEEP_H * 3600_000].reset_index(drop=True)
+        save(df, path)
+    return df
+
+
+def dvol_series(df: pd.DataFrame):
+    """캐시 → 연구 iv_hourly 와 같은 (아는 시각, log, 30일 분위). 끝나기 전에 받은 봉은 뺀다."""
+    d = df[df.got >= df.ts + 3600_000]
+    return R.iv_hourly(d.ts.to_numpy() // 1000, d.close.to_numpy(float)) if len(d) else None
+
+
 def save(df: pd.DataFrame, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp.parquet"); df.to_parquet(tmp); tmp.replace(path)          # 원자적 교체(쓰다 죽어도 옛 캐시 유지)
@@ -100,13 +143,17 @@ def usual60(F: dict) -> np.ndarray:
     return np.where(last >= 0, uh[np.maximum(last, 0)], np.nan) if len(uh) else np.full(len(mins), np.nan)
 
 
-def compute(cl, hi, lo, m0, p: dict, P: dict, qv=None) -> dict:
-    """배열 전체에 대해 예측(인과) → 마지막 분 결과 + 전체 배열(대조용)."""
+def compute(cl, hi, lo, m0, p: dict, P: dict, qv=None, iv=None) -> dict:
+    """배열 전체에 대해 예측(인과) → 마지막 분 결과 + 전체 배열(대조용). iv = dvol_series 결과(없으면 1시간도 B2 식)."""
     F = R.features(cl, m0)
     if any(c in R.VWIN for c in P["cols"]):
         R.vol_features(F, qv, p.get("vclip"))   # 창별 하한 = 학습과 같은 값(검증 11-16 ①)
     X = R.design(F, P["cols"])
     f15 = p["c15"] * np.exp(2 * X @ np.array(p["beta15"])); f60 = p["c60"] * np.exp(2 * X @ np.array(p["beta60"]))
+    f60i = np.full(len(cl), np.nan)
+    if iv is not None and "beta60_iv" in p:                                     # 1시간 = IV 판(B2 위 −0.53%) · IV 가 낡았으면 그 분은 B2 식
+        R.iv_features(F, *iv); f60i = p["c60_iv"] * np.exp(2 * R.design(F, p["cols60_iv"]) @ np.array(p["beta60_iv"]))
+        f60 = np.where(np.isfinite(f60i), f60i, f60)
     us = usual60(F)
     sig1 = np.sqrt(np.r_[np.nan, f15[:-1]]) / np.sqrt(15); f5 = np.r_[np.full(5, np.nan), f15[:-5]]
     raw = (np.abs(F["r"]) >= P["alert_k"] * sig1) | (np.exp(F["lrv5"]) >= P["alert_k5"] * np.sqrt(f5) * np.sqrt(5 / 15))
@@ -126,18 +173,28 @@ def compute(cl, hi, lo, m0, p: dict, P: dict, qv=None) -> dict:
     out = dict(ts=pd.Timestamp((m0 + i + 1) * MIN, unit="ms", tz="UTC").strftime("%Y-%m-%dT%H:%M:%SZ"), price=fin(cl[i]),
                sigma15_pct=pc(s15), band80_pct=pc(s15, p["q80"]), band95_pct=pc(s15, p["q95"]), baseline7d_sigma15_pct=pc(b0),
                sigma60_pct=pc(s60), usual60_pct=pc(fin(us[i])), ratio60=ratio, state60=state,
-               alert=dict(active=ago is not None and ago < 15, minutes_ago=ago), valid=s15 is not None and ratio is not None)
+               alert=dict(active=ago is not None and ago < 15, minutes_ago=ago), valid=s15 is not None and ratio is not None, iv60=bool(np.isfinite(f60i[i])))
     return out, dict(f15=f15, f60=f60, usual=us, raw=raw)
 
 
-def main(now_ms: int | None = None, fetch=rest) -> int:
+def main(now_ms: int | None = None, fetch=rest, dvol_fetch=dvol_rest) -> int:
     now_ms = now_ms or int(time.time() * 1000)
     P = json.loads(PARAMS.read_text()); res = {}
     for coin, p in P["coins"].items():
         try:                                                        # 한 코인 실패가 나머지를 막지 않게
             df = update_cache(coin, now_ms, fetch)
             cl, hi, lo, m0, qv = grid(df)
-            out, _ = compute(cl, hi, lo, m0, p, P, qv)
+            iv = None
+            if "beta60_iv" in p:
+                try:                                                        # IV 실패는 1시간을 B2 식으로 떨어뜨릴 뿐(코인 출력은 그대로)
+                    iv = dvol_series(update_dvol(coin, now_ms, dvol_fetch))
+                except Exception as e:
+                    print(f"{coin} DVOL {type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
+                    try:
+                        iv = dvol_series(pd.read_parquet(CACHE / f"{coin}_dvol.parquet"))
+                    except Exception:
+                        iv = None
+            out, _ = compute(cl, hi, lo, m0, p, P, qv, iv)
             out["data_age_s"] = round(now_ms / 1000 - (m0 + len(cl)) * 60, 1)
             if out["data_age_s"] > STALE_DATA_S:                   # REST 가 새 봉을 안 줘도 옛 값이 지금 값처럼 보이던 것(검증 11-16 ②) -- 화면은 24h 로 떨어진다
                 out.update(valid=False, error=f"데이터 지연 {out['data_age_s']:.0f}초")
@@ -165,6 +222,10 @@ def selftest():
             F = R.vol_features(R.features(cl, m0), qv, p.get("vclip")); X = R.design(F, P["cols"])
             ref = p["c15"] * np.exp(2 * X @ np.array(p["beta15"]))
             assert np.allclose(full["f15"], ref, equal_nan=True)
+            if "beta60_iv" in p:                                         # 1시간 IV 판 = 연구 식(같은 DVOL 시간봉)
+                iv = R.load_iv(coin); _, fi = compute(cl, hi, lo, m0, p, P, qv, iv)
+                R.iv_features(F, *iv); ri = p["c60_iv"] * np.exp(2 * R.design(F, p["cols60_iv"]) @ np.array(p["beta60_iv"]))
+                ok = np.isfinite(ri); assert ok.mean() > 0.5 and np.allclose(fi["f60"][ok], ri[ok]), coin
             nu = 0
             for i in (len(cl) - 120000, len(cl) - 60000, len(cl) - 5000):   # 서버처럼 31일만 들고 있을 때 마지막 분 값
                 a = i - KEEP + 1
@@ -176,6 +237,15 @@ def selftest():
             assert nu >= 1, coin
             print(f"  {coin}: 연구 배열과 일치 · 31일 창 마지막 분 일치")
     import tempfile
+    with tempfile.TemporaryDirectory() as td:                            # DVOL 캐시: 형성 봉 안 씀 · 한 시간 안엔 다시 안 받음 · 봉 끝나면 받음
+        bh = 1_790_000_000_000 // 3600_000 * 3600_000
+        fdv = lambda coin, s, e: [[t, 0, 0, 0, 50.0 + (t // 3600_000) % 7] for t in range(s - s % 3600_000, e, 3600_000)]
+        def nofetch(*a):
+            raise AssertionError("한 시간 안 재요청")
+        pv = Path(td) / "dv.parquet"
+        d1 = update_dvol("ETH", bh + 30 * MIN, fdv, pv); assert len(d1) >= 899 and d1.ts.max() == bh and dvol_series(d1)[0].max() == bh // 1000
+        update_dvol("ETH", bh + 40 * MIN, nofetch, pv)
+        d3 = update_dvol("ETH", bh + 3600_000 + 4000, fdv, pv); assert dvol_series(d3)[0].max() == (bh + 3600_000) // 1000 and not d3.ts.duplicated().any()
     base = 1_790_000_000_000 // MIN * MIN
     def fake(sym, start, lim):
         return [[t, 0, 101.0, 99.0, 100.0 + (t // MIN) % 7, 0, t + MIN - 1] for t in range(start, start + lim * MIN, MIN)]
@@ -192,11 +262,11 @@ def selftest():
             if sym == "SOLUSDT":
                 raise ConnectionError("x")
             return fake(sym, start, lim)
-        rc = main(base, half); g["CACHE"], g["LATEST"], g["LOG"] = keep
+        rc = main(base, half, lambda *a: []); g["CACHE"], g["LATEST"], g["LOG"] = keep
         out = json.loads((Path(td) / "l.json").read_text())
         assert rc == 1 and "error" in out["coins"]["SOL"] and "sigma15_pct" in out["coins"]["ETH"]
         g["CACHE"], g["LATEST"], g["LOG"] = Path(td) / "c", Path(td) / "l.json", Path(td) / "f.jsonl"   # REST 가 10분 동안 새 봉을 안 주면 그 코인은 무효(검증 11-16 ②)
-        main(base + 10 * MIN, lambda sym, start, lim: []); g["CACHE"], g["LATEST"], g["LOG"] = keep
+        main(base + 10 * MIN, lambda sym, start, lim: [], lambda *a: []); g["CACHE"], g["LATEST"], g["LOG"] = keep
         o2 = json.loads((Path(td) / "l.json").read_text())["coins"]["ETH"]
         assert o2["valid"] is False and "지연" in o2["error"] and o2["data_age_s"] > STALE_DATA_S
     print("selftest OK")

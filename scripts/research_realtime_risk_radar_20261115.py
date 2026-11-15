@@ -55,6 +55,32 @@ def vol_features(F, qv, vclip=None):
     return F
 
 
+IV_COLS, IV_COINS, IV_STALE_S = ["I_l", "I_p"], ("ETH", "BTC"), 7200        # 2026-11-16 IV(Deribit DVOL) -- 1시간 식에만(docs/experiments/radar_iv_20261116.md)
+DVOL_DIR = Path("/home/kbj20/crypto-scalping/data/vision_cg_20261116/dvol")
+
+
+def iv_hourly(ts_s, close):
+    """DVOL 시간봉(봉 시작 초 · 종가) → (아는 시각 = 봉 끝, log 종가, 직전 720시간(자기 포함) 중 분위 0~100). 연구·라이브 같은 식."""
+    d = pd.DataFrame({"t": np.asarray(ts_s, dtype=np.int64), "x": np.asarray(close, dtype=float)})
+    d = d[d.x > 0].drop_duplicates("t", keep="last").sort_values("t")
+    pct = d.x.rolling(720, min_periods=240).rank(pct=True).to_numpy() * 100
+    return d.t.to_numpy() + 3600, np.log(d.x.to_numpy()), pct
+
+
+def load_iv(c):
+    d = pd.read_csv(DVOL_DIR / f"{c}_dvol_hourly.csv", parse_dates=["timestamp"])
+    return iv_hourly(d.timestamp.astype("int64").to_numpy() // 10**9, d.close.to_numpy(float))
+
+
+def iv_features(F, T, lx, pct):
+    """결정 분 m(마감 (m+1)·60초)에 끝난 마지막 DVOL 시간봉 → F 에 I_l(log)·I_p(30일 분위). 2시간 넘게 낡으면 NaN."""
+    now = (F["mins"] + 1) * 60
+    j = np.searchsorted(T, now, "right") - 1
+    ok = (j >= 0) & (now - T[np.maximum(j, 0)] <= IV_STALE_S)
+    F["I_l"] = np.where(ok, lx[np.maximum(j, 0)], np.nan); F["I_p"] = np.where(ok, pct[np.maximum(j, 0)], np.nan)
+    return F
+
+
 def wsum(x, w):
     """x[t-w+1..t] 합과 그 안의 NaN 개수(자기 포함, 과거만)."""
     v = np.nan_to_num(x); n = np.isnan(x).astype(float)
@@ -264,6 +290,11 @@ def export(path=ROOT / "dashboard/risk_radar_params_20261115.json", vol=False):
             vol_features(F, load_qv(c), vclip)
         y15, y60 = target(F["r2"], 15), target(F["r2"], 60)
         f15, b15, c15 = fit_predict(F, y15, tr, cols); _, b60, c60 = fit_predict(F, y60, tr, cols)
+        ivp = {}
+        if vol and c in IV_COINS:                                                    # 1시간 식만 IV 판을 따로(없으면 위 B2 식으로 떨어진다)
+            iv_features(F, *load_iv(c)); oki = tr & np.isfinite(F["I_l"]) & np.isfinite(F["I_p"])
+            _, b60i, c60i = fit_predict(F, y60, oki, cols + IV_COLS)
+            ivp = dict(cols60_iv=cols + IV_COLS, beta60_iv=b60i.tolist(), c60_iv=float(c60i))
         hmax = np.r_[pd.Series(hi[::-1]).rolling(15, min_periods=15).max().to_numpy()[::-1][1:], np.nan]
         lmin = np.r_[pd.Series(lo[::-1]).rolling(15, min_periods=15).min().to_numpy()[::-1][1:], np.nan]
         exc = np.maximum(hmax / cl - 1, 1 - lmin / cl) / np.sqrt(f15); okx = tr & np.isfinite(exc)
@@ -274,7 +305,7 @@ def export(path=ROOT / "dashboard/risk_radar_params_20261115.json", vol=False):
         one = np.r_[up[okt], dn[okt]]                                                # 한쪽 선 «15분 안 닿을 확률»(위·아래 합침, 학습 구간) -- 꼬리표용
         P["touch_k"] = TOUCH_K.tolist()
         P["coins"][c] = dict(beta15=b15.tolist(), c15=float(c15), beta60=b60.tolist(), c60=float(c60), q80=float(q80), q95=float(q95), cb0=cb0,
-                             touch=[float((one >= k).mean()) for k in TOUCH_K], **({"vclip": vclip} if vclip else {}))
+                             touch=[float((one >= k).mean()) for k in TOUCH_K], **({"vclip": vclip} if vclip else {}), **ivp)
         print(c, "c15", round(c15, 4), "q80", round(q80, 3), "q95", round(q95, 3))
     path.write_text(json.dumps(P, indent=1))
     print("→", path)
@@ -303,6 +334,10 @@ def selftest():
     assert abs(qlike(np.array([2.0]), np.array([2.0]))[0]) < 1e-12
     x = np.r_[np.ones(5), np.nan, np.ones(5)]; s, k = wsum(x, 3); assert s[4] == 3 and k[6] == 1 and k[8] == 0
     s, k = fwd(x, 3); assert s[0] == 3 and k[3] == 1 and k[5] == 0
+    ts = np.arange(1000) * 3600 + 3600 * 400_000; cx = np.exp(rng.normal(4, .1, 1000))       # IV: 봉 끝 전엔 그 봉을 안 쓴다 · 900시간 창 분위 = 전체 분위
+    T, lx, pct = iv_hourly(ts, cx); _, _, pw = iv_hourly(ts[-900:], cx[-900:]); assert np.allclose(pct[-100:], pw[-100:])
+    Fm = {"mins": np.array([(ts[500] + 3600) // 60 - 1, (ts[500] + 3600) // 60 - 2])}; iv_features(Fm, T, lx, pct)
+    assert np.isclose(Fm["I_l"][0], lx[500]) and np.isclose(Fm["I_l"][1], lx[499])       # 끝난 순간부터 · 1분 전엔 앞 봉
     print("selftest OK")
 
 
