@@ -7137,6 +7137,87 @@ function measIdx(bars, t) {   // 봉 시각 → 봉 번호(소수) -- 화면 밖
 //   OB = 스윙 다음 봉~돌파 직전 봉 중 저가 최저(하락은 고가 최고) 봉의 [저가, 고가](꼬리 포함·색 조건 없음).
 //   검증(4코인 2022~2026-11): 첫 닿음 버팀 68.9% vs 무작위 61.1%·옆 띠 64.9% -- 100봉 안 첫 닿음만 셌다 → 그 밖·닿은 존은 근거가 없어 지운다.
 //   FVG = 가운데 봉 같은 색 & high[i-1] < low[i+1] · 효과 +1pp 뿐(기본 끔). 매매 통과 없음 = 참고 표시(문구에 «전환»·«신호» 금지).
+// ── 2026-11-16 사용자 «B 왼쪽 위 판 하나 + A 캔들 표식» -- 지표가 예측하는 방향을 먼저(색 칸 ▲/▼ + 짧은 이름), 긴 말은 마우스를 올리면(차트 툴팁 그대로) ──
+//   fpBoard: renderCandleSvg(스냅숏)가 비우고 SMA50·스윙 → renderObFvg → renderDirMarks 가 줄을 채운 뒤 renderDirBoard 가 왼쪽 위에 그린다 · 휴대폰 = null(옛 꼬리표).
+let fpBoard = null;
+const FPB_W = 268;
+function fpTipOn(node, html) {   // 캔들 툴팁 대신 이 설명 -- 버블링을 끊어 봉 툴팁이 덮어쓰지 않게(subSvg 와 같은 수)
+  node.setAttribute("pointer-events", "all"); node.style.cursor = "help"; node.classList.add("fp-tip");
+  node.addEventListener("mousemove", (e) => { e.stopPropagation(); showTooltip(e.pageX, e.pageY, html); });
+  node.addEventListener("mouseleave", hideTooltip);
+}
+const fpBoardBox = (G) => (fpBoard ? [G.ml + 6, G.mt + fpBoard.top, FPB_W, 210] : null);   // 판 자리 예약(줄 수를 아직 몰라 넉넉히) -- 꼬리표가 비킨다
+function dirTri(g, cx, cy, d, c, r = 5) {   // 위 ▲ / 아래 ▼ 삼각형(그린 아이콘 -- 글자 화살표 대신)
+  const e = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  e.setAttribute("d", d > 0 ? `M${cx - r} ${cy + r * 0.8}L${cx + r} ${cy + r * 0.8}L${cx} ${cy - r * 0.8}Z` : `M${cx - r} ${cy - r * 0.8}L${cx + r} ${cy - r * 0.8}L${cx} ${cy + r * 0.8}Z`);
+  e.setAttribute("fill", c); g.appendChild(e); return e;
+}
+function dirPill({ g, G, placed, x, y, d, name, sub = "", anchor = "start", tip, hollow = false, small = false }) {   // 방향 머리 알약: [색 칸 ▲/▼][이름][흐린 덧말]
+  const NSV = "http://www.w3.org/2000/svg", mk = (tag, a, txt) => { const e = document.createElementNS(NSV, tag); for (const k in a) e.setAttribute(k, a[k]); if (txt != null) e.textContent = txt; return e; };
+  const fs = small ? 10 : 11.5, h = small ? 17 : 20, hw = small ? 16 : 20, c = d > 0 ? "var(--good)" : d < 0 ? "var(--bad)" : "var(--muted)";
+  const nW = measureTextW(name, `700 ${fs}px "Pretendard Variable", Pretendard, sans-serif`), sW = sub ? measureTextW(sub, `600 ${fs - 1}px "Pretendard Variable", Pretendard, sans-serif`) + 6 : 0;
+  const w = (d ? hw : 4) + nW + sW + 12, xr = G.ml + G.cw;
+  const L = Math.max(G.ml + 2, Math.min(xr - 2 - w, anchor === "start" ? x : anchor === "end" ? x - w : x - w / 2));
+  const cl = (t) => Math.max(G.mt + 1, Math.min(G.pb - 1 - h, t)), T0 = cl(y - h / 2);
+  const hit = (t) => (placed || []).some((q) => q && L < q[0] + q[2] && q[0] < L + w && t < q[1] + (q[3] || h) + 2 && q[1] < t + h + 2);
+  let T = T0;
+  for (const o of [h + 2, -(h + 2), 2 * (h + 2), -2 * (h + 2), 3 * (h + 2), -3 * (h + 2)]) { if (!hit(T)) break; T = cl(T0 + o); }
+  if (placed) placed.push([L, T, w, h]);
+  const gg = mk("g", {}); g.appendChild(gg);
+  gg.appendChild(mk("rect", { x: L, y: T, width: w, height: h, rx: 5, fill: "var(--chart-bg)", "fill-opacity": 0.94, stroke: c, "stroke-opacity": 0.6 }));
+  if (d) {
+    gg.appendChild(mk("path", { d: `M${L + 5} ${T}h${hw - 5}v${h}h-${hw - 5}a5 5 0 0 1 -5 -5v-${h - 10}a5 5 0 0 1 5 -5z`, fill: hollow ? "none" : c, stroke: hollow ? c : "none" }));
+    dirTri(gg, L + hw / 2, T + h / 2, d, hollow ? c : "var(--on-fill)", small ? 4 : 5);
+  }
+  const tx = L + (d ? hw : 4) + 6;
+  gg.appendChild(mk("text", { x: tx, y: T + h / 2 + 0.5, "dominant-baseline": "middle", fill: "var(--text)", "font-size": fs, "font-weight": 700, "font-family": "var(--font-sans)" }, name));
+  if (sub) gg.appendChild(mk("text", { x: tx + nW + 6, y: T + h / 2 + 0.5, "dominant-baseline": "middle", fill: "var(--muted)", "font-size": fs - 1, "font-weight": 600, "font-family": "var(--font-sans)" }, sub));
+  if (tip) fpTipOn(gg, tip);
+  return gg;
+}
+function renderDirBoard() {   // 왼쪽 위 «지표 방향» 판 -- 줄 = 지금 보이는 표식마다 하나(방향·이름·언제) · 바닥 = 큰 스윙 «넘으면 ▲ / 깨면 ▼» 가격
+  const svg = el("candleSvgSnapshot"), G = chartGeo, B = fpBoard;
+  svg?.querySelector("#dirBoard")?.remove();
+  if (!svg || !B || fpAltOn() || !G || !(B.rows.length || B.cond.length)) return;
+  const NSV = "http://www.w3.org/2000/svg", F = "var(--font-sans)", mk = (p, tag, a, txt) => { const e = document.createElementNS(NSV, tag); for (const k in a) e.setAttribute(k, a[k]); if (txt != null) e.textContent = txt; p.appendChild(e); return e; };
+  const rows = B.rows, up = rows.filter((r) => r.d > 0).length, dn = rows.filter((r) => r.d < 0).length, ups = B.cond.filter((c) => c.d > 0), dns = B.cond.filter((c) => c.d < 0);
+  const L = G.ml + 6, T = G.mt + B.top, w = FPB_W, rh = 23, head = rows.length ? 44 : 10, foot = (ups.length ? 20 : 0) + (dns.length ? 20 : 0), h = head + rows.length * rh + (foot ? foot + 10 : 4);
+  const g = mk(svg, "g", { id: "dirBoard" });
+  const bg = mk(g, "rect", { x: L, y: T, width: w, height: h, rx: 10, fill: "var(--panel-strong)", "fill-opacity": 0.95, stroke: "var(--line)" });
+  bg.addEventListener("mousemove", (e) => { e.stopPropagation(); hideTooltip(); });   // 판 위에선 봉 툴팁 안 띄움
+  bg.setAttribute("pointer-events", "all"); bg.classList.add("fp-tip");
+  if (rows.length) {
+    mk(g, "text", { x: L + 12, y: T + 19, fill: "var(--muted)", "font-size": 11, "font-weight": 700, "font-family": F }, "지표 방향");
+    const bx = L + 86, bw = w - 98, n = up + dn || 1, uw = Math.round(bw * up / n);
+    if (up) mk(g, "rect", { x: bx, y: T + 11, width: Math.max(2, uw - (dn ? 1 : 0)), height: 9, rx: 3, fill: "var(--good)" });
+    if (dn) mk(g, "rect", { x: bx + uw + (up ? 1 : 0), y: T + 11, width: Math.max(2, bw - uw - (up ? 1 : 0)), height: 9, rx: 3, fill: "var(--bad)" });
+    dirTri(g, bx + 5, T + 32, 1, "var(--good)", 4); mk(g, "text", { x: bx + 13, y: T + 36, fill: "var(--good)", "font-size": 11, "font-weight": 750, "font-family": F }, `위 ${up}`);
+    dirTri(g, bx + bw - 5, T + 32, -1, "var(--bad)", 4); mk(g, "text", { x: bx + bw - 13, y: T + 36, fill: "var(--bad)", "font-size": 11, "font-weight": 750, "font-family": F, "text-anchor": "end" }, `아래 ${dn}`);
+    const tally = mk(g, "rect", { x: bx, y: T + 6, width: bw, height: 34, fill: "transparent" });
+    fpTipOn(tally, "<b>지표 방향 개수</b><br>지금 화면에 보이는 표식마다 한 표(오래된 것·효과 다른 것도 같은 한 표)<br>모두 +1~4%p 수준의 약한 참고 -- 개수가 많다고 더 맞는 것 아님");
+  }
+  rows.forEach((r, i) => {
+    const y = T + head + i * rh, c = r.d > 0 ? "var(--good)" : "var(--bad)", rg = mk(g, "g", {});
+    mk(rg, "rect", { x: L + 6, y, width: w - 12, height: rh - 2, rx: 5, fill: "var(--text)", "fill-opacity": i % 2 ? 0 : 0.035 });
+    dirTri(rg, L + 19, y + (rh - 2) / 2, r.d, c, 5);
+    mk(rg, "text", { x: L + 32, y: y + 15, fill: "var(--text)", "font-size": 12, "font-weight": 700, "font-family": F }, r.name);
+    mk(rg, "text", { x: L + w - 12, y: y + 15, fill: "var(--muted)", "font-size": 11, "font-weight": 550, "font-family": F, "text-anchor": "end" }, r.sub || "");
+    if (r.tip) fpTipOn(rg, r.tip);
+  });
+  let yc = T + head + rows.length * rh + 4;
+  if (foot) mk(g, "line", { x1: L + 10, x2: L + w - 10, y1: yc, y2: yc, stroke: "var(--line)" });
+  for (const [arr, d, word] of [[ups, 1, "넘으면"], [dns, -1, "깨면"]]) {
+    if (!arr.length) continue;
+    const c = d > 0 ? "var(--good)" : "var(--bad)", rg = mk(g, "g", {});
+    mk(rg, "rect", { x: L + 6, y: yc + 2, width: w - 12, height: 18, fill: "transparent" });
+    mk(rg, "text", { x: L + 12, y: yc + 15, fill: "var(--muted)", "font-size": 11, "font-weight": 650, "font-family": F }, word);
+    dirTri(rg, L + 12 + measureTextW(word, '650 11px "Pretendard Variable", Pretendard, sans-serif') + 9, yc + 11, d, c, 4);
+    mk(rg, "text", { x: L + 12 + measureTextW(word, '650 11px "Pretendard Variable", Pretendard, sans-serif') + 18, y: yc + 15, fill: "var(--text)", "font-size": 11, "font-weight": 650, "font-family": F },
+       arr.map((q) => `${q.tf} ${q.v}${q.wait ? " 마감 대기" : ""}`).join(" · "));
+    fpTipOn(rg, `<b>큰 스윙 ${d > 0 ? "고점" : "저점"}(앞뒤 50봉 · 아직 안 깨짐)</b><br>그 봉(${arr.map((q) => q.tf).join("·")}) 종가로 ${word} 구조 돌파<br>돌파 뒤 깬 쪽 2 ATR 먼저 약 53% · 무작위 49%<br>추세 전환 신호 아님 · 참고`);
+    yc += 20;
+  }
+}
 const OB_ASSETS = new Set(["eth", "btc", "sol", "xrp"]);   // 검증한 코인만(주식은 미검증)
 const obWant = () => (mcLine.ob || mcLine.fvg) && OB_ASSETS.has(activeSnapshotAsset);
 const OB_N = 50, OB_LIFE = 100, M15 = 900;
@@ -7221,6 +7302,8 @@ function renderObFvg() {
     const w = measureTextW(t.textContent || "", `800 ${fs}px "Pretendard Variable", Pretendard, sans-serif`) + 4;
     return [an === "end" ? x - w : an === "middle" ? x - w / 2 : x - 2, y - fs - 1, w];
   });
+  if (fpBoard) placed.push(fpBoardBox(G));
+  const dpx = (ASSET_CONFIG[activeSnapshotAsset] || {}).dp ?? 2;
   const pill = (x, y, txt, z, anchor, solid) => {   // 폭은 캔버스로 잰다(getBBox = 꼬리표마다 강제 레이아웃 · 리뷰) · 플롯 안으로 밀어 넣는다(프로파일 칸 침범 방지)
     const w = measureTextW(txt, '650 11px "Pretendard Variable", Pretendard, sans-serif') + 10, h = 17;
     const L = Math.max(G.ml + 2, Math.min(xr - 2 - w, anchor === "start" ? x - 5 : anchor === "end" ? x + 5 - w : x - w / 2));
@@ -7239,7 +7322,10 @@ function renderObFvg() {
     const x0 = x0Of(z), y0 = yP(z.hi), y1 = yP(z.lo);
     body.appendChild(mk("rect", { x: x0, y: y0, width: Math.max(0, xr - x0), height: Math.max(1, y1 - y0), fill: `url(#${z.d > 0 ? "obHg" : "obHb"})` }));
     const right = x0 > G.ml + G.cw * 0.6;
-    if (inY(z)) pill(right ? x0 - 8 : x0 + 8, (y0 + y1) / 2, "FVG · 버팀 42% (무작위 40%)", z, right ? "end" : "start", false);
+    if (!inY(z)) continue;
+    const ftip = `<b>FVG ${z.d > 0 ? "지지" : "저항"} 15분</b><br>${z.lo.toFixed(dpx)}–${z.hi.toFixed(dpx)} · 생긴 뒤 100봉 안 · 아직 안 닿음<br>닿으면 ${z.d > 0 ? "위로" : "아래로"} 버팀 42% · 무작위 40%<br>효과 작음 · 참고`;
+    dirPill({ g, G, placed, x: right ? x0 - 8 : x0 + 8, y: (y0 + y1) / 2, d: z.d, name: `FVG ${z.d > 0 ? "지지" : "저항"}`, anchor: right ? "end" : "start", tip: ftip, hollow: true, small: G.cw < 520 });
+    if (fpBoard) fpBoard.rows.push({ d: z.d, name: `FVG ${z.d > 0 ? "지지" : "저항"}`, sub: `${z.lo.toFixed(dpx)}–${z.hi.toFixed(dpx)} 닿으면`, tip: ftip });
   }
   if (!mcLine.ob) return;
   // 11-15 사용자 «15분봉·5분봉 큰 스윙 둘 다 5분봉에» -- 5분 보기 = 15분(실선·채운 꼬리표·존 위쪽) + 5분(파선·연한 칠·빈 꼬리표·존 아래쪽) · 30분/1시간 보기 = 15분만
@@ -7253,7 +7339,11 @@ function renderObFvg() {
       const x0 = x0Of(z), y0 = yP(z.hi), y1 = yP(z.lo), h = Math.max(2, y1 - y0);
       body.appendChild(mk("rect", { x: x0, y: y0, width: Math.max(0, xr - x0), height: h, fill: col(z), "fill-opacity": big ? 0.14 : 0.08, stroke: col(z), "stroke-opacity": big ? 0.75 : 0.6, "stroke-dasharray": big ? "none" : "4 3" }));
       body.appendChild(mk("rect", { x: x0, y: y0, width: big ? 3 : 2, height: h, fill: col(z) }));
-      if (inY(z)) pill(x0 + 12, big ? y0 + 11 : y1 - 11, `${z.d > 0 ? "지지" : "저항"} OB ${tfN} · 닿으면 버팀 약 ${pHold}% (무작위 ${pRnd}%) · ${left(z)}`, z, "start", big);
+      if (!inY(z)) continue;
+      const nm = `${z.d > 0 ? "지지" : "저항"} OB ${tfN}`;
+      const otip = `<b>${z.d > 0 ? "지지" : "저항"} 오더블록 ${tfN}</b><br>${z.lo.toFixed(dpx)}–${z.hi.toFixed(dpx)} · 아직 안 닿음 · ${left(z)}<br>닿으면 ${z.d > 0 ? "위로" : "아래로"} 버팀 약 ${pHold}% · 무작위 ${pRnd}%<br>큰 스윙(앞뒤 50봉) 구조 돌파의 출발 봉 · 참고`;
+      dirPill({ g, G, placed, x: x0 + 12, y: big ? y0 + 12 : y1 - 12, d: z.d, name: nm, sub: left(z).replace(" 남음", ""), tip: otip, hollow: !big, small: G.cw < 520 });
+      if (fpBoard) fpBoard.rows.push({ d: z.d, name: nm, sub: `${z.lo.toFixed(dpx)}–${z.hi.toFixed(dpx)} 닿으면`, tip: otip });
     }
     // 11-15 사용자 펜 메모 «OB·FVG 가 보고 있는 차트 밖이면 칩을 두지 말아줘» → 화면 밖 가장자리 알림 삭제(보이는 존만 꼬리표)
     const tEnd = R.B[R.B.length - 1].t + M;
@@ -7370,7 +7460,7 @@ function renderDirMarks() {
     const fs = +t.getAttribute("font-size") || 10, x = +t.getAttribute("x") || 0, y = +t.getAttribute("y") || 0, an = t.getAttribute("text-anchor");
     const w = measureTextW(t.textContent || "", `800 ${fs}px "Pretendard Variable", Pretendard, sans-serif`) + 4;
     return [an === "end" ? x - w : an === "middle" ? x - w / 2 : x - 2, y - fs - 1, w];
-  }).concat([...svg.querySelectorAll("#obfvg rect[rx]")].map((r) => [+r.getAttribute("x"), +r.getAttribute("y"), +r.getAttribute("width")]));
+  }).concat([...svg.querySelectorAll("#obfvg rect[rx]")].map((r) => [+r.getAttribute("x"), +r.getAttribute("y"), +r.getAttribute("width"), +r.getAttribute("height")]), fpBoard ? [fpBoardBox(G)] : []);
   const pill = (x, y, txt, c, anchor) => {
     const w = measureTextW(txt, '650 11px "Pretendard Variable", Pretendard, sans-serif') + 10, h = 17;
     const L = Math.max(G.ml + 2, Math.min(xr - 2 - w, anchor === "start" ? x - 5 : anchor === "end" ? x + 5 - w : x - w / 2));
@@ -7386,10 +7476,10 @@ function renderDirMarks() {
   const born = (e) => e.tk != null && e.tk <= tv1 && e.tk > tv0;
   const narrow = G.cw < 520;   // 휴대폰: 꼬리표가 캔들을 덮어 짧게(검증 렌더 11-16) -- 뜻은 칩 설명(title)에
   const SHORT = { cci: "CCI 1h", rsi2: "RSI2 눌림", rdiv: "RSI 다이버전스" };
-  const NAME0 = { cci: (d) => `CCI 1h ${d > 0 ? "+100 위로" : "−100 아래로"} · 그쪽 1 ATR 먼저 ${DIR_STAT.cci[0]}% (모멘텀 ${DIR_STAT.cci[1]}%)`,
-    rsi2: (d) => `RSI2 추세 속 눌림 ${d > 0 ? "↑" : "↓"} · 추세 쪽 1 ATR 먼저 ${DIR_STAT.rsi2[0]}% (같은 추세 ${DIR_STAT.rsi2[1]}%)`,
-    rdiv: (d) => `RSI 다이버전스 ${d > 0 ? "↑" : "↓"} · 반전 쪽 1 ATR 먼저 ${DIR_STAT.rdiv[0]}% (가짜 ${DIR_STAT.rdiv[1]}%)` };
-  const NAME = (k, d) => (narrow ? `${SHORT[k]} ${d > 0 ? "↑" : "↓"} ${DIR_STAT[k][0]}% (대조 ${DIR_STAT[k][1]}%)` : NAME0[k](d));
+  const ago = (t) => `${measDur(Math.max(0, tv1 - t))} 전`;
+  const TIP = { cci: (d) => `<b>CCI 1h ${d > 0 ? "위" : "아래"}</b><br>1시간봉 CCI(20)가 ${d > 0 ? "+100 위로" : "−100 아래로"} 넘음<br>그쪽 1 ATR 먼저 ${DIR_STAT.cci[0]}% · 20봉 모멘텀 ${DIR_STAT.cci[1]}%<br>새 코인 5종 재현 · 효과 작음 = 참고`,
+    rsi2: (d) => `<b>RSI2 추세 속 눌림 ${d > 0 ? "위" : "아래"}</b><br>15분봉 종가가 SMA200 ${d > 0 ? "위 · RSI(2) 10 아래로" : "아래 · RSI(2) 90 위로"}<br>추세 쪽 1 ATR 먼저 ${DIR_STAT.rsi2[0]}% · 같은 추세 아무 봉 ${DIR_STAT.rsi2[1]}%<br>새 코인 5종 재현 · 효과 작음 = 참고`,
+    rdiv: (d) => `<b>RSI 다이버전스 ${d > 0 ? "위" : "아래"}</b><br>15분 스윙 가격과 RSI14 가 엇갈림(스윙 5봉 뒤에 앎)<br>반전 쪽 1 ATR 먼저 ${DIR_STAT.rdiv[0]}% · 가짜 ${DIR_STAT.rdiv[1]}%<br>2025~26 은 효과 거의 0` };
   const ev = dirMemo.ev;
   const orbs = ev.filter((e) => e.k.startsWith("orb") && e.s0 < tv1 && Math.max(e.tEnd, e.tRace || 0) > tv0 && e.s0 + e.L * 60 <= tv1);   // 범위가 끝난(알려진) 것만
   const orbLast = Math.max(...orbs.map((e) => e.s0));   // 꼬리표는 가장 최근 개장 하나(1주일 보기에서 10~20개가 겹치던 것 · 검증 11-16 ⑦)
@@ -7403,7 +7493,9 @@ function renderDirMarks() {
     const x = xC(e.tk), c = col(e.d), tgt = e.p + e.d * e.W, opp = e.p - e.d * e.W, xe = Math.min(xr, xT(Math.min(e.tRace, tv1)));   // 선 = 연구 경주 창(돌파 뒤 72봉) 끝까지(검증 11-16 D6)
     for (const [v, op] of [[tgt, 0.75], [opp, 0.35]]) body.appendChild(mk("line", { x1: x, x2: xe, y1: yP(v), y2: yP(v), stroke: c, "stroke-opacity": op, "stroke-dasharray": "3 3" }));
     tri(x, e.d > 0 ? yP(e.lo) + 4 : yP(e.hi) - 4, e.d, c);
-    if (lab && yP(tgt) > G.mt && yP(tgt) < G.pb) pill(Math.max(G.ml, x) + 10, yP(tgt), narrow ? `뉴욕 ${e.L}분 ${e.d > 0 ? "↑" : "↓"} 이 선 ${DIR_STAT[e.k][2]}·반대 ${DIR_STAT[e.k][3]}%` : `${tag} ${e.d > 0 ? "위로" : "아래로"} 돌파 · 6시간 안 이 선 먼저 ${DIR_STAT[e.k][2]}% · 반대선 ${DIR_STAT[e.k][3]}% (닿은 것만 ${DIR_STAT[e.k][0]}% vs 다른 시각 ${DIR_STAT[e.k][1]}%)`, c, "start");   // 52·54% 는 «결판 난 경주만» 비율 -- 조건 없이 읽히지 않게 무조건 비율을 앞에(검증 11-16)
+    const otip = `<b>뉴욕 개장 ${e.L}분 범위 ${e.d > 0 ? "위로" : "아래로"} 돌파</b><br>6시간 안 이 선(범위폭) 먼저 ${DIR_STAT[e.k][2]}% · 반대선 ${DIR_STAT[e.k][3]}% · 미결 ${e.L === 30 ? 14 : 31}%<br>결판 난 것만 ${DIR_STAT[e.k][0]}% · 다른 시각 범위 ${DIR_STAT[e.k][1]}%<br>수수료 뒤 ≈ 0 · 참고 · 미국 휴장일 미반영`;
+    if (lab && fpBoard) fpBoard.rows.push({ d: e.d, name: `뉴욕 ${e.L}분 돌파`, sub: ago(e.tk), tip: otip });
+    if (lab && yP(tgt) > G.mt && yP(tgt) < G.pb) dirPill({ g, G, placed, x: Math.max(G.ml, x) + 10, y: yP(tgt), d: e.d, name: narrow ? `뉴욕 ${e.L}분` : `뉴욕 ${e.L}분 돌파`, sub: "목표선", tip: otip, small: narrow });
   }
   for (const k of ["cci", "rsi2", "rdiv"]) {
     if (!mcLine[k]) continue;
@@ -7412,7 +7504,9 @@ function renderDirMarks() {
       const x = xC(e.tk), y = e.d > 0 ? yP(e.bl) + 5 : yP(e.bh) - 5, c = col(e.d);
       if (k === "rdiv") body.appendChild(mk("line", { x1: xC(e.tq + 900), y1: yP(e.xq), x2: xC(e.tp + 900), y2: yP(e.xp), stroke: c, "stroke-width": 1.5, "stroke-opacity": 0.8 }));
       tri(x, y, e.d, c);
-      if (i === vis.length - 1 && inPlot(x, y)) pill(x, e.d > 0 ? y + 18 : y - 18, NAME(k, e.d), c, "middle");   // 꼬리표는 그 종류 가장 최근 것 하나(나머지는 삼각형만)
+      if (i !== vis.length - 1) return;   // 꼬리표·판 줄은 그 종류 가장 최근 것 하나(나머지는 삼각형만)
+      if (fpBoard) fpBoard.rows.push({ d: e.d, name: SHORT[k], sub: ago(e.tk), tip: TIP[k](e.d) });
+      if (inPlot(x, y)) dirPill({ g, G, placed, x, y: e.d > 0 ? y + 20 : y - 20, d: e.d, name: SHORT[k], anchor: "middle", tip: TIP[k](e.d), small: narrow });   // 꼬리표는 그 종류 가장 최근 것 하나(나머지는 삼각형만)
     });
   }
 }
@@ -7490,7 +7584,7 @@ function setupChartPan() {
     chartZoomAt(chartWindowBars * Math.exp(Math.max(-400, Math.min(400, dy)) * 0.0025), g.at(ev.clientX));   // 한 번에 400px 까지(빠른 휠에 12봉→1주일로 튀지 않게)
   }, { passive: false });
   // 안쪽 패널(1초 수급 등 중첩 svg)은 mousemove 버블을 끊는다 -- 잡는 단계(capture)에서 커서를 받아 둔다(다시 그린 뒤 호버 재생용)
-  svg.addEventListener("mousemove", (ev) => { chartHoverPt = ev.target.closest("svg") === svg ? { x: ev.clientX, y: ev.clientY } : null; }, true);
+  svg.addEventListener("mousemove", (ev) => { chartHoverPt = ev.target.closest("svg") === svg && !ev.target.closest(".fp-tip") ? { x: ev.clientX, y: ev.clientY } : null; }, true);   // 11-16: 지표 판·알약 위면 다시 그릴 때 봉 툴팁을 되살리지 않는다(그 설명이 떠 있다)
   svg.addEventListener("mouseleave", () => { chartHoverPt = null; });
   // 리뷰: 화면 좌표라 스크롤하면 다른 봉을 가리킨다(손가락 탭은 mouseleave 가 없어 스크롤 뒤에도 렌더마다 되살아났다). 탭한 툴팁은 그대로 둔다(휴대폰 읽기)
   //   차트를 담은 것(페이지 · 감싼 칸)이 스크롤될 때만 -- 뉴스 목록 scrollTop 복원(30초 갱신) 같은 남의 스크롤은 커서를 안 지운다(리뷰)
@@ -7960,6 +8054,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // 2026-11-13 펜 메모 «풋프린트에 전체화면 아이콘 -- 누르면 오른쪽 칸(1초 수급·시장 맥락)이 접히고 왼쪽이 카드 전체를»: 2단 배치는 그대로 두고 오른쪽 칸 폭만 0
   //   (위 한 줄·체결/호가 기둥·차트 아래 띠는 2단 그대로) · 1초 수급·시장 맥락은 안 그린다(#mcBody 는 CSS 가 숨김). fpWideSet 이 켜고 끈다.
   const FPW = !!splitR && document.documentElement.classList.contains("fp-wide") && matchMedia("(hover: hover)").matches;   // 검증: 버튼이 안 보이는 기기(터치)에서 접힌 채 고정되지 않게
+  if (svg.id === "candleSvgSnapshot") fpBoard = mobileChart ? null : { rows: [], cond: [], top: FPW ? 16 : 6 };   // 11-16 지표 방향 판(데스크톱) -- 렌더마다 비우고 SMA50·스윙·OB·방향 표식이 채운다 · 휴대폰은 옛 가장자리 꼬리표
   const FP_SIDE_OK = FPW && !fpAltOn(), FP_SIDE = FP_SIDE_OK && fpSideOpen;   // 11-15 시안 B: 전체화면 오른쪽 칸 서랍(손잡이는 _OK 일 때만)
   if (svg.id === "candleSvgSnapshot" && !FP_SIDE) fpSidePlace(svg, FP_SIDE_OK, null);
   const subW = splitR ? (FPW ? 0 : Math.round((wAll - SPLIT_GAP) * splitR) + FP_LEFT_SHIFT) : wAll;   // 10-15 풋프린트를 왼쪽으로 옮긴 만큼 오른쪽 칸을 넓힌다(플롯 폭은 그대로 -- 아래 ml 도 같은 만큼 줄인다)
@@ -9226,7 +9321,10 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           });
           pl(pts, { stroke: col, "stroke-opacity": 0.8, "stroke-width": S.w, "stroke-dasharray": S.d }, tip);
           const y50 = yAt(v50), above = y50 <= mt + 8, below = y50 >= plotBottom - 2;
-          if (!above && !below && gutOn) fpNotes.push({ val: v50, label: `SMA50·${up ? "롱" : "숏"}`, color: col });
+          if (fpBoard && svg.id === "candleSvgSnapshot") fpBoard.rows.push({ d: up ? 1 : -1, name: "일봉 추세", sub: `SMA50 ${up ? "위" : "아래"} · 오늘 내내`,
+            tip: `<b>일봉 추세 ${up ? "롱" : "숏"}</b><br>SMA50 ${v50.toFixed(dp)} · ${dc ? `전날 종가 ${dc.toFixed(dp)}` : "지금가"}가 ${up ? "위" : "아래"}<br>${up ? "숏" : "롱"} 자제 참고 · 하루 동안 그대로<br>롱 추세일 때 잡은 숏이 더 나빴으나 유의 아님(통과 후보)` });
+          if (fpBoard && svg.id === "candleSvgSnapshot" && (above || below)) { /* 화면 밖 = 판의 줄이 대신 */ }
+          else if (!above && !below && gutOn) fpNotes.push({ val: v50, label: `SMA50·${up ? "롱" : "숏"}`, color: col });
           else {
             const t = mk(svg, "text", { class: "edge-l", x: ml + 4, y: (above ? mt + 11 + 13 * edgeL.top++ : below ? plotBottom - LANE_IN - 5 - 13 * edgeL.bot++ : y50 - 3).toFixed(1), "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: col,
                                         stroke: "var(--chart-bg)", "stroke-width": 4, "stroke-linejoin": "round", "paint-order": "stroke" });
@@ -9258,6 +9356,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
             mk(lines, "line", { x1: x0.toFixed(1), x2: ml + cw, y1: y.toFixed(1), y2: y.toFixed(1), stroke: S.c,
               "stroke-opacity": wait ? 0.9 : 0.55, "stroke-dasharray": S.d, "stroke-width": S.w }, tip);
             const lab = `${tf} 스윙 ${nm}${wait ? "·마감 대기" : ""}`, above = y <= mt + 8, below = y >= plotBottom - 2;
+            if (fpBoard && svg.id === "candleSvgSnapshot") fpBoard.cond.push({ d, tf, v: lv.price.toFixed(dp), wait });
+            if (fpBoard && svg.id === "candleSvgSnapshot" && (above || below)) return;   // 화면 밖 = 판 바닥 «넘으면/깨면» 줄이 대신
             if (!above && !below) {
               if (gutOn) { fpNotes.push({ val: lv.price, label: lab, color: S.c }); return; }
               const t = mk(svg, "text", { class: "edge-l", x: ml + 4, y: (y - 3).toFixed(1), "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: "var(--muted)", "pointer-events": "none" });
@@ -9271,13 +9371,9 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           const lb = st.last_break, ib = lb ? idxAt(lb.t) : null;   // 돌파가 알려진 시각(그 봉 마감) 뒤 첫 봉 · 창보다 오래됐으면 0 이 나와 아래 ib > 0 에서 빠진다
           if (lb && ib != null && ib > 0) {
             const col = lb.dir > 0 ? "var(--good)" : "var(--bad)", yb = yAt(lb.level);
-            if (yb > mt + 8 && yb < plotBottom - 2) {
-              const t = mk(svg, "text", { x: xAt(ib).toFixed(1), y: (yb + (lb.dir > 0 ? -5 : 13)).toFixed(1), "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: col, "text-anchor": "middle",
-                                          stroke: "var(--chart-bg)", "stroke-width": 4, "stroke-linejoin": "round", "paint-order": "stroke" });
-              t.textContent = `${tf} ${lb.dir > 0 ? "↑" : "↓"} 돌파`;
-              const tt = document.createElementNS(NS, "title"); tt.textContent = `${tf} 큰 스윙 ${lb.dir > 0 ? "고점" : "저점"} ${lb.level.toFixed(dp)} 를 ${tf} 종가로 깸. 우리 검정: 깬 쪽 2 ATR 먼저 약 53%(무작위 49%) — 그 뒤 방향은 반반.`;
-              t.appendChild(tt);
-            }
+            const btip = `<b>${tf} 구조 돌파 ${lb.dir > 0 ? "위" : "아래"}</b><br>큰 스윙 ${lb.dir > 0 ? "고점" : "저점"} ${lb.level.toFixed(dp)} 를 ${tf} 종가로 깸<br>깬 쪽 2 ATR 먼저 약 53% · 무작위 49%<br>추세 전환 신호 아님 · 그 뒤 방향은 반반`;
+            if (fpBoard && svg.id === "candleSvgSnapshot") fpBoard.rows.push({ d: lb.dir, name: `${tf} 구조 돌파`, sub: `${measDur(Math.max(0, (candles[candles.length - 1].time * 1000 - lb.t) / 1000))} 전`, tip: btip });
+            if (yb > mt + 8 && yb < plotBottom - 2) dirPill({ g: svg, G: { ml, mt, cw, pb: plotBottom }, x: xAt(ib), y: yb + (lb.dir > 0 ? -14 : 14), d: lb.dir, name: `${tf} 돌파`, anchor: "middle", tip: btip, small: mobileChart });
           }
         });
       }
@@ -10987,7 +11083,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   if (svg.id === "candleSvgSnapshot") post.push(renderLineTool);   // 2026-10-28 선 주문 상자 자리
   if (svg.id === "candleSvgSnapshot") post.push(renderArmedLines);   // 2026-10-29 들어간 선 주문(익절·손절) 자리
   if (svg.id === "candleSvgSnapshot") post.push(renderObFvg);   // 2026-11-15 오더블록·FVG(시안 C)
-  if (svg.id === "candleSvgSnapshot") post.push(renderDirMarks);   // 2026-11-16 방향 «의미» 표식(OB 꼬리표 뒤 -- 겹침 피하기에 넣는다)
+  if (svg.id === "candleSvgSnapshot") post.push(renderDirMarks);
+  if (svg.id === "candleSvgSnapshot") post.push(renderDirBoard);   // 2026-11-16 지표 방향 판(위 둘이 줄을 채운 뒤)   // 2026-11-16 방향 «의미» 표식(OB 꼬리표 뒤 -- 겹침 피하기에 넣는다)
   if (svg.id === "candleSvgSnapshot") post.push(renderMeasure);   // 2026-11-07 Shift+드래그 측정 박스
   post.forEach((f) => f());   // 화면 상자를 재는 HTML 배치(위 ③) -- svg 를 다 쌓은 뒤 한 번만 배치된다
   // 2026-10-01 프로파일 오른쪽 끝 가격 이름과 겹치는 호가 벽 수량 글자(«11.8k»)는 숨긴다(사용자 지시) -- 층 캐시라 매번 되살린 뒤 다시 판정
