@@ -393,7 +393,7 @@ const LINE_RR = [1, 1.5, 2, 3];
 // 2026-10-30 사용자 «SLTP 가 마진이 너무 작게 들어간다(2%)» → «증거금 % 슬라이더»(시안 C): 자동 2× 규칙(계좌 전체 명목 ≤ 순자산 × 2 · 첫 1/3) 대신
 //   떠 있는 버튼 «직접»과 같은 크기(증거금 = 순자산 × 이 %, 레버리지 = 화면 레버). 다른 코인 포지션이 상한을 먹어 작아지던 것이 없어진다.
 let linePct = 10;
-try { linePct = Math.min(100, Math.max(1, Math.round(Number(localStorage.getItem("linePct"))) || 10)); } catch (e) { /* 기억은 편의일 뿐 */ }   // 2026-10-29 손익비 버튼(익절 거리 ÷ 손절 거리)
+try { linePct = Math.min(100, Math.max(5, Math.round(Number(localStorage.getItem("linePct")) / 5) * 5 || 10)); } catch (e) { /* 기억은 편의일 뿐 */ }   // 11-16 5% 단위(옛 12% 같은 값은 가까운 5단위로)   // 2026-10-29 손익비 버튼(익절 거리 ÷ 손절 거리)
 let lineDrag = null, lineHold = 0, linePrevT = 0, linePt = "", linePrevSeq = 0;   // linePrevSeq = 선이 바뀔 때마다 +1 -- 늦게 온 옛 미리보기 응답은 버린다(10-30 검토 S1)
 // 2026-10-31 사용자 «현재가 peg 말고 가격선을 정해 limit 으로 기다리게 · 그 선도 끌어 주문 수정»: t.entry = 진입 지정가(null = 지금가 peg, 현행).
 //   방향·손익비·손절 손실은 진입선(ref)이 기준 -- 지정가면 ref = entry. 롱 지정가는 지금가 아래 · 숏 지정가는 위(메이커)여야 하고 넘으면 peg 로 되돌린다.
@@ -488,7 +488,7 @@ function lineToolEl(box) {
     + '<span class="lt-dpx" hidden></span><button type="button" class="lt-tag tp" data-k="tp"></button><button type="button" class="lt-tag sl" data-k="sl"></button><button type="button" class="lt-tag en" data-k="en"></button>'
     + '<div class="lt-tk"><div class="lt-row"><b class="lt-side"></b><span class="lt-qty"></span></div>'
     + '<div class="lt-mg"><div class="lt-mg-hd"><span>증거금</span><b class="lt-mg-v"></b></div>'
-    + '<input type="range" class="lt-mg-r" min="1" max="50" step="1" aria-label="진입 증거금 (순자산 대비 %)"></div>'
+    + '<input type="range" class="lt-mg-r" min="5" max="50" step="5" aria-label="진입 증거금 (순자산 대비 %)"></div>'
     + '<div class="lt-lv"><div class="lt-mg-hd"><span>배수<button type="button" class="lt-lv-auto" aria-pressed="false" title="자동 = 고정 10배">자동</button></span><b class="lt-lv-v"></b></div>'
     + '<input type="range" class="lt-lv-r" min="5" max="50" step="5" aria-label="레버리지 배수"></div>'
     + '<div class="lt-row lt-rr"></div>'
@@ -540,7 +540,7 @@ function lineToolEl(box) {
   h.addEventListener("pointerup", end); h.addEventListener("pointercancel", end); h.addEventListener("pointerleave", end);
   h.querySelector(".lt-go").addEventListener("pointerleave", end);   // 꾹 누르다 버튼 밖으로 나가면 취소(표 안에서도)
   h.querySelector(".lt-mg-r").addEventListener("input", (e) => {   // 끄는 동안 숫자·손절 손실은 바로, 크기는 멈추고 0.5초 뒤 서버 미리보기
-    linePct = Math.min(lineMaxPct(), Math.max(1, Math.round(Number(e.target.value)) || 10));
+    linePct = Math.min(lineMaxPct(), Math.max(1, Math.round(Number(e.target.value)) || 10));   // 11-16 펜 메모 «증거금 1% 단위 → 5% 단위»: 슬라이더 step 5(min 5)
     try { localStorage.setItem("linePct", String(linePct)); } catch (err) { /* 기억은 편의일 뿐 */ }
     if (lineTool) { lineTool.plan = null; lineTool.arm = 0; renderLineTool(); linePreview(); }
   });
@@ -817,7 +817,7 @@ function renderLineTool() {
   // 2026-10-30 시안 C: 증거금 슬라이더(순자산 %). 2026-11-04 펜 메모로 손절 손실·레버리지·명목 줄은 뺐다.
   const pl = t.plan, eq = Number(pl?.projection?.equity_usdt) || Number(assetBalance()?.margin) || 0;
   const rg = h.querySelector(".lt-mg-r");
-  const mxPct = lineMaxPct(); rg.max = String(mxPct); if (linePct > mxPct && !t.placed) linePct = mxPct;   // 가용이 줄었으면 값도 상한으로
+  const mxPct = lineMaxPct(); rg.max = String(mxPct); rg.min = String(Math.min(5, mxPct)); if (linePct > mxPct && !t.placed) linePct = mxPct;   // 가용이 5% 미만이면 그 값 하나만   // 가용이 줄었으면 값도 상한으로
   if (Number(rg.value) !== linePct) rg.value = String(linePct);
   rg.disabled = !!t.placed; h.querySelectorAll("[data-rr]").forEach((b) => { b.disabled = !!t.placed; });
   h.querySelector(".lt-mg-v").innerHTML = `${linePct}%${eq > 0 ? `<small>$${Math.round(eq * linePct / 100).toLocaleString()}</small>` : ""}`;   // 숫자뿐

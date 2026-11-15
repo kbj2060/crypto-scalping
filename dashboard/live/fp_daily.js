@@ -34,6 +34,9 @@
   //   2026-11-13 사용자 «펀딩까지 해서 롱 우세·숏 우세를 더 정확히» → 펀딩 거래소별(2칸) 추가.
   var LANES = [["xcvd", "CVD · 거래소별", 5], ["xoi", "OI · 거래소별", 3], ["xfund", "펀딩 · 거래소별", 2], ["delta", "델타"]];
   //   검증 11-13: 4h·주식은 펀딩 자료가 없어 빈 레인 2칸이 가격 칸을 깎았다 → 펀딩 자료가 있을 때만 펀딩 레인.
+  // 2026-11-16 사용자 «캔들 아래 선 차트 cvd·oi·펀딩비만 전체화면으로 볼 수 있는 버튼 -- 평평하다는 문제를 해결»: «선 차트 크게» = 레인 셋이 차트 칸 거의 전부 ·
+  //   OI 는 거래소마다 자기 띠·자기 눈금(절대값이 0.8M~2.3M 로 달라 한 축이면 하루 1~3% 움직임이 몇 px 였다) · 가격은 시점 맞춤용 얇은 띠.
+  function lanesBig() { return !!S.lanesBig && S.period === "1d"; }
   function lanesNow() { return LANES.filter(function (l) { return l[0] !== "xfund" || !!(S.X && S.X.bn_fund && Object.keys(S.X.bn_fund).length); }); }
   // 2026-10-20 사용자 «4h 버튼 = 1주일을 4시간봉 풋프린트로» → «1d 에서 데이터 양만 4h 로»: 같은 그림·레인·청산 히트맵을 봉 길이만 바꿔 쓴다
   //   (서버 /api/footprint-4h · 지난 7일 + 형성 중 · OI = 칸 마지막 값 · 청산 = 칸 합 · 히트맵 = 칸 마감 시점). 시각 = 칸 시작(UTC 00·04·…시 = KST 09·13·…시).
@@ -230,15 +233,18 @@
     var W = cv.clientWidth, H = cv.clientHeight, narrow = W < 560;
     var L = 8, R = narrow ? 52 : 66, axisH = 26, gap = 8;
     var laneH = Math.max(30, Math.round((H - axisH) * (narrow ? 0.07 : 0.055)));   // 2026-11-04 펜 메모 «차트 높이가 너무 낮다 -- 아래 막대 높이를 줄이고 차트를 늘려줘»: 레인 0.1 → 0.055(휴대폰 0.095 → 0.07) · 가격 차트 329 → ~500px(776px 상자 실측)
-    var LN = lanesNow(), units = LN.reduce(function (t, l) { return t + (l[2] || 1); }, 0), fixed = axisH + LN.length * gap + 6;
+    var LN = lanesNow(), BIG = lanesBig() && LN.some(function (l) { return l[0].charAt(0) === "x"; });
+    if (BIG) LN = LN.filter(function (l) { return l[0].charAt(0) === "x"; }).map(function (l) { return [l[0], l[1], l[0] === "xoi" ? 5 : l[0] === "xcvd" ? 4 : 2]; });   // 11-16 «선 차트 크게»: OI 는 거래소마다 띠 3개라 가장 크게
+    var units = LN.reduce(function (t, l) { return t + (l[2] || 1); }, 0), fixed = axisH + LN.length * gap + 6;
     // 검증 11-13: 레인 9칸이 가격 칸을 데스크톱 500 → 351px · 휴대폰 → 197px 로 눌렀다 -- 가격 칸이 높이의 55% 아래로 안 가게 레인 한 칸을 줄인다
-    laneH = Math.max(14, Math.min(laneH, Math.floor((H - fixed - 0.55 * (H - axisH)) / units)));
+    laneH = BIG ? Math.max(14, Math.floor((H - fixed - Math.max(48, Math.round(0.1 * (H - axisH)))) / units))   // 가격은 시점 맞춤용 얇은 띠(높이 10%)만
+      : Math.max(14, Math.min(laneH, Math.floor((H - fixed - 0.55 * (H - axisH)) / units)));
     var priceH = H - fixed - units * laneH;
     var lanes = {}, y = 6 + priceH + gap;
     LN.forEach(function (l) { var hh = Math.round(laneH * (l[2] || 1)); lanes[l[0]] = { y: y, h: hh }; y += hh + gap; });
     // 2026-11-13 사용자 «1d 차트에도 오른쪽에 체결·델타 프로파일»: 플롯과 가격 눈금 사이 PW 칸(5분 차트 «체결 · 델타»와 같은 그림)
     var PW = narrow ? 56 : 160;   // 검증 11-13: 휴대폰 4h 3봉 칸 숫자가 1~2px 모자라던 폭 -- 70 → 56
-    return { W: W, H: H, L: L, R: R, PW: PW, plotW: W - L - R - PW, top: 6, priceH: priceH, lanes: lanes, axisY: H - axisH, narrow: narrow };
+    return { W: W, H: H, L: L, R: R, PW: PW, plotW: W - L - R - PW, top: 6, priceH: priceH, lanes: lanes, axisY: H - axisH, narrow: narrow, big: BIG };
   }
 
   function clampView() {
@@ -660,6 +666,35 @@
     });
     return out;
   }
+  function drawOiBands(g, C, G, a, b, xOf, lines, top, hh) {   // 거래소마다 띠 하나 · 띠마다 자기 최저~최고 · 왼쪽 위·아래 끝 = 그 띠 최고·최저(절대값)
+    var n = lines.length, bh = hh / n, hj = S.hover && S.hover.i >= a && S.hover.i <= b ? S.hover.i - a : null, tags = [];
+    lines.forEach(function (l, j) {
+      var t0 = top + j * bh + 4, h0 = bh - 10, lo = Infinity, hi = -Infinity;
+      l.c.forEach(function (v) { if (v != null) { lo = Math.min(lo, v); hi = Math.max(hi, v); } });
+      if (j) { g.strokeStyle = C.soft; g.lineWidth = 1; g.setLineDash([2, 4]); g.beginPath(); g.moveTo(G.L, Math.round(top + j * bh) + 0.5); g.lineTo(G.L + G.plotW, Math.round(top + j * bh) + 0.5); g.stroke(); g.setLineDash([]); }
+      if (!(hi > lo)) { hi = lo + 1; }
+      var pd = (hi - lo) * 0.08, L0 = lo - pd, H0 = hi + pd, Y = function (v) { return t0 + h0 - (v - L0) / (H0 - L0) * h0; };
+      g.strokeStyle = l.se.col; g.lineWidth = 1.8; g.beginPath(); var pen = false, last = null;
+      l.c.forEach(function (v, i) { if (v == null) { pen = false; return; } var xx = xOf(a + i), yy = Y(v); if (pen) g.lineTo(xx, yy); else g.moveTo(xx, yy); pen = true; last = v; });
+      g.stroke();
+      g.font = "600 10px " + C.sans; g.textBaseline = "top";
+      halo(g, C, l.se.n + " 최고 " + qty(hi), G.L + 4, t0, C.muted);
+      g.textBaseline = "bottom"; halo(g, C, "최저 " + qty(lo), G.L + 4, t0 + h0, C.muted); g.textBaseline = "top";
+      var tv = hj != null ? l.c[hj] : last;
+      if (tv != null) tags.push({ y: Y(tv), v: tv, se: l.se });
+    });
+    S.after.push(function () {   // 이름표 = 마우스 올린 날(없으면 마지막 날) 값 -- 띠마다 제 높이
+      var th = 14, x0 = G.L + G.plotW + 6, w = G.PW - 12;
+      g.font = "700 10px " + C.sans; g.textBaseline = "middle";
+      tags.forEach(function (t) {
+        var ty = Math.max(top, Math.min(top + hh - th, t.y - th / 2));
+        g.fillStyle = t.se.col; g.globalAlpha = 0.92; g.fillRect(x0, ty, w, th); g.globalAlpha = 1;
+        g.fillStyle = inkOn(t.se.col); g.textAlign = "left"; if (!G.narrow) g.fillText(t.se.n, x0 + 3, ty + th / 2 + 0.5);
+        g.textAlign = "right"; g.fillText(G.narrow ? cqty(t.v) : qty(t.v), x0 + w - 3, ty + th / 2 + 0.5);
+      });
+      g.textAlign = "left"; g.textBaseline = "top";
+    });
+  }
   function drawX(g, C, G, a, b, xOf, k, name, y, h) {
     var all = xSeries(a, b), pick = all.filter(function (se) {
       return se.kind === (k === "xoi" ? "oi" : k === "xfund" ? "fund" : "cvd");
@@ -686,6 +721,7 @@
     halo(g, C, k === "xfund" ? (G.narrow ? "그날 평균 · 점선 0.01%" : "그날 정산 평균(8시간마다 · %) · 점선 = 기본 0.01%(선물 ≈ 현물) · 아래 = 선물 할인(숏이 급함) · 위 = 선물 웃돈(롱이 급함)")
       : k === "xoi" ? (G.narrow ? "그날 " + A().coin : "그날 미결제약정(" + A().coin + " 수량 · 달러로만 오는 OKX 는 ÷ 그날 평균가) · 노랑 바이낸스 · 분홍 OKX · 파랑 Bybit · 오른쪽 값 = 마우스 올린 날(없으면 마지막 날)")
       : (G.narrow ? (b - a + 1) + "봉 누적" : "보이는 " + (b - a + 1) + "봉 누적 · 실선 선물 · 점선 현물 · 굵은 선 = 합(모든 원천이 있는 날)") + (S.X === undefined && S.period === "1d" ? " · 불러오는 중" : ""), G.L + 4 + tw, y + 4, C.muted);
+    if (abs && G.big && lines.length > 1) { drawOiBands(g, C, G, a, b, xOf, lines, top, hh); return; }
     if (!(hi > lo)) return;
     var Y = function (v) { return top + hh - (v - lo) / (hi - lo) * hh; };
     if (!abs) { g.strokeStyle = C.line; g.setLineDash([2, 3]); g.lineWidth = 1; g.beginPath(); g.moveTo(G.L, Math.round(Y(0)) + 0.5); g.lineTo(G.L + G.plotW, Math.round(Y(0)) + 0.5); g.stroke(); g.setLineDash([]); }
@@ -1088,6 +1124,17 @@
     document.querySelectorAll("#chartWindowTabs .asset-tab[data-bars]").forEach(function (b) {
       b.addEventListener("click", function () { if (S.on) setOn(false); });
     });
+    var lb = document.querySelector("#fpDailyTools [data-lanes]");
+    try { S.lanesBig = localStorage.getItem("fpDailyLanesBig") === "1"; } catch (e) { /* 기본 끔 */ }
+    if (lb) {
+      lb.setAttribute("aria-pressed", String(!!S.lanesBig)); lb.classList.toggle("active", !!S.lanesBig);
+      lb.addEventListener("click", function () {
+        S.lanesBig = !S.lanesBig;
+        lb.setAttribute("aria-pressed", String(S.lanesBig)); lb.classList.toggle("active", S.lanesBig);
+        try { localStorage.setItem("fpDailyLanesBig", S.lanesBig ? "1" : "0"); } catch (e) { /* 저장 못 해도 동작 */ }
+        redraw();
+      });
+    }
     var hb = document.querySelector("#fpDailyTools [data-heat]");
     try { S.heatOn = localStorage.getItem("fpDailyHeat") !== "0"; } catch (e) { /* 기본 켬 */ }
     if (hb) {
