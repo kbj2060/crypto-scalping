@@ -652,11 +652,11 @@
       { n: "Bybit", s: "BYB", col: XC.bybit, kind: "fund", v: mk(m("bybit_fund")) }
     ];
   }
-  function xCum(se) {   // CVD = 보이는 첫 값부터 누적(달러) · OI = 보이는 첫 값 대비 변화(코인 수량)
-    var out = [], acc = 0, base = null;
+  function xCum(se) {   // CVD = 보이는 첫 값부터 누적(달러) · OI = 그날 값 그대로(코인 수량 -- 11-16 사용자 «비교값 말고 절대값, 해당 날의 데이터»)
+    var out = [], acc = 0;
     se.v.forEach(function (v) {
       if (v == null) { out.push(null); return; }
-      if (se.kind === "oi") { if (base == null) base = v; out.push(v - base); } else { acc += v; out.push(acc); }
+      if (se.kind === "oi") out.push(v); else { acc += v; out.push(acc); }
     });
     return out;
   }
@@ -676,18 +676,20 @@
         if (c.some(function (v) { return v != null; })) lines.push({ se: { n: gp[1], s: gp[1].replace(" 합", "합"), col: gp[2], sum: true }, c: c });
       });
     }
-    var top = y + 18, hh = h - 22, lo = 0, hi = 0;
+    var top = y + 18, hh = h - 22, abs = k === "xoi", lo = abs ? Infinity : 0, hi = abs ? -Infinity : 0;   // OI = 절대값이라 0 을 범위에 넣지 않는다(넣으면 선이 위에 납작하게 붙는다)
     lines.forEach(function (l) { l.c.forEach(function (v) { if (v != null) { lo = Math.min(lo, v); hi = Math.max(hi, v); } }); });
+    if (abs && hi > lo) { var pd_ = (hi - lo) * 0.06; lo -= pd_; hi += pd_; }
     if (k === "xfund") hi = Math.max(hi, F_BASE * 1.2);   // 기본 0.01% 선이 늘 보이게
     g.font = "700 12px " + C.sans; g.textAlign = "left"; g.textBaseline = "top";
     halo(g, C, name, G.L + 4, y + 4, C.muted);
     var tw = g.measureText(name).width + 8;
     halo(g, C, k === "xfund" ? (G.narrow ? "그날 평균 · 점선 0.01%" : "그날 정산 평균(8시간마다 · %) · 점선 = 기본 0.01%(선물 ≈ 현물) · 아래 = 선물 할인(숏이 급함) · 위 = 선물 웃돈(롱이 급함)")
-      : k === "xoi" ? (G.narrow ? "첫 봉 대비 " + A().coin : "보이는 첫 봉 대비 변화(" + A().coin + " 수량 · 달러로만 오는 OKX 는 ÷ 그날 평균가) · 노랑 바이낸스 · 분홍 OKX · 파랑 Bybit")
+      : k === "xoi" ? (G.narrow ? "그날 " + A().coin : "그날 미결제약정(" + A().coin + " 수량 · 달러로만 오는 OKX 는 ÷ 그날 평균가) · 노랑 바이낸스 · 분홍 OKX · 파랑 Bybit · 오른쪽 값 = 마우스 올린 날(없으면 마지막 날)")
       : (G.narrow ? (b - a + 1) + "봉 누적" : "보이는 " + (b - a + 1) + "봉 누적 · 실선 선물 · 점선 현물 · 굵은 선 = 합(모든 원천이 있는 날)") + (S.X === undefined && S.period === "1d" ? " · 불러오는 중" : ""), G.L + 4 + tw, y + 4, C.muted);
     if (!(hi > lo)) return;
     var Y = function (v) { return top + hh - (v - lo) / (hi - lo) * hh; };
-    g.strokeStyle = C.line; g.setLineDash([2, 3]); g.lineWidth = 1; g.beginPath(); g.moveTo(G.L, Math.round(Y(0)) + 0.5); g.lineTo(G.L + G.plotW, Math.round(Y(0)) + 0.5); g.stroke(); g.setLineDash([]);
+    if (!abs) { g.strokeStyle = C.line; g.setLineDash([2, 3]); g.lineWidth = 1; g.beginPath(); g.moveTo(G.L, Math.round(Y(0)) + 0.5); g.lineTo(G.L + G.plotW, Math.round(Y(0)) + 0.5); g.stroke(); g.setLineDash([]); }
+    var hj = S.hover && S.hover.i >= a && S.hover.i <= b ? S.hover.i - a : null;   // 이름표 값 = 마우스 올린 날(«해당 날의 데이터») · 없으면 마지막 값
     if (k === "xfund") { g.strokeStyle = C.muted; g.setLineDash([5, 4]); g.beginPath(); g.moveTo(G.L, Math.round(Y(F_BASE)) + 0.5); g.lineTo(G.L + G.plotW, Math.round(Y(F_BASE)) + 0.5); g.stroke(); g.setLineDash([]); }
     var tags = [];
     lines.forEach(function (l) {
@@ -695,7 +697,8 @@
       g.beginPath(); var pen = false, last = null;
       l.c.forEach(function (v, j) { if (v == null) { pen = false; return; } var xx = xOf(a + j), yy = Y(v); if (pen) g.lineTo(xx, yy); else g.moveTo(xx, yy); pen = true; last = v; });
       g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
-      if (last != null) tags.push({ y: Y(last), v: last, se: l.se });
+      var tv = hj != null ? l.c[hj] : last;
+      if (tv != null) tags.push({ y: Y(tv), v: tv, se: l.se });
     });
     // 오른쪽 이름표(킹피셔식 색 상자) -- 끝 값 높이에서 겹치면 아래로 민다
     tags.sort(function (p, q) { return p.y - q.y; });
@@ -711,7 +714,7 @@
       g.fillStyle = t.se.col; g.globalAlpha = t.se.dash ? 0.78 : 0.92; g.fillRect(x0, t.ty, w, th); g.globalAlpha = 1;
       g.fillStyle = inkOn(t.se.col); g.textAlign = "left";
       if (!G.narrow) g.fillText(t.se.n, x0 + 3, t.ty + th / 2 + 0.5);   // 휴대폰(칸 58px)은 이름과 값이 겹쳤다 -- 값만(색이 거래소)
-      g.textAlign = "right"; g.fillText(k === "xfund" ? (G.narrow ? fmtF(t.v).replace("%", "") : fmtF(t.v)) : k === "xoi" ? (t.v >= 0 ? "+" : "−") + cqty(Math.abs(t.v)) : sgnUsd(t.v), x0 + w - 3, t.ty + th / 2 + 0.5);
+      g.textAlign = "right"; g.fillText(k === "xfund" ? (G.narrow ? fmtF(t.v).replace("%", "") : fmtF(t.v)) : k === "xoi" ? (G.narrow ? cqty(t.v) : qty(t.v)) : sgnUsd(t.v), x0 + w - 3, t.ty + th / 2 + 0.5);
     });
     g.textAlign = "left"; g.textBaseline = "top";
     });
@@ -737,6 +740,11 @@
     return D.ll[i] == null ? null : [D.ll[i], D.ls[i]];
   }
 
+  function oiEx(i) {   // 11-16: 툴팁에 그날 OKX·Bybit OI(코인 수량 · 레인과 같은 환산)
+    var se = xSeries(i, i).filter(function (z) { return z.kind === "oi" && z.n !== "바이낸스"; });
+    var t = se.map(function (z) { return z.v[0] == null ? null : z.n + " " + qty(z.v[0]); }).filter(Boolean);
+    return t.length ? " · " + t.join(" · ") + " " + A().coin : "";
+  }
   function laneText(k, i) {
     var v = laneVal(k, i), D = S.D;
     if (v == null) return k === "liq" ? "모름(수집 전)" : k === "oi" ? (D.oi[i] == null ? (S.period === "4h" ? "모름" : "모름(2022-01 전)") : qty(D.oi[i]) + " " + A().coin) : "모름";
@@ -1005,7 +1013,7 @@
       }
     } else {
       html = "<b>" + lab(D.d[i]) + "</b><br>델타 " + laneText("delta", i) + " · 거래대금 " + laneText("turn", i) +
-             "<br>OI " + laneText("oi", i) + (S.X && S.X.bn_fund ? "<br>펀딩(그날 평균/8h) " + [["바이낸스", "bn_fund"], ["OKX", "okx_fund"], ["Bybit", "bybit_fund"]].map(function (z) {
+             "<br>OI 바이낸스 " + laneText("oi", i) + oiEx(i) + (S.X && S.X.bn_fund ? "<br>펀딩(그날 평균/8h) " + [["바이낸스", "bn_fund"], ["OKX", "okx_fund"], ["Bybit", "bybit_fund"]].map(function (z) {
                var v = S.X[z[1]] && S.X[z[1]][D.d[i]]; return z[0] + " " + (v == null ? "-" : fmtF(v)); }).join(" · ") : "") + "<br>청산 " + laneText("liq", i) + "<br>추정 청산(" + (S.period === "4h" ? "그 칸" : "그날") + " 마감 7일 지도) " + laneText("lmap", i);
     }
     if (html) tipShow(e.pageX, e.pageY, html); else tipHide();
