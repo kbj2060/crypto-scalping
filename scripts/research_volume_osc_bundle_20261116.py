@@ -3,10 +3,12 @@
 
   selftest   손계산 봉으로 지표값·사건 방향 단언
   run        4코인 × 15분·1시간(+4시간 보조) 실제 + 기하 위약 20벌 + 지표별 실제 가격 대조 → tmp/volume_osc_bundle_20261116/
+  run2       E1·E4 만 안 본 코인 5종(5분봉 CSV) 재현 — 사전등록 docs/prereg/cci_soldiers_r2_newcoins_20261116.md (c9fdbfb7)
 실행·판정 뼈대는 research_classic_indicator_bundle_20261115.run 그대로(events·KEYS·OUT 만 바꿈). 거래량 끝(AV.END) 앞 사건만.
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -21,6 +23,7 @@ import research_anchored_vwap_meaning_20261115 as AV  # noqa: E402
 
 OUT = Path(__file__).resolve().parents[1] / "tmp/volume_osc_bundle_20261116"
 KEYS = ["E1", "E2", "E3", "E4"]
+ONLY = None                                                # run2: 이 키(와 P3)만
 lag = lambda x, k=1: np.r_[np.full(k, np.nan), x[:-k]]
 rmax = lambda x, w: pd.Series(x).rolling(w).max().to_numpy()
 rsum = lambda x, w: pd.Series(x).rolling(w).sum().to_numpy()
@@ -77,6 +80,8 @@ def events(B: dict, tf: str, with_p3: bool) -> dict:
             if y >= 0:
                 R["cell"].append(cell + suf); R["tk"].append(int(t[i]) + B["ms"]); R["y"].append(float(y))
     def fire(cell, x):
+        if ONLY and cell.replace("P3", "") not in ONLY:
+            return
         for i in np.flatnonzero(x):
             add(cell, i, x[i])
     C = cci(h, l, c)
@@ -88,7 +93,7 @@ def events(B: dict, tf: str, with_p3: bool) -> dict:
     E4, P4 = soldiers(c, o, atr); fire("E4", E4)
     if with_p3:
         fire("P3E2", mfi_ev(one)); fire("P3E3", obv_lead(c, one)); fire("P3E4", P4)
-        for i in range(CB.WARM, n - 1, CB.STEP[tf]):
+        for i in (range(CB.WARM, n - 1, CB.STEP[tf]) if not ONLY or "E1" in ONLY else ()):
             add("P3E1", i, np.sign(c[i] - c[i - 20]))
     return R
 
@@ -114,5 +119,40 @@ def run() -> None:
     CB.run()
 
 
+def run2() -> None:
+    global ONLY
+    import research_orb_meaning_20261115 as OR
+    ONLY, out = ("E1", "E4"), OUT.parent / "cci_soldiers_r2_newcoins_20261116"; out.mkdir(parents=True, exist_ok=True)
+    rows, aggs = [], []
+    for ci, coin in enumerate(OR.NEW):
+        k = OR.load5(coin)
+        for draw in range(-1, SM.NPLACEBO):
+            kk = k if draw < 0 else SM.placebo(k, SM.SEED + 9000 + 1000 * ci + draw)
+            k1 = kk.assign(t=kk.t // 5)                       # 쌍봉 2라운드와 같은 5분 → «1분» 눈금 묶음(selftest2)
+            for tf, mnt in CB.TFS.items():
+                B = SM.bars(k1, mnt // 5); B["t"] = B["t"] * 5; B["ms"] *= 5
+                ev = pd.DataFrame(events(B, tf, draw < 0)).assign(coin=coin, tf=tf, draw=draw)
+                if draw < 0:
+                    rows.append(ev)
+                elif len(ev):
+                    aggs.append(ev.assign(hh=ev.tk >= SM.SPLIT).groupby(["coin", "tf", "draw", "cell", "hh"]).y.agg(["sum", "count"]).reset_index())
+            print(coin, draw, flush=True)
+    E, PA = pd.concat(rows, ignore_index=True), pd.concat(aggs, ignore_index=True)
+    E.to_parquet(out / "events.parquet"); PA.to_parquet(out / "placebo_agg.parquet")
+    SM.TFS, SM.COINS = CB.TFS, list(OR.NEW); main, aux = {}, {}
+    for key, tfs in (("E1", ("15m", "1h")), ("E4", ("1h",))):
+        SM.MAIN_TFS, SM.CELLS, SM.P2OF = tfs, [key], {key: "P3" + key}
+        main.update(SM.judge(E, PA))
+        SM.MAIN_TFS, SM.CELLS, SM.P2OF = (), [key + "_2atr"], {key + "_2atr": "P3" + key + "_2atr"}
+        aux.update(SM.judge(E, PA))
+    for v in main.values():                                  # 코인 ≥ 4/5 — judge 는 3 고정이라 다시 셈 · Holm 밖 칸 = 보조
+        if "holm" not in v:
+            continue
+        ok = sum(x > 0 for x in v["coin_diff_pp"].values()) >= 4 and all(x > 0 for x in v["half_diff_pp"].values())
+        v["pass"] = bool(v["holm"] and v["lo90_pp"] > 0 and v.get("lo90_2_pp", -1) > 0 and ok)
+        v["candidate"] = bool(v["diff_pp"] > 0 and v.get("diff2_pp", -1) > 0 and ok)
+    json.dump(dict(main=main, aux=aux), open(out / "result.json", "w"), ensure_ascii=False, indent=1, default=float)
+
+
 if __name__ == "__main__":
-    {"selftest": selftest, "run": run}[sys.argv[1]]()
+    {"selftest": selftest, "run": run, "run2": run2}[sys.argv[1]]()
