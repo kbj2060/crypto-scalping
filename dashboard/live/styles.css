@@ -3930,7 +3930,24 @@ html.fp-lock { overflow: hidden; scrollbar-gutter: stable; }
 #fpWideBtn[aria-pressed="false"] .wd-off, #fpWideBtn[aria-pressed="true"] .wd-on { display: none; }
 @media (min-width: 1700px) and (orientation: landscape) and (hover: hover) {
   #fpWideBtn { display: inline-flex; }
-  html.fp-wide #mcBody { display: none !important; }
+  html.fp-wide:not(.fp-side) #mcBody { display: none !important; }
+  /* 2026-11-15 펜 메모 시안 B: 오른쪽 끝 손잡이(#ofabTab 문법) + 차트 위 오른쪽 칸 서랍 -- 위치·폭은 app.js fpSidePlace(평소 오른쪽 칸 자리 그대로) */
+  .fp-side-tab { position: absolute; right: 0; top: 50%; transform: translateY(-50%); z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 7px;
+    padding: 12px 6px 12px 8px; border: 1px solid var(--line); border-right: 0; border-radius: 12px 0 0 12px; background: var(--bg); color: var(--text); cursor: pointer;
+    box-shadow: 0 8px 24px rgb(var(--shadow) / .32); font: 700 12px/1 var(--font-sans); }
+  .fp-side-tab[hidden], .fp-side[hidden] { display: none; }
+  .fp-side-tab svg { width: 14px; height: 14px; color: var(--muted); }
+  .fp-side-tab b { writing-mode: vertical-rl; letter-spacing: .12em; }
+  .fp-side-tab:hover svg, .fp-side-tab[aria-expanded="true"] svg { color: var(--text); }
+  .fp-side-tab[aria-expanded="true"] { background: var(--panel-strong); border-color: var(--hover-line, var(--line)); }
+  .fp-side-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .fp-side { position: absolute; top: 0; right: 0; bottom: 0; z-index: 3; border-left: 1px solid var(--line); background: var(--chart-bg);
+    box-shadow: -14px 0 36px rgb(var(--shadow) / .42); }
+  .fp-side-head { position: absolute; top: 0; left: 14px; right: 12px; height: 46px; display: flex; align-items: center; border-bottom: 1px solid var(--soft-line, var(--line)); }
+  .fp-side-head #fpRates { display: flex; flex: 1; min-width: 0; margin: 0; }
+  .fp-side-head #fpRates[hidden] { display: none; }
+  .fp-side-s1 { position: absolute; left: 14px; display: block; }
+  html.fp-wide.fp-side #mcBody.mc-cmp { z-index: 4; }
   /* 2026-11-15 펜 메모 시안 B «차트가 화면 전체»: 카드가 창 전체를 덮는다(앱 막대·왼쪽 메뉴·카드 테두리 없음) · 머리 줄은 왼쪽 위 떠 있는 도구 상자
      (보기·시간 단위·잠금·나가기 -- 손익은 오른쪽 아래 주문 캡슐에 있어 뺐다) · z 860 = 왼쪽 메뉴(.card-rail 800·850) 위 · 주문 캡슐(.ofab 900)·툴팁(1000) 아래 · Esc = 나가기(app.js) */
   html.fp-wide body { overflow: hidden; }
@@ -3943,7 +3960,7 @@ html.fp-lock { overflow: hidden; scrollbar-gutter: stable; }
     border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--panel-strong) 84%, transparent); backdrop-filter: blur(8px);
     box-shadow: 0 6px 20px rgb(0 0 0 / .35); }
   html.fp-wide #fpCard .chart-head-left { flex: 0 0 auto; flex-wrap: nowrap; gap: 8px; }
-  html.fp-wide #fpCard .card-title, html.fp-wide #fpCard #fpRates, html.fp-wide #fpCard #fpPos { display: none !important; }
+  html.fp-wide #fpCard .card-title, html.fp-wide #fpCard .ops-health-head #fpRates, html.fp-wide #fpCard #fpPos { display: none !important; }   /* 11-15: 서랍 머리로 옮긴 #fpRates 는 보인다 */
   html.fp-wide .entry-pop { z-index: 870; }   /* 검증 11-15: 관리 막대(#entryPop, body 에 붙는 fixed z 60)가 전체화면 카드(860) 뒤에 깔려 안 보였다 */
 }
 @media (min-width: 721px) and (max-width: 1099px) {   /* 검증 11-13: 태블릿에서 주식 카드(.opt-eq)가 데스크톱 배치 + 태블릿 열 비율로 찌그러졌다 -- 태블릿 배치를 주식용으로 */

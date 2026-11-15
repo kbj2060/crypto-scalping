@@ -3917,8 +3917,42 @@ el("fpWideBtn")?.addEventListener("click", () => fpWideSet(!document.documentEle
 addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || e.defaultPrevented || !document.documentElement.classList.contains("fp-wide")) return;
   const busy = el("entryPop") || lineDraft || armedEdit?.cfm || fpIndOpen || document.querySelector(".ms-x, .asset-pop:not([hidden]), dialog[open]") || el("ofab")?.contains(document.activeElement);
-  if (!busy) fpWideSet(false);
+  if (!busy) { if (fpSideOpen && !el("fpSideTab")?.hidden) fpSideSet(false); else fpWideSet(false); }   // 11-15 시안 B: 열린 오른쪽 칸 서랍부터 닫는다
 }, true);
+// 2026-11-15 펜 메모 시안 B «전체화면이면 화면 오른쪽 끝 손잡이 → 접힌 오른쪽 칸(발표·1초 수급·시장 맥락)을 통째로 팝업»: 차트 폭은 그대로 두고
+//   오른쪽 칸을 평소 폭 그대로 차트 위 서랍(#fpSide)에 띄운다. 1초 수급 = 서랍 안 따로 svg · 시장 맥락 = #mcBody 를 서랍 자리에 겹침(mcPlace) · 발표 띠 = #fpRates 를 서랍 머리로 옮김.
+//   열고 닫음은 기억 · Esc 는 서랍부터. renderCandleSvg 의 FP_SIDE 가 읽는다.
+const FP_SIDE_HEAD = 46;   // 서랍 머리(발표 띠 두 줄) 높이
+let fpSideOpen = false;
+try { fpSideOpen = localStorage.getItem("fpSide") === "1"; } catch (e) { /* 기억은 편의 */ }
+function fpSideSet(on) {
+  fpSideOpen = on;
+  try { localStorage.setItem("fpSide", on ? "1" : "0"); } catch (e) { /* 기억은 편의 */ }
+  if (typeof scheduleSnapshotChartRender === "function") scheduleSnapshotChartRender();
+}
+el("fpSideTab")?.addEventListener("click", () => fpSideSet(!fpSideOpen));
+function fpSidePlace(svg, ok, px, s1y) {   // px = 서랍 안쪽 왼쪽 끝(svg 좌표) · null 이면 닫힘
+  const tab = el("fpSideTab"), box = el("fpSide"), card = el("fpCard"), rates = el("fpRates"), head = el("fpSideHead"), home = el("fpPanHome");
+  if (!tab || !box || !card) return;
+  const open = px != null;
+  tab.hidden = !ok; box.hidden = !open;
+  document.documentElement.classList.toggle("fp-side", open);
+  tab.setAttribute("aria-expanded", String(open));
+  tab.title = open ? "오른쪽 칸 닫기 (Esc)" : "오른쪽 칸 열기 — 발표·1초 수급·시장 맥락을 차트 위에 띄움";
+  if (rates && head && home) { if (open && rates.parentElement !== head) head.appendChild(rates); else if (!open && rates.parentElement === head) home.before(rates); }
+  // 카드(100vw)는 스크롤바 자리(카드 고정 = scrollbar-gutter stable)까지 덮지만 그 칸은 눌리지 않는다 -- 보이는 끝(clientWidth)에 붙인다
+  const c = card.getBoundingClientRect(), gut = Math.max(0, Math.round(c.right - document.documentElement.clientWidth));
+  if (!open) { tab.style.right = `${gut}px`; return; }
+  const a = svg.getBoundingClientRect(), L = Math.round(a.left - c.left + px - 14);
+  box.style.left = `${L}px`; box.style.right = `${gut}px`; tab.style.right = `${Math.round(c.width - L)}px`;
+  const s1 = el("fpSideS1"); if (s1) s1.style.top = `${Math.round(a.top - c.top + s1y)}px`;
+}
+function fpSideS1(w, h) {   // 서랍 안 1초 수급(따로 svg -- 본 svg 안에 두면 서랍 바탕 아래에 깔린다)
+  const s = el("fpSideS1"); if (!s) return null;
+  const k = sub1sKey(w, h);
+  if (s._k !== k) { s.setAttribute("viewBox", `0 0 ${w} ${h}`); s.style.width = `${w}px`; s.style.height = `${h}px`; renderSupply1s({ svg: s, w, h }); s._k = k; }   // 크기는 style 로(#fpCard svg 류 CSS 가 속성을 덮는다)
+  return { svg: s, w, h };
+}
 try { if (localStorage.getItem("fpWide") === "1") fpWideSet(true); } catch (e) { /* 기억은 편의 */ }
 function railGo(id) {
   const t = el(id);
@@ -7767,6 +7801,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // 2026-11-13 펜 메모 «풋프린트에 전체화면 아이콘 -- 누르면 오른쪽 칸(1초 수급·시장 맥락)이 접히고 왼쪽이 카드 전체를»: 2단 배치는 그대로 두고 오른쪽 칸 폭만 0
   //   (위 한 줄·체결/호가 기둥·차트 아래 띠는 2단 그대로) · 1초 수급·시장 맥락은 안 그린다(#mcBody 는 CSS 가 숨김). fpWideSet 이 켜고 끈다.
   const FPW = !!splitR && document.documentElement.classList.contains("fp-wide") && matchMedia("(hover: hover)").matches;   // 검증: 버튼이 안 보이는 기기(터치)에서 접힌 채 고정되지 않게
+  const FP_SIDE_OK = FPW && !fpAltOn(), FP_SIDE = FP_SIDE_OK && fpSideOpen;   // 11-15 시안 B: 전체화면 오른쪽 칸 서랍(손잡이는 _OK 일 때만)
+  if (svg.id === "candleSvgSnapshot" && !FP_SIDE) fpSidePlace(svg, FP_SIDE_OK, null);
   const subW = splitR ? (FPW ? 0 : Math.round((wAll - SPLIT_GAP) * splitR) + FP_LEFT_SHIFT) : wAll;   // 10-15 풋프린트를 왼쪽으로 옮긴 만큼 오른쪽 칸을 넓힌다(플롯 폭은 그대로 -- 아래 ml 도 같은 만큼 줄인다)
   const w = splitR ? wAll - SPLIT_GAP - subW : wAll, subX = splitR ? w + SPLIT_GAP : 0;
   // 🔴SUB_TOTAL(아래)은 styles.css 의 #candleSvgSnapshot 높이와 **같이** 움직여야 한다 -- 상자가 작으면 가격 플롯이 눌린다
@@ -10678,12 +10714,14 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     // 2026-09-19 히트맵도 같은 캐시를 쓴다 -- 래스터는 3초마다 새 열이 오는데 캔들 전체
     // 리렌더(가격 틱)를 기다릴 이유가 없다(2bb2b2f1 이 프로파일/1초수급에 넣은 그 이유).
     // 2026-09-30 시안 Y(사용자 선택): ETH 는 오른쪽 칸 위 절반만 1초 수급, 아래 절반은 시장 맥락(#mcBody 를 그 자리에 겹쳐 놓는다).
-    const mcSplit0 = !!splitR && flowOn(), mcSplit = mcSplit0 && !FPW;   // 2026-10-04 SOL·XRP 도 시장 맥락(코인별) · 전체화면(FPW)은 오른쪽 칸을 접는다
+    const mcSplit0 = !!splitR && flowOn(), mcSplit = mcSplit0 && (!FPW || FP_SIDE);
+    // 11-15 시안 B: 서랍이 열리면 오른쪽 칸을 평소 폭(sW)으로 차트 오른쪽 끝 위(sX)에 · 머리(발표 띠)만큼 아래로
+    const sW = FP_SIDE ? Math.round((wAll - SPLIT_GAP) * splitR) + FP_LEFT_SHIFT : subW, sX = FP_SIDE ? wAll - sW : subX, sHead = FP_SIDE ? FP_SIDE_HEAD : 0;   // 2026-10-04 SOL·XRP 도 시장 맥락(코인별) · 전체화면(FPW)은 오른쪽 칸을 접는다
     // 2026-09-30 1초 수급 높이 = 칸 − 시장 맥락의 **실제 내용 높이**(mcNeedH, renderMarketCtx 가 잰다) -- 한 화면 모드로 칸이 줄어도 시장 맥락이 스크롤 없이 다 들어간다.
     //   아직 못 쟀으면 47% · 1초 수급은 칸의 22% 아래로는 안 줄인다(2026-10-15 30 → 22%: ⑤ 예측 줄·⑥ 그래프 키운 몫, 사용자 «모자라면 수급 차트 높이를 줄여»).
     // 2026-10-01 바닥 = 전환 리본 바닥(사용자 «전환 리본까지 나머지 바닥을 맞춰») -- 시장 맥락·모의 판(옛 옵션 요약) 칸이 같은 선에서 끝난다
     const floorY = hAll - 2;   // 2026-10-06 리본 줄이 빠져 칸 바닥 = 상자 바닥
-    const s1Avail = floorY + 12 - mtTop - 4;   // +10 = 시장 맥락 내용 높이의 여유(+6)·칸 아래 여백 -- 마지막 줄 글자가 리본 바닥에 닿게
+    const s1Avail = floorY + 12 - mtTop - 4 - sHead;   // +10 = 시장 맥락 내용 높이의 여유(+6)·칸 아래 여백 -- 마지막 줄 글자가 리본 바닥에 닿게
     const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.22), mcNeedH ? Math.round(s1Avail - mcNeedH - 16 - 8 - (FP_BUB ? 0 : MC_BUBBLE_H)) : Math.round(s1Avail * 0.47)) : s1Avail) : S1_BELOW ? S1_PANEL : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
     { const fs = el("fpLineSwitch"), card = el("fpCard");   // 청산 밀도 범례(왼쪽 위, ~256px) 오른쪽
       if (fs && card) {
@@ -10710,14 +10748,15 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         fpMobRowSet(!on && mobileChart && flowOn() && !fpAltOn(), card, fs);   // 2026-10-28 휴대폰 = 머리 마지막 줄 [· | SLTP | 지표]
       } }
     // 2026-10-15 아티팩트 댓글 «봉 시간은 수급 차트 위로, 남는 공간은 미니 체결 버블»: 수급 바닥 시각 줄(12px, renderSupply1s mb 16→4)을 버블에 넘긴다
-    const s1Give = mcSplit ? 12 : 0, s1Hd = s1H - s1Give;
-    if (mcSplit0 && mcBubbleEl) { const bh = FP_BUB ? FP_BUB - 14 : floorY - (sub1sY + s1Hd + 12) - mcNeedH - 6;   // 11-10 띠 안(위 여백 8 · 아래 6)   // 10-30 버블 = 칸 − 아래 두 줄 내용 → 아래 두 줄 바닥 = 칸 바닥(지지·저항 칸 바닥)
+    const s1Give = mcSplit ? 12 : 0, s1Hd = s1H - s1Give, s1Y = sub1sY + sHead;
+    if (mcSplit0 && mcBubbleEl) { const bh = FP_BUB ? FP_BUB - 14 : floorY - (s1Y + s1Hd + 12) - mcNeedH - 6;   // 11-10 띠 안(위 여백 8 · 아래 6)   // 10-30 버블 = 칸 − 아래 두 줄 내용 → 아래 두 줄 바닥 = 칸 바닥(지지·저항 칸 바닥)
       const v = bh >= 60 ? `${bh}px` : "0px"; if (mcBubbleEl.style.height !== v) mcBubbleEl.style.height = v; mcBubbleEl.hidden = bh < 60; }
-    post.push(() => mcPlace(svg, mcSplit0 ? { x: subX, y: sub1sY + s1Hd + 12, w: Math.max(0, subW - 16), h: floorY - (sub1sY + s1Hd + 12) } : null,   // 전체화면도 넓은 배치(mc-cmp)로 둔다 -- 풀면 머리 금리 띠·지지/저항 목록이 차트 아래로 튀어나왔다(CSS 가 #mcBody 를 숨김)
+    if (FP_SIDE) post.push(() => fpSidePlace(svg, true, sX, s1Y));
+    post.push(() => mcPlace(svg, mcSplit0 ? { x: sX, y: s1Y + s1Hd + 12, w: Math.max(0, sW - 16), h: floorY - (s1Y + s1Hd + 12) } : null,   // 전체화면도 넓은 배치(mc-cmp)로 둔다 -- 풀면 머리 금리 띠·지지/저항 목록이 차트 아래로 튀어나왔다(CSS 가 #mcBody 를 숨김)
             mcSplit0 && TRADE_W ? (FP_BUB ? { x: ml, y: h - FP_BUB + 8, w: w - mr - ml, h: FP_BUB - 14 }   // 2026-11-10 차트 아래 전폭 체결 버블 띠(플롯 왼쪽 ~ 호가 칸 오른쪽)
               : (() => { const y = plotBottom + 12;   // 2026-10-01(4) 프로파일 아래 = 2026-10-04 모의 판(renderPaper 가 채운다)
               return { x: tradeX0 + 4, y, w: REG_W - 8, h: floorY - y }; })()) : null));   // 10-26 레인 값 칸(옛 LANE_VAL_W 144)을 빼 지지/저항 칸이 제자리로
-    supply1sSubBox = FPW ? null : {
+    supply1sSubBox = FP_SIDE ? fpSideS1(sW, s1Hd) : FPW ? null : {
       svg: subSvg("s1", subX, sub1sY, subW, s1Hd, sub1sKey(subW, s1Hd),
                   (g) => renderSupply1s({ svg: g, w: subW, h: s1Hd })),
       w: subW, h: s1Hd };
