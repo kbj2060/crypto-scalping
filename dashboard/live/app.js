@@ -7165,7 +7165,7 @@ function renderObFvg() {
   const Rf = obFvgCalc(c5, M15), P = Number(c5[c5.length - 1].close), slot = G.cw / G.n, xr = G.ml + G.cw, ch = G.pb - G.mt;
   const xT = (t) => G.ml + (measIdx(G.bars, t) + G.off) * slot, yP = (v) => G.mt + (G.ymax - v) * ch / (G.ymax - G.ymin);
   const NSV = "http://www.w3.org/2000/svg", mk = (tag, a, txt) => { const e = document.createElementNS(NSV, tag); for (const k in a) e.setAttribute(k, a[k]); if (txt != null) e.textContent = txt; return e; };
-  const col = (z) => (z.d > 0 ? "var(--good)" : "var(--bad)"), f0 = (v) => v.toLocaleString("en-US", { maximumSignificantDigits: 5 });
+  const col = (z) => (z.d > 0 ? "var(--good)" : "var(--bad)");
   const g = mk("g", { id: "obfvg", "pointer-events": "none" }); svg.appendChild(g);
   const defs = mk("defs", {}), clip = mk("clipPath", { id: "obClip" });
   clip.appendChild(mk("rect", { x: G.ml, y: G.mt, width: G.cw, height: ch })); defs.appendChild(clip);
@@ -7203,7 +7203,6 @@ function renderObFvg() {
   }
   if (!mcLine.ob) return;
   // 11-15 사용자 «15분봉·5분봉 큰 스윙 둘 다 5분봉에» -- 5분 보기 = 15분(실선·채운 꼬리표·존 위쪽) + 5분(파선·연한 칠·빈 꼬리표·존 아래쪽) · 30분/1시간 보기 = 15분만
-  const edge = { up: 0, dn: 0 };   // 가장자리 알림 쌓기(위·아래 각각)
   for (const M of chartTfK === 1 ? [M15, 300] : [M15]) {
     const R = obFvgCalc(c5, M), [tfN, pHold, pRnd] = OB_STAT[M], big = M === M15;
     const live = R.ob.filter((z) => z.ti == null && z.age < OB_LIFE);   // age 100 = 닿음 검사 창(k+1..k+100)이 다 마감 → 수명 끝(리뷰)
@@ -7216,12 +7215,7 @@ function renderObFvg() {
       body.appendChild(mk("rect", { x: x0, y: y0, width: big ? 3 : 2, height: h, fill: col(z) }));
       if (inY(z)) pill(x0 + 12, big ? y0 + 11 : y1 - 11, `${z.d > 0 ? "지지" : "저항"} OB ${tfN} · 닿으면 버팀 약 ${pHold}% (무작위 ${pRnd}%) · ${left(z)}`, z, "start", big);
     }
-    for (const z of nb) if (!inY(z) && chartPanEnd == null) {   // 화면 밖 = 위·아래 가장자리 꼬리표(지금 보기만 -- 과거 구간 세로 범위로 «위/아래»를 가르면 틀린다)
-      const up = z.lo > G.ymax, pct = ((up ? z.lo : z.hi) / P - 1) * 100, k = edge[up ? "up" : "dn"]++, mob = isMobileChartMode(), pc = `${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}%`;
-      // 휴대폰 = 오른쪽 끝·둘째 줄·짧게(11-15 스윙선 세션 제보: 가운데 알림이 왼쪽 끝 일봉 SMA50·스윙 꼬리표와 오른쪽 위 추세 veto 글을 덮었다)
-      const yy = (mob ? 32 : 12) + 20 * k;
-      pill(mob ? xr - 6 : G.ml + G.cw / 2, up ? G.mt + yy : G.pb - yy, mob ? `${up ? "↑" : "↓"} ${z.d > 0 ? "지지" : "저항"} OB ${tfN} ${f0(up ? z.lo : z.hi)} ${pc}` : `${up ? "↑" : "↓"} ${z.d > 0 ? "지지" : "저항"} OB ${tfN} ${f0(z.lo)}–${f0(z.hi)} (${pc}) · ${left(z)}`, z, mob ? "end" : "middle", false);
-    }
+    // 11-15 사용자 펜 메모 «OB·FVG 가 보고 있는 차트 밖이면 칩을 두지 말아줘» → 화면 밖 가장자리 알림 삭제(보이는 존만 꼬리표)
     const tEnd = R.B[R.B.length - 1].t + M;
     for (const z of R.ob) if (z.res && z.rt + M >= tEnd - 2 * 3600) {   // 닿고 판정 난 존 = 닿은 자리에 결과 2시간 뒤 지움
       const x = xT(R.B[z.ti].t + M / 2), y = yP(z.d > 0 ? z.hi : z.lo);
@@ -10627,34 +10621,25 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   }
 
   // ── 2026-11-10 사용자 «맨 POC·미완 경매도 넣어서 시안»: 아직 다시 안 간 가격 -- 서술 표시(자석 아님).
-  //   맨 POC = 닫힌 봉의 최다 체결 행 중 그 뒤 봉 고저가 아직 안 지난 것(흐린 실선 + 생긴 봉 점 → 오른쪽 끝 «nPOC 가격») ·
+  //   11-15 사용자 펜 메모 «nPOC 가 표시만 되고 다른 데 안 쓰이면 로직·코드·표시 모두 제거» → 맨 POC 삭제, 미완 경매만 남김.
   //   미완 경매 = 닫힌 봉 고가·저가 행에 매수·매도가 둘 다 체결됐는데 아직 안 간 것(꺾쇠 아이콘: 고 ︿ · 저 ﹀).
   //   검정(docs/experiments/footprint_naked_poc_unfinished_auction_results_20261110.md, ETH 55일): 1시간 안 재방문 맨 POC 70.5% vs 위약 68.6% ·
   //   미완 67.6% vs 65.0% -- 통과지만 +2~2.6%p 뿐이고 지금가 10bp 안쪽은 위약 이하라 그리지 않는다. 1주일 창(DENSE)은 너무 많아 끈다.
   if (isSnapshotChart && footprint && candles.length > 1 && !DENSE) {
     const cp = Number(currentPrice) || candles[candles.length - 1].close, far = (p) => Math.abs(p / cp - 1) >= 0.001;
-    const lines = [];   // [x0, 가격, 종류, 오른쪽 끝]
+    const lines = [];   // [x0, 가격, 종류]
     candles.forEach((c, i) => {
       if (c.partial || i === candles.length - 1) return;
       const r = (footprint.byTime.get(c.time) || []).filter((l) => (Number(l[1]) || 0) + (Number(l[2]) || 0) > 0);
       if (!r.length) return;
       const hq = (Number(footprint.bucket) || 0) / 2, later = candles.slice(i + 1), open = (p) => !later.some((x) => x.low <= p + hq && p - hq <= x.high) && far(p);   // 11-10 리뷰: 레벨 = 칸 중심 -- 반 칸 허용
-      const vol = (l) => (Number(l[1]) || 0) + (Number(l[2]) || 0);
-      const poc = Number(r.reduce((a, l) => (vol(l) > vol(a) ? l : a))[0]);
-      const seen = (p) => lines.some((q) => q[1] === p);   // 같은 가격이 여러 봉에서 나오면 가장 먼저 생긴 것 하나만(글자 겹침)
-      if (open(poc) && !seen(poc)) lines.push([xAt(i) + bw / 2, poc, "poc"]);
+      const seen = (p) => lines.some((q) => q[1] === p);   // 같은 가격이 여러 봉에서 나오면 가장 먼저 생긴 것 하나만
       const top = r.reduce((a, l) => (Number(l[0]) > Number(a[0]) ? l : a)), bot = r.reduce((a, l) => (Number(l[0]) < Number(a[0]) ? l : a));
-      [[top, "고"], [bot, "저"]].forEach(([l, k]) => { const p = Number(l[0]); if (Number(l[1]) > 0 && Number(l[2]) > 0 && p !== poc && open(p) && !seen(p)) lines.push([xAt(i) + bw / 2, p, "ua" + k]); });
+      [[top, "고"], [bot, "저"]].forEach(([l, k]) => { const p = Number(l[0]); if (Number(l[1]) > 0 && Number(l[2]) > 0 && open(p) && !seen(p)) lines.push([xAt(i) + bw / 2, p, "ua" + k]); });
     });
     if (lines.length) {
-      const xR = ml + cw;
       fgI.push({ ...CV_ALL, c: plotC, p: (ctx) => lines.forEach(([x0, p, k]) => {
         const y = Math.round(yAt(p)) + 0.5;
-        if (k === "poc") {   // 11-10 시안 C: 흐린 실선 + 생긴 봉 점(지지·저항 띠·max pain 주황 점 줄과 다른 문법)
-          cvStroke(ctx, [[x0, y], [xR, y]], "var(--text)", 1, 0.28);
-          ctx.globalAlpha = 0.9; ctx.fillStyle = cvc("var(--muted)"); ctx.beginPath(); ctx.arc(x0, y, 2.6, 0, Math.PI * 2); ctx.fill();
-          return;
-        }
         // 2026-11-10 사용자 «미완은 아이콘으로 깔끔하게» → 시안 1 꺾쇠: 고 = 봉 위 ︿ · 저 = 봉 아래 ﹀(경매가 그쪽으로 덜 끝났다) · 글자 없음(뜻은 툴팁)
         const hi = k === "ua고", s = Math.max(3.5, Math.min(5, bw * 0.35)), yc = hi ? y - 7 : y + 7, d = hi ? 1 : -1;
         cvStroke(ctx, [[x0 - s, yc + d * s * 0.6], [x0, yc - d * s * 0.6], [x0 + s, yc + d * s * 0.6]], "var(--text)", 1.6, 0.85, null, "round");
@@ -10662,17 +10647,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       const lg = document.createElementNS(NS, "g");
       lg.setAttribute("pointer-events", "none");
       if (plotClip) lg.setAttribute("clip-path", plotClip);
-      lines.forEach(([x0, p, k]) => {
-        if (k !== "poc") return;   // 미완 = 꺾쇠 아이콘만(뜻은 툴팁)
-        const t = document.createElementNS(NS, "text");
-        t.setAttribute("x", xR - 4); t.setAttribute("y", yAt(p) - 3);
-        t.setAttribute("text-anchor", "end"); t.setAttribute("font-size", "10"); t.setAttribute("font-weight", "700");
-        t.setAttribute("fill", "var(--muted)"); t.setAttribute("paint-order", "stroke"); t.setAttribute("stroke", "var(--chart-bg)"); t.setAttribute("stroke-width", "3");
-        t.textContent = `nPOC ${fmtNum(p, Math.max(1, pxDp()))}`;
-        lg.appendChild(t);
-      });
       const ti = document.createElementNS(NS, "title");
-      ti.textContent = "아직 다시 안 간 가격(서술 표시 · 자석 아님). nPOC(흐린 선 · 생긴 봉 점) = 닫힌 봉의 최다 체결 행 · 꺾쇠 ︿/﹀ = 미완 경매(봉 고가·저가 행에 매수·매도가 둘 다 체결됨). 지금가 0.1% 안쪽은 생략.";
+      ti.textContent = "아직 다시 안 간 가격(서술 표시 · 자석 아님). 꺾쇠 ︿/﹀ = 미완 경매(봉 고가·저가 행에 매수·매도가 둘 다 체결됨). 지금가 0.1% 안쪽은 생략.";
       lg.appendChild(ti);
       svg.appendChild(lg);
     }
