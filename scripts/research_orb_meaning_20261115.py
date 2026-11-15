@@ -248,5 +248,88 @@ def selftest2() -> None:
     print("selftest2 ok")
 
 
+# ── 3라운드: 런던 08:00 · 뉴욕 08:30 개장 범위 · 4코인 + 새 코인 둘 다 (docs/prereg/session_open_range_r3_20261116.md, afc448f5) ──
+OUT3 = OUT.parent / "session_open_range_r3_20261116"
+P3H3 = [h for h in range(24) if h not in (0, 7, 8, 12, 13, 14, 23)]
+
+
+def starts3(t0: int, t1: int) -> dict[str, np.ndarray]:
+    days = pd.date_range(pd.Timestamp(t0, unit="ms").normalize(), pd.Timestamp(t1, unit="ms"), freq="D")
+    ms = lambda x: np.asarray(x.asi8 // 10**6, dtype=np.int64)
+    loc = lambda off, tz: (days + pd.Timedelta(off)).tz_localize(tz, nonexistent="shift_forward", ambiguous=True).tz_convert("UTC")
+    wd = lambda x: x[x.dayofweek < 5]
+    p3 = np.sort(np.concatenate([ms(days.tz_localize("UTC") + pd.Timedelta(hours=h)) for h in P3H3]))
+    return {"LON": ms(wd(loc("8h", "Europe/London"))), "N830": ms(wd(loc("8h30min", "America/New_York"))),
+            "NY": ms(wd(loc("9h30min", "America/New_York"))), "P3": p3[pd.to_datetime(p3, unit="ms").dayofweek < 5]}
+
+
+def events3(B: dict, with_p3: bool) -> list[dict]:
+    h, l, c, t = B["h"], B["l"], B["c"], B["t"]; R = []
+    for kind, ss in starts3(int(t[0]), int(t[-1])).items():
+        if kind == "P3" and not with_p3:
+            continue
+        ix = np.searchsorted(t, ss); ok = (ix < len(t)) & (t[np.clip(ix, 0, len(t) - 1)] == ss)
+        for s0, i0 in zip(ss[ok], ix[ok]):
+            for tf, L in LS.items():
+                o = orb(B, int(s0), L, int(i0))
+                if o is None:
+                    continue
+                b, d, W = o
+                cell = "N830L" if (kind == "N830" and tf == "or60") else kind        # N830 60분 = 09:30 개장과 겹침 → 보조
+                for suf, k in (("", 1.0), ("_2w", 2.0)):
+                    R.append(dict(cell=cell + suf, tf=tf, tk=int(t[b]) + BAR, y=float(race3(h, l, c, b, d, k * W))))
+    return R
+
+
+def run3() -> None:
+    OUT3.mkdir(parents=True, exist_ok=True)
+    SM.TFS = {tf: 5 for tf in LS}; res = {}
+    for grp, coins in (("orig", list(SM.COINS)), ("new", NEW)):
+        rows, aggs = [], []
+        for ci, coin in enumerate(coins):
+            k = load5(coin) if grp == "new" else SM.load_1m(f"{coin}USDT")
+            mk = bars5 if grp == "new" else (lambda kk: SM.bars(kk, 5))
+            for draw in range(-1, SM.NPLACEBO):
+                kk = k if draw < 0 else SM.placebo(k, SM.SEED + 11000 + 1000 * ci + draw)
+                ev = pd.DataFrame(events3(mk(kk), draw < 0)).assign(coin=coin, draw=draw)
+                if draw < 0:
+                    rows.append(ev)
+                else:
+                    ev = ev[ev.y >= 0]
+                    aggs.append(ev.assign(hh=ev.tk >= SM.SPLIT).groupby(["coin", "tf", "draw", "cell", "hh"]).y.agg(["sum", "count"]).reset_index())
+                print(grp, coin, draw, flush=True)
+        E = pd.concat(rows, ignore_index=True); PA = pd.concat(aggs, ignore_index=True)
+        E.to_parquet(OUT3 / f"events_{grp}.parquet"); PA.to_parquet(OUT3 / f"placebo_agg_{grp}.parquet")
+        dec = {f"{tf}|{c_}": round(float((E[(E.tf == tf) & (E.cell == c_)].y >= 0).mean()), 4) for tf in LS for c_ in ("LON", "N830", "N830L", "NY", "P3")}
+        Ed = E[E.y >= 0]
+        SM.COINS = coins; need = 4 if grp == "new" else 3
+        SM.MAIN_TFS, SM.CELLS, SM.P2OF = tuple(LS), ["LON", "N830"], {"LON": "P3", "N830": "P3"}
+        main = SM.judge(Ed, PA)                                # N830 60분은 칸 이름이 N830L 이라 주 판정 밖 → Holm 3칸
+        for v in main.values():                                # 코인 ≥ 4/5 (새 코인) — judge 는 3 고정이라 다시 셈
+            if "holm" not in v:
+                continue
+            ok = sum(x > 0 for x in v["coin_diff_pp"].values()) >= need and all(x > 0 for x in v["half_diff_pp"].values())
+            v["pass"] = bool(v["holm"] and v["lo90_pp"] > 0 and v.get("lo90_2_pp", -1) > 0 and ok)
+            v["candidate"] = bool(v["diff_pp"] > 0 and v.get("diff2_pp", -1) > 0 and ok)
+        SM.MAIN_TFS, SM.CELLS = (), ["N830L", "NY", "LON_2w", "N830_2w"]
+        SM.P2OF = {"N830L": "P3", "NY": "P3", "LON_2w": "P3_2w", "N830_2w": "P3_2w"}
+        aux = SM.judge(Ed, PA)
+        res[grp] = dict(main=main, aux=aux, decided_share=dec)
+    SM.COINS = ["ETH", "BTC", "SOL", "XRP"]
+    final = {k: bool(res["orig"]["main"].get(k, {}).get("pass") and res["new"]["main"].get(k, {}).get("pass")) for k in res["orig"]["main"] if "holm" in res["orig"]["main"][k]}
+    json.dump(dict(final_pass=final, **res), open(OUT3 / "result.json", "w"), ensure_ascii=False, indent=1, default=float)
+    print("final", final)
+
+
+def selftest3() -> None:
+    S = starts3(int(pd.Timestamp("2026-01-15").value // 10**6), int(pd.Timestamp("2026-07-16").value // 10**6))
+    f = lambda k: pd.to_datetime(S[k], unit="ms", utc=True)
+    assert pd.Timestamp("2026-01-15 08:00", tz="UTC") in f("LON") and pd.Timestamp("2026-07-15 07:00", tz="UTC") in f("LON")   # 런던 겨울 08 · 여름 07 UTC
+    assert pd.Timestamp("2026-01-15 13:30", tz="UTC") in f("N830") and pd.Timestamp("2026-07-15 12:30", tz="UTC") in f("N830")
+    assert pd.Timestamp("2026-01-17 08:00", tz="UTC") not in f("LON")                                                        # 토요일
+    assert all(f("P3").hour.isin(P3H3)) and all(f("P3").dayofweek < 5) and not f("P3").hour.isin([7, 8, 12, 13, 14]).any()
+    print("selftest3 ok")
+
+
 if __name__ == "__main__":
-    {"selftest": selftest, "run": run, "diag": diag, "run2": run2, "selftest2": selftest2}[sys.argv[1]]()
+    {"selftest": selftest, "run": run, "diag": diag, "run2": run2, "selftest2": selftest2, "run3": run3, "selftest3": selftest3}[sys.argv[1]]()
