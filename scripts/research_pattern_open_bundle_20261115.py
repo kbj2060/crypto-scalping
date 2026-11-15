@@ -3,6 +3,7 @@
 
   selftest   손계산 봉으로 기간 시가 방향·쌍봉 목선 돌파 단언
   run        4코인 × 15분·1시간(+4시간 보조) 실제 + 기하 위약 20벌 + 지표별 실제 가격 대조 → tmp/pattern_open_bundle_20261115/
+  run2       D1 만 안 본 코인 5종(5분봉 CSV) 재현 — 사전등록 docs/prereg/double_top_r2_newcoins_20261116.md (33edaca0) → tmp/double_top_r2_newcoins_20261116/
 실행·판정 뼈대는 research_classic_indicator_bundle_20261115.run 그대로(events·KEYS·OUT 만 바꿈).
 """
 from __future__ import annotations
@@ -10,7 +11,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import json
+
 import numpy as np
+import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import research_smc_ict_meaning_20261115 as SM  # noqa: E402
@@ -21,6 +25,7 @@ KEYS = ["D1", "D2", "D3"]
 H, DAY = 3_600_000, 86_400_000
 MON = 4 * DAY                                               # 1970-01-05 = 월요일(1970-01-01 목요일)
 NP, GAP, EQ, LOOK = 10, 50, 0.25, 50
+ONLY_D1 = False                                             # run2: D2·D3 건너뜀
 
 
 def open_dir(t: np.ndarray, c: np.ndarray, P: int, off: int) -> np.ndarray:
@@ -67,6 +72,8 @@ def events(B: dict, tf: str, with_p3: bool) -> dict:
     for j, d, kind in doubles(h, l, c, atr):
         if kind == "D1" or with_p3:
             add(kind, j, d)
+    if ONLY_D1:
+        return R
     keep = np.arange(CB.WARM, n - 1, CB.STEP[tf])
     tt = t + B["ms"]                                        # 봉 마감 시각으로 기간을 가름(마감 봉의 종가 vs 시가)
     sets = {"D2": [(7 * DAY, MON)], "D3": [(DAY, 0)]}
@@ -100,5 +107,47 @@ def run() -> None:
     CB.run()
 
 
+def run2() -> None:
+    global ONLY_D1
+    import research_orb_meaning_20261115 as OR
+    ONLY_D1, out = True, OUT.parent / "double_top_r2_newcoins_20261116"; out.mkdir(parents=True, exist_ok=True)
+    rows, aggs = [], []
+    for ci, coin in enumerate(OR.NEW):
+        k = OR.load5(coin)
+        for draw in range(-1, SM.NPLACEBO):
+            kk = k if draw < 0 else SM.placebo(k, SM.SEED + 8000 + 1000 * ci + draw)
+            k1 = kk.assign(t=kk.t // 5)                       # ponytail: 5분 행을 «1분 행»으로 눈금만 줄여 SM.bars 재사용 → t·ms 다시 ×5
+            for tf, mnt in CB.TFS.items():
+                B = SM.bars(k1, mnt // 5); B["t"] = B["t"] * 5; B["ms"] *= 5
+                ev = pd.DataFrame(events(B, tf, draw < 0)).assign(coin=coin, tf=tf, draw=draw)
+                if draw < 0:
+                    rows.append(ev)
+                elif len(ev):
+                    aggs.append(ev.assign(hh=ev.tk >= SM.SPLIT).groupby(["coin", "tf", "draw", "cell", "hh"]).y.agg(["sum", "count"]).reset_index())
+            print(coin, draw, flush=True)
+    E, PA = pd.concat(rows, ignore_index=True), pd.concat(aggs, ignore_index=True)
+    E.to_parquet(out / "events.parquet"); PA.to_parquet(out / "placebo_agg.parquet")
+    SM.TFS, SM.COINS = CB.TFS, list(OR.NEW)
+    SM.MAIN_TFS, SM.CELLS, SM.P2OF = ("15m", "1h"), ["D1"], {"D1": "P3D1"}
+    main = SM.judge(E, PA)
+    for v in main.values():                                  # 코인 ≥ 4/5 — judge 는 3 고정이라 다시 셈
+        ok = sum(x > 0 for x in v["coin_diff_pp"].values()) >= 4 and all(x > 0 for x in v["half_diff_pp"].values())
+        v["pass"] = bool(v["holm"] and v["lo90_pp"] > 0 and v.get("lo90_2_pp", -1) > 0 and ok)
+        v["candidate"] = bool(v["diff_pp"] > 0 and v.get("diff2_pp", -1) > 0 and ok)
+    SM.MAIN_TFS, SM.CELLS, SM.P2OF = (), ["D1_2atr"], {"D1_2atr": "P3D1_2atr"}
+    aux = SM.judge(E, PA)
+    json.dump(dict(main=main, aux=aux), open(out / "result.json", "w"), ensure_ascii=False, indent=1, default=float)
+
+
+def selftest2() -> None:
+    import research_orb_meaning_20261115 as OR
+    k = OR.load5("ADA").iloc[:600]; k1 = k.assign(t=k.t // 5)
+    B = SM.bars(k1, 3); B["t"] = B["t"] * 5; B["ms"] *= 5
+    g = k[k.t // 900_000 == B["t"][0] // 900_000]
+    assert B["t"][0] % 900_000 == 0 and B["ms"] == 900_000 and len(g) == 3
+    assert B["h"][0] == g.h.max() and B["l"][0] == g.l.min() and B["c"][0] == g.c.iloc[-1]
+    print("selftest2 ok")
+
+
 if __name__ == "__main__":
-    {"selftest": selftest, "run": run}[sys.argv[1]]()
+    {"selftest": selftest, "run": run, "run2": run2, "selftest2": selftest2}[sys.argv[1]]()
