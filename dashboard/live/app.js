@@ -5664,8 +5664,9 @@ const API_MARKET_CTX_URL = "/api/market-context";
 const MARKET_CTX_POLL_MS = 1000;   // 2026-10-03 5초 -> 1초(사용자 «1초 원천은 화면도 1초») -- 호가 벽·스프레드·계기·BTC 동행은 서버 1초 루프 · 응답 중앙 14ms·3KB(서버 실측)
 let latestMarketCtx = null, marketCtxLastFetchAt = 0;
 let latestMacroEvents = null;        // renderMacroCalendar 가 채운다 -- 카드의 «다음 주요 일정». null = 아직 못 받음(«없음»과 다르다)
-const mcLine = { st: {}, poc: true, vwap: true, veto: true, sma50: true, sw1h: true, sw30m: false, ob: true, fvg: false, orb: true, cci: true, rsi2: true, rdiv: false, bb: false, wvwap: false, vsess: false, ema5: false, ema20: false, vwma: false };   // 2026-10-26 펜 메모: 이동평균 셋(기본 끔)   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
+const mcLine = { st: {}, poc: true, vwap: true, veto: true, sma50: true, sw1h: true, sw30m: true, ob: true, fvg: false, orb: true, cci: true, rsi2: true, rdiv: false, bb: false, wvwap: false, vsess: false, ema5: false, ema20: false, vwma: false };   // 2026-10-26 펜 메모: 이동평균 셋(기본 끔)   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
 try { Object.assign(mcLine, JSON.parse(localStorage.getItem("mcLine") || "{}")); } catch (err) { /* 기억은 편의 */ }
+if (!mcLine.sw30mOn) { mcLine.sw30m = true; mcLine.sw30mOn = 1; }   // 11-16 사용자 «30m 스윙도 기본으로 켜줘» -- 옛 저장값(sw30m:false, 칩을 하나라도 만지면 통째로 저장됨)도 한 번 켠다 · 그 뒤 끄면 기억
 if (mcLine.vwW) { mcLine.st = { ...mcLine.st, vwap: { w: mcLine.vwW, d: mcLine.vwD, c: mcLine.vwC } }; delete mcLine.vwW; delete mcLine.vwD; delete mcLine.vwC; }   // 10-29 오전판(VWAP 전용 줄)에서 고른 값 옮김
 // 2026-09-30 사용자 «세션은 미국·유럽·아시아 시장 VWAP 으로» -- vsess 켜면 지금 시장 세션 개장(현지 시각, 서머타임 반영)부터 센 VWAP.
 //   서버가 봉마다 두 벌을 싣는다: vwap/vsd = UTC 00시부터 · svwap/svsd/sstart/sname = 세션 개장부터. seg 가 바뀌는 곳에서 선을 끊는다.
@@ -9204,7 +9205,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       // ③ 일봉 SMA50(2026-11-15 사용자 «일봉 SMA50 도 풋프린트 지표 리스트에») -- /api/trend 의 sma50(그날 종가가 알려진 다음 날 00:00 UTC 부터 같은 값 = 날마다 계단).
       //   «롱 추세면 숏 금지» 검정(docs/experiments/trend_filter_bundle_20261115.md)의 기준선 -- 통과 후보 등급(맞는 방향 · 유의 아님).
       //   색 = 측면(지금가가 위 = 초록 롱 추세 · 아래 = 빨강 숏 추세). 일봉 평균이라 5분 창에선 대개 화면 밖 -- 그때도 «지금 어느 측면인가»는 왼쪽 위·아래 끝 꼬리표로 읽힌다(veto 와 같은 규약).
-      const edgeL = { top: 0, bot: 0 };   // 왼쪽 위·아래 끝 꼬리표 쌓기(일봉 SMA50 → 1h·30m 스윙 순) · 아래 끝은 플롯 안에 겹친 레인(LANE_IN) 위
+      const edgeL = { top: FPW ? 2 : 0, bot: 0 };   // 11-16: 전체화면은 왼쪽 위 떠 있는 도구 막대(.ops-health-head)가 첫 줄을 덮는다 → 두 줄 내려 쌓기   // 왼쪽 위·아래 끝 꼬리표 쌓기(일봉 SMA50 → 1h·30m 스윙 순) · 아래 끝은 플롯 안에 겹친 레인(LANE_IN) 위
       const s50 = mcLine.sma50 && latestTrend?.ok && Array.isArray(latestTrend.sma50) ? latestTrend.sma50 : null;
       const lastClose50 = Number((candles[candles.length - 1] || {}).close);
       if (s50 && s50.length && lastClose50 > 0) {
