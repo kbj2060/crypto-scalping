@@ -437,7 +437,10 @@
   //     같은 167일 재계산: 펀딩 표 롱 41 · 중립 74 · 숏 23 → 판정 롱 쪽 약하게 34 · 숏 쪽 약하게 39 · 숏 우세 21 · 엇갈림 24 · 중립 18 · 롱 우세 2
   //     (롱 우세가 드문 건 그 기간 사분면이 실제로 숏 쪽이었기 때문). 0.01% 대비 절대 위치(선물 할인/웃돈)는 글로 같이 적는다.
   var F_BASE = 1e-4;
-  function fmtF(v) { return (v >= 0 ? "+" : "−") + Math.abs(v * 100).toFixed(4) + "%"; }
+  function fmtF(v) {   // 11-16 사용자 «펀딩이 음수인지 양수인지»: 0 근처 평균이 «+0.0000%»로 부호가 사라지던 것 -- 작으면 자릿수를 늘리고, 그래도 0 이면 부호 없이 0
+    var a = Math.abs(v * 100), dg = a < 0.0001 ? 5 : 4, t = a.toFixed(dg);
+    return Number(t) === 0 ? "0%" : (v >= 0 ? "+" : "−") + t + "%";
+  }
   function fundDay(d) {   // 그날 거래소 평균(있는 것만)
     var X = S.X || {}, t = 0, n = 0;
     ["bn_fund", "okx_fund", "bybit_fund"].forEach(function (k) { var v = X[k] && X[k][d]; if (v != null) { t += v; n++; } });
@@ -455,7 +458,7 @@
       var pr = hist.length >= 30 ? hist.filter(function (v) { return v <= fm; }).length / hist.length : null;
       var fv = pr != null ? (pr >= 0.7 ? 1 : pr <= 0.3 ? -1 : 0) : fm > F_BASE + 1e-5 ? 1 : fm < F_BASE - 1e-5 ? -1 : 0;   // 이력 30일 미만이면 0.01% 기준
       var fh = Object.keys(X.bn_fund || {}).sort().filter(function (d) { return d <= fEnd; }).slice(-30).map(function (d) { return fundDay(d); }).filter(function (v) { return v != null; });
-      ev.push({ k: "fund", fm: fm, pr: pr, fh: fh, fEnd: fEnd, v: fv, s: "펀딩 " + (pr != null ? Math.round(pr * 100) + "분위" : fmtF(fm)),
+      ev.push({ k: "fund", fm: fm, f1: f3[0], pr: pr, fh: fh, fEnd: fEnd, v: fv, s: "펀딩 " + (pr != null ? Math.round(pr * 100) + "분위" : fmtF(fm)),
                 l: "펀딩 3일" + (b < S.n - 1 ? "(~" + fEnd.slice(5).replace("-", "/") + ")" : "") + " " + fmtF(fm) + "/8h(" + (pr != null ? "최근 " + hist.length + "일 중 " + Math.round(pr * 100) + "분위 · " : "") +
                    (fm < F_BASE - 1e-5 ? "0.01% 아래 = 선물 할인" : fm > F_BASE + 1e-5 ? "0.01% 위 = 선물 웃돈" : "0.01% = 현물 근처") + ")" });
     }
@@ -491,10 +494,13 @@
       var fmx = Math.max.apply(null, F.fh.map(Math.abs).concat([F_BASE * 1.2])), sw = 150, sh_ = 26, n = F.fh.length || 1, yb = sh_ / 2 - (F_BASE / fmx) * sh_ / 2;
       var bars = F.fh.map(function (v, i) {
         var hh = Math.max(1, Math.abs(v / fmx) * sh_ / 2), y = v >= 0 ? sh_ / 2 - hh : sh_ / 2;
-        return '<rect x="' + (i * sw / n + 0.5).toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + Math.max(1, sw / n - 1).toFixed(1) + '" height="' + hh.toFixed(1) + '" class="' + (v >= F_BASE ? "g" : "r") + '"/>';
-      }).join("");
-      h += '<div class="rb-f" title="' + esc(F.l) + '"><span class="t">펀딩 30일 · 점선 0.01% · 3일 ' + fmtF(F.fm) + (F.pr != null ? " · " + Math.round(F.pr * 100) + "분위" : "") + " " + tag(F.v) + "</span>"
-        + '<svg width="' + sw + '" height="' + sh_ + '" viewBox="0 0 ' + sw + " " + sh_ + '" aria-hidden="true">' + bars + '<line x1="0" x2="' + sw + '" y1="' + yb.toFixed(1) + '" y2="' + yb.toFixed(1) + '"/></svg></div>';
+        return '<rect x="' + (i * sw / n + 0.5).toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + Math.max(1, sw / n - 1).toFixed(1) + '" height="' + hh.toFixed(1) + '" class="' + (v >= 0 ? "g" : "r") + '"/>';
+      }).join("");   // 11-16: 막대 색 = 부호(초록 양수 · 빨강 음수) -- 전엔 0.01% 위/아래라 양수인데 빨강이었다 · 점선 = 0.01% · 실선 = 0
+      var fs = F.f1 > 0 ? 1 : F.f1 < 0 ? -1 : 0, fday = F.fEnd ? F.fEnd.slice(5).replace("-", "/") : "";
+      var ftip = F.l + "\n" + fday + " 거래소 평균 " + fmtF(F.f1) + "/8h · 양수 = 롱이 숏에게 냄 · 음수 = 숏이 롱에게 냄 · 0.01% = 선물 ≈ 현물(기본값)\n분위 = 최근 90일 중 3일 평균의 자리(≥70 롱 · ≤30 숏 근거) · 막대 = 최근 30일 그날 평균(초록 양수 · 빨강 음수) · 점선 0.01% · 실선 0";
+      h += '<div class="rb-f" title="' + esc(ftip) + '"><span class="t">펀딩 ' + fday + ' <b class="fv ' + (fs > 0 ? "g" : fs < 0 ? "r" : "n") + '">' + fmtF(F.f1) + "</b>/8h " + (fs > 0 ? "양수 · 롱이 냄" : fs < 0 ? "음수 · 숏이 냄" : "0")
+        + " · 3일 " + fmtF(F.fm) + (F.pr != null ? " · " + Math.round(F.pr * 100) + "분위" : "") + " " + tag(F.v) + "</span>"
+        + '<svg width="' + sw + '" height="' + sh_ + '" viewBox="0 0 ' + sw + " " + sh_ + '" aria-hidden="true">' + bars + '<line x1="0" x2="' + sw + '" y1="' + yb.toFixed(1) + '" y2="' + yb.toFixed(1) + '"/><line class="z" x1="0" x2="' + sw + '" y1="' + (sh_ / 2).toFixed(1) + '" y2="' + (sh_ / 2).toFixed(1) + '"/></svg></div>';
     }
     var Q = byK.quad;
     if (Q) {
