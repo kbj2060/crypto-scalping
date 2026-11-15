@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import calendar
+import re
 import json
 import time
 from pathlib import Path
@@ -19,7 +20,11 @@ STALE_S = 180                                 # 워커가 3분 넘게 못 쓰면
 def risk_radar_payload(latest: Path = LATEST, params: Path = PARAMS, now: float | None = None) -> dict:
     if not latest.exists():
         return {"ok": False, "reason": "기록 대기"}
-    d, P = json.loads(latest.read_text()), json.loads(params.read_text())
+    d = json.loads(latest.read_text())
+    nm = str(d.get("params") or "")                                   # 워커가 쓴 계수 파일 = 꼬리표 표도 같은 파일(되돌릴 때 두 파일이 어긋나지 않게 · 검증 11-16)
+    if params == PARAMS and re.fullmatch(r"risk_radar_params_\d{8}[a-z]?\.json", nm) and (ROOT / "dashboard" / nm).exists():
+        params = ROOT / "dashboard" / nm
+    P = json.loads(params.read_text())
     age = (now or time.time()) - calendar.timegm(time.strptime(d["updated"], "%Y-%m-%dT%H:%M:%SZ"))
     coins = {c.lower(): {**o, "touch": P["coins"].get(c, {}).get("touch")} for c, o in d.get("coins", {}).items()}
     return {"ok": True, "updated": d["updated"], "age_s": round(age, 1), "stale": age > STALE_S, "touch_k": P.get("touch_k"), "coins": coins}

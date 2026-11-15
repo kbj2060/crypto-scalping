@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import binance_ban_guard  # noqa: E402,F401 -- 공용 밴 가드: requests 를 감싸 418/429 뒤엔 바이낸스 REST 를 내보내지 않는다
 import research_realtime_risk_radar_20261115 as R  # noqa: E402
 
+STALE_DATA_S = 180                                                 # 마지막 닫힌 봉이 3분 넘게 옛것이면 그 코인은 무효
 PARAMS = ROOT / "dashboard/risk_radar_params_20261116.json"   # B2(11-16): + 거래대금 5창 · 옛 계수 _20261115.json 은 되돌리기용
 CACHE = ROOT / "data/live/risk_radar"
 LATEST = ROOT / "data/live/risk_radar_latest.json"
@@ -69,7 +70,7 @@ def update_cache(coin: str, now_ms: int, fetch=rest, path: Path | None = None) -
     while start < now_ms - MIN:
         lim = 1000 if now_ms - start > 99 * MIN else 99            # 평소엔 1분 몇 개(가중치 1)
         k = fetch(f"{coin}USDT", start, lim)
-        k = [x for x in k if x[6] < now_ms]                         # 닫힌 봉만
+        k = [x for x in k if x[6] + 1000 < now_ms]                  # 닫힌 봉만 -- 1초 여유(서버 시계가 조금 빨라도 형성 봉이 안 들어오게 · 검증 11-16)
         if not k:
             break
         new = pd.DataFrame({"t": [x[0] for x in k], "h": [float(x[2]) for x in k], "l": [float(x[3]) for x in k], "c": [float(x[4]) for x in k], "v": [float(x[5]) for x in k]})
@@ -103,7 +104,7 @@ def compute(cl, hi, lo, m0, p: dict, P: dict, qv=None) -> dict:
     """배열 전체에 대해 예측(인과) → 마지막 분 결과 + 전체 배열(대조용)."""
     F = R.features(cl, m0)
     if any(c in R.VWIN for c in P["cols"]):
-        R.vol_features(F, qv)
+        R.vol_features(F, qv, p.get("vclip"))   # 창별 하한 = 학습과 같은 값(검증 11-16 ①)
     X = R.design(F, P["cols"])
     f15 = p["c15"] * np.exp(2 * X @ np.array(p["beta15"])); f60 = p["c60"] * np.exp(2 * X @ np.array(p["beta60"]))
     us = usual60(F)
@@ -138,6 +139,8 @@ def main(now_ms: int | None = None, fetch=rest) -> int:
             cl, hi, lo, m0, qv = grid(df)
             out, _ = compute(cl, hi, lo, m0, p, P, qv)
             out["data_age_s"] = round(now_ms / 1000 - (m0 + len(cl)) * 60, 1)
+            if out["data_age_s"] > STALE_DATA_S:                   # REST 가 새 봉을 안 줘도 옛 값이 지금 값처럼 보이던 것(검증 11-16 ②) -- 화면은 24h 로 떨어진다
+                out.update(valid=False, error=f"데이터 지연 {out['data_age_s']:.0f}초")
         except Exception as e:
             out = dict(error=f"{type(e).__name__}: {str(e)[:200]}", valid=False)
         res[coin] = out
@@ -159,7 +162,7 @@ def selftest():
         for coin in ("ETH", "XRP"):
             cl, hi, lo, m0 = R.load(coin); qv = R.load_qv(coin); p = P["coins"][coin]
             _, full = compute(cl, hi, lo, m0, p, P, qv)
-            F = R.vol_features(R.features(cl, m0), qv); X = R.design(F, P["cols"])
+            F = R.vol_features(R.features(cl, m0), qv, p.get("vclip")); X = R.design(F, P["cols"])
             ref = p["c15"] * np.exp(2 * X @ np.array(p["beta15"]))
             assert np.allclose(full["f15"], ref, equal_nan=True)
             nu = 0
@@ -192,6 +195,10 @@ def selftest():
         rc = main(base, half); g["CACHE"], g["LATEST"], g["LOG"] = keep
         out = json.loads((Path(td) / "l.json").read_text())
         assert rc == 1 and "error" in out["coins"]["SOL"] and "sigma15_pct" in out["coins"]["ETH"]
+        g["CACHE"], g["LATEST"], g["LOG"] = Path(td) / "c", Path(td) / "l.json", Path(td) / "f.jsonl"   # REST 가 10분 동안 새 봉을 안 주면 그 코인은 무효(검증 11-16 ②)
+        main(base + 10 * MIN, lambda sym, start, lim: []); g["CACHE"], g["LATEST"], g["LOG"] = keep
+        o2 = json.loads((Path(td) / "l.json").read_text())["coins"]["ETH"]
+        assert o2["valid"] is False and "지연" in o2["error"] and o2["data_age_s"] > STALE_DATA_S
     print("selftest OK")
 
 

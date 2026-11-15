@@ -860,7 +860,7 @@ function reach15(v) {
   const p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
   if (!o || !K || !T || !(p > 0) || !(o.sigma15_pct > 0) || !(v > 0)) return null;
   const k = Math.abs(v / p - 1) * 100 / o.sigma15_pct;
-  if (k <= K[0]) return Math.round(T[0] * 100);
+  if (k <= K[0]) return Math.round((1 - k / K[0] * (1 - T[0])) * 100);   // ponytail: 0~첫 칸은 (0σ = 100%) 와 직선 -- 표에 0.25σ 안쪽 칸을 넣으면 그걸로(검증 11-16)
   for (let i = 1; i < K.length; i++) if (k <= K[i]) return Math.round((T[i - 1] + (k - K[i - 1]) / (K[i] - K[i - 1]) * (T[i] - T[i - 1])) * 100);
   return Math.round(T[T.length - 1] * 100);
 }
@@ -6075,7 +6075,7 @@ function renderMarketCtx() {
       + `<span class="mc-sw-g">${swChip("sw1h", "1h 스윙", 1, "1시간봉 큰 스윙(앞뒤 50봉) 중 아직 안 깨진 고점·저점 · 1시간 종가로 넘으면 구조 돌파 · 돌파 뒤 깬 쪽 2 ATR 먼저 약 53%(무작위 49%) · 추세 전환 신호 아님 · ETH·BTC·SOL·XRP")}${gear("sw1h")}`
       + `${swChip("sw30m", "30m 스윙", 1, "30분봉 큰 스윙(앞뒤 50봉) 중 아직 안 깨진 고점·저점 · 30분 종가로 넘으면 구조 돌파 · 돌파 뒤 깬 쪽 2 ATR 먼저 약 53%(무작위 49%) · ETH·BTC·SOL·XRP")}${gear("sw30m")}</span>`
       // 2026-11-16 사용자 «방향에 도움이 될 것들도 모두 배포» -- 방향 «의미» 표식(대조 대비 +1~4pp · 수수료 뒤 ≈ 0 = 참고) · RSI 다이버전스는 2025~26 효과 0 에 가까워 기본 끔
-      + `<span class="mc-sw-g">${swChip("orb", "뉴욕 개장 범위", 0, "뉴욕 09:30 첫 30분·60분 고저 범위 · 5분 종가로 뚫으면 돌파 쪽 범위폭 선이 반대쪽보다 먼저 닿은 비율 30분 52%·60분 54%(다른 시각 범위 50%) · 범위 끝 뒤 6시간 · 수수료 뒤 이득 ≈ 0 = 참고(매매 신호 아님) · 미국 휴장일 미반영 · ETH·BTC·SOL·XRP")}`
+      + `<span class="mc-sw-g">${swChip("orb", "뉴욕 개장 범위", 0, "뉴욕 09:30 첫 30분·60분 고저 범위 · 5분 종가로 뚫으면 6시간 안 돌파 쪽 범위폭 선이 먼저 닿음 30분 45%·60분 37% · 반대선 먼저 41%·32% · 둘 다 안 닿음 14%·31% · 닿은 것만 세면 52%·54%(다른 시각 범위 50%) · 범위 끝 뒤 6시간 · 수수료 뒤 이득 ≈ 0 = 참고(매매 신호 아님) · 미국 휴장일 미반영 · ETH·BTC·SOL·XRP")}`
       + `${swChip("cci", "CCI 1h", 0, "1시간봉 CCI(20) 가 +100 위로(−100 아래로) 넘은 봉 · 그쪽 1 ATR 이 먼저 닿은 비율 51%(20봉 모멘텀 50%) · 새 코인 5종 재현 · 효과 작음 = 참고")}`
       + `${swChip("rsi2", "RSI2 눌림", 0, "15분봉 종가가 SMA200 위에서 RSI(2)가 10 아래로 꺾인 봉(▲) · 아래에서 90 위로(▼) · 추세 쪽 1 ATR 먼저 51%(같은 추세 아무 봉 50%) · 새 코인 5종 재현 · 효과 작음 = 참고")}`
       + `${swChip("rdiv", "RSI 다이버전스", 0, "15분봉 앞뒤 5봉 스윙이 직전 스윙(60봉 안)보다 높은데(낮은데) RSI14 는 낮을(높을) 때 · 스윙 5봉 뒤에 알려짐 · 반전 쪽 1 ATR 먼저 51%(가짜 49%) · 2025~26 은 효과 거의 0 · 기본 끔")}</span>`
@@ -7268,15 +7268,16 @@ function renderObFvg() {
 //   모두 «1 ATR(뉴욕 = 범위폭) 먼저 닿기» 경주에서 대조보다 +1~4pp 뿐 -- 수수료 뒤 ≈ 0(종합 손익분기 docs/research_synthesis_tape_fujimoto_coinglass_20261116.md) = 참고 표시, 문구에 «신호»·«매수/매도» 금지.
 //   대조 tmp/dirmarks_parity_20261116.py(연구 Python ↔ 이 계산 사건 목록 일치).
 // DIRCALC-BEGIN
-const DIR_STAT = { orb30: [52, 50], orb60: [54, 50], cci: [51, 50], rsi2: [51, 50], rdiv: [51, 49] };
-function dirBars(c5, M) {   // 5분봉 → M초 봉(마지막 묶음 = 형성 중이라 뺀다 · M=300 이면 마지막 5분봉) · ponytail: 빠진 5분봉 묶음도 그대로(연구는 꽉 찬 봉만)
+const DIR_STAT = { orb30: [52, 50, 45, 41], orb60: [54, 50, 37, 32],   // 뉴욕: [결판 난 경주 중 목표 먼저, 다른 시각, 무조건 목표 먼저, 무조건 반대 먼저](새 코인 5종 · 나머지 = 6시간 안 미결 14·31%)
+  cci: [51, 50], rsi2: [51, 50], rdiv: [51, 49] };
+function dirBars(c5, M) {   // 5분봉 → M초 봉(마지막 묶음 = 형성 중이라 뺀다 · M=300 이면 마지막 5분봉) · 5분봉이 빠진 묶음은 건너뛴다(연구 SM.bars 처럼 · 검증 11-16)
   const B = [];
   for (const c of c5) {
     const T = c.time - (c.time % M), b = B[B.length - 1];
-    if (!b || b.t !== T) B.push({ t: T, h: +c.high, l: +c.low, c: +c.close });
-    else { b.h = Math.max(b.h, +c.high); b.l = Math.min(b.l, +c.low); b.c = +c.close; }
+    if (!b || b.t !== T) B.push({ t: T, h: +c.high, l: +c.low, c: +c.close, n: 1 });
+    else { b.h = Math.max(b.h, +c.high); b.l = Math.min(b.l, +c.low); b.c = +c.close; b.n++; }
   }
-  return B.slice(0, -1);
+  return B.slice(0, -1).filter((b) => b.n === M / 300);
 }
 function dirRsi(c, n) {   // Wilder = ewm(α 1/n, adjust=False, min_periods n) · 첫 차분 0(연구 rsi 와 같음)
   const out = new Array(c.length).fill(NaN); let up = 0, dn = 0;
@@ -7303,11 +7304,11 @@ function dirCalc(c5, now) {   // → 사건 목록 { k, d, tk(알려진 시각),
   for (const s0 of nyOpens(t5[0] || 0, now)) {   // A14 뉴욕 개장 범위(research orb): 첫 m 봉 고저 · 그 뒤 72봉 안 첫 종가 돌파
     const i0 = idx5.get(s0); if (i0 == null) continue;
     for (const L of [30, 60]) {
-      const m = L / 5; if (i0 + m >= B5.length || t5[i0 + m - 1] !== s0 + (m - 1) * 300) continue;
+      const m = L / 5; if (i0 + m > B5.length || t5[i0 + m - 1] !== s0 + (m - 1) * 300) continue;   // 범위 봉이 다 마감되면 바로 상자(검증 11-16 ⑤)
       let hi = -Infinity, lo = Infinity; for (let j = i0; j < i0 + m; j++) { hi = Math.max(hi, B5[j].h); lo = Math.min(lo, B5[j].l); }
       const W = hi - lo; if (!(W > 0)) continue;
       let b = -1; for (let j = i0 + m; j < Math.min(i0 + m + 72, B5.length); j++) if (B5[j].c > hi || B5[j].c < lo) { b = j; break; }
-      ev.push({ k: `orb${L}`, s0, L, hi, lo, W, tEnd: s0 + L * 60 + 72 * 300, ...(b >= 0 ? { d: B5[b].c > hi ? 1 : -1, t: t5[b], tk: t5[b] + 300, p: B5[b].c } : {}) });
+      ev.push({ k: `orb${L}`, s0, L, hi, lo, W, tEnd: s0 + L * 60 + 72 * 300, ...(b >= 0 ? { d: B5[b].c > hi ? 1 : -1, t: t5[b], tk: t5[b] + 300, p: B5[b].c, tRace: t5[b] + 73 * 300 } : {}) });   // tRace = 연구 경주 창(b+1..b+72) 끝
     }
   }
   const B60 = dirBars(c5, 3600);   // A15 CCI(20) 1시간 ±100: +100 위로 넘음 = 위 · −100 아래로 = 아래
@@ -7317,12 +7318,12 @@ function dirCalc(c5, now) {   // → 사건 목록 { k, d, tk(알려진 시각),
     let a = 0; for (let j = i - 19; j <= i; j++) a += Math.abs(tp[j] - m) / 20;
     return a > 0 ? (v - m) / (0.015 * a) : NaN;
   });
-  for (let i = 20; i < B60.length; i++) {
+  for (let i = 40; i < B60.length; i++) {   // CCI(20) 는 20봉 창만 보는 식(EWM 없음)이라 창이 두 번 찬 40봉부터면 연구 값과 같다 -- 연구 WARM 250 은 1주일(1시간봉 168개)보다 길어 그대로 쓰면 1시간 CCI 가 영영 안 나온다(검증 11-16 D7)
     const d = dirCross(cci, i, 100) === 1 ? 1 : dirCross(cci, i, -100) === -1 ? -1 : 0;
     if (d) ev.push({ k: "cci", d, t: B60[i].t, tk: B60[i].t + 3600, p: B60[i].c, bh: B60[i].h, bl: B60[i].l });
   }
   const B15 = dirBars(c5, 900), c15 = B15.map((b) => b.c), r2 = dirRsi(c15, 2), r14 = dirRsi(c15, 14);
-  for (let i = 200; i < B15.length; i++) {   // A16 RSI(2) 추세 속 눌림: 종가 > SMA200 에서 RSI2 10 아래로 → 위 · 대칭
+  for (let i = 250; i < B15.length; i++) {   // 연구 WARM 250 부터(RSI2·SMA200 이 자리 잡은 뒤 · 검증 11-16 D4·D7) · A16 RSI(2) 추세 속 눌림: 종가 > SMA200 에서 RSI2 10 아래로 → 위 · 대칭
     let s = 0; for (let j = i - 199; j <= i; j++) s += c15[j] / 200;
     const tr = Math.sign(c15[i] - s), d = tr === 1 && dirCross(r2, i, 10) === -1 ? 1 : tr === -1 && dirCross(r2, i, 90) === 1 ? -1 : 0;
     if (d) ev.push({ k: "rsi2", d, t: B15[i].t, tk: B15[i].t + 900, p: c15[i], bh: B15[i].h, bl: B15[i].l });
@@ -7330,10 +7331,10 @@ function dirCalc(c5, now) {   // → 사건 목록 { k, d, tk(알려진 시각),
   for (const hiSide of [true, false]) {   // A12 RSI 정규 다이버전스: 앞뒤 5봉 스윙(같은 값 포함) · 직전 같은 쪽 스윙과 60봉 안 · 가격 신고(저) + RSI14 반대 → 반전 쪽 · p+5 마감에 알려짐
     const x = B15.map((b) => (hiSide ? b.h : b.l)), sg = hiSide ? 1 : -1;
     let q = -1;
-    for (let p = 5; p + 5 < B15.length; p++) {
+    for (let p = 5; p + 5 < B15.length; p++) {   // p < 100 은 스윙 후보(q)로만 쓰고 사건은 안 낸다 -- RSI14(EWM) 시작점 영향(검증 11-16 D7)
       let ok = true; for (let j = p - 5; j <= p + 5 && ok; j++) ok = sg * (x[j] - x[p]) <= 0;
       if (!ok) continue;
-      if (q >= 0 && p - q <= 60 && isFinite(r14[p]) && isFinite(r14[q]) && sg * (x[p] - x[q]) > 0 && sg * (r14[p] - r14[q]) < 0) {
+      if (p >= 100 && q >= 0 && p - q <= 60 && isFinite(r14[p]) && isFinite(r14[q]) && sg * (x[p] - x[q]) > 0 && sg * (r14[p] - r14[q]) < 0) {
         const kk = p + 5;
         ev.push({ k: "rdiv", d: -sg, t: B15[kk].t, tk: B15[kk].t + 900, p: c15[kk], bh: B15[kk].h, bl: B15[kk].l, tq: B15[q].t, xq: x[q], tp: B15[p].t, xp: x[p] });
       }
@@ -7351,11 +7352,13 @@ function renderDirMarks() {
   const c5 = chartFull();
   if (!svg || !dirWant() || fpAltOn() || !G || !G.bars.length || !(G.ymax > G.ymin) || c5.length < 300) return;
   const z5 = c5[c5.length - 1], key = `${activeSnapshotAsset}|${c5.length}|${c5[0].time}|${z5.time}`;   // 마감 봉만 쓰니 형성 봉 값이 바뀌어도 그대로
-  if (!dirMemo || dirMemo.key !== key) dirMemo = { key, ev: dirCalc(c5, z5.time) };
-  const nb = G.bars.length, step = nb > 1 ? G.bars[nb - 1].time - G.bars[nb - 2].time || 300 : 300;
+  if (!dirMemo || dirMemo.key !== key || dirMemo.src !== c5) dirMemo = { key, src: c5, ev: dirCalc(c5, z5.time) };   // 서버 마감 봉이 임시 봉을 고치면 새 배열(검증 11-16 ③)
+  const nb = G.bars.length, step = ({ 1: 300, 6: 1800, 12: 3600 })[chartTfK] || 300;   // 마지막 두 봉 간격이 아니라 보기 봉 길이 -- 구멍이 있으면 창 끝이 늘어 그 뒤 사건이 보였다(검증 11-16 D2)
   const tv0 = G.bars[0].time, tv1 = G.bars[nb - 1].time + step;   // 보이는 창(과거로 옮긴 보기면 그 끝까지 알려진 것만)
   const slot = G.cw / G.n, xr = G.ml + G.cw, ch = G.pb - G.mt;
   const xT = (t) => G.ml + (measIdx(G.bars, t) + G.off) * slot, yP = (v) => G.mt + (G.ymax - v) * ch / (G.ymax - G.ymin);
+  const xC = (tEnd) => G.ml + (Math.floor(measIdx(G.bars, tEnd - 1)) + G.off + 0.5) * slot;   // 봉 끝 시각 → 그 봉 마지막 순간이 든 보기 봉의 가운데(30분·1시간 보기에서 이전 봉·경계에 놓이던 것 · 검증 11-16 ②)
+  const inPlot = (x, y) => x > G.ml && x < xr && y > G.mt && y < G.pb;
   const NSV = "http://www.w3.org/2000/svg", mk = (tag, a, txt) => { const e = document.createElementNS(NSV, tag); for (const k in a) e.setAttribute(k, a[k]); if (txt != null) e.textContent = txt; return e; };
   const col = (d) => (d > 0 ? "var(--good)" : "var(--bad)");
   const g = mk("g", { id: "dirmk", "pointer-events": "none" }); svg.appendChild(g);
@@ -7387,25 +7390,28 @@ function renderDirMarks() {
     rdiv: (d) => `RSI 다이버전스 ${d > 0 ? "↑" : "↓"} · 반전 쪽 1 ATR 먼저 ${DIR_STAT.rdiv[0]}% (가짜 ${DIR_STAT.rdiv[1]}%)` };
   const NAME = (k, d) => (narrow ? `${SHORT[k]} ${d > 0 ? "↑" : "↓"} ${DIR_STAT[k][0]}% (대조 ${DIR_STAT[k][1]}%)` : NAME0[k](d));
   const ev = dirMemo.ev;
-  if (mcLine.orb) for (const e of ev.filter((e) => e.k.startsWith("orb") && e.s0 < tv1 && e.tEnd > tv0 && e.s0 + e.L * 60 <= tv1)) {   // 범위가 끝난(알려진) 것만
+  const orbs = ev.filter((e) => e.k.startsWith("orb") && e.s0 < tv1 && Math.max(e.tEnd, e.tRace || 0) > tv0 && e.s0 + e.L * 60 <= tv1);   // 범위가 끝난(알려진) 것만
+  const orbLast = Math.max(...orbs.map((e) => e.s0));   // 꼬리표는 가장 최근 개장 하나(1주일 보기에서 10~20개가 겹치던 것 · 검증 11-16 ⑦)
+  if (mcLine.orb) for (const e of orbs) {
     const big = e.L === 60, x0 = Math.max(G.ml, xT(e.s0)), xm = xT(e.s0 + e.L * 60), x1 = Math.min(xr, xT(Math.min(e.tEnd, tv1)));
     body.appendChild(mk("rect", { x: x0, y: yP(e.hi), width: Math.max(0, x1 - x0), height: Math.max(1, yP(e.lo) - yP(e.hi)), fill: "var(--neutral)", "fill-opacity": big ? 0.05 : 0.04, stroke: "var(--muted)", "stroke-opacity": 0.7, "stroke-dasharray": big ? "6 3" : "2 3" }));
     if (xm > G.ml && xm < xr) body.appendChild(mk("line", { x1: xm, x2: xm, y1: yP(e.hi), y2: yP(e.lo), stroke: "var(--muted)", "stroke-opacity": 0.6 }));
     const tag = narrow ? `뉴욕 ${e.L}분` : `뉴욕 개장 ${e.L}분 범위`;
-    if (!born(e)) { if (yP(e.hi) > G.mt && yP(e.hi) < G.pb) pill(x0 + 6, yP(e.hi) - (big ? 11 : -11), tag, "var(--muted)", "start"); continue; }
-    const x = xT(e.tk) - slot / 2, c = col(e.d), tgt = e.p + e.d * e.W, opp = e.p - e.d * e.W, xe = Math.min(xr, xT(Math.min(e.tEnd, tv1)));
+    const known = e.tk != null && e.tk <= tv1, lab = e.s0 === orbLast;   // 돌파가 창 시작보다 앞이어도 돌파로 그린다(«안 뚫린 범위»로 보이던 것 · 검증 11-16 ①)
+    if (!known) { if (lab && yP(e.hi) > G.mt && yP(e.hi) < G.pb) pill(x0 + 6, yP(e.hi) - (big ? 11 : -11), tag, "var(--muted)", "start"); continue; }
+    const x = xC(e.tk), c = col(e.d), tgt = e.p + e.d * e.W, opp = e.p - e.d * e.W, xe = Math.min(xr, xT(Math.min(e.tRace, tv1)));   // 선 = 연구 경주 창(돌파 뒤 72봉) 끝까지(검증 11-16 D6)
     for (const [v, op] of [[tgt, 0.75], [opp, 0.35]]) body.appendChild(mk("line", { x1: x, x2: xe, y1: yP(v), y2: yP(v), stroke: c, "stroke-opacity": op, "stroke-dasharray": "3 3" }));
     tri(x, e.d > 0 ? yP(e.lo) + 4 : yP(e.hi) - 4, e.d, c);
-    if (yP(tgt) > G.mt && yP(tgt) < G.pb) pill(x + 10, yP(tgt), narrow ? `뉴욕 ${e.L}분 ${e.d > 0 ? "↑" : "↓"} ${DIR_STAT[e.k][0]}% (대조 ${DIR_STAT[e.k][1]}%)` : `${tag} ${e.d > 0 ? "위로" : "아래로"} 돌파 · 이 선 먼저 ${DIR_STAT[e.k][0]}% (다른 시각 ${DIR_STAT[e.k][1]}%)`, c, "start");
+    if (lab && yP(tgt) > G.mt && yP(tgt) < G.pb) pill(Math.max(G.ml, x) + 10, yP(tgt), narrow ? `뉴욕 ${e.L}분 ${e.d > 0 ? "↑" : "↓"} 이 선 ${DIR_STAT[e.k][2]}·반대 ${DIR_STAT[e.k][3]}%` : `${tag} ${e.d > 0 ? "위로" : "아래로"} 돌파 · 6시간 안 이 선 먼저 ${DIR_STAT[e.k][2]}% · 반대선 ${DIR_STAT[e.k][3]}% (닿은 것만 ${DIR_STAT[e.k][0]}% vs 다른 시각 ${DIR_STAT[e.k][1]}%)`, c, "start");   // 52·54% 는 «결판 난 경주만» 비율 -- 조건 없이 읽히지 않게 무조건 비율을 앞에(검증 11-16)
   }
   for (const k of ["cci", "rsi2", "rdiv"]) {
     if (!mcLine[k]) continue;
     const vis = ev.filter((e) => e.k === k && born(e));
     vis.forEach((e, i) => {
-      const x = xT(e.tk) - slot / 2, y = e.d > 0 ? yP(e.bl) + 5 : yP(e.bh) - 5, c = col(e.d);
-      if (k === "rdiv") body.appendChild(mk("line", { x1: xT(e.tq) + slot / 2, y1: yP(e.xq), x2: xT(e.tp) + slot / 2, y2: yP(e.xp), stroke: c, "stroke-width": 1.5, "stroke-opacity": 0.8 }));
+      const x = xC(e.tk), y = e.d > 0 ? yP(e.bl) + 5 : yP(e.bh) - 5, c = col(e.d);
+      if (k === "rdiv") body.appendChild(mk("line", { x1: xC(e.tq + 900), y1: yP(e.xq), x2: xC(e.tp + 900), y2: yP(e.xp), stroke: c, "stroke-width": 1.5, "stroke-opacity": 0.8 }));
       tri(x, y, e.d, c);
-      if (i === vis.length - 1 && x > G.ml && x < xr) pill(x, e.d > 0 ? y + 18 : y - 18, NAME(k, e.d), c, "middle");   // 꼬리표는 그 종류 가장 최근 것 하나(나머지는 삼각형만)
+      if (i === vis.length - 1 && inPlot(x, y)) pill(x, e.d > 0 ? y + 18 : y - 18, NAME(k, e.d), c, "middle");   // 꼬리표는 그 종류 가장 최근 것 하나(나머지는 삼각형만)
     });
   }
 }

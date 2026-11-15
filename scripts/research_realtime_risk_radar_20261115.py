@@ -42,12 +42,16 @@ def load_qv(c):
     return (g.v * g.c).to_numpy()
 
 
-def vol_features(F, qv):
-    """분 t 까지 거래대금 로그 합(lrv 와 같은 결측 규칙) -- F 에 VWIN 열을 더한다."""
+def vol_features(F, qv, vclip=None):
+    """분 t 까지 거래대금 로그 합(lrv 와 같은 결측 규칙) -- F 에 VWIN 열을 더한다.
+    vclip = 창별 하한(학습 구간 0.5% 분위, 계수 json 의 coins.X.vclip) -- 거래량 0 분(거래소 정지)에 log 하한 0 으로 떨어져
+    σ̂ 가 평소의 0.27배로 무너지던 것(2026-11-16 체결 세션 검증 ①: ETH 2024-10-28 16:25 A10 0.254% vs B2 0.128%)을 막는다."""
     for nm, w in VWIN.items():
         s, k = wsum(qv, w)
         ok = (k == 0) if w <= 240 else (k <= 0.05 * w)
         F[nm] = np.where(ok, np.log(np.maximum(s * w / np.maximum(w - k, 1), 1.0)), np.nan)
+        if vclip:
+            F[nm] = np.where(np.isfinite(F[nm]), np.maximum(F[nm], vclip[nm]), np.nan)
     return F
 
 
@@ -253,8 +257,11 @@ def export(path=ROOT / "dashboard/risk_radar_params_20261115.json", vol=False):
              cols=cols, cells=48, quiet=0.7, loud=1.5, alert_k=4.0, alert_k5=3.0, alert_dedupe_min=30, coins={})
     for c in COINS:
         cl, hi, lo, m0 = load(c); F = features(cl, m0); M, _ = masks(F["mins"]); tr = M["train"]
+        vclip = None
         if vol:
             vol_features(F, load_qv(c))
+            vclip = {k: float(np.nanquantile(F[k][tr], 0.005)) for k in VWIN}   # 학습 구간만(검증 11-16 ①)
+            vol_features(F, load_qv(c), vclip)
         y15, y60 = target(F["r2"], 15), target(F["r2"], 60)
         f15, b15, c15 = fit_predict(F, y15, tr, cols); _, b60, c60 = fit_predict(F, y60, tr, cols)
         hmax = np.r_[pd.Series(hi[::-1]).rolling(15, min_periods=15).max().to_numpy()[::-1][1:], np.nan]
@@ -267,7 +274,7 @@ def export(path=ROOT / "dashboard/risk_radar_params_20261115.json", vol=False):
         one = np.r_[up[okt], dn[okt]]                                                # 한쪽 선 «15분 안 닿을 확률»(위·아래 합침, 학습 구간) -- 꼬리표용
         P["touch_k"] = TOUCH_K.tolist()
         P["coins"][c] = dict(beta15=b15.tolist(), c15=float(c15), beta60=b60.tolist(), c60=float(c60), q80=float(q80), q95=float(q95), cb0=cb0,
-                             touch=[float((one >= k).mean()) for k in TOUCH_K])
+                             touch=[float((one >= k).mean()) for k in TOUCH_K], **({"vclip": vclip} if vclip else {}))
         print(c, "c15", round(c15, 4), "q80", round(q80, 3), "q95", round(q95, 3))
     path.write_text(json.dumps(P, indent=1))
     print("→", path)
