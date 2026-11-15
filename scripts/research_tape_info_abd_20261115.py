@@ -278,6 +278,23 @@ def fit(split, arm, df=None):
     json.dump(meta, open(od / f"meta_{arm}.json", "w"), indent=1)
 
 
+def predict(split, arm):
+    """동결 모델로 시험 행만 예측(시험 날짜가 나중에 생기는 final 분할용) — 적합·조기 종료 없음."""
+    import lightgbm as lgb
+    df = load(split, [arm]); X = cols(df, arm); od = OUT / split; out = []
+    for name, col, kind in G.TARGETS:
+        m = lgb.Booster(model_file=str(od / "models" / f"arm{arm}_{name}.txt"))
+        ev = df[(df.split == "test") & df[col].notna()]
+        p = m.predict(ev[X]); o = ev[["t", "coin", "split"]].copy(); o["target"] = name
+        if kind == "multi":
+            o[["p0", "p1", "p2"]] = p.astype(np.float32)
+        else:
+            o["p"] = p.astype(np.float32)
+        out.append(o)
+    P = pd.concat(out); P["coin"] = P.coin.astype(str); P["split"] = P.split.astype(str)
+    P.to_parquet(od / f"pred_{arm}_test.parquet")
+
+
 def score(split, a, b):
     df = load(split, ["P"])
     df = df[df.split == "test"][["t", "coin"] + [c for _, c, _ in G.TARGETS]].copy(); df["coin"] = df.coin.astype(str)
@@ -338,6 +355,7 @@ if __name__ == "__main__":
     ap.add_argument("--feat")
     ap.add_argument("--fit", nargs=2)
     ap.add_argument("--score", nargs=3)
+    ap.add_argument("--predict", nargs=2)
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
@@ -348,3 +366,5 @@ if __name__ == "__main__":
         fit(*a.fit)
     elif a.score:
         score(*a.score)
+    elif a.predict:
+        predict(*a.predict)
