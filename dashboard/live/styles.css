@@ -3229,6 +3229,14 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .lt-x { order: -1; justify-self: center; margin: -4px 0 -2px; width: 28px; height: 20px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px;
   background: none; color: var(--muted); font: 600 13px/1 var(--font-sans); cursor: pointer; }
 .lt-x:hover { color: var(--text); background: rgb(var(--lift) / .1); }
+/* 2026-11-17 펜 메모: 대기 주문 상자 접기(상자 오른쪽 위) · 접으면 진입선 꼬리표의 «상자» 칩으로 펼침 */
+.lt-fold { position: absolute; top: 6px; right: 8px; height: 20px; padding: 0 9px; border: 1px solid var(--line); border-radius: 999px;
+  background: none; color: var(--muted); font: 700 10.5px/1 var(--font-sans); cursor: pointer; }
+.lt-fold:hover { color: var(--text); background: rgb(var(--lift) / .1); }
+.lt-fold:focus-visible, .lt-tag .lt-unf:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.lt-fold[hidden], .lt.lt-folded .lt-tk { display: none; }
+.lt-tag .lt-unf { margin-left: 6px; padding: 1px 7px; border: 1px solid color-mix(in srgb, currentColor 55%, transparent); border-radius: 999px; font: 700 10px/1.3 var(--font-sans); cursor: pointer; }
+.lt-tag .lt-unf:hover { background: color-mix(in srgb, currentColor 16%, transparent); }
 /* 2026-10-29 SLTP 상자: 크기 줄(레버리지·증거금·명목) + 손익비 버튼 */
 /* 2026-10-30 SLTP 증거금 슬라이더(시안 C) + 손절 시 손실 줄 · 들어간 선 진입가 라벨 손익(시안 B) */
 .lt-mg, .lt-lv { display: grid; gap: 5px; }
@@ -3283,6 +3291,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
   .lt-tk > .lt-row { grid-area: row; align-self: center; flex-direction: column; align-items: flex-start; gap: 2px; }
   .lt-tk > .lt-mg { grid-area: mg; } .lt-tk > .lt-lv { grid-area: lv; } .lt-tk > .lt-rr { grid-area: rr; align-self: center; } .lt-tk > .lt-rrb { grid-area: rrb; } .lt-tk > .lt-go { grid-area: go; }
   .lt-tk > .lt-x { position: absolute; top: -13px; right: 10px; width: 40px; height: 26px; margin: 0; border: 1px solid var(--line); background: var(--panel-strong); }
+  .lt-tk > .lt-fold { top: -13px; right: 58px; height: 26px; background: var(--panel-strong); }
   .lt-tag { padding: 7px 10px 7px 8px; }   /* 손가락 -- 높이 ~30px */
   .lt-go { height: 42px; }
 }

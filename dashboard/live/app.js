@@ -480,6 +480,9 @@ function chartValAt(clientY) {
   return G.ymax - ((clientY - m.f) / m.d - G.mt) * (G.ymax - G.ymin) / (G.pb - G.mt);
 }
 const ARMED_TOUCH_HOLD_MS = 250;   // 2026-11-12 터치로 실주문 선(들어간 선·대기 지정가)을 옮기려면 이만큼 누른 뒤 끈다 -- 쓸다 걸린 손가락이 주문을 바꾸지 않게
+// 2026-11-17 펜 메모 «지정가 주문 대기 중일 때 박스를 숨길 수 있게 -- 차트가 안 보인다»: 대기 중엔 상자 조작이 전부 잠겨 있고(PEG·TAKER·취소는 진입선 꼬리표에 있다)
+//   접으면 상자만 숨기고 꼬리표에 «상자» 칩을 단다. 한 번 접으면 다음 대기 주문도 접힌 채(브라우저 기억).
+let lineFold = false; try { lineFold = localStorage.getItem("ltFold") === "1"; } catch (err) {}
 function lineToolEl(box) {
   let h = document.getElementById("lineTool");
   if (h || !box) return h;
@@ -494,11 +497,12 @@ function lineToolEl(box) {
     + '<div class="lt-row lt-rr"></div>'
     + `<div class="lt-rrb" role="group" aria-label="손익비로 익절선 맞추기 (손절선은 그대로)">${LINE_RR.map((r) => `<button type="button" data-rr="${r}">1:${r}</button>`).join("")}</div>`
     + '<button type="button" class="lt-go"></button>'
-    + '<button type="button" class="lt-x" aria-label="닫기">✕</button></div>';
+    + '<button type="button" class="lt-x" aria-label="닫기">✕</button>'
+    + '<button type="button" class="lt-fold" hidden title="상자 접기 — 진입선 꼬리표의 «상자»로 다시 펼칩니다">접기</button></div>';
   h.addEventListener("pointerdown", (e) => {
     e.stopPropagation();   // 차트 끌기로 번지지 않게
     linePt = e.pointerType;
-    const tag = e.target.closest(".lt-tx, .lt-tkr") ? null : e.target.closest(".lt-tag[data-k]"), go = e.target.closest(".lt-go");
+    const tag = e.target.closest(".lt-tx, .lt-tkr, .lt-unf") ? null : e.target.closest(".lt-tag[data-k]"), go = e.target.closest(".lt-go");
     if (tag && lineTool) {
       // 2026-11-12 검토: 꼬리표가 플롯 끝에 고정(화면 밖 선)이면 손가락 절대 위치로 재 선이 튀었다 -- 잡은 순간의 «선 − 손가락 가격» 차이만큼 띄워 움직인 만큼만 옮긴다.
       const k = tag.dataset.k, p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), lv = k === "en" ? lineRef(lineTool, p) : lineTool[k], v0 = chartValAt(e.clientY);
@@ -554,9 +558,11 @@ function lineToolEl(box) {
     g.dispatchEvent(new Event("input", { bubbles: true }));   // 칩·«N배» 글자·크기 재조회는 그쪽 리스너가 한다(칩 클릭과 같은 길)
     if (lineTool) { lineTool.plan = null; lineTool.arm = 0; renderLineTool(); linePreview(); }
   });
+  h.addEventListener("keydown", (e) => { if ((e.key === "Enter" || e.key === " ") && e.target.closest(".lt-unf")) { e.preventDefault(); e.target.click(); } });
   h.addEventListener("click", (e) => {
     e.stopPropagation();
     const tkb = e.target.closest(".lt-tkr"); if (tkb) { lineTakerClick(e, tkb.dataset.a || "market"); return; }
+    if (e.target.closest(".lt-fold, .lt-unf")) { lineFold = !!e.target.closest(".lt-fold"); try { localStorage.setItem("ltFold", lineFold ? "1" : "0"); } catch (err) {} renderLineTool(); return; }
     if (e.target.closest(".lt-lv-auto")) {
       const a = el("snapLevAuto");
       if (a && lineTool && !lineTool.placed && !manualLevLocked()) { a.checked = !a.checked; a.dispatchEvent(new Event("change", { bubbles: true })); lineTool.plan = null; lineTool.arm = 0; renderLineTool(); linePreview(); }
@@ -798,10 +804,12 @@ function renderLineTool() {
   const enH = `<span class="lt-grip" aria-hidden="true"></span>${side === "SHORT" ? "SHORT" : "LONG"}${t.add ? " 추가" : ""}${stp ? " 감시" : ""}${lim && t.placed ? " " + lineFmt(ref) : ""}`
     + (lim && t.placed && !t.trig ? `<span class="lt-tkr pg" data-a="peg" role="button" tabindex="0" aria-label="지금 호가 peg 로 진입(maker)" title="누르면 바로: 걸린 지정가를 취소하고 남은 수량을 지금 최우선 호가 peg(메이커)로 따라갑니다 — 120초 · 남은 수량 버림 · 시장가 전환 없음">${t.busy && t.tkK === "peg" ? "…" : "PEG"}</span>` : "")
     + (lim && t.placed && !t.trig ? `<span class="lt-tkr${mkArmed ? " arm" : ""}" role="button" tabindex="0" aria-label="${mkArmed ? "빨간색 = 한 번 더 누르면 시장가로 진입" : "지금 시장가로 진입(taker)"}" title="걸린 지정가를 취소하고 남은 수량을 시장가(테이커 4bp)로 진입 — 두 번 눌러 확인(첫 클릭 = 빨간색, 5초)">${t.busy && t.tkK !== "peg" ? "…" : "TAKER"}</span>` : "")
+    + (lim && t.placed && lineFold ? `<span class="lt-unf" role="button" tabindex="0" aria-label="주문 상자 펼치기" title="주문 상자 펼치기">상자</span>` : "")
     + (lim && t.placed ? `<span class="lt-tx" role="button" tabindex="0" aria-label="지정가 주문 취소" title="주문 취소">✕</span>` : "");
   if (en._h !== enH) { en.innerHTML = enH; en._h = enH; }
   en.setAttribute("aria-label", lim ? `${stp ? "감시" : "지정가"} 진입선 ${lineFmt(ref)} — 위아래로 끌어 옮기기` : "지금가 peg 진입선 — 끌어서 지정가로 바꾸기");
   h.classList.toggle("short", side === "SHORT");
+  h.classList.toggle("lt-folded", !!t.placed && lineFold); h.querySelector(".lt-fold").hidden = !t.placed;
   // 표는 플롯 왼쪽 -- 두 꼬리표의 높이 띠(±22px)를 피한 빈 구간 중 표가 들어가는 첫 곳(위부터, 대개 두 선 사이). 없으면 가장 넓은 곳.
   const tk = h.querySelector(".lt-tk"), th = tk.offsetHeight + 8, ys = [yT, yS].sort((a, b) => a - b);
   const gaps = [[top + 8, ys[0] - 22], [ys[0] + 22, ys[1] - 22], [ys[1] + 22, bot - 8]];
