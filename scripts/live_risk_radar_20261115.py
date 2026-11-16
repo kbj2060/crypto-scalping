@@ -27,9 +27,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import binance_ban_guard  # noqa: E402,F401 -- 공용 밴 가드: requests 를 감싸 418/429 뒤엔 바이낸스 REST 를 내보내지 않는다
 import research_realtime_risk_radar_20261115 as R  # noqa: E402
+import research_soxl_session_vol_20261112 as S  # noqa: E402 -- 2026-11-17 SOXL 세션 HAR-S(연구 frame·har_x 그대로)
 
 STALE_DATA_S = 180                                                 # 마지막 닫힌 봉이 3분 넘게 옛것이면 그 코인은 무효
 PARAMS = ROOT / "dashboard/risk_radar_params_20261116.json"   # B2(11-16): + 거래대금 5창 · 옛 계수 _20261115.json 은 되돌리기용
+PARAMS_SESS = ROOT / "dashboard/risk_radar_params_soxl_20261117.json"   # 2026-11-17 주식(SOXL) 세션 식 · 되돌리기 = 이 파일 삭제(그 종목만 빠진다)
 CACHE = ROOT / "data/live/risk_radar"
 LATEST = ROOT / "data/live/risk_radar_latest.json"
 LOG = ROOT / "data/live/risk_radar_forward.jsonl"
@@ -177,25 +179,47 @@ def compute(cl, hi, lo, m0, p: dict, P: dict, qv=None, iv=None) -> dict:
     return out, dict(f15=f15, f60=f60, usual=us, raw=raw)
 
 
+def compute_session(df: pd.DataFrame, p: dict) -> dict:
+    """주식 선물(SOXL): 세션 HAR-S -- 연구 frame(매분 τ)·har_x 와 동결 계수. τ = 마지막 닫힌 봉 다음 분(형성 중 봉 자리를 빈 행으로 붙여 τ 행을 만든다).
+    «앞 1시간 조용/격함»·급변 경고는 코인에서만 검정했다 -- 여기는 세션 이름과 1시간 σ 만 낸다.
+    ponytail: 개장 더미(open_in = 개장까지 15분 미만)는 5분 경계에서만 배웠다 -- 매분 쓰면 개장 11~14분 전(동부 09:16~09:19)엔 σ̂ 가 1.6~2.3배 크게 나온다
+    (시험 29일 · 시계 더미를 5분 내림하면 반대로 1.3~2배 작아져 더 나쁨). 고치려면 «창 안 정규장 분 비율» 피쳐로 새 검정."""
+    k = pd.concat([df.tail(9 * 1440), pd.DataFrame({"t": [int(df.t.iloc[-1]) + MIN]})], ignore_index=True)   # 7일 창 + 여유
+    r15, r60 = S.frame(k, 15, every=1).iloc[-1:], S.frame(k, 60, every=1).iloc[-1:]
+    v15 = p["c15"] * np.exp(2 * (S.har_x(r15) @ np.array(p["beta15"]))[0]); v60 = p["c60"] * np.exp(2 * (S.har_x(r60) @ np.array(p["beta60"]))[0])
+    fin = lambda x, m=1.0: float(x) * m * 100 if np.isfinite(x) else None
+    return dict(ts=pd.Timestamp(int(r15.tau.iloc[0]), unit="s", tz="UTC").strftime("%Y-%m-%dT%H:%M:%SZ"), price=float(df.c.iloc[-1]),
+                sigma15_pct=fin(np.sqrt(v15)), band80_pct=fin(np.sqrt(v15), p["q80"]), band95_pct=fin(np.sqrt(v15), p["q95"]),
+                baseline7d_sigma15_pct=fin(r15.b0.iloc[0] * np.sqrt(p["cb0"])), sigma60_pct=fin(np.sqrt(v60)), usual60_pct=None, ratio60=None, state60=None,
+                session=S.SESS[int(r15.sess.iloc[0])], alert=dict(active=False, minutes_ago=None), valid=bool(np.isfinite(v15) and np.isfinite(v60)), touch=p["touch"])
+
+
 def main(now_ms: int | None = None, fetch=rest, dvol_fetch=dvol_rest) -> int:
     now_ms = now_ms or int(time.time() * 1000)
     P = json.loads(PARAMS.read_text()); res = {}
-    for coin, p in P["coins"].items():
+    try:                                                            # 주식 계수 파일이 없거나 깨져도 4코인은 그대로
+        sess = json.loads(PARAMS_SESS.read_text())["coins"] if PARAMS_SESS.exists() else {}
+    except Exception as e:
+        print(f"{PARAMS_SESS.name} {type(e).__name__}: {str(e)[:120]}", file=sys.stderr); sess = {}
+    for coin, p in {**P["coins"], **sess}.items():
         try:                                                        # 한 코인 실패가 나머지를 막지 않게
             df = update_cache(coin, now_ms, fetch)
-            cl, hi, lo, m0, qv = grid(df)
-            iv = None
-            if "beta60_iv" in p:
-                try:                                                        # IV 실패는 1시간을 B2 식으로 떨어뜨릴 뿐(코인 출력은 그대로)
-                    iv = dvol_series(update_dvol(coin, now_ms, dvol_fetch))
-                except Exception as e:
-                    print(f"{coin} DVOL {type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
-                    try:
-                        iv = dvol_series(pd.read_parquet(CACHE / f"{coin}_dvol.parquet"))
-                    except Exception:
-                        iv = None
-            out, _ = compute(cl, hi, lo, m0, p, P, qv, iv)
-            out["data_age_s"] = round(now_ms / 1000 - (m0 + len(cl)) * 60, 1)
+            if p.get("kind") == "session":
+                out = compute_session(df, p)
+            else:
+                cl, hi, lo, m0, qv = grid(df)
+                iv = None
+                if "beta60_iv" in p:
+                    try:                                                        # IV 실패는 1시간을 B2 식으로 떨어뜨릴 뿐(코인 출력은 그대로)
+                        iv = dvol_series(update_dvol(coin, now_ms, dvol_fetch))
+                    except Exception as e:
+                        print(f"{coin} DVOL {type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
+                        try:
+                            iv = dvol_series(pd.read_parquet(CACHE / f"{coin}_dvol.parquet"))
+                        except Exception:
+                            iv = None
+                out, _ = compute(cl, hi, lo, m0, p, P, qv, iv)
+            out["data_age_s"] = round((now_ms - int(df.t.iloc[-1]) - MIN) / 1000, 1)
             if out["data_age_s"] > STALE_DATA_S:                   # REST 가 새 봉을 안 줘도 옛 값이 지금 값처럼 보이던 것(검증 11-16 ②) -- 화면은 24h 로 떨어진다
                 out.update(valid=False, error=f"데이터 지연 {out['data_age_s']:.0f}초")
         except Exception as e:
@@ -208,7 +232,7 @@ def main(now_ms: int | None = None, fetch=rest, dvol_fetch=dvol_rest) -> int:
         for c, o in res.items():
             if "error" not in o:
                 f.write(json.dumps(dict(coin=c, **{k: o[k] for k in ("ts", "price", "sigma15_pct", "baseline7d_sigma15_pct", "sigma60_pct", "usual60_pct", "state60", "data_age_s")}, alert=o["alert"]["active"]), ensure_ascii=False, allow_nan=False) + "\n")
-    print(" · ".join(f"{c} " + (o["error"] if "error" in o else f"σ15 {o['sigma15_pct'] or 0:.3f}% (기준 {o['baseline7d_sigma15_pct'] or 0:.3f}) {o['state60']}{' 급변' if o['alert']['active'] else ''}") for c, o in res.items()))
+    print(" · ".join(f"{c} " + (o["error"] if "error" in o else f"σ15 {o['sigma15_pct'] or 0:.3f}% (기준 {o['baseline7d_sigma15_pct'] or 0:.3f}) {o.get('session') or o['state60']}{' 급변' if o['alert']['active'] else ''}") for c, o in res.items()))
     return 0 if all("error" not in o for o in res.values()) else 1
 
 
@@ -236,6 +260,18 @@ def selftest():
                     assert np.isclose(o["usual60_pct"], full["usual"][i] * 100), coin; nu += 1
             assert nu >= 1, coin
             print(f"  {coin}: 연구 배열과 일치 · 31일 창 마지막 분 일치")
+    if PARAMS_SESS.exists() and (S.OUT / "klines").exists():                # SOXL: 그 시각까지만 든 캐시의 서빙 값 = 연구가 시험에 쓴 HAR-S 값(같은 τ)
+        ps, k = json.loads(PARAMS_SESS.read_text())["coins"]["SOXL"], S.load("SOXLUSDT")
+        for H, key in ((15, "sigma15_pct"), (60, "sigma60_pct")):
+            d = S.frame(k, H).dropna(subset=[*S.HGB_COLS, "b0", "rv", "open_in"]).reset_index(drop=True)
+            te = S.cut(d, "test"); ref = np.sqrt(S.fit_predict(S.cut(d, "refit"), te)["HAR"]) * 100
+            for i in (7, len(te) // 3, len(te) // 2 + 1, len(te) - 9):       # 세션이 다른 네 시각
+                tau = int(te.tau.iloc[i]); o = compute_session(k[k.t < tau * 1000], ps)
+                assert o["valid"] and np.isclose(o[key], ref[i], rtol=1e-9) and o["ts"] == pd.Timestamp(tau, unit="s", tz="UTC").strftime("%Y-%m-%dT%H:%M:%SZ"), (H, i)
+                assert o["session"] == S.SESS[int(te.sess.iloc[i])]
+        mid = int(te.tau.iloc[len(te) // 2]) + 120                           # 5분 경계가 아닌 분에도 값이 난다(매분 갱신)
+        assert compute_session(k[k.t < mid * 1000], ps)["valid"]
+        print("  SOXL: 시험에 쓴 HAR-S 값과 일치(15분·1시간 · 미래 봉 없이)")
     import tempfile
     with tempfile.TemporaryDirectory() as td:                            # DVOL 캐시: 형성 봉 안 씀 · 한 시간 안엔 다시 안 받음 · 봉 끝나면 받음
         bh = 1_790_000_000_000 // 3600_000 * 3600_000
@@ -265,6 +301,7 @@ def selftest():
         rc = main(base, half, lambda *a: []); g["CACHE"], g["LATEST"], g["LOG"] = keep
         out = json.loads((Path(td) / "l.json").read_text())
         assert rc == 1 and "error" in out["coins"]["SOL"] and "sigma15_pct" in out["coins"]["ETH"]
+        assert not PARAMS_SESS.exists() or ("SOXL" in out["coins"] and "session" in out["coins"]["SOXL"]), out["coins"].get("SOXL")   # 주식 종목도 같은 파일에
         g["CACHE"], g["LATEST"], g["LOG"] = Path(td) / "c", Path(td) / "l.json", Path(td) / "f.jsonl"   # REST 가 10분 동안 새 봉을 안 주면 그 코인은 무효(검증 11-16 ②)
         main(base + 10 * MIN, lambda sym, start, lim: [], lambda *a: []); g["CACHE"], g["LATEST"], g["LOG"] = keep
         o2 = json.loads((Path(td) / "l.json").read_text())["coins"]["ETH"]

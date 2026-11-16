@@ -26,7 +26,7 @@ def risk_radar_payload(latest: Path = LATEST, params: Path = PARAMS, now: float 
         params = ROOT / "dashboard" / nm
     P = json.loads(params.read_text())
     age = (now or time.time()) - calendar.timegm(time.strptime(d["updated"], "%Y-%m-%dT%H:%M:%SZ"))
-    coins = {c.lower(): {**o, "touch": P["coins"].get(c, {}).get("touch")} for c, o in d.get("coins", {}).items()}
+    coins = {c.lower(): {"touch": P["coins"].get(c, {}).get("touch"), **o} for c, o in d.get("coins", {}).items()}   # 11-17 워커가 표를 실어 보낸 종목(SOXL)은 그 표
     return {"ok": True, "updated": d["updated"], "age_s": round(age, 1), "stale": age > STALE_S, "touch_k": P.get("touch_k"), "coins": coins}
 
 
@@ -40,4 +40,6 @@ if __name__ == "__main__":   # 자체점검: 파일 없음 → 대기 · 신선/
         t0 = calendar.timegm((2026, 11, 15, 0, 0, 0))
         a, b = risk_radar_payload(lt, pr, now=t0 + 30), risk_radar_payload(lt, pr, now=t0 + 400)
         assert a["ok"] and not a["stale"] and abs(a["age_s"] - 30) < 1e-6 and b["stale"] and a["coins"]["eth"]["touch"] == [0.7, 0.5]
+        lt.write_text(json.dumps({"updated": "2026-11-15T00:00:00Z", "coins": {"SOXL": {"sigma15_pct": 0.9, "touch": [0.6, 0.4]}}}))
+        assert risk_radar_payload(lt, pr, now=t0)["coins"]["soxl"]["touch"] == [0.6, 0.4]
     print("selftest OK")

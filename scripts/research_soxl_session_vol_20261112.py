@@ -4,6 +4,7 @@
   selftest   세션 시각표 · 미래를 잘라도 같은 피쳐 · 표적 직접 계산 대조 · QLIKE · HAR 계수 복원
   build      SOXLUSDT·SNDKUSDT 1분봉을 Vision 일 파일로 받는다(tmp/soxl_vol_20261112/klines)
   run        적합·판정 → result.json
+  export     서빙 계수(HAR-S) → dashboard/risk_radar_params_soxl_20261117.json (2026-11-17, 워커 scripts/live_risk_radar_20261115.py 가 읽는다)
 
 시각 규약: 결정 τ = 5분 경계(UTC). 피쳐 = 시작 < τ 인 1분봉만. 표적 = [τ, τ+H) 1분 로그수익 제곱합의 제곱근.
 """
@@ -24,7 +25,8 @@ FIRST, LAST = "2026-05-15", "2026-11-10"
 SPLIT = {"train": ("2026-05-22", "2026-08-31"), "val": ("2026-09-01", "2026-09-30"), "test": ("2026-10-01", "2026-11-11"),
          "refit": ("2026-05-22", "2026-09-30")}     # [시작, 끝) UTC -- 끝을 하루 당겨 경계 1일 purge
 # ponytail: NYSE 휴장일 손으로 적음(2026 남은 것까지). 반일장(11-27·12-24)은 정규장으로 본다 -- 해가 바뀌면 달력 라이브러리로.
-HOLIDAYS = {"2026-05-25", "2026-06-19", "2026-07-03", "2026-09-07", "2026-11-26", "2026-12-25"}
+HOLIDAYS = {"2026-05-25", "2026-06-19", "2026-07-03", "2026-09-07", "2026-11-26", "2026-12-25",
+            "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26", "2027-05-31", "2027-06-18", "2027-07-05", "2027-09-06", "2027-11-25", "2027-12-24"}   # 2027 = 서빙용(11-17, 시험 구간 밖)
 SESS = ("정규장", "프리장", "애프터", "야간", "주말", "휴장")
 RV_FLOOR = 1e-4
 WIN = {"lrv5": 5, "lrv15": 15, "lrv60": 60, "lrv240": 240, "lrv1d": 1440, "lrv7d": 10080}
@@ -39,9 +41,11 @@ def clock(tau: np.ndarray, H: int) -> pd.DataFrame:
     hol = np.isin(et.strftime("%Y-%m-%d"), list(HOLIDAYS))
     sess = np.select([(w == 5) | ((w == 4) & (m >= 1200)) | ((w == 6) & (m < 1200)), hol & (m >= 240) & (m < 1200),
                       (m >= 570) & (m < 960), (m >= 240) & (m < 570), (m >= 960) & (m < 1200)], [4, 5, 0, 1, 2], 3)
-    days = pd.date_range(et.min().normalize() - pd.Timedelta(days=5), et.max().normalize() + pd.Timedelta(days=5), freq="D")
+    # 2026-11-17: 달력일 격자는 시간대 없이 만들고 09:30 을 붙인 뒤 동부 시각으로 -- 전엔 «현지 자정 − 120시간»이라 첫 τ 가 서머타임 전환 뒤 1~5일이면
+    #   격자가 23:00/01:00 에 걸려 개장 시각이 한 시간 밀리거나(봄) 예외(가을)였다. 9일 창만 드는 서빙에서만 걸린다(연구 프레임은 05-15 시작이라 값 불변).
+    days = pd.date_range(et.min().tz_localize(None).normalize() - pd.Timedelta(days=5), et.max().tz_localize(None).normalize() + pd.Timedelta(days=5), freq="D")
     days = days[(days.dayofweek < 5) & ~np.isin(days.strftime("%Y-%m-%d"), list(HOLIDAYS))]
-    opens = ((days + pd.Timedelta(minutes=570)).tz_convert("UTC").asi8 // 10**9)   # 정규장 개장(동부 09:30) UTC 초
+    opens = ((days + pd.Timedelta(minutes=570)).tz_localize("America/New_York").tz_convert("UTC").asi8 // 10**9)   # 정규장 개장(동부 09:30) UTC 초
     closes = opens + 390 * 60
     i = np.searchsorted(opens, tau, "right") - 1
     since_open = np.clip((tau - opens[i.clip(0)]) / 60, 0, 1440)
@@ -52,8 +56,8 @@ def clock(tau: np.ndarray, H: int) -> pd.DataFrame:
                          "last30": ((sess == 0) & (to_close <= 30)).astype(float)})
 
 
-def frame(k: pd.DataFrame, H: int) -> pd.DataFrame:
-    """1분봉(t ms·h·l·c·v) → 5분 경계 τ 마다 피쳐·표적. 서빙도 이 함수를 쓴다(표적 열만 NaN)."""
+def frame(k: pd.DataFrame, H: int, every: int = 5) -> pd.DataFrame:
+    """1분봉(t ms·h·l·c·v) → 5분 경계 τ 마다 피쳐·표적. 서빙도 이 함수를 쓴다(표적 열만 NaN · every=1 이면 매분 τ)."""
     t0, t1 = int(k.t.iloc[0]) // 60000, int(k.t.iloc[-1]) // 60000
     g = k.assign(i=k.t // 60000 - t0).set_index("i").reindex(range(t1 - t0 + 1))      # 빈 분은 NaN
     c, h, l, qv = g.c.to_numpy(), g.h.to_numpy(), g.l.to_numpy(), (g.v * g.c).to_numpy()
@@ -68,15 +72,17 @@ def frame(k: pd.DataFrame, H: int) -> pd.DataFrame:
     f["b0"] = (np.log(hc).diff().rolling(168, min_periods=150).std(ddof=1) * np.sqrt(H / 60)).reindex(range(len(c))).ffill().to_numpy()   # 현행: 7일 1시간 수익 σ
     fut = r2.rolling(H, min_periods=H).sum().shift(-(H - 1))                           # 분 j 부터 H 개
     prev = pd.Series(c).shift(1)
-    exc = np.maximum(np.log(pd.Series(h).rolling(H, min_periods=H).max().shift(-(H - 1)) / prev),
-                     -np.log(pd.Series(l).rolling(H, min_periods=H).min().shift(-(H - 1)) / prev))
+    up = np.log(pd.Series(h).rolling(H, min_periods=H).max().shift(-(H - 1)) / prev)      # 한쪽 최대 이동(위·아래) -- 꼬리표 «닿을 확률» 표용
+    dn = -np.log(pd.Series(l).rolling(H, min_periods=H).min().shift(-(H - 1)) / prev)
+    exc = np.maximum(up, dn)
     F = pd.DataFrame(f)
     j = np.arange(len(c))
-    j = j[((j + t0) % 5 == 0) & (j >= 1)]                                              # τ = 분 j 의 시작
+    j = j[((j + t0) % every == 0) & (j >= 1)]                                              # τ = 분 j 의 시작
     d = F.iloc[j - 1].reset_index(drop=True)                                           # 피쳐 = 직전 분까지
     d["tau"] = (j + t0) * 60
     d["rv"] = np.sqrt(fut.to_numpy()[j])
     d["exc"] = exc.to_numpy()[j]
+    d["up"], d["dn"] = up.to_numpy()[j], dn.to_numpy()[j]
     return pd.concat([d, clock(d.tau.to_numpy(), H)], axis=1)
 
 
@@ -184,6 +190,37 @@ def run() -> None:
     print(json.dumps(res, ensure_ascii=False, indent=1))
 
 
+def export(path: Path = ROOT / "dashboard/risk_radar_params_soxl_20261117.json") -> None:
+    """서빙 계수: 시험에 쓴 그 HAR-S(적합 = refit 구간 05-22~09-30, evaluate 와 같은 행). 띠(q80·q95)·한쪽 «닿을 확률» 표도 적합 구간에서만.
+    시험 구간(10-01~11-10) 포함률·표 일치는 찍기만 한다(판정 아님 · docs/experiments/soxl_session_vol_20261112.md §서빙)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from research_realtime_risk_radar_20261115 import TOUCH_K
+    k, o, chk = load("SOXLUSDT"), {"kind": "session"}, {}
+    for H in (15, 60):
+        d = frame(k, H).dropna(subset=[*HGB_COLS, "b0", "rv", "open_in"]).reset_index(drop=True)
+        fit, te = cut(d, "refit"), cut(d, "test")
+        rv2 = np.maximum(fit.rv.to_numpy(), RV_FLOOR) ** 2
+        beta = np.linalg.lstsq(har_x(fit), np.log(rv2) / 2, rcond=None)[0]
+        c = float(np.mean(rv2 / np.exp(2 * har_x(fit) @ beta)))
+        o[f"beta{H}"], o[f"c{H}"] = beta.tolist(), c
+        sig = lambda x: np.sqrt(c * np.exp(2 * har_x(x) @ beta))
+        if H == 15:
+            sf, st = sig(fit), sig(te)
+            o["cb0"] = float(np.mean(rv2 / fit.b0.to_numpy() ** 2))                    # 현행 7일 고정 σ 의 학습 눈금(연구 fit_predict 의 B0 와 같은 값)
+            o["q80"], o["q95"] = (float(x) for x in np.quantile(fit.exc / sf, [.8, .95]))
+            one = np.r_[fit.up / sf, fit.dn / sf]
+            o["touch"] = [float((one >= x).mean()) for x in TOUCH_K]
+            onet = np.r_[te.up / st, te.dn / st]
+            chk = {"시험 80% 띠 포함률": round(float((te.exc / st <= o["q80"]).mean()), 4), "시험 95% 띠 포함률": round(float((te.exc / st <= o["q95"]).mean()), 4),
+                   "닿을 확률 표 vs 시험 실제(σ 배수: 표, 실제)": {str(x): [round(t, 3), round(float((onet >= x).mean()), 3)] for x, t in zip(TOUCH_K, o["touch"]) if x in (0.5, 1, 1.5, 2, 3)},
+                   "세션별 시험 80% 포함률": {SESS[s]: round(float((te.exc / st <= o["q80"])[te.sess == s].mean()), 3) for s in sorted(te.sess.unique())},
+                   "시험 QLIKE HAR": round(float(qlike(te.rv.to_numpy(), st ** 2).mean()), 4), "n 적합·시험": [len(fit), len(te)]}
+    P = {"source": "scripts/research_soxl_session_vol_20261112.py export", "prereg": "docs/prereg/soxl_session_vol_20261112.md",
+         "fit": SPLIT["refit"], "har_cols": HAR_COLS, "touch_k": TOUCH_K.tolist(), "coins": {"SOXL": o}}
+    path.write_text(json.dumps(P, indent=1))
+    print(json.dumps(chk, ensure_ascii=False, indent=1)); print("→", path)
+
+
 def selftest() -> None:
     # 세션 시각표(서머타임 전후)
     ts = lambda s: int(pd.Timestamp(s, tz="UTC").timestamp())
@@ -193,6 +230,10 @@ def selftest() -> None:
     assert c.since_open[0] == 0 and c.to_open[0] == 0 and c.open_in[0] == 1 and c.first60[0] == 1 and c.to_close[0] == 390
     assert c.to_open[8] == 10 and c.open_in[8] == 1 and c.open_in[2] == 0 and c.to_open[2] == 60
     assert c.to_open[4] == 1440 and c.since_open[4] == 1440                    # 휴장일(7-3 금): 다음 개장은 월요일
+    et = lambda s: int(pd.Timestamp(s, tz="America/New_York").timestamp())      # 첫 τ 가 서머타임 전환(2027-03-14·11-07) 뒤 1~5일인 짧은 창(서빙 9일 창)
+    for first, q in (("2027-03-15 12:00", "2027-03-24"), ("2027-11-08 12:00", "2027-11-17"), ("2027-03-10 12:00", "2027-03-24")):
+        d = clock(np.array([et(first), et(q + " 09:30"), et(q + " 09:20"), et(q + " 08:20"), et(q + " 15:45")]), 15).iloc[1:]
+        assert d.sess.tolist() == [0, 1, 1, 0] and d.since_open.tolist()[0] == 0 and d.open_in.tolist() == [1, 1, 0, 0] and d.first60.tolist() == [1, 0, 0, 0] and d.last30.tolist() == [0, 0, 0, 1], (first, d)
     # 합성 12일 1분봉: 미래를 잘라도 같은 피쳐 · 표적 직접 계산 대조
     rng = np.random.default_rng(0)
     n = 12 * 1440
@@ -210,6 +251,9 @@ def selftest() -> None:
     assert k.t[i] == row.tau * 1000 and abs(row.rv - np.sqrt((np.diff(np.log(k.c.to_numpy()[i - 1:i + 15])) ** 2).sum())) < 1e-12
     assert abs(row.lrv15 - np.log(np.sqrt((np.diff(np.log(k.c.to_numpy()[i - 16:i])) ** 2).mean()))) < 1e-12
     assert abs(row.exc - max(np.log(k.h[i:i + 15].max() / k.c[i - 1]), -np.log(k.l[i:i + 15].min() / k.c[i - 1]))) < 1e-12
+    E = frame(k, 15, every=1); E5 = E[E.tau % 300 == 0].reset_index(drop=True)
+    assert len(E) > 4 * len(A) and np.allclose(E5[cols].to_numpy(float), A[cols].to_numpy(float), equal_nan=True), "매분 τ 행이 5분 경계 행과 다르다"
+    assert np.allclose(np.maximum(A.up, A.dn).to_numpy(), A.exc.to_numpy(), equal_nan=True)
     gap = A[(A.tau > k.t[8999] // 1000 - 840) & (A.tau <= k.t[8999] // 1000 + 60 + 420)]
     assert gap.rv.isna().all(), "봉 구멍이 든 표적 창이 남았다"
     # QLIKE · HAR 계수 복원
@@ -225,5 +269,5 @@ def selftest() -> None:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["selftest", "build", "run"])
-    {"selftest": selftest, "build": build, "run": run}[ap.parse_args().cmd]()
+    ap.add_argument("cmd", choices=["selftest", "build", "run", "export"])
+    {"selftest": selftest, "build": build, "run": run, "export": export}[ap.parse_args().cmd]()

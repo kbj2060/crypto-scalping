@@ -5525,12 +5525,19 @@ function predXsecHtml() {
 // 2026-11-15 시안 C(사용자 선택): «15분 폭»(1분 갱신 HAR-1m · 15분 안 최대 이동 80%·95% 띠) · «앞 1시간»(예측 ÷ 평소, 조용 ≤0.7 · 격함 ≥1.5).
 //   크기만 말한다(방향 없음). 급변 경고는 검정 불통과라 숫자 보정 없이 글만.
 function rrCells(cell) {
-  const on = DIRSHORT_ASSETS.has(activeSnapshotAsset), o = riskRadarNow(), r = latestRiskRadar;
-  const why = !on ? "ETH·BTC·SOL·XRP 전용" : !r ? "불러오는 중" : !r.ok ? (r.reason || "준비 안 됨") : r.stale ? "지연" : "기록 대기";
-  const tip15 = "15분 폭 — 지금부터 15분 안 최대 이동이 ± 이 안에 머물 확률 80%(95% 는 아래). 1분마다 다시 계산(직전 1·5·15·60·240분·1일·7일 변동성 + 시각, 2024~25 학습).\n"
+  const o = riskRadarNow(), r = latestRiskRadar, ss = !!(o && o.session);   // ss = 주식(SOXL) 세션 식(2026-11-17)
+  const on = DIRSHORT_ASSETS.has(activeSnapshotAsset) || !!(r && r.coins && r.coins[activeSnapshotAsset]);
+  const why = !on ? "ETH·BTC·SOL·XRP·SOXL 전용" : !r ? "불러오는 중" : !r.ok ? (r.reason || "준비 안 됨") : r.stale ? "지연" : "기록 대기";
+  // 2026-11-17 SOXL: 미국장 세션(정규장·프리장·애프터·야간·주말·휴장)을 아는 15분·1시간 폭. «조용/격함» 판정·급변 경고는 코인에서만 검정해 여기선 세션 이름과 1시간 σ 만.
+  const tip15s = "15분 폭 — 지금부터 15분 안 최대 이동이 ± 이 안에 머물 확률 80%(95% 는 아래). 1분마다 다시 계산(직전 15분·1시간·1일·7일 변동성 + 미국장 세션, 2026-05~09 학습).\n"
+    + "2026-10~11 표본 밖: 80% 띠 포함률 79% · 95% 띠 95% · 오차는 7일 고정 σ 의 약 40%(고정 σ 는 주말에 3.6배 크고 정규장엔 작다). 애프터장은 80% 띠가 72% 로 좁게 나온다. 정규장 개장 11~14분 전(동부 09:16~09:19)은 실제보다 크게 나온다. 방향은 말하지 않는다.";
+  const tip60s = "앞 1시간 — 지금 미국장 세션과 다음 1시간 예측 폭(σ). 세션 = 미 동부 정규장 09:30–16:00 · 프리장 04:00–09:30 · 애프터 16:00–20:00 · 야간 · 주말(금 20:00–일 20:00) · 휴장.\n"
+    + "15분 실제 폭 중앙(2026-10~11): 정규장 0.92% · 프리장 0.63% · 야간 0.62% · 애프터 0.41% · 주말 0.20%. 휴장일·반일장은 검증 안 됨. 방향은 말하지 않는다.";
+  const ssT = ss || STOCK_ASSETS.has(activeSnapshotAsset);   // 값이 잠깐 없을 때도 주식 화면엔 주식 설명
+  const tip15 = ssT ? tip15s : "15분 폭 — 지금부터 15분 안 최대 이동이 ± 이 안에 머물 확률 80%(95% 는 아래). 1분마다 다시 계산(직전 1·5·15·60·240분·1일·7일 변동성 + 시각, 2024~25 학습).\n"
     + "2026-06~10 표본 밖: 80% 띠 포함률 80.2% · 95% 띠 94.4% · 오차는 7일 고정 σ 의 절반. 방향은 말하지 않는다.\n"
     + "급변 = 1분 움직임이 예측의 4배 이상 또는 5분 변동성 3배 이상(15분 동안 표시) — 그 뒤 15분은 평소의 1.3~1.6배였고 모델 숫자보다 넓게 잡아야 한다(경고만 · 검정 불통과).";
-  const tip60 = "앞 1시간 — 다음 1시간 예측 폭 ÷ 직전 30일 평소(1시간 변동성 중앙값). 0.7배 이하 조용 · 1.5배 이상 격함 · 그 사이 보통.\n"
+  const tip60 = ssT ? tip60s : "앞 1시간 — 다음 1시간 예측 폭 ÷ 직전 30일 평소(1시간 변동성 중앙값). 0.7배 이하 조용 · 1.5배 이상 격함 · 그 사이 보통.\n"
     + "2026-06~10 표본 밖: 조용 판정 96~98% 가 실제로 평소보다 작았고, 격함 판정 96~98% 가 평소보다 컸다(«평소의 1.5배가 된다»는 뜻은 아님). 방향은 말하지 않는다.";
   if (!o) return cell("15분 폭", "flat", "-", why, tip15, "", "", null) + cell("앞 1시간", "flat", "-", why, tip60, "", "", null);
   const f2 = (x) => x.toFixed(2), px = Number(latestLivePriceByAsset[activeSnapshotAsset] || o.price);
@@ -5541,6 +5548,7 @@ function rrCells(cell) {
   const c15 = cell("15분 폭", al ? "trd" : "flat", `±${f2(o.band80_pct)}%`, `80% ±${usd(o.band80_pct)} · 95% ±${f2(o.band95_pct)}% (${usd(o.band95_pct)})`,
     tip15, "", `<small class="rr-sub">95% ±${f2(o.band95_pct)}%</small>`, null, `<span class="rr-r">${right15}</span>`);
   const X = (x) => Math.max(0, Math.min(100, 50 + Math.log(x) / Math.log(2.5) * 50)).toFixed(1);   // 1 가운데 · 0.4~2.5배 로그
+  if (ss) return c15 + cell("앞 1시간", "flat", o.session, `1시간 σ ${f2(o.sigma60_pct)}%`, tip60, "", "", null, `<span class="rr-r"><span class="rr-v">1시간 σ ${f2(o.sigma60_pct)}%</span></span>`);
   const st = o.state60 || "-", ratio = o.ratio60;
   const g = ratio ? `<span class="d4g" aria-hidden="true"><i class="z rq" style="width:${X(0.7)}%"></i><i class="z rl" style="left:${X(1.5)}%"></i><u style="left:${X(ratio)}%"></u></span>` : "";
   const c60 = cell("앞 1시간", st === "격함" ? "trd" : "flat", st, ratio ? `평소의 ${f2(ratio)}배 · 1시간 σ ${f2(o.sigma60_pct)}%` : why, tip60, g, "", null,
