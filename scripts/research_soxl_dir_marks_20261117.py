@@ -422,8 +422,17 @@ def posctrl() -> None:
         out[f"{tf}|{cell}"] = dict(n_orig=int(r.count_orig), n_mine=int(r.count_mine), rate_orig=round(r.sum_orig / r.count_orig, 5),
                                    rate_mine=round(r.sum_mine / r.count_mine, 5), exact=exact, ok=ok)
     a = json.load(open(ORIG_C / "a11_a13_r2_20261116/result.json"))["old4_p3"]
+    # 양성 대조 1차 실행 뒤 추가(SOXL 채점 전): old4_p3 는 SCRATCH_K 없는 환경(ETH 09-15~30·10-28·10-30~ 빠짐, 끝 10-29)에서 돌았다
+    #   → 같은 자료 조건으로 A13 만 다시 만든다(코드 대조가 목적 · 위 다른 칸은 최근 일까지 메운 자료로 완전 일치).
+    SM.SK, k0 = Path("/nonexistent"), None
+    k0 = SM.load_1m("ETHUSDT"); SM.SK = OUT / "eth_k"
+    E0 = []
+    for tf, mnt in (("30m", 30), ("1h", 60)):
+        B = SM.bars(k0, mnt); B["tf"] = tf
+        E0 += [dict(cell=e["cell"], tf=tf, tk=e["tk"], y=e["y"]) for e in A13.a13_events(B, with_p3=True) if e["cell"] in ("K", "P3K")]
+    E0 = pd.DataFrame(E0)
     for tf in ("30m", "1h"):
-        r, p = E[(E.tf == tf) & (E.cell == "K")], E[(E.tf == tf) & (E.cell == "P3K")]
+        r, p = E0[(E0.tf == tf) & (E0.cell == "K")], E0[(E0.tf == tf) & (E0.cell == "P3K")]
         ref = a[f"ETH|{tf}"]; ok = bool(len(r) == ref["n"] and abs(r.y.mean() - ref["real"]) < 1e-4 and abs(p.y.mean() - ref["p3"]) < 1e-4)
         ok_all &= ok
         out[f"{tf}|K(old4_p3)"] = dict(n_orig=ref["n"], n_mine=int(len(r)), real_orig=ref["real"], real_mine=round(r.y.mean(), 4), p3_orig=ref["p3"], p3_mine=round(p.y.mean(), 4), ok=ok)
