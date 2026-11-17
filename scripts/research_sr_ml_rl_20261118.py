@@ -292,6 +292,21 @@ def score() -> None:
     Path(R.ROOT / "docs/experiments/sr_ml_rl_result_20261118.json").write_text(json.dumps(out, ensure_ascii=False, indent=1)); print(json.dumps(out, ensure_ascii=False, indent=1))
 
 
+YCONF = "y_fp10_300"                                                    # 확인 검정(docs/prereg/sr_ml_confirm_2023_20261118.md): 2026 채점의 보조 라벨을 손대지 않은 2023 으로 1회
+
+
+def confirm() -> None:
+    import json
+    import warnings; warnings.filterwarnings("ignore")
+    tr, te = pd.read_parquet(OUT / "ml_train.parquet"), pd.read_parquet(OUT / "ml_confirm.parquet"); oo = pd.read_parquet(OUT / "ml_train_oof_ens.parquet"); rng = np.random.default_rng(R.SEED + 1)
+    S_ = sets(tr); ytr = tr[YCONF].to_numpy(); ms = {nm: fit_ens(tr, X, ytr) for nm, X in S_.items()}; thr = tuple(float(v) for v in np.quantile(oo[f"{YCONF}|전체"], [.1, .9]))
+    P = {k: pred_ens(ms[k], te, S_[k]) for k in S_}; y = te[YCONF].to_numpy(); out = {"라벨": YCONF, "구간": [str(te.ts.min()), str(te.ts.max())], "문턱": thr, "확인": evaluate(te, y, P, thr, rng)}
+    _, first = np.unique(te.asec.to_numpy(), return_index=True); u = te.iloc[np.sort(first)].reset_index(drop=True); ix = np.sort(first)      # 같은 초의 중복 사건을 하나로(보고용)
+    out["중복 제거(같은 초 1건)"] = {k: v for k, v in evaluate(u, y[ix], {k: v[ix] for k, v in P.items()}, thr, rng).items() if k in ("사건", "방향_AUC", "방향_AUC_하한90", "월 안 위약_95분위", "집단차", "집단차_하한90", "전체−크기만", "전체−크기만_하한90", "통과")}
+    out["판정"] = {"통과(1·2)": out["확인"]["통과"], "부호 재료 고유 몫(3·4)": out["확인"]["부호 재료 고유 몫(3·4)"]}
+    Path(R.ROOT / "docs/experiments/sr_ml_confirm_2023_20261118.json").write_text(json.dumps(out, ensure_ascii=False, indent=1)); print(json.dumps(out, ensure_ascii=False, indent=1))
+
+
 def selftest() -> None:
     import tempfile
     rng = np.random.default_rng(0)
@@ -336,8 +351,11 @@ if __name__ == "__main__":
     if cmd == "selftest":
         selftest()
     elif cmd == "build":
-        rng_ = {"train": ("2024-01-01", str(R.VAL0 - R.PG)), "test": (str(R.VAL0), "2026-11-15 18:00")}[sys.argv[2]]
-        d_ = build(R.minute_bars(), *rng_); d_.to_parquet(OUT / f"ml_{sys.argv[2]}.parquet"); print(sys.argv[2], len(d_), d_.ts.min(), d_.ts.max())
+        rng_ = {"train": ("2024-01-01", str(R.VAL0 - R.PG)), "test": (str(R.VAL0), "2026-11-15 18:00"), "confirm": ("2023-01-01", "2023-12-31 18:00")}[sys.argv[2]]
+        m_ = R.minute_bars(cache=OUT / "min_from_tape_2023.parquet") if sys.argv[2] == "confirm" else R.minute_bars()      # 2023 은 받은 뒤 분봉을 따로 만든다(학습·시험 분봉 캐시는 그대로)
+        d_ = build(m_, *rng_); d_.to_parquet(OUT / f"ml_{sys.argv[2]}.parquet"); print(sys.argv[2], len(d_), d_.ts.min(), d_.ts.max())
+    elif cmd == "confirm":
+        confirm()
     elif cmd == "explore":
         explore()
     elif cmd == "rl":
