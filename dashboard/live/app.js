@@ -5376,7 +5376,7 @@ async function refreshOpenRev() {
 //   박스 = 지금가 ± 지난 W분 고저폭의 절반 · 값 = 다음 W분 동안 한 번도 안 벗어날 확률(2022~24 학습, 2025·2026 보정 오차 ≤6pp).
 let latestBoxHold = null, boxHoldLastFetchAt = 0;
 // 2026-10-20 XRP 전용 모델(30분·1시간 통과 · 4시간 불통과 = 서버 ok false) -- 박스 줄·차트 1h 박스선이 그 코인 값만 쓴다
-const BOX_ASSETS = new Set(["eth", "xrp", "btc", "sol"]);   // 10-31 BTC·SOL 30분·1h 통과(4h 는 불통과 → 서버가 칸을 끈다)
+const BOX_ASSETS = new Set(["eth", "xrp", "btc", "sol", "soxl"]);   // 10-31 BTC·SOL 30분·1h 통과(4h 는 불통과 → 서버가 칸을 끈다) · 11-18 SOXL 1h 만(ETH+SOXL 합동 · 30분·4h 는 서버가 끈다)
 const boxNow = () => (latestBoxHold && latestBoxHold.ok && (latestBoxHold.asset || "eth") === activeSnapshotAsset ? latestBoxHold : null);
 const BOX_ON_CHART = false;   // 2026-10-16 사용자 «B로 배포» → 10-26 미래 칸 상자(renderCandleSvg «미래 상자») → 2026-11-14 펜 메모 «캔들 오른쪽 변동성 박스와 차트는 안 본다 · 제거 · 오른쪽 빈 칸 끌기는 그대로»: 미래 칸 상자·가격 경로(E2)·옵션 부채꼴 셋 다 끔(되살리려면 true)
 const BOX_STALE_MS = 180e3;   // 10-16 리뷰: 기준가가 3분 넘게 묵으면 «지연»·차트 선 숨김(30분 박스는 3분 뒤 9%가 이미 깨져 있다)
@@ -7377,6 +7377,7 @@ function renderObFvg() {
 // DIRCALC-BEGIN
 const DIR_STAT = { orb30: [52, 50, 45, 41], orb60: [54, 50, 37, 32],   // 뉴욕: [결판 난 경주 중 목표 먼저, 다른 시각, 무조건 목표 먼저, 무조건 반대 먼저](새 코인 5종 · 나머지 = 6시간 안 미결 14·31%)
   cci: [51, 50], rsi2: [51, 50], rdiv: [51, 49] };
+const DIR_STAT_BY = { soxl: { cci: [55, 51, "SOXL 375건 · 효과는 정규장 밖(정규장 ≈0)"] } };   // 코인별 덮어쓰기(없으면 위 새 코인 5종 값)
 function dirBars(c5, M) {   // 5분봉 → M초 봉(마지막 묶음 = 형성 중이라 뺀다 · M=300 이면 마지막 5분봉) · 5분봉이 빠진 묶음은 건너뛴다(연구 SM.bars 처럼 · 검증 11-16)
   const B = [];
   for (const c of c5) {
@@ -7451,7 +7452,10 @@ function dirCalc(c5, now) {   // → 사건 목록 { k, d, tk(알려진 시각),
   return ev;
 }
 // DIRCALC-END
-const dirWant = () => (mcLine.orb || mcLine.cci || mcLine.rsi2 || mcLine.rdiv) && OB_ASSETS.has(activeSnapshotAsset);
+// 2026-11-18 SOXL 이식 검증(docs/experiments/soxl_dir_marks_20261117.md): CCI 1h 만 통과 -- 뉴욕 개장·RSI2·다이버전스·OB·FVG·스윙은 SOXL 에서 끈 채
+const DIRMK_ASSETS = { orb: OB_ASSETS, rsi2: OB_ASSETS, rdiv: OB_ASSETS, cci: new Set([...OB_ASSETS, "soxl"]) };
+const dirOn = (k) => !!mcLine[k] && DIRMK_ASSETS[k].has(activeSnapshotAsset);
+const dirWant = () => ["orb", "cci", "rsi2", "rdiv"].some(dirOn);
 let dirMemo = null;
 function renderDirMarks() {
   const svg = el("candleSvgSnapshot"), G = chartGeo;
@@ -7491,15 +7495,15 @@ function renderDirMarks() {
   const tri = (x, y, d, c) => body.appendChild(mk("path", { d: d > 0 ? `M${x - 5} ${y + 7}L${x + 5} ${y + 7}L${x} ${y}Z` : `M${x - 5} ${y - 7}L${x + 5} ${y - 7}L${x} ${y}Z`, fill: c, stroke: "var(--bg)", "stroke-width": 1 }));
   const born = (e) => e.tk != null && e.tk <= tv1 && e.tk > tv0;
   const narrow = G.cw < 520;   // 휴대폰: 꼬리표가 캔들을 덮어 짧게(검증 렌더 11-16) -- 뜻은 칩 설명(title)에
-  const SHORT = { cci: "CCI 1h", rsi2: "RSI2 눌림", rdiv: "RSI 다이버전스" };
+  const SHORT = { cci: "CCI 1h", rsi2: "RSI2 눌림", rdiv: "RSI 다이버전스" }, cciSt = (DIR_STAT_BY[activeSnapshotAsset] || {}).cci || DIR_STAT.cci;
   const ago = (t) => `${measDur(Math.max(0, tv1 - t))} 전`;
-  const TIP = { cci: (d) => `<b>CCI 1h ${d > 0 ? "위" : "아래"}</b><br>1시간봉 CCI(20)가 ${d > 0 ? "+100 위로" : "−100 아래로"} 넘음<br>그쪽 1 ATR 먼저 ${DIR_STAT.cci[0]}% · 20봉 모멘텀 ${DIR_STAT.cci[1]}%<br>새 코인 5종 재현 · 효과 작음 = 참고`,
+  const TIP = { cci: (d) => `<b>CCI 1h ${d > 0 ? "위" : "아래"}</b><br>1시간봉 CCI(20)가 ${d > 0 ? "+100 위로" : "−100 아래로"} 넘음<br>그쪽 1 ATR 먼저 ${cciSt[0]}% · 20봉 모멘텀 ${cciSt[1]}%<br>${cciSt[2] || "새 코인 5종 재현"} · 효과 작음 = 참고`,
     rsi2: (d) => `<b>RSI2 추세 속 눌림 ${d > 0 ? "위" : "아래"}</b><br>15분봉 종가가 SMA200 ${d > 0 ? "위 · RSI(2) 10 아래로" : "아래 · RSI(2) 90 위로"}<br>추세 쪽 1 ATR 먼저 ${DIR_STAT.rsi2[0]}% · 같은 추세 아무 봉 ${DIR_STAT.rsi2[1]}%<br>새 코인 5종 재현 · 효과 작음 = 참고`,
     rdiv: (d) => `<b>RSI 다이버전스 ${d > 0 ? "위" : "아래"}</b><br>15분 스윙 가격과 RSI14 가 엇갈림(스윙 5봉 뒤에 앎)<br>반전 쪽 1 ATR 먼저 ${DIR_STAT.rdiv[0]}% · 가짜 ${DIR_STAT.rdiv[1]}%<br>2025~26 은 효과 거의 0` };
   const ev = dirMemo.ev;
   const orbs = ev.filter((e) => e.k.startsWith("orb") && e.s0 < tv1 && Math.max(e.tEnd, e.tRace || 0) > tv0 && e.s0 + e.L * 60 <= tv1);   // 범위가 끝난(알려진) 것만
   const orbLast = Math.max(...orbs.map((e) => e.s0));   // 꼬리표는 가장 최근 개장 하나(1주일 보기에서 10~20개가 겹치던 것 · 검증 11-16 ⑦)
-  if (mcLine.orb) for (const e of orbs) {
+  if (dirOn("orb")) for (const e of orbs) {
     const big = e.L === 60, x0 = Math.max(G.ml, xT(e.s0)), xm = xT(e.s0 + e.L * 60), x1 = Math.min(xr, xT(Math.min(e.tEnd, tv1)));
     body.appendChild(mk("rect", { x: x0, y: yP(e.hi), width: Math.max(0, x1 - x0), height: Math.max(1, yP(e.lo) - yP(e.hi)), fill: "var(--neutral)", "fill-opacity": big ? 0.05 : 0.04, stroke: "var(--muted)", "stroke-opacity": 0.7, "stroke-dasharray": big ? "6 3" : "2 3" }));
     if (xm > G.ml && xm < xr) body.appendChild(mk("line", { x1: xm, x2: xm, y1: yP(e.hi), y2: yP(e.lo), stroke: "var(--muted)", "stroke-opacity": 0.6 }));
@@ -7514,7 +7518,7 @@ function renderDirMarks() {
     if (lab && yP(tgt) > G.mt && yP(tgt) < G.pb) dirPill({ g, G, placed, x: Math.max(G.ml, x) + 10, y: yP(tgt), d: e.d, name: narrow ? `뉴욕 ${e.L}분` : `뉴욕 ${e.L}분 돌파`, sub: "목표선", tip: otip, small: narrow });
   }
   for (const k of ["cci", "rsi2", "rdiv"]) {
-    if (!mcLine[k]) continue;
+    if (!dirOn(k)) continue;
     const vis = ev.filter((e) => e.k === k && born(e));
     vis.forEach((e, i) => {
       const x = xC(e.tk), y = e.d > 0 ? yP(e.bl) + 5 : yP(e.bh) - 5, c = col(e.d);

@@ -416,5 +416,58 @@ def selftest():
     log("selftest ok")
 
 
+def export():
+    """2026-11-18 사용자 «연결해 줘» -- 통과한 1h J(ETH 2022~24 + SOXL 학습 구간 합동 HGB)를 run_box 와 같은 행·같은 식으로 다시 적합해
+    dashboard/box_hold.py 묶음 형식으로 내보낸다. 30m(보정 불통과)·4h(검정 안 함) = deployable False.
+    확인 두 개: ① 표본 밖 예측이 채점한 box_preds.p_J 와 같다 ② box_hold.features/payload 가 연구 특징·확률과 같다(시험 구간 40행)."""
+    import dashboard.box_hold as bh
+    box_setup()
+    K = pd.read_parquet(OUT / "soxl_1m.parquet")
+    D = ms.build(K[["t", "h", "l", "c"]])
+    prof = season_prof_train(K)
+    eth = joblib.load(X.ETH_ART)
+    A = pd.concat([D[["scale", "ts", "hold"] + X.F_BASE], X.features(D, K, prof)], axis=1).replace([np.inf, -np.inf], np.nan)
+    fs = sorted(glob.glob(f"{X.BV}/klines1m/ETHUSDT-1m-202[234]-*.parquet"))
+    KE = pd.concat([pd.read_parquet(f)[["t", "h", "l", "c", "v", "tb"]] for f in fs]).drop_duplicates("t").sort_values("t").reset_index(drop=True)
+    DE = ms.build(KE[["t", "h", "l", "c"]])
+    AE = pd.concat([DE[["scale", "ts", "hold"] + X.F_BASE], X.features(DE, KE, np.asarray(eth["prof"], float))], axis=1).replace([np.inf, -np.inf], np.nan)
+    del KE, DE
+    nm, W = "1h", BOX["1h"]
+    g = A[(A.scale == nm) & A[X.LEAN].notna().all(1)]
+    tr = ((g.ts >= pd.Timestamp(T["train"][0])) & (g.ts + pd.Timedelta(minutes=W + 1) <= pd.Timestamp(T["train"][1]))).to_numpy()
+    gt, oos = g[tr], g[(g.ts >= pd.Timestamp(T["val"][0])).to_numpy()]
+    eth_tr = AE[(AE.scale == nm) & (AE.ts < "2025-01-01")].dropna(subset=X.LEAN)
+    J = X.hgb().fit(pd.concat([eth_tr[X.LEAN], gt[X.LEAN]]), np.r_[eth_tr.hold.to_numpy(), gt.hold.to_numpy()])
+    ref = pd.read_parquet(OUT / "box_preds.parquet").query("scale == @nm").set_index("ts").p_J
+    d1 = float(np.max(np.abs(J.predict_proba(oos[X.LEAN])[:, 1] - ref.reindex(oos.ts).to_numpy())))
+    assert d1 < 1e-12, ("① 채점 예측과 다름", d1)
+    ptr = J.predict_proba(gt[X.LEAN])[:, 1]
+    art = ROOT / "dashboard/box_hold_hgb_soxl_20261117.joblib"
+    joblib.dump({"prof": prof.tolist(), "train": ["2026-05-22", "2026-08-31"], "symbol": "SOXLUSDT", "model": "hgb-soxl-j-20261117",
+                 "scales": {"30m": {"deployable": False}, "4h": {"deployable": False},
+                            "1h": {"model": J, "cols": list(X.LEAN), "train_base": float(gt.hold.mean()), "n": int(len(gt)), "eth_rows": int(len(eth_tr)),
+                                   "q20": float(np.quantile(ptr, .2)), "q80": float(np.quantile(ptr, .8)), "deployable": True}}}, art, compress=3)
+    b = joblib.load(art)
+    evl = X._evl()
+    S = oos[oos.ts >= pd.Timestamp(T["test"][0])]
+    pick = pd.concat([S[S.M_major_in == 1].sample(min(10, int((S.M_major_in == 1).sum())), random_state=1), S.sample(30, random_state=2)])
+    pos = pd.Series(np.arange(len(K)), index=K.t)
+    worst = 0.0
+    for _, row in pick.iterrows():
+        i = int(pos[int(row.ts.value // 10**6)])
+        k = K.iloc[i - bh.NEED + 1:i + 1]
+        k1m = pd.DataFrame({"timestamp": pd.to_datetime(k.t, unit="ms", utc=True), "high": k.h, "low": k.l, "close": k.c,
+                            "volume": k.v, "taker_buy_base": k.tb}).reset_index(drop=True)
+        a = np.array([bh.features(k1m, evl, np.asarray(b["prof"], float))[nm][c] for c in X.LEAN])
+        worst = max(worst, float(np.max(np.abs(a - row[X.LEAN].to_numpy(float)))))
+        assert np.allclose(a, row[X.LEAN].to_numpy(float), rtol=1e-6, atol=1e-8), ("② 특징", row.ts)
+        bh.BUNDLES["soxl"] = b
+        pl = bh.payload(k1m, evl, "soxl")["scales"]
+        assert pl["30m"]["ok"] is False and pl["4h"]["ok"] is False
+        assert abs(pl["1h"]["p"] - J.predict_proba(row[X.LEAN].to_frame().T.astype(float))[0, 1]) < 1e-4, ("② 확률", row.ts)
+    log(f"→ {art} ({art.stat().st_size / 1e3:.0f} KB) · ① 표본 밖 {len(oos):,}행 최대 차 {d1:.1e} · ② 서빙 {len(pick)}행 특징 최대 차 {worst:.1e} · "
+        f"학습 SOXL {len(gt):,}+ETH {len(eth_tr):,} · 기저 {gt.hold.mean():.3f} · q20 {np.quantile(ptr, .2):.3f} q80 {np.quantile(ptr, .8):.3f}")
+
+
 if __name__ == "__main__":
-    {"data": data, "selftest": selftest, "control": control, "run": run, "score": score}[sys.argv[1]]()
+    {"data": data, "selftest": selftest, "control": control, "run": run, "score": score, "export": export}[sys.argv[1]]()
