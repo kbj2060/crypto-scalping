@@ -392,7 +392,7 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
             break
         open_orders.extend({"symbol": o["symbol"], "side": o["side"], "price": float(o["price"]),
                             "qty": float(o["origQty"]) - float(o.get("executedQty") or 0),
-                            "reduce_only": bool(o.get("reduceOnly"))}
+                            "reduce_only": bool(o.get("reduceOnly")), "cid": str(o.get("clientOrderId") or "")}   # 11-18 대기 표식(dbwt·dbpg) 가르기(orders 상한 차감)
                            for o in rows if o.get("type") == "LIMIT")
 
     chosen, listed = pick_balance(balance, quote_asset)

@@ -99,14 +99,39 @@ class ManyWaitsTest(CL.ChartLinesTest):
             self._armed(self.SAVED)
             q = "/api/manual-entry/preview?side=LONG&lev=20&pct=100&tp=2550&sl=2480&limit=2485"
             n0 = (await (await c.get(q)).json())["plan"]["notional_usdt"]
-            st, b = await self._post(c, "&limit=2490".replace("pct=10", "pct=100"))
-            self.assertEqual(st, 200, b)
+            r = await c.post(BASE.replace("pct=10", "pct=100") + "&limit=2490")   # 검토 #6: 100% 로 제출(전엔 replace 가 안 먹어 10%)
+            b = await r.json()
+            await asyncio.sleep(0.05)
+            self.assertEqual(r.status, 200, b)
             r = await c.get(q)
             j = await r.json()
             n1 = (j.get("plan") or {}).get("notional_usdt") or 0.0
             self.assertLess(n1, n0 - 1.0, (n0, j))
             await self._cancel_all(c)
         self._run(fn, acct=POS, **self._fakes({}))
+
+    def test_slot_not_reused_while_old_task_rearms(self) -> None:   # 검토 11-18 #2: 체결 뒤 익절 다시 걸기 중인 칸은 새 대기에 안 준다(복구 파일·상태가 섞이지 않게)
+        flags: dict = {}
+        fk = self._fakes(flags)
+
+        async def slow_bracket(_s, b, symbol, pside):
+            await asyncio.sleep(0.5)
+            return {"placed": True, "tp": {"placed": True, "price": b.get("tp_price")}}
+        fk["place_bracket"] = slow_bracket
+
+        async def fn(c):
+            from dashboard import server
+            self._armed({**self.SAVED, "tp_resting": True})
+            await self._post(c, "&limit=2490")
+            await self._post(c, "&limit=2510&stop=1")
+            flags["fill"] = 2490.0
+            await asyncio.sleep(0.1)
+            st, b = await self._post(c, "&limit=2470")
+            self.assertEqual((st, b.get("wid")), (200, 3), b)
+            await asyncio.sleep(0.8)
+            self.assertTrue((server.LIVE_DIR / f"manual_limit_wait_{CL.SYM}_3.json").exists(), "새 대기 복구 파일이 지워지면 안 된다")
+            await self._cancel_all(c)
+        self._run(fn, acct=POS, **fk)
 
     def test_non_add_second_is_refused(self) -> None:
         async def fn(c):
