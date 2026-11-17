@@ -389,6 +389,8 @@ function setFpCol(mode, win, side) {
 //   익절 = 체결 직후 post-only 지정가 · 손절 = 서버가 1초 체결가 닿음 판정 → peg 청산(마감 뒤 남은 수량 시장가) · 거래소 스탑 없음.
 //   상자·꼬리표는 차트가 매초 다시 그려도 남는 HTML 층(fpColTog 와 같은 이유) -- 자리만 renderLineTool 이 맞춘다.
 let lineTool = null;   // {tp, sl, plan, err, arm(터치 확인 마감 ms)} · null = 꺼짐
+// 2026-11-18 사용자 «추가 진입을 현재가 위에 하나 아래에 하나 · 하나 체결되면 나머지 취소»: 걸린 추가 진입 대기 둘 중 편집 도구(lineTool)가 아닌 쪽 -- 차트에 선+칩만(renderLineParked) · 칩을 누르면 서로 바꾼다 · wid = 서버 대기 칸 번호(1|2)
+let lineParked = null;
 const LINE_RR = [1, 1.5, 2, 3];
 // 2026-10-30 사용자 «SLTP 가 마진이 너무 작게 들어간다(2%)» → «증거금 % 슬라이더»(시안 C): 자동 2× 규칙(계좌 전체 명목 ≤ 순자산 × 2 · 첫 1/3) 대신
 //   떠 있는 버튼 «직접»과 같은 크기(증거금 = 순자산 × 이 %, 레버리지 = 화면 레버). 다른 코인 포지션이 상한을 먹어 작아지던 것이 없어진다.
@@ -412,8 +414,9 @@ function execPosSide(want) {   // 주문 심볼(USDC 등)에 그 방향 포지�
 }
 function lineToolToggle(want) {   // 2026-10-30 사용자 «롱만 나오고 숏 진입 방법이 없다 → SLTP 버튼을 롱/숏으로»
   const G = chartGeo, p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), cur = lineTool && p > 0 ? lineSide(lineTool, p) : "";
+  if (lineTool && lineTool.placed && lineTool.add && !lineParked && lineTool.addSide === want && execPosSide(want) === want) { lineParked = lineTool; lineTool = null; }   // 11-18 두 번째 추가 진입 초안(서버 칸 2 · 하나 체결되면 나머지 취소)
   if (lineTool && lineTool.placed) return;   // 대기 주문이 걸린 동안은 «주문 취소»로만 끈다
-  if (lineTool && cur === want) { lineTool = null; renderLineTool(); return; }   // 같은 쪽을 다시 누르면 끈다
+  if (lineTool && cur === want) { lineTool = lineParked; lineParked = null; renderLineTool(); return; }   // 같은 쪽을 다시 누르면 끈다(세워 둔 대기가 있으면 그것이 편집 도구로)
   if (!G || !(G.ymax > G.ymin) || !(p > 0)) return;
   if (lineTool && lineTool.add) lineTool = null;   // 추가 진입 도구에서 반대쪽을 누르면 새 선 도구로(기존 선은 거울로 못 옮긴다)
   const arm = armedLinesNow(), pside = execPosSide(want);   // 검증 11-14: snapshotAccountPosition 은 주문 심볼 포지션이 없으면 차트 심볼(봇)로 떨어지고 헤지면 첫 다리만 봤다
@@ -568,7 +571,7 @@ function lineToolEl(box) {
       if (a && lineTool && !lineTool.placed && !manualLevLocked()) { a.checked = !a.checked; a.dispatchEvent(new Event("change", { bubbles: true })); lineTool.plan = null; lineTool.arm = 0; renderLineTool(); linePreview(); }
       return;
     }
-    if (e.target.closest(".lt-x, .lt-tx")) { if (lineTool?.placed) { lineTool.busy = true; manualWaitAction("cancel").then(() => setTimeout(() => { if (lineTool?.busy) { lineTool.busy = false; renderLineTool(); } }, 8000)); renderLineTool(); return; } lineTool = null; renderLineTool(); return; }   // 대기 주문 = 서버 취소(≤3초 뒤 선이 사라진다)
+    if (e.target.closest(".lt-x, .lt-tx")) { if (lineTool?.placed) { lineTool.busy = true; manualWaitAction("cancel", lineTool.wid || 1).then(() => setTimeout(() => { if (lineTool?.busy) { lineTool.busy = false; renderLineTool(); } }, 8000)); renderLineTool(); return; } lineTool = lineParked; lineParked = null; renderLineTool(); return; }   // 대기 주문 = 서버 취소(≤3초 뒤 선이 사라진다)
     const rb = e.target.closest("[data-rr]");
     if (rb && lineTool && !lineTool.placed) {   // 2026-10-29 사용자 «SLTP 비율 1:1·1:2 버튼 → 칸 자동» -- 손절선은 그대로, 익절선만 비율만큼(방향 = 손절선의 반대쪽)
       const p = lineRef(lineTool, Number(latestLivePriceByAsset[activeSnapshotAsset] || 0)), risk = Math.abs(p - lineTool.sl);
@@ -605,7 +608,7 @@ async function lineTakerClick(e, a = "market") {
   t.tkArm = 0; t.busy = true; t.err = ""; renderLineTool();
   let msg = "";
   try {
-    const r = await (await fetch(`/api/manual-entry/wait-action?action=${a}&asset=${t.asset || "eth"}&confirm=1`, { method: "POST", cache: "no-cache" })).json();
+    const r = await (await fetch(`/api/manual-entry/wait-action?action=${a}&asset=${t.asset || "eth"}&wid=${t.wid || 1}&confirm=1`, { method: "POST", cache: "no-cache" })).json();
     if (!r.ok) msg = r.detail || r.error || (a === "peg" ? "peg 요청 실패" : "시장가 요청 실패");
   } catch (err) { msg = "서버에 닿지 못했습니다"; }
   if (lineTool === t) { t.busy = false; t.err = msg; renderLineTool(); }
@@ -617,27 +620,67 @@ async function lineAmend() {
   if (!t || !t.placed || !(t.entry > 0)) return;
   t.busy = true; t.err = ""; renderLineTool();
   try {
-    const r = await (await fetch(`/api/manual-entry/limit-amend?confirm=1&asset=${t.asset || "eth"}&tp=${linePx(t.tp)}&sl=${linePx(t.sl)}&limit=${linePx(t.entry)}`, { method: "POST", cache: "no-cache" })).json();
+    const r = await (await fetch(`/api/manual-entry/limit-amend?confirm=1&asset=${t.asset || "eth"}&wid=${t.wid || 1}&tp=${linePx(t.tp)}&sl=${linePx(t.sl)}&limit=${linePx(t.entry)}`, { method: "POST", cache: "no-cache" })).json();
     if (!r.ok) t.err = r.detail || r.error || "수정 실패";
   } catch (e) { t.err = "서버에 닿지 못했습니다"; }
   t.busy = false;
   manualWaitPoll();
 }
 // manualWaitPoll → renderManualWait 가 부른다: 서버의 대기 지정가(mode=limit)와 차트 선을 맞춘다. 끝났으면(체결·취소·거부) 선을 거둔다 -- 체결분은 포지션 선(armed)이 이어받는다.
-function lineSyncWait(w) {
+function lineSyncWait(w, wid = 1) {   // 11-18 칸 번호(wid)별 -- 편집 도구(lineTool)·세워 둔 선(lineParked) 중 그 칸의 것을 맞춘다
   const lim = w?.mode === "limit", live = waitLiveP(w), pl = w?.plan || {}, br = pl.bracket || {};
+  if (lineParked && lineParked.asset !== activeSnapshotAsset) lineParked = null;
+  const mine = (o) => !!(o && o.placed && (o.wid || 1) === wid);
   if (!lim || !live || Number(w.filled || 0) > 0) {   // 부분 체결도 거둔다 -- 그 몫은 이미 선으로 무장돼 포지션 선 수정이 맡는다
-    if (lineTool?.placed) { lineTool = null; renderLineTool(); }
+    if (mine(lineTool)) { lineTool = lineParked; lineParked = null; renderLineTool(); }   // 남은 대기가 있으면 편집 도구로 올린다
+    else if (mine(lineParked)) { lineParked = null; renderLineTool(); }
     return;
   }
-  if (!(br.tp_level > 0 && br.sl_level > 0 && pl.limit?.usdt > 0)) return;
-  if (!lineTool && (w.asset || "eth") === activeSnapshotAsset) lineTool = { placed: true, asset: w.asset || "eth", plan: null, err: "", add: !!pl.add_keep, addSide: String(pl.positionSide || "").toUpperCase() || undefined };   // 추가 진입 대기면 add 도 되살린다(도구 쪽 가짜 익절·손절선을 안 그리고 들어간 선을 끌 수 있게)   // 새로고침·다른 기기에서 걸린 주문도 다시 잇는다
-  const t = lineTool;
-  if (!t || !t.placed || lineDrag || t.busy) return;
+  if (!(br.tp_level > 0 && br.sl_level > 0 && pl.limit?.usdt > 0) || (w.asset || "eth") !== activeSnapshotAsset) return;
+  if (!mine(lineTool) && !mine(lineParked)) {   // 새로고침·다른 기기에서 걸린 주문도 다시 잇는다 · 추가 진입 대기면 add 도 되살린다(도구 쪽 가짜 익절·손절선을 안 그리고 들어간 선을 끌 수 있게)
+    const o = { placed: true, wid, asset: w.asset || "eth", plan: null, err: "", add: !!pl.add_keep, addSide: String(pl.positionSide || "").toUpperCase() || undefined };
+    if (!lineTool) lineTool = o; else if (!lineParked) lineParked = o; else return;
+  }
+  const t = mine(lineTool) ? lineTool : lineParked;
+  if (t === lineTool && (lineDrag || t.busy)) return;
   Object.assign(t, { tp: br.tp_level, sl: br.sl_level, entry: (w.pegged || w.triggered) && w.limit_price > 0 && pl.limit.price > 0 ? w.limit_price * pl.limit.usdt / pl.limit.price : pl.limit.usdt, px: Number(w.limit_price) || 0, amended: Number(w.amends || 0), stopP: !!(w.stop || pl.stop), trig: !!(w.triggered || w.pegged) });
   // 따라가는 중(PEG · 감시 닿음) 진입선 = 서버가 옮기는 주문가(USDC) ÷ 접수 basis -- 처음 선에 두면 따라가도 멈춰 보인다(2026-11-09)
   t.plan = { ...pl, quantity: Number(w.quantity ?? pl.quantity) || 0 };   // 크기 줄 = 서버가 정한 계획(수량·배수·명목·순자산)
   renderLineTool();
+}
+// 2026-11-18 세워 둔 두 번째 추가 진입 대기: 진입선 + 칩(«LONG 추가 감시 46.20 ✕»). 칩 = 편집 도구와 바꾸기 · ✕ = 그 대기만 취소. 하나가 체결되면 서버가 다른 쪽을 취소한다.
+function renderLineParked() {
+  const t = lineParked, svg = el("candleSvgSnapshot"), G = chartGeo, box = svg && svg.parentElement, m = svg && svg.getScreenCTM();
+  let h = el("lineParked");
+  const show = !!(t && t.placed && t.entry > 0 && t.asset === activeSnapshotAsset && box && G && m && G.ymax > G.ymin && !fpAltOn() && orderCoinOk());
+  if (!show) { if (h) h.hidden = true; return; }
+  if (!h) {
+    h = document.createElement("div"); h.id = "lineParked"; h.className = "lt";
+    h.innerHTML = '<i class="lt-ln en"></i><button type="button" class="lt-tag en lt-mini lim wait-c"></button>';
+    h.addEventListener("pointerdown", (e) => e.stopPropagation());   // 차트 끌기로 번지지 않게
+    h.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const p = lineParked;
+      if (!p) return;
+      if (e.target.closest(".lt-tx")) { manualWaitAction("cancel", p.wid || 1); return; }
+      if (!lineTool || lineTool.placed) { [lineTool, lineParked] = [lineParked, lineTool]; renderLineTool(); }   // 초안을 만드는 중이면 바꾸지 않는다(초안이 사라지지 않게)
+    });
+  }
+  if (h.parentElement !== box) box.appendChild(h);
+  h.hidden = false;
+  const pr = box.getBoundingClientRect(), X = (x) => m.a * x + m.e - pr.left, Yv = (v) => G.mt + (G.ymax - v) * (G.pb - G.mt) / (G.ymax - G.ymin);
+  const top = m.d * G.mt + m.f - pr.top, bot = m.d * G.pb + m.f - pr.top, y = Math.min(bot, Math.max(top, m.d * Yv(t.entry) + m.f - pr.top));
+  const L = X(G.ml), R = X(G.ml + G.cw), x0 = L + (R - L) * (isMobileChartMode() ? 0.36 : 0.58);
+  h.classList.toggle("short", t.addSide === "SHORT");
+  const ln = h.querySelector(".lt-ln");
+  Object.assign(ln.style, { left: x0 + "px", width: R - x0 + "px", top: y + "px" });
+  ln.classList.toggle("stop", !!t.stopP);
+  const tag = h.querySelector(".lt-tag");
+  Object.assign(tag.style, { left: x0 + (R - x0) * 0.3 + "px", top: y + "px" });   // 편집 도구 칩(가운데)과 겹치지 않게 왼쪽 30%
+  const html = `<span class="lt-grip" aria-hidden="true"></span>${t.addSide === "SHORT" ? "SHORT" : "LONG"} 추가${t.stopP ? " 감시" : ""} ${lineFmt(t.entry)}<span class="lt-tx" role="button" tabindex="0" aria-label="이 대기 주문 취소" title="이 대기만 취소">✕</span>`;
+  if (tag._h !== html) { tag.innerHTML = html; tag._h = html; }
+  tag.title = `두 번째 추가 진입 대기 ${lineFmt(t.entry)} — 누르면 이 선을 편집(끌기·PEG·TAKER) · ✕ = 이 대기만 취소 · 둘 중 하나가 체결되면 다른 쪽은 서버가 취소합니다`;
+  tag.setAttribute("aria-label", `두 번째 추가 진입 대기 ${lineFmt(t.entry)} — 눌러서 편집`);
 }
 function fpMobRowSet(mob, card, fs) {   // 휴대폰 머리 줄에 SLTP·지표 버튼을 옮기거나(mob) 제자리(카드)로 되돌린다 -- 노드째 옮겨 리스너·팝업 상태가 따라간다
   const row = el("fpMobRow");
@@ -740,6 +783,7 @@ function ltLanePlace(en, y, R, X, top, bot, mob, svg, box) {
 }
 function renderLineTool() {
   renderPegTag();
+  renderLineParked();
   const svg = el("candleSvgSnapshot"), G = chartGeo, box = svg && svg.parentElement;
   const p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), m = svg && svg.getScreenCTM();
   if (lineTool && lineTool.asset !== activeSnapshotAsset) lineTool = null;   // 다른 코인 가격의 선을 그대로 두지 않는다
@@ -12636,7 +12680,7 @@ async function manualEntrySubmit() {
     if (data.wait) {   // 2026-10-10 기다리기 -- 주문 칸을 잡지 않는다(대기 중에도 청산·다른 버튼). 상태는 아래 #snapWait 가 말한다.
       manualOrderBusy = false;
       manualButtonsDisabled(false);
-      if (pending.limit && lineTool) { lineTool.placed = true; lineTool.arm = 0; lineTool.err = ""; renderLineTool(); }   // 접수 확인 -- 선이 «대기 주문»이 된다(끌면 수정)
+      if (pending.limit && lineTool) { lineTool.placed = true; lineTool.wid = data.wid || 1; lineTool.arm = 0; lineTool.err = ""; renderLineTool(); }   // 접수 확인 -- 선이 «대기 주문»이 된다(끌면 수정)
       box.innerHTML = entryNote(pending.limit && /stop=1/.test(pending.exec || "") ? "감시 진입 — 차트가 선에 닿으면 최우선 호가로 따라가며 진입합니다(120초 · 남은 수량 버림 · 시장가 전환 없음). 선을 끌면 수정, «주문 취소»로 거둡니다"
         : pending.limit ? "지정가 대기 — 선 가격에 걸어 두었습니다. 선을 끌면 주문이 수정되고, «주문 취소»로 거둡니다(시장가 전환 없음)"
         : "기다리기 — 최우선 호가에 걸어 두었습니다. 아래에서 취소·지금 시장가", "live");
@@ -12658,11 +12702,15 @@ async function manualEntrySubmit() {
 // ── 2026-10-10 기다리는 진입 ─────────────────────────────────────────────────────────
 // 서버 별도 칸(/api/manual-entry/status 의 wait). 진행 중이면 3초마다 다시 본다 -- 페이지를 새로 열어도 첫 조회가 다시 잇는다.
 // 2026-11-10 사용자 «코인별로»: 대기 칸이 코인마다 하나 -- 지금 탭 코인 칸만 본다(?asset=) · 탭을 바꾸면 그 코인 칸을 곧바로 다시 본다.
-let manualWaitTimer = 0, manualWaitLive = false, manualWaitArmT = 0, manualWaitAsset = "eth";
+let manualWaitTimer = 0, manualWaitLive = false, manualWaitArmT = 0, manualWaitAsset = "eth", manualWaitWid = 1;   // wid = 아래 상자 버튼(취소·지금 시장가)이 가리키는 대기 칸
 const waitLiveP = (w) => /^(working|submitting)$/.test(w?.phase || "");
-function renderManualWait(w) {
+function renderManualWait(w, w2) {
   const box = el("snapWait"), txt = el("snapWaitText"), acts = el("snapWaitActs");
-  lineSyncWait(w);
+  lineSyncWait(w, 1); lineSyncWait(w2, 2);
+  const w1live = waitLiveP(w);
+  manualWaitWid = !w1live && waitLiveP(w2) ? 2 : 1;   // 11-18 칸 1 이 끝났고 칸 2 가 살아 있으면 상자는 칸 2 를 말한다
+  if (manualWaitWid === 2) w = w2;
+  const also = w1live && waitLiveP(w2) ? ` ｜ 두 번째 대기(하나 체결되면 나머지 취소): ${w2.stop ? "감시 진입" : "지정가"} ${Number(w2.filled || 0)} / ${Number(w2.quantity ?? w2.plan?.quantity ?? 0)} · 차트(USDT) ${w2.plan?.limit?.usdt ?? "-"}` : "";
   if (!box || !txt) return;
   const live = waitLiveP(w), ph = w?.phase || "idle";
   const recent = Date.now() - Date.parse(w?.done_at || "") < 10 * 60e3;   // 끝난 결과는 10분만 남긴다
@@ -12686,7 +12734,7 @@ function renderManualWait(w) {
         : w.pegged ? ` · 주문가(USDC) ${w.limit_price} · 최우선 호가를 따라갑니다(120초 · 남은 수량 버림 · 시장가 전환 없음)`
         : w.limit_price ? ` · 주문가(USDC) ${w.limit_price}${w.plan?.limit?.usdt ? ` = 차트선(USDT) ${w.plan.limit.usdt}` : ""} (따라가지 않음)` : "")
       + (w.stop || w.pegged ? "" : w.mode === "limit" ? ` · 시장가 전환 없음 · 선을 끌면 수정${w.reprices ? ` · 자동 재조정 ${w.reprices}회(USDC/USDT 차이)` : ""}` : Number.isFinite(left) && w.wait_until ? ` · ${left}분 뒤 남은 수량 시장가` : "")
-      + (w.action ? ` · ${w.action === "cancel" ? "취소" : "지금 시장가"} 요청됨 — 3초 안에 처리` : "");
+      + (w.action ? ` · ${w.action === "cancel" ? "취소" : "지금 시장가"} 요청됨 — 3초 안에 처리` : "") + also;
   } else {
     t = `${wk} 끝 — ${manualEntryStateText(w).replace(/\n/g, " · ")}`
       + (w.taker_reason ? ` (${w.taker_reason})` : "") + (w.cancel_reason ? ` (${w.cancel_reason})` : "");
@@ -12699,24 +12747,25 @@ function renderManualWait(w) {
 async function manualWaitPoll() {
   clearTimeout(manualWaitTimer);
   const a = activeSnapshotAsset;
-  let w = null;
+  let w = null, w2 = null;
   try {
-    w = (await (await fetch(`/api/manual-entry/status?asset=${a}`, { cache: "no-cache" })).json()).wait || null;
+    const j = await (await fetch(`/api/manual-entry/status?asset=${a}`, { cache: "no-cache" })).json();
+    w = j.wait || null; w2 = j.wait2 || null;
   } catch (e) {
     manualWaitTimer = setTimeout(manualWaitPoll, 10000);   // 조회 실패 -- 표시는 그대로 두고 늦게 다시
     return;
   }
   if (a !== activeSnapshotAsset) return;   // 조회 중 탭을 바꿨다 -- 탭 전환이 부른 새 조회가 그린다
-  renderManualWait(w);
-  const live = waitLiveP(w);
+  renderManualWait(w, w2);
+  const live = waitLiveP(w) || waitLiveP(w2);
   if (manualWaitLive && !live && manualWaitAsset === a) { refreshBinanceAccount(true); manualEntryRefreshSize(); }   // 방금 끝났다 -- 포지션 다시(탭 전환은 끝난 게 아니다)
   manualWaitLive = live; manualWaitAsset = a;
   if (live) manualWaitTimer = setTimeout(manualWaitPoll, STATUS_POLL_MS);
 }
-async function manualWaitAction(action) {
+async function manualWaitAction(action, wid = manualWaitWid) {
   ["snapWaitCancel", "snapWaitMarket"].forEach((id) => { const b = el(id); if (b) b.disabled = true; });
   try {
-    const r = await (await fetch(`/api/manual-entry/wait-action?action=${action}&asset=${manualWaitAsset}&confirm=1`, { method: "POST", cache: "no-cache" })).json();
+    const r = await (await fetch(`/api/manual-entry/wait-action?action=${action}&asset=${manualWaitAsset}&wid=${wid}&confirm=1`, { method: "POST", cache: "no-cache" })).json();
     if (!r.ok) { const t = el("snapWaitText"); if (t) { t.className = "entry-note bad"; t.textContent = `요청 실패: ${r.detail || r.error}`; } }
   } catch (e) { /* 아래 조회가 실제 상태를 다시 그린다 */ }
   manualWaitPoll();
