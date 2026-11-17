@@ -284,7 +284,8 @@ def score() -> None:
                           "엄격 통과(비용 뒤 양측95% 하한>0)": bool(lo - 10 > 0), "통과 후보(비용 0 하한>0)": bool(lo > 0)}
     ytr = tr[YMAIN].to_numpy(); days = np.unique(tr.ts.dt.floor("D")); dd = tr.ts.dt.floor("D").to_numpy(); rs = []                 # 강건성: 학습 날짜를 다시 뽑아 부스팅만 10번
     for i in range(10):
-        pk = np.flatnonzero(np.isin(dd, rng.choice(days, len(days)))); m_ = hgb(seed=i).fit(tr[S_["전체"]].iloc[pk], ytr[pk]); rs.append(round(auc_(seg["시험"][YMAIN].to_numpy(), m_.predict_proba(seg["시험"][S_["전체"]])[:, 1]), 4))
+        # 라벨 없는 1건 제외(첫 실행이 여기서 멈춤 — 결과 출력 전, 주 판정 계산과 무관)
+        pk = np.flatnonzero(np.isin(dd, rng.choice(days, len(days))) & np.isfinite(ytr)); m_ = hgb(seed=i).fit(tr[S_["전체"]].iloc[pk], ytr[pk]); rs.append(round(auc_(seg["시험"][YMAIN].to_numpy(), m_.predict_proba(seg["시험"][S_["전체"]])[:, 1]), 4))
     out["학습 날짜 재추출 부스팅 시험 AUC"] = rs
     out["판정"] = {"통과(시험 주 라벨 1·2)": out[YMAIN]["시험"]["통과"], "통과 후보(검증·시험 점추정)": bool(out[YMAIN]["검증"]["후보_점추정"] and out[YMAIN]["시험"]["후보_점추정"]),
                   "부호 재료 고유 몫(시험 3·4)": out[YMAIN]["시험"]["부호 재료 고유 몫(3·4)"], "밴딧 엄격": out["밴딧"]["시험"]["엄격 통과(비용 뒤 양측95% 하한>0)"], "밴딧 통과 후보": out["밴딧"]["시험"]["통과 후보(비용 0 하한>0)"]}
