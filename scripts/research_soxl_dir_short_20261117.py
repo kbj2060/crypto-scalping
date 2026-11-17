@@ -68,12 +68,18 @@ def build():
         a, b = o.to_numpy(float), chk.reindex(o.index).to_numpy(float)
         mism = int((~((a == b) | (np.isnan(a) & np.isnan(b)))).sum())
         new = [got[(s, d)] for d in dates[1:] if got[(s, d)] is not None]
+        if s == "SOXL":   # 11-04 사본에 빠진 날(10-28 -- 그때 vision 미공개)을 채운다. 코인 패널은 원 연구 그대로(양성 대조).
+            have = set(old.timestamp.dt.normalize())
+            new += [x for d in pd.date_range(old.timestamp.min().normalize(), CHECK_DAY) if d not in have
+                    for x in [day("SOXLUSDT", str(d.date()))] if x is not None]
         df = pd.concat([old] + new).drop_duplicates("timestamp", keep="first").sort_values("timestamp").reset_index(drop=True)
         df.to_parquet(PAN / f"{s}USDT.parquet")
         rep[s] = {"check_day_mismatch": mism, "rows": len(df), "end": str(df.timestamp.max()), "new_days": len(new)}
         print(s, rep[s], flush=True)
     (OUT / "build.json").write_text(json.dumps(rep, indent=1))
     assert all(r["check_day_mismatch"] == 0 and r["end"] == f"{END} 23:55:00" for r in rep.values()), "패널 대조·끝 불일치"
+    x = pd.read_parquet(PAN / "SOXLUSDT.parquet"); n = x.groupby(x.timestamp.dt.normalize()).size()
+    assert (n.iloc[1:] == 288).all() and len(n) == (pd.Timestamp(END) - n.index[0]).days + 1, "SOXL 빠진 날·봉"
 
 
 def frames() -> dict:
