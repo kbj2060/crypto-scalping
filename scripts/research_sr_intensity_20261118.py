@@ -218,9 +218,10 @@ def hilo_events(m: pd.DataFrame) -> pd.DataFrame:
         bu, bd = m.h > hh, m.l < ll
         first = lambda b: b & ~(b.astype(float).rolling(GAP).max().shift(1).fillna(0).astype(bool))
         return first(bu) & s1h.notna(), first(bd) & s1h.notna(), hh, ll
-    u, dn, hh, ll = sets(LOOK); u24, d24, _, _ = sets(1440)
-    ev = pd.concat([pd.DataFrame({"mi": m.index[u], "side": 1, "L": hh[u].to_numpy(), "s1h": s1h[u].to_numpy(), "is24": u24[u].to_numpy().astype(float)}),
-                    pd.DataFrame({"mi": m.index[dn], "side": -1, "L": ll[dn].to_numpy(), "s1h": s1h[dn].to_numpy(), "is24": d24[dn].to_numpy().astype(float)})])
+    u, dn, hh, ll = sets(LOOK); _, _, hh24, ll24 = sets(1440)
+    # is24 = 넘은 레벨이 24시간 고점(저점)이기도 한가 — 분 i 이전에 정해진다. 🔴첫 채점(v1)은 «그 분에 24시간 고저도 넘었나»(분 끝까지의 고가)라 결정 뒤 최대 55초를 봤다(채점 뒤 발견·수정).
+    ev = pd.concat([pd.DataFrame({"mi": m.index[u], "side": 1, "L": hh[u].to_numpy(), "s1h": s1h[u].to_numpy(), "is24": np.isclose(hh24[u].to_numpy(), hh[u].to_numpy(), rtol=1e-12).astype(float)}),
+                    pd.DataFrame({"mi": m.index[dn], "side": -1, "L": ll[dn].to_numpy(), "s1h": s1h[dn].to_numpy(), "is24": np.isclose(ll24[dn].to_numpy(), ll[dn].to_numpy(), rtol=1e-12).astype(float)})])
     return ev.sort_values("mi").reset_index(drop=True)
 
 
@@ -388,7 +389,7 @@ def selftest() -> None:
         i = int(e.mi) - int(m.index[0]); assert abs(e.L - (m.h.to_numpy()[i - LOOK:i].max() if e.side > 0 else m.l.to_numpy()[i - LOOK:i].min())) < 1e-9          # 레벨 = 직전 240분 고저
         g2 = allg.copy(); fut = g2.s > f["ksec"] + 5; g2.loc[fut, ["po", "ph", "pl", "pc"]] = g2.loc[fut, ["po", "ph", "pl", "pc"]] * 1.01; g2.loc[fut, ["bq", "sq"]] = 77.0
         root2 = Path(td) / "b"; root2.mkdir(); dump(g2, root2); m2 = minute_bars(root2, cache=root2 / "m.parquet"); ev2 = hilo_events(m2)
-        e2 = ev2[(ev2.mi == e.mi) & (ev2.side == e.side)]; assert len(e2) == 1 and abs(float(e2.L.iloc[0]) - e.L) < 1e-9 and abs(float(e2.s1h.iloc[0]) - e.s1h) < 1e-15, "사건·레벨이 미래에 따라 바뀐다"
+        e2 = ev2[(ev2.mi == e.mi) & (ev2.side == e.side)]; assert len(e2) == 1 and float(e2.is24.iloc[0]) == float(e.is24) and abs(float(e2.L.iloc[0]) - e.L) < 1e-9 and abs(float(e2.s1h.iloc[0]) - e.s1h) < 1e-15, "사건·레벨이 미래에 따라 바뀐다"
         f2 = hilo_one(Tape(root2), marr(m2), int(e.mi), int(e.side), float(e.L), float(e.s1h)); fk = [c for c in f if c.startswith(("pre_", "obs_")) and not c.endswith(("_1",))] + ["lage", "near", "rng4", "mom15", "mom60", "mom1d", "pull", "tb60", "tb240"]
         fk = [c for c in fk if c not in ("obs_imb1", "obs_vol1", "obs_pos1")] + ["obs_imb5", "obs_vol5", "obs_pos5"]
         assert f2["ksec"] == f["ksec"] and all(abs(f[c] - f2[c]) < 1e-9 for c in set(fk)), "피쳐가 결정 초 뒤를 본다"
