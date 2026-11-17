@@ -12707,10 +12707,15 @@ const waitLiveP = (w) => /^(working|submitting)$/.test(w?.phase || "");
 function renderManualWait(w, w2) {
   const box = el("snapWait"), txt = el("snapWaitText"), acts = el("snapWaitActs");
   lineSyncWait(w, 1); lineSyncWait(w2, 2);
-  const w1live = waitLiveP(w);
-  manualWaitWid = !w1live && waitLiveP(w2) ? 2 : 1;   // 11-18 칸 1 이 끝났고 칸 2 가 살아 있으면 상자는 칸 2 를 말한다
+  // 11-18 칸 둘: 상자 주인 = 살아 있는 칸(1 먼저) · 둘 다 끝났으면 최근 끝난 칸 · 다른 칸은 뒤에 한 줄(끝난 결과·🔴오류·재시작 복구 실패도 -- 검토 11-18 #3)
+  const recentP = (x) => Date.now() - Date.parse(x?.done_at || "") < 10 * 60e3;
+  manualWaitWid = waitLiveP(w) ? 1 : waitLiveP(w2) ? 2 : recentP(w) || !recentP(w2) ? 1 : 2;
+  const other = manualWaitWid === 1 ? w2 : w;
   if (manualWaitWid === 2) w = w2;
-  const also = w1live && waitLiveP(w2) ? ` ｜ 두 번째 대기(하나 체결되면 나머지 취소): ${w2.stop ? "감시 진입" : "지정가"} ${Number(w2.filled || 0)} / ${Number(w2.quantity ?? w2.plan?.quantity ?? 0)} · 차트(USDT) ${w2.plan?.limit?.usdt ?? "-"}` : "";
+  const oname = manualWaitWid === 1 ? "두 번째" : "첫 번째";
+  const also = !other || other.phase === "idle" ? ""
+    : waitLiveP(other) ? ` ｜ ${oname} 대기(하나 체결되면 나머지 취소): ${other.stop ? "감시 진입" : "지정가"} ${Number(other.filled || 0)} / ${Number(other.quantity ?? other.plan?.quantity ?? 0)} · 차트(USDT) ${other.plan?.limit?.usdt ?? "-"}`
+    : recentP(other) ? ` ｜ ${oname} 대기 끝 — ${manualEntryStateText(other).replace(/\n/g, " · ")}${other.cancel_reason ? ` (${other.cancel_reason})` : ""}${other.recovered?.reason ? ` · 🔴${other.recovered.reason}` : ""}` : "";
   if (!box || !txt) return;
   const live = waitLiveP(w), ph = w?.phase || "idle";
   const recent = Date.now() - Date.parse(w?.done_at || "") < 10 * 60e3;   // 끝난 결과는 10분만 남긴다
@@ -12734,14 +12739,14 @@ function renderManualWait(w, w2) {
         : w.pegged ? ` · 주문가(USDC) ${w.limit_price} · 최우선 호가를 따라갑니다(120초 · 남은 수량 버림 · 시장가 전환 없음)`
         : w.limit_price ? ` · 주문가(USDC) ${w.limit_price}${w.plan?.limit?.usdt ? ` = 차트선(USDT) ${w.plan.limit.usdt}` : ""} (따라가지 않음)` : "")
       + (w.stop || w.pegged ? "" : w.mode === "limit" ? ` · 시장가 전환 없음 · 선을 끌면 수정${w.reprices ? ` · 자동 재조정 ${w.reprices}회(USDC/USDT 차이)` : ""}` : Number.isFinite(left) && w.wait_until ? ` · ${left}분 뒤 남은 수량 시장가` : "")
-      + (w.action ? ` · ${w.action === "cancel" ? "취소" : "지금 시장가"} 요청됨 — 3초 안에 처리` : "") + also;
+      + (w.action ? ` · ${w.action === "cancel" ? "취소" : "지금 시장가"} 요청됨 — 3초 안에 처리` : "");
   } else {
     t = `${wk} 끝 — ${manualEntryStateText(w).replace(/\n/g, " · ")}`
       + (w.taker_reason ? ` (${w.taker_reason})` : "") + (w.cancel_reason ? ` (${w.cancel_reason})` : "");
     tone = /^(error|taker_failed|rejected)$/.test(ph) ? "bad" : "";   // 끝난 결과는 흐리게 -- 주황(주의)은 거래소에 걸려 있는 동안만
   }
   txt.className = `entry-note${tone ? " " + tone : ""}`;
-  txt.textContent = t;
+  txt.textContent = t + also;
   ["snapWaitCancel", "snapWaitMarket"].forEach((id) => { const b = el(id); if (b) b.disabled = !!w.action; });
 }
 async function manualWaitPoll() {

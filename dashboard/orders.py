@@ -963,15 +963,22 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
     async def oco_cancel_sibling(key: str, state: dict) -> None:
         """2026-11-18 사용자 «추가 진입 위·아래 둘 -- 하나 체결되면 나머지 취소»: 이 칸에 첫 체결이 보이면 같은 코인 다른 칸의 같은 쪽 추가 진입 대기를 취소한다
         (집행 루프가 다음 조회 ≤3초에 걸린 주문을 취소 확인 · 그 사이 든 몫은 그 칸이 keep_rearm 으로 무장). 체결 없이 끝나면 아무것도 안 한다.
-        ponytail: 0.3초 폴링 -- 두 주문이 같은 0.3초 안에 동시에 체결되면 둘 다 든다(거래소 OCO 가 아님)."""
-        while float(state.get("filled") or 0.0) <= 0:
-            if not _busy(state):
+        자기 칸이 끝날 때까지 돈다 -- 체결 뒤 생긴 짝도 취소(submit 이 막지만 이중 안전) · 짝에 PEG·TAKER 요청이 걸려 있어도 취소로 덮는다(검토 11-18 #1·#4).
+        ponytail: 거래소 OCO 가 아니다 -- 체결 확인(집행 루프 조회 ≤3초) + 0.3초 + 짝의 취소 확인(≤3초)까지 대략 6초 안에 짝도 체결되면 둘 다 든다(합친 크기가 상한을 넘을 수 있음).
+          더 줄이려면 사용자 스트림 체결 알림 순간 짝을 취소한다."""
+        done = False
+        while True:
+            live = _busy(state)
+            if float(state.get("filled") or 0.0) > 0:
+                sib = manual_wait_states.get(wsib(key))
+                if (_busy(sib) and (sib.get("plan") or {}).get("add_keep") and sib.get("side") == state.get("side")
+                        and sib.get("action") != "cancel"):
+                    sib.update(action="cancel", action_at=datetime.now(timezone.utc).isoformat(), action_reason="다른 쪽 추가 진입이 체결됨 — 하나만 들어가게 취소")
+                    print(f"limit entry: {key} 체결 → {wsib(key)} 대기 취소(하나만)", flush=True)
+                done = True
+            if not live:
                 return
-            await asyncio.sleep(0.3)
-        sib = manual_wait_states.get(wsib(key))
-        if _busy(sib) and (sib.get("plan") or {}).get("add_keep") and sib.get("side") == state.get("side") and not sib.get("action"):
-            sib.update(action="cancel", action_at=datetime.now(timezone.utc).isoformat(), action_reason="다른 쪽 추가 진입이 체결됨 — 하나만 들어가게 취소")
-            print(f"limit entry: {key} 체결 → {wsib(key)} 대기 취소(하나만)", flush=True)
+            await asyncio.sleep(0.3 if not done else 1.0)
 
     async def entry_then_bracket(plan: dict, state: dict, wait_sec: float | None = None, limit: bool = False, key: str | None = None) -> None:
         """진입 → 체결이 있으면(부분 포함, 모든 종료 경로) TP·비상 스탑을 걸고 감시를 무장한다.
@@ -1774,8 +1781,11 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         # 11-18 칸 둘: 하나만 차 있고 그것이 같은 쪽 «추가 진입 대기(지정가·감시)»면 빈 칸 후보 -- 이 주문도 추가 진입인지는 계획을 짠 뒤(add_keep) 본다
         busy = [w for w in (1, 2) if _busy(wait_slot(query_asset(request), w))]
         w1 = wait_slot(query_asset(request), busy[0]) if busy else wait_slot(query_asset(request))   # 차 있는 칸(짝)
-        second = (len(busy) == 1 and bool(limit_px) and w1.get("mode") == "limit" and (w1.get("plan") or {}).get("add_keep")
-                  and w1.get("side") == side)
+        stop_q = request.query.get("stop") == "1"
+        pair_ok = lambda w: (w.get("mode") == "limit" and (w.get("plan") or {}).get("add_keep") and w.get("side") == side   # noqa: E731
+                             and float(w.get("filled") or 0.0) == 0 and not w.get("triggered") and not w.get("pegged") and not w.get("action")   # 검토 11-18 #1: 짝이 이미 (부분)체결·따라가는 중이면 두 번째를 안 받는다
+                             and bool(w.get("stop") or (w.get("plan") or {}).get("stop")) != stop_q)   # 검토 #2: 위(감시) 하나 + 아래(지정가) 하나만 -- 같은 주문을 두 번 보내도 둘째는 막힘
+        second = len(busy) == 1 and bool(limit_px) and pair_ok(w1)
         if wait_pending(query_asset(request)) and not second:   # 2026-11-10 같은 코인만 막는다 -- 다른 코인 대기 잔량은 assemble_entry_plan 이 상한 여유에서 뺀다
             return web.json_response({"ok": False, "error": "wait_pending",
                                       "detail": "이 코인에 기다리는 진입 주문이 있습니다 — 취소하거나 체결된 뒤에 넣으세요(청산·다른 코인은 됩니다)",
@@ -1802,9 +1812,9 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             wid = 1
             busy = [w for w in (1, 2) if _busy(wait_slot(query_asset(request), w))]   # 계획 조립(await) 사이에 바뀌었을 수 있어 다시 본다
             if busy:   # 하나가 차 있다 = 위 second 후보 -- 이 주문도 같은 쪽 추가 진입이어야 빈 칸
-                if len(busy) > 1 or not plan.get("add_keep") or not _busy(w1) or w1.get("side") != side:
+                if len(busy) > 1 or not plan.get("add_keep") or not _busy(w1) or not pair_ok(w1):
                     return web.json_response({"ok": False, "error": "wait_pending",
-                                              "detail": "이 코인에 기다리는 진입 주문이 있습니다 — 두 번째 대기는 같은 쪽 추가 진입(지정가·감시)만 됩니다",
+                                              "detail": "이 코인에 기다리는 진입 주문이 있습니다 — 두 번째 대기는 같은 쪽 추가 진입이고, 첫 대기가 아직 체결 전이며, 현재가 반대편(지정가 ↔ 감시)일 때만 됩니다",
                                               "wait": w1}, status=409)
                 wid = 2 if busy == [1] else 1
             plan["wid"] = wid

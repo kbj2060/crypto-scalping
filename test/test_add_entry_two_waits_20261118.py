@@ -89,6 +89,34 @@ class TwoWaitsTest(CL.ChartLinesTest):
             await asyncio.sleep(0.1)
         self._run(fn, acct=POS, **self._fakes({}))
 
+    def test_second_refused_after_partial_fill_or_same_kind(self) -> None:   # 검토 11-18 #1·#2
+        flags: dict = {}
+
+        async def fake_limit(_s, plan, state, max_sec=0, on_fill=None, reprice=None):
+            state.update(phase="working", mode="limit", order_id=5, filled=0.0, limit_price=plan["price"])
+            while not state.get("action"):
+                await asyncio.sleep(0.01)
+                if flags.get("half"):
+                    state["filled"] = float(plan["quantity"]) / 2
+            state.update(phase="cancelled")
+            return state
+
+        async def fn(c):
+            self._armed(self.SAVED)
+            b1 = await (await c.post(BASE + "&limit=2490")).json()
+            self.assertTrue(b1.get("ok") and b1.get("wid") == 1, b1)
+            await asyncio.sleep(0.05)
+            r = await c.post(BASE + "&limit=2490")   # 같은 주문 두 번(재시도·두 기기) = 같은 종류(지정가) → 막힘
+            self.assertEqual((r.status, (await r.json())["error"]), (409, "wait_pending"))
+            flags["half"] = True
+            await asyncio.sleep(0.05)
+            r = await c.post(BASE + "&limit=2510&stop=1")   # 짝이 부분 체결 → 두 번째 안 받음
+            self.assertEqual((r.status, (await r.json())["error"]), (409, "wait_pending"))
+            await c.post("/api/manual-entry/wait-action?action=cancel&asset=eth&confirm=1")
+            await asyncio.sleep(0.1)
+        fk = self._fakes({}); fk["run_entry_limit"] = fake_limit
+        self._run(fn, acct=POS, **fk)
+
     def test_fill_cancels_the_other(self) -> None:
         flags: dict = {}
 
