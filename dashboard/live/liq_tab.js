@@ -452,22 +452,13 @@
       + (r.lb ? kp("남은 매물 아래 최대", px(r.lb), sgn((r.lb / P - 1) * 100, 1) + "%") : "") + (r.ub ? kp("남은 매물 위 최대", px(r.ub), sgn((r.ub / P - 1) * 100, 1) + "%") : "")
       + kp("±3% 안", pc(r.near3), "7일보다 오래됨 " + pc(r.old7)) + "</div>";
   }
-  function nowLine() {
-    var T = today(), B = S.data && S.data.band, i = T.cum.length - 1, base = B && i >= 0 ? B.p50[i] : 0, bnOk = i >= 0 ? T.cum[i] : 0, bars = S.bars, big = asset() === "eth" || asset() === "btc" ? 1e5 : 1e4, tot24 = 0, n24 = 0, last = null;
-    bars.forEach(function (b) { tot24 += b.l + b.s; n24 += b.n; if (b.l + b.s >= big) last = b; });
-    var ago = last ? Math.max(0, (Date.now() / 1000 - last.t - 300) / 3600) : null, m = ctx(), bu = m && m.burst, side = bu && typeof mcLiqBurstSide === "function" && asset() === "eth" ? mcLiqBurstSide(bu) : null, burst = "";
-    if (asset() === "eth") burst = side ? '<span class="lq-burst" title="직전 60초 청산이 큰 버스트입니다. 이런 순간 보유 포지션을 시장가로 닫으면 평균 −17bp 였습니다(35건, 95% −24~−11, 수수료 포함 모의 원장). 그 뒤 되돌림은 약합니다."><b>' + (side === "long" ? "롱" : "숏") + " 청산 급증 " + usd(side === "long" ? bu.long_usd_60s : bu.short_usd_60s) + "/60초</b> · 시장가 청산 주의</span>" : "<span>60초 급증 <b>없음</b></span>";
-    return "<span>오늘(09시~) <b>" + usd(T.tot) + "</b></span>" + (base > 0 ? "<span>평소 같은 시각의 <b>" + pc(bnOk / base) + "</b></span>" : "") + (T.tot > 0 ? '<span>롱 쪽 <b class="lg">' + pc(T.l / T.tot) + "</b></span>" : "")
-      + "<span>24시간 <b>" + usd(tot24) + "</b> · " + n24.toLocaleString("en-US") + "건</span>" + (ago != null ? "<span>마지막 " + usd(big) + "+ 5분봉 <b>" + ago.toFixed(1) + "시간 전</b></span>" : "") + burst
-      + (T.first != null && T.first > T.d0 + 600 ? '<span class="lq-warn">오늘 기록 ' + hhmm(T.first) + "부터</span>" : "");
-  }
   function build() {
     var host = $("lqTab"); if (!host) return;
     var seg = '<div class="lq-seg" role="group" aria-label="남은 매물 입력 기간">' + WINS.map(function (w) { return '<button type="button" data-win="' + w + '" aria-pressed="' + (S.win === w) + '">' + (w === 365 ? "1년" : w + "일") + "</button>"; }).join("") + "</div>";
     var segP = '<div class="lq-seg" role="group" aria-label="최대 고통 주기">' + PERS.map(function (k) { return '<button type="button" data-pp="' + k + '" aria-pressed="' + (S.pp === k) + '">' + PLAB[k] + "</button>"; }).join("") + "</div>";
     var segL = '<div class="lq-seg" role="group" aria-label="청산맵 원천">' + LAD.map(function (k) { return '<button type="button" data-lad="' + k + '" aria-pressed="' + (S.lad === k) + '">' + LADLAB[k] + "</button>"; }).join("") + "</div>";
     var H = function (t, tag, cls, right) { return "<header><h4>" + t + '</h4><span class="lq-tag ' + cls + '">' + tag + "</span>" + (right || "") + "</header>"; };
-    host.innerHTML = '<div class="lq-now" id="lqNow"></div><div class="lq-cols">'
+    host.innerHTML = '<div class="lq-cols">'   // 2026-11-17 펜 메모 «이 텍스트는 제거»: 맨 위 요약 줄(오늘·24시간·마지막 큰 5분봉·60초 급증) 뺌
       + '<div class="lq-row lq-top">'
       + '<section class="lq-p lq-f-rem">' + H("남은 매물 일봉별", "파생·서술", "der", seg) + '<div class="lq-b"><div id="lqRemKpi"></div>' + d_("remain", 300, "남은 매물 계산 전입니다") + '<div class="lq-leg" id="lqRemLeg"></div></div></section>'
       + '<section class="lq-p lq-f-lad">' + H("청산맵", "추정", "est", segL) + '<div class="lq-b">' + d_("ladder", 560, "지도를 받는 중입니다") + '<div class="lq-leg" id="lqLadLeg"></div></div></section>'
@@ -485,7 +476,6 @@
     var host = $("lqTab"); if (!host) return;
     if (S.built !== asset()) build();
     var P = price(), stack = matchMedia(STACK_MQ).matches;
-    fill("lqNow", nowLine());
     fill("lqRemKpi", remainKpi());
     var age = S.data ? (Date.now() - S.data.generated_ms) / 3600000 : null;
     fill("lqRemLeg", "<span>칸 = 그날 마감 기준 지난 " + S.win + "일 입력 중 아직 안 닿은 청산가 · 진할수록 많음</span><span>오른쪽 = 오늘 남은 양</span><span>아래 띠 = 그 날 만든 양 중 지금까지 남은 비율</span>" + (age != null && age > 3 ? '<span class="lq-warn">' + age.toFixed(0) + "시간 전 계산</span>" : ""));
