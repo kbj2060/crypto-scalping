@@ -659,16 +659,19 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
     # 2026-11-10 사용자 «코인별로»: 대기 칸을 코인마다 하나씩(ETH 지정가가 걸린 채 SOXL 지정가) -- 같은 풀의 다른 코인 대기 잔량은 상한 여유에서 미리 뺀다(assemble_entry_plan).
     manual_wait_states: dict[str, dict[str, Any]] = {}
 
-    # 2026-11-18 사용자 «추가 진입을 현재가 위에 하나 아래에 하나»: 코인마다 칸 둘 -- 1 = 코인 키 그대로(예전과 같음) · 2 = "<코인>#2".
-    #   칸 2 는 칸 1 이 같은 쪽 «추가 진입 대기(지정가·감시)»일 때만 열린다(submit) · 둘 중 하나가 체결되면 나머지를 서버가 취소(oco_cancel_sibling, 사용자 «하나 체결되면 나머지 취소»).
+    # 2026-11-18 사용자 «추가 진입을 여러 개 · 제한 없이 · 하나 체결돼도 나머지 유지»: 코인마다 대기 칸 여럿 -- 1 = 코인 키 그대로(예전과 같음) · n = "<코인>#n".
+    #   둘째부터는 이미 걸린 대기가 모두 같은 쪽 «추가 진입 대기(지정가·감시)»이고 새 주문도 그럴 때만(submit) · 서로 독립(하나 체결돼도 나머지 그대로).
+    #   새 대기의 크기는 같은 코인 다른 대기의 남은 몫을 상한 여유에서 미리 뺀 값(assemble_entry_plan) -- 다 체결돼도 상한 안.
+    WAIT_SLOTS_MAX = 10   # ponytail: 대기마다 집행 루프가 3초마다 주문 조회 -- 10개 ≈ 분당 200회(가중치 한도 2400 의 일부). 더 필요하면 올린다
+
     def wkey(asset: str, wid: int = 1) -> str:
         return asset if wid == 1 else f"{asset}#{wid}"
 
     def wasset(key: str) -> str:
         return key.split("#")[0]
 
-    def wsib(key: str) -> str:
-        return wasset(key) if "#" in key else f"{key}#2"
+    def wslots(asset: str) -> list[tuple[int, dict]]:   # 이 코인의 (칸 번호, 상태) -- 있는 칸만
+        return sorted((1 if "#" not in k else int(k.split("#")[1]), v) for k, v in manual_wait_states.items() if wasset(k) == asset)
 
     def wait_slot(asset: str, wid: int = 1) -> dict[str, Any]:
         return manual_wait_states.setdefault(wkey(asset, wid), {"phase": "idle"})
@@ -960,31 +963,9 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                             "note": "기존 익절·손절 그대로" + (" · 익절 지정가를 합친 수량으로 다시 걸음" if r.get("placed")
                                                           else f" · 🔴익절 지정가 다시 걸기 실패({r.get('reason') or '?'}) — 서버가 닿으면 닫습니다" if r else "")}
 
-    async def oco_cancel_sibling(key: str, state: dict) -> None:
-        """2026-11-18 사용자 «추가 진입 위·아래 둘 -- 하나 체결되면 나머지 취소»: 이 칸에 첫 체결이 보이면 같은 코인 다른 칸의 같은 쪽 추가 진입 대기를 취소한다
-        (집행 루프가 다음 조회 ≤3초에 걸린 주문을 취소 확인 · 그 사이 든 몫은 그 칸이 keep_rearm 으로 무장). 체결 없이 끝나면 아무것도 안 한다.
-        자기 칸이 끝날 때까지 돈다 -- 체결 뒤 생긴 짝도 취소(submit 이 막지만 이중 안전) · 짝에 PEG·TAKER 요청이 걸려 있어도 취소로 덮는다(검토 11-18 #1·#4).
-        ponytail: 거래소 OCO 가 아니다 -- 체결 확인(집행 루프 조회 ≤3초) + 0.3초 + 짝의 취소 확인(≤3초)까지 대략 6초 안에 짝도 체결되면 둘 다 든다(합친 크기가 상한을 넘을 수 있음).
-          더 줄이려면 사용자 스트림 체결 알림 순간 짝을 취소한다."""
-        done = False
-        while True:
-            live = _busy(state)
-            if float(state.get("filled") or 0.0) > 0:
-                sib = manual_wait_states.get(wsib(key))
-                if (_busy(sib) and (sib.get("plan") or {}).get("add_keep") and sib.get("side") == state.get("side")
-                        and sib.get("action") != "cancel"):
-                    sib.update(action="cancel", action_at=datetime.now(timezone.utc).isoformat(), action_reason="다른 쪽 추가 진입이 체결됨 — 하나만 들어가게 취소")
-                    print(f"limit entry: {key} 체결 → {wsib(key)} 대기 취소(하나만)", flush=True)
-                done = True
-            if not live:
-                return
-            await asyncio.sleep(0.3 if not done else 1.0)
-
-    async def entry_then_bracket(plan: dict, state: dict, wait_sec: float | None = None, limit: bool = False, key: str | None = None) -> None:
+    async def entry_then_bracket(plan: dict, state: dict, wait_sec: float | None = None, limit: bool = False) -> None:
         """진입 → 체결이 있으면(부분 포함, 모든 종료 경로) TP·비상 스탑을 걸고 감시를 무장한다.
         wait_sec(2026-10-10 «기다리기»)면 첫 체결을 본 순간 한 번 더 건다 -- 60분 동안 든 몫을 무방비로 두지 않는다."""
-        if key and plan.get("add_keep"):
-            refresh_tasks[f"oco_{key}"] = asyncio.create_task(oco_cancel_sibling(key, state))
         if limit:
             limit_save(plan)
         if wait_sec or limit:
@@ -1210,8 +1191,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 touch = (min(pts), max(pts)) if pts else None
             act = bracket_action(b, pside, account.get("positions") or [], bool(account.get("ok")),
                                  acct_ts, last_bar, touch)
-            for wid in (1, 2):   # 11-18 칸 둘
-                ws = manual_wait_states.get(wkey(exec_asset_of(b["symbol"]) or "eth", wid))
+            for _wid, ws in wslots(exec_asset_of(b["symbol"]) or "eth"):   # 11-18 칸 여럿
                 if (act in ("clear", "fire") and _busy(ws) and ws.get("side") == pside
                         and (ws.get("plan") or {}).get("symbol") == b["symbol"]):   # 2026-10-20 다른 코인 대기는 두다
                     # 2026-10-10 손절·청산으로 포지션이 닫히는데 같은 쪽 대기 진입이 걸려 있으면 그것도 거둔다(나중에 체결돼 손절 없이 다시 열리지 않게)
@@ -1372,7 +1352,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
     async def assemble_entry_plan(side: str, fraction: float = 1.0,
                                   want_lev: int | None = None, asset: str = "eth", fresh: bool = False,
                                   rule_l: str | None = None, lines: tuple[float, float] | None = None,
-                                  limit_usdt: float | None = None, stop: bool = False):
+                                  limit_usdt: float | None = None, stop: bool = False, skip_wait: str | None = None):
         """계획 조립은 **여기 한 곳뿐**이다 -- 미리보기와 실주문이 같은 입력·같은 함수를 지난다.
         두 곳에 복사해 두면 언젠가 한쪽만 고쳐져 «미리보기와 다른 주문»이 나간다.
 
@@ -1427,13 +1407,18 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                     other[o["symbol"]] = other.get(o["symbol"], 0.0) + abs(float(o.get("price") or 0) * float(o.get("qty") or 0))
             # 2026-11-10 코인별 대기: 다른 코인 대기 진입의 남은 몫 -- 계좌 캐시(≤30초)엔 막 건 지정가가 없고 감시 진입은 닿기 전 거래소 주문이 없다.
             #   그 심볼의 걸린 주문 합과 큰 쪽만 센다(같은 주문을 두 번 세지 않게).
-            for a, w in manual_wait_states.items():   # 11-18 칸 키 "<코인>#2" -- 같은 코인 두 칸은 하나만 체결되므로(서로 취소) 아래 max 로 한 번만 센다
+            same = 0.0
+            for a, w in manual_wait_states.items():
                 ws_sym = MANUAL_EXEC_SYMBOLS.get(wasset(a))
-                if _busy(w) and ws_sym and ws_sym != symbol and quote_of(ws_sym) == quote_of(symbol):
-                    pl = w.get("plan") or {}
-                    left = float(w.get("quantity") or pl.get("quantity") or 0) - float(w.get("filled") or 0)
-                    other[ws_sym] = max(other.get(ws_sym, 0.0), abs(left * float(w.get("limit_price") or pl.get("price") or 0)))
-            exposure += sum(other.values())
+                if not (_busy(w) and ws_sym and quote_of(ws_sym) == quote_of(symbol)) or a == skip_wait:
+                    continue
+                pl = w.get("plan") or {}
+                left = abs((float(w.get("quantity") or pl.get("quantity") or 0) - float(w.get("filled") or 0)) * float(w.get("limit_price") or pl.get("price") or 0))
+                if ws_sym != symbol:
+                    other[ws_sym] = max(other.get(ws_sym, 0.0), left)
+                else:   # 11-18 같은 코인 다른 추가 진입 대기(서로 독립 -- 다 체결될 수 있다) · 수정 중인 자기 칸(skip_wait)은 뺀다
+                    same += left
+            exposure += sum(other.values()) + same
             # 추가 진입 맥락은 **같은 방향**만 본다 -- 헤지 모드에서 반대 다리는 다른 결정이다.
             same = [p for p in positions if p.get("side") == side]
             same_unrealized = sum(float(p.get("unrealized_pnl") or 0.0) for p in same)
@@ -1587,6 +1572,24 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                     cr = {**cr, "l": rule["l_eff"], "binding": "레버리지 증거금"}
                 cap_notional, who = rule["cap_notional"], "rule"
                 fraction = rule["fraction"]
+            # 2026-11-18 추가 진입 대기 여러 개(서로 독립 -- 다 체결될 수 있다): 가용 잔고에서 «아직 거래소에 안 걸린» 대기 몫의 증거금을 미리 뺀다.
+            #   걸린 지정가는 거래소가 이미 가용에서 잡았다(계좌 open_orders) -- 감시 진입(닿기 전 주문 없음)·막 건 지정가(계좌 캐시 ≤30초)만 빼면 두 번 세지 않는다.
+            #   ponytail: 주문 id 가 없어 심볼별 합(대기 남은 명목 − 걸린 비-reduce 지정가)으로 근사 · 레버리지는 이번 주문 것
+            wsum: dict[str, float] = {}
+            for a, w in manual_wait_states.items():
+                ws_sym = MANUAL_EXEC_SYMBOLS.get(wasset(a))
+                if _busy(w) and ws_sym and quote_of(ws_sym) == quote_of(symbol) and a != skip_wait:
+                    pl = w.get("plan") or {}
+                    wsum[ws_sym] = wsum.get(ws_sym, 0.0) + abs((float(w.get("quantity") or pl.get("quantity") or 0) - float(w.get("filled") or 0))
+                                                               * float(w.get("limit_price") or pl.get("price") or 0))
+            rsum: dict[str, float] = {}
+            for o in account.get("open_orders") or []:
+                if o.get("symbol") in wsum and not o.get("reduce_only"):
+                    rsum[o["symbol"]] = rsum.get(o["symbol"], 0.0) + abs(float(o.get("price") or 0) * float(o.get("qty") or 0))
+            unres = sum(max(0.0, v - rsum.get(k, 0.0)) for k, v in wsum.items())
+            avail = pool_balance(account, symbol).get("available")
+            if avail is not None and unres > 0 and margin_lev:
+                avail = float(avail) - unres / float(margin_lev)
             plan = build_entry_plan(
                 side=side, best_bid=float(book["bidPrice"]), best_ask=float(book["askPrice"]),
                 recommended_qty=rec_qty,
@@ -1595,7 +1598,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 equity=equity, leverage=leverage, fraction=fraction,
                 # 2026-09-25 사용자 지시: 비율 = 순자산 대비 증거금, 상한 넘으면 진입 불가
                 fraction_of_equity=True, order_leverage=margin_lev or 0.0,
-                available_margin=pool_balance(account, symbol).get("available"),
+                available_margin=avail,
                 cap_label={"margin": f"증거금 상한 {SIZING_MARGIN_CAP_PCT:g}%",
                            "model": "위험모델 상한",
                            "rule": f"자동 규칙 상한(순자산 {cr['l'] if cr else 0:.2f}배)",
@@ -1778,17 +1781,16 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         if _busy(manual_entry_state) or _busy(side_exit_states.get(query_asset(request))):
             return web.json_response({"ok": False, "error": "already_working",
                                       "state": manual_entry_state}, status=409)
-        # 11-18 칸 둘: 하나만 차 있고 그것이 같은 쪽 «추가 진입 대기(지정가·감시)»면 빈 칸 후보 -- 이 주문도 추가 진입인지는 계획을 짠 뒤(add_keep) 본다
-        busy = [w for w in (1, 2) if _busy(wait_slot(query_asset(request), w))]
-        w1 = wait_slot(query_asset(request), busy[0]) if busy else wait_slot(query_asset(request))   # 차 있는 칸(짝)
+        # 11-18 칸 여럿: 걸린 대기가 모두 같은 쪽 «추가 진입 대기(지정가·감시)»면 빈 칸 후보 -- 이 주문도 추가 진입인지는 계획을 짠 뒤(add_keep) 본다
         stop_q = request.query.get("stop") == "1"
-        pair_ok = lambda w: (w.get("mode") == "limit" and (w.get("plan") or {}).get("add_keep") and w.get("side") == side   # noqa: E731
-                             and float(w.get("filled") or 0.0) == 0 and not w.get("triggered") and not w.get("pegged") and not w.get("action")   # 검토 11-18 #1: 짝이 이미 (부분)체결·따라가는 중이면 두 번째를 안 받는다
-                             and bool(w.get("stop") or (w.get("plan") or {}).get("stop")) != stop_q)   # 검토 #2: 위(감시) 하나 + 아래(지정가) 하나만 -- 같은 주문을 두 번 보내도 둘째는 막힘
-        second = len(busy) == 1 and bool(limit_px) and pair_ok(w1)
-        if wait_pending(query_asset(request)) and not second:   # 2026-11-10 같은 코인만 막는다 -- 다른 코인 대기 잔량은 assemble_entry_plan 이 상한 여유에서 뺀다
+        add_ok = lambda w: w.get("mode") == "limit" and (w.get("plan") or {}).get("add_keep") and w.get("side") == side   # noqa: E731
+        # 검토 11-18 #2: 응답이 끊겨 재시도·두 기기에서 같은 주문 = 같은 종류(지정가/감시)·같은 선(USDT) 대기가 이미 있으면 거절
+        dup = lambda w: bool(w.get("stop") or (w.get("plan") or {}).get("stop")) == stop_q and abs(float(((w.get("plan") or {}).get("limit") or {}).get("usdt") or 0) - float(limit_px or 0)) < 1e-9   # noqa: E731
+        busy = [(n, w) for n, w in wslots(query_asset(request)) if _busy(w)]
+        extra = bool(busy) and bool(limit_px) and len(busy) < WAIT_SLOTS_MAX and all(add_ok(w) and not dup(w) for _, w in busy)
+        if wait_pending(query_asset(request)) and not extra:   # 2026-11-10 같은 코인만 막는다 -- 다른 코인 대기 잔량은 assemble_entry_plan 이 상한 여유에서 뺀다
             return web.json_response({"ok": False, "error": "wait_pending",
-                                      "detail": "이 코인에 기다리는 진입 주문이 있습니다 — 취소하거나 체결된 뒤에 넣으세요(청산·다른 코인은 됩니다)",
+                                      "detail": "이 코인에 기다리는 진입 주문이 있습니다 — 취소하거나 체결된 뒤에 넣으세요(청산·다른 코인은 됩니다 · 같은 쪽 추가 진입 지정가·감시는 여러 개 됩니다)",
                                       "wait": wait_slot(query_asset(request))}, status=409)
         # 비율은 **여기서 다시** 적용한다 -- 기존 포지션도 다시 읽으므로, 앞 칸이 이미
         # 들어가 있으면 상한 여유가 그만큼 줄어든 상태에서 계산된다.
@@ -1809,22 +1811,20 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             return web.json_response({"ok": False, "error": "blocked", "detail": plan["blocked"]},
                                      status=400)
         if wait_min or limit_px:
-            wid = 1
-            busy = [w for w in (1, 2) if _busy(wait_slot(query_asset(request), w))]   # 계획 조립(await) 사이에 바뀌었을 수 있어 다시 본다
-            if busy:   # 하나가 차 있다 = 위 second 후보 -- 이 주문도 같은 쪽 추가 진입이어야 빈 칸
-                if len(busy) > 1 or not plan.get("add_keep") or not _busy(w1) or not pair_ok(w1):
-                    return web.json_response({"ok": False, "error": "wait_pending",
-                                              "detail": "이 코인에 기다리는 진입 주문이 있습니다 — 두 번째 대기는 같은 쪽 추가 진입이고, 첫 대기가 아직 체결 전이며, 현재가 반대편(지정가 ↔ 감시)일 때만 됩니다",
-                                              "wait": w1}, status=409)
-                wid = 2 if busy == [1] else 1
+            busy = [(n, w) for n, w in wslots(query_asset(request)) if _busy(w)]   # 계획 조립(await) 사이에 바뀌었을 수 있어 다시 본다
+            if busy and (not plan.get("add_keep") or len(busy) >= WAIT_SLOTS_MAX or not all(add_ok(w) and not dup(w) for _, w in busy)):
+                return web.json_response({"ok": False, "error": "wait_pending",
+                                          "detail": f"이 코인에 기다리는 진입 주문이 있습니다 — 여러 개는 같은 쪽 추가 진입(지정가·감시)끼리만, 같은 선 중복 없이, {WAIT_SLOTS_MAX}개까지 됩니다",
+                                          "wait": busy[0][1]}, status=409)
+            taken = {n for n, _ in busy}
+            wid = next(n for n in range(1, WAIT_SLOTS_MAX + 1) if n not in taken)
             plan["wid"] = wid
             ws = wait_slot(query_asset(request), wid)
             ws.clear()
             ws.update(phase="submitting", mode="limit" if limit_px else "wait", wait_min=wait_min or 0, side=side, plan=plan,
                       asset=query_asset(request), wid=wid, started_at=datetime.now(timezone.utc).isoformat())
-            key = wkey(query_asset(request), wid)
-            refresh_tasks[f"manual_wait_{key}"] = asyncio.create_task(
-                entry_then_bracket(plan, ws, wait_sec=wait_min * 60.0 if wait_min else None, limit=bool(limit_px), key=key))
+            refresh_tasks[f"manual_wait_{wkey(query_asset(request), wid)}"] = asyncio.create_task(
+                entry_then_bracket(plan, ws, wait_sec=wait_min * 60.0 if wait_min else None, limit=bool(limit_px)))
             return web.json_response({"ok": True, "plan": plan, "state": ws, "wait": True, "wid": wid},
                                      headers=NOCACHE)
         manual_entry_state.clear()
@@ -2765,7 +2765,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         if not isinstance(lines, tuple) or not isinstance(lim, float):
             return web.json_response({"ok": False, "error": "bad_limit", "detail": "limit·tp·sl 이 모두 양수여야 합니다"}, status=400)
         asset = st.get("asset") or "eth"
-        plan, _, _, error = await assemble_entry_plan(st["side"], float(old.get("fraction") or 1.0), int(old.get("target_leverage") or 0) or None, asset, fresh=True, rule_l=None, lines=lines, limit_usdt=lim, stop=watching)
+        plan, _, _, error = await assemble_entry_plan(st["side"], float(old.get("fraction") or 1.0), int(old.get("target_leverage") or 0) or None, asset, fresh=True, rule_l=None, lines=lines, limit_usdt=lim, stop=watching,
+                                                      skip_wait=wkey(asset, query_wid(request)))
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):
@@ -2788,16 +2789,20 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         """진행 중인 수동 주문 상태. 프런트가 폴링해 «메이커로 채워졌나 / 테이커로 넘어갔나»를
         보여준다. 주문은 최대 하나만 동시에 둔다."""
         return web.json_response({"ok": True, "state": manual_entry_state, "wait": wait_slot(query_asset(request) or "eth"), "waits": manual_wait_states,   # wait = ?asset= 코인 칸(2026-11-10 코인별)
-                                  "wait2": manual_wait_states.get(wkey(query_asset(request) or "eth", 2)) or {"phase": "idle"},   # 11-18 같은 코인 두 번째 추가 진입 대기
+                                  "wait_list": [{**v, "wid": n} for n, v in wslots(query_asset(request) or "eth") if v.get("phase") != "idle"],   # 11-18 같은 코인 대기 전부(칸 번호 순)
                                   "side_exits": side_exit_states,
                                   "exec_enabled": exec_enabled(), "bracket_armed": bracket_load()},
                                  headers=NOCACHE)
 
-    def wait_pending(asset: str | None) -> bool:   # 두 칸 중 하나라도
-        return any(_busy(manual_wait_states.get(wkey(asset or "eth", w))) for w in (1, 2))
+    def wait_pending(asset: str | None) -> bool:   # 칸 중 하나라도
+        return any(_busy(w) for _, w in wslots(asset or "eth"))
 
-    def query_wid(request: web.Request) -> int:   # 11-18 대기 칸 번호(없으면 1)
-        return 2 if request.query.get("wid") == "2" else 1
+    def query_wid(request: web.Request) -> int:   # 11-18 대기 칸 번호(없거나 이상하면 1)
+        try:
+            n = int(request.query.get("wid") or 1)
+        except ValueError:
+            return 1
+        return n if 1 <= n <= WAIT_SLOTS_MAX else 1
 
     async def api_manual_wait_action(request: web.Request) -> web.Response:
         """기다리는 진입에 «취소»(잔량 버림 -- 시장가 없음) 또는 «지금 시장가». 진입과 같은 방어: POST + confirm=1 + 게이트.
