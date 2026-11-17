@@ -11299,7 +11299,9 @@ function showTooltip(x, y, html) {
   left = Math.max(4, left);   // 2026-09-27 좁은 화면에서 왼쪽 밖으로 나가지 않게
   
   t.style.left = left + "px";
-  t.style.top = (y + 15) + "px"; // Position slightly below cursor
+  // 2026-11-17 아래가 모자라면 커서 위로(1d 레인 툴팁 «읽기»가 길어 화면 밑으로 잘렸다)
+  const tH = t.offsetHeight, vb = window.scrollY + window.innerHeight;
+  t.style.top = (y + 15 + tH > vb - 4 ? Math.max(window.scrollY + 4, y - tH - 10) : y + 15) + "px";
 }
 
 function hideTooltip() {

@@ -3045,6 +3045,8 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .fpd-tag { margin-left: 12px; color: var(--muted); font: 11px/1.5 var(--font-sans); }
 .fpd-pos { color: var(--good); }
 .fpd-neg { color: var(--bad); }
+.fpd-mut { color: var(--muted); font-weight: 500; }   /* 11-17 1d 툴팁 «읽기» 꼬리말 */
+.chart-tooltip .fpd-read { max-width: 540px; margin-top: 6px; padding-top: 6px; border-top: 1px solid rgb(var(--lift) / .14); white-space: normal; line-height: 1.5; }
 .fpd-tools { display: inline-flex; gap: 4px; }
 .fpd-tools button { display: inline-flex; align-items: center; justify-content: center; min-height: 28px; min-width: 32px; padding: 0 10px;
   border: 1px solid var(--line); border-radius: 999px; background: rgb(var(--lift) / .04); color: var(--text);
