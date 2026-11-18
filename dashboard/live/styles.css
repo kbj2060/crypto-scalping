@@ -3045,6 +3045,8 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .fpd-tag { margin-left: 12px; color: var(--muted); font: 11px/1.5 var(--font-sans); }
 .fpd-pos { color: var(--good); }
 .fpd-neg { color: var(--bad); }
+.fpd-mut { color: var(--muted); font-weight: 500; }   /* 11-17 1d 툴팁 «읽기» 꼬리말 */
+.chart-tooltip .fpd-read { max-width: 540px; margin-top: 6px; padding-top: 6px; border-top: 1px solid rgb(var(--lift) / .14); white-space: normal; line-height: 1.5; }
 .fpd-tools { display: inline-flex; gap: 4px; }
 .fpd-tools button { display: inline-flex; align-items: center; justify-content: center; min-height: 28px; min-width: 32px; padding: 0 10px;
   border: 1px solid var(--line); border-radius: 999px; background: rgb(var(--lift) / .04); color: var(--text);
@@ -3836,10 +3838,6 @@ button, [role="button"], select, summary, label { touch-action: manipulation; } 
 #lqTab { color: var(--text); display: flex; flex-direction: column; gap: 8px; min-height: 0; height: clamp(760px, calc(100vh - 206px), 1180px); }
 #lqTab[hidden] { display: none; }
 #lqTab * { box-sizing: border-box; }
-.lq-now { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; min-height: 20px; font-size: 13px; line-height: 1.45; color: var(--muted); padding: 0 2px; }
-.lq-now b { color: var(--text); font: 700 14px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; }
-.lq-now b.lg { color: var(--bad); }
-.lq-burst { color: var(--warn); font-weight: 600; } .lq-burst b { color: var(--warn); }
 .lq-warn { color: var(--warn); }
 .lq-cols { display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-height: 0; background: var(--soft-line); border: 1px solid var(--soft-line); border-radius: 12px; overflow: hidden; }
 .lq-row { display: flex; gap: 1px; min-height: 0; min-width: 0; }

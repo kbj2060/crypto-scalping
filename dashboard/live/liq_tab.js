@@ -1,12 +1,12 @@
 // 풋프린트 카드 «청산» 보기 -- 2026-11-07 사용자 시안 I: 남은 매물(전체) → 가격 사다리(±6% 확대) · 2026-11-08 누적 곡선은 풋프린트 청산 기둥으로 옮김(fpLiqCurve) ·
 // 아래 줄 = 오늘 누적 + 최대 고통 + 코인별 최대 고통(11-11 사용자: 24시간 5분 막대·자기 흥분 지수 뺌). 보기 토글은 liq_profile.js setView, 이 파일은 그린다.
-// 원천: 지도 = fpLiqColTp(1·7·30·60·90·180일, 지나간 칸 지움) · HL 고래·호가·60초 = latestMarketCtx · 5분봉 = /api/liquidation-5m-history ·
+// 원천: 지도 = fpLiqColTp(1·7·30·60·90·180·365일, 지나간 칸 지움) · HL 고래·호가·60초 = latestMarketCtx · 5분봉 = /api/liquidation-5m-history ·
 //   남은 매물·띠·실측 위치·탄력 = /api/liq-tab · 최대 고통 = /api/liq-tab?asset=all(cron scripts/live_liq_tab_20261107.py, 매시).
 // 지도·남은 매물은 가상 포지션 추정이다. 금액 눈금(세 거래소 OI×2 -- 2026-11-15 바이낸스·OKX·바이비트 합)은 절대액이 아니다 -- 흰 선이 실제 터진 양. 전부 서술이고 신호가 아니다.
 // 🔴CI esprima: `?.(`·`?.[`·숫자 구분자 금지.
 (function () {
   "use strict";
-  var LADDER_R = 6, FINE = 1000, F4 = 400, BAR_POLL_MS = 30000, DATA_POLL_MS = 600000, TICK_MS = 5000, WINS = [7, 30, 60, 90, 180], STACK_MQ = "(max-width:1100px)";
+  var LADDER_R = 6, FINE = 1000, F4 = 400, BAR_POLL_MS = 30000, DATA_POLL_MS = 600000, TICK_MS = 5000, WINS = [7, 30, 60, 90, 180, 365], STACK_MQ = "(max-width:1100px)";
   var S = { on: false, asset: null, win: 60, pp: "24H", data: null, dataT: 0, all: null, allT: 0, bars: [], barsT: 0, built: "" };
   try { var saved = Number(localStorage.getItem("liqTabWin")); if (WINS.indexOf(saved) >= 0) S.win = saved; var sp = localStorage.getItem("liqPainPer"); if (/^(12H|24H|48H|3D|1W|2W|1M)$/.test(sp || "")) S.pp = sp; } catch (e) { /* 저장 못 해도 동작 */ }
   var $ = function (id) { return document.getElementById(id); };
@@ -192,7 +192,8 @@
   //   가격 = 가로(±6%, 0.25% 칸) · 막대 = 그 칸 금액(레버리지 색 쌓기, 왼쪽 축) · 선 = 지금가에서 멀어지며 쌓은 누적(왼쪽 빨강 = 롱 청산 · 오른쪽 초록 = 숏 청산, 오른쪽 축).
   //   실측은 롱(빨강)·숏(초록) 쌓기 · HL 고래는 청산가마다 막대 하나. 누적 선은 지도만(실측은 이미 터진 양이라 «앞으로 쌓인 양»이 아니다).
   // 2026-11-13 펜 메모 «청산맵도 180일까지 · 왼쪽 기간을 누르면 오른쪽도 같은 기간»: 60·180일 추가(왼쪽 남은 매물 7·30·60·90·180 과 짝) · 짧은 기간부터.
-  var LAD = ["1", "7", "30", "60", "90", "180", "real", "hl"], LADLAB = { "1": "1일", "7": "7일", "30": "30일", "60": "60일", "90": "90일", "180": "180일", real: "실측 7일", hl: "HL 고래" };
+  // 2026-11-17 사용자 «180일까지밖에 없는데 1년치도»: 365일(왼쪽 남은 매물·오른쪽 청산맵 둘 다 · 버튼 글 «1년»)
+  var LAD = ["1", "7", "30", "60", "90", "180", "365", "real", "hl"], LADLAB = { "1": "1일", "7": "7일", "30": "30일", "60": "60일", "90": "90일", "180": "180일", "365": "1년", real: "실측 7일", hl: "HL 고래" };
   try { var sl = localStorage.getItem("liqLadWin"); if (LAD.indexOf(sl) >= 0) S.lad = sl; } catch (e) { /* 저장 못 해도 동작 */ }
   if (!S.lad) S.lad = "7";
   // 2026-11-15 펜 메모 «코인글래스 청산맵처럼 해당 지평의 고점과 저점의 청산맵을 다 보여줘 · 지금은 중간에 잘린 것 같다»: 가로 = 고른 기간 일봉의 저가~고가(±1% 여유, 최소 ±6%) ·
@@ -451,22 +452,13 @@
       + (r.lb ? kp("남은 매물 아래 최대", px(r.lb), sgn((r.lb / P - 1) * 100, 1) + "%") : "") + (r.ub ? kp("남은 매물 위 최대", px(r.ub), sgn((r.ub / P - 1) * 100, 1) + "%") : "")
       + kp("±3% 안", pc(r.near3), "7일보다 오래됨 " + pc(r.old7)) + "</div>";
   }
-  function nowLine() {
-    var T = today(), B = S.data && S.data.band, i = T.cum.length - 1, base = B && i >= 0 ? B.p50[i] : 0, bnOk = i >= 0 ? T.cum[i] : 0, bars = S.bars, big = asset() === "eth" || asset() === "btc" ? 1e5 : 1e4, tot24 = 0, n24 = 0, last = null;
-    bars.forEach(function (b) { tot24 += b.l + b.s; n24 += b.n; if (b.l + b.s >= big) last = b; });
-    var ago = last ? Math.max(0, (Date.now() / 1000 - last.t - 300) / 3600) : null, m = ctx(), bu = m && m.burst, side = bu && typeof mcLiqBurstSide === "function" && asset() === "eth" ? mcLiqBurstSide(bu) : null, burst = "";
-    if (asset() === "eth") burst = side ? '<span class="lq-burst" title="직전 60초 청산이 큰 버스트입니다. 이런 순간 보유 포지션을 시장가로 닫으면 평균 −17bp 였습니다(35건, 95% −24~−11, 수수료 포함 모의 원장). 그 뒤 되돌림은 약합니다."><b>' + (side === "long" ? "롱" : "숏") + " 청산 급증 " + usd(side === "long" ? bu.long_usd_60s : bu.short_usd_60s) + "/60초</b> · 시장가 청산 주의</span>" : "<span>60초 급증 <b>없음</b></span>";
-    return "<span>오늘(09시~) <b>" + usd(T.tot) + "</b></span>" + (base > 0 ? "<span>평소 같은 시각의 <b>" + pc(bnOk / base) + "</b></span>" : "") + (T.tot > 0 ? '<span>롱 쪽 <b class="lg">' + pc(T.l / T.tot) + "</b></span>" : "")
-      + "<span>24시간 <b>" + usd(tot24) + "</b> · " + n24.toLocaleString("en-US") + "건</span>" + (ago != null ? "<span>마지막 " + usd(big) + "+ 5분봉 <b>" + ago.toFixed(1) + "시간 전</b></span>" : "") + burst
-      + (T.first != null && T.first > T.d0 + 600 ? '<span class="lq-warn">오늘 기록 ' + hhmm(T.first) + "부터</span>" : "");
-  }
   function build() {
     var host = $("lqTab"); if (!host) return;
-    var seg = '<div class="lq-seg" role="group" aria-label="남은 매물 입력 기간">' + WINS.map(function (w) { return '<button type="button" data-win="' + w + '" aria-pressed="' + (S.win === w) + '">' + w + "일</button>"; }).join("") + "</div>";
+    var seg = '<div class="lq-seg" role="group" aria-label="남은 매물 입력 기간">' + WINS.map(function (w) { return '<button type="button" data-win="' + w + '" aria-pressed="' + (S.win === w) + '">' + (w === 365 ? "1년" : w + "일") + "</button>"; }).join("") + "</div>";
     var segP = '<div class="lq-seg" role="group" aria-label="최대 고통 주기">' + PERS.map(function (k) { return '<button type="button" data-pp="' + k + '" aria-pressed="' + (S.pp === k) + '">' + PLAB[k] + "</button>"; }).join("") + "</div>";
     var segL = '<div class="lq-seg" role="group" aria-label="청산맵 원천">' + LAD.map(function (k) { return '<button type="button" data-lad="' + k + '" aria-pressed="' + (S.lad === k) + '">' + LADLAB[k] + "</button>"; }).join("") + "</div>";
     var H = function (t, tag, cls, right) { return "<header><h4>" + t + '</h4><span class="lq-tag ' + cls + '">' + tag + "</span>" + (right || "") + "</header>"; };
-    host.innerHTML = '<div class="lq-now" id="lqNow"></div><div class="lq-cols">'
+    host.innerHTML = '<div class="lq-cols">'   // 2026-11-17 펜 메모 «이 텍스트는 제거»: 맨 위 요약 줄(오늘·24시간·마지막 큰 5분봉·60초 급증) 뺌
       + '<div class="lq-row lq-top">'
       + '<section class="lq-p lq-f-rem">' + H("남은 매물 일봉별", "파생·서술", "der", seg) + '<div class="lq-b"><div id="lqRemKpi"></div>' + d_("remain", 300, "남은 매물 계산 전입니다") + '<div class="lq-leg" id="lqRemLeg"></div></div></section>'
       + '<section class="lq-p lq-f-lad">' + H("청산맵", "추정", "est", segL) + '<div class="lq-b">' + d_("ladder", 560, "지도를 받는 중입니다") + '<div class="lq-leg" id="lqLadLeg"></div></div></section>'
@@ -484,7 +476,6 @@
     var host = $("lqTab"); if (!host) return;
     if (S.built !== asset()) build();
     var P = price(), stack = matchMedia(STACK_MQ).matches;
-    fill("lqNow", nowLine());
     fill("lqRemKpi", remainKpi());
     var age = S.data ? (Date.now() - S.data.generated_ms) / 3600000 : null;
     fill("lqRemLeg", "<span>칸 = 그날 마감 기준 지난 " + S.win + "일 입력 중 아직 안 닿은 청산가 · 진할수록 많음</span><span>오른쪽 = 오늘 남은 양</span><span>아래 띠 = 그 날 만든 양 중 지금까지 남은 비율</span>" + (age != null && age > 3 ? '<span class="lq-warn">' + age.toFixed(0) + "시간 전 계산</span>" : ""));

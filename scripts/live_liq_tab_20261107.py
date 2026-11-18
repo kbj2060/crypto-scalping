@@ -30,12 +30,21 @@ from scripts.coin_config import COIN_CONFIG  # noqa: E402
 from scripts.live_liquidation_map_20260824 import LEVERAGE_TIERS, MAINTENANCE_MARGIN_RATE, compute_tier_profile  # noqa: E402
 
 LAKE, LIVE, HOT = ROOT / "data" / "lake", ROOT / "data" / "live", ROOT / "data" / "hot"
-WINDOWS = ((7, 90), (30, 90), (60, 90), (90, 90), (180, 180))   # 2026-11-13 펜 메모 «매물 일봉별에 7일 지평도»   # (입력 일수, 표시 일수) -- 90일까지는 표시 창을 고정해 탭을 눌러도 축이 안 움직인다
-KEEP_DAYS = 370                                        # 180일 표시의 왼쪽 칸도 입력 180일을 다 채우려면 360일이 필요하다
+WINDOWS = ((7, 90), (30, 90), (60, 90), (90, 90), (180, 180), (365, 365))   # 2026-11-13 펜 메모 «매물 일봉별에 7일 지평도» · 11-17 사용자 «1년치도»   # (입력 일수, 표시 일수) -- 90일까지는 표시 창을 고정해 탭을 눌러도 축이 안 움직인다
+KEEP_DAYS = 735                                        # 365일 표시의 왼쪽 칸도 입력 365일을 다 채우려면 730일이 필요하다(합성 735일 positions 2.4초)
 ROW_PCT, REAL_PCT = 0.004, 0.0025                      # 히트맵 칸 0.4% · 실측 위치 칸 0.25%
 HEAT_CUT = 0.1                                         # t < .1 은 화면 투명도(.85·t^2.5)로 안 보인다 -- 파일 크기를 줄인다
 PAIN_PERIODS = (("12H", 12), ("24H", 24), ("48H", 48), ("3D", 72), ("1W", 168), ("2W", 336), ("1M", 720))   # 코인글래스 «청산 최대 고통» 주기
 PAIN_BOX, PAIN_SEP, PAIN_TOP = 5, 0.01, 3              # 묶음 = 0.1% 칸 ±5개(±0.5%) · 봉우리 사이 1% 넘게 · 쪽마다 3개
+
+
+def k1h_spans(old_min: int | None, old_max: int | None, now_ms: int) -> list[tuple[int, int]]:
+    """받을 [시작, 끝) 구간: 저장분 뒤 + (저장분이 KEEP_DAYS 를 못 채우면) 앞쪽. 2026-11-17 KEEP_DAYS 370 → 735 -- 상장이 늦은 코인은 시간당 한 쪽만 더 묻고 끝."""
+    need = now_ms - KEEP_DAYS * 86_400_000
+    spans = [(old_max + 3_600_000 if old_max is not None else need, now_ms - 3_600_000)]
+    if old_min is not None and old_min > need + 86_400_000:
+        spans.insert(0, (need, old_min))
+    return spans
 
 
 def fetch_k1h(symbol: str, cache: Path, now_ms: int) -> pd.DataFrame:
@@ -43,19 +52,20 @@ def fetch_k1h(symbol: str, cache: Path, now_ms: int) -> pd.DataFrame:
     old = pd.read_parquet(cache) if cache.exists() else pd.DataFrame(columns=["t", "high", "low", "close", "qv"])
     if os.environ.get("LIQ_TAB_NO_REST"):
         return old
-    start = int(old.t.max()) + 3_600_000 if len(old) else now_ms - KEEP_DAYS * 86_400_000
+    spans = k1h_spans(int(old.t.min()) if len(old) else None, int(old.t.max()) if len(old) else None, now_ms)
     new: list[list] = []
     try:
-        while start < now_ms - 3_600_000:
-            u = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval=1h&startTime={start}&limit=1500"
-            raw = json.load(urllib.request.urlopen(urllib.request.Request(u, headers={"User-Agent": "liq-tab"}), timeout=20))
-            if not raw:
-                break
-            new += [[int(r[0]), float(r[2]), float(r[3]), float(r[4]), float(r[7])] for r in raw if int(r[6]) < now_ms]
-            if len(raw) < 1500:
-                break
-            start = int(raw[-1][0]) + 3_600_000
-            time.sleep(0.5)
+        for start, end in spans:
+            while start < end:
+                u = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval=1h&startTime={start}&limit=1500"
+                raw = json.load(urllib.request.urlopen(urllib.request.Request(u, headers={"User-Agent": "liq-tab"}), timeout=20))
+                if not raw:
+                    break
+                new += [[int(r[0]), float(r[2]), float(r[3]), float(r[4]), float(r[7])] for r in raw if int(r[6]) < now_ms]
+                if len(raw) < 1500:
+                    break
+                start = int(raw[-1][0]) + 3_600_000
+                time.sleep(0.5)
     except OSError as exc:
         print(f"{symbol}: klines {exc!r} -- 저장분으로 계속", flush=True)
     if not new:
@@ -291,7 +301,7 @@ def build(coin: str, now_ms: int) -> dict | None:
     day = k.t // 86_400_000
     last_day = int(day.iloc[-1])
     daily = k.groupby(day).agg(o=("close", "first"), h=("high", "max"), l=("low", "min"), c=("close", "last"))
-    daily = daily[daily.index > last_day - 180]
+    daily = daily[daily.index > last_day - 365]
     made = r.groupby(["e", "side"])["w"].sum().unstack(fill_value=0.0)
     left = r[r.s > last_day].groupby(["e", "side"])["w"].sum().unstack(fill_value=0.0)
     days = []
@@ -319,6 +329,10 @@ def selftest() -> None:
     ft = first_touch(np.full(n, 95.0), "long", hi, lo)
     assert ft[0] > 24 * 8 and lo[ft[0]] <= 95 and all(lo[1:ft[0]] > 95), "첫 닿음"
     assert first_touch(np.full(n, 1.0), "long", hi, lo)[0] == -1, "안 닿으면 -1"
+    D, now = 86_400_000, 800 * 86_400_000
+    assert k1h_spans(None, None, now) == [(now - KEEP_DAYS * D, now - 3_600_000)], "처음 = 전부"
+    assert k1h_spans(now - KEEP_DAYS * D, now - 7_200_000, now) == [(now - 3_600_000, now - 3_600_000)], "다 찼으면 뒤만"
+    assert k1h_spans(now - 370 * D, now - 7_200_000, now)[0] == (now - KEEP_DAYS * D, now - 370 * D), "370일 저장분 = 앞쪽 메움"
     r = positions(k)
     last = int(t[-1] // 86_400_000)
     row = 0.5

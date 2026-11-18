@@ -23,7 +23,10 @@ import pandas as pd
 #   2026-10-31 BTC·SOL 전용(같은 식·같은 관문 · 30분·1h 통과 · 4h 2026 보정 8.4/9.8pp 불통과 → deployable False)
 #   재현 python scripts/research_btc_sol_box_hold_20261031.py --run · 결과 docs/experiments/btc_sol_box_hold_20261031.md
 HGB = {"eth": "box_hold_hgb_20261016.joblib", "xrp": "box_hold_hgb_xrp_20261020.joblib",
-       "btc": "box_hold_hgb_btc_20261031.joblib", "sol": "box_hold_hgb_sol_20261031.joblib"}
+       "btc": "box_hold_hgb_btc_20261031.joblib", "sol": "box_hold_hgb_sol_20261031.joblib",
+       # 2026-11-18 SOXL 1h = ETH 2022~24 + SOXL 05-22~08-31 합동 HGB(J) -- 시험 10-01~11-16 AUC .793·보정 5.62pp 통과(docs/experiments/soxl_dir4h_box_20261117.md) ·
+       #   30m 보정 불통과·4h 미검정 = deployable False · 정규장 과대(예측 .339 vs 실현 .292) · 재현 python scripts/research_soxl_dir4h_box_20261117.py export
+       "soxl": "box_hold_hgb_soxl_20261117.joblib"}
 BUNDLES = {a: joblib.load(Path(__file__).with_name(f)) for a, f in HGB.items()}
 B = BUNDLES["eth"]
 PROF = np.asarray(B["prof"], float)            # 요일×시각(월 0시 = 0) 평균 1분 수익² / 전체 평균, 학습 구간

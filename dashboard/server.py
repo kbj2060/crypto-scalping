@@ -3295,7 +3295,7 @@ def make_app() -> web.Application:
             # 2026-11-15 코인글래스 세션 추천: 60·90·180일은 최근성 감쇠 끔(정확도 같음 +.005 · 180일이 30일과 똑같아 보이던 문제) -- 1·7·30일은 그대로
             tp = await asyncio.to_thread(compute_tier_profile, df, cp, oi_usd, None, None if days >= 60 else RECENCY_HALFLIFE_HOURS)
             return {"days": days, "tier_profile": tp, "decay": days < 60, "generated_at": datetime.now(timezone.utc).isoformat()}
-        return await swr_cached(f"liquidation_tiers:{asset}:{days}", LIQUIDATION_MAP_CACHE_SECONDS, produce,
+        return await swr_cached(f"liquidation_tiers:{asset}:{days}", LIQUIDATION_MAP_CACHE_SECONDS if days < 365 else 300, produce,   # 1년 지도는 1분에 거의 안 변한다 -- REST 여섯 쪽을 5분에 한 번만
                                 max_stale=STALE_GRACE_SECONDS)
 
     # ── 포지션 프로파일 (2026-10-10, 사용자 «체결 기둥 위 [체결 | 포지션] 토글 · A + C 미니맵 · 1초») ──────────────
@@ -4774,7 +4774,7 @@ def make_app() -> web.Application:
         return web.json_response(payload, headers=NOCACHE)
 
     async def api_liquidation_tiers(request: web.Request) -> web.Response:
-        days = int(request.query.get("days", "1")) if request.query.get("days", "1") in ("1", "7", "30", "60", "90", "180") else 1   # 2026-11-13 90일(펜 메모 «기간을 더 늘려줘») · 60·180일(펜 메모 «청산 차트도 180일까지», 1시간봉 4,322개 = 바이낸스 세 번)
+        days = int(request.query.get("days", "1")) if request.query.get("days", "1") in ("1", "7", "30", "60", "90", "180", "365") else 1   # 2026-11-17 365일(사용자 «1년치도», 1시간봉 8,762개 = 바이낸스 여섯 번 · 위 5분 캐시) · 2026-11-13 90일(펜 메모 «기간을 더 늘려줘») · 60·180일(펜 메모 «청산 차트도 180일까지», 1시간봉 4,322개 = 바이낸스 세 번)
         try:
             payload = await load_liquidation_tiers(_query_coin_asset(request), days)
         except web.HTTPBadGateway:
