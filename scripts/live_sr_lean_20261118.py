@@ -316,7 +316,8 @@ async def run() -> None:
                                     if mi <= L.t0 // 60 and mi in L.M.index and ref[3] > 0:
                                         fixed += not np.allclose(L.M.loc[mi].to_numpy(float), ref, rtol=1e-9); L.M.loc[mi] = ref
                                     elif mi == own_chk:
-                                        mine = L.M.loc[mi].to_numpy(float).tolist(); print("분봉 대조(내 초 vs 거래소 고·저·종·거래량·테이커 매수)", "일치" if np.allclose(mine, ref, rtol=1e-9) else "🔴불일치", mine, ref, flush=True)
+                                        mine = L.M.loc[mi].to_numpy(float).tolist(); # 고·저·종은 같아야 한다. 거래량은 분 경계 체결의 귀속이 달라 조금 어긋날 수 있다(Vision 묶음 vs Vision 1분봉도 하루 157~507분이 다르고 하루 합은 같다 — 11-18 대조)
+                                        print("분봉 대조(내 초 vs 거래소)", "고·저·종 일치" if np.allclose(mine[:3], ref[:3], rtol=1e-9) else "🔴고·저·종 불일치", f"· 거래량 차 {mine[3] / ref[3] - 1:+.3%}", mine, ref, flush=True)
                                 print("처음 받은 1분봉 끝 몇 분 다시 확인 · 바뀐 분", int(fixed), flush=True)
                             except (aiohttp.ClientError, asyncio.TimeoutError) as e:      # 다음 분에 다시(1분에 한 번)
                                 print("분봉 대조 실패", type(e).__name__, e, flush=True); own_chk += 1; continue
