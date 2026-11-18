@@ -86,3 +86,19 @@
   - 서버 체인은 스크립트가 `scripts/ops/handoff.sh launch`(read_only COPY) → `logs` → `pull` 로 가져온다. 출력 `tmp/prereg_reverse_conventional_gex_20261001/result_20261001T0000_20261110T0000.json` 의 `primary.pass` 가 판정이다.
 - 자체점검: `python scripts/prereg_eth_reverse_conventional_gex_eval_20261001.py --selftest`
 - 의존: 정의 함수는 `scripts/research_eth_dealer_gex_reconstruct_2026_20261001.py`(exposures·Bars·beta_test·halves·positions_at)와 `scripts/research_eth_dealer_position_accuracy_20260930.py`(API 호출·종목명 해석)에 있다. **이 둘도 같은 커밋에 넣어 정의를 함께 고정한다.**
+
+## 10. 판정 결과 (2026-11-18 04:27 UTC 실행 · 판정일 11-10 05:00 이후 한 번)
+명령 그대로: `python scripts/prereg_eth_reverse_conventional_gex_eval_20261001.py --start 2026-10-01 --end 2026-11-10` (서버 체인 read_only COPY → pull, 가격·DVOL = Deribit 공개 API). 출력 `tmp/prereg_reverse_conventional_gex_20261001/result_20261001T0000_20261110T0000.json`(커밋 안 함).
+- 창 2026-10-01 00:00 ≤ t < 11-10 00:00 UTC · **959/960시간**(빠진 시간 1) · 40일 · 5분봉 빈 봉 0 · 반쪽 경계 10-20 23:00.
+
+| X | 전체 β [95% CI] (통제판) | 전반 | 후반 | 일 FE |
+|---|---|---|---|---|
+| **뒤집은 관행 week(판정)** | **−0.158 [−0.356, +0.057]** | −0.309 [−0.606, +0.067] | +0.154 [−0.081, +0.440] | −0.048 [−0.257, +0.232] |
+| 뒤집은 관행 front | −0.054 [−0.219, +0.129] | −0.091 | +0.068 | +0.049 |
+| 뒤집은 관행 all | −0.168 [−0.382, +0.072] | −0.226 | +0.123 | −0.034 |
+| 관행 week(대조, 정확히 −1배) | +0.158 [−0.057, +0.356] | +0.309 | −0.154 | +0.048 |
+| 체결 딜러 GEX(대조) | unavailable — 연구 체결 캐시 `tmp/dealer_position_accuracy_20260930/opt_trades_hist.parquet` 없음 | | | |
+
+- **판정: 불통과**(엄격 기준 §4: β < 0 이나 CI 상한 +0.057 > 0). 반쪽 부호 불일치(후반 +). 일 FE 판은 거의 0.
+- §7 대로 적는다: «40일로는 −0.29 보다 큰 효과를 못 봤다». 점추정은 표본 안 −0.304 의 약 절반(승자의 저주와 부합), 후반 20일은 부호가 반대.
+- 사전 결정(11-07)대로 감마 화면은 서술용 유지 · 배포 없음. §8 사후 점검은 불통과라 돌리지 않았다.
