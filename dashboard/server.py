@@ -140,6 +140,7 @@ from dashboard.dir_signals import dir_signals_payload, vol4h_from_klines, open_r
 from dashboard import acct_notes  # noqa: E402 -- 계좌 카드 날짜별 메모(2026-11-04)
 from dashboard import pred_record  # noqa: E402 -- ⑤ 예측 줄 아래 «적중 기록»·«4h 상대 강도»(2026-11-03)
 from dashboard.regime_band import regime_band_payload  # noqa: E402 -- ⑤ 예측 줄 «횡보·추세» 칸(2026-11-02, 전진 기록 크론이 쌓은 마지막 행)
+from dashboard.sr_lean import sr_lean_payload  # noqa: E402 -- ETH «레벨 5분» 기울기 표식·칸(2026-11-18, 상시 워커가 쌓은 jsonl 꼬리)
 from dashboard.risk_radar import risk_radar_payload  # noqa: E402 -- ⑤ 예측 줄 «15분 폭»·«앞 1시간» + 꼬리표 «15분 N%»(2026-11-15, 매분 크론이 쓴 파일)
 from dashboard.box_hold import BUNDLES as box_hold_bundles, payload as box_hold_payload, with_qx4i as box_hold_with_qx4i  # noqa: E402 -- 박스 유지 확률(2026-10-16, 방향 아님 · 10-20 XRP)
 from scripts.live_push_notifier_20260904 import PUSH_KINDS  # noqa: E402 -- 알림 센터 «무엇을 보내나»(2026-10-05)
@@ -2723,6 +2724,13 @@ def make_app() -> web.Application:
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
         return web.json_response(payload, headers=NOCACHE)
 
+    async def api_sr_lean(request: web.Request) -> web.Response:   # 2026-11-18 ETH «레벨 5분» 기울기(워커 scripts/live_sr_lean_20261118.py 의 jsonl 꼬리 -- 계산 없음 · 화면이 2초마다 묻는다)
+        try:
+            payload = await swr_cached("sr_lean", 1.0, lambda: asyncio.to_thread(sr_lean_payload), max_stale=30.0)
+        except Exception as exc:  # noqa: BLE001
+            payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+        return web.json_response(payload, headers=NOCACHE)
+
     async def api_risk_radar(request: web.Request) -> web.Response:   # 2026-11-15 ⑤ «15분 폭»·«앞 1시간» + 꼬리표 «15분 N%» (매분 크론 파일 -- 계산 없음)
         try:
             payload = await swr_cached("risk_radar", 10.0, lambda: asyncio.to_thread(risk_radar_payload), max_stale=120.0)
@@ -4921,6 +4929,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/dir-signals", api_dir_signals)
     app.router.add_get("/api/regime-band", api_regime_band)
     app.router.add_get("/api/risk-radar", api_risk_radar)
+    app.router.add_get("/api/sr-lean", api_sr_lean)
     app.router.add_get("/api/liq-tab", api_liq_tab)
     app.router.add_get("/api/vol-forecast", api_vol_forecast)
     app.router.add_get("/api/dir4h", api_dir4h)

@@ -5517,6 +5517,93 @@ async function refreshRegimeBand() {
     if (res.ok) latestRegimeBand = await res.json();
   } catch (error) { /* 다음 주기에 다시 -- 받아 둔 값은 그대로 */ }
 }
+// 2026-11-18 ETH «레벨 5분» 기울기(배포 대기 A19 · 사용자 «배포해줘»): /api/sr-lean = 상시 워커(scripts/live_sr_lean_20261118.py)가 쌓은 사건 중 점수 양끝 10% -- 화면은 계산 안 함
+//   1시간·4시간·24시간 고점/저점 접근(0.1σ 안)·돌파 5초 뒤 판정 → 다음 5분 안에 0.1σ(약 6bp)를 어느 쪽 먼저 닿나. 가운데 80% 는 동전이라 그리지 않는다. 표시 전용(매매 신호 아님).
+const SR_LEAN_POLL_MS = 2000, SR_LEAN_HZ = 305;   // 닿는 데 중앙 22초라 2초마다 · 판정 다음 초부터 300초(+ 초가 닫히는 여유)
+let latestSrLean = null, srLeanLastFetchAt = 0, srLeanSkew = 0, srLeanKey = "";
+async function refreshSrLean() {
+  if (activePageTab !== "snapshot" || document.hidden || activeSnapshotAsset !== "eth") return;
+  const now = Date.now();
+  if (now - srLeanLastFetchAt < SR_LEAN_POLL_MS) return;
+  srLeanLastFetchAt = now;
+  try {
+    const res = await fetch("/api/sr-lean", { cache: "no-cache" });
+    if (!res.ok) return;
+    latestSrLean = await res.json();
+    if (!latestSrLean.ok) return;
+    srLeanSkew = latestSrLean.now - Date.now() / 1000;   // 서버 시계 기준으로 남은 시간을 센다
+    const k = JSON.stringify(latestSrLean.ev);
+    if (k !== srLeanKey) { srLeanKey = k; scheduleSnapshotChartRender(); }   // 새 사건·결과가 오면 차트 표식도 바로
+  } catch (error) { /* 다음 주기에 다시 -- 받아 둔 값은 그대로 */ }
+}
+const srLeanNowS = () => Date.now() / 1000 + srLeanSkew;
+// 사건 읽기: cont = 이어짐(사건 쪽 먼저) · up = 가격이 먼저 갈 쪽 · st = live(진행 중) · hit · miss · na(결과를 못 냄)
+function srLeanRead(e, nowS) {
+  const cont = e.grp === "top", up = (cont ? e.side : -e.side) > 0;
+  const st = e.y == null ? (nowS - e.d < SR_LEAN_HZ ? "live" : "na") : (e.y === 1) === cont ? "hit" : "miss";
+  return { cont, up, st, nm: `${e.look === 60 ? "1h" : e.look === 240 ? "4h" : "24h"} ${e.side > 0 ? "고점" : "저점"}`, word: cont ? "이어짐" : "되돌림", left: Math.max(0, SR_LEAN_HZ - (nowS - e.d)) };
+}
+// ⑤ 예측 줄 «레벨 5분» 칸(ETH 만): 게이지 왼끝 = 아래로 · 오른끝 = 위로(양끝 10% 만 색) · 오른쪽 = 실시간 적중 기록(표시한 사건만)
+function srLeanCell(cell) {
+  const r = latestSrLean, ok = !!(r && r.ok), nowS = srLeanNowS(), rec = ok ? r.rec : null;
+  const tip = "레벨 5분 — 1시간·4시간·24시간 고점/저점에 닿거나(0.1σ 안) 넘은 5초 뒤 판정. 다음 5분 안에 약 6bp(0.1σ)를 어느 쪽으로 먼저 가는지.\n"
+    + "점수 상위 10% 만 «이어짐», 하위 10% 만 «되돌림»으로 표시 — 가운데 80% 는 동전이라 표시 안 함. 확률 = 2023 확인 검정의 집단 비율(이어짐 989/1,752 = 56% · 되돌림 1,535/2,804 = 55%).\n"
+    + "효과가 작다(AUC .53) · 닿는 데 중앙 22초 · 매매 신호 아님(진입 모의 비용 뒤 −7bp) · 전진 판정 12-17.\n"
+    + "적중 기록 — 표시한 사건 중 5분 안에 표시한 쪽을 먼저 닿은 비율(실시간 기록 · 최근 약 12일)";
+  const right = !rec || !rec.n ? `<span class="pr-n">쌓는 중</span>`
+    : `<span class="pr-sp">${rec.recent.map(([, o]) => `<i class="${o ? "u" : "d"}" style="height:${o ? 16 : 6}px"></i>`).join("")}</span>`
+      + `<span class="pr-n"><b class="${rec.hit / rec.n >= 0.55 ? "up" : rec.hit / rec.n <= 0.45 ? "dn" : ""}">${Math.round(100 * rec.hit / rec.n)}%</b> ${rec.hit}/${rec.n}</span>`;
+  const g = (x) => `<span class="d4g" aria-hidden="true"><i class="z dn" style="width:10%"></i><i class="z up" style="left:90%"></i><u style="left:${x}%"></u></span>`;
+  if (!ok) return cell("레벨 5분", "flat", "-", r ? `워커 기록 없음${r.reason ? `: ${r.reason}` : ""}` : "불러오는 중", tip, "", "", null, right);
+  const warm = r.warm_until != null && nowS < r.warm_until;
+  const cur = r.stale || warm ? null : [...r.ev].reverse().map((e) => [e, srLeanRead(e, nowS)]).find(([, q]) => q.st === "live");
+  if (!cur) return cell("레벨 5분", "flat", r.stale ? "멈춤" : warm ? "준비 중" : "대기",
+    r.stale ? "🔴워커가 45초 넘게 조용함" : warm ? `체결 1시간치가 차야 판정 · ${Math.ceil((r.warm_until - nowS) / 60)}분 남음` : `지난 48시간 표시 ${r.ev.length}건 · 가운데(표시 안 함) ${r.mid48}건`, tip, g(50), "", null, right);
+  const [e, q] = cur;
+  return cell("레벨 5분", q.up ? "up" : "dn", `${q.up ? "▲" : "▼"} ${q.word} ${r.pct[q.cont ? "top" : "bot"]}%`, `${q.nm} ${e.L} · 남은 ${Math.ceil(q.left)}초`, tip, g(q.up ? 95 : 5), "", null, right);
+}
+// 차트 표식: 레벨 자리에 눈금 + 화살(가격이 먼저 갈 쪽). 이어짐 = 화살이 눈금을 뚫고 지나감 · 되돌림 = 눈금에서 떨어져 나옴.
+//   진행 중(5분)만 꼬리표 + 남은 시간 막대 · 끝나면 맞음 = 색 실선 · 빗나감 = 회색 점선 · 결과 없음 = 회색 실선.
+function renderSrLean() {
+  const svg = el("candleSvgSnapshot"), G = chartGeo, r = latestSrLean;
+  svg?.querySelector("#srlean")?.remove();
+  if (!svg || !mcLine.srl || activeSnapshotAsset !== "eth" || fpAltOn() || !r || !r.ok || !G || !G.bars.length || !(G.ymax > G.ymin)) return;
+  const nb = G.bars.length, step = ({ 1: 300, 6: 1800, 12: 3600 })[chartTfK] || 300, tv0 = G.bars[0].time, tv1 = G.bars[nb - 1].time + step;
+  const slot = G.cw / G.n, xr = G.ml + G.cw, ch = G.pb - G.mt, nowS = srLeanNowS();
+  const xT = (t) => G.ml + (measIdx(G.bars, t) + G.off) * slot, yP = (v) => G.mt + (G.ymax - v) * ch / (G.ymax - G.ymin);
+  const NSV = "http://www.w3.org/2000/svg", mk = (tag, a, txt) => { const n = document.createElementNS(NSV, tag); for (const k in a) n.setAttribute(k, a[k]); if (txt != null) n.textContent = txt; return n; };
+  const boxes = [...svg.querySelectorAll('.edge-l, [data-live="label"][data-with-price="num"]')].map((t) => {   // 꼬리표가 가격 숫자·다른 꼬리표를 덮지 않게
+    const fs = +t.getAttribute("font-size") || 10, x = +t.getAttribute("x") || 0, y = +t.getAttribute("y") || 0, an = t.getAttribute("text-anchor");
+    const w = measureTextW(t.textContent || "", `800 ${fs}px "Pretendard Variable", Pretendard, sans-serif`) + 4;
+    return [an === "end" ? x - w : an === "middle" ? x - w / 2 : x - 2, y - fs - 1, w, fs + 4];
+  }).concat([...svg.querySelectorAll("#obfvg rect[rx], #dirmk rect[rx]")].map((q) => [+q.getAttribute("x"), +q.getAttribute("y"), +q.getAttribute("width"), +q.getAttribute("height")]));
+  const g = mk("g", { id: "srlean", "pointer-events": "none" }), at = [];
+  for (const e of r.ev) {
+    if (!(e.a >= tv0 && e.a < tv1 && e.L > G.ymin && e.L < G.ymax)) continue;
+    const q = srLeanRead(e, nowS), live = q.st === "live" && !r.stale;
+    const c = live || q.st === "hit" ? (q.up ? "var(--good)" : "var(--bad)") : "var(--muted)", y = yP(e.L), d = q.up ? -1 : 1;
+    let x = Math.max(G.ml + 10, Math.min(xr - 12, xT(e.a)));
+    while (at.some((o) => Math.abs(o[0] - x) < 13 && Math.abs(o[1] - y) < 20) && x + 14 < xr - 10) x += 14;   // 같은 자리 겹침은 옆으로
+    at.push([x, y]);
+    const y0 = q.cont ? y - d * 7 : y + d * 4, y1 = y + d * 17;
+    const path = `M${x - 9} ${y}L${x + 9} ${y}M${x} ${y0}L${x} ${y1}M${x - 4.5} ${y1 - d * 6}L${x} ${y1}L${x + 4.5} ${y1 - d * 6}`;
+    g.appendChild(mk("path", { d: path, fill: "none", stroke: "var(--bg)", "stroke-width": 5, "stroke-linecap": "round", "stroke-linejoin": "round", opacity: 0.9 }));
+    const m = mk("path", { d: path, fill: "none", stroke: c, "stroke-width": live ? 2.2 : 1.8, "stroke-linecap": "round", "stroke-linejoin": "round" });
+    if (q.st === "miss") { m.setAttribute("stroke-dasharray", "2.5 3"); m.setAttribute("opacity", 0.8); }
+    g.appendChild(m);
+    if (!live) continue;
+    const txt = `${q.nm} · ${q.word} ${r.pct[q.cont ? "top" : "bot"]}%`, w = measureTextW(txt, '650 11px "Pretendard Variable", Pretendard, sans-serif') + 12, h = 19;
+    const L = x - 14 - w >= G.ml + 2 ? x - 14 - w : Math.min(xr - 2 - w, x + 14), cl = (t) => Math.max(G.mt + 1, Math.min(G.pb - 1 - h, t)), T0 = cl(y - d * 4 - (d > 0 ? 0 : h));
+    const hit = (t) => boxes.some((b) => L < b[0] + b[2] && b[0] < L + w && t < b[1] + b[3] + 2 && b[1] < t + h + 2);
+    let T = T0;
+    for (const o of [21, -21, 42, -42, 63, -63]) { if (!hit(T)) break; T = cl(T0 + o); }
+    boxes.push([L, T, w, h]);
+    g.appendChild(mk("rect", { x: L, y: T, width: w, height: h, rx: 4, fill: "var(--bg)", "fill-opacity": 0.96, stroke: c, "stroke-opacity": 0.9 }));
+    g.appendChild(mk("text", { x: L + w / 2, y: T + h / 2 - 0.5, "text-anchor": "middle", "dominant-baseline": "middle", fill: c, "font-size": 11, "font-weight": 650, "font-family": "var(--font-sans)" }, txt));
+    g.appendChild(mk("rect", { x: L + 4, y: T + h - 3.5, width: (w - 8) * Math.min(1, q.left / 300), height: 1.6, rx: 0.8, fill: c, opacity: 0.85 }));
+  }
+  if (g.childNodes.length) svg.appendChild(g);
+}
 // 2026-11-15 시안 C: 위험 레이더(/api/risk-radar = 서버 크론 scripts/live_risk_radar_20261115.py 가 매분 쓴 파일, 화면은 계산 안 함)
 const RISK_RADAR_POLL_MS = 30000;
 let latestRiskRadar = null, riskRadarLastFetchAt = 0;
@@ -5716,7 +5803,7 @@ function fcRowHtml(sec) {
   return `<div class="mc-sec mc-fc"><h4>${eth ? fcSum : ""}${mcTipBtn("q_fc", "⑤ 예측 · 지금에서 멀리")}</h4><div class="fc-row">`
     + (t ? fcTrendCell(t, cell)
          : cell("지금 추세", "flat now", "-", "불러오는 중", "지금 추세"))
-    + sCell("15m", "15분", 3, 1) + sCell("1h", "1시간", 12, 2)
+    + sCell("15m", "15분", 3, 1) + (eth ? srLeanCell(cell) : "") + sCell("1h", "1시간", 12, 2)
     + cell("4h 예측", g4 && !old4 ? cls(g4.signal) : "flat", g4 ? word(g4.signal) : "-", d4Sub, d4Tip, d4Gauge, "", "4h")
     + rbCell + rrCells(cell)
     + `</div>${predXsecHtml()}</div>`;   // 2026-10-28 사용자 «4~13주 예측은 Macro Trend 카드로 대체» -- z91 칸 뺌(서버 계산·전진 판정 2027-06 은 그대로)
@@ -5741,7 +5828,7 @@ const API_MARKET_CTX_URL = "/api/market-context";
 const MARKET_CTX_POLL_MS = 1000;   // 2026-10-03 5초 -> 1초(사용자 «1초 원천은 화면도 1초») -- 호가 벽·스프레드·계기·BTC 동행은 서버 1초 루프 · 응답 중앙 14ms·3KB(서버 실측)
 let latestMarketCtx = null, marketCtxLastFetchAt = 0;
 let latestMacroEvents = null;        // renderMacroCalendar 가 채운다 -- 카드의 «다음 주요 일정». null = 아직 못 받음(«없음»과 다르다)
-const mcLine = { st: {}, poc: true, vwap: true, veto: true, sma50: true, sw1h: true, sw30m: true, ob: true, fvg: false, orb: true, cci: true, rsi2: true, rdiv: false, bb: false, wvwap: false, vsess: false, ema5: false, ema20: false, vwma: false };   // 2026-10-26 펜 메모: 이동평균 셋(기본 끔)   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
+const mcLine = { st: {}, poc: true, vwap: true, veto: true, sma50: true, sw1h: true, sw30m: true, ob: true, fvg: false, orb: true, cci: true, rsi2: true, rdiv: false, srl: true, bb: false, wvwap: false, vsess: false, ema5: false, ema20: false, vwma: false };   // 2026-10-26 펜 메모: 이동평균 셋(기본 끔)   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
 try { Object.assign(mcLine, JSON.parse(localStorage.getItem("mcLine") || "{}")); } catch (err) { /* 기억은 편의 */ }
 if (!mcLine.sw30mOn) { mcLine.sw30m = true; mcLine.sw30mOn = 1; }   // 11-16 사용자 «30m 스윙도 기본으로 켜줘» -- 옛 저장값(sw30m:false, 칩을 하나라도 만지면 통째로 저장됨)도 한 번 켠다 · 그 뒤 끄면 기억
 if (mcLine.vwW) { mcLine.st = { ...mcLine.st, vwap: { w: mcLine.vwW, d: mcLine.vwD, c: mcLine.vwC } }; delete mcLine.vwW; delete mcLine.vwD; delete mcLine.vwC; }   // 10-29 오전판(VWAP 전용 줄)에서 고른 값 옮김
@@ -6156,10 +6243,10 @@ function renderMarketCtx() {
       + `<span class="mc-sw-g">${swChip("orb", "뉴욕 개장 범위", 0, "뉴욕 09:30 첫 30분·60분 고저 범위 · 5분 종가로 뚫으면 6시간 안 돌파 쪽 범위폭 선이 먼저 닿음 30분 45%·60분 37% · 반대선 먼저 41%·32% · 둘 다 안 닿음 14%·31% · 닿은 것만 세면 52%·54%(다른 시각 범위 50%) · 범위 끝 뒤 6시간 · 수수료 뒤 이득 ≈ 0 = 참고(매매 신호 아님) · 미국 휴장일 미반영 · ETH·BTC·SOL·XRP")}`
       + `${swChip("cci", "CCI 1h", 0, "1시간봉 CCI(20) 가 +100 위로(−100 아래로) 넘은 봉 · 그쪽 1 ATR 이 먼저 닿은 비율 51%(20봉 모멘텀 50%) · 새 코인 5종 재현 · 효과 작음 = 참고")}`
       + `${swChip("rsi2", "RSI2 눌림", 0, "15분봉 종가가 SMA200 위에서 RSI(2)가 10 아래로 꺾인 봉(▲) · 아래에서 90 위로(▼) · 추세 쪽 1 ATR 먼저 51%(같은 추세 아무 봉 50%) · 새 코인 5종 재현 · 효과 작음 = 참고")}`
-      + `${swChip("rdiv", "RSI 다이버전스", 0, "15분봉 앞뒤 5봉 스윙이 직전 스윙(60봉 안)보다 높은데(낮은데) RSI14 는 낮을(높을) 때 · 스윙 5봉 뒤에 알려짐 · 반전 쪽 1 ATR 먼저 51%(가짜 49%) · 2025~26 은 효과 거의 0 · 기본 끔")}</span>`
+      + `${swChip("rdiv", "RSI 다이버전스", 0, "15분봉 앞뒤 5봉 스윙이 직전 스윙(60봉 안)보다 높은데(낮은데) RSI14 는 낮을(높을) 때 · 스윙 5봉 뒤에 알려짐 · 반전 쪽 1 ATR 먼저 51%(가짜 49%) · 2025~26 은 효과 거의 0 · 기본 끔")}${swChip("srl", "레벨 5분", 0, "1h·4h·24h 고점/저점 접근·돌파 5초 뒤 판정 · 화살 = 다음 5분 안에 먼저 갈 쪽(약 6bp) · 눈금을 뚫고 가면 이어짐 56% · 눈금에서 떨어져 나오면 되돌림 55%(2023 확인 검정) · 끝나면 색 실선 = 맞음 · 회색 점선 = 빗나감 · 점수 양끝 10% 만 표시 · ETH · 효과 작음 = 참고(매매 신호 아님) · 전진 판정 12-17")}</span>`
       + `<div class="mc-cfg"${lineCfg ? "" : " hidden"}>${lineCfg ? lineCfgHtml(lineCfg) : ""}</div></div>`;
   // 2026-10-28 펜 메모 «지표 아이콘 버튼을 누르면 이 지표 버튼들이 팝업으로 나와 추가/제거» -- 넓은 화면 줄 = 버튼 하나(켠 개수) · 칩·입력·저장은 그대로 팝업 안
-  const indOn = ["ema5", "ema20", "vwma", "bb", "veto", "sma50", "sw1h", "sw30m", "vwap", "wvwap", "poc", "ob", "fvg", "orb", "cci", "rsi2", "rdiv"].filter((k) => mcLine[k]).length;
+  const indOn = ["ema5", "ema20", "vwma", "bb", "veto", "sma50", "sw1h", "sw30m", "vwap", "wvwap", "poc", "ob", "fvg", "orb", "cci", "rsi2", "rdiv", "srl"].filter((k) => mcLine[k]).length;
   const fsRow = G.cmpW || (flowOn() && !!el("fpMobRow"));   // 10-30 1단 데스크톱도(위 한 줄) -- 휴대폰은 머리 줄 · 넓은 화면은 위 한 줄   // 옛 index.html(줄 없음)이면 칩을 시장 맥락에 그대로   // 2026-10-28 사용자 «모바일도 데스크탑처럼» -- 휴대폰 흐름 코인도 버튼 + 팝업(#fpMobRow)
   if (!fsRow) fpIndOpen = false;   // 버튼 줄이 없는 화면으로 가면 닫힌 채로(돌아왔을 때 저절로 열려 있지 않게)
   const fsEl = el("fpLineSwitch"), fsHtml = fsRow ? `<button type="button" class="fp-ind-btn" aria-haspopup="true" aria-expanded="${fpIndOpen}" aria-controls="fpIndPop">`
@@ -11165,7 +11252,9 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   if (svg.id === "candleSvgSnapshot") post.push(renderArmedLines);   // 2026-10-29 들어간 선 주문(익절·손절) 자리
   if (svg.id === "candleSvgSnapshot") post.push(renderObFvg);   // 2026-11-15 오더블록·FVG(시안 C)
   if (svg.id === "candleSvgSnapshot") post.push(renderDirMarks);
-  if (svg.id === "candleSvgSnapshot") post.push(renderDirBoard);   // 2026-11-16 지표 방향 판(위 둘이 줄을 채운 뒤)   // 2026-11-16 방향 «의미» 표식(OB 꼬리표 뒤 -- 겹침 피하기에 넣는다)
+  if (svg.id === "candleSvgSnapshot") post.push(renderDirBoard);
+  if (svg.id === "candleSvgSnapshot") post.push(renderSrLean);   // 2026-11-18 «레벨 5분» 기울기 표식(다른 꼬리표 뒤 -- 겹침 피하기에 넣는다)
+    // 2026-11-16 지표 방향 판(위 둘이 줄을 채운 뒤)   // 2026-11-16 방향 «의미» 표식(OB 꼬리표 뒤 -- 겹침 피하기에 넣는다)
   if (svg.id === "candleSvgSnapshot") post.push(renderMeasure);   // 2026-11-07 Shift+드래그 측정 박스
   post.forEach((f) => f());   // 화면 상자를 재는 HTML 배치(위 ③) -- svg 를 다 쌓은 뒤 한 번만 배치된다
   // 2026-10-01 프로파일 오른쪽 끝 가격 이름과 겹치는 호가 벽 수량 글자(«11.8k»)는 숨긴다(사용자 지시) -- 층 캐시라 매번 되살린 뒤 다시 판정
@@ -11248,6 +11337,7 @@ async function tick() {
       refreshDirSig();               // 2026-10-15 지평 사다리 7일·4~13주 (10분, 서버 1시간 캐시)
       refreshPredRecord();           // 2026-11-03 ⑤ 예측 줄 아래 적중 기록·4h 상대 강도 (1분, 서버가 쌓은 기록)
       refreshRiskRadar();            // 2026-11-15 ⑤ «15분 폭»·«앞 1시간» + 꼬리표 «15분 N%» (30초, 서버 크론이 매분 쓴 파일)
+      refreshSrLean();               // 2026-11-18 «레벨 5분» 기울기 표식·칸 (2초, ETH · 상시 워커가 쌓은 jsonl 꼬리)
       refreshRegimeBand();           // 2026-11-02 ⑤ 예측 줄 «횡보·추세» (5분, 서버 크론이 매 시 쌓은 마지막 행 · ETH·BTC·SOL·XRP)
       refreshVol4h();                // 2026-10-15 ⑤ 예측 판 4h 변동성 (5분, ETH)
       refreshDir4h();                // 2026-10-15 ⑤ 예측 판 4h 방향 (2분, ETH·SOL·XRP · 서버 5분 캐시)
