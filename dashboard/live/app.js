@@ -596,7 +596,7 @@ function lineToolEl(box) {
 const TAKER_ARM_MS = 5000;
 async function lineTakerClick(e, a = "market") {
   const t = lineTool;
-  if (!t || !t.placed || t.busy || !(t.entry > 0)) return;
+  if (!t || !t.placed || t.busy || !(t.entry > 0) || t.asset !== activeSnapshotAsset) return;   // 11-19 다른 코인 선으로 PEG·TAKER 를 보내지 않는다
   const now = Date.now();
   if (a === "peg") {   // 2026-11-11 사용자 «PEG 한 번 누름»: 두 번 확인은 빠른 두 번째 누름을 조용히 버려 PEG 가 한 번도 안 나갔다(서버 로그 0건) -- 메이커·시장가 없음이라 지정가 걸기와 같은 한 번
     if (e.detail > 1 || (t.tkK === a && now - (t.tkAt || 0) < 1500)) return;   // 더블클릭·연타의 두 번째는 같은 요청을 또 보내지 않는다(서버가 «이미 처리 중»으로 거절해 빨간 글이 뜬다)
@@ -617,7 +617,7 @@ async function lineTakerClick(e, a = "market") {
 // 2026-10-31 대기 지정가 = 서버가 진실. 놓는 순간 /limit-amend(진입·익절·손절 한 번에) · 실패하면 다음 상태 조회가 서버 값으로 되돌린다.
 async function lineAmend() {
   const t = lineTool;
-  if (!t || !t.placed || !(t.entry > 0)) return;
+  if (!t || !t.placed || !(t.entry > 0) || t.asset !== activeSnapshotAsset) return;   // 11-19 다른 코인 선 값으로 수정 요청을 보내지 않는다
   t.busy = true; t.err = ""; renderLineTool();
   try {
     const r = await (await fetch(`/api/manual-entry/limit-amend?confirm=1&asset=${t.asset || "eth"}&wid=${t.wid || 1}&tp=${linePx(t.tp)}&sl=${linePx(t.sl)}&limit=${linePx(t.entry)}`, { method: "POST", cache: "no-cache" })).json();
@@ -628,6 +628,9 @@ async function lineAmend() {
 }
 // manualWaitPoll → renderManualWait 가 부른다: 서버의 대기 지정가(mode=limit)와 차트 선을 맞춘다. 끝났으면(체결·취소·거부) 선을 거둔다 -- 체결분은 포지션 선(armed)이 이어받는다.
 function lineSyncWaits(list) {   // 11-18 이 코인 대기 전부(칸 번호 wid) -- 편집 도구(lineTool)·세워 둔 선(lineParked)을 서버와 맞춘다
+  // 🔴2026-11-19 사용자 «두 자산에 지정가 대기를 걸면 서로 덮어쓴다»: 탭을 바꾸면 setActiveSnapshotAsset 이 차트를 다시 그리기 전에 manualWaitPoll 을 불러
+  //   새 코인 대기 값(진입·익절·손절·계획)이 아직 남아 있던 옛 코인 선(lineTool)에 칸 번호만 맞아 덮어써졌다 -- 코인이 다른 선은 먼저 거둔다(서버에 그 코인 대기는 그대로)
+  if (lineTool && lineTool.asset !== activeSnapshotAsset) lineTool = null;
   lineParked = lineParked.filter((o) => o.asset === activeSnapshotAsset);
   const keep = new Map(), show = new Map();
   for (const w of list || []) {
