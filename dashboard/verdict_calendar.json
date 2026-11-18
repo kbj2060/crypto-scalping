@@ -424,6 +424,15 @@
    "what": "09-19 «≈2027-03 재실행». 청산·GEX 는 과거를 메울 수 없어 쌓일 때까지 판정 불가",
    "how": "새 사전등록",
    "doc": "docs/experiments/ (zeus_altdata_options_liquidation_gex_no_trigger 메모)"
+  },
+  {
+   "id": "sr_ml_5m_forward",
+   "date": "2026-12-17",
+   "kind": "전진 판정",
+   "title": "ETH 지지·저항 접근·돌파 5분 기울기(A19) — 얼린 모델 전진 30일",
+   "what": "2023 확인 통과(AUC .531)의 시간 방향 확인. 11-15 18:00~12-15 사건 약 1,500건에 얼린 앙상블 적용 · 방향 AUC 단측 90% 하한 > .5 + 월 안 위약 · 양끝 10% 집단 차. 불통과면 A19 내림",
+   "how": "dev 에서 python scripts/research_sr_ml_rl_20261118.py forward (Vision 정적 파일 · 장부 docs/experiments/sr_ml_forward_ledger_20261118.json 의 «판정 실행인가 = true» 줄) · 브랜치 claude/dashboard-next-steps-88f9ae",
+   "doc": "docs/prereg/sr_ml_forward_20261118.md"
   }
  ]
 }
