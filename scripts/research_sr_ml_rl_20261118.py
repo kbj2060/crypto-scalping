@@ -307,6 +307,30 @@ def confirm() -> None:
     Path(R.ROOT / "docs/experiments/sr_ml_confirm_2023_20261118.json").write_text(json.dumps(out, ensure_ascii=False, indent=1)); print(json.dumps(out, ensure_ascii=False, indent=1))
 
 
+FWD0, FWD_JUDGE = "2026-11-15 18:00", "2026-12-16"                       # 전진 판정(docs/prereg/sr_ml_forward_20261118.md): 판정일 전의 실행은 기록만
+
+
+def forward() -> None:
+    """얼린 모델(학습 2024~25 재적합 — 결정적)을 2026-11-16 이후 새 Vision 일 파일에 적용해 장부에 한 줄 덧붙인다."""
+    import json
+    import warnings; warnings.filterwarnings("ignore")
+    import build_eth_aggtrades_1s_20261118 as B
+    day, last, today = pd.Timestamp("2026-11-16"), None, pd.Timestamp.now(tz="UTC").tz_localize(None).normalize()
+    while day < today:                                                    # 정적 파일만(REST 아님). 아직 안 올라온 날에서 멈춘다
+        if any(k in B.one(day.strftime("%Y-%m-%d")) for k in ("없음", "실패")):
+            break
+        last, day = day, day + pd.Timedelta(days=1)
+    if last is None:
+        print("전진 자료 없음"); return
+    cache = OUT / "min_from_tape_fwd.parquet"; cache.unlink(missing_ok=True); te = build(R.minute_bars(cache=cache), FWD0, str(last + pd.Timedelta(days=1)))
+    tr, oo = pd.read_parquet(OUT / "ml_train.parquet"), pd.read_parquet(OUT / "ml_train_oof_ens.parquet"); S_ = sets(tr); ytr = tr[YCONF].to_numpy(); rng = np.random.default_rng(R.SEED + 2)
+    thr = tuple(float(v) for v in np.quantile(oo[f"{YCONF}|전체"], [.1, .9])); P = {k: pred_ens(fit_ens(tr, X, ytr), te, X) for k, X in S_.items()}; e = evaluate(te, te[YCONF].to_numpy(), P, thr, rng)
+    final = bool(last >= pd.Timestamp(FWD_JUDGE) - pd.Timedelta(days=1))
+    row = {"실행": str(pd.Timestamp.now(tz="UTC"))[:16], "구간": [str(te.ts.min()), str(te.ts.max())], "판정 실행인가": final, **{k: e[k] for k in ("사건", "날", "사건 쪽 먼저 비율", "방향_AUC", "방향_AUC_하한90", "월 안 위약_95분위",
+           "상위10%[사건 쪽 먼저, n]", "하위10%[사건 쪽 먼저, n]", "집단차", "집단차_하한90", "전체−크기만", "통과")}}
+    p = R.ROOT / "docs/experiments/sr_ml_forward_ledger_20261118.json"; led = json.loads(p.read_text()) if p.exists() else []; led.append(row); p.write_text(json.dumps(led, ensure_ascii=False, indent=1)); print(json.dumps(row, ensure_ascii=False, indent=1))
+
+
 def selftest() -> None:
     import tempfile
     rng = np.random.default_rng(0)
@@ -356,6 +380,8 @@ if __name__ == "__main__":
         d_ = build(m_, *rng_); d_.to_parquet(OUT / f"ml_{sys.argv[2]}.parquet"); print(sys.argv[2], len(d_), d_.ts.min(), d_.ts.max())
     elif cmd == "confirm":
         confirm()
+    elif cmd == "forward":
+        forward()
     elif cmd == "explore":
         explore()
     elif cmd == "rl":
