@@ -306,13 +306,20 @@ async def run() -> None:
                                 rows = None; print("1분봉 실패(1분 뒤 다시)", type(e).__name__, e, flush=True)
                             if rows:
                                 L.klines(rows, L.done // 60); own_chk = L.done // 60 + 1; print("1분봉 받음", len(L.M), flush=True)
-                        if own_chk is not None and L.done is not None and L.done // 60 > own_chk and L.done % 60 >= 3 and not L.need_klines:      # 한 번: 내 초로 만든 분봉 == 거래소 1분봉?
+                        if own_chk is not None and L.done is not None and L.done // 60 > own_chk and L.done % 60 >= 3 and not L.need_klines:
+                            # 한 번(받은 지 2분 뒤): ① 처음 받은 1분봉의 마지막 몇 분을 다시 받아 바꾼다 — REST 가 몇 초 늦어 직전 분이 덜 찬 값일 수 있다(11-18 실측: 분 경계 +3초 응답에 형성 중인 분이 없었다)
+                            #   ② 내 초로 만든 분봉이 거래소 1분봉과 같은지 로그에 남긴다
                             try:
-                                k = next(r for r in await get("klines", symbol="ETHUSDT", interval="1m", limit=5) if int(r[0]) // 60000 == own_chk)
-                                mine = L.M.loc[own_chk].to_numpy(float); ref = np.array([float(k[2]), float(k[3]), float(k[4]), float(k[5]), float(k[9])])
-                                print("분봉 대조(내 초 vs 거래소 고·저·종·거래량·테이커 매수)", "일치" if np.allclose(mine, ref, rtol=1e-9) else "🔴불일치", mine.tolist(), ref.tolist(), flush=True)
-                            except Exception as e:                    # 대조는 참고 — 실패해도 워커는 돈다
-                                print("분봉 대조 실패", type(e).__name__, e, flush=True)
+                                fixed = 0
+                                for r in await get("klines", symbol="ETHUSDT", interval="1m", limit=10):
+                                    mi = int(r[0]) // 60000; ref = [float(r[2]), float(r[3]), float(r[4]), float(r[5]), float(r[9])]
+                                    if mi <= L.t0 // 60 and mi in L.M.index and ref[3] > 0:
+                                        fixed += not np.allclose(L.M.loc[mi].to_numpy(float), ref, rtol=1e-9); L.M.loc[mi] = ref
+                                    elif mi == own_chk:
+                                        mine = L.M.loc[mi].to_numpy(float).tolist(); print("분봉 대조(내 초 vs 거래소 고·저·종·거래량·테이커 매수)", "일치" if np.allclose(mine, ref, rtol=1e-9) else "🔴불일치", mine, ref, flush=True)
+                                print("처음 받은 1분봉 끝 몇 분 다시 확인 · 바뀐 분", int(fixed), flush=True)
+                            except (aiohttp.ClientError, asyncio.TimeoutError) as e:      # 다음 분에 다시(1분에 한 번)
+                                print("분봉 대조 실패", type(e).__name__, e, flush=True); own_chk += 1; continue
                             own_chk = None
                         if top is not None and L.done is not None:
                             for s in range(L.done + 1, top + 1):
