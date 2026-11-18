@@ -48,7 +48,8 @@
    "title": "뒤집은 관행 GEX → 4시간 실현변동성",
    "what": "딜러 = 콜 매도·풋 매수 가정의 GEX 가 다음 4시간 변동성을 설명하나 — 표본 밖 10-01~11-10, 05:00 UTC 이후 한 번. 그 전까지 감마 화면은 서술용 · 11-07 사전 결정: 결과와 무관하게 화면은 서술용 유지·배포 없음(통과해도 QX4 위 증분이 아니고, 결과 보고 부호를 뒤집은 가설이다). 실행은 기록용",
    "how": "python scripts/prereg_eth_reverse_conventional_gex_eval_20261001.py --start 2026-10-01 --end 2026-11-10",
-   "doc": "docs/experiments/eth_reverse_conventional_gex_prereg_20261001.md"
+   "doc": "docs/experiments/eth_reverse_conventional_gex_prereg_20261001.md",
+   "done": "11-18 판정 불통과 — week β −0.158 [−0.356,+0.057] (959시간·40일), 반쪽 부호 불일치 · 화면 서술용 유지·배포 없음"
   },
   {
    "id": "liqmap_fwd",
@@ -66,7 +67,8 @@
    "title": "옵션 정보 두 줄 — ATM 호가 폭 · 선도−지수",
    "what": "근거 없음·반대면 옵션 카드에서 줄을 뺀다 · 지지면 툴팁을 «검증됨»으로 · 11-07 사전 결정: 선도−지수 줄은 결과와 무관하게 뺀다(통과해도 의미 일치 확인일 뿐 쓰임이 없다). ATM 호가 폭만 이 판정을 따른다",
    "how": "python scripts/research_eth_option_info_surface_validate_20261002.py  (7번을 판정 기간으로)",
-   "doc": "docs/experiments/eth_option_info_untestable_prereg_20261002.md"
+   "doc": "docs/experiments/eth_option_info_untestable_prereg_20261002.md",
+   "done": "11-18 판정 — ATM 호가 폭 «반대» β −0.069 [−0.121,−0.014] (1,087시간·46일) → 사전 규칙상 줄 빼기 · 선도−지수 근거 없음 ρ +0.126 [−0.069,+0.316] → 사전 결정대로 빼기"
   },
   {
    "id": "f0b",
@@ -90,11 +92,11 @@
   },
   {
    "id": "exh1",
-   "date": "2027-04-01",
+   "date": "2027-02-15",
    "approx": true,
    "kind": "건수 기준",
    "title": "ETH 소진형 대량 델타 4시간 지속 — 1차 점검(125건)",
-   "what": "누적 125건에서 z ≥ 4.05. 문턱 전엔 결과를 보지 않는다 — --status 로 건수만",
+   "what": "누적 125건에서 z ≥ 4.05. 문턱 전엔 결과를 보지 않는다 — --status 로 건수만 · 11-18 중간 점검: 하루 0.94건 속도로 125건은 2027-02 중순(옛 04-01 추정에서 앞당김) — 02월부터 --status 로 건수 확인",
    "how": "python scripts/research_eth_exhaustion_continuation_fwd_20261001.py --status",
    "doc": "docs/experiments/eth_exhaustion_continuation_fwd_prereg_20261001.md"
   },
@@ -116,7 +118,8 @@
    "title": "max pain 1h·6h 규칙 — 표본 밖 만기 40개",
    "what": "평균 > 0 이고 날짜 부트스트랩 CI 0 배제 · 전체와 «이벤트일(사전) 제외» 두 집계 · 11-07 사전 결정: 판정 전 매매 없음. 통과해도 곧바로 매매하지 않고 상위 건 집중도와 표본 안 44건 제외 결과를 본 뒤 전진으로 넘긴다",
    "how": "python scripts/live_eth_maxpain_oos_ledger_20261007.py report  (서버)",
-   "doc": "docs/experiments/eth_maxpain_1h_oos_ledger_20261003.md"
+   "doc": "docs/experiments/eth_maxpain_1h_oos_ledger_20261003.md",
+   "done": "11-18 판정 불통과 — 처음 40개 1h +3.18bp [−8.3,+15.5] · 6h +0.027% [−0.30,+0.34], 이벤트일(사전) 제외도 불통과 · 상위 3건 빼면 음 · 매매·전진 없음"
   },
   {
    "id": "dir4h_p2",

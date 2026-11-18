@@ -30,9 +30,23 @@ def ms(ts):
 
 
 def read(path):
+    """2026-11-18 중간 점검: 서버 재시작 때 쓰다 끊긴 줄(NUL 바이트·잘린 JSON)에서 JSONDecodeError 로 판정 전체가 죽었다
+    (pred_record BTC 2108행 · SOL·XRP 4261행, 11-10 22:40 UTC) -- 그런 줄은 건너뛰고 수를 알린다. 채점 규칙은 그대로."""
     if not Path(path).exists():
         return []
-    return [json.loads(ln) for ln in Path(path).read_text().splitlines() if ln.strip()]
+    out, bad = [], 0
+    for ln in Path(path).read_text(errors="replace").splitlines():
+        t = ln.replace("\x00", "").strip()
+        if not t:
+            bad += ln != t   # NUL 만 있던 줄
+            continue
+        try:
+            out.append(json.loads(t))
+        except ValueError:
+            bad += 1
+    if bad:
+        print(f"{path}: 깨진 줄 {bad}개 건너뜀(쓰다 끊긴 줄 · 채점 규칙 그대로)", flush=True)
+    return out
 
 
 def boot_days(days, stat):
