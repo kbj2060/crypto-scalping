@@ -3982,6 +3982,7 @@ html.fp-lock { overflow: hidden; scrollbar-gutter: stable; }
   html.fp-wide #fpCoinBtn { display: inline-flex; }
   /* 2026-11-20 시안 B: 전체화면 보기·봉 탭 = 단추 아래 펼침(app.js fpDd*) -- 도구 상자가 짧아져 LONG·SHORT·MANAGE 를 안 덮는다 */
   html.fp-wide .fp-dd { display: inline-flex; }
+  html.fp-wide .fp-dd[hidden] { display: none; }
   html.fp-wide #fpCard #fpViewTabs:not(.dd-open), html.fp-wide #fpCard #chartWindowTabs:not(.dd-open) { display: none !important; }
   html.fp-wide #fpCard .dd-open { position: absolute; top: calc(100% + 6px); z-index: 7; padding: 4px; border: 1px solid var(--line); background: var(--panel-strong);
     box-shadow: 0 10px 28px rgb(0 0 0 / .4); }

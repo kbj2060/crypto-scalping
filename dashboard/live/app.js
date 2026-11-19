@@ -1775,8 +1775,9 @@ function setupAssetPop() {
   // [ ] = 이전·다음 코인(보이는 탭 순서) -- 전체화면에서만 · 글 쓰는 칸이면 무시
   document.addEventListener("keydown", (e) => {
     if ((e.key !== "[" && e.key !== "]") || e.ctrlKey || e.metaKey || e.altKey || !document.documentElement.classList.contains("fp-wide") || e.target.closest?.("input, textarea, select, [contenteditable]")) return;
+    if (el("entryPop") || lineDraft || armedEdit?.cfm || document.querySelector(".ms-x, dialog[open]")) return;   // 검증 11-20: 주문 막대·선 초안·확인이 열려 있으면 코인을 안 바꾼다
     const ks = [...document.querySelectorAll("#snapshotAssetTabs .asset-tab")].filter((b) => !b.hidden).map((b) => b.dataset.asset), i = ks.indexOf(activeSnapshotAsset);
-    if (ks.length > 1) { e.preventDefault(); setActiveSnapshotAsset(ks[(i + (e.key === "]" ? 1 : ks.length - 1)) % ks.length]); }
+    if (ks.length > 1) { e.preventDefault(); setActiveSnapshotAsset(ks[i < 0 ? (e.key === "]" ? 0 : ks.length - 1) : (i + (e.key === "]" ? 1 : ks.length - 1)) % ks.length]); }   // 목록에만 있는 코인(i<0)이면 처음·끝으로
   });
   search?.addEventListener("input", renderAssetPop);
   search?.addEventListener("keydown", (e) => { if (e.key === "Enter") { const f = pop.querySelector("[data-pick]"); if (f) f.click(); } });
@@ -1998,9 +1999,11 @@ function fpDdSync() {
     const x = el(b)?.querySelector("b"), a = el(t)?.querySelector(".asset-tab.active");
     if (x) x.textContent = a ? a.textContent.trim() : "넓힘";   // 휠로 넓힌 창 = 어느 칸도 안 켜짐
   });
+  const wb = el("fpWinDd"); if (wb) wb.hidden = !!el("chartWindowTabs")?.hidden;   // 검증 11-20: 체결 버블·청산 보기는 봉 탭 줄을 숨긴다(liq_profile.js) -- 단추도 같이(안 그러면 빈 목록이 열렸다)
 }
+addEventListener("fpview", () => setTimeout(fpDdSync));   // 검증 11-20: 저장된 보기 복원·보기 전환 뒤 단추 글자(이벤트가 .active 보다 먼저 온다 -- 한 틱 뒤)
 function fpDdClose() {
-  document.querySelectorAll(".dd-open").forEach((t) => t.classList.remove("dd-open"));
+  document.querySelectorAll(".dd-open").forEach((t) => { t.classList.remove("dd-open"); t.style.left = ""; });   // 검증 11-20: left 를 남기면 전체화면을 나간 뒤 일반 화면 탭 줄이 그만큼 밀렸다
   document.querySelectorAll(".fp-dd").forEach((b) => b.setAttribute("aria-expanded", "false"));
 }
 document.querySelectorAll(".fp-dd").forEach((b) => b.addEventListener("click", () => {
@@ -4010,6 +4013,7 @@ function fpWideSet(on) {
   const b = el("fpWideBtn"); if (!b) return;
   document.documentElement.classList.toggle("fp-wide", on);
   b.setAttribute("aria-pressed", String(on));
+  if (!on) { fpDdClose(); const hd = document.querySelector("#fpCard > .ops-health-head"); if (hd) hd.style.top = ""; }   // 검증 11-20: 전체화면용 머리 줄 top·열린 드롭다운이 일반 화면에 남았다(청산 보기는 top 을 안 지운다)
   b.setAttribute("aria-label", on ? "전체화면 나가기 (Esc)" : "차트 전체화면"); b.title = b.getAttribute("aria-label");
   try { localStorage.setItem("fpWide", on ? "1" : "0"); } catch (e) { /* 기억은 편의 */ }
   if (typeof scheduleSnapshotChartRender === "function") scheduleSnapshotChartRender();
@@ -7353,7 +7357,7 @@ function fpTipOn(node, html) {   // 캔들 툴팁 대신 이 설명 -- 버블링
   node.addEventListener("mousemove", (e) => { e.stopPropagation(); showTooltip(e.pageX, e.pageY, html); });
   node.addEventListener("mouseleave", hideTooltip);
 }
-let dirFold = false;   // 2026-11-19 펜 메모 «이 부분을 접을 수 있게» -- 판을 머리줄(지표 방향 개수)만 남기고 접는다 · 기억은 편의
+let dirFold = false, dirFoldFocus = false;   // 2026-11-19 펜 메모 «이 부분을 접을 수 있게» -- 판을 머리줄(지표 방향 개수)만 남기고 접는다 · 기억은 편의
 try { dirFold = localStorage.getItem("dirBoardFold") === "1"; } catch (err) { /* 기억은 편의 */ }
 const fpBoardBox = (G) => (fpBoard ? [G.ml + 6, G.mt + fpBoard.top, FPB_W, dirFold ? 48 : 210] : null);   // 판 자리 예약(줄 수를 아직 몰라 넉넉히) -- 꼬리표가 비킨다
 function dirTri(g, cx, cy, d, c, r = 5) {   // 위 ▲ / 아래 ▼ 삼각형(그린 아이콘 -- 글자 화살표 대신)
@@ -7398,6 +7402,10 @@ function renderDirBoard() {   // 왼쪽 위 «지표 방향» 판 -- 줄 = 지�
   mk(g, "text", { x: L + 12, y: T + 19, fill: "var(--muted)", "font-size": 11, "font-weight": 700, "font-family": F }, "지표 방향");
   {   // 접기 단추(오른쪽 위) -- 접으면 머리줄만
     const fb = mk(g, "g", { role: "button", tabindex: 0, "aria-label": fold ? "지표 방향 펼치기" : "지표 방향 접기", "aria-expanded": String(!fold), class: "dirb-fold" });
+    // 검증 11-20: 판은 렌더마다 새로 지어(차트 전체가 먼저 지워진다) 포커스가 body 로 떨어졌다 -- 포커스를 기억해 새 단추에 되돌린다(진짜로 떠난 blur 만 잊는다)
+    fb.addEventListener("focus", () => { dirFoldFocus = true; });
+    fb.addEventListener("blur", () => setTimeout(() => { if (fb.isConnected) dirFoldFocus = false; }));
+    if (dirFoldFocus && document.activeElement === document.body) fb.focus({ preventScroll: true });
     mk(fb, "rect", { x: L + w - 30, y: T + 5, width: 24, height: 20, rx: 6, fill: "var(--text)", "fill-opacity": 0.06 });
     const cx = L + w - 18, cy = T + 15;
     mk(fb, "path", { d: fold ? `M${cx - 4} ${cy - 2}l4 4l4 -4` : `M${cx - 4} ${cy + 2}l4 -4l4 4`, fill: "none", stroke: "var(--muted)", "stroke-width": 1.8, "stroke-linecap": "round", "stroke-linejoin": "round" });
@@ -7872,7 +7880,11 @@ function setupChartPan() {
     if (ev.type === "pointerup") flingFrom(d, ev.timeStamp);
   };
   svg.addEventListener("pointerup", stop); svg.addEventListener("pointercancel", stop);
-  svg.addEventListener("dblclick", () => { if (!isMobileChartMode() && chartGeo) fpFitQty(); else if (chartPanEnd != null || chartPanY || chartPanRight) chartPanReset(); });
+  svg.addEventListener("dblclick", (ev) => {
+    // 검증 11-20: 끌기·휠과 같은 문 -- 일봉·4h·버블(fpAltOn)·오른쪽 수급 칸·가격 칸 밖·지표 방향 판 접기 단추에서는 풋프린트 창을 안 건드린다
+    if (fpAltOn() || ev.target.closest?.("#dirBoard") || (flowOn() && (zoneY(ev.clientY) !== "plot" || zoneX(ev.clientX) === "side"))) return;
+    if (!isMobileChartMode() && chartGeo) fpFitQty(); else if (chartPanEnd != null || chartPanY || chartPanRight) chartPanReset();
+  });
   document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && meas) measClear(); });
   document.addEventListener("click", (ev) => { if (ev.target.closest?.(".ms-x")) measClear(); });
   // 2026-10-27 휴대폰(사용자 «모바일에서도 풋프린트 차트를 자유롭게»): **가격 칸 안에서 시작한** 손가락만 차트가 받는다 --
