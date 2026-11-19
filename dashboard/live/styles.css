@@ -3999,6 +3999,8 @@ html.fp-lock { overflow: hidden; scrollbar-gutter: stable; }
 .fp-line-btn button.pm-tab::before { width: 7px; height: 7px; border-radius: 2px; transform: rotate(45deg); background: var(--accent); }
 .fp-line-btn button.pm-tab b { margin-left: 8px; font: 700 12px var(--font-mono); font-variant-numeric: tabular-nums; }
 .fp-line-btn button.pm-tab b.good { color: var(--good); } .fp-line-btn button.pm-tab b.bad { color: var(--bad); }
+.fp-line-btn button.pm-tab .pm-w { margin-left: 10px; font: 600 11px var(--font-mono); font-style: normal; letter-spacing: .04em; color: var(--muted); font-variant-numeric: tabular-nums; }   /* 11-20 펜 메모 «보유 비중» -- 손익보다 한 단 흐리게 */
+.fp-line-btn button.pm-tab .pm-w:empty { display: none; }
 .fp-line-btn button.pm-tab[aria-expanded="true"] { color: var(--text); }
 .fp-line-btn .pm-car { margin-left: 6px; width: 9px; height: 9px; flex: none; transition: transform .16s ease; }
 .fp-line-btn [aria-expanded="true"] .pm-car { transform: rotate(180deg); }
