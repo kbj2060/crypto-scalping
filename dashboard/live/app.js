@@ -10166,11 +10166,28 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   }
   const tagX = ml + cw + 4, xR = ml + cw - 4, inR = LBL !== "B";
   const xRR = w - mr - 2;   // 호가 프로파일 오른쪽 끝 -- 현재가·지지/저항·감마 플립·지표·max pain 이름이 여기 오른쪽 정렬
+  // 2026-11-19 펜 메모 «라벨이 다 여기 있어서 TPO 가 잘 안 보여» → 사용자 «C 로 하되 선 이름은 2줄로 작게»: 호가 칸이 없는 넓은 2단(BOOK_W 0)에선 꼬리표가 TPO 기둥 위에 얹혔다.
+  //   레벨 꼬리표(지지·저항·고통·스윙 등 상자) = 캔들 플롯 왼쪽 끝(지표 방향 판과 겹치면 판 오른쪽) · 선 이름(VWAP·EMA 등) = 플롯 위 여백 두 줄 범례 + TPO 오른쪽 끝 색 눈금(마우스 = 이름·가격) · 현재가 알약은 그대로.
+  const legOn = gutOn && TRADE_W > 0 && !BOOK_W && svg.id === "candleSvgSnapshot", legItems = [];
+  const bdBox = legOn ? fpBoardBox({ ml, mt }) : null;
+  const tagLeftX = (y) => (bdBox && y + 9 > bdBox[1] && y - 9 < bdBox[1] + bdBox[3] ? bdBox[0] + bdBox[2] + 8 : ml + 8);
   // 2026-09-30 약어 → 짧은 이름(사용자 «약어가 너무 많아 이해가 힘들다»): 이름은 그대로, 가격만 호버로 뺀다.
   const CODE = (nm) => nm.replace("앵커·전일고", "앵커 전일고").replace("앵커·전일저", "앵커 전일저")
     .replace(/^HL (롱|숏).*/, "HL $1청산");
   priceLabels.forEach(p => {
     const labelYRaw = p.adjustedY !== undefined ? p.adjustedY : p.realY;
+    if (p.note && legOn && inR) {   // 선 이름 → 위 범례 · 제자리엔 색 눈금(지시선 = 선 끝에서 눈금까지 점선)
+      const full = `${p.label}${p.noPrice ? "" : " " + fmtNum(p.val, Math.max(0, pxDp() - 1))}${p.offTop ? " ↑" : p.offBottom ? " ↓" : ""}`;
+      const ng = document.createElementNS(NS, "g"), y = p.realY.toFixed(1);
+      const lead = document.createElementNS(NS, "path");
+      Object.entries({ d: `M${ml + cw} ${y} L${xRR - 14} ${y}`, stroke: p.color, "stroke-opacity": 0.3, "stroke-dasharray": "2 3", fill: "none" }).forEach(([k, v]) => lead.setAttribute(k, v));
+      const tick = document.createElementNS(NS, "path");
+      Object.entries({ d: `M${xRR - 12} ${y} h10`, stroke: p.color, "stroke-width": 3, "stroke-linecap": "round" }).forEach(([k, v]) => tick.setAttribute(k, v));
+      const ti = document.createElementNS(NS, "title"); ti.textContent = p.title ? `${full}\n${p.title}` : full; tick.appendChild(ti);
+      ng.appendChild(lead); ng.appendChild(tick); svg.appendChild(ng);
+      legItems.push({ name: `${CODE(p.label)}${p.offTop ? "↑" : p.offBottom ? "↓" : ""}`, color: p.color, tip: ti.textContent });
+      return;
+    }
     if (p.note) {   // 겹침 선 이름 -- 선은 제자리에 이미 있다. 칸 안 글자 + 지시선만.
       const ly = Math.max(mt + 9, Math.min(plotBottom - 9, labelYRaw));
       const ng = document.createElementNS(NS, "g");
@@ -10274,15 +10291,16 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     const gutTag = gutOn && !!txt;   // 2026-09-30 꼬리표 칸: 모든 가격 이름이 상자(현재 = 채움 · 나머지 = 테두리)
     const pill = nowTag && gutTag;   // 2026-11-04 펜 메모 시안 A «현재가 라벨 = 축 태그»: 데스크톱 풋프린트 현재가 = 채운 알약(밝은 바탕 + 어두운 숫자) · 셀·막대 위에서도 읽힌다
     const tagBg = nowTag || gutTag ? document.createElementNS(NS, "rect") : null;
+    const sideL = legOn && gutTag && !nowTag && inR, tagL = sideL ? tagLeftX(labelY) : 0;   // 11-19 레벨 꼬리표 = 플롯 왼쪽 끝
     if (gutTag && (!inR || Math.abs(labelY - p.realY) > 2)) {
       const lead = document.createElementNS(NS, "path");
       // 2026-10-01 가격 이름은 프로파일 오른쪽 끝 -- 밀렸으면 그 끝에서 세로로 짧게 잇는다(선은 이미 전폭이다)
-      lead.setAttribute("d", inR ? `M${xRR + 1} ${p.realY.toFixed(1)} L${xRR + 1} ${labelY.toFixed(1)}` : `M${ml + cw} ${p.realY.toFixed(1)} L${tagX - 2} ${labelY.toFixed(1)}`);
+      lead.setAttribute("d", sideL ? `M${tagL + 1} ${p.realY.toFixed(1)} L${tagL + 1} ${labelY.toFixed(1)}` : inR ? `M${xRR + 1} ${p.realY.toFixed(1)} L${xRR + 1} ${labelY.toFixed(1)}` : `M${ml + cw} ${p.realY.toFixed(1)} L${tagX - 2} ${labelY.toFixed(1)}`);
       lead.setAttribute("stroke", p.color); lead.setAttribute("stroke-opacity", "0.6"); lead.setAttribute("fill", "none");
       svg.appendChild(lead);
     }
     if (tagBg) {
-      tagBg.setAttribute("x", gutTag ? tagX : 2); tagBg.setAttribute("y", labelY - 9); tagBg.setAttribute("height", 18);
+      tagBg.setAttribute("x", sideL ? tagL : gutTag ? tagX : 2); tagBg.setAttribute("y", labelY - 9); tagBg.setAttribute("height", 18);
       tagBg.setAttribute("rx", 3);
       if (pill) { tagBg.setAttribute("fill", "var(--ink)"); tagBg.setAttribute("rx", 9); tagBg.dataset.pill = "1"; }
       else if (nowTag) tagBg.setAttribute("fill", p.color);
@@ -10290,8 +10308,9 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       svg.appendChild(tagBg);
     }
     if (txt) {
-      txt.setAttribute("x", gutTag ? (inR ? xRR - (pill ? 9 : 5) : tagX + (pill ? 9 : 5)) : nowTag ? 7 : ml - TRADE_L - 5); txt.setAttribute("y", labelY + (nowTag ? 4.5 : 4));
-      txt.setAttribute("text-anchor", gutTag ? (inR ? "end" : "start") : nowTag ? "start" : "end");
+      txt.setAttribute("x", sideL ? tagL + 5 : gutTag ? (inR ? xRR - (pill ? 9 : 5) : tagX + (pill ? 9 : 5)) : nowTag ? 7 : ml - TRADE_L - 5); txt.setAttribute("y", labelY + (nowTag ? 4.5 : 4));
+      txt.setAttribute("text-anchor", sideL ? "start" : gutTag ? (inR ? "end" : "start") : nowTag ? "start" : "end");
+      if (sideL) txt.classList.add("edge-l");   // OB·방향 표식 꼬리표가 이 자리를 피한다
       txt.setAttribute("font-size", nowTag ? (mobileChart ? "12" : "13") : gutTag ? "10.5" : "10");   // 2026-10-01 차트 글씨 상한 10.5(DESIGN 차트 예외)
       txt.setAttribute("font-weight", "bold"); txt.setAttribute("fill", nowTag && !gutTag ? inkOnFill() : p.color);
       if (pill) {   // 알약 안 숫자: 14px · 굵게 · 차트 바탕색 글자
@@ -10320,7 +10339,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         try { tw = pill ? txt.getComputedTextLength() : textW(txt); } catch (e) { /* 비렌더 */ }   // 🔴2026-11-04 펜 메모 «현재가 알약 왼쪽이 커졌다 작아졌다»: 전체 그리기는 canvas 폭(textW) · 빠른 갱신은 SVG 폭이라 두 값이 달라 번갈아 흔들렸다 -- 알약은 한 가지 잣대(SVG) + 4px 단위로 맞춘다
         const bw0 = pill ? pillW(tw, txt.textContent.length) : (tw > 0 ? tw : txt.textContent.length * 7.5) + 10;
         tagBg.setAttribute("width", bw0);
-        if (gutTag && inR) { tagBg.setAttribute("x", xRR - bw0); tagBg.dataset.right = String(xRR); }   // 오른쪽 정렬(빠른 갱신도 이 오른쪽 끝을 지킨다)
+        if (gutTag && inR && !sideL) { tagBg.setAttribute("x", xRR - bw0); tagBg.dataset.right = String(xRR); }   // 오른쪽 정렬(빠른 갱신도 이 오른쪽 끝을 지킨다)
       }
     }
 
@@ -10402,6 +10421,27 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       if (priceLeft && txt) txt.dataset.withPrice = gutOn ? "num" : "1";   // 빠른 갱신이 글자 속 가격도 바꾼다(num = 숫자만)
     }
   });
+  if (legItems.length && mt >= 44) {   // 11-19 선 이름 범례 -- 플롯 위 여백 두 줄(작게) · 오른쪽 끝 = 캔들 플롯 끝 · LONG·SHORT 단추 오른쪽부터
+    const sb = svg.getBoundingClientRect(), lb = el("fpLineBtn")?.getBoundingClientRect();
+    const x0 = lb && lb.width ? lb.right - sb.left + 14 : ml + 8, xEnd = ml + cw - 4, half = Math.ceil(legItems.length / 2), rowsL = [legItems.slice(0, half), legItems.slice(half)];
+    const rowW = (r, f) => r.reduce((a, it) => a + 14 + measureTextW(it.name, `700 ${f}px "Pretendard Variable", Pretendard, sans-serif`) + 12, -12);
+    const fs = Math.max(...rowsL.map((r) => rowW(r, 10))) > xEnd - x0 ? 9 : 10;   // ponytail: 9px 로도 넘치면 왼쪽으로 삐져나간다 -- 선 이름이 8개를 넘는 일이 잦아지면 «+N» 접기
+    const W = Math.max(...rowsL.map((r) => rowW(r, fs))), lg = document.createElementNS(NS, "g");
+    lg.setAttribute("class", "fp-leg");
+    rowsL.forEach((r, ri) => {
+      let x = xEnd - W;
+      const y = mt - 38 + ri * 14;
+      for (const it of r) {
+        const sw = document.createElementNS(NS, "path"), tx = document.createElementNS(NS, "text"), ti = document.createElementNS(NS, "title");
+        Object.entries({ d: `M${x.toFixed(1)} ${y - 3.5} h10`, stroke: it.color, "stroke-width": 3, "stroke-linecap": "round" }).forEach(([k, v]) => sw.setAttribute(k, v));
+        Object.entries({ x: (x + 14).toFixed(1), y, fill: it.color, "font-size": fs, "font-weight": 700, "font-family": "var(--font-sans)" }).forEach(([k, v]) => tx.setAttribute(k, v));
+        tx.textContent = it.name; ti.textContent = it.tip; tx.appendChild(ti);
+        lg.appendChild(sw); lg.appendChild(tx);
+        x += 14 + measureTextW(it.name, `700 ${fs}px "Pretendard Variable", Pretendard, sans-serif`) + 12;
+      }
+    });
+    svg.appendChild(lg);
+  }
   // 2026-09-22 사용자 지시: 모바일은 배지 대신 플롯 **아래 한 줄**이 값을 갖는다.
   //   순서는 priceLabels 그대로다 -- y 오름차순 = 가격 내림차순이라 줄이 위에서 아래로
   //   읽히는 순서와 같다. 폭을 넘으면 거기서 멈춘다(잘린 글자를 남기지 않는다).
