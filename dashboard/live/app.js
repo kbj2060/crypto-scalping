@@ -7223,6 +7223,16 @@ function chartPanTo(edge) {   // edge = 소수 봉 인덱스(끌기·관성·휠
   maybeFetchFpWeek();   // 처음 옮기는 순간 1주일을 받는다
   return true;
 }
+// 2026-11-20 펜 메모 «더블클릭 = 지금 화면에서 체결 수가 보이는 최소 화면 · 마지막 봉은 맨 오른쪽이 아니라 오른쪽에 2칸 빈 공간 · 전체화면도»:
+//   칸 숫자(renderCandleSvg showQty: half ≥ 18)가 들어가는 가장 넓은 창(봉 수)으로 맞추고 실시간 + 빈 칸 2 · 세로 이동 풀기(데스크톱 -- 휴대폰 두 번 톡은 옛 «최신으로»)
+const fpHalfAt = (slot) => Math.max(2, (slot * 0.86 - Math.max(3, Math.min(8, slot * 0.14)) - 2) / 2 - 0.5);   // renderCandleSvg 의 bw·fpcWC·half 와 같은 식(데스크톱 박스 봉)
+function fpFitQty() {
+  let n = Math.floor(chartGeo.cw / 12);
+  while (n > 12 && fpHalfAt(chartGeo.cw / n) < 18) n--;
+  chartFlingStop(); chartPanEnd = null; chartPanFrac = 0; chartPanY = 0;
+  chartWindowBars = n; chartPanRight = Math.min(2, chartPanRightMax());
+  renderChartWindowTabs(); scheduleSnapshotChartRender(); maybeFetchFpWeek();
+}
 function chartPanReset() { chartFlingStop(); chartPanEnd = null; chartPanFrac = 0; chartPanRight = 0; chartPanY = 0; scheduleSnapshotChartRender(); }   // 최신 봉 · 자동 축
 const chartPanStep = () => Math.max(1, Math.round(chartWindowBars / 12));   // 한 칸 이동 = 창의 1/12(12봉 창 = 1봉 · 1주일 창 = 168봉)
 const chartPanBy = (n) => chartPanTo(chartPanEdge(chartTfFull()) - n * chartPanStep());   // n>0 = 과거로
@@ -7862,7 +7872,7 @@ function setupChartPan() {
     if (ev.type === "pointerup") flingFrom(d, ev.timeStamp);
   };
   svg.addEventListener("pointerup", stop); svg.addEventListener("pointercancel", stop);
-  svg.addEventListener("dblclick", () => { if (chartPanEnd != null || chartPanY || chartPanRight) chartPanReset(); });
+  svg.addEventListener("dblclick", () => { if (!isMobileChartMode() && chartGeo) fpFitQty(); else if (chartPanEnd != null || chartPanY || chartPanRight) chartPanReset(); });
   document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && meas) measClear(); });
   document.addEventListener("click", (ev) => { if (ev.target.closest?.(".ms-x")) measClear(); });
   // 2026-10-27 휴대폰(사용자 «모바일에서도 풋프린트 차트를 자유롭게»): **가격 칸 안에서 시작한** 손가락만 차트가 받는다 --
@@ -11256,7 +11266,10 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           fs.style.top = y; fs.style.right = `${Math.round(c.width - colR)}px`;
           if (pan) { pan.style.top = y; pan.style.left = `${Math.round(colL + pan.offsetWidth / 2)}px`; }   // 2026-10-28 펜 메모: 미니맵 = 옛 청산 밀도 자리(왼쪽 끝)
           const lb = fpLineBtnEl(card);   // 2026-10-28 펜 메모 «주문은 풋프린트 바로 위 가운데에 버튼으로 크게»
-          lb.style.top = y; lb.style.left = `${Math.round(a.left - c.left + chartGeo.ml + chartGeo.cw / 2)}px`;   // 2026-11-04 펜 메모 «롱/숏 버튼을 풋프린트 차트 중앙에» -- 옛 = 왼쪽 칸 전체(체결·호가 기둥 포함) 가운데
+          lb.style.top = y; lb.style.left = `${Math.round(a.left - c.left + chartGeo.ml + chartGeo.cw / 2)}px`;
+          // 2026-11-20 펜 메모 «도구 상자를 LONG/SHORT/MANAGE 줄 왼쪽으로 · 컨셉 통일»: 전체화면이면 머리(도구 줄)의 세로 가운데를 이 줄에 맞춘다(모양은 CSS html.fp-wide)
+          const hd = card.querySelector(":scope > .ops-health-head");
+          if (hd) hd.style.top = FPW ? `${Math.round(parseFloat(y) - hd.offsetHeight / 2)}px` : "";   // 2026-11-04 펜 메모 «롱/숏 버튼을 풋프린트 차트 중앙에» -- 옛 = 왼쪽 칸 전체(체결·호가 기둥 포함) 가운데
         }); else if (pan) { pan.style.top = pan.style.left = ""; }
         card.classList.toggle("fp-toprow", on);   // 이 줄이 있으면 체결 기둥 토글의 작은 «선 주문»은 숨긴다(큰 버튼 하나)
         fpMobRowSet(!on && mobileChart && flowOn() && !fpAltOn(), card, fs);   // 2026-10-28 휴대폰 = 머리 마지막 줄 [· | SLTP | 지표]
