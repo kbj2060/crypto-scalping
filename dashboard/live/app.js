@@ -7311,7 +7311,9 @@ function fpTipOn(node, html) {   // 캔들 툴팁 대신 이 설명 -- 버블링
   node.addEventListener("mousemove", (e) => { e.stopPropagation(); showTooltip(e.pageX, e.pageY, html); });
   node.addEventListener("mouseleave", hideTooltip);
 }
-const fpBoardBox = (G) => (fpBoard ? [G.ml + 6, G.mt + fpBoard.top, FPB_W, 210] : null);   // 판 자리 예약(줄 수를 아직 몰라 넉넉히) -- 꼬리표가 비킨다
+let dirFold = false;   // 2026-11-19 펜 메모 «이 부분을 접을 수 있게» -- 판을 머리줄(지표 방향 개수)만 남기고 접는다 · 기억은 편의
+try { dirFold = localStorage.getItem("dirBoardFold") === "1"; } catch (err) { /* 기억은 편의 */ }
+const fpBoardBox = (G) => (fpBoard ? [G.ml + 6, G.mt + fpBoard.top, FPB_W, dirFold ? 48 : 210] : null);   // 판 자리 예약(줄 수를 아직 몰라 넉넉히) -- 꼬리표가 비킨다
 function dirTri(g, cx, cy, d, c, r = 5) {   // 위 ▲ / 아래 ▼ 삼각형(그린 아이콘 -- 글자 화살표 대신)
   const e = document.createElementNS("http://www.w3.org/2000/svg", "path");
   e.setAttribute("d", d > 0 ? `M${cx - r} ${cy + r * 0.8}L${cx + r} ${cy + r * 0.8}L${cx} ${cy - r * 0.8}Z` : `M${cx - r} ${cy - r * 0.8}L${cx + r} ${cy - r * 0.8}L${cx} ${cy + r * 0.8}Z`);
@@ -7346,14 +7348,25 @@ function renderDirBoard() {   // 왼쪽 위 «지표 방향» 판 -- 줄 = 지�
   if (!svg || !B || fpAltOn() || !G || !(B.rows.length || B.cond.length)) return;
   const NSV = "http://www.w3.org/2000/svg", F = "var(--font-sans)", mk = (p, tag, a, txt) => { const e = document.createElementNS(NSV, tag); for (const k in a) e.setAttribute(k, a[k]); if (txt != null) e.textContent = txt; p.appendChild(e); return e; };
   const rows = B.rows, up = rows.filter((r) => r.d > 0).length, dn = rows.filter((r) => r.d < 0).length, ups = B.cond.filter((c) => c.d > 0), dns = B.cond.filter((c) => c.d < 0);
-  const L = G.ml + 6, T = G.mt + B.top, w = FPB_W, rh = 23, head = rows.length ? 44 : 10, foot = (ups.length ? 20 : 0) + (dns.length ? 20 : 0), h = head + rows.length * rh + (foot ? foot + 10 : 4);
+  const fold = dirFold, L = G.ml + 6, T = G.mt + B.top, w = FPB_W, rh = 23, head = rows.length ? 44 : 30, foot = fold ? 0 : (ups.length ? 20 : 0) + (dns.length ? 20 : 0), h = fold ? head : head + rows.length * rh + (foot ? foot + 10 : 4);
   const g = mk(svg, "g", { id: "dirBoard" });
   const bg = mk(g, "rect", { x: L, y: T, width: w, height: h, rx: 10, fill: "var(--panel-strong)", "fill-opacity": 0.95, stroke: "var(--line)" });
   bg.addEventListener("mousemove", (e) => { e.stopPropagation(); hideTooltip(); });   // 판 위에선 봉 툴팁 안 띄움
   bg.setAttribute("pointer-events", "all"); bg.classList.add("fp-tip");
+  mk(g, "text", { x: L + 12, y: T + 19, fill: "var(--muted)", "font-size": 11, "font-weight": 700, "font-family": F }, "지표 방향");
+  {   // 접기 단추(오른쪽 위) -- 접으면 머리줄만
+    const fb = mk(g, "g", { role: "button", tabindex: 0, "aria-label": fold ? "지표 방향 펼치기" : "지표 방향 접기", "aria-expanded": String(!fold), class: "dirb-fold" });
+    mk(fb, "rect", { x: L + w - 30, y: T + 5, width: 24, height: 20, rx: 6, fill: "var(--text)", "fill-opacity": 0.06 });
+    const cx = L + w - 18, cy = T + 15;
+    mk(fb, "path", { d: fold ? `M${cx - 4} ${cy - 2}l4 4l4 -4` : `M${cx - 4} ${cy + 2}l4 -4l4 4`, fill: "none", stroke: "var(--muted)", "stroke-width": 1.8, "stroke-linecap": "round", "stroke-linejoin": "round" });
+    const flip = (e) => { e.stopPropagation(); e.preventDefault(); dirFold = !dirFold; try { localStorage.setItem("dirBoardFold", dirFold ? "1" : "0"); } catch (err) { /* 기억은 편의 */ } renderSnapshotChart(); el("candleSvgSnapshot")?.querySelector("#dirBoard .dirb-fold")?.focus(); };   // 전체 다시 그림 -- 꼬리표가 접힌 판 자리(fpBoardBox)를 바로 따른다
+    fb.setAttribute("pointer-events", "all"); fb.style.cursor = "pointer";
+    fb.addEventListener("click", flip); fb.addEventListener("mousedown", (e) => e.stopPropagation());
+    fb.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") flip(e); });
+    fpTipOn(fb, fold ? "펼치기 -- 지표마다 한 줄" : "접기 -- 개수 줄만 남김");
+  }
   if (rows.length) {
-    mk(g, "text", { x: L + 12, y: T + 19, fill: "var(--muted)", "font-size": 11, "font-weight": 700, "font-family": F }, "지표 방향");
-    const bx = L + 86, bw = w - 98, n = up + dn || 1, uw = Math.round(bw * up / n);
+    const bx = L + 86, bw = w - 98 - 30, n = up + dn || 1, uw = Math.round(bw * up / n);
     if (up) mk(g, "rect", { x: bx, y: T + 11, width: Math.max(2, uw - (dn ? 1 : 0)), height: 9, rx: 3, fill: "var(--good)" });
     if (dn) mk(g, "rect", { x: bx + uw + (up ? 1 : 0), y: T + 11, width: Math.max(2, bw - uw - (up ? 1 : 0)), height: 9, rx: 3, fill: "var(--bad)" });
     dirTri(g, bx + 5, T + 32, 1, "var(--good)", 4); mk(g, "text", { x: bx + 13, y: T + 36, fill: "var(--good)", "font-size": 11, "font-weight": 750, "font-family": F }, `위 ${up}`);
@@ -7361,6 +7374,7 @@ function renderDirBoard() {   // 왼쪽 위 «지표 방향» 판 -- 줄 = 지�
     const tally = mk(g, "rect", { x: bx, y: T + 6, width: bw, height: 34, fill: "transparent" });
     fpTipOn(tally, "<b>지표 방향 개수</b><br>지금 화면에 보이는 표식마다 한 표(오래된 것·효과 다른 것도 같은 한 표)<br>모두 +1~4%p 수준의 약한 참고 -- 개수가 많다고 더 맞는 것 아님");
   }
+  if (fold) return;
   rows.forEach((r, i) => {
     const y = T + head + i * rh, c = r.d > 0 ? "var(--good)" : "var(--bad)", rg = mk(g, "g", {});
     mk(rg, "rect", { x: L + 6, y, width: w - 12, height: rh - 2, rx: 5, fill: "var(--text)", "fill-opacity": i % 2 ? 0 : 0.035 });
