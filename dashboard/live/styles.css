@@ -3971,6 +3971,9 @@ html.fp-lock { overflow: hidden; scrollbar-gutter: stable; }
     box-shadow: 0 6px 20px rgb(0 0 0 / .35); }
   html.fp-wide #fpCard .chart-head-left { flex: 0 0 auto; flex-wrap: nowrap; gap: 8px; }
   html.fp-wide #fpCard .card-title, html.fp-wide #fpCard .ops-health-head #fpRates, html.fp-wide #fpCard #fpPos { display: none !important; }   /* 11-15: 서랍 머리로 옮긴 #fpRates 는 보인다 */
+  /* 2026-11-20 시안 B: 전체화면 도구 상자 맨 앞 큰 코인 이름 → 코인·주식 선택 창(app.js setupAssetPop) */
+  html.fp-wide #fpCoinBtn { display: inline-flex; }
+  html.fp-wide .asset-pop-keys { display: block; }
   html.fp-wide .entry-pop { z-index: 870; }   /* 검증 11-15: 관리 막대(#entryPop, body 에 붙는 fixed z 60)가 전체화면 카드(860) 뒤에 깔려 안 보였다 */
 }
 @media (min-width: 721px) and (max-width: 1099px) {   /* 검증 11-13: 태블릿에서 주식 카드(.opt-eq)가 데스크톱 배치 + 태블릿 열 비율로 찌그러졌다 -- 태블릿 배치를 주식용으로 */
@@ -4019,3 +4022,14 @@ html.fp-lock { overflow: hidden; scrollbar-gutter: stable; }
 .dirb-fold:focus { outline: none; }
 .dirb-fold:focus-visible > rect { stroke: var(--accent); stroke-width: 1.5; }
 .dirb-fold:hover > rect { fill-opacity: 0.12; }
+
+/* 2026-11-20 시안 B 전체화면 코인 이름 단추 · 선택 창 단축키 줄 -- 둘 다 전체화면(html.fp-wide)에서만 켠다(위 넓은 화면 블록) */
+.fp-coin-btn { display: none; align-items: center; gap: 10px; height: 40px; padding: 0 12px 0 10px; margin-right: 4px; border-radius: 10px; border: 1px solid var(--line);
+  background: rgb(var(--lift) / .06); color: var(--text); cursor: pointer; flex: none; }
+.fp-coin-btn b { font: 800 18px/1 var(--font-sans); letter-spacing: .02em; }
+.fp-coin-btn svg { width: 12px; height: 12px; color: var(--muted); transition: transform .16s ease; }
+.fp-coin-btn:hover, .fp-coin-btn[aria-expanded="true"] { background: rgb(var(--lift) / .12); }
+.fp-coin-btn[aria-expanded="true"] svg { transform: rotate(180deg); }
+.fp-coin-btn:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.asset-pop-keys { display: none; margin: 10px 4px 0; padding-top: 8px; border-top: 1px solid var(--line); font: 600 11px var(--font-sans); color: var(--muted); }
+.asset-pop-keys kbd { font: 700 10px var(--font-mono); padding: 1px 5px; border: 1px solid var(--line); border-radius: 4px; }

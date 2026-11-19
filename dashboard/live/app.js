@@ -1744,7 +1744,7 @@ function assetPinToggle(a) {
   try { localStorage.setItem("snapPins", JSON.stringify([...p])); } catch (e) { /* 기억은 편의 */ }
   renderSnapshotAssetTabs(); renderAssetPop();
 }
-function assetPopClose() { const p = el("assetPop"); if (p && !p.hidden) { p.hidden = true; el("assetMore")?.setAttribute("aria-expanded", "false"); } }
+function assetPopClose() { const p = el("assetPop"); if (p && !p.hidden) { p.hidden = true; ["assetMore", "fpCoinBtn"].forEach((id) => el(id)?.setAttribute("aria-expanded", "false")); } }
 function renderAssetPop() {
   const body = el("assetPopBody"), pop = el("assetPop");
   if (!body || !pop || pop.hidden) return;
@@ -1761,28 +1761,37 @@ function setupAssetPop() {
   const more = el("assetMore"), pop = el("assetPop"), search = el("assetSearch");
   if (!more || !pop) return;
   document.body.appendChild(pop);   // 카드(backdrop-filter)·상단 칸 안에 두면 position:fixed 가 그 상자 기준이 돼 어긋난다 -- body 로 옮긴다
-  let openW = 0;
-  const open = () => {
-    openW = innerWidth;
-    pop.hidden = false; more.setAttribute("aria-expanded", "true"); if (search) search.value = ""; renderAssetPop();
-    const r = more.getBoundingClientRect(), w = Math.min(540, innerWidth - 16);
+  let openW = 0, from = more;   // from = 연 단추(칩 줄 «전체 ▾» 또는 전체화면 코인 이름 #fpCoinBtn) -- 그 아래에 띄우고 닫으면 그리로 포커스
+  const coinBtn = el("fpCoinBtn");
+  const open = (btn = more) => {
+    openW = innerWidth; from = btn;
+    pop.hidden = false; btn.setAttribute("aria-expanded", "true"); if (search) search.value = ""; renderAssetPop();
+    const r = btn.getBoundingClientRect(), w = Math.min(540, innerWidth - 16);
     pop.style.width = `${w}px`; pop.style.top = `${Math.round(r.bottom + 8)}px`; pop.style.left = `${Math.max(8, Math.min(Math.round(r.left), innerWidth - w - 8))}px`;
     if (matchMedia("(pointer: fine)").matches) search?.focus();   // 2026-11-04 펜 메모(모바일 «전체» 드롭다운이 떴다 바로 사라짐): 터치 기기는 포커스하면 키보드가 올라와 resize 가 나고 아래 resize 닫기가 바로 닫았다 -- 키보드도 안 띄운다(검색은 탭하면)
   };
   more.addEventListener("click", () => (pop.hidden ? open() : assetPopClose()));
+  coinBtn?.addEventListener("click", () => (pop.hidden ? open(coinBtn) : assetPopClose()));
+  // [ ] = 이전·다음 코인(보이는 탭 순서) -- 전체화면에서만 · 글 쓰는 칸이면 무시
+  document.addEventListener("keydown", (e) => {
+    if ((e.key !== "[" && e.key !== "]") || e.ctrlKey || e.metaKey || e.altKey || !document.documentElement.classList.contains("fp-wide") || e.target.closest?.("input, textarea, select, [contenteditable]")) return;
+    const ks = [...document.querySelectorAll("#snapshotAssetTabs .asset-tab")].filter((b) => !b.hidden).map((b) => b.dataset.asset), i = ks.indexOf(activeSnapshotAsset);
+    if (ks.length > 1) { e.preventDefault(); setActiveSnapshotAsset(ks[(i + (e.key === "]" ? 1 : ks.length - 1)) % ks.length]); }
+  });
   search?.addEventListener("input", renderAssetPop);
   search?.addEventListener("keydown", (e) => { if (e.key === "Enter") { const f = pop.querySelector("[data-pick]"); if (f) f.click(); } });
   pop.addEventListener("click", (e) => {
     const pin = e.target.closest("[data-pin]"), pick = e.target.closest("[data-pick]");
     if (pin) { assetPinToggle(pin.dataset.pin); return; }
-    if (pick) { assetPopClose(); setActiveSnapshotAsset(pick.dataset.pick); more.focus(); }
+    if (pick) { assetPopClose(); setActiveSnapshotAsset(pick.dataset.pick); from.focus(); }
   });
-  document.addEventListener("pointerdown", (e) => { if (!pop.hidden && !pop.contains(e.target) && !more.contains(e.target)) assetPopClose(); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !pop.hidden) { assetPopClose(); more.focus(); } });
+  document.addEventListener("pointerdown", (e) => { if (!pop.hidden && !pop.contains(e.target) && !from.contains(e.target)) assetPopClose(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !pop.hidden) { assetPopClose(); from.focus(); } });
   addEventListener("resize", () => { if (innerWidth !== openW) assetPopClose(); });   // 폭이 바뀔 때(회전·창 크기)만 닫는다 -- 높이만 바뀌는 키보드·주소창은 그대로
 }
 function renderSnapshotAssetTabs() {
   const cn = el("fpCoinSym"); if (cn) cn.textContent = String(activeSnapshotAsset || "eth").toUpperCase();
+  const cb = el("fpCoinBtnSym"); if (cb) cb.textContent = String(activeSnapshotAsset || "eth").toUpperCase();   // 전체화면 코인 이름(시안 B)
   document.querySelectorAll("#snapshotAssetTabs .asset-tab").forEach((btn) => {
     const on = !enabledAssets || enabledAssets.includes(btn.dataset.asset);
     // 🔴목록을 받기 전(enabledAssets === null)에는 **되살리지 않는다**.
@@ -10525,19 +10534,22 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   const priceBadgeW = mobileChart ? 56 : 64, priceBadgeH = 18;
   // 위 가격 배지와 **같은 기준**으로 잡는다 -- 둘이 어긋나면 호버 배지만 다른 열에 뜬다.
   // 2026-09-27 풋프린트는 오른쪽이 호가 띠라 호버 배지도 왼쪽 여백으로.
-  const priceBadgeX = mobileChart ? w - 4 - priceBadgeW : footprint ? Math.max(2, ml - priceBadgeW - 3) : w - mr + 4;
+  // 2026-11-20 사용자 «마우스 가격 라벨을 현재가 라벨이 있는 TPO 자리로»: 데스크톱 풋프린트(gutOn)는 현재가 알약과 같은 오른쪽 끝(xRR)·같은 알약 모양 -- 폭은 움직일 때 글자에 맞춘다
+  const badgeR = gutOn ? xRR : 0;
+  const priceBadgeX = mobileChart ? w - 4 - priceBadgeW : badgeR ? badgeR - priceBadgeW : footprint ? Math.max(2, ml - priceBadgeW - 3) : w - mr + 4;
   const priceBadgeRect = document.createElementNS(NS, "rect");
   priceBadgeRect.setAttribute("x", priceBadgeX);
   priceBadgeRect.setAttribute("width", priceBadgeW);
   priceBadgeRect.setAttribute("height", priceBadgeH);
   priceBadgeRect.setAttribute("fill", "var(--accent)");
-  priceBadgeRect.setAttribute("rx", "2");
+  priceBadgeRect.setAttribute("rx", badgeR ? "9" : "2");
   priceBadgeRect.style.display = "none";
   priceBadgeRect.style.pointerEvents = "none";
   hoverGroup.appendChild(priceBadgeRect);
 
   const priceBadgeText = document.createElementNS(NS, "text");
-  priceBadgeText.setAttribute("x", priceBadgeX + 4);
+  priceBadgeText.setAttribute("x", badgeR ? badgeR - 9 : priceBadgeX + 4);
+  if (badgeR) { priceBadgeText.setAttribute("text-anchor", "end"); priceBadgeText.setAttribute("style", "font-variant-numeric: tabular-nums"); }
   priceBadgeText.setAttribute("font-size", mobileChart ? "11" : "12");
   priceBadgeText.setAttribute("font-weight", "bold");
   priceBadgeText.setAttribute("fill", inkOnFill());
@@ -10573,6 +10585,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       priceBadgeText.textContent = fmtNum(priceAtCursor, pxDp());
       priceBadgeRect.style.display = "block";
       priceBadgeText.style.display = "block";
+      if (badgeR) { const bw = priceBadgeText.getComputedTextLength() + 18; priceBadgeRect.setAttribute("x", badgeR - bw); priceBadgeRect.setAttribute("width", bw); }
     } else {
       hLine.style.display = "none";
       priceBadgeRect.style.display = "none";

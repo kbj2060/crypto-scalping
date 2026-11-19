@@ -28,7 +28,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
-  <link rel="stylesheet" href="styles.css?v=20261119-dirfold">
+  <link rel="stylesheet" href="styles.css?v=20261120-fscoin">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -179,6 +179,8 @@
           <div class="chart-head-left">
             <h3 class="card-title">Footprint</h3>   <!-- 2026-09-30 카드 제목(사용자 지시) -->
             <!-- 2026-10-08 풋프린트 보기 토글(liq_profile.js) -- 2026-10-27 «청산맵» 보기는 풋프린트 오른쪽 기둥 «청산»으로 옮겨 탭·상자를 지웠다 -->
+            <!-- 2026-11-20 사용자 시안 B «전체화면에서 다른 자산으로 바로»: 전체화면일 때만 보이는 큰 코인 이름 → 코인·주식 선택 창(#assetPop) · [ ] = 이전·다음 (app.js setupAssetPop) -->
+            <button type="button" id="fpCoinBtn" class="fp-coin-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="assetPop" title="코인·주식 바꾸기 — 전체화면 그대로 · [ ] 이전·다음"><b id="fpCoinBtnSym">ETH</b><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg></button>
             <div id="fpViewTabs" class="asset-tabs chart-mode-tabs fp-view-tabs" aria-label="차트 보기">
               <button type="button" class="asset-tab active" data-view="fp" aria-pressed="true">풋프린트</button>
               <button type="button" class="asset-tab" data-view="bubble" aria-pressed="false">체결 버블</button>   <!-- 2026-10-13 bubble_map.js -->
@@ -228,6 +230,7 @@
             <div id="assetPop" class="asset-pop" role="dialog" aria-label="코인·주식 선택" hidden>
               <input id="assetSearch" class="asset-search" type="search" placeholder="코인·주식 검색 (예: nv, sol)" autocomplete="off" aria-label="코인·주식 검색">
               <div id="assetPopBody"></div>
+              <p class="asset-pop-keys"><kbd>[</kbd> <kbd>]</kbd> 이전·다음 · 이름 입력 후 <kbd>Enter</kbd> · 전체화면 그대로</p>
             </div>
             </div>
             <!-- 2026-10-28 사용자 «모바일도 데스크탑처럼»: 휴대폰 머리 마지막 줄 = [· | 롱 숏 | 지표 N] -- app.js 가 #fpLineBtn·#fpLineSwitch 를 여기로 옮긴다(넓은 화면은 차트 위 줄) -->
@@ -630,7 +633,7 @@
   </div>
   <button type="button" id="ofabTab" class="ofab-tab" hidden aria-label="주문 버튼 꺼내기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg><i aria-hidden="true"></i><b>주문</b></button>
-  <script src="./app.js?v=20261119-lblc"></script>
+  <script src="./app.js?v=20261120-fscoin"></script>
   <script src="./fp_daily.js?v=20261117-oizero1"></script>
   <script src="./liq_profile.js?v=20261108-liqcurve2"></script>
   <script src="./liq_tab.js?v=20261117-nonow1"></script>
