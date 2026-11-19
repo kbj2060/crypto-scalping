@@ -1989,7 +1989,30 @@ function renderChartWindowTabs() {
     host.style.setProperty("--i", String(idx));
     host.classList.toggle("zoomed", !daily && fpZoomed());   // 넓힌 창 = 어느 칸도 켜지 않는다(1h 를 누르면 풋프린트로)
   }
+  fpDdSync();
 }
+// 2026-11-20 사용자 시안 B «전체화면에서 LONG·SHORT·MANAGE 의 LONG 이 도구 상자에 가려짐»: 전체화면(CSS html.fp-wide)이면 보기·봉 탭을 접고
+//   «보기 풋프린트 ▾»·«봉 5m ▾» 단추 아래에 같은 탭 줄을 그대로 띄운다(탭 처리기는 그대로) · 단추 글자 = 켜진 탭 글자
+function fpDdSync() {
+  [["fpViewDd", "fpViewTabs"], ["fpWinDd", "chartWindowTabs"]].forEach(([b, t]) => {
+    const x = el(b)?.querySelector("b"), a = el(t)?.querySelector(".asset-tab.active");
+    if (x) x.textContent = a ? a.textContent.trim() : "넓힘";   // 휠로 넓힌 창 = 어느 칸도 안 켜짐
+  });
+}
+function fpDdClose() {
+  document.querySelectorAll(".dd-open").forEach((t) => t.classList.remove("dd-open"));
+  document.querySelectorAll(".fp-dd").forEach((b) => b.setAttribute("aria-expanded", "false"));
+}
+document.querySelectorAll(".fp-dd").forEach((b) => b.addEventListener("click", () => {
+  const t = el(b.getAttribute("aria-controls")), open = !!t && !t.classList.contains("dd-open");
+  fpDdClose();
+  if (open) { t.style.left = `${b.offsetLeft}px`; t.classList.add("dd-open"); b.setAttribute("aria-expanded", "true"); }
+}));
+document.addEventListener("click", (e) => {
+  if (e.target.closest("#fpViewTabs, #chartWindowTabs")) setTimeout(fpDdSync);   // 보기 탭은 liq_profile.js 등이 켠다 -- 처리기가 끝난 뒤 읽는다
+  if (!e.target.closest(".fp-dd")) fpDdClose();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.querySelector(".dd-open")) { const t = document.querySelector(".dd-open"); fpDdClose(); document.querySelector(`.fp-dd[aria-controls="${t.id}"]`)?.focus(); } });
 
 function setupSnapshotAssetTabs() {
   document.querySelectorAll("#snapshotAssetTabs .asset-tab").forEach((btn) => {
@@ -3997,7 +4020,7 @@ el("fpWideBtn")?.addEventListener("click", () => fpWideSet(!document.documentEle
 //   열려 있으면 그것만 닫히게 둔다. 🔴검증 11-15: 그 처리기들은 document 에서 먼저 닫아 버려(preventDefault 없음) window 에서 보면 이미 없다 -- 그래서 캡처 단계에서 미리 본다.
 addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || e.defaultPrevented || !document.documentElement.classList.contains("fp-wide")) return;
-  const busy = el("entryPop") || lineDraft || armedEdit?.cfm || fpIndOpen || document.querySelector(".ms-x, .asset-pop:not([hidden]), dialog[open]") || el("ofab")?.contains(document.activeElement);
+  const busy = el("entryPop") || lineDraft || armedEdit?.cfm || fpIndOpen || document.querySelector(".ms-x, .asset-pop:not([hidden]), dialog[open], .dd-open") || el("ofab")?.contains(document.activeElement);
   if (!busy) { if (fpSideOpen && !el("fpSideTab")?.hidden) fpSideSet(false); else fpWideSet(false); }   // 11-15 시안 B: 열린 오른쪽 칸 서랍부터 닫는다
 }, true);
 // 2026-11-15 펜 메모 시안 B «전체화면이면 화면 오른쪽 끝 손잡이 → 접힌 오른쪽 칸(발표·1초 수급·시장 맥락)을 통째로 팝업»: 차트 폭은 그대로 두고
