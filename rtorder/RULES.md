@@ -73,8 +73,8 @@
 | E3 | 옮김 | `is_post_only_reject` · inv11 · mut «코드 앞머리만» |
 | E4 | 옮김 | `fill_maker` -5022 → 재호가 · 그 밖 rejected · inv06 · inv11 |
 | E5 | 옮김 | `fill_maker` 호가 실패 → rejected · inv `e05_book_failure_after_post_only_reject_is_rejected` |
-| E6 | 옮김 | `fill_maker` 숫자로 시작 안 하는 오류 → 표식 1회 조회 · inv `e06_…` · `d2_…` · mut «표식 조회 빼기» |
-| E7 | 옮김 | `run_entry_limit` 5xx·-1007·-1006 → 3회 조회 → 표식 DELETE → error · inv `d2_…`(c·c') · mut «5xx 를 확정 거부로» |
+| E6 | 옮김 | ✅해결(2026-11-20, D2): `fill_maker`·`run_entry_wait`·`run_entry_limit` 이 공용 `resolve_unknown_post`(E7 처리) 하나를 쓴다 · inv `e06_…` · `d2_unknown_outcome_same_on_all_paths`(4경로×a~e+-1006+4xx 음성) · 퍼즈 «불명» 접수 4경로 · 음성 대조: 해결 전 exec.rs 로 d2·e06·fuzz 실패 |
+| E7 | 옮김 | `resolve_unknown_post`: 네트워크·5xx·-1007·-1006 → 3회 조회(1초) → 찾으면 이어 감 → 끝내 모르면 표식 DELETE → error · inv `d2_…`(d·e) · mut «5xx 를 확정 거부로» |
 | E8 | 옮김 | `ensure_closed`(재조회 상태 · 3회×1초) · 확인 못 하면 error · inv03·05·07 · fuzz · mut «취소 확인 실패해도 재호가» |
 | E9 | 옮김 | 오류 때 마지막 체결량 · inv `e09_…` · mut «마지막 체결량 버림» |
 | E10 | 부분 | 지정가 체결량 = 응답 `executedQty` · 장부 대조(check: 적힌 체결 = 거래소 체결) · 시장가 다리는 미정(M1~M9) |
@@ -223,4 +223,4 @@
 - 시장가 13곳 → 위 표(보내지 않고 멈춤).
 - `run_entry`·`run_entry_wait`·`run_entry_limit`·`run_exit` 의 «API 키 없음 → error» · `ensure_leverage` 호출 → 거래소 구현·조립 조각.
 - 파이썬 예외(0 나누기·inf→int·빈 목록 인덱스) → 같은 종류의 `PlanError`(정답지가 종류·문구까지 비교).
-- D2(«나갔는지 모르는 주문» 처리가 세 경로에서 다름)는 **통일하지 않았다** -- inv `d2_unknown_outcome_differs_per_path_as_in_python` 이 경로별 원본 동작(유령 주문 생존 포함)을 고정한다. 고치는 것은 사용자 결정.
+- ~~D2(«나갔는지 모르는 주문» 처리가 세 경로에서 다름)는 통일하지 않았다~~ → **해결(2026-11-20, 사용자 결정)**: 파이썬 원본을 먼저 고치고(`resolve_unknown_post` 공용 함수) Rust 도 같게 맞췄다 -- 원본과 다른 곳이 아니다. inv `d2_unknown_outcome_same_on_all_paths` 가 «세 경로가 같다»를 고정한다.

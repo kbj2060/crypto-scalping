@@ -53,6 +53,7 @@ struct Fake {
     counts: HashMap<&'static str, u32>,
     post_only_rejects: u32,
     place_err: Option<(String, bool)>, // (오류 문자열, 실제로는 접수됐나 = 유령)
+    lookup_miss: u32,                  // 표식 조회 처음 n 번은 있어도 «없음»(거래소가 아직 처리 전, D2 (c))
     drift: bool,
     fill_on_cancel: bool,
     kill_at: Option<u32>,
@@ -134,7 +135,8 @@ impl Exchange for Fake {
             return Err("400 [-5022] Due to the order could not be executed as maker".into());
         }
         if self.fails("place") {
-            return Err("500 boom".into());
+            // 확정 거부(4xx). 2026-11-20 전엔 "500 boom" -- 5xx 는 «체결 상태 불명»이라(D2 해결) 확정 거부 사례로 쓸 수 없다
+            return Err("400 [-2019] Margin is insufficient.".into());
         }
         let ghost = self.place_err.take();
         self.next_id += 1;
@@ -151,6 +153,12 @@ impl Exchange for Fake {
         self.tick();
         if matches!(r, OrderRef::Client(_)) {
             self.lookups += 1;
+            if self.fails("lookup") {
+                return Err("TimeoutError: lookup".into());
+            }
+            if self.lookups <= self.lookup_miss {
+                return Err("400 [-2013] Order does not exist.".into());
+            }
         }
         let Some(id) = self.find(r) else { return Err("400 [-2013] Order does not exist.".into()) };
         if self.orders[&id].cancel_sent && self.fails("get_after_cancel") {
@@ -182,6 +190,9 @@ impl Exchange for Fake {
     async fn cancel_order(&mut self, _s: &str, r: &OrderRef) -> Reply {
         self.tick();
         self.deletes.push(r.clone());
+        if matches!(r, OrderRef::Client(_)) && self.fails("delete_cid") {
+            return Err("TimeoutError: delete".into());
+        }
         let id = self.find(r);
         if let Some(id) = id {
             let foc = self.fill_on_cancel;
@@ -404,41 +415,50 @@ fn e06_unknown_outcome_lookup_adopts_ghost_order() {
     let st = go(&mut fx, &exit_plan(), Kind::Exit);
     check("유령 입양", &st, &fx, 2.0);
     assert!(st.phase == Phase::FilledMaker && fx.placed.len() == 1 && fx.lookups == 1);
-    // 접수 안 됐으면 조회 실패 → rejected(살아 있는 주문 없음)
+    // 접수 안 됐으면 세 번 본 뒤 표식 DELETE → error(2026-11-20 D2 해결 전: 한 번 보고 DELETE 없이 rejected)
     let mut fx = Fake { fill_after: 1, place_err: Some(("TimeoutError: read".into(), false)), ..Default::default() };
     let st = go(&mut fx, &exit_plan(), Kind::Exit);
     check("유령 없음", &st, &fx, 2.0);
-    assert!(st.phase == Phase::Rejected && fx.lookups == 1 && fx.deletes.is_empty());
+    assert!(st.phase == Phase::Error && fx.lookups == 3 && fx.deletes.len() == 1);
 }
 
 #[test]
-fn d2_unknown_outcome_differs_per_path_as_in_python() {
-    // D2(규칙 문서): «나갔는지 모르는 주문» 처리가 세 경로에서 다르다 -- 통일하지 않고 원본 그대로 옮겼음을 고정한다.
-    let ghost_5xx = || Some(("503 [-1007] Timeout waiting for response from backend server. Send status unknown".to_string(), true));
-    // (a) fill_maker: 5xx 는 숫자로 시작 → «확정 거부»로 보고 조회 없이 rejected -- 🔴유령 주문이 살아 남는다(불변식 ② 위반, 원본 동작)
-    let mut fx = Fake { place_err: ghost_5xx(), ..Default::default() };
-    let st = go(&mut fx, &exit_plan(), Kind::Exit);
-    assert_eq!((st.phase, fx.lookups, fx.live().len()), (Phase::Rejected, 0, 1));
-    // (b) run_entry_wait: 시간초과도 조회하지 않는다 -- 유령 주문 생존(재시작 고아 정리만 지운다)
-    let mut fx = Fake { place_err: Some(("TimeoutError: read".into(), true)), ..Default::default() };
-    let st = go(&mut fx, &entry_plan(), Kind::Wait(900.0, false));
-    assert_eq!((st.phase, fx.lookups, fx.live().len()), (Phase::Rejected, 0, 1));
-    // (c) run_entry_limit: 5xx·-1007 도 «불명» → 표식으로 찾아 입양
-    let mut fx = Fake { fill_after: 1, place_err: ghost_5xx(), ..Default::default() };
-    let st = go(&mut fx, &entry_plan(), Kind::Limit(60.0, false, false));
-    check("지정가 유령 입양", &st, &fx, 2.0);
-    assert_eq!((st.phase, fx.lookups), (Phase::FilledMaker, 1));
-    // (c'') -1007 이 없는 맨 5xx 도 «불명»
-    let mut fx = Fake { fill_after: 1, place_err: Some(("502 Bad Gateway".into(), true)), ..Default::default() };
-    let st = go(&mut fx, &entry_plan(), Kind::Limit(60.0, false, false));
-    check("지정가 5xx 유령", &st, &fx, 2.0);
-    assert_eq!((st.phase, fx.lookups), (Phase::FilledMaker, 1));
-    // (c') 끝내 못 찾으면 세 번 본 뒤 표식으로 DELETE 하고 error(E7)
-    let mut fx = Fake { place_err: Some(("TimeoutError: read".into(), false)), ..Default::default() };
-    let st = go(&mut fx, &entry_plan(), Kind::Limit(60.0, false, false));
-    check("지정가 불명", &st, &fx, 2.0);
-    assert_eq!((st.phase, fx.lookups), (Phase::Error, 3));
-    assert!(matches!(&fx.deletes[..], [OrderRef::Client(c)] if c.starts_with(WAIT_TAG)));
+fn d2_unknown_outcome_same_on_all_paths() {
+    // D2 해결(2026-11-20): «나갔는지 모르는 주문»(5xx·-1007·-1006·네트워크) 처리가 세 경로(fill_maker = 청산·진입 · 기다리기 · 지정가 대기)에서 같다 --
+    // 표식으로 3번 조회 → 찾으면 이어 감 → 끝내 모르면 표식 DELETE 뒤 error. 해결 전엔 fill_maker 는 네트워크 오류만 한 번 · 기다리기는 조회 없음(유령 생존 + rejected).
+    let to = || "TimeoutError: read".to_string();
+    // (이름, 설정, 기대 phase, 표식 조회 수, 표식 DELETE 수, 끝에 살아 있는 지정가 수)
+    let cases: Vec<(&str, Fake, Phase, u32, usize, usize)> = vec![
+        ("a 503·접수됨", Fake { place_err: Some(("503 Service Unavailable".into(), true)), ..Default::default() }, Phase::FilledMaker, 1, 0, 0),
+        ("b -1007·접수됨", Fake { place_err: Some(("408 [-1007] Timeout waiting for response from backend server. Send status unknown; execution status unknown.".into(), true)), ..Default::default() }, Phase::FilledMaker, 1, 0, 0),
+        ("b' -1006·접수됨", Fake { place_err: Some(("400 [-1006] An unexpected response was received from the message bus. Execution status unknown.".into(), true)), ..Default::default() }, Phase::FilledMaker, 1, 0, 0),
+        ("c 시간초과·둘째 조회에 보임", Fake { place_err: Some((to(), true)), lookup_miss: 1, ..Default::default() }, Phase::FilledMaker, 2, 0, 0),
+        ("d 접수 안 됨·3번 다 없음", Fake { place_err: Some((to(), false)), ..Default::default() }, Phase::Error, 3, 1, 0),
+        ("e 조회·DELETE 전부 실패", Fake { place_err: Some((to(), true)), fail: vec!["lookup", "delete_cid"], ..Default::default() }, Phase::Error, 3, 1, 1),
+        ("음성: 4xx 확정 거부", Fake { place_err: Some(("400 [-2019] Margin is insufficient.".into(), false)), ..Default::default() }, Phase::Rejected, 0, 0, 0),
+    ];
+    for (path, tag) in [("exit", PEG_TAG), ("entry", PEG_TAG), ("wait", WAIT_TAG), ("limit", WAIT_TAG)] {
+        for (name, base, phase, lookups, dels, live_n) in &cases {
+            let label = format!("불명 POST {path}/{name}");
+            let mut fx = Fake { fill_after: 1, place_err: base.place_err.clone(), lookup_miss: base.lookup_miss, fail: base.fail.clone(), ..Default::default() };
+            let (p, k) = match path {
+                "exit" => (exit_plan(), Kind::Exit),
+                "entry" => (entry_plan(), Kind::Entry),
+                "wait" => (entry_plan(), Kind::Wait(900.0, false)),
+                _ => (entry_plan(), Kind::Limit(60.0, false, false)),
+            };
+            let st = go(&mut fx, &p, k);
+            check(&label, &st, &fx, 2.0);
+            assert!(!(fx.live().len() > 0 && st.phase == Phase::Rejected), "{label}: 살아 있는 지정가인데 rejected");
+            assert_eq!(st.phase, *phase, "{label}: {:?}", st.error);
+            assert_eq!((fx.lookups, fx.deletes.len(), fx.live().len()), (*lookups, *dels, *live_n), "{label}: (표식 조회, DELETE, 살아 있는 지정가)");
+            assert!(fx.deletes.iter().all(|d| matches!(d, OrderRef::Client(c) if c.starts_with(tag))), "{label}: DELETE 는 이 경로 표식으로 {:?}", fx.deletes);
+            assert!(fx.placed.len() <= 1 && st.market_branch.is_none(), "{label}: 두 번 걸었거나 시장가 결정으로 갔다");
+            if *phase == Phase::Error {
+                assert!(st.error.as_deref().unwrap().contains("접수 여부를 확인하지 못했습니다"), "{label}");
+            }
+        }
+    }
 }
 
 #[test]
@@ -634,7 +654,7 @@ fn limit_paths() {
 }
 
 // ── 무작위 실패 주입(고정 시드) ──────────────────────────────────────────────
-// D2 로 원본이 유령 주문을 남기는 조합(fill_maker·기다리기의 접수 «불명»)은 d2_ 시험이 따로 고정하므로 여기선 넣지 않는다.
+// D2 해결(2026-11-20) 뒤 «불명» 접수를 네 경로 모두에 넣는다(해결 전엔 fill_maker·기다리기가 유령을 남겨 지정가 대기에만 넣었다).
 
 #[test]
 fn fuzz_random_faults_keep_invariants() {
@@ -649,9 +669,7 @@ fn fuzz_random_faults_keep_invariants() {
             kill_at: (rnd(8) == 0).then_some(3), wake_every: (rnd(4) == 0).then_some(0.7), ..Default::default()
         };
         let k = rnd(4);
-        if k == 2 {
-            fx.place_err = (rnd(3) == 0).then(|| ("TimeoutError: x".into(), rnd(2) == 0)); // 지정가 대기만 «불명»을 다룬다
-        }
+        fx.place_err = (rnd(3) == 0).then(|| (["TimeoutError: x", "503 [-1007] Timeout"][rnd(2) as usize].into(), rnd(2) == 0));
         if rnd(3) == 0 {
             fx.script.push((rnd(60) as f64, Cmd::Action([Action::Cancel, Action::Market, Action::Peg][rnd(3) as usize])));
         }
