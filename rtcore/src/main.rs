@@ -8,7 +8,7 @@ async fn main() {
     let cfg = Cfg::from_env();
     let listen = std::env::var("RTCORE_LISTEN").unwrap_or_else(|_| "127.0.0.1:8788".into());
     let listener = tokio::net::TcpListener::bind(&listen).await.expect("bind");
-    println!("rtcore 시작 -- {listen} · 심볼 {:?} · 침묵 {:?}", cfg.symbols, cfg.silence);
+    println!("rtcore 시작 -- {listen} · 심볼 {:?} · 침묵 {:?} · 문 {:?}", cfg.symbols, cfg.silence, cfg.hub);
     let (_state, mut dead) = rtcore::start(&cfg, listener);
     let mut tick = tokio::time::interval(Duration::from_secs(60));
     tick.tick().await;

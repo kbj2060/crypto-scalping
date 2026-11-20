@@ -67,7 +67,28 @@ fn text(r: &[Value], sym: &str) -> String {
 
 #[test]
 fn supply1s_matches_python() {
-    let fx: Value = serde_json::from_str(FX).unwrap();
+    check(FX);
+}
+
+// 칸 폭이 작은 종목(0.0003 · 가격 4자리)과 가격이 큰 종목(칸 15 · 가격 0자리) -- ETH 칸 폭에선 값이 안 바뀌는 변형(응답 가격 반올림 등)을 잡는다.
+#[test]
+fn supply1s_matches_python_xrp() {
+    check(&gen_fixture("supply1s_xrp.json"));
+}
+
+#[test]
+fn supply1s_matches_python_btc() {
+    check(&gen_fixture("supply1s_btc.json"));
+}
+
+/// 커밋 안 한 정답지(XRP·BTC -- 합쳐 약 1.9MB). 없으면 저장소 루트에서 `python3 rtcore/tools/gen_supply1s_fixture.py xrp`(btc 도)로 먼저 만든다.
+fn gen_fixture(name: &str) -> String {
+    let p = format!("{}/tests/fixtures/gen/{name}", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{p}: {e} -- 생성기로 먼저 만든다(이 함수 주석)"))
+}
+
+fn check(fx: &str) {
+    let fx: Value = serde_json::from_str(fx).unwrap();
     // 고래·리테일 경계 표와 보관 길이가 파이썬과 같은가(사본이 조용히 갈라지는 것을 막는다).
     for (s, b) in fx["bands"].as_object().unwrap() {
         let (r, w) = rtcore::supply::size_bands(s);
@@ -120,7 +141,7 @@ fn supply1s_matches_python() {
     assert_eq!(supply.now, fin["now"].as_i64().unwrap(), "now");
     t.rows_vs("스냅숏 seconds", &supply.seconds, &fin["seconds"]);
     t.rows_vs("스냅숏 partial", &[supply.partial.bn.unwrap()], &json!([fin["partial"]["bn"]]));
-    assert_eq!((supply.retail_max_usd, supply.whale_min_usd), (10_000.0, 100_000.0));
+    assert_eq!((supply.retail_max_usd, supply.whale_min_usd), rtcore::supply::size_bands(&sym));
 
     // 화면 쪽: 밀기만으로 지은 칸 중 파이썬 창(now-660, now] 이 since=0 응답(seconds + partial)과 같아야 한다.
     let now = supply.now;

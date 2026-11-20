@@ -116,12 +116,33 @@ impl Tally {
 
 fn snap_of(st: &State, sym: &str) -> Footprint {
     let Event::Snapshot { footprint, .. } = st.snapshot(sym, 0).unwrap().ev else { panic!() };
-    footprint.expect("ETH 는 풋프린트가 있다")
+    footprint.expect("칸 폭 표에 있는 종목은 풋프린트가 있다")
 }
 
 #[test]
 fn footprint_matches_python() {
-    let fx: Value = serde_json::from_str(FX).unwrap();
+    check(FX);
+}
+
+// 칸 폭이 작은 종목(0.0003 · 가격 4자리)과 가격이 큰 종목(칸 15 · 가격 0자리) -- ETH 칸 폭에선 값이 안 바뀌는 변형(응답 가격 반올림 등)을 잡는다.
+#[test]
+fn footprint_matches_python_xrp() {
+    check(&gen_fixture("footprint_xrp.json"));
+}
+
+#[test]
+fn footprint_matches_python_btc() {
+    check(&gen_fixture("footprint_btc.json"));
+}
+
+/// 커밋 안 한 정답지(XRP·BTC -- 합쳐 약 1.9MB). 없으면 저장소 루트에서 `python3 rtcore/tools/gen_footprint_fixture.py xrp`(btc 도)로 먼저 만든다.
+fn gen_fixture(name: &str) -> String {
+    let p = format!("{}/tests/fixtures/gen/{name}", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{p}: {e} -- 생성기로 먼저 만든다(이 함수 주석)"))
+}
+
+fn check(fx: &str) {
+    let fx: Value = serde_json::from_str(fx).unwrap();
     // 파이썬 표·상수의 사본이 갈라지지 않았는가.
     for (s, v) in fx["specs"].as_object().unwrap() {
         let want = (v[0].as_f64().unwrap(), v[1].as_u64().unwrap() as usize);
@@ -223,7 +244,7 @@ fn footprint_matches_python() {
     assert_eq!(snap.bucket, fin["bucket"].as_f64().unwrap());
     assert_eq!(snap.bar_seconds, fin["barSeconds"].as_i64().unwrap());
     assert_eq!(snap.bars_expected as i64, fin["barsExpected"].as_i64().unwrap());
-    assert_eq!((snap.retail_max_usd, snap.whale_min_usd), (10_000.0, 100_000.0));
+    assert_eq!((snap.retail_max_usd, snap.whale_min_usd), rtcore::supply::size_bands(&sym));
     let fb = fin["bars"].as_array().unwrap();
     assert_eq!(snap.bars.len(), fb.len(), "스냅숏 봉 수");
     let mut body_only = vec![];

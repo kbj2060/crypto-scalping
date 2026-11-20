@@ -26,7 +26,12 @@ M = [
     ("보관 봉 수 288 → 287", FP, "pub const KEEP_BARS: i64 = 288;", "pub const KEEP_BARS: i64 = 287;"),
     ("새 봉 때 오래된 봉 안 지움", FP, "let kept = self.bars.split_off(&cutoff);", "let kept = self.bars.split_off(&i64::MIN);"),
     ("창 144 → 143", FP, "pub const WINDOW_BARS: usize = 144;", "pub const WINDOW_BARS: usize = 143;"),
+    # +1 은 모든 종목에서 값이 안 바뀐다(칸 폭 표의 칸 폭은 전부 price_dp 자리 안이라 k × 칸 폭을 한 자리 더 써도 같은 수) -- 등가 변형
     ("응답 가격 소수 자리 +1", FP, 'format!("{:.*}", dp, k as f64 * bucket)', 'format!("{:.*}", dp + 1, k as f64 * bucket)'),
+    # 아래 둘·«1초 가격 반올림 없음»은 ETH(칸 0.5 · 가격 2자리)에서 값이 안 바뀐다 -- XRP(칸 0.0003 · 4자리) 정답지가 잡는다(2026-11-20)
+    ("응답 가격 소수 자리 −1", FP, 'format!("{:.*}", dp, k as f64 * bucket)', 'format!("{:.*}", dp.saturating_sub(1), k as f64 * bucket)'),
+    ("응답 가격 반올림 없음", FP, 'let px = format!("{:.*}", dp, k as f64 * bucket).parse().unwrap_or(0.0);', 'let px = { let _ = dp; k as f64 * bucket };'),
+    ("1초 가격 반올림 없음", SU, "r3(c[6])))", "c[6]))"),
     ("칸 값 반올림 없음", FP, "(px, r3(c[0]), r3(c[1])", "(px, c[0], r3(c[1])"),
     ("dhl 어긋남 허용 0.5 → 0.05", FP, "f64::max(0.5, 0.01 * cd.abs())", "f64::max(0.05, 0.01 * cd.abs())"),
     ("dhl 봉 시작 0 을 후보에서 뺌", FP, "let (mut c, mut lo, mut hi) = (0.0f64, 0.0f64, 0.0f64);", "let (mut c, mut lo, mut hi) = (0.0f64, f64::INFINITY, f64::NEG_INFINITY);"),
@@ -77,7 +82,8 @@ def main() -> None:
             lines = (r.stdout + r.stderr).splitlines()
             why = next((lines[k + 1].strip() for k, ln in enumerate(lines) if "panicked at" in ln and k + 1 < len(lines)), "")
             caught += bool(r.returncode)
-            print(f"{i:2d} {name}: {'잡음' if r.returncode else '못 잡음'} | {why[:150]}", flush=True)
+            failed = [ln.split()[1] for ln in lines if ln.startswith("test ") and ln.endswith("FAILED")]
+            print(f"{i:2d} {name}: {'잡음' if r.returncode else '못 잡음'} {failed} | {why[:150]}", flush=True)
             time.sleep(1.1)
             restore()
     finally:

@@ -56,6 +56,8 @@ pub struct Cfg {
     pub okx_url: String,
     pub bybit_url: String,
     pub silence: Duration,
+    /// 화면 문 단속(hub.rs 머리 주석).
+    pub hub: hub::HubCfg,
 }
 
 impl Cfg {
@@ -75,6 +77,7 @@ impl Cfg {
             okx_url: env("RTCORE_OKX_WS_URL", "wss://ws.okx.com:8443/ws/v5/public"),
             bybit_url: env("RTCORE_BYBIT_WS_URL", "wss://stream.bybit.com/v5/public/linear"),
             silence: Duration::from_secs_f64(env("RTCORE_SILENCE_SECS", "30").parse().unwrap_or(30.0)),
+            hub: hub::HubCfg::from_env(),
         }
     }
 }
@@ -96,7 +99,7 @@ pub fn start(cfg: &Cfg, listener: TcpListener) -> (Arc<state::State>, tokio::tas
     for src in sources(cfg) {
         feeds.push((src.url.clone(), tokio::spawn(feed::run_src(src, state.clone(), cfg.silence))));
     }
-    tokio::spawn(hub::serve(listener, state.clone()));
+    tokio::spawn(hub::serve(listener, state.clone(), cfg.hub.clone()));
     let st = state.clone();
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_millis(state::FLUSH_MS));

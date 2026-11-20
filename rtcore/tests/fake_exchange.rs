@@ -99,6 +99,7 @@ async fn core(addr: &str, silence_ms: u64) -> String {
         okx_url: String::new(),
         bybit_url: String::new(),
         silence: Duration::from_millis(silence_ms),
+        hub: rtcore::hub::HubCfg::from_env(),
     };
     let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let hub = l.local_addr().unwrap().to_string();
@@ -109,7 +110,7 @@ async fn core(addr: &str, silence_ms: u64) -> String {
 type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 async fn subscribe(hub: &str) -> Ws {
-    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{hub}")).await.unwrap();
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{hub}/rt")).await.unwrap();
     let req = Subscribe { subscribe: vec!["ETHUSDT".into()] };
     ws.send(Message::text(serde_json::to_string(&req).unwrap())).await.unwrap();
     ws

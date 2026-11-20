@@ -22,7 +22,7 @@ import json
 import sys
 import time
 
-CORE = "ws://127.0.0.1:8788"
+CORE = "ws://127.0.0.1:8788/rt"   # hub.rs 경로 · aiohttp 는 Origin 을 안 실어 Origin 목록과 상관없이 붙는다
 PY = "http://127.0.0.1:8787/api/supply-1s"
 LANES = ("bn", "liq", "spot", "okx", "okxLiq", "okxOi", "bybitLiq")
 KEY = {"bn": "seconds", "liq": "liq", "spot": "spot", "okx": "okx", "okxLiq": "okxLiq", "okxOi": "okxOi", "bybitLiq": "bybitLiq"}

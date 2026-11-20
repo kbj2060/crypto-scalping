@@ -11,6 +11,7 @@ sum() 은 SQLite 가 보정 합산(Kahan-Babuska-Neumaier)이라 끝자리가 �
 네트워크 없음(gen_supply1s_fixture 가 소켓 connect 를 막는다) · .env 안 읽음 · REST 백필은 바로 예외(ready=False).
 
     python3 rtcore/tools/gen_footprint_fixture.py     # 저장소 루트에서. rtcore/tests/fixtures/footprint_eth.json (약 10초: 재연결 대기 3초 x3)
+    python3 rtcore/tools/gen_footprint_fixture.py xrp # 칸 폭이 작은 종목(btc = 가격이 큰 종목) -- tests/fixtures/gen/ (커밋 안 함, 시험 전에 만든다)
 """
 from __future__ import annotations
 
@@ -23,10 +24,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from gen_supply1s_fixture import ROOT, SYM, T0, cf, text  # noqa: E402 -- 이 import 가 네트워크를 막는다
+from gen_supply1s_fixture import COIN, EDGES, MID, PD, PX, ROOT, SYM, T0, cf, pfmt, qfmt, text  # noqa: E402 -- 이 import 가 네트워크·테이프 읽기를 막는다
 from aiohttp import WSMsgType  # noqa: E402
 
-OUT = ROOT / "rtcore" / "tests" / "fixtures" / "footprint_eth.json"
+OUT = ROOT / "rtcore" / "tests" / "fixtures" / ("footprint_eth.json" if COIN == "eth" else f"gen/footprint_{COIN}.json")
 SEED = 20261121
 BS = cf.FOOTPRINT_BAR_SECONDS
 WANT = cf.FOOTPRINT_MAX_WINDOW_BARS      # 화면이 묻는 bars=144(app.js CHART_PAN_BARS)
@@ -39,7 +40,7 @@ def gen() -> tuple[list[list], set[int]]:
     rng = random.Random(SEED)
     out: list[list] = []
     marks: set[int] = set()                 # 중간 대조를 뜰 자리(특수 사례 바로 뒤)
-    st = {"tid": 70_000_000, "wall": T0, "mid": 3000.0, "conn": 0}
+    st = {"tid": 70_000_000, "wall": T0, "mid": MID, "conn": 0}
 
     def put(T: int, p: str, q: str, m: bool, *, late: bool = False, skip_tid: int = 0) -> None:
         st["tid"] += 1 + skip_tid
@@ -54,19 +55,19 @@ def gen() -> tuple[list[list], set[int]]:
         for i, q in enumerate(qtys):
             if i:
                 T += gaps[i - 1]
-            put(T, f"{px:.2f}", f"{max(q, 0.001):.3f}", side)
+            put(T, pfmt(px), qfmt(q), side)
         return T
 
     def walk() -> float:
-        st["mid"] += rng.gauss(0, 0.6)
-        return round(st["mid"], 2)
+        st["mid"] += rng.gauss(0, 0.6) * PX
+        return round(st["mid"], PD)
 
     def sparse_bar(k: int) -> None:
         """봉 하나에 주문 2~4개(드문 체결 -- 봉 수·보관 규칙용)."""
         secs = sorted(rng.sample(range(BS), rng.randint(1, 3)))
         for s in secs:
             mid = walk()
-            px = round(mid + rng.choice([-1.0, -0.5, 0.0, 0.5, 1.0]) * rng.randint(0, 2), 2)
+            px = round(mid + rng.choice([-1.0, -0.5, 0.0, 0.5, 1.0]) * PX * rng.randint(0, 2), PD)
             qtys = [rng.choice([0.05, 0.8, 3.0, 12.0, 40.0]) * rng.uniform(0.5, 1.5) for _ in range(rng.randint(1, 3))]
             fills((B0 + k * BS + s) * 1000 + rng.randint(0, 900), px, rng.random() < 0.5, qtys, [0, 1, 30][:len(qtys) - 1])
 
@@ -86,11 +87,11 @@ def gen() -> tuple[list[list], set[int]]:
         if k == 288:
             mark()
         if k == 470:   # 늦게 온 과거 체결: 창 안의 빈 봉(450)을 새로 만든다 → 창이 한 봉 밀린다
-            put((B0 + 450 * BS + 100) * 1000, f"{walk():.2f}", "2.000", False, late=True); mark()
+            put((B0 + 450 * BS + 100) * 1000, pfmt(walk()), qfmt(2.0), False, late=True); mark()
         if k == 500:   # 창 밖(144봉 밖)·보관 안(288봉 안) 닫힌 봉(300) -- 칸은 바뀌지만 밀기·스냅숏에는 안 나온다
-            put((B0 + 300 * BS + 7) * 1000, f"{walk():.2f}", "5.000", True, late=True); mark()
+            put((B0 + 300 * BS + 7) * 1000, pfmt(walk()), qfmt(5.0), True, late=True); mark()
         if k == 520:   # 25시간 전 -- 24시간 봉 창 밖이라 통째로 버린다
-            put((B0 + 520 * BS) * 1000 - 25 * 3600_000, f"{walk():.2f}", "60.000", True, late=True); mark()
+            put((B0 + 520 * BS) * 1000 - 25 * 3600_000, pfmt(walk()), qfmt(60.0), True, late=True); mark()
 
     # ② 봉 560~563 촘촘한 체결(초마다) -- 1초 링(660초)이 봉을 덮었다 놓치는 dhl 규칙용. 특수 사례는 d(초)에.
     d0 = B0 + 560 * BS
@@ -103,28 +104,29 @@ def gen() -> tuple[list[list], set[int]]:
             continue
         if d == 300:
             continue
-        if d == 310:   # 가격 칸 경계(반올림 동률): /0.5 가 x.5 -- 파이썬 round 는 짝수 쪽(6000.5→6000 · 6001.5→6002)
-            m0 = round(mid)
-            for px in (m0 + 0.25, m0 + 0.75, m0 + 0.24, m0 + 0.26, m0 - 0.25):
-                put(base + 100, f"{px:.2f}", "1.000", True)
+        if d == 310:   # 가격 칸 경계(반올림 동률): /0.5 가 x.5 -- 파이썬 round 는 짝수 쪽(6000.5→6000 · 6001.5→6002) · BTC 도 동률(/15) · XRP 는 4자리 가격으로 동률이 안 난다
+            m0 = round(mid / PX) * PX
+            for o in (0.25, 0.75, 0.24, 0.26, -0.25):
+                put(base + 100, pfmt(m0 + o * PX), qfmt(1.0), True)
             mark()
             continue
         if d == 320:   # 같은 ms 여러 건(같은 가격·방향 = 한 주문 · 방향 바뀜 = 끊김) + 가격 0 이 가운데
             for i in range(6):
-                put(base + 50, f"{mid:.2f}", "6.000", i == 3)
+                put(base + 50, pfmt(mid), qfmt(6.0), i == 3)
             put(base + 50, "0", "0", False)
-            put(base + 50, f"{mid:.2f}", "6.000", False)
+            put(base + 50, pfmt(mid), qfmt(6.0), False)
             mark()
             continue
-        if d == 330:   # 고래·리테일 경계값: $100,000 = 고래(>=) · $10,000 = 중형 · $9,997.5 = 리테일
-            put(base + 100, "2500.00", "40.000", False); put(base + 400, "2500.00", "4.000", True)
-            put(base + 700, "2500.00", "3.999", False); put(base + 900, f"{mid:.2f}", "0.010", True)
+        if d == 330:   # 고래·리테일 경계값(ETH): $100,000 = 고래(>=) · $10,000 = 중형 · $9,997.5 = 리테일 -- 다른 코인은 MARKETS 경계 체결
+            for ms, e in zip((100, 400, 700), EDGES):
+                put(base + ms, *e)
+            put(base + 900, pfmt(mid), qfmt(0.01), True)
             mark()
             continue
         if d == 340:   # 뒤늦게: 같은 봉 닫힌 초(3초 전) · 앞 봉(560, 아직 링이 덮음)
-            put(base + 500, f"{mid:.2f}", "1.000", False)
-            put(base - 3000 + 200, f"{mid + 0.5:.2f}", "9.000", False, late=True)
-            put((d0 + 250) * 1000 + 300, f"{mid:.2f}", "30.000", True, late=True)
+            put(base + 500, pfmt(mid), qfmt(1.0), False)
+            put(base - 3000 + 200, pfmt(mid + 0.5 * PX), qfmt(9.0), False, late=True)
+            put((d0 + 250) * 1000 + 300, pfmt(mid), qfmt(30.0), True, late=True)
             mark()
             continue
         if d == 450:   # 큰 주문 하나가 같은 가격 체결 300건으로
@@ -136,9 +138,9 @@ def gen() -> tuple[list[list], set[int]]:
             mark()
             continue
         if d == 900:   # 700초 전 체결(1초 링 660초 밖) -- 파이썬은 그 초 칸을 만들고 다음 새 초에 지운다 · 봉(557)은 링 밖
-            put(base - 700_000 + 300, f"{mid:.2f}", "5.000", False, late=True); mark()
+            put(base - 700_000 + 300, pfmt(mid), qfmt(5.0), False, late=True); mark()
         if d == 1000:  # 링이 놓친 봉(560, dhl 을 얼려 둠)에 늦은 체결 -- 코어는 얼린 값을 지운다(몸통만)
-            put((d0 + 100) * 1000 + 5, f"{mid:.2f}", "3.000", False, late=True); mark()
+            put((d0 + 100) * 1000 + 5, pfmt(mid), qfmt(3.0), False, late=True); mark()
         if rng.random() < 0.06:
             continue
         if rng.random() < 0.04:
@@ -158,7 +160,7 @@ def gen() -> tuple[list[list], set[int]]:
             gaps = [rng.choice([0, 0, 1, 3, 12, 40, 100, 101, 150]) for _ in range(n - 1)]
             if ms + sum(gaps) > 990:
                 break
-            px = round(mid + rng.choice([-0.5, -0.25, 0.0, 0.25, 0.5]) * rng.randint(0, 4), 2)
+            px = round(mid + rng.choice([-0.5, -0.25, 0.0, 0.25, 0.5]) * PX * rng.randint(0, 4), PD)
             ms = fills(base + ms, px, rng.random() < 0.5, qtys, gaps) - base + rng.choice([0, 1, 5, 30, 120])
             if ms > 990:
                 break
@@ -198,7 +200,7 @@ def fp_dhl(sec: dict, tape: dict, sent: list, now: float) -> dict[int, list]:
 
 def payload(fs: dict, tape: dict, now: float) -> dict:
     """server.py api_footprint(3993~4059)의 since=0 · bars=144 몫. dhl 은 [가지, 값] 으로 따로(시험이 가지별로 다르게 본다)."""
-    want, bucket, dp = WANT, cf.FLOW_SPECS["eth"].bucket, cf.FLOW_SPECS["eth"].price_dp
+    want, bucket, dp = WANT, cf.FLOW_SPECS[COIN].bucket, cf.FLOW_SPECS[COIN].price_dp
     recent = sorted(fs["bars"].items())[-want:]
     dhl = fp_dhl(fs["sec"], tape, recent, now)
     return {
@@ -224,7 +226,7 @@ async def run(rows: list[list], marks: set[int]) -> dict:
 
     async def no_rest(*_a, **_k):
         raise RuntimeError("REST 금지(시험)")
-    ns = cf.make_coin_flow(dataclasses.replace(cf.FLOW_SPECS["eth"],
+    ns = cf.make_coin_flow(dataclasses.replace(cf.FLOW_SPECS[COIN],
                                                snapshot_path=Path("/nonexistent/rtcore_fixture_footprint.json")),
                            no_rest, {})
     free = dict(zip(ns.start.__code__.co_freevars, ns.start.__closure__))
@@ -295,7 +297,7 @@ async def run(rows: list[list], marks: set[int]) -> dict:
             pass
 
         def ws_connect(self, url, **k):
-            assert url.endswith("ethusdt@trade"), url
+            assert url.endswith(f"{SYM.lower()}@trade"), url
             c = FakeSession.n
             FakeSession.n += 1
             return FakeWS(conns[c], c == len(conns) - 1)
@@ -315,7 +317,8 @@ async def run(rows: list[list], marks: set[int]) -> dict:
     except asyncio.CancelledError:
         pass
     assert FakeSession.n == len(conns)
-    assert not fs["ready"], "REST 가 막혔는데 ready -- 정답지 전제가 깨졌다"
+    # ETH 외 코인은 테이프 복원이 실패해도 ready 가 된다(footprint_tape_restore 끝) -- 값에는 안 닿는다(스냅샷 저장만 · 없는 경로라 실패)
+    assert COIN != "eth" or not fs["ready"], "REST 가 막혔는데 ready -- 정답지 전제가 깨졌다"
     return {"checkpoints": cps, "final_cells": final_cells, "final": final, "final_ms": rows[-1][7]}
 
 

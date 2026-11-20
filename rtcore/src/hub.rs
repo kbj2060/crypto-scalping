@@ -2,6 +2,18 @@
 //! 느린 구독자: broadcast 채널이 구독자마다 상한(QUEUE_CAP)까지만 쌓고, 넘치면 그 구독자만 Lagged 가 되어 끊는다.
 //! 끊는 쪽을 고른 이유: 체결은 누적(풋프린트·수급)이라 몇 건을 조용히 합치거나 건너뛰면 화면 합계가 틀린다 --
 //! 끊으면 화면이 다시 붙어 새 스냅숏을 받는다. 보내는 쪽(feed)과 다른 구독자는 기다리지 않는다.
+//!
+//! 문 단속(docs/rtcore_browser_route_20261120.md §5 «코드가 할 일»). 읽기 전용 시세만 내보낸다 -- 계좌·주문은 이 문으로 안 낸다(다른 문).
+//! - 경로: `RTCORE_PATH`(기본 `/rt`)로 온 업그레이드만. 그 밖은 404. Cloudflare 규칙이 `^/rt$` 를 이 포트로 보낸다(경로는 안 잘린다).
+//! - Origin: `RTCORE_ALLOW_ORIGINS`(쉼표, 예 `https://<호스트>`)에 든 것만. **Origin 머리가 없는 요청은 늘 받는다**:
+//!   브라우저는 웹소켓에 Origin 을 반드시 싣고 페이지가 바꿀 수 없다 -- 다른 사이트 페이지가 로그인된 사용자의 쿠키로 여는 공격(CSWSH)은
+//!   늘 «목록 밖 Origin» 으로 온다. Origin 이 없는 것은 브라우저가 아닌 도구(그림자 대조기·휴대폰 앱)다. 그래서 목록이 비면
+//!   «브라우저는 하나도 못 붙음» 이 되어 기본값이 «아무나» 가 되지 않는다. 사람 인증은 앞단 Cloudflare Access 몫이다.
+//! - 동시 연결 `RTCORE_MAX_CONNS`(기본 16 -- 사용자 한 명의 데스크톱·휴대폰·탭 몇 개) · 연결당 구독 심볼 `RTCORE_MAX_SUBS`(기본 8).
+//!   연결 수 × QUEUE_CAP 이 큐 메모리 상한이다.
+//! - ping: `RTCORE_PING_SECS`(기본 20)마다 보내고, 다음 ping 때까지 아무것도 못 받았으면(pong 포함) 끊는다 -- Cloudflare 가 조용한
+//!   웹소켓을 닫고(시간 미공개), 반쯤 죽은 연결이 칸을 쥐고 있지 않게.
+//! - 받는 메시지 상한 MAX_IN · 핸드셰이크·첫 구독 각 10초.
 use crate::proto::{Stamped, Subscribe};
 use crate::state::State;
 use crate::{now_us, record_latency};
@@ -11,23 +23,71 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::error::{RecvError, TryRecvError};
-use tokio::time::timeout;
-use tokio_tungstenite::{accept_async, tungstenite::Message};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::time::{interval_at, timeout, Instant};
+use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
+use tokio_tungstenite::tungstenite::http::StatusCode;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+use tokio_tungstenite::tungstenite::protocol::{CloseFrame, WebSocketConfig};
+use tokio_tungstenite::{accept_hdr_async_with_config, tungstenite::Message};
 
 type Err = Box<dyn std::error::Error + Send + Sync>;
 const BATCH: usize = 64;
+/// 받는 메시지 상한. 구독 메시지는 심볼 8개여도 200바이트 안팎이다.
+pub const MAX_IN: usize = 4096;
 
-pub async fn serve(listener: TcpListener, state: Arc<State>) {
+#[derive(Clone, Debug)]
+pub struct HubCfg {
+    pub path: String,
+    pub origins: Vec<String>,
+    pub max_conns: usize,
+    pub max_subs: usize,
+    pub ping: Duration,
+}
+
+impl HubCfg {
+    pub fn from_env() -> HubCfg {
+        let env = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_string());
+        HubCfg {
+            path: env("RTCORE_PATH", "/rt"),
+            origins: env("RTCORE_ALLOW_ORIGINS", "").split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+            max_conns: env("RTCORE_MAX_CONNS", "16").parse().unwrap_or(16),
+            max_subs: env("RTCORE_MAX_SUBS", "8").parse().unwrap_or(8),
+            ping: Duration::from_secs_f64(env("RTCORE_PING_SECS", "20").parse().unwrap_or(20.0)),
+        }
+    }
+}
+
+pub async fn serve(listener: TcpListener, state: Arc<State>, cfg: HubCfg) {
+    let cfg = Arc::new(cfg);
+    let slots = Arc::new(Semaphore::new(cfg.max_conns));
     loop {
         let Ok((tcp, peer)) = listener.accept().await else { continue };
         let _ = tcp.set_nodelay(true);
-        let state = state.clone();
+        let (state, cfg) = (state.clone(), cfg.clone());
+        let slot = slots.clone().try_acquire_owned().ok(); // 칸은 이 연결 태스크가 끝날 때 돌려준다
         tokio::spawn(async move {
-            if let Err(e) = client(tcp, state).await {
+            if let Err(e) = client(tcp, state, cfg, slot).await {
                 println!("rtcore hub {peer}: {e}");
             }
         });
     }
+}
+
+/// 업그레이드 요청 검사(머리 주석의 순서: 경로 → Origin → 칸).
+fn gate(cfg: &HubCfg, req: &Request, has_slot: bool) -> Result<(), (StatusCode, &'static str)> {
+    if req.uri().path() != cfg.path {
+        return Err((StatusCode::NOT_FOUND, "경로"));
+    }
+    if let Some(o) = req.headers().get("origin") {
+        if !cfg.origins.iter().any(|a| a.as_bytes() == o.as_bytes()) {
+            return Err((StatusCode::FORBIDDEN, "Origin"));
+        }
+    }
+    if !has_slot {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "연결 상한"));
+    }
+    Ok(())
 }
 
 fn text(m: &Stamped) -> Message {
@@ -35,17 +95,32 @@ fn text(m: &Stamped) -> Message {
 }
 
 // ponytail: 구독은 첫 메시지 한 번뿐 -- 연결 중 심볼 바꾸기가 필요하면 그때 받는다(지금은 다시 접속).
-async fn client(tcp: TcpStream, state: Arc<State>) -> Result<(), Err> {
-    let (mut out, mut inp) = accept_async(tcp).await?.split();
+async fn client(tcp: TcpStream, state: Arc<State>, cfg: Arc<HubCfg>, slot: Option<OwnedSemaphorePermit>) -> Result<(), Err> {
+    let cb = |req: &Request, resp: Response| match gate(&cfg, req, slot.is_some()) {
+        Ok(()) => Ok(resp),
+        Err((code, why)) => {
+            let mut r = ErrorResponse::new(Some(why.into()));
+            *r.status_mut() = code;
+            Err(r)
+        }
+    };
+    let conf = WebSocketConfig::default().max_message_size(Some(MAX_IN)).max_frame_size(Some(MAX_IN));
+    let (mut out, mut inp) = timeout(Duration::from_secs(10), accept_hdr_async_with_config(tcp, cb, Some(conf))).await??.split();
     // 스냅숏보다 먼저 구독해야 그 사이 사건을 놓치지 않는다(겹치는 것은 seq 로 거른다).
     let mut rx = state.tx.subscribe();
     let req: Subscribe = loop {
         match timeout(Duration::from_secs(10), inp.next()).await? {
             Some(Ok(Message::Text(t))) => break serde_json::from_str(t.as_str())?,
             Some(Ok(_)) => continue,
-            _ => return Ok(()),
+            Some(Err(e)) => return Err(e.into()), // 큰 메시지(MAX_IN 초과)도 여기
+            None => return Ok(()),
         }
     };
+    if req.subscribe.len() > cfg.max_subs {
+        let why = format!("구독 심볼 {}개 > 상한 {}", req.subscribe.len(), cfg.max_subs);
+        out.send(Message::Close(Some(CloseFrame { code: CloseCode::Policy, reason: why.clone().into() }))).await?;
+        return Err(why.into());
+    }
     let mut seen: HashMap<String, u64> = HashMap::new();
     for s in req.subscribe {
         let s = s.to_lowercase();
@@ -55,6 +130,8 @@ async fn client(tcp: TcpStream, state: Arc<State>) -> Result<(), Err> {
             out.send(text(&snap)).await?;
         }
     }
+    let mut ping = interval_at(Instant::now() + cfg.ping, cfg.ping);
+    let mut heard = true; // 지난 ping 뒤로 무엇이든 받았나(브라우저는 ping 에 pong 을 스스로 낸다)
     loop {
         tokio::select! {
             r = rx.recv() => {
@@ -82,9 +159,16 @@ async fn client(tcp: TcpStream, state: Arc<State>) -> Result<(), Err> {
                 }
                 out.flush().await?;
             },
+            _ = ping.tick() => {
+                if !heard {
+                    return Err(format!("{:?} 동안 pong 없음: 끊는다", cfg.ping).into());
+                }
+                heard = false;
+                out.send(Message::Ping(Vec::new().into())).await?;
+            },
             r = inp.next() => match r {
-                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return Ok(()),
-                Some(Ok(_)) => {}
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return Ok(()), // 탭 닫힘·끊김은 로그 안 남김
+                Some(Ok(_)) => heard = true,
             },
         }
     }
