@@ -3,7 +3,7 @@
 python -I rtui/compare/capture.py <worktree> <js|rtui|compare|hover|jsbench> [bars=36] [nohint]   (먼저 make_fixture.py · rtui 웹어셈블리 빌드 → rtui/dist)
 단계마다 브라우저 하나 · 페이지 하나 · 끝나면(예외여도) 닫는다. js → rtui → compare → hover 순서(rtui 는 js 가 잰 상자 자리를 읽는다).
 출력: rtui/compare/{js,rtui,side,diff}_<bars>.png(카드 영역: 차트 + 레인 + 프로파일) · side_hover_<bars>_<n>.png · 기록 JSON(_*) · 표준출력에 요약."""
-import json, pathlib, sys
+import json, os, pathlib, sys
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 from PIL import Image, ImageChops, ImageDraw
@@ -120,7 +120,7 @@ def open_rt(br, g):
     pr.on("console", lambda m: print("rtui console", m.type, m.text[:200]))
     pr.on("pageerror", lambda e: print("rtui pageerror", str(e)[:300]))
     pr.on("requestfailed", lambda r: print("rtui reqfail", r.url))
-    pr.goto(f"http://fx.invalid/rtui/index.html?mode=shot&{q}")
+    pr.goto(f"http://fx.invalid/rtui/index.html?mode=shot&{q}{os.environ.get('RTUI_Q', '')}")   # RTUI_Q='&aa=0' 처럼 컨텍스트 속성(rtui/bench/README.md)
     pr.wait_for_function("window.RESULT", timeout=20_000, polling=100)
     return pr
 

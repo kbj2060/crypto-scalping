@@ -13,6 +13,12 @@ canvas{display:block;width:100vw;height:100vh;background:transparent}
 // 비교 하네스: ?mode=shot&x=&y=&w=&h=&bars=&tz=&bg=(hex|none)&plate=  · ?mode=bench&bars=&n=  (compare/*.py) -- 결과 window.RESULT
 // 접착(이 파일의 일): Rust(feed::Req)가 window.rtui_io 로 넘긴 할 일을 fetch · WebSocket 으로 하고 결과를 돌려준다 · 500ms tick(app.js POLL_MS) · 탭 숨김.
 const q = new URLSearchParams(location.search), t0 = performance.now(), N = (k, d) => (q.has(k) ? +q.get(k) : d);
+if (q.has("bench")) await import("./bench/probe.js");   // 실기기 측정(bench/README.md) -- 시계·소켓·rAF 를 앱보다 먼저 감싼다
+// WebGL 컨텍스트 속성(eframe 은 getContext("webgl2") 를 속성 없이 부른다 -- 먼저 만든 컨텍스트를 그대로 받는다): ?aa=0|1 · alpha · pdb(preserveDrawingBuffer) · depth · desync(desynchronized) · pp=low-power|high-performance
+const ga = {};
+for (const [k, n] of [["aa", "antialias"], ["alpha", "alpha"], ["pdb", "preserveDrawingBuffer"], ["depth", "depth"], ["desync", "desynchronized"]]) if (q.has(k)) ga[n] = q.get(k) === "1";
+if (q.has("pp")) ga.powerPreference = q.get("pp");
+if (Object.keys(ga).length) document.getElementById("c").getContext("webgl2", ga);
 // 캐시: 묶음 파일 이름에 내용 해시(compare/build.sh) -- 이 페이지와 dist/VERSION 만 매번 새로 묻는다
 const ver = (await fetch("./dist/VERSION", { cache: "no-cache" }).then((r) => r.text())).trim();
 const m = await import(`./dist/rtui-${ver}.js`);

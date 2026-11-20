@@ -1,3 +1,4 @@
 # 비교 캡처 중간 파일(전체 화면 PNG·바탕판·기록 JSON) -- 결과는 compare/{js,rtui,side,diff}_<봉>.png · coords_<봉>.md
 compare/_*
 compare/fixture/footprint-week.json
+bench/results/

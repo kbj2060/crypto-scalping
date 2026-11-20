@@ -18,7 +18,8 @@ extern "C" {
 thread_local! {
     static CH: RefCell<Option<Rc<RefCell<Chart>>>> = Default::default();
     static CTX: RefCell<Option<Context>> = Default::default();
-    static LAST: RefCell<Option<String>> = Default::default();
+    /// 마지막으로 그린 장면 -- JSON 은 하네스가 scene() 을 부를 때만 만든다(매 프레임 만들면 프레임당 3~4ms: rtui/bench 측정)
+    static LAST: RefCell<Option<(fp::Scene, Option<hover::Hover>)>> = Default::default();
     /// 측정(compare/live_bench.py): ui() 끝 시각(performance.now) · ui() 시간(ms)
     static LAT: RefCell<(Vec<f64>, Vec<f64>)> = Default::default();
 }
@@ -37,7 +38,7 @@ fn flush(ch: &mut Chart) {
 
 /// 마지막으로 그린 장면(JSON) -- 비교 하네스
 #[wasm_bindgen]
-pub fn scene() -> Option<String> { LAST.with(|l| l.borrow().clone()) }
+pub fn scene() -> Option<String> { LAST.with(|l| l.borrow().as_ref().map(|(sc, hv)| scene_json(sc, hv.as_ref()))) }
 /// 창 상태(JSON) -- 비교 하네스
 #[wasm_bindgen]
 pub fn state() -> Option<String> { with(|c| c.state_json().to_string()) }
@@ -84,7 +85,7 @@ impl eframe::App for WebApp {
         let mut ch = self.0.borrow_mut();
         let r = ch.ui(ui, date_now());
         flush(&mut ch);
-        if let Some((sc, hv)) = r { LAST.with(|l| *l.borrow_mut() = Some(scene_json(&sc, hv.as_ref()))); }
+        if r.is_some() { LAST.with(|l| *l.borrow_mut() = r); }
         let t1 = now();
         LAT.with(|l| { let mut l = l.borrow_mut(); l.0.push(t1); l.1.push(t1 - t0); });
     }
