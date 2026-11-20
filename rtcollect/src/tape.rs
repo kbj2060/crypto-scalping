@@ -165,7 +165,12 @@ impl TapeBuffer {
         bands(c, i, price * qty, qty, rm, wm);
     }
 
-    /// 진행 중인 초(max_sec)를 빼고 꺼낸다(:391-402). `everything` 은 REST 복구용(여기선 안 쓴다).
+    /// 재연결 전에 진행 중인 초까지 닫는다(Bybit 수집기 :268-269) -- 재연결 뒤 그 초에 온 체결은 버린다(dropped_late).
+    pub fn seal(&mut self) {
+        self.closed_before = self.closed_before.max(self.max_sec + 1);
+    }
+
+    /// 진행 중인 초(max_sec)를 빼고 꺼낸다(:391-402). `everything` = 끝난 구간을 통째로(Bybit 재연결 전 · 원본 REST 복구).
     pub fn take_closed(&mut self, everything: bool) -> Vec<(i64, i64, Cell)> {
         let max_sec = self.max_sec;
         let mut done: Vec<(i64, i64, Cell)> = Vec::new();

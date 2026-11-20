@@ -9,3 +9,9 @@ publish = false
 rusqlite = { version = "0.37", features = ["bundled"] }
 # float_roundtrip: JSON 숫자 → f64 를 파이썬 float() 처럼 정확 반올림으로(기본 파서는 긴 가수에서 1ulp 틀릴 수 있다).
 serde_json = { version = "1", features = ["float_roundtrip"] }
+# 접속 루프(src/net.rs · main.rs)만 쓴다. rtcore 와 같은 판: 2026-11-20 실서버에서 rustls 0.23 이 암호 제공자를 못 골라 wss 접속마다 패닉
+#   -- tokio-tungstenite 가 rustls 를 default-features=false 로 받으므로 `ring` 하나만 켠다(제공자가 하나면 rustls 가 스스로 고른다).
+tokio = { version = "1", features = ["rt", "macros", "net", "time", "signal"] }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
