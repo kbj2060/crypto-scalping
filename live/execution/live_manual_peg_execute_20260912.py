@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import os
 import time
 from datetime import datetime, timezone
@@ -66,14 +67,41 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# 2026-11-20 M0 측정(docs/rtcore_design_20261120.md §7): 누름 → 계획 끝 → 첫 주문 전송 직전 → 거래소 응답, 단계별 ms 한 줄(order_timing).
+#   접수 핸들러가 order_mark() 로 시각을 **실행 맥락(contextvars)** 에 싣는다 -- create_task 가 맥락을 복사하므로 집행 작업의 signed() 가 본다.
+#   계획·상태·주문 파라미터 dict 에는 아무것도 넣지 않는다(거래소로 나가는 값 불변 · test/test_m0_timing_20261120.py). 시간만 찍는다(가격·수량·심볼 없음).
+_ORDER_T: contextvars.ContextVar = contextvars.ContextVar("order_timing", default=None)
+
+
+def order_mark(kind: str) -> dict:
+    m = {"kind": kind, "t0": time.perf_counter()}
+    _ORDER_T.set(m)
+    return m
+
+
+def _order_timing(m: dict, t_send: float, status: int) -> None:
+    try:   # 측정은 실패해도 조용히 -- 주문 흐름에 예외를 내지 않는다
+        t_ack, p = time.perf_counter(), m.get("plan", m["t0"])
+        ms = lambda a, b: int((b - a) * 1000)   # noqa: E731
+        print(f"order_timing kind={m['kind']} mode={m.get('mode', '?')} status={status} plan={ms(m['t0'], p)}ms to_send={ms(p, t_send)}ms"
+              f" ack={ms(t_send, t_ack)}ms total={ms(m['t0'], t_ack)}ms", flush=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def signed(session, method: str, path: str, params: dict, key: str, secret: str,
                  offset: int) -> Any:
     """서명 요청 하나. 실패해도 예외 대신 {"__error__": ...} 를 돌려준다 -- 주문 흐름이
     중간에 예외로 끊기면 «보냈는지 안 보냈는지 모르는» 상태가 남는다. 호출부가 매번 본다."""
     url = f"{FAPI}{path}?{_sign(params, secret, offset)}"
+    m, t_send = _ORDER_T.get(), 0.0   # M0: 이 접수의 첫 주문 POST 만 잰다(위 order_mark)
+    if m is not None and "sent" not in m and method == "POST" and path == "/fapi/v1/order":
+        m["sent"], t_send = True, time.perf_counter()
     try:
         async with session.request(method, url, headers={"X-MBX-APIKEY": key}) as response:
             payload = await response.json()
+            if t_send:
+                _order_timing(m, t_send, response.status)
             if response.status != 200:
                 # 418/429 는 기록만 한다(다른 경로가 물러나게) -- 주문·취소는 막지 않는다: 손절 청산을 가짜 밴 기록으로 멈추면 더 위험하다
                 ban_guard.note(response.status, str(payload), response.headers.get("Retry-After"))

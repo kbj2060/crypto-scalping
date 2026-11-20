@@ -15,7 +15,9 @@ from html import unescape as html_unescape
 import sqlite3
 import statistics
 import sys
+import threading
 import time
+import traceback
 from collections import deque
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
@@ -4975,6 +4977,7 @@ def make_app() -> web.Application:
     app.router.add_post("/api/manual-exit/submit", lambda r: order_api.busy_or(order_api.api_manual_exit_submit, r))
     app.router.add_post("/api/manual-exit/submit-all", lambda r: order_api.busy_or(order_api.api_manual_exit_all_submit, r))   # 2026-10-22 여러 코인 한꺼번에
     app.router.add_get("/api/liquidation-5m-history", api_liquidation_5m_history)
+    app.router.add_post("/api/client-timing", api_client_timing)   # 2026-11-20 M0 화면 시간 보고(로그 한 줄 · 저장 없음)
     # show_index=False (data/live 는 2026-10-19 보안 수정으로 더는 정적 서빙하지 않는다): this directory is reachable from the
     # public tunnel, and a listing advertised every file sitting in it (e.g. the
     # *.bak_pre_live_tab_removal_20260831 snapshots) rather than just the three the page
@@ -4992,12 +4995,89 @@ def make_app() -> web.Application:
     app.on_startup.append(order_api.start_bracket_watcher)
     app.on_startup.append(order_api.start_wait_cleanup)
     app.on_startup.append(order_api.start_user_stream)   # 2026-11-09 체결 알림(태스크는 refresh_tasks 라 stop_http_session 이 취소)
+    app.on_startup.append(start_loop_watch)   # 2026-11-20 M0 멈춤 감지
+    app.on_cleanup.append(stop_loop_watch)
     app.on_cleanup.append(order_api.stop_bracket_watcher)
     app.on_cleanup.append(stop_micro_ref)
     app.on_cleanup.append(stop_flows)
     app.on_cleanup.append(stop_dashboard_events)
     app.on_cleanup.append(stop_http_session)
     return app
+
+
+# 2026-11-20 M0 멈춤 감지(docs/rtcore_design_20261120.md §7): 루프 안 태스크가 50ms 마다 시각을 갱신하고, 별도 스레드가 그 시각이
+#   LOOP_STALL_MS 넘게 낡으면 그 순간 루프 스레드의 스택을 떠 두었다가 멈춤이 풀릴 때 한 줄(loop_stall) 남긴다 -- 초당 1줄 상한.
+#   ms 는 감시 주기(50ms) 단위라 실제보다 최대 50ms 짧다 · 스택은 멈춘 지 ~200ms 시점의 것. DASHBOARD_LOOP_WATCH=0 이면 끈다.
+#   loop.set_debug 는 상시 부하라 안 쓴다. 감시 스레드 비용 = 50ms 마다 시각 비교 한 번(멈출 때만 스택 뜨기).
+LOOP_STALL_MS = 200
+
+
+async def start_loop_watch(app: web.Application) -> None:
+    if os.getenv("DASHBOARD_LOOP_WATCH", "1") == "0":
+        return
+    beat, stop, tid = [time.monotonic()], threading.Event(), threading.get_ident()
+
+    async def tick() -> None:
+        while True:
+            beat[0] = time.monotonic()
+            await asyncio.sleep(0.05)
+
+    def stack() -> str:
+        f = sys._current_frames().get(tid)
+        return " ← ".join(f"{os.path.basename(s.filename)}:{s.lineno} {s.name}" for s in reversed(traceback.extract_stack(f)[-5:])) if f else "?"
+
+    def watch() -> None:
+        hold, last = None, 0.0   # hold = [최대 ms, 스택]
+        while not stop.wait(0.05):
+            try:
+                lag = int((time.monotonic() - beat[0]) * 1000)
+                if lag >= LOOP_STALL_MS:
+                    hold = [lag, hold[1] if hold else stack()]
+                elif hold is not None:
+                    if time.monotonic() - last >= 1.0:
+                        last = time.monotonic()
+                        print(f"loop_stall ms={hold[0]} at={hold[1]}", flush=True)
+                    hold = None
+            except Exception:  # noqa: BLE001 -- 측정은 실패해도 조용히
+                hold = None
+
+    app["loop_watch"] = (asyncio.create_task(tick()), stop)
+    threading.Thread(target=watch, name="loop_watch", daemon=True).start()
+
+
+async def stop_loop_watch(app: web.Application) -> None:
+    w = app.get("loop_watch")
+    if w:
+        w[0].cancel()
+        w[1].set()
+
+
+# 2026-11-20 M0 화면 시간 보고(app.js 가 60초마다 값이 있을 때만). 받으면 client_timing 한 줄 찍고 끝(저장 없음).
+#   공개 터널로 닿는 신뢰 경계다 -- 본문 1KB 상한 · 아는 키만 · 숫자만(유한·|v|≤1e7) · sym/kind 는 허용 목록 · 전체 0.2초에 한 줄.
+CLIENT_TIMING_NUM = {"order_rtt_ms", "order_srv_ms", "order_net_ms", "fp_n", "fp_med_ms", "fp_max_ms",
+                     "longtask_n", "px_n", "px_med_ms", "px_max_ms"}
+_client_timing_at = [0.0]
+
+
+async def api_client_timing(request: web.Request) -> web.Response:
+    raw = await request.content.read(1025)
+    if len(raw) > 1024:
+        return web.json_response({"ok": False, "error": "too_large"}, status=413)
+    try:
+        body = json.loads(raw)
+    except (ValueError, RecursionError):
+        return web.json_response({"ok": False, "error": "bad_json"}, status=400)
+    nums = {k: v for k, v in body.items() if k in CLIENT_TIMING_NUM} if isinstance(body, dict) else {}
+    if (not nums or set(body) - CLIENT_TIMING_NUM - {"sym", "kind"} or str(body.get("sym")) not in MARKET_SYMBOLS
+            or body.get("kind", "entry") not in ("entry", "exit")
+            or any(type(v) not in (int, float) or not math.isfinite(v) or abs(v) > 1e7 for v in nums.values())):
+        return web.json_response({"ok": False, "error": "bad_body"}, status=400)
+    if time.monotonic() - _client_timing_at[0] < 0.2:
+        return web.json_response({"ok": False, "error": "too_often"}, status=429)
+    _client_timing_at[0] = time.monotonic()
+    print(f"client_timing sym={body['sym']}" + (f" kind={body['kind']}" if "kind" in body else "")
+          + "".join(f" {k}={round(v)}" for k, v in sorted(nums.items())), flush=True)
+    return web.json_response({"ok": True}, headers=NOCACHE)
 
 
 def main() -> None:

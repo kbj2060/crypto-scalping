@@ -38,7 +38,7 @@ from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position, sl_up_of,
     COMMIT_CAP_X, HOLD_CAP_X, RULE_STOP_PCT, TP_LEGS_MAX, commit_rule_l, line_bracket, rec_rule_add_order, rec_rule_bracket, rec_rule_size)   # 2026-10-09 자동 규칙 진입(재생 ×15.2 크기식) · 10-14 자동 물타기 지정가
 from live.execution.live_manual_peg_execute_20260912 import (  # noqa: E402
-    FALLBACK_SEC, WAIT_CHOICES_MIN, cancel_wait_orphans, clear_bracket, commission_bp, margin_type, nap, place_add_order, place_bracket, place_stop, place_tp_ladder, run_entry, run_entry_limit, run_entry_stop, run_entry_wait, run_exit, wake_fills)
+    FALLBACK_SEC, WAIT_CHOICES_MIN, cancel_wait_orphans, clear_bracket, commission_bp, margin_type, nap, order_mark, place_add_order, place_bracket, place_stop, place_tp_ladder, run_entry, run_entry_limit, run_entry_stop, run_entry_wait, run_exit, wake_fills)
 import scripts.binance_ban_guard as ban_guard  # noqa: E402
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
 # 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).
@@ -1767,6 +1767,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         POST 인 이유: GET 이면 링크 미리보기·프리페치·주소창 재방문이 그대로 주문이 된다.
         confirm 을 받는 이유: 프런트의 2단 확인을 서버에서 한 번 더 건다 -- 프런트만 믿으면
         프런트 버그가 곧 오발주다."""
+        tm = order_mark("entry")   # 2026-11-20 M0 측정: 요청 도착 시각(order_timing 줄 · 응답 server_ms) -- 주문 값에는 안 섞인다
         side = (request.query.get("side") or "").upper()
         if side not in ("LONG", "SHORT"):
             return web.json_response({"ok": False, "error": "side must be LONG or SHORT"}, status=400)
@@ -1824,6 +1825,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                                                              query_leverage(request), query_asset(request),
                                                              fresh=request.query.get("fresh") == "1", rule_l=rule_l,
                                                              lines=lines, limit_usdt=limit_px, stop=bool(limit_px) and request.query.get("stop") == "1")
+        tm.update(plan=time.perf_counter(), mode="stop" if limit_px and stop_q else "limit" if limit_px else "wait" if wait_min else "peg")   # M0
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):
@@ -1847,7 +1849,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                       asset=query_asset(request), wid=wid, started_at=datetime.now(timezone.utc).isoformat())
             refresh_tasks[f"manual_wait_{wkey(query_asset(request), wid)}"] = asyncio.create_task(
                 entry_then_bracket(plan, ws, wait_sec=wait_min * 60.0 if wait_min else None, limit=bool(limit_px)))
-            return web.json_response({"ok": True, "plan": plan, "state": ws, "wait": True, "wid": wid},
+            return web.json_response({"ok": True, "plan": plan, "state": ws, "wait": True, "wid": wid, "server_ms": int((time.perf_counter() - tm["t0"]) * 1000)},
                                      headers=NOCACHE)
         manual_entry_state.clear()
         manual_entry_state.update(phase="submitting", side=side, plan=plan, asset=query_asset(request),
@@ -1855,7 +1857,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         # refresh_tasks 에 넣어 두면 stop_http_session 이 세션을 닫기 전에 취소해 준다.
         refresh_tasks["manual_entry"] = asyncio.create_task(
             entry_then_bracket(plan, manual_entry_state))
-        return web.json_response({"ok": True, "plan": plan, "state": manual_entry_state},
+        return web.json_response({"ok": True, "plan": plan, "state": manual_entry_state, "server_ms": int((time.perf_counter() - tm["t0"]) * 1000)},
                                  headers=NOCACHE)
 
     HOLD_CHOICES = (60, 120, 240, 480, 1440)
@@ -2143,6 +2145,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
     async def api_manual_exit_submit(request: web.Request) -> web.Response:
         """실제 청산. 진입과 **같은 방어**를 건다: POST 전용 + confirm=1 + 게이트.
         상태 dict 도 진입과 공유한다 -- 수동 주문이 동시에 둘 나가지 않는 보호가 따라온다."""
+        tm = order_mark("exit")   # 2026-11-20 M0 측정(진입과 같다)
         side = (request.query.get("side") or "").upper()
         if side not in ("LONG", "SHORT"):
             return web.json_response({"ok": False, "error": "side must be LONG or SHORT"}, status=400)
@@ -2183,6 +2186,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         # 2026-10-10 사용자 결정: 스위칭은 즉시 체결(청산·반대 진입 둘 다 시장가) -- 떨어지는 장에서 매도 지정가가 따라가기만 했다.
         plan, error = await assemble_exit_plan(side, frac, fresh=True, asset=query_asset(request),
                                                market=bool(sw) or ex == "market", for_order=True)
+        tm.update(plan=time.perf_counter(), mode="switch" if sw else ex)   # M0
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):
@@ -2199,7 +2203,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         refresh_tasks["manual_entry" if st is manual_entry_state else f"manual_exit_{query_asset(request)}"] = asyncio.create_task(
             exit_then_switch(plan, st, sw, query_asset(request)) if sw
             else settle(exit_then_rearm(plan, st) if frac < 1.0 else run_exit(binance_session(), plan, st), st))
-        return web.json_response({"ok": True, "plan": plan, "state": st},
+        return web.json_response({"ok": True, "plan": plan, "state": st, "server_ms": int((time.perf_counter() - tm["t0"]) * 1000)},
                                  headers=NOCACHE)
 
     async def api_manual_exit_all_submit(request: web.Request) -> web.Response:
@@ -2241,7 +2245,9 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             if st is None:
                 r.update(error="already_working", detail="이 코인 주문이 진행 중입니다 — 끝난 뒤 다시 누르세요")
                 continue
+            tm = order_mark("exit_all")   # 2026-11-20 M0 측정: 코인마다 따로(create_task 가 이 순간 맥락을 복사) -- 도착 시각 = 이 코인 계획 시작
             plan, error = await assemble_exit_plan(side, 1.0, fresh=True, asset=asset, market=ex == "market", for_order=True)
+            tm.update(plan=time.perf_counter(), mode=ex)   # M0
             if error:
                 r.update(**error[0])
                 continue

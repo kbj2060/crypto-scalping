@@ -14,6 +14,27 @@ const API_SESSION_ALERTS_URL = "/api/session-alerts";
 // tick() 은 게이트 확인만 하는 디스패처라(각 refresh 가 `now - last < gate` 로 즉시 반환)
 // 이 값을 반으로 줄여도 늘어나는 요청은 풋프린트 하나뿐이다.
 const POLL_MS = 500;
+// 2026-11-20 M0 측정(docs/rtcore_design_20261120.md §7) -- 화면에 보이는 것은 바꾸지 않는다. 60초마다 값이 있을 때만 /api/client-timing 으로 보낸다(탭이 숨었으면 안 보냄 · 서버는 로그 한 줄).
+//   order = 마지막 주문 전송 왕복(performance.now) · 서버 처리(server_ms) · 그 차 = 브라우저↔서버 구간 추정
+//   fp = 풋프린트 한 장 그리기(renderCandleSvg) ms · longtask = 50ms 넘는 긴 작업 수(PerformanceObserver, 없으면 건너뜀)
+//   px = @trade 거래소 시각 E → 현재가 선 반영(updateLivePriceFast) ms. 🔴기기 시계와 거래소 시계의 오차가 그대로 섞인다(음수도 나온다) -- 같은 기기의 추이로만 읽는다.
+const m0 = { order: null, fp: [], px: [], longtask: 0, tradeE: 0 };
+const m0Push = (a, v) => { if (Number.isFinite(v) && a.length < 2000) a.push(v); };
+try { new PerformanceObserver((l) => { m0.longtask += l.getEntries().length; }).observe({ type: "longtask", buffered: false }); } catch (e) { /* longtask 없는 브라우저 -- 건너뜀 */ }
+setInterval(() => {
+  try {
+    if (document.hidden) return;
+    const b = { ...(m0.order || {}) };
+    const mm = (k, a) => { if (!a.length) return; const s = [...a].sort((x, y) => x - y); b[`${k}_n`] = s.length; b[`${k}_med_ms`] = Math.round(s[s.length >> 1]); b[`${k}_max_ms`] = Math.round(s[s.length - 1]); };
+    mm("fp", m0.fp); mm("px", m0.px);
+    if (m0.longtask) b.longtask_n = m0.longtask;
+    m0.order = null; m0.fp = []; m0.px = []; m0.longtask = 0;
+    if (!Object.keys(b).length) return;
+    b.sym = activeSnapshotAsset;
+    fetch("/api/client-timing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) }).catch(() => {});
+  } catch (e) { /* 측정은 실패해도 조용히 */ }
+}, 60000);
+
 const CANDLE_HISTORY_POLL_MS = 300000;
 // Kept post-Live-tab-removal solely as the SSE ticker payload's asset allowlist (see
 // applyDashboardEvent()) -- eth/btc still need their live price tracked for the Snapshot tab's own
@@ -4413,6 +4434,7 @@ function updateLivePriceFast(price) {
   const lab = c.svg.querySelector('[data-live="label"]');
   const cl = c.cvLine && fpCv.bg && fpCv.bg.items.includes(c.cvLine) ? c.cvLine : null;   // 2026-10-20 풋프린트 = bg 캔버스의 칸 뒤 선
   if (!(line || tri || cl)) return;            // 아직 안 그렸거나 현재가 표시가 없는 판
+  if (m0.tradeE > 0) m0Push(m0.px, Date.now() - m0.tradeE);   // M0 -- 선 속성을 바꾸는 이 자리 = 반영(칠하기는 다음 프레임)
   if (line) { line.setAttribute("y1", y); line.setAttribute("y2", y); }
   if (cl && cl.y !== y) {   // 옛 띠와 새 띠만 다시 칠한다(밀도·격자·다른 선은 같은 명령으로 되칠해져 이음매가 없다)
     const a = cl.y;
@@ -4561,7 +4583,9 @@ function ensurePriceWs() {
         const price = Number(d.p);
         if (!(price > 0)) return;   // 바이낸스가 p:"0" 을 섞어 보낸다(실측 0.3%)
         noteLiveTrade(priceWsAsset, price, Number(d.T), Number(d.q) || 0);
+        m0.tradeE = Number(d.E);   // M0 가격 표시 지연(updateLivePriceFast 가 선을 옮겼을 때만 잰다)
         updateLivePriceFast(price);
+        m0.tradeE = 0;
         const qty = Number(d.q);
         if (qty > 0 && FLOW_ASSETS.has(priceWsAsset) && priceWsAsset === activeSnapshotAsset) {
           footprintLiveAdd(price, qty, Number(d.T), !!d.m,
@@ -8255,8 +8279,10 @@ function renderSnapshotChart() {
   //   (liqBars 기본값 [] -> peak 0 -> 블록 전체 skip, 오류도 안 남). 치환 대상 문자열을
   //   확인 없이 바꾸려다 조용히 실패했던 자리다.
   const boxesOff = fpBoxesOff;
+  const m0t = performance.now();   // M0 풋프린트 그리기 시간
   renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels,
     densityHistory, tfLiq(weekJoin("liq", latestLiquidation5mHist, (b) => Date.parse(b.ts))), footprint, view);
+  if (footprint) m0Push(m0.fp, performance.now() - m0t);
   if (boxesOff !== fpBoxesOff) renderChartWindowTabs();   // 머리 «· 캔들»
   // 호버 재생(위 chartHoverPt 주석) -- 이 렌더가 새로 단 핸들러에 마지막 커서를 넣는다(툴팁·십자선이 새 그림·새 봉 기준으로)
   const hp = chartHoverPt;
@@ -12996,10 +13022,15 @@ async function manualEntrySubmit() {
       + (pending.kind === "exit" && pending.sw ? `&switch_to=${pending.sw.to}&sw_pct=${pending.sw.pct}`
         + (pending.sw.lev ? `&sw_lev=${pending.sw.lev}` : "")
         + (pending.sw.rule ? `&sw_rule=${pending.sw.rule}` : "") : "");
+    const m0t = performance.now();   // M0 주문 전송 왕복
     const res = await fetch(
       `/api/manual-${pending.kind || "entry"}/submit?side=${pending.side}&asset=${pending.asset || "eth"}&confirm=1${q}`,
       { method: "POST", cache: "no-cache" });
     const data = await res.json();
+    try {
+      const rtt = Math.round(performance.now() - m0t), srv = Number(data.server_ms);
+      m0.order = Number.isFinite(srv) ? { kind: pending.kind === "exit" ? "exit" : "entry", order_rtt_ms: rtt, order_srv_ms: srv, order_net_ms: rtt - srv } : null;
+    } catch (e) { /* 측정은 실패해도 조용히 */ }
     if (!data.ok) {
       box.innerHTML = entryNote(`주문 실패: ${data.detail || data.error || res.status}`, "bad");
       lineSubmitFail(pending, `주문 실패: ${data.detail || data.error || res.status}`);
