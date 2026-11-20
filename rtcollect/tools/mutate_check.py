@@ -171,7 +171,7 @@ M = [
     ("원본으로: Bybit청산 바인딩 못 하는 행 = 재연결", "src/bybit_liq.rs", "serde_json::Value::Object(d.clone()));\n                    Ok(None)", "serde_json::Value::Object(d.clone()));\n                    Err(Reconnect(\"InterfaceError\".into()))", ["venue_parity"]),
     ("원본으로: Bybit테이프 못 읽는 칸도 합침", "src/bybit_tape.rs", "if NUM_KEYS.contains(&k.as_str()) && !num_ok(k, v) {", "if false {", ["venue_parity"]),
     ("원본으로: OKX맥락 공백 시작 = 마지막 실패", "src/okx_ctx.rs", "        if self.up {\n            self.down_from = ms(wall);\n        }", "        self.down_from = ms(wall);", ["ctx_parity"]),
-    ("원본으로: 바맥 깨진 JSON = 재연결", "src/binance_ctx.rs", "        if serde_json::from_str::<Value>(text).is_err() {", "        if false {", ["ctx_parity"]),
+    ("원본으로: 바맥 깨진 JSON = 재연결", "src/binance_ctx.rs", "        if serde_json::from_str::<Value>(text).is_err() {", "        if false {", ["ctx_parity", "venue_loop"]),
     ("원본으로: 바맥 OI seen 먼저", "src/binance_ctx.rs", "if !self.seen.contains(&ts) {", "if self.seen.insert(ts) {", ["ctx_parity"]),
     ("원본으로: 바맥 gaps 안 적음", "src/binance_ctx.rs", "            if now - d >= 1500 {", "            if false {", ["ctx_parity"]),
     ("원본으로: xyz 끊길 때 남은 행 버림", "src/xyz.rs", "        self.write_rest();\n        let b", "        (self.bars, self.ctxs) = (Ordered::default(), Ordered::default());\n        let b", ["ctx_parity"]),
@@ -183,14 +183,27 @@ M = [
     # ── depth_diff ──
     ("depth 스냅숏 열쇠 정렬(preserve_order 무시)", "src/lib.rs", "                for (i, (k, x)) in o.iter().enumerate() {", "                for (i, (k, x)) in { let mut v: Vec<_> = o.iter().collect(); v.sort_by(|a, b| a.0.cmp(b.0)); v }.into_iter().enumerate() {", ["depth_parity"]),
     ("depth 시 열쇠 +1시간", "src/depth.rs", "    let secs = ts_ms.div_euclid(1000);", "    let secs = ts_ms.div_euclid(1000) + 3600;", ["depth_parity"]),
-    ("depth 압축 안 함", "src/depth.rs", "self.zips.push(std::thread::spawn(move || gzip_done(&p)));", "drop(p);", ["depth_parity"]),
+    ("depth 압축 안 함", "src/depth.rs", "std::thread::spawn(move || gzip_done(&p))", "std::thread::spawn(move || drop(p))", ["depth_parity"]),
     ("depth 구멍 판정 값 비교 → 모양 비교", "src/depth.rs", "if !py_eq(&pu, prev) {", "if pu != *prev {", ["depth_parity"]),
     ("depth 구멍 줄 got_pu 빼기", "src/depth.rs", 'json!({"_gap": true, "expected_pu": prev, "got_pu": pu})', 'json!({"_gap": true, "expected_pu": prev})', ["depth_parity"]),
     ("depth 새 파일 스냅숏 안 씀", "src/depth.rs", "            if new {\n                let s = snap();", "            if false {\n                let s = snap();", ["depth_parity"]),
     ("루프 depth 재접속 때 prev_u 유지", "src/depth.rs", "    pub fn on_connect(&mut self) {\n        self.prev_u = None;", "    pub fn on_connect(&mut self) {", ["venue_loop"]),
     ("루프 depth 깨끗한 닫힘도 3초", "src/net.rs", "        if !clean {", "        if true {", ["venue_loop"]),
+    # ── 여섯째 조각: 호가 래스터 · depth 늦은 프레임 ──
+    ("래스터 f32 덧셈 → f64 누적", "src/raster.rs", "arr[j as usize] += q as f32;", "arr[j as usize] = (arr[j as usize] as f64 + q) as f32;", ["raster_parity"]),
+    ("래스터 스냅숏 병합 순서(스냅숏 먼저)", "src/raster.rs", "            let mut nb = self.bids.retain(|p| p < lo);\n            bids.iter().for_each(|(p, q)| nb.set(p, q));",
+     "            let mut nb = bids.clone();\n            self.bids.retain(|p| p < lo).iter().for_each(|(p, q)| nb.set(p, q));", ["raster_parity"]),
+    ("래스터 STALE 5→6초", "src/raster.rs", "STALE_SEC: f64 = 5.0;", "STALE_SEC: f64 = 6.0;", ["raster_parity"]),
+    ("래스터 가지치기 ±4→3%", "src/raster.rs", "PRUNE_PCT: f64 = 4.0;", "PRUNE_PCT: f64 = 3.0;", ["raster_parity"]),
+    ("래스터 재동기 드리프트 1→2%", "src/raster.rs", "RESYNC_DRIFT_PCT: f64 = 1.0;", "RESYNC_DRIFT_PCT: f64 = 2.0;", ["raster_parity"]),
+    ("래스터 무효 메움행 빼기", "src/raster.rs", "for _ in 0..(target - size) / ROW as u64 {", "for _ in 0..0 {", ["raster_parity"]),
+    ("래스터 bin_lo 가운데 120→119", "src/raster.rs", "- (N_BINS / 2) as i64;", "- (N_BINS / 2) as i64 + 1;", ["raster_parity"]),
+    ("래스터 동기 전 단절 = 다시 받기(물러남 없음)", "src/raster.rs", "                if !self.synced {\n                    // 방금", "                if false {\n                    // 방금", ["raster_parity"]),
+    ("루프 래스터 수신 시한 35→20초", "src/raster.rs", "RECV_TIMEOUT_S: f64 = 35.0;", "RECV_TIMEOUT_S: f64 = 20.0;", ["venue_loop"]),
+    ("원본으로: depth 늦은 프레임 = 다시 열기(.gz 무시)", "src/depth.rs", "            if !path.exists() && gz.exists() {\n                self.late_gz = Some(gz);\n            }", "", ["depth_parity"]),
+    ("원본으로: depth 늦은 프레임에 지금 시도 압축", "src/depth.rs", "                self.close(forward);", "                self.close(true);", ["depth_parity"]),
 ]
-PARITY = ["tape_parity", "venue_parity", "rest_parity", "ctx_parity", "venue_rest_parity", "depth_parity"]
+PARITY = ["tape_parity", "venue_parity", "rest_parity", "ctx_parity", "venue_rest_parity", "depth_parity", "raster_parity"]
 
 
 def digest() -> str:

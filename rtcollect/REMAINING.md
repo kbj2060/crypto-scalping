@@ -1,7 +1,62 @@
-# rtcollect 로 아직 안 옮긴 수집기 (2026-11-21 조사)
+# rtcollect 로 옮길 것 전수 표 (2026-11-21 · 범위 문서 docs/rtcore_port_scope_20261120.md 표 2 의 «쓰임»·«전진» 전부)
 
-**옮김(다섯째 조각)**: depth_diff(`depth` -- flate2 · serde_json preserve_order 허용, 압축을 푼 내용 바이트 일치) · HL 자산 맥락 hl_ctx.sqlite(`hl_ctx`).
-아래 표의 그 두 줄은 조사 기록으로 남긴다. **안 옮김**: raster(.f32 -- 시간 부족) · HL 호가 .bt(불확실) · HL 체결·duckdb_persist_worker(duckdb 결정 전) · HL 포지션(입력이 duckdb) · 뉴스 RSS.
+판정 «안 쓰임»(돌파 워커 · 신호 워커 · maxpain 기록기 · maker_fill_shadow)과 «불확실»(HL 호가 .bt · 뉴스 판정·ollaya · prometheus · trend_core_forward ·
+f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하는 것은 «rtmodel» · 감시·알림·배포는 «범위 밖(R7·알림)».
+
+### 상주 (scripts/ops/supervisor_*.sh)
+
+| 프로그램 | 저장 형식 | 읽는 곳 | 전진 검정 | rtcollect | 막는 것 · 다음 |
+|---|---|---|---|---|---|
+| 바이낸스 체결 테이프 `live_trade_tape_collector` | SQLite hot | server 풋프린트·수급 · seal → 고래 맞대결 | whale_duel1 | **옮김** `binance_tape`(+REST 대조·복구) | — |
+| OKX 체결 테이프 | SQLite hot | server · seal | whale_duel1 | **옮김** `okx_tape`(+REST) | — |
+| Bybit 체결 테이프 + 맥락 | SQLite hot 둘 | 시장 맥락 OI · seal | — | **옮김** `bybit_tape`(+kline 대조) | — |
+| Bybit 청산 | SQLite hot | server 청산 원 · liqmap_scorer | liqmap_fwd | **옮김** `bybit_liq` | — |
+| OKX 맥락 | SQLite hot | server · coin_flow · liq_tab · liqmap_scorer | liqmap_fwd | **옮김** `okx_ctx` | — |
+| 바이낸스 맥락 | SQLite hot | server · liq_tab · liqmap_scorer · dqm · 감시 | liqmap_fwd | **옮김** `binance_ctx`(OI REST 기본 꺼짐) | — |
+| xyz100 | SQLite hot | /api/xyz100 · 감시 · seal | — | **옮김** `xyz` | — |
+| HL 자산 맥락(book ticker CTX_ONLY) | SQLite hot | server 시장 맥락 · seal · dqm | — | **옮김** `hl_ctx` | HL 호가 `.bt` 몫은 «불확실»(질문 4) |
+| depth_diff | JSONL → 시각별 gz | ob5m · iceberg · bookdepth_feat | fwd_dirshort(간접) | **옮김** `depth`(스냅숏 REST 기본 꺼짐 · 전환 때 켬) | — |
+| 호가 래스터 | 고정폭 `.f32`(+14일 뒤 parquet·duckdb 보관) | server read_window → 히트맵·시장 맥락 | — | **옮김** `raster`(.f32 쓰기만 · 스냅숏 REST 필수) | 보관·지우기 = 파이썬 cron 으로 남김(parquet·duckdb 크레이트) |
+| ob5m 실시간 워커 `live_ob5m` | SQLite `data/live/ob5m/<코인>.sqlite` | /api/ob5m(화면) | — | 안 옮김 | depthdiff 북 재구성(`replay`: numpy 중앙값·flatnonzero·추적) + 5분 봉 · 748줄 -- 같은 값 증명이 큰 일 · **다음 1순위** |
+| 호가 깊이 10열 `live_bookdepth_feat` | SQLite `data/live/bookdepth/ethusdt.sqlite` | live_eth_dir_short 피쳐(→ rtmodel) | fwd_dirshort | 안 옮김 | ob5m `replay` 를 그대로 쓴다 -- ob5m 을 옮기면 같이(219줄) |
+| 아이스버그 `live_eth_iceberg` | JSON 상태 + JSONL 사건 | /api/iceberg · 감시 | — | 안 옮김 | depthdiff + hot 테이프 30초 창 계산(numpy) · 291줄 |
+| HL 포지션 | SQLite hot `hl_positions*.sqlite` | server HL 고래 청산 · 시장 맥락 · seal | — | 안 옮김 | **입력이 HL 체결 DuckDB**(duckdb 크레이트 결정 전) |
+| HL 체결 | DuckDB 일별 → 3일 뒤 gz | HL 포지션 입력 · 감시 | — | 안 옮김 | duckdb 크레이트 |
+| market_data_worker `duckdb_persist_worker` | DuckDB 셋 + JSON 둘(dashboard_state · liq_burst_state) | server 세션·청산 배지(JSON) · 청산 5분 폴백(tail_risk) | — | 안 옮김 | duckdb + 장 달력(pandas_market_calendars) + 미시구조 884줄 재작성 |
+| oi_lsratio 워커 | DuckDB | **server 롱숏비(server.py:2536)** · seal | — | 안 옮김 | duckdb (범위 문서 «불확실» → 서버가 읽어 «쓰임») |
+| 뉴스 RSS | SQLite hot | /api/news | — | 안 옮김 | XML·HTML 엔티티·RFC822 날짜·정규식 크레이트(사용자 결정) |
+| deribit 블록체결·GEX | JSON 둘 + 옵션 DuckDB | server 옵션 카드 · 감시 | — | 안 옮김 | 옵션 DuckDB 몫(크레이트) · JSON 몫만 떼는 것은 결정 필요 |
+| SR lean `live_sr_lean` | JSONL | /api/sr-lean | sr_ml_5m_forward | **rtmodel** | 모델 서빙 |
+| 푸시 알림 · SR 근접 알림 | 웹푸시·텔레그램 | 폰 · 알림 센터 | — | 범위 밖(알림) | — |
+
+### 예약(cron)
+
+| 프로그램 | 주기 | 저장 형식 | 읽는 곳 | 전진 검정 | rtcollect | 막는 것 · 다음 |
+|---|---|---|---|---|---|---|
+| treasury_futures | 매분 | SQLite | /api/treasury-futures · 감시 · lake | — | 안 옮김 | 없음(야후 차트 REST → SQLite, 93줄) · 화면 빈도 낮음 |
+| macro_5m | */5 | SQLite | Macro Trend · /api/macro-today · 감시 | — | 안 옮김 | 없음(야후 REST, 123줄) |
+| macro_daily | 매시 | SQLite | macro_trend | macro_bias | 안 옮김 | pandas 계산 · 재무부 REST |
+| cboe 옵션 체인 | */10 | JSON | /api/gex | soxl_own_iv | 안 옮김 | 없음(CBOE REST → JSON, 106줄) -- 전진 기록이라 JSON 글자 일치 필요(preserve_order 있음) |
+| liqmap_scorer | 매시 | JSONL·JSON | 알림 센터 · 판정 | liqmap_fwd | 안 옮김 | pandas merge_asof 채점 -- 전진 채점기라 값 일치 증명 필수 |
+| liq_tab | 매시 | JSON | /api/liq-tab | — | 안 옮김 | numpy·pandas 계산 + 바이낸스 klines REST |
+| soxl_weekend_forward | 매일 | JSONL | 판정 | soxl_wknd1·2 | 안 옮김 | 바이낸스 REST + 규칙 계산 |
+| macro_bias_forward | 주말 | JSONL | 판정 | fwd_macro_regime | 안 옮김 | pandas 계산 |
+| risk_radar · regime_band · eth_direction_forward_recorder | 매분·매시·매일 | JSON·JSONL | 화면·판정 | regime: fwd_band · dir: dir4h_p2·dir3asset | **rtmodel** | 모델 예측 기록 |
+| seal_to_lake | 매일 | Parquet | 전진 다수 · 감시 | 여럿 | 안 옮김 | parquet(arrow) 크레이트 |
+| 월간 학습(dir4h·vol4h·dir_short·box_hold Platt) | 월간 | joblib | 서빙 | 여럿 | 파이썬 유지(학습) | — |
+| raw_failover · data_quality_monitor · morning_audit · multicoin_collectors · gen_data_map · verdict_ledger_health · backup | 여러 | JSON·보고 | 감시·사용자 | — | 범위 밖(R7 운영) | — |
+
+**요약**: 상주 수집기 중 옮김 10(테이프 셋 · 청산 · 맥락 넷 · depth · 래스터) · 안 옮김 9(SQLite·JSON 계산 워커 셋 = ob5m·bookdepth·iceberg · duckdb 넷 · XML 하나 · deribit) ·
+rtmodel 1 · 범위 밖 2 / 예약 중 안 옮김 8(크레이트 없이 되는 것 = treasury·macro_5m·cboe · 계산 기록기 다섯) · rtmodel 3 · parquet 1.
+옮기지 않은 «불확실»: HL 호가 .bt · 뉴스 판정·ollaya · prometheus · trend_core_forward · f4c altdata · llm_brief / «안 쓰임»: 돌파 워커 · 신호 워커 · maxpain 기록기 · maker_fill_shadow.
+
+---
+
+## 형식이 다른 수집기 조사(넷째 조각)
+
+
+**옮김(다섯째·여섯째 조각)**: 호가 래스터 .f32(`raster` -- 표준 라이브러리, 파일 바이트 일치) · depth_diff(`depth` -- flate2 · serde_json preserve_order 허용, 압축을 푼 내용 바이트 일치) · HL 자산 맥락 hl_ctx.sqlite(`hl_ctx`).
+아래 표의 그 두 줄은 조사 기록으로 남긴다. **안 옮김**: raster 보관(parquet·duckdb) · HL 호가 .bt(불확실) · HL 체결·duckdb_persist_worker(duckdb 결정 전) · HL 포지션(입력이 duckdb) · 뉴스 RSS.
 
 저장 형식이 SQLite 가 아니거나(또는 입력이 SQLite 가 아니어서) 지금 크레이트(rusqlite·serde_json·tokio·tokio-tungstenite·rustls·ureq)만으로는
 «같은 파일»을 못 내는 것들. 줄 번호는 각 원본 파일. **형식을 SQLite 로 바꾸는 것은 «값이 바뀌는 변경»(읽는 쪽도 바뀐다) -- 사용자 결정.**

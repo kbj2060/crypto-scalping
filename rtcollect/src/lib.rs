@@ -20,6 +20,7 @@ pub mod net;
 pub mod hl_ctx;
 pub mod okx;
 pub mod okx_ctx;
+pub mod raster;
 pub mod rest;
 pub mod rest_venue;
 pub mod store;

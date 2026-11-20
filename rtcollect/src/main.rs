@@ -25,7 +25,7 @@
 use rtcollect::net::{self, EXIT_STALL};
 use rtcollect::rest::{wall_s, Clock, Rest, TIMEOUT};
 use rtcollect::store::open_db;
-use rtcollect::{binance, binance_ctx, bybit_liq, bybit_tape, depth, hl_ctx, okx, okx_ctx, rest_venue, xyz};
+use rtcollect::{binance, binance_ctx, bybit_liq, bybit_tape, depth, hl_ctx, okx, okx_ctx, raster, rest_venue, xyz};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -35,7 +35,7 @@ use std::time::Duration;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::task::JoinSet;
 
-const KINDS: &str = "binance_tape|bybit_liq|bybit_tape|okx_tape|okx_ctx|binance_ctx|xyz|hl_ctx|depth";
+const KINDS: &str = "binance_tape|bybit_liq|bybit_tape|okx_tape|okx_ctx|binance_ctx|xyz|hl_ctx|depth|raster";
 
 fn env_f(k: &str, d: f64) -> f64 {
     std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
@@ -96,6 +96,7 @@ fn main() {
             "xyz" => run_xyz().await,
             "hl_ctx" => run_hl_ctx().await,
             "depth" => run_depth().await,
+            "raster" => run_raster().await,
             k => die(2, &format!("RTCOLLECT_KIND={k} -- {KINDS}")),
         }
     });
@@ -329,6 +330,46 @@ async fn run_depth() {
     c.borrow_mut().out.close(false);
     c.borrow_mut().out.join();
     println!("종료 신호 -- 파일 닫고 끝낸다");
+}
+
+/// 호가 래스터(live_orderflow_raster_collector_20260914.py). 종목 하나(OF_SYMBOL). 🔴스냅숏 REST 없이는 북을 못 세운다 -- RTCOLLECT_REST=1 필수
+/// (시간당 2회 안팎 · 가중치 20). 기본 폴더 data/live/rtcollect/orderflow/raster -- 파이썬 폴더면 켜지지 않는다. 보관·지우기는 하지 않는다.
+async fn run_raster() {
+    let sym = env_s("OF_SYMBOL", "ethusdt").to_lowercase();
+    let root = PathBuf::from(env_s("OF_ROOT", "data/live/rtcollect/orderflow/raster"));
+    if root.ends_with("data/live/orderflow/raster") && env_s("RTCOLLECT_TAKEOVER", "") != "1" {
+        die(2, &format!("🔴{} 는 파이썬 수집기의 폴더다 -- 그림자는 다른 경로에. 전환이면 RTCOLLECT_TAKEOVER=1", root.display()));
+    }
+    let url = env_s("RTCOLLECT_WS_URL", raster::WS).replace("{symbol}", &sym);
+    let rest = env_s("RTCOLLECT_REST", "") == "1";
+    let snap_url = env_s("RTCOLLECT_DEPTH_URL", raster::SNAPSHOT).replace("{SYMBOL}", &sym.to_uppercase());
+    let ban = PathBuf::from(env_s("RTCOLLECT_BAN_FILE", "data/live/binance_ban_until"));
+    let agent = rtcollect::rest::agent(Duration::from_secs(10)); // ClientTimeout(total=10)
+    // _fetch_snapshot: raise_for_status · json(content_type=None). 🔧밴 중이면 안 보내고 418·429 는 공용 밴 파일에(원본은 모른다).
+    let fetch: Arc<dyn Fn() -> Result<serde_json::Value, String> + Send + Sync> = Arc::new(move || {
+        if !rest {
+            return Err("REST 꺼짐(RTCOLLECT_REST=1)".into());
+        }
+        if rtcollect::rest::ban_left(&ban, wall_s()) > 0.0 {
+            return Err("binance IP ban -- 안 보냄".into());
+        }
+        let mut r = agent.get(&snap_url).call().map_err(|e| e.to_string())?;
+        let st = r.status().as_u16();
+        let ra = r.headers().get("retry-after").and_then(|v| v.to_str().ok()).map(str::to_string);
+        let body = r.body_mut().read_to_string().map_err(|e| e.to_string())?;
+        rtcollect::rest::ban_note(&ban, st, &body, ra.as_deref(), wall_s());
+        if st >= 400 {
+            return Err(format!("ClientResponseError: {st}"));
+        }
+        serde_json::from_str(&body).map_err(|e| e.to_string())
+    });
+    let r = Rc::new(RefCell::new(raster::Raster::new(&root, &sym)));
+    println!("raster {sym} → {} (스냅숏 REST {})", root.display(), if rest { "켬" } else { "🔴꺼짐 = 모든 행 무효" });
+    let mut tasks = JoinSet::new();
+    tasks.spawn_local(net::run_raster(r.clone(), url, fetch));
+    tasks.spawn_local(net::raster_ticks(r.clone()));
+    wait_term(&mut tasks, || { let r = r.borrow(); println!("rtcollect raster 60s · 행 {}(무효 {}) · 호가 {}/{}", r.rows_written, r.rows_invalid, r.bids.len(), r.asks.len()) }).await;
+    println!("종료 신호 -- 끝낸다");
 }
 
 /// Bybit 청산(live_bybit_liquidation_collector_20261003.py `run()`). 정지 감시 없음(원본 그대로).

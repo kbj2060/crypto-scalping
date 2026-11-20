@@ -566,6 +566,13 @@ fn bn_mark_msgs(k: i64) -> Vec<String> {
         .collect()
 }
 
+/// 마지막 마크 연결: 셋째 프레임 자리에 깨진 JSON -- 고친 Rust 는 건너뛰고 같은 연결로 나머지를 받는다(되돌리면 끊겨 뒤 행이 사라지고 gaps 가 하나 는다).
+fn bn_mark_broken() -> Vec<String> {
+    let mut v = bn_mark_msgs(3);
+    v.insert(2, r#"{"e":"markPriceUpdate","E":17"#.into());
+    v
+}
+
 fn bn_force_msgs() -> Vec<String> {
     let syms = ["ETHUSDT", "DOGEUSDT", "ZECUSDT", "BTCUSDT"];
     (0..4i64).map(|s| json!({"e": "forceOrder", "E": T0 + s, "o": {"s": syms[s as usize],
@@ -582,7 +589,7 @@ async fn binance_ctx_loop_matches_replay() {
             Conn { msgs: bn_mark_msgs(0), end: End::Close },
             Conn { msgs: bn_mark_msgs(1), end: End::Read(Duration::from_secs(33)) }, // PING 하나(30초) -- 서버가 pong 하니 안 끊긴다
             Conn { msgs: bn_mark_msgs(2), end: End::Mute(Duration::from_secs(60)) }, // pong 없음 -- 30+15초에 닫고 3초 뒤
-            Conn { msgs: bn_mark_msgs(3), end: End::Read(Duration::from_secs(120)) },
+            Conn { msgs: bn_mark_broken(), end: End::Read(Duration::from_secs(120)) }, // 🔧깨진 프레임 뒤 정상 프레임이 같은 연결로(원본이면 여기서 끊긴다)
         ]),
         ("!forceOrder@arr", vec![Conn { msgs: bn_force_msgs(), end: End::Read(Duration::from_secs(200)) }]),
     ])
@@ -618,7 +625,7 @@ async fn binance_ctx_loop_matches_replay() {
     let mut ev = vec![];
     for k in 0..4 {
         ev.push(json!([1.0, "o", ""]));
-        ev.extend(bn_mark_msgs(k).into_iter().map(|m| json!([1.0, "t", m])));
+        ev.extend((if k == 3 { bn_mark_broken() } else { bn_mark_msgs(k) }).into_iter().map(|m| json!([1.0, "t", m])));
         ev.push(json!([1.0, "c", ""]));
     }
     feeds.push(json!({"kind": "mark", "events": ev}));
@@ -832,5 +839,93 @@ async fn depth_loop_matches_replay() {
     // 원본 그대로: 접속마다 prev_u 를 비워 첫 프레임은 대조하지 않는다 -- 재접속 사이 구멍은 _gap 으로 안 남는다(첫 프레임 pu 가 어긋나도)
     assert_eq!(a.iter().filter(|l| l.contains("_gap")).count(), 0, "{a:#?}");
     eprintln!("depth 접속 루프 = replay: 줄 {} · PING {p:?} · 다시 붙기 {:.2}·{:.2}초", a.len(), redial(0), redial(1));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── 호가 래스터 ─────────────────────────────────────────────────────────────────────────────────────────
+/// 가짜 스냅숏 REST(언제나 같은 북 · lastUpdateId 1000) -- 받은 요청 수를 센다.
+fn snapshot_server() -> (String, Arc<Mutex<usize>>) {
+    use std::io::{Read, Write};
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", l.local_addr().unwrap());
+    let n = Arc::new(Mutex::new(0usize));
+    let n2 = n.clone();
+    std::thread::spawn(move || {
+        for s in l.incoming() {
+            let mut s = s.unwrap();
+            let mut b = [0u8; 4096];
+            let _ = s.read(&mut b);
+            *n2.lock().unwrap() += 1;
+            let bids: Vec<Value> = (1..=50).map(|k| json!([format!("{:.2}", 2500.0 - 0.01 * k as f64), "1.000"])).collect();
+            let asks: Vec<Value> = (0..50).map(|k| json!([format!("{:.2}", 2500.0 + 0.01 * k as f64), "2.000"])).collect();
+            let body = json!({"lastUpdateId": 1000, "E": 1, "T": 1, "bids": bids, "asks": asks}).to_string();
+            let _ = s.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes());
+        }
+    });
+    (base, n)
+}
+
+/// 접속마다: 스냅숏을 부르는 첫 이벤트(버려진다) → U <= 1000 <= u 인 동기 이벤트 → 이어지는 이벤트.
+fn raster_msgs() -> Vec<String> {
+    let ev = |uu: i64, u: i64, pu: i64, b: &str| json!({"e": "depthUpdate", "E": T0, "T": T0, "s": "ETHUSDT", "U": uu, "u": u, "pu": pu, "b": [[b, "3.000"]], "a": []}).to_string();
+    vec![ev(900, 950, 899, "2499.90"), ev(990, 1005, 989, "2499.80"), ev(1006, 1010, 1005, "2499.70"), ev(1011, 1020, 1010, "2499.60")]
+}
+
+#[tokio::test]
+async fn raster_loop_writes_rows_and_redials() {
+    let dir = tmpdir("raster");
+    let (rest, n_snap) = snapshot_server();
+    let (port, conns, _pings) = serve_paths(vec![("ethusdt@depth@500ms", vec![
+        Conn { msgs: raster_msgs(), end: End::Read(Duration::from_secs(4)) },       // 서버가 닫음 = recv 예외 → 3초(동기됐으니 대기 3초)
+        Conn { msgs: raster_msgs(), end: End::Mute(Duration::from_secs(60)) },      // pong 없음: 20초 PING + 10초 = 끊고 3초
+        Conn { msgs: raster_msgs(), end: End::Read(Duration::from_secs(60)) },
+    ])])
+    .await;
+    let root = dir.join("rs");
+    let env = [("RTCOLLECT_KIND", "raster".into()), ("OF_SYMBOL", "ETHUSDT".into()), ("OF_ROOT", root.display().to_string()), ("RTCOLLECT_REST", "1".into()),
+               ("RTCOLLECT_DEPTH_URL", format!("{rest}/fapi/v1/depth?symbol={{SYMBOL}}&limit=1000")), ("RTCOLLECT_BAN_FILE", dir.join("ban").display().to_string()),
+               ("RTCOLLECT_WS_URL", format!("ws://127.0.0.1:{port}/ws/{{symbol}}@depth@500ms"))];
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_rtcollect"));
+    for (k, v) in &env {
+        cmd.env(k, v);
+    }
+    let mut child = cmd.stdout(Stdio::null()).stderr(Stdio::piped()).spawn().unwrap();
+    let t0 = Instant::now();
+    while conns.lock().unwrap().len() < 3 {
+        assert!(t0.elapsed() < Duration::from_secs(90), "연결 3개가 90초 안에 안 왔다");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert!(Command::new("kill").args(["-TERM", &child.id().to_string()]).status().unwrap().success());
+    let st = tokio::task::spawn_blocking(move || child.wait().unwrap()).await.unwrap();
+    assert_eq!(st.code(), Some(0), "SIGTERM 은 0");
+    let c = conns.lock().unwrap().clone();
+    let redial = |k: usize| c[k + 1].1 - c[k].2;
+    within(redial(0), 6.9, 8.2, "서버가 4초에 닫음 + 대기 3초");
+    within(redial(1), 32.9, 34.2, "PING 20초 + pong 10초 + 대기 3초");
+    assert_eq!(*n_snap.lock().unwrap(), 3, "접속마다 스냅숏 한 번");
+    // 파일: 헤더 · 초마다 한 행(이어진 초) · 동기된 동안은 유효(mid·bin_lo) · 5초 넘게 조용하면 무효
+    let files: Vec<_> = std::fs::read_dir(root.join("ETHUSDT")).unwrap().map(|e| std::fs::read(e.unwrap().path()).unwrap()).collect();
+    let (mut valid, mut total) = (0, 0);
+    for b in &files {
+        assert_eq!(&b[..4], b"FLWR");
+        assert_eq!(u16::from_le_bytes([b[6], b[7]]), 240);
+        for k in 0..(b.len() - 32) / 976 {
+            let r = &b[32 + k * 976..32 + (k + 1) * 976];
+            if r[..8] == [0u8; 8] {
+                continue;
+            }
+            total += 1;
+            let (lo, mid) = (i32::from_le_bytes(r[8..12].try_into().unwrap()), f32::from_le_bytes(r[12..16].try_into().unwrap()));
+            if mid.is_finite() {
+                assert_eq!((lo, mid), (4879, 2499.995), "유효 행의 bin_lo·mid");
+                let q = |j: usize| f32::from_le_bytes(r[16 + 4 * j..20 + 4 * j].try_into().unwrap());
+                assert!(q(120) > 0.0 && q(121) < 0.0, "매수 + · 매도 − (2499.99 → 칸 120 · 2500.00 → 121)");
+                valid += 1;
+            }
+        }
+    }
+    assert!(total >= 40 && valid >= 6, "행 {total} · 유효 {valid}");
+    eprintln!("래스터 접속 루프: 행 {total}(유효 {valid}) · 스냅숏 {} · 다시 붙기 {:.2}·{:.2}초", n_snap.lock().unwrap(), redial(0), redial(1));
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -24,6 +24,7 @@ Rust 수집기(`rtcollect`)를 서버에서 **파이썬 수집기 옆에 나란�
 | `binance_ctx` | `BN_CTX_MARK_SYMBOLS` · `BN_CTX_OI_SYMBOLS` · `BN_CTX_OI_SLOW_SYMBOLS` | `data/hot/rtcollect/binance_ctx.sqlite` | `data/hot/binance_ctx.sqlite` |
 | `xyz` | `HL_XYZ_COINS`(글자 그대로) | `data/hot/rtcollect/hl_xyz.sqlite` | `data/hot/hl_xyz.sqlite` |
 | `hl_ctx` | `HL_BT_COIN`(쉼표 -- 원본은 코인마다 프로세스·`HL_BT_CTX_ONLY=1`) | `data/hot/rtcollect/hl_ctx.sqlite` | `data/hot/hl_ctx.sqlite` |
+| `raster` | `OF_SYMBOL`(한 종목) · 🔴`RTCOLLECT_REST=1` 필수(스냅숏 없이는 북을 못 세운다) | 폴더 `data/live/rtcollect/orderflow/raster/<SYM>/` | `data/live/orderflow/raster/<SYM>/`(폴더를 가리키면 종료코드 2) |
 | `depth` | `DD_SYMBOL`(한 종목 -- 원본과 같다) | 폴더 `data/live/rtcollect/orderflow/depthdiff/<SYM>/` | `data/live/orderflow/depthdiff/<SYM>/`(폴더를 가리키면 종료코드 2) |
 
 - 심볼 목록은 **지금 도는 파이썬과 같게**: `tr '\0' '\n' < /proc/<파이썬 pid>/environ | grep -E 'TAPE_SYMBOL|TAPE_MARKET|OKX_TAPE_INST|BYBIT_'`.
@@ -70,10 +71,13 @@ python3 rtcollect/tools/shadow_tape.py data/hot/okx_ctx.sqlite           data/ho
 python3 rtcollect/tools/shadow_tape.py data/hot/binance_ctx.sqlite       data/hot/rtcollect/binance_ctx.sqlite       --from … --to …
 python3 rtcollect/tools/shadow_tape.py data/hot/hl_xyz.sqlite            data/hot/rtcollect/hl_xyz.sqlite            --from … --to …
 python3 rtcollect/tools/shadow_tape.py data/hot/hl_ctx.sqlite            data/hot/rtcollect/hl_ctx.sqlite            --from … --to …
+python3 rtcollect/tools/shadow_tape.py --raster data/live/orderflow/raster/ETHUSDT data/live/rtcollect/orderflow/raster/ETHUSDT --hours 2026-11-22T00,2026-11-22T23
 python3 rtcollect/tools/shadow_tape.py --depth data/live/orderflow/depthdiff/ETHUSDT data/live/rtcollect/orderflow/depthdiff/ETHUSDT --hours 2026-11-22T00,2026-11-22T23
 ```
 depth 는 시 파일을 풀어 **거래소 프레임 줄을 글자 그대로** 맞춘다(스냅숏 줄은 두 쪽이 다른 순간에 REST 를 불러 원래 다르고 Rust 는 기본 null · `_gap` 줄은
 연결 시각에 달렸다 -- 센 수만). 통과 = 날마다 «파이썬에만 0 · Rust에만 0», 단 두 쪽 로그의 끊김 시각 ±5초 안 프레임은 뺀다(제안).
+래스터는 바이트 일치를 기대하지 않는다(두 프로세스가 스냅숏을 다른 순간에 받고 틱이 각자 벽시계다) -- «두 쪽 유효 초의 99% 이상 bin_lo·mid 같음 · 칸 같음 비율 중앙 0.95 이상»(제안).
+값 일치는 개발기 정답지(원본과 같은 사건 열 → 파일 바이트 같음)가 보인다.
 `«Rust에만 N(의도한 차이 후보 -- …)»` 는 §11 의 고친 결함으로 Rust 가 더 쓴 행이다 -- 불일치로 세지 않는다(그 수는 적는다).
 표준 라이브러리만 · 두 파일 다 읽기 전용(`mode=ro`) · 한 시간 창씩 읽는다(큰 표를 통째로 안 올린다).
 빼는 분: 두 쪽 gaps ±5초 · 두 쪽 backfill_1m ok 분 · 두 쪽 verify_1m 불일치 분 · 범위 끝 10초. 뺀 (종목, 분) 수를 같이 찍는다.
@@ -116,6 +120,7 @@ depth 는 시 파일을 풀어 **거래소 프레임 줄을 글자 그대로** �
 | `okx_ctx` | 시작 때 ctVal 1회 | 종목당 시작마다 1회 |
 | `bybit_tape` | 300초마다 종목마다 v5 kline 1회(복구 없음 -- 원본에 없다) | 5종목 = 1회/분 |
 | `xyz` | 접속할 때마다 종목마다 candleSnapshot POST(마지막 저장 봉부터, 없으면 72시간) | 재접속 때만(4회/접속) |
+| `raster` | 시작 · 30분마다 · 드리프트 1% · 시퀀스 단절 때 `/fapi/v1/depth?limit=1000`(가중치 20 · 🔧밴 파일을 지킨다) | 평소 시간당 2회 안팎 -- **그림자도 켠다**(안 켜면 모든 행이 무효라 대조할 것이 없다. 합쳐도 시간당 4회 안팎) |
 | `depth` | 새 시 파일마다 `/fapi/v1/depth?limit=1000`(가중치 20 · 🔧밴 파일을 지킨다) | 시간당 1회(= 분당 약 0.3 가중치). 끄면 첫 줄 `{"_snapshot":null}` -- 읽는 쪽(ob5m·bookdepth_feat)이 그 시 파일로 북을 못 세운다(«no_snapshot») → **전환 때 반드시 켠다** |
 
 - 바이낸스 OI 의 418·429 는 공용 밴 파일(`RTCOLLECT_BAN_FILE`, 기본 `data/live/binance_ban_until`)에 적고 그때까지 안 보낸다(원본 binance_ban_guard 와 같다).
@@ -179,6 +184,9 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
 | 10 | 바이낸스 맥락 | SIGTERM 이면 보류 행(최대 10초분)을 잃는다(asyncio 기본 처리 = finally 없이 끝) | 쓰고 끝낸다 | 재시작마다 원본이 최대 10초 비고 Rust 는 안 빈다 | — | 코드(main.rs) |
 | 11 | 바이낸스 맥락 | 재연결 기록이 없다(gaps 표 없음) | `gaps(symbol, from_ms, to_ms, reason)` 표를 **더했다**(마크 = 소문자 종목 · 강제청산 = NULL) -- 기존 표·열은 그대로라 대시보드·dqm·liqmap 은 안 바뀐다 | Rust 파일에만 gaps 표 | gaps 0 → 20 | ctx_parity · venue_loop(끊김 셋 = gaps 셋) |
 | 12 | xyz100 | 끊기면(예외·시한 셋·글자 아닌 메시지) 마지막 플러시 뒤 받은 행(최대 2초)을 **버린다** · 종료 때도 | 끊길 때·종료 때 쓴다 | Rust 에만 끊김 직전 행 | hl_xyz_1m 11 → 13 · hl_xyz_ctx_1s 73 → 124 | ctx_parity · venue_loop((9, 18) -- 원본이면 (6, 12)) |
+
+| 13 | depth_diff | 시각이 바뀐 뒤 지난 시의 늦은 프레임이 오면 압축 중인 그 파일을 다시 열어 이어 쓰고, 압축 스레드가 끝나며 원본을 지워 **그 줄이 사라진다**(경쟁) -- 압축이 이미 끝났으면 새 `.jsonl`(스냅숏부터)을 만들어 읽는 쪽(`.jsonl` 먼저)이 그 시의 `.gz` 를 못 본다 · 늦은 프레임 하나에 **지금 시** 파일까지 압축해 곧 다시 연다 | 그 시 압축을 기다린 뒤 `.gz` 뒤에 gzip 멤버로 붙인다(파이썬 gzip.open 도 이어 읽는다) · 앞으로 넘어갈 때만 압축한다 | Rust 는 늦은 줄이 그 시 `.gz` 에 남고 지금 시 파일은 `.jsonl` 그대로 | 정답지엔 넣지 않았다(원본 결과가 돌릴 때마다 달라 정답지가 안 된다) | depth_parity `depth_late_frame_during_compress_is_kept`(2만 줄 압축 중 늦은 셋 → 2만+3 줄 · 지금 시 그대로) |
+| 14 | 호가 래스터 | 스냅숏 REST 가 공용 밴 파일을 모른다 | 밴 중이면 안 보내고 418·429 를 밴 파일에 | 밴 중엔 Rust 는 동기 못 함(행 무효) | — | 코드(main.rs) |
 
 `shadow_tape.py` 는 1·3·8·9·12 의 표에서 «Rust에만» 을 `(의도한 차이 후보 -- 이유)` 로 따로 적는다(«파이썬에만»·값 불일치는 그대로 실패).
 원본 그대로 둔 것(고치지 않음 -- 범위 밖이거나 값이 원본 정의다): depth 의 재접속 사이 구멍이 `_gap` 으로 안 남는 것 · 재시작이 시 경계를 넘으면 지난 시

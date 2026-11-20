@@ -657,3 +657,84 @@ pub async fn run_depth(c: Rc<RefCell<crate::depth::DepthCollector>>, url: String
         }
     }
 }
+
+// ── 호가 래스터(websockets) ──────────────────────────────────────────────────────────────────────────
+/// 영원히(live_orderflow_raster_collector_20260914.py `_depth_loop` :587-632): 접속(ping 20 · pong 10) → 메시지 → 35초 수신 시한·끊김·예외면
+/// `delay`(3초, 1.5배씩 60초까지 · 동기된 이벤트가 오면 3초로) 쉬고 다시. 스냅숏은 `fetch`(다른 스레드 -- 그동안 틱이 돈다).
+pub async fn run_raster(r: Rc<RefCell<crate::raster::Raster>>, url: String, fetch: std::sync::Arc<dyn Fn() -> Result<serde_json::Value, String> + Send + Sync>) {
+    let silence = Duration::from_secs_f64(crate::raster::RECV_TIMEOUT_S);
+    loop {
+        let why: String = match timeout(DEPTH_CONNECT, connect_async(url.as_str())).await {
+            Ok(Ok((ws, _))) => {
+                r.borrow_mut().on_connect();
+                let (mut tx, mut rx) = ws.split();
+                let mut ping_at = tokio::time::Instant::now() + DEPTH_PING;
+                let mut pong_by: Option<tokio::time::Instant> = None;
+                let mut deadline = tokio::time::Instant::now() + silence;
+                loop {
+                    let m = tokio::select! {
+                        _ = sleep_until(ping_at) => {
+                            ping_at += DEPTH_PING;
+                            if tx.send(Message::Ping(Default::default())).await.is_err() {
+                                break "ping 실패".to_string();
+                            }
+                            pong_by.get_or_insert(tokio::time::Instant::now() + DEPTH_PONG);
+                            continue;
+                        }
+                        _ = sleep_until(pong_by.unwrap_or(ping_at)), if pong_by.is_some() => break "pong 10초 없음".to_string(),
+                        _ = sleep_until(deadline) => break "TimeoutError: recv 35초".to_string(),
+                        m = rx.next() => m,
+                    };
+                    let raw = match m {
+                        Some(Ok(Message::Text(t))) => t.as_str().to_string(),
+                        Some(Ok(Message::Binary(b))) => String::from_utf8_lossy(&b).to_string(),
+                        Some(Ok(Message::Pong(_))) => {
+                            pong_by = None;
+                            continue;
+                        }
+                        Some(Ok(Message::Ping(_) | Message::Frame(_))) => continue,
+                        Some(Ok(_)) | None => break "ConnectionClosed".to_string(), // recv() 는 닫히면 예외
+                        Some(Err(e)) => break format!("{e}"),
+                    };
+                    deadline = tokio::time::Instant::now() + silence; // wait_for(ws.recv(), 35) -- 메시지마다
+                    let is_depth = serde_json::from_str::<serde_json::Value>(&raw).ok().and_then(|v| v.get("e").cloned()) == Some("depthUpdate".into());
+                    let pre = if is_depth && r.borrow().wants_snapshot() {
+                        let f = fetch.clone();
+                        Some(tokio::task::spawn_blocking(move || f()).await.unwrap_or_else(|e| Err(e.to_string())))
+                    } else {
+                        None
+                    };
+                    let mut snap = || pre.clone().unwrap_or_else(|| Err("스냅숏 없음".into()));
+                    if let Err(e) = r.borrow_mut().on_text(&raw, crate::rest::wall_s(), &mut snap) {
+                        break e;
+                    }
+                }
+            }
+            Ok(Err(e)) => format!("{e}"),
+            Err(_) => "접속 10초 초과".into(),
+        };
+        RECONNECTS.fetch_add(1, Relaxed);
+        let d = r.borrow_mut().on_error();
+        eprintln!("depth WS 끊김, {d:.0}s 후 재접속: {why}");
+        sleep(Duration::from_secs_f64(d)).await;
+    }
+}
+
+/// `_raster_loop`(:654-702): 목표 초를 세며 매초 한 행. 늦으면 `next_tick` 이 따라잡는다(건너뛴 초는 writer 가 무효행으로).
+pub async fn raster_ticks(r: Rc<RefCell<crate::raster::Raster>>) {
+    let mut target = crate::rest::wall_s() as i64 + 1;
+    loop {
+        let d = target as f64 - crate::rest::wall_s();
+        if d > 0.0 {
+            sleep(Duration::from_secs_f64(d)).await;
+        }
+        if let Err(e) = r.borrow_mut().tick(target, crate::rest::wall_s()) {
+            eprintln!("래스터 쓰기 실패: {e}");
+        }
+        let nxt = crate::raster::next_tick(target, crate::rest::wall_s());
+        if nxt > target + 1 {
+            eprintln!("틱 건너뜀 {target}→{nxt}");
+        }
+        target = nxt;
+    }
+}

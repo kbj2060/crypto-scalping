@@ -213,6 +213,36 @@ def compare_depth(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~") -> li
     return res or ["depth: 두 쪽에 같은 시 파일이 없다"]
 
 
+def compare_raster(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~") -> list[str]:
+    """호가 래스터 시 파일(<폴더>/<SYM>/<UTC 시>.f32) 대조: 같은 초에 두 쪽 다 유효한 행의 bin_lo·mid 같음 · 잔량 칸 같음 비율.
+    🔴바이트 일치는 기대하지 않는다 -- 두 프로세스가 스냅숏을 다른 순간에 받고(병합 범위가 다르다) 틱이 각자 벽시계라 같은 초의 북이 몇 이벤트 갈린다.
+    통과 기준(제안): 두 쪽 유효 초의 99% 이상에서 bin_lo·mid 같음 · 칸 같음 비율 중앙 0.95 이상. 무효 초 수는 따로 적는다."""
+    import struct
+    row = 976
+
+    def rows(p: Path) -> dict:
+        b = p.read_bytes()
+        out = {}
+        for k in range((len(b) - 32) // row):
+            r = b[32 + k * row:32 + (k + 1) * row]
+            ts, bl, mid = struct.unpack_from("<qif", r, 0)
+            if ts and mid == mid:
+                out[ts] = (bl, mid, r[16:])
+        return out
+    res = []
+    for pp in sorted(py_dir.glob("*.f32")):
+        h, rp = pp.stem, rs_dir / pp.name
+        if not (lo <= h <= hi) or not rp.exists():
+            continue
+        a, b = rows(pp), rows(rp)
+        both = sorted(a.keys() & b.keys())
+        same_hdr = sum(a[t][:2] == b[t][:2] for t in both)
+        fr = sorted(sum(x == y for x, y in zip(struct.iter_unpack("<f", a[t][2]), struct.iter_unpack("<f", b[t][2]))) / 240 for t in both if a[t][:2] == b[t][:2])
+        med = fr[len(fr) // 2] if fr else None
+        res.append(f"raster {h}: 두 쪽 유효 초 {len(both):,} · bin_lo·mid 같음 {same_hdr:,} · 칸 같음 비율 중앙 {med} · 파이썬만 유효 {len(a.keys() - b.keys()):,} · Rust만 유효 {len(b.keys() - a.keys()):,}")
+    return res or ["raster: 두 쪽에 같은 시 파일이 없다"]
+
+
 def selftest() -> None:
     tape = ("CREATE TABLE trade_tape_1s(symbol TEXT, ts_sec INTEGER, price_bin INTEGER, buy_qty REAL, sell_qty REAL, "
             "PRIMARY KEY (symbol, ts_sec, price_bin)) WITHOUT ROWID")
@@ -291,11 +321,15 @@ def main() -> None:
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--depth", action="store_true", help="두 경로 = depth_diff 종목 폴더(<root>/<SYM>) · --from/--to 대신 --hours 시작,끝(YYYY-MM-DDTHH)")
     ap.add_argument("--hours", default="")
+    ap.add_argument("--raster", action="store_true", help="두 경로 = 호가 래스터 종목 폴더(<root>/<SYM>) · --hours 시작,끝")
     a = ap.parse_args()
     if a.selftest:
         return selftest()
     if not (a.py and a.rs):
         ap.error("파이썬 DB 와 Rust DB 경로가 필요하다")
+    if a.raster:
+        lo, _, hi = a.hours.partition(",")
+        return print("\n".join(compare_raster(a.py, a.rs, lo, hi or "~")))
     if a.depth:
         lo, _, hi = a.hours.partition(",")
         return print("\n".join(compare_depth(a.py, a.rs, lo, hi or "~")))

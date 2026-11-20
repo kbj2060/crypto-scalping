@@ -57,25 +57,49 @@ pub struct HourFile {
     dir: PathBuf,
     hour: Option<String>,
     fh: Option<BufWriter<File>>,
+    /// 🔧이미 압축된 지난 시에 늦게 온 줄 = 그 .gz 뒤에 gzip 멤버로 붙인다(gzip 은 여러 멤버를 이어 읽는다 -- 파이썬 gzip.open 도)
+    late_gz: Option<PathBuf>,
     rows: usize,
-    /// 압축 스레드(시험은 끝에 기다린다).
-    pub zips: Vec<std::thread::JoinHandle<()>>,
+    /// 압축 스레드(시각, 손잡이) -- 같은 시를 다시 열기 전에 기다린다. 시험은 끝에 다 기다린다.
+    pub zips: Vec<(String, std::thread::JoinHandle<()>)>,
 }
 
 impl HourFile {
     pub fn new(root: &Path, symbol: &str) -> std::io::Result<Self> {
         let dir = root.join(symbol.to_uppercase());
         std::fs::create_dir_all(&dir)?;
-        Ok(Self { dir, hour: None, fh: None, rows: 0, zips: vec![] })
+        Ok(Self { dir, hour: None, fh: None, late_gz: None, rows: 0, zips: vec![] })
     }
 
     /// `snap` = 새 파일일 때만 부른다 → 스냅숏(JSON 값, 실패면 None). `wall` = at_ms 의 벽시계.
     pub fn write(&mut self, ts_ms: i64, line: &str, wall: f64, snap: &mut dyn FnMut() -> Option<Value>) -> Result<(), Reconnect> {
         let key = hour_key(ts_ms).ok_or_else(|| Reconnect("ValueError: year out of range".into()))?;
-        if self.hour.as_deref() != Some(key.as_str()) || self.fh.is_none() {
+        if self.hour.as_deref() != Some(key.as_str()) || (self.fh.is_none() && self.late_gz.is_none()) {
             if self.hour.as_deref() != Some(key.as_str()) {
-                self.close(true);
+                // 🔧앞으로 넘어갈 때만 압축한다 -- 원본은 늦은 프레임 하나에 **지금 시** 파일까지 압축해 버리고 곧 다시 연다
+                let forward = self.hour.as_deref().is_none_or(|h| key.as_str() > h);
+                self.close(forward);
             }
+            // 🔧의도한 차이: 원본은 압축 스레드가 도는 시 파일을 다시 열어 이어 쓰고, 그 스레드가 끝나며 원본을 지워 **이어 쓴 줄이 사라진다**(경쟁) --
+            //   또는 압축이 끝났으면 새 .jsonl(스냅숏부터)을 만들어 읽는 쪽(.jsonl 먼저)이 그 시의 .gz 를 못 본다. 여기는 그 시 압축을 기다리고, .gz 만 있으면 거기 붙인다.
+            if let Some(i) = self.zips.iter().position(|z| z.0 == key) {
+                let _ = self.zips.remove(i).1.join();
+            }
+            let path = self.dir.join(format!("{key}.jsonl"));
+            let gz = self.dir.join(format!("{key}.jsonl.gz"));
+            if !path.exists() && gz.exists() {
+                self.late_gz = Some(gz);
+            }
+            self.hour = Some(key);
+        }
+        if let Some(gz) = &self.late_gz {
+            let f = OpenOptions::new().append(true).open(gz).map_err(|e| Reconnect(format!("OSError: {e}")))?;
+            let mut z = flate2::write::GzEncoder::new(f, flate2::Compression::new(6));
+            writeln!(z, "{line}").and_then(|_| z.finish().map(drop)).map_err(|e| Reconnect(format!("OSError: {e}")))?;
+            return Ok(());
+        }
+        if self.fh.is_none() {
+            let key = self.hour.clone().unwrap();
             let path = self.dir.join(format!("{key}.jsonl"));
             let new = !path.exists();
             let f = OpenOptions::new().create(true).append(true).open(&path).map_err(|e| Reconnect(format!("OSError: {e}")))?;
@@ -85,7 +109,7 @@ impl HourFile {
                 let head = py_dumps(&json!({"_snapshot": s, "at_ms": ms(wall)}));
                 writeln!(w, "{head}").map_err(|e| Reconnect(format!("OSError: {e}")))?;
             }
-            (self.fh, self.hour, self.rows) = (Some(w), Some(key), 0);
+            (self.fh, self.rows) = (Some(w), 0);
         }
         let fh = self.fh.as_mut().unwrap();
         writeln!(fh, "{line}").map_err(|e| Reconnect(format!("OSError: {e}")))?;
@@ -101,17 +125,18 @@ impl HourFile {
         if let Some(mut fh) = self.fh.take() {
             let _ = fh.flush();
         }
+        self.late_gz = None;
         if let (true, Some(h)) = (compress, &self.hour) {
             let p = self.dir.join(format!("{h}.jsonl"));
             if p.exists() {
-                self.zips.push(std::thread::spawn(move || gzip_done(&p)));
+                self.zips.push((h.clone(), std::thread::spawn(move || gzip_done(&p))));
             }
         }
     }
 
     pub fn join(&mut self) {
         for z in self.zips.drain(..) {
-            let _ = z.join();
+            let _ = z.1.join();
         }
     }
 }
