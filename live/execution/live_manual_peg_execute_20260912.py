@@ -507,13 +507,33 @@ def is_post_only_reject(err) -> bool:
     return "5022" in e or "could not be executed as maker" in e
 
 
+async def resolve_unknown_post(session, symbol: str, cid: str, order: dict, key: str, secret: str,
+                               offset: int) -> dict | None:
+    """지정가 POST 응답이 «나갔는지 모름»이면 표식(cid)으로 찾아 본다. 찾았으면 그 주문 · 확정 응답(접수·4xx 거부)은 그대로 ·
+    끝내 모르면 표식으로 DELETE 를 보낸 뒤 None(호출부는 phase="error" 로 멈춘다 -- 사람에게).
+    2026-11-20 D2: 따라가기(fill_maker = 진입·청산·손절 청산)·기다리기·지정가 대기가 **이 함수 하나**를 쓴다 -- 경로마다 따로 두었더니
+    지정가 대기만 방어가 있었다(따라가기는 네트워크 오류만 한 번 조회 · 기다리기는 없음 → 살아 있는 GTX 를 두고 rejected). 2026-09-13 교훈 그대로."""
+    e0 = order.get("__error__", "")
+    if not (e0 and (not e0[:1].isdigit() or e0[:1] == "5" or "-1007" in e0 or "-1006" in e0)):   # 5xx·-1007·-1006 = «체결 상태 불명»(검증 #1) -- 4xx 확정 거부와 다르다
+        return order
+    # 🔴네트워크·시간초과 = 나갔는지 모른다 -- 거부로 치면 살아 있는 GTX 가 손절 없이 체결된다. 표식으로 찾아 본다
+    for _ in range(3):   # 한 번 못 찾았다고 «없다»가 아니다(처리 전일 수 있다) -- 세 번 본다
+        found = await signed(session, "GET", "/fapi/v1/order", {"symbol": symbol, "origClientOrderId": cid}, key, secret, offset)
+        if "__error__" not in found and found.get("orderId"):
+            return found
+        await asyncio.sleep(1.0)
+    # 끝내 모르면 늦게 도착할 수 있는 그 주문을 표식으로 지운다(고아 방지, 검증 D3). 응답은 안 본다 -- «없음»이든 실패든 결과는 같다(멈춤)
+    await signed(session, "DELETE", "/fapi/v1/order", {"symbol": symbol, "origClientOrderId": cid}, key, secret, offset)
+    return None
+
+
 async def fill_maker(session, *, common: dict, price: float, total: float, deadline: float,
                      state: dict, key: str, secret: str,
                      offset: int) -> tuple[float, float, int, dict | None]:
     """GTX 로 `total` 을 채운다 — 호가가 달아나면 취소하고 **새 호가에 다시 건다**.
 
     반환 `(체결량, 마지막 지정가, 리페그 수, 오류|None)`. 오류가 나오면 호출부가 멈춘다
-    (`phase` 는 주문 거부면 "rejected", 취소를 확인 못 했으면 "error").
+    (`phase` 는 주문 거부면 "rejected", 취소나 접수 여부를 확인 못 했으면 "error").
 
     진입과 청산이 이 루프 **한 벌**을 쓴다(2026-09-15). 두 벌로 두면 한쪽만 고쳐진다.
     다른 점은 호출부에 남는다 -- 레버리지·손절(진입), 극단변동성 시장가·변동성 연동
@@ -531,12 +551,12 @@ async def fill_maker(session, *, common: dict, price: float, total: float, deadl
                              {**common, "type": "LIMIT", "timeInForce": "GTX",
                               "price": round(price, 8), "quantity": remaining, "newClientOrderId": cid},
                              key, secret, offset)
-        if "__error__" in order and not order["__error__"][:1].isdigit():
-            # 🔴네트워크·시간초과 = 나갔는지 모른다 -- 거부로 치면 살아 있는 GTX 가 손절 없이 체결된다. 표식으로 찾아 본다
-            found = await signed(session, "GET", "/fapi/v1/order",
-                                 {"symbol": common["symbol"], "origClientOrderId": cid}, key, secret, offset)
-            if "__error__" not in found and found.get("orderId"):
-                order = found
+        got = await resolve_unknown_post(session, common["symbol"], cid, order, key, secret, offset)
+        if got is None:   # 살아 있는지 모르는 채로 **또 걸면 안 된다**(청산·손절 청산도) -- 멈추고 사람에게
+            return done, price, repegs, {
+                "phase": "error",
+                "error": f"주문 접수 여부를 확인하지 못했습니다({order['__error__']}) — 거래소에서 직접 확인하세요"}
+        order = got
         if "__error__" in order:
             # -5022 = «지금 걸면 테이커가 된다». 실패가 아니라 호가가 움직였다는 뜻이라
             # 새 호가로 다시 건다. 그 외 오류는 그대로 멈춘다 -- 몰래 테이커로 바꾸지 않는다.
@@ -624,6 +644,12 @@ async def run_entry_wait(session, plan: dict, state: dict, wait_sec: float, on_f
         order = await signed(session, "POST", "/fapi/v1/order",
                              {**common, "type": "LIMIT", "timeInForce": "GTX", "price": round(price, 8),
                               "quantity": total, "newClientOrderId": cid}, key, secret, offset)
+        got = await resolve_unknown_post(session, common["symbol"], cid, order, key, secret, offset)
+        if got is None:
+            state.update(phase="error", done_at=now_iso(),
+                         error=f"주문 접수 여부를 확인하지 못했습니다({order['__error__']}) — 거래소에서 직접 확인하세요")
+            return state
+        order = got
         if "__error__" not in order:
             break
         if not (is_post_only_reject(order["__error__"]) and state["repegs"] < REPEG_MAX and not state.get("action")):
@@ -708,20 +734,12 @@ async def run_entry_limit(session, plan: dict, state: dict, max_sec: float = LIM
         order = await signed(session, "POST", "/fapi/v1/order",
                              {**common, "type": "LIMIT", "timeInForce": "GTX", "price": round(price, 8),
                               "quantity": remaining, "newClientOrderId": cid}, key, secret, offset)
-        e0 = order.get("__error__", "")
-        if e0 and (not e0[:1].isdigit() or e0[:1] == "5" or "-1007" in e0 or "-1006" in e0):   # 5xx·-1007·-1006 = «체결 상태 불명»(검증 #1) -- 4xx 확정 거부와 다르다
-            # 🔴네트워크·시간초과 = 나갔는지 모른다 -- 거부로 치면 살아 있는 GTX 가 손절 없이 체결된다. 표식으로 찾아 본다
-            for _ in range(3):   # 한 번 못 찾았다고 «없다»가 아니다(처리 전일 수 있다) -- 세 번 본다
-                found = await signed(session, "GET", "/fapi/v1/order", {"symbol": common["symbol"], "origClientOrderId": cid}, key, secret, offset)
-                if "__error__" not in found and found.get("orderId"):
-                    order = found
-                    break
-                await asyncio.sleep(1.0)
-            if "__error__" in order:   # 끝내 모르면 늦게 도착할 수 있는 그 주문을 표식으로 지운 뒤 멈춘다(고아 방지, 검증 D3)
-                await signed(session, "DELETE", "/fapi/v1/order", {"symbol": common["symbol"], "origClientOrderId": cid}, key, secret, offset)
-                state.update(phase="error", filled=done, done_at=now_iso(),
-                             error=f"주문 접수 여부를 확인하지 못했습니다({order['__error__']}) — 거래소에서 직접 확인하세요")
-                return state
+        got = await resolve_unknown_post(session, common["symbol"], cid, order, key, secret, offset)
+        if got is None:   # 끝내 모름 -- 표식 DELETE 는 보냈다, 멈춘다
+            state.update(phase="error", filled=done, done_at=now_iso(),
+                         error=f"주문 접수 여부를 확인하지 못했습니다({order['__error__']}) — 거래소에서 직접 확인하세요")
+            return state
+        order = got
         if "__error__" in order:
             err = order["__error__"]
             if is_post_only_reject(err) and (state.get("amends", 0) + state.get("reprices", 0)) > 0 and rej < 3 and not state.get("action"):
@@ -968,6 +986,8 @@ def _self_check() -> None:
     # 진입과 청산이 **같은 함수**를 쓴다. 한쪽만 고쳐지는 걸 막는 검사다.
     for _fn in (run_entry, run_exit):
         assert "fill_maker(" in _i.getsource(_fn), f"{_fn.__name__} 이 공용 루프를 안 쓴다"
+    for _fn in (fill_maker, run_entry_wait, run_entry_limit):   # 2026-11-20 D2 «나갔는지 모름»도 한 벌
+        assert "resolve_unknown_post(" in _i.getsource(_fn), f"{_fn.__name__} 이 불명 응답 공용 처리를 안 쓴다"
     # 호가 기준은 **주문 측면**이다. 진입 롱과 청산 숏은 둘 다 BUY 라 같은 값이어야 한다.
     assert drifted("BUY", 100.0, 100.01, 100.02) is True, "매수는 최우선 매수호가가 위로 가면 밀린다"
     assert drifted("BUY", 100.0, 100.00, 100.01) is False
