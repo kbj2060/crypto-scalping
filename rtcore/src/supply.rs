@@ -133,7 +133,7 @@ fn sec_cell(m: &mut BTreeMap<i64, [f64; 7]>, s: i64) -> &mut [f64; 7] {
     m.get_mut(&s).expect("방금 넣었다")
 }
 
-fn sec_row(m: &BTreeMap<i64, [f64; 7]>, s: i64) -> Option<SecRow> {
+pub(crate) fn sec_row(m: &BTreeMap<i64, [f64; 7]>, s: i64) -> Option<SecRow> {
     let c = m.get(&s)?;
     Some((s, r3(c[0]), r3(c[1]), r3(c[2]), r3(c[3]), r3(c[4]), r3(c[5]), r3(c[6])))
 }
@@ -193,8 +193,14 @@ struct Order {
 pub struct Supply {
     pub retail_max: f64,
     pub whale_min: f64,
-    sec: BTreeMap<i64, [f64; 7]>,
-    fp: Bars,
+    pub(crate) sec: BTreeMap<i64, [f64; 7]>,
+    pub(crate) fp: Bars,
+    /// 지금까지 받은 `@trade` 의 가장 늦은 거래소 시각(ms) -- 코어 스냅숏의 `last_ms`, 다음 공백 메우기의 시작(restore.rs).
+    /// 파이썬은 «마지막으로 처리한 체결의 T»(coin_flow.py 625)라 늦게 온 체결 하나가 값을 뒤로 당긴다 -- 그러면 다음 메우기가
+    /// 이미 센 초를 테이프로 또 더한다. 코어는 가장 늦은 값을 든다(RESTORE.md «파이썬과 달라지는 지점»).
+    pub(crate) last_ms: i64,
+    /// 재시작·재연결 복원 상태(restore.rs).
+    pub(crate) rs: crate::restore::Pending,
     open: Option<Order>,
     liq: VecDeque<LiqEv>,
     spot: Lane,
@@ -214,6 +220,8 @@ impl Supply {
             whale_min,
             sec: BTreeMap::new(),
             fp: Bars::new(symbol),
+            last_ms: 0,
+            rs: Default::default(),
             open: None,
             liq: VecDeque::new(),
             spot: Lane::default(),
@@ -229,6 +237,7 @@ impl Supply {
     /// 재연결: 열린 주문 묶음을 버린다(끊긴 사이가 빠진 주문을 «한 주문»이라 부르지 않게).
     pub fn reset_orders(&mut self) {
         self.open = None;
+        self.rs.await_first = self.rs.on; // 복원이 켜져 있으면 이 연결의 첫 체결이 공백을 메운다(restore.rs)
     }
 
     /// 시험용: 원천별 1초 칸(반올림 전).
@@ -260,6 +269,7 @@ impl Supply {
     /// 밀 것이 있으면 «바뀐 닫힌 초 + 진행 중인 초»를 돌려준다.
     pub fn trade(&mut self, px: f64, qty: f64, ts_ms: i64, sell: bool, tid: i64, now_us: i64) -> Option<Supply1s> {
         let now_ms = now_us.div_euclid(1000);
+        self.last_ms = self.last_ms.max(ts_ms);
         let mut touched: Vec<i64> = Vec::with_capacity(2);
         // 순서도 파이썬 그대로: 총량 먼저, 그다음 이 체결로 닫힌 주문의 구간(coin_flow.py 619~624).
         self.add(px, qty, ts_ms, sell, false, now_ms, &mut touched);
@@ -401,7 +411,7 @@ impl Supply {
     }
 
     /// 목록 칸이 빈 메시지(밀기는 바뀐 초만 채운다).
-    fn base(&self, now_us: i64) -> Supply1s {
+    pub(crate) fn base(&self, now_us: i64) -> Supply1s {
         let (bn, sp, ok) = (newest(&self.sec), newest(&self.spot.sec), newest(&self.okx.sec));
         Supply1s {
             now: bn,

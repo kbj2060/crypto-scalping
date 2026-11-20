@@ -4,10 +4,11 @@
 //! 1초 수급·풋프린트는 사건마다 밀지 않고 FLUSH_MS 마다 모아 민다(flush). 스냅숏은 모으던 것까지 이미 반영한 상태라,
 //! 스냅숏 뒤 첫 묶음이 같은 값을 한 번 더 덮어써도 결과가 같다.
 use crate::proto::{Event, Stamped, Supply1s, Venue};
+use crate::restore;
 use crate::supply::Supply;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 
 struct Sym {
     seq: u64,
@@ -29,10 +30,18 @@ pub struct State {
     syms: HashMap<String, Mutex<Sym>>,
     ring_cap: usize,
     pub tx: broadcast::Sender<Stamped>,
+    /// 재시작 복원(restore.rs). None = 끔(시험·부분 가동).
+    restore: Option<restore::Cfg>,
+    /// 첫 체결이 와서 메울 공백이 생긴 심볼을 복원 스레드에 알린다(lib.rs).
+    wake: Option<mpsc::UnboundedSender<String>>,
 }
 
 impl State {
     pub fn new(symbols: &[String], ring_cap: usize, queue_cap: usize) -> Arc<Self> {
+        Arc::new(Self::build(symbols, ring_cap, queue_cap))
+    }
+
+    fn build(symbols: &[String], ring_cap: usize, queue_cap: usize) -> State {
         let syms = symbols
             .iter()
             .map(|s| {
@@ -40,7 +49,77 @@ impl State {
                 (s.clone(), Mutex::new(sym))
             })
             .collect();
-        Arc::new(State { syms, ring_cap, tx: broadcast::channel(queue_cap).0 })
+        State { syms, ring_cap, tx: broadcast::channel(queue_cap).0, restore: None, wake: None }
+    }
+
+    /// 복원을 켠 상태: 심볼마다 스냅숏 파일을 읽어 되살린다(수신 전 · `now_us` = 지금 벽시계 -- 143봉보다 오래된 봉은 버린다).
+    /// 받는 쪽(둘째 값)은 «메울 공백이 생긴 심볼»을 받아 `run_restore` 를 부른다(lib.rs). 시험은 버리고 `run_restore` 를 직접 부른다.
+    pub fn with_restore(symbols: &[String], ring_cap: usize, queue_cap: usize, cfg: restore::Cfg, now_us: i64) -> (Arc<Self>, mpsc::UnboundedReceiver<String>) {
+        let mut st = Self::build(symbols, ring_cap, queue_cap);
+        let (wake, rx) = mpsc::unbounded_channel();
+        for (s, cell) in &mut st.syms {
+            let sup = &mut cell.get_mut().unwrap().supply;
+            if sup.fp.spec.is_none() {
+                continue; // 파이썬에 흐름 엔진이 없는 종목 -- 되살릴 것이 없다
+            }
+            sup.rs.on = true;
+            sup.rs.await_first = true;
+            let p = restore::snap_path(&cfg.snap_dir, s);
+            match restore::load(&p, s, now_us.div_euclid(1000)) {
+                Ok(snap) => {
+                    println!("rtcore 복원 {s}: 스냅숏 {} -- 봉 {} · 1초 칸 {} · last_ms {} · 구멍 {:?}", p.display(), snap.bars.len(), snap.sec.len(), snap.last_ms, snap.holes);
+                    sup.load_snap(snap);
+                }
+                Err(e) => println!("rtcore 복원 {s}: {} {e} -- 첫 체결 때 테이프로 창(144봉)을 메운다", p.display()),
+            }
+        }
+        st.restore = Some(cfg);
+        st.wake = Some(wake);
+        (Arc::new(st), rx)
+    }
+
+    /// 메울 공백이 있으면 테이프를 읽어 합친다. 테이프 읽기(최대 tries × wait)는 락 밖, 합치기만 락 안 -- 수신을 막지 않는다.
+    /// 실행기 밖 스레드에서 부른다(lib.rs spawn_blocking). 돌려주는 것 = 로그 한 줄(일감이 없으면 None).
+    pub fn run_restore(&self, s: &str) -> Option<String> {
+        let cfg = self.restore.as_ref()?;
+        let cell = self.syms.get(s)?;
+        let (job, bucket) = {
+            let g = cell.lock().unwrap();
+            (g.supply.rs.job?, g.supply.fp.spec?.0)
+        };
+        let t = match restore::tape_bucket(s) {
+            Some(tb) => restore::read(&cfg.tape, s, job, bucket, tb, cfg.tries, cfg.wait),
+            None => Err("테이프 칸 폭 표에 없는 종목".into()),
+        };
+        let mut g = cell.lock().unwrap();
+        let now = crate::now_us();
+        let (line, up) = g.supply.merge(t, now);
+        if let Some(up) = up {
+            g.first.get_or_insert((0, now));
+            match &mut g.pending {
+                Some(p) => p.merge(up),
+                None => g.pending = Some(up),
+            }
+        }
+        println!("rtcore 복원 {s}: {line}");
+        Some(line)
+    }
+
+    /// 코어 스냅숏을 쓴다(lib.rs 가 SNAP_EVERY 마다 · 종료코드 70 직전 main.rs). 락 안에서는 값만 뜨고 직렬화·쓰기는 락 밖.
+    /// 돌려주는 것 = 쓴 파일 수.
+    pub fn write_snapshots(&self) -> usize {
+        let Some(cfg) = &self.restore else { return 0 };
+        let mut n = 0;
+        for (s, cell) in &self.syms {
+            let snap = cell.lock().unwrap().supply.to_snap(s);
+            if let Some(snap) = snap {
+                match restore::write(&restore::snap_path(&cfg.snap_dir, s), &snap) {
+                    Ok(()) => n += 1,
+                    Err(e) => println!("rtcore 스냅숏 쓰기 실패 {s}: {e}"),
+                }
+            }
+        }
+        n
     }
 
     /// 모르는 심볼은 버린다.
@@ -52,6 +131,12 @@ impl State {
         let mut supply = None;
         match m.ev {
             Event::Trade { id, px, qty, sell } => {
+                // 이 연결의 첫 체결 -- 그 앞 공백을 테이프로 메운다(쌓기 전에: last_ms 가 앞 연결의 값이어야 한다).
+                if g.supply.rs.await_first && g.supply.begin_restore(m.ex_ms) {
+                    if let Some(w) = &self.wake {
+                        let _ = w.send(m.s.clone());
+                    }
+                }
                 if g.trades.len() == self.ring_cap {
                     g.trades.pop_front();
                 }

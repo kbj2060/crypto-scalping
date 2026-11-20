@@ -25,10 +25,11 @@
 //!   ② 660초 넘게 늦게 온 체결은 다음 새 초까지 링에 남아(supply.rs 21~22) 그 사이 파이썬은 뒤 봉들을 구멍 난 링으로 재다 버린다
 //!   (그 순간만 몸통만) -- 코어는 영향 없음. 시험은 ② 순간의 dhl 대조만 뺀다(tests/footprint_parity.rs).
 //!   ③ 파이썬은 테이프 값을 한 번 읽으면 기억한다(fp_dhl_cache) -- 늦은 체결이 바꿔도 옛값. 코어는 지운다(몸통만).
-//!   ④ 재시작 직후: 파이썬은 첫 봉을 테이프로, 코어는 재시작 뒤 본 체결만으로 잰다(봉 칸도 그만큼만 있어 어긋남 검사는 통과).
-//! - `agg`(REST 백필로 메운 봉 표시)·`symbol`·`venues` 는 싣지 않는다 -- 코어는 백필이 없어 agg 는 늘 거짓, 나머지 둘은 화면이 안 읽는다.
-//! - `ready`: 파이썬은 «백필이 끝나 빈 구간이 없다». 코어는 백필이 없으므로 «창 144봉이 다 찼다»로 둔다 -- 화면의
+//!   ④ 재시작 직후: 복원(restore.rs)이 링 밖 봉은 테이프로(파이썬과 같은 SQL), 링 안 봉은 테이프로 채운 링으로 잰다.
+//! - `agg`(REST 백필로 메운 봉 표시)·`symbol`·`venues` 는 싣지 않는다 -- 코어는 REST 백필이 없어 agg 는 늘 거짓, 나머지 둘은 화면이 안 읽는다.
+//! - `ready`: 파이썬은 «백필이 끝나 빈 구간이 없다». 코어는 «창 144봉이 다 찼다»로 둔다 -- 화면의
 //!   «체결 테이프 수집 중 N/144봉» 이 코어가 실제로 가진 봉 수를 보이게. 정답지 비교 대상이 아니다.
+//!   빈 구간은 따로 `holes`(복원이 못 메운 초 구간에 걸친 봉 · restore.rs)로 싣는다 -- 파이썬에는 없는 칸.
 use crate::proto::{FpBar, Footprint, Level};
 use crate::supply::{r3, SUPPLY_1S_SECONDS};
 use std::collections::{BTreeMap, BTreeSet};
@@ -60,18 +61,25 @@ pub fn bar_of(ms: i64) -> i64 {
     ms.div_euclid(1000).div_euclid(BAR_SECONDS) * BAR_SECONDS
 }
 
-struct Bar {
-    cells: BTreeMap<i64, [f64; 6]>,
-    dhl: Option<[f64; 3]>,
+#[derive(Default)]
+pub(crate) struct Bar {
+    pub(crate) cells: BTreeMap<i64, [f64; 6]>,
+    pub(crate) dhl: Option<[f64; 3]>,
 }
 
 pub struct Bars {
-    spec: Option<(f64, usize)>,
-    bars: BTreeMap<i64, Bar>,
+    pub(crate) spec: Option<(f64, usize)>,
+    pub(crate) bars: BTreeMap<i64, Bar>,
     /// 마지막 밀기 뒤 바뀐 칸(봉 → 가격 키). 봉만 있고 키가 비면 dhl 만 바뀐 것.
-    dirty: BTreeMap<i64, BTreeSet<i64>>,
+    pub(crate) dirty: BTreeMap<i64, BTreeSet<i64>>,
     /// 창 안에 있다가 시각 정리로 지워진 봉(밀기 `drop`).
     dropped: Vec<i64>,
+    /// 복원이 못 메운 초 구간 [시작, 끝) -- 걸친 봉이 메시지 `holes` 로 나간다(restore.rs). 스냅숏 파일에도 실린다.
+    pub(crate) holes: Vec<(i64, i64)>,
+    /// 지금 테이프에서 메우는 중인 구간(메우기가 끝나면 지우고, 못 메운 몫만 holes 로 남긴다).
+    pub(crate) pending: Option<(i64, i64)>,
+    /// holes·pending 이 바뀌었다 -- 다음 밀기가 봉이 안 바뀌었어도 나간다.
+    pub(crate) holes_dirty: bool,
 }
 
 /// 1초 링이 다 드는 가장 이른 초(가장 새 초 − 660). 링은 새 초 s 가 올 때 s − 660 밑만 지운다(supply.rs sec_cell).
@@ -96,15 +104,19 @@ fn delta_hl(deltas: impl Iterator<Item = f64>) -> [f64; 3] {
 
 /// fp_dhl 의 링 가지 한 봉(server.py 3958~3965). 마감 델타가 봉 칸 델타와 어긋나면 None.
 // ponytail: 칸 델타 합은 키 순서로 더한다(파이썬은 칸이 생긴 순서) -- 허용폭(≥0.5) 경계에 1e-12 안으로 붙는 경우만 갈린다.
-fn dhl_of(sec: &BTreeMap<i64, [f64; 7]>, b: i64, bar: &Bar) -> Option<[f64; 3]> {
-    let v = delta_hl(sec.range(b..b + BAR_SECONDS).map(|(_, c)| c[4] - c[5]));
+pub(crate) fn dhl_of(sec: &BTreeMap<i64, [f64; 7]>, b: i64, bar: &Bar) -> Option<[f64; 3]> {
+    dhl_ok(delta_hl(sec.range(b..b + BAR_SECONDS).map(|(_, c)| c[4] - c[5])), bar)
+}
+
+/// server.py fp_dhl `ok`: 마감 델타가 봉 칸 델타와 max(0.5, 1%) 안이어야 낸다(링·테이프 어느 쪽에서 쟀든 같은 검사).
+pub(crate) fn dhl_ok(v: [f64; 3], bar: &Bar) -> Option<[f64; 3]> {
     let cd: f64 = bar.cells.values().map(|c| c[0] - c[1]).sum();
     ((v[2] - cd).abs() <= f64::max(0.5, 0.01 * cd.abs())).then_some(v)
 }
 
 impl Bars {
     pub fn new(symbol: &str) -> Bars {
-        Bars { spec: spec(symbol), bars: BTreeMap::new(), dirty: BTreeMap::new(), dropped: vec![] }
+        Bars { spec: spec(symbol), bars: BTreeMap::new(), dirty: BTreeMap::new(), dropped: vec![], holes: vec![], pending: None, holes_dirty: false }
     }
 
     /// 체결의 봉을 들고 있어도 되나(coin_flow.py 355~365). 새 봉이면 만들고 창 밖 봉을 지운다.
@@ -117,7 +129,7 @@ impl Bars {
             return false; // 창을 벗어난 봉 -- 넣어봐야 바로 지워진다
         }
         let win_lo = self.window_lo();
-        self.bars.insert(bar, Bar { cells: BTreeMap::new(), dhl: None });
+        self.bars.insert(bar, Bar::default());
         let kept = self.bars.split_off(&cutoff); // 새 봉이 생길 때만 정리(체결마다 돌 일이 아니다)
         for (&b, _) in &self.bars {
             self.dirty.remove(&b);
@@ -168,7 +180,7 @@ impl Bars {
     }
 
     /// 화면 창(가장 새 144봉)의 첫 봉. 봉이 144 보다 적으면 가장 오래된 봉.
-    fn window_lo(&self) -> Option<i64> {
+    pub(crate) fn window_lo(&self) -> Option<i64> {
         self.bars.keys().rev().take(WINDOW_BARS).last().copied()
     }
 
@@ -184,9 +196,25 @@ impl Bars {
         }
     }
 
+    /// 지금 보이는 dhl: 링이 봉을 다 들면 링에서 재고, 아니면 얼린 값(스냅숏·코어 스냅숏 파일이 같은 값을 쓴다).
+    pub(crate) fn dhl_now(&self, sec: &BTreeMap<i64, [f64; 7]>, b: i64, bar: &Bar) -> Option<[f64; 3]> {
+        if ring_floor(sec).is_some_and(|f| f <= b) { dhl_of(sec, b, bar) } else { bar.dhl }
+    }
+
+    /// 창 안 봉 중 holes·pending 에 걸친 봉(봉 [b, b+300) 와 구간 [a, z) 가 겹침).
+    fn holey(&self) -> Vec<i64> {
+        let hs: Vec<(i64, i64)> = self.holes.iter().copied().chain(self.pending).collect();
+        if hs.is_empty() {
+            return vec![];
+        }
+        let lo = self.window_lo().unwrap_or(i64::MIN);
+        self.bars.range(lo..).map(|(&b, _)| b).filter(|&b| hs.iter().any(|&(a, z)| b < z && b + BAR_SECONDS > a)).collect()
+    }
+
     fn head(&self, full: bool, retail_max: f64, whale_min: f64, bars: Vec<FpBar>) -> Footprint {
         let n = self.bars.len().min(WINDOW_BARS);
         Footprint {
+            holes: self.holey(),
             full,
             bucket: self.spec.map_or(0.0, |s| s.0),
             bar_seconds: BAR_SECONDS,
@@ -202,17 +230,8 @@ impl Bars {
     /// 구독 직후 1회 = 파이썬 `/api/footprint?bars=144&since=0` 의 봉·칸. 표에 없는 종목은 None.
     pub fn snapshot(&self, sec: &BTreeMap<i64, [f64; 7]>, retail_max: f64, whale_min: f64) -> Option<Footprint> {
         self.spec?;
-        let floor = ring_floor(sec);
         let lo = self.window_lo().unwrap_or(i64::MIN);
-        let bars = self
-            .bars
-            .range(lo..)
-            .map(|(&b, bar)| FpBar {
-                time: b,
-                levels: self.levels(bar, None),
-                dhl: if floor.is_some_and(|f| f <= b) { dhl_of(sec, b, bar) } else { bar.dhl },
-            })
-            .collect();
+        let bars = self.bars.range(lo..).map(|(&b, bar)| FpBar { time: b, levels: self.levels(bar, None), dhl: self.dhl_now(sec, b, bar) }).collect();
         Some(self.head(true, retail_max, whale_min, bars))
     }
 
@@ -230,9 +249,10 @@ impl Bars {
                 }
             }
         }
-        if self.dirty.is_empty() && self.dropped.is_empty() {
+        if self.dirty.is_empty() && self.dropped.is_empty() && !self.holes_dirty {
             return None;
         }
+        self.holes_dirty = false;
         let lo = self.window_lo().unwrap_or(i64::MIN);
         let dirty = std::mem::take(&mut self.dirty);
         let bars = dirty
@@ -248,11 +268,4 @@ impl Bars {
     pub fn raw(&self) -> Vec<(i64, Vec<(i64, [f64; 6])>)> {
         self.bars.iter().map(|(&b, bar)| (b, bar.cells.iter().map(|(&k, c)| (k, *c)).collect())).collect()
     }
-
-    /// 재시작 복원을 붙일 자리(이번 범위 밖 -- 코어는 빈 상태에서 시작한다).
-    /// 파이썬은 재시작 때 data/live/footprint_<코인>.json 스냅샷(144봉)을 되살리고(coin_flow.py footprint_load 419~440)
-    /// 끊긴 구간을 REST aggTrades(ETH · footprint_backfill 442~531)나 체결 테이프 SQLite(그 밖 · footprint_tape_restore 533~570)로 메운다.
-    /// 붙일 때: 봉마다 칸을 더하고(테이프 복원은 `+=` · 스냅샷 복원은 통째로) 그 봉을 dirty 로 -- 다음 밀기가 화면에 싣는다.
-    // ponytail: 비어 있다 -- rtcollect(체결 테이프 이전 · 다른 작업)가 표를 읽는 함수를 내면 여기서 부른다.
-    pub fn restore(&mut self, _bars: &[(i64, Vec<(i64, [f64; 6])>)]) {}
 }

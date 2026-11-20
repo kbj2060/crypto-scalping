@@ -9,7 +9,7 @@ async fn main() {
     let listen = std::env::var("RTCORE_LISTEN").unwrap_or_else(|_| "127.0.0.1:8788".into());
     let listener = tokio::net::TcpListener::bind(&listen).await.expect("bind");
     println!("rtcore 시작 -- {listen} · 심볼 {:?} · 침묵 {:?} · 문 {:?}", cfg.symbols, cfg.silence, cfg.hub);
-    let (_state, mut dead) = rtcore::start(&cfg, listener);
+    let (state, mut dead) = rtcore::start(&cfg, listener);
     let mut tick = tokio::time::interval(Duration::from_secs(60));
     tick.tick().await;
     loop {
@@ -18,6 +18,8 @@ async fn main() {
             why = &mut dead => {
                 // 다시 띄우지 않고 끝낸다: 패닉은 대개 같은 자리에서 또 난다(이번 rustls 처럼) -- 감시자가 재기동·알림한다.
                 println!("rtcore 종료: {} -- 감시자가 다시 띄운다", why.unwrap_or_else(|e| format!("감시 태스크 {e}")));
+                // 다음 판이 메울 공백을 «재시작에 걸린 시간»으로 줄인다(coin_flow.py stop 1029~1031 과 같은 뜻 · 메우는 중이면 안 쓴다).
+                println!("rtcore 종료 전 스냅숏 {}개", state.write_snapshots());
                 std::process::exit(70);
             }
         }

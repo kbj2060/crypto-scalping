@@ -4,6 +4,7 @@ pub mod feed;
 pub mod footprint;
 pub mod hub;
 pub mod proto;
+pub mod restore;
 pub mod state;
 pub mod supply;
 
@@ -58,6 +59,10 @@ pub struct Cfg {
     pub silence: Duration,
     /// 화면 문 단속(hub.rs 머리 주석).
     pub hub: hub::HubCfg,
+    /// 재시작 복원(restore.rs): 코어 스냅숏 폴더(빈 문자열 = 복원 끔) · 체결 테이프 hot SQLite(읽기 전용).
+    /// 상대 경로는 실행 위치 기준 -- 감시자(scripts/ops/supervisor_rtcore.sh)가 저장소 루트에서 띄운다.
+    pub snap_dir: String,
+    pub tape_db: String,
 }
 
 impl Cfg {
@@ -78,6 +83,9 @@ impl Cfg {
             bybit_url: env("RTCORE_BYBIT_WS_URL", "wss://stream.bybit.com/v5/public/linear"),
             silence: Duration::from_secs_f64(env("RTCORE_SILENCE_SECS", "30").parse().unwrap_or(30.0)),
             hub: hub::HubCfg::from_env(),
+            snap_dir: env("RTCORE_SNAP_DIR", "data/live/rtcore"),
+            // 파이썬 수집기 파일(live_trade_tape_collector HOT_TAPE_DB) -- Rust 수집기로 갈아 끼우면 그 파일로 바꾼다.
+            tape_db: env("RTCORE_TAPE_DB", "data/hot/binance_tape.sqlite"),
         }
     }
 }
@@ -85,7 +93,32 @@ impl Cfg {
 /// 수신 연결들과 화면 서버를 띄운다(tokio 런타임 안에서 부른다).
 /// 둘째 값은 수신 태스크 하나라도 끝나면(feed::run 은 영원히 돌므로 끝 = 패닉) 그 사유를 내는 핸들이다.
 pub fn start(cfg: &Cfg, listener: TcpListener) -> (Arc<state::State>, tokio::task::JoinHandle<String>) {
-    let state = state::State::new(&cfg.symbols, RING_CAP, QUEUE_CAP);
+    let state = if cfg.snap_dir.is_empty() {
+        state::State::new(&cfg.symbols, RING_CAP, QUEUE_CAP)
+    } else {
+        // 순서: 스냅숏을 읽은 뒤(수신 전) 수신을 붙인다. 테이프 메우기는 각 연결의 첫 체결 뒤에 스레드에서(restore.rs 머리 주석 2).
+        let rc = restore::Cfg { snap_dir: cfg.snap_dir.clone().into(), tape: cfg.tape_db.clone().into(), tries: 12, wait: Duration::from_secs(5) };
+        let (st, mut wake) = state::State::with_restore(&cfg.symbols, RING_CAP, QUEUE_CAP, rc, now_us());
+        let s2 = st.clone();
+        tokio::spawn(async move {
+            while let Some(sym) = wake.recv().await {
+                let s3 = s2.clone();
+                tokio::task::spawn_blocking(move || s3.run_restore(&sym)); // 심볼마다 따로(기다림 최대 60초가 서로 안 막게)
+            }
+        });
+        let s2 = st.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(restore::SNAP_EVERY);
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            tick.tick().await;
+            loop {
+                tick.tick().await;
+                let s3 = s2.clone();
+                let _ = tokio::task::spawn_blocking(move || s3.write_snapshots()).await;
+            }
+        });
+        st
+    };
     let mut feeds = Vec::new();
     for s in &cfg.symbols {
         for url in [

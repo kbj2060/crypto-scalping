@@ -100,6 +100,8 @@ async fn core(addr: &str, silence_ms: u64) -> String {
         bybit_url: String::new(),
         silence: Duration::from_millis(silence_ms),
         hub: rtcore::hub::HubCfg::from_env(),
+        snap_dir: String::new(),
+        tape_db: String::new(),
     };
     let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let hub = l.local_addr().unwrap().to_string();

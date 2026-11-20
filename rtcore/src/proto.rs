@@ -176,6 +176,13 @@ pub struct Footprint {
     pub bars: Vec<FpBar>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub drop: Vec<i64>,
+    /// 구멍 난 봉(2026-11-21 재시작 복원 · restore.rs): 창 안 봉 중 «복원이 못 메운 초 구간»(테이프를 못 읽음 · 테이프가 덜 따라옴 ·
+    /// 테이프 수집기 끊김 `gaps` · 지금 메우는 중)에 걸친 봉의 시작 시각. 화면은 이 봉을 온전한 봉으로 보지 않는다(반쪽 칸·델타).
+    /// `ready`(창 144봉이 다 참)와 따로다 -- 봉이 다 있어도 구멍이 있을 수 있다. **메시지마다 지금 목록 전체**를 싣는다
+    /// (밀기도 같다 · 빈 목록이면 키를 뺀다 = 구멍 없음). 파이썬 /api/footprint 에는 없는 칸 -- 모르는 화면은 그냥 건너뛴다.
+    /// 경계 두 초(끊기기 직전 초·붙은 첫 초의 일부 체결)는 파이썬도 빼는 몫이라 구멍으로 치지 않는다(RESTORE.md).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub holes: Vec<i64>,
 }
 
 /// 화면 → 코어 첫 메시지: `{"subscribe":["ethusdt"]}`.
