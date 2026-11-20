@@ -10,6 +10,8 @@
 //! - LogisticRegression(이진): `X @ coef + intercept` → expit(유한값 아니면 예외).
 //! 파이썬이 예외를 내는 입력은 `None`.
 use serde::{Deserialize, Deserializer};
+
+pub mod box_hold;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -190,12 +192,18 @@ pub struct BoxScale {
     pub cols: Vec<String>,
     #[serde(deserialize_with = "bit")]
     pub train_base: f64,
+    #[serde(deserialize_with = "bit")]
+    pub q20: f64,
+    #[serde(deserialize_with = "bit")]
+    pub q80: f64,
     pub model: Model,
 }
 
 #[derive(Deserialize)]
 pub struct BoxBundle {
     pub source: String,
+    #[serde(deserialize_with = "bits")]
+    pub prof: Vec<f64>,
     pub scales: HashMap<String, BoxScale>,
 }
 

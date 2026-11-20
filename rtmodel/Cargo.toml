@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }   # Platt90·일정 JSON 의 십진 실수를 파이썬과 같은 f64 로
 
 [profile.test]
 opt-level = 2   # 시험이 트리 수십만 노드 × 수천 행을 돈다

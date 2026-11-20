@@ -100,9 +100,11 @@ def main(out: Path) -> None:
             if "model" not in cf:
                 continue                                  # SOXL 30m·4h = 모델 없음(deployable False)
             scales[name] = {"deployable": bool(cf.get("deployable", True)), "cols": list(cf["cols"]), "train_base": b1(cf["train_base"]),
-                            "model": model(cf["model"])}
+                            "q20": b1(cf["q20"]), "q80": b1(cf["q80"]), "model": model(cf["model"])}   # q20·q80 = 화면 «깨질 쪽·머물 쪽» 문턱
             assert list(cf["model"].feature_names_in_) == list(cf["cols"])
-        (out / f"box_{asset}.json").write_text(json.dumps({**meta, "source": p.name, "sha256": sha(p), "scales": scales}))
+        prof = np.asarray(b["prof"], float)   # 요일×시각 168칸(box_hold.payload 가 np.asarray(bb["prof"], float) 로 쓴다)
+        assert prof.shape == (168,), prof.shape
+        (out / f"box_{asset}.json").write_text(json.dumps({**meta, "source": p.name, "sha256": sha(p), "prof": bits(prof), "scales": scales}))
     p = DASH / f"{SR}.joblib"
     a = joblib.load(p)
     for m in a["models"]:

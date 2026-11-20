@@ -35,4 +35,26 @@ fn main() {
         ns.push(t.elapsed().as_nanos());
     }
     stats("레벨 5분 앙상블(HGB+ET300+LR)", ns);
+
+    // 박스 유지: 봉 열 1,559개 → payload 한 번(피쳐 세 척도 + HGB 세 번 + 4h 등조). tests/fixtures/box_fixture.json 의 ETH·SOL 보통 봉 열
+    let bx: serde_json::Value = read_json(&d.join("box_fixture.json")).unwrap();
+    let iso: Qx4iIso = read_json(&d.join("qx4i_iso.json")).unwrap();
+    let vol = box_hold::Vol { ok: true, asof_ms: 0.0, log_rv: -10.0, log_rv_iv: Some(-10.0) };
+    for asset in ["eth", "sol"] {
+        let b: BoxBundle = read_json(&d.join(format!("box_{asset}.json"))).unwrap();
+        let s = bx["sets"].as_array().unwrap().iter().find(|s| s["asset"] == asset && s["name"] == "normal").unwrap();
+        let bars: Vec<box_hold::Bar> = s["bars"].as_array().unwrap().iter().map(|r| {
+            let f = |i: usize| f64::from_bits(r[i].as_u64().unwrap());
+            box_hold::Bar { t_ms: r[0].as_i64().unwrap(), h: f(1), l: f(2), c: f(3), v: f(4), tb: f(5) }
+        }).collect();
+        let vol = box_hold::Vol { asof_ms: (bars[bars.len() - 1].t_ms + 60_000) as f64, ..vol };
+        let qx = (asset == "eth").then_some((&iso, &vol));
+        let mut ns = vec![];
+        for _ in 0..3_000 {
+            let t = Instant::now();
+            std::hint::black_box(box_hold::payload(std::hint::black_box(&bars), &[], &b, asset, None, qx));
+            ns.push(t.elapsed().as_nanos());
+        }
+        stats(&format!("박스 {asset} 봉 열 → payload"), ns);
+    }
 }

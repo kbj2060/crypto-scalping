@@ -1,5 +1,6 @@
-"""파이썬 한 줄 predict_proba 시간(examples/bench.rs 와 같은 행). 스레드 1개 · 기본 둘 다.  python rtmodel/tools/bench_py.py"""
+"""파이썬 한 줄 predict_proba 시간(examples/bench.rs 와 같은 행). 스레드 1개 · 기본 둘 다.  python rtmodel/tools/bench_py.py [box]"""
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -45,5 +46,26 @@ def main():
             stat(f"[{lim}] 레벨 5분 앙상블 · DataFrame(live 꼴)", lambda r: float(np.mean([mm.predict_proba(pd.DataFrame([r], columns=a["cols"]))[:, 1] for mm in a["models"]])), XS)
 
 
+def box():
+    """박스 유지 봉 열 → payload(server.py produce 와 같은 호출: payload → ETH 는 with_qx4i). examples/bench.rs 와 같은 봉 열."""
+    import sys
+    sys.path.insert(0, str(ROOT / "dashboard"))
+    import box_hold as BH
+    bx = json.loads((ROOT / "rtmodel/tests/fixtures/box_fixture.json").read_text())
+    for asset in ("eth", "sol"):
+        s = next(x for x in bx["sets"] if x["asset"] == asset and x["name"] == "normal")
+        B = np.array([r[1:] for r in s["bars"]], np.uint64).view(np.float64)
+        k = pd.DataFrame({"timestamp": pd.to_datetime([r[0] for r in s["bars"]], unit="ms", utc=True), "high": B[:, 0], "low": B[:, 1],
+                          "close": B[:, 2], "volume": B[:, 3], "taker_buy_base": B[:, 4]})
+        vol = {"ok": True, "asof_ms": int(s["bars"][-1][0]) + 60_000, "log_rv": -10.0, "log_rv_iv": -10.0}
+        f = (lambda _: BH.with_qx4i(BH.payload(k, [], "eth"), vol)) if asset == "eth" else (lambda _: BH.payload(k, [], asset))
+        for lim in ("기본", 1):
+            with (threadpool_limits(1) if lim == 1 else threadpool_limits(None)):
+                stat(f"[{lim}] 박스 {asset} 봉 열 → payload", f, [0] * 20)
+
+
 if __name__ == "__main__":
+    if sys.argv[1:] == ["box"]:
+        box()
+        raise SystemExit
     main()
