@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>rtui</title>
+<style>html,body{margin:0;background:#1e2229;overflow:hidden}canvas{background:transparent}canvas{display:block;width:1920px;height:1080px}</style></head>
+<body><canvas id="c"></canvas>
+<script type="module">
+// ?mode=shot|bench&x=&y=&w=&h=&bars=&tz=&bg=(hex)&n= -- 결과는 window.RESULT (비교 하네스 compare/capture.py · compare/bench_web.py)
+const q = new URLSearchParams(location.search), t0 = performance.now();
+const m = await import("./dist/rtui.js");
+await m.default();
+const [fp, mh] = await Promise.all(["footprint", "market-history"].map((f) => fetch(`./compare/fixture/${f}.json`).then((r) => r.text())));
+const tInit = performance.now() - t0, N = (k, d) => (q.has(k) ? +q.get(k) : d);
+const bg = q.get("bg") === "none" ? 0xffffffff : parseInt(q.get("bg") || "1e2229", 16);
+if (q.get("plate")) document.body.style.background = `url(${q.get("plate")}) no-repeat 0 0`;   // 비교 캡처: 지금 화면에서 차트 층만 숨긴 바탕
+if (q.get("mode") === "bench") {
+  window.RESULT = { tInit, v: [...m.bench(fp, mh, N("w", 1751), N("h", 844), N("bars", 36), N("tz", -540), N("n", 300))] };
+} else {
+  await m.start("c", fp, mh, N("x", 113), N("y", 126), N("w", 1751), N("h", 844), N("bars", 36), N("tz", -540), bg);
+  const poll = () => { const s = m.scene(); if (s) requestAnimationFrame(() => requestAnimationFrame(() => { window.RESULT = { tInit, ...JSON.parse(s) }; })); else setTimeout(poll, 50); };
+  poll();
+}
+</script></body></html>
