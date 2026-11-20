@@ -44,6 +44,8 @@ def main():
             texts = pg.evaluate('() => [...document.querySelectorAll("#dirBoard text")].map((t) => t.textContent)')
             if w == 390:
                 assert not texts, texts                       # 휴대폰엔 판이 없다
+                m = pg.evaluate('() => { const b = document.getElementById("dirReadM"); return b && !b.hidden ? b.innerText : ""; }')
+                assert "지금 읽기" in m and "설명 " in m, m      # 2026-11-20 대신 차트 아래 목록(renderDirReadMob)
             else:
                 assert "지금 읽기" in texts and any(t.startswith("설명 ") for t in texts), texts
                 if a.shot: pg.screenshot(path=a.shot)

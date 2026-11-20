@@ -28,7 +28,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
-  <link rel="stylesheet" href="styles.css?v=20261120-pmw">
+  <link rel="stylesheet" href="styles.css?v=20261120-mob">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -236,6 +236,7 @@
               <p class="asset-pop-keys"><kbd>[</kbd> <kbd>]</kbd> 이전·다음 · 이름 입력 후 <kbd>Enter</kbd> · 전체화면 그대로</p>
             </div>
             </div>
+            <div id="posChips" class="pos-chips" hidden></div>   <!-- 2026-11-20 휴대폰 = 다른 종목 포지션 손익 칩(넓은 화면 맨 위 전광판 몫) -- app.js posChipsSet -->
             <!-- 2026-10-28 사용자 «모바일도 데스크탑처럼»: 휴대폰 머리 마지막 줄 = [· | 롱 숏 | 지표 N] -- app.js 가 #fpLineBtn·#fpLineSwitch 를 여기로 옮긴다(넓은 화면은 차트 위 줄) -->
             <div id="fpMobRow" class="fp-mob-row" hidden><span aria-hidden="true"></span></div>
           </div>
@@ -313,6 +314,7 @@
         <button type="button" id="fpSideTab" class="fp-side-tab" aria-controls="fpSide" aria-expanded="false" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/></svg><b>오른쪽 칸</b></button>
         <aside id="fpSide" class="fp-side" aria-label="오른쪽 칸 — 발표 · 1초 수급 · 시장 맥락" hidden><div id="fpSideHead" class="fp-side-head"></div><svg id="fpSideS1" class="fp-side-s1" aria-hidden="true"></svg></aside>
         <div id="mcWall" class="mc-body mc-wall"></div>   <!-- 2026-09-30 ④ 벽·교차·위치 = 호가/체결 프로파일 아래(넓은 화면) -->
+        <div id="dirReadM" class="drm" hidden></div>   <!-- 2026-11-20 휴대폰 «지금 읽기»(넓은 화면 = 지표 방향 판 아래 칸) -- app.js renderDirReadMob -->
         <div id="mcBody" class="mc-body mc-in-fp"></div>
           <!-- 2026-09-30 시장 맥락(넓은 화면은 1초 수급 아래 칸에 겹쳐 놓는다 -- renderCandleSvg) -->
       </section>
@@ -636,7 +638,7 @@
   </div>
   <button type="button" id="ofabTab" class="ofab-tab" hidden aria-label="주문 버튼 꺼내기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg><i aria-hidden="true"></i><b>주문</b></button>
-  <script src="./app.js?v=20261120-read"></script>
+  <script src="./app.js?v=20261120-mob"></script>
   <script src="./fp_daily.js?v=20261117-oizero1"></script>
   <script src="./liq_profile.js?v=20261108-liqcurve2"></script>
   <script src="./liq_tab.js?v=20261117-nonow1"></script>

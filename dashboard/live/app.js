@@ -3867,10 +3867,25 @@ function tickerPnl(p) {
   const cur = Number(latestLivePriceByAsset[acctCoin(p.symbol).toLowerCase()] || 0), qty = Math.abs(Number(p.qty) || 0), en = cur > 0 ? entryUsdt(p, cur) : 0;
   return en > 0 ? (cur - en) * qty * (String(p.side).toUpperCase() === "SHORT" ? -1 : 1) : Number(p.unrealized_pnl) || 0;
 }
+// 2026-11-20 사용자 «데스크톱·모바일 내용이 다름»: 휴대폰은 맨 위 전광판 자리가 없어 «다른 종목 포지션»만 코인 버튼 아래 한 줄 칩(지금 코인 손익은 머리에 크게 있다) · 누르면 그 코인으로
+function posChipsSet(ps) {
+  const box = el("posChips");
+  if (!box) return;
+  const os = isMobileChartMode() ? ps.filter((p) => acctCoin(p.symbol).toLowerCase() !== activeSnapshotAsset) : [];
+  if (box.hidden !== !os.length) box.hidden = !os.length;
+  if (!os.length) return;
+  const key = os.map((p) => `${p.symbol}:${p.side}`).join("|");
+  if (box.dataset.k !== key) {
+    box.dataset.k = key;
+    box.innerHTML = `<span class="pc-l">다른 포지션</span>` + os.map((p) => `<button type="button" class="it" data-a="${acctCoin(p.symbol).toLowerCase()}" data-s="${p.symbol}:${p.side}" title="${acctCoin(p.symbol)} 차트로"><i>${acctCoin(p.symbol)} ${p.side === "LONG" ? "롱" : "숏"}</i><b></b></button>`).join("");
+  }
+  os.forEach((p) => { const u = tickerPnl(p), b = box.querySelector(`[data-s="${p.symbol}:${p.side}"] b`); if (b) { b.textContent = `${u >= 0 ? "+" : "−"}$${Math.abs(u).toFixed(2)}`; b.className = u >= 0 ? "good" : "bad"; } });
+}
 function renderPnlTicker() {
   const box = el("pnlTicker"), slot = el("topLeftSlot"), title = el("fpCoinName"), mid = el("topCenterSlot");
-  if (!box) return;
   const ps = ((latestBinanceAccount || {}).positions || []).filter((p) => Math.abs(Number(p.qty) || 0) > 0);
+  posChipsSet(ps);
+  if (!box) return;
   const tr = box.parentElement.getBoundingClientRect(), l = slot && slot.getBoundingClientRect().right - tr.left + 28, r = title && title.getBoundingClientRect().left - tr.left - 28;
   if (!ps.length || !title || title.parentElement !== mid || !(r - l >= 160)) { box.hidden = true; return; }
   // 2026-11-12 사용자 «전광판 너비가 너무 길다 -- 종목 3개 정도»: 칸(132px) 셋 폭으로 고정. ponytail: 넷째 종목부터는 잘린다(CSS safe center = 넘치면 왼쪽부터 채움) -- 늘 넷 이상 들면 칸 폭을 줄이거나 칸끼리 넘기기
@@ -3897,9 +3912,10 @@ setInterval(() => {
   if (document.title !== next) document.title = next;
   renderPnlTicker();   // 2026-11-13 검증: «청산» 보기에선 차트 그리기가 멈춰 전광판 숫자도 멈췄다 -- 탭 제목과 같은 박자로
 }, 1000);
-{ const go = (e) => { const it = e.target.closest && e.target.closest(".pnl-tk .it"), tab = it && document.querySelector(`#snapshotAssetTabs .asset-tab[data-asset="${it.dataset.a}"]`); if (tab) tab.click(); };
+{ const go = (e) => { const it = e.target.closest && e.target.closest(".pnl-tk .it, .pos-chips .it"), tab = it && document.querySelector(`#snapshotAssetTabs .asset-tab[data-asset="${it.dataset.a}"]`); if (tab) tab.click(); };
   const tk = el("pnlTicker");
-  if (tk) { tk.addEventListener("click", go); tk.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(e); } }); } }
+  if (tk) { tk.addEventListener("click", go); tk.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(e); } }); }
+  el("posChips")?.addEventListener("click", go); }
 if (TOP_TITLE_WIDE && TOP_TITLE_WIDE.addEventListener) TOP_TITLE_WIDE.addEventListener("change", placeTopLeft);
 if (PAGE_TABS_WIDE && PAGE_TABS_WIDE.addEventListener) PAGE_TABS_WIDE.addEventListener("change", placeTopLeft);   // 🔴CI 검사기(esprima)는 ?.( 를 못 읽는다
 
@@ -6295,7 +6311,7 @@ function renderMarketCtx() {
   const fsRow = G.cmpW || (flowOn() && !!el("fpMobRow"));   // 10-30 1단 데스크톱도(위 한 줄) -- 휴대폰은 머리 줄 · 넓은 화면은 위 한 줄   // 옛 index.html(줄 없음)이면 칩을 시장 맥락에 그대로   // 2026-10-28 사용자 «모바일도 데스크탑처럼» -- 휴대폰 흐름 코인도 버튼 + 팝업(#fpMobRow)
   if (!fsRow) fpIndOpen = false;   // 버튼 줄이 없는 화면으로 가면 닫힌 채로(돌아왔을 때 저절로 열려 있지 않게)
   const fsEl = el("fpLineSwitch"), fsHtml = fsRow ? `<button type="button" class="fp-ind-btn" aria-haspopup="true" aria-expanded="${fpIndOpen}" aria-controls="fpIndPop">`
-    + `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 12.5l4-4.5 3 2.5 6-6.5"/><path d="M1.5 14.5h13"/></svg>지표<b>${indOn}</b></button>`
+    + `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 12.5l4-4.5 3 2.5 6-6.5"/><path d="M1.5 14.5h13"/></svg><span class="t">지표</span><b>${indOn}</b></button>`
     + `<div class="fp-ind-pop" id="fpIndPop" aria-label="차트에 그릴 지표"${fpIndOpen ? "" : ' hidden=""'}>`
     + lineSw.replace('<span class="mc-switch-t">차트에 그리기</span>', '<span class="mc-switch-t">이동평균·밴드 · VWAP · POC · 오더블록 · 스윙 · 방향 표식 — 눌러서 켜고 끄기</span>') + `</div>` : "";
   // 🔴setH(직렬화한 innerHTML 과 비교)는 여기서 매번 다시 썼다 -- `checked`→`checked=""`·`<path/>`→`</path>` 라 늘 달라 클릭·포커스가 씹혔다(10-28 검증). 마지막으로 쓴 글과 비교한다.
@@ -6355,7 +6371,11 @@ function renderMarketCtx() {
     setH("fpRates", mtHeadHtml());
     setH("macroSpikeChips", macroSpikeChips((cls, txt, tip = "") => `<span class="ops-badge ${cls}"${tip ? ` title="${escapeHtml(tip)}"` : ""}>${txt}</span>`));   // 2026-11-03 «발표 변동성 주의» 와 같은 배지 모양(색 = 방향)   // 2026-11-03 급변 칩은 상단바 «발표 변동성 주의» 옆(머리 오른쪽에서 겹쳤다)
     el("fpRates") && (el("fpRates").hidden = false);
-  } else { mcWallTiles = ""; htmlB.push(wallHtml0 + fcHtml); ratesOff(); }
+  } else {
+    mcWallTiles = ""; htmlB.push(wallHtml0 + fcHtml);
+    // 2026-11-20 사용자 «데스크톱·모바일 내용이 다름»: 휴대폰도 머리 줄(LONG·SHORT 아래)에 Macro 요약·다음 발표 -- 넓은 화면과 같은 단추(누르면 Macro Trend 카드)
+    if (isMobileChartMode()) { setH("fpRates", mtHeadHtml()); el("fpRates").hidden = false; setH("macroSpikeChips", ""); } else ratesOff();
+  }
   renderPaper();   // 2026-11-04 #mcWall = 넓은 화면 ①②(위에서 만든 mcWallTiles) -- 바뀐 때만 다시 쓴다
   // 2026-10-13 좁은 화면 시장 맥락 끝 모의 판도 뺐다(사용자 «모의판은 제거»)
   htmlB = htmlB.join("");
@@ -6421,7 +6441,7 @@ function helpOpen(b) {
       + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div><p class="help-body"></p>`;
     d.addEventListener("click", (e) => { if (e.target === d || e.target.closest(".help-x")) d.close(); });
     d.addEventListener("close", () => {
-      const btns = [...document.querySelectorAll(`.mc-q[data-tip="${helpKey}"], .opt-q[data-tip="${helpKey}"], .mt-q[data-tip="${helpKey}"]`)];
+      const btns = [...document.querySelectorAll(`.mc-q[data-tip="${helpKey}"], .opt-q[data-tip="${helpKey}"], .mt-q[data-tip="${helpKey}"], .drm-q[data-tip="${helpKey}"]`)];
       helpKey = null;
       btns.forEach((x) => x.setAttribute("aria-expanded", "false"));
       btns.find((x) => x.getClientRects().length)?.focus({ preventScroll: true });
@@ -6431,7 +6451,7 @@ function helpOpen(b) {
   const k = b.dataset.tip, opt = b.classList.contains("opt-q");
   d.classList.toggle("opt", opt);
   d.querySelector("h3").textContent = (b.title ? b.title.replace(/ — 설명$/, "") : b.textContent.replace(/\?$/, "")).trim();   // 글자 끝 «?» = 단추 원(«① 레버리지 과열?» 의 물음표는 남긴다)
-  d.querySelector(".help-body").textContent = (opt ? OPT_TIPS[k] : b.classList.contains("mt-q") ? MT_TIPS[k] : mcTipOf(k)) || "";
+  d.querySelector(".help-body").textContent = (b.dataset.body != null ? b.dataset.body : opt ? OPT_TIPS[k] : b.classList.contains("mt-q") ? MT_TIPS[k] : mcTipOf(k)) || "";
   helpKey = k; b.setAttribute("aria-expanded", "true");
   d.style.left = d.style.top = "";
   d.showModal();
@@ -6441,7 +6461,7 @@ function helpOpen(b) {
   d.style.left = `${Math.round(Math.max(8, Math.min(r.left, innerWidth - w - 8)))}px`;
   d.style.top = `${Math.round(r.bottom + 6 + h <= innerHeight - 8 ? r.bottom + 6 : Math.max(8, r.top - 6 - h))}px`;
 }
-document.addEventListener("click", (e) => { const b = e.target.closest(".mc-q, .opt-q, .mt-q"); if (b) helpOpen(b); });
+document.addEventListener("click", (e) => { const b = e.target.closest(".mc-q, .opt-q, .mt-q, .drm-q"); if (b) helpOpen(b); });
 // 2026-10-28 지표 팝업 열고 닫기(버튼 · 밖을 누르면 · Esc) -- 열림 상태는 fpIndOpen 이 들고 다시 그려도 유지
 let fpIndOpen = false;
 function fpIndSet(open) {
@@ -7376,6 +7396,28 @@ function dirReadNow() {
   const hot = r.lines.filter((l) => l.grade === "근거" || l.grade === "약함");
   return { hot, desc: r.lines.filter((l) => !hot.includes(l)) };
 }
+// 2026-11-20 사용자 «데스크톱·모바일 내용이 다름»: 휴대폰은 판이 없어 «지금 읽기»만 차트 아래(시장 맥락 위) 목록 -- 같은 dirReadNow · 줄을 누르면 풀이 시트(툴팁 대신 helpOpen)
+//   ponytail: 차트를 다시 그릴 때만 갱신된다(renderDirBoard 와 같은 박자) -- 체결 버블·청산 보기에서 차트가 멈추면 마지막 읽기가 남는다(3분 낡음 판정도 그때 멈춤).
+const DRM_TIP = "실시간 데이터 쌍(체결·크기별 흐름·OI·청산·호가·베이시스 …)을 서버가 매초 읽은 것\n▲▼ = 과거 검정에서 방향 근거가 있던 줄만 · 네모 = 움직임 크기 줄(방향 아님)\n효과는 수 bp 수준 -- 메이커로만 비용을 넘는다 · 나머지 줄은 «설명»";
+function renderDirReadMob(R) {
+  const box = el("dirReadM");
+  if (!box) return;
+  if (!R || !isMobileChartMode() || fpAltOn()) { if (!box.hidden) { box.hidden = true; box.innerHTML = ""; box._h = ""; } return; }
+  const short = (l) => (String(l.text).split(" — ")[1] || String(l.text)).split(":")[0], lines = (t) => String(t || "").split(" — ").join("\n— ");
+  const tri = (d) => `<svg viewBox="0 0 10 10" aria-hidden="true"><path d="${d > 0 ? "M1 8.5h8L5 1.5z" : "M1 1.5h8L5 8.5z"}"/></svg>`;
+  const btn = (k, cls, title, body, inner) => `<button type="button" class="drm-q ${cls}" ${helpAttrs(k)} title="${escapeHtml(title)}" data-body="${escapeHtml(body)}">${inner}</button>`;
+  const nu = R.hot.filter((l) => l.dir > 0).length, nd = R.hot.filter((l) => l.dir < 0).length, on = R.desc.filter((l) => l.g && l.g.on).map((l) => l.topic);
+  const h = `<div class="drm-h">${btn("drm-h", "drm-t", "지금 읽기", DRM_TIP, `지금 읽기<span aria-hidden="true">?</span>`)}`
+    + `<span class="drm-n${nu ? " up" : ""}" aria-label="위쪽 ${nu}">${tri(1)}${nu}</span><span class="drm-n${nd ? " dn" : ""}" aria-label="아래쪽 ${nd}">${tri(-1)}${nd}</span></div>`
+    + R.hot.map((l, i) => btn(`drm${i}`, `drm-r ${l.dir > 0 ? "up" : l.dir < 0 ? "dn" : l.g && l.g.v >= 80 ? "big" : ""}`,
+        `${l.topic} · ${l.grade}${l.dir ? (l.dir > 0 ? " · 위쪽" : " · 아래쪽") : " · 크기(방향 아님)"}`, `${lines(l.text)}\n\n${lines(l.note)}`,
+        `${l.dir ? tri(l.dir) : '<i aria-hidden="true"></i>'}<b>${escapeHtml(l.topic)}</b><span>${escapeHtml(short(l))}</span><em>${escapeHtml(l.grade)}</em>`)).join("")
+    + (R.desc.length ? btn("drm-d", "drm-d", `설명 줄 ${R.desc.length}개 — 지금 일어난 일일 뿐, 다음 방향 근거 없음`, R.desc.map((l) => `${l.topic} · ${short(l)}`).join("\n"),
+        `설명 ${R.desc.length}${on.length ? `<span>${escapeHtml(on.join(" · "))}</span>` : ""}`) : "");
+  const key = h.replace(/aria-expanded="\w+"/g, "");   // 시트를 여닫는 aria-expanded 만 바뀐 건 다시 쓰지 않는다 -- 닫을 때 포커스가 돌아갈 단추가 사라졌다(검증)
+  if (box._h !== key) { box._h = key; box.innerHTML = h; }
+  if (box.hidden) box.hidden = false;
+}
 const dirReadH = (R) => (R ? 30 + R.hot.length * 23 + (R.desc.length ? 22 : 0) + 4 : 0);
 const fpBoardBox = (G) => (fpBoard ? [G.ml + 6, G.mt + fpBoard.top, FPB_W, dirFold ? 48 : 210 + dirReadH(dirReadNow())] : null);   // 판 자리 예약(줄 수를 아직 몰라 넉넉히) -- 꼬리표가 비킨다
 function dirTri(g, cx, cy, d, c, r = 5) {   // 위 ▲ / 아래 ▼ 삼각형(그린 아이콘 -- 글자 화살표 대신)
@@ -7410,6 +7452,7 @@ function renderDirBoard() {   // 왼쪽 위 «지표 방향» 판 -- 줄 = 지�
   const svg = el("candleSvgSnapshot"), G = chartGeo, B = fpBoard;
   svg?.querySelector("#dirBoard")?.remove();
   const R = dirReadNow();
+  renderDirReadMob(R);
   if (!svg || !B || fpAltOn() || !G || !(B.rows.length || B.cond.length || R)) return;
   const NSV = "http://www.w3.org/2000/svg", F = "var(--font-sans)", mk = (p, tag, a, txt) => { const e = document.createElementNS(NSV, tag); for (const k in a) e.setAttribute(k, a[k]); if (txt != null) e.textContent = txt; p.appendChild(e); return e; };
   const rows = B.rows, up = rows.filter((r) => r.d > 0).length, dn = rows.filter((r) => r.d < 0).length, ups = B.cond.filter((c) => c.d > 0), dns = B.cond.filter((c) => c.d < 0);
