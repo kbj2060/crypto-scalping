@@ -773,7 +773,44 @@ def bybit_bars(symbol: str, t0: int, t1: int, db: Path = BYBIT_TAPE_DB) -> dict[
         return {}
     return {int(b): (float(bu), float(se), float(w or 0.0), float(rt or 0.0)) for b, bu, se, w, rt in rows
             if not any(f < (int(b) + 300) * 1000 and t > int(b) * 1000 for f, t in gaps)}
-_BYBIT_LIQ_CACHE: dict[str, tuple[float, list[dict], int | None]] = {}
+_BYBIT_LIQ_CACHE: dict[tuple[str, Path], tuple[float, list[dict], int | None]] = {}   # (종목, db) -> (갱신 시각, 창 안 청산, 수집 시작 ms)
+_BYBIT_LIQ_START: dict[Path, tuple[float, int | None]] = {}   # db -> (읽은 시각, min(ts_ms))
+_BYBIT_LIQ_BUSY: set[tuple[str, Path]] = set()                 # 갱신 스레드가 도는 (종목, db) -- 하나씩만
+_BYBIT_LIQ_LOCK = threading.Lock()
+BYBIT_LIQ_TAIL_MS = 60_000      # 덧붙일 때 마지막 청산 앞 60초는 다시 읽어 갈아 끼운다(같은 ms 여러 건·2초 flush 늦게 온 행)
+BYBIT_LIQ_FULL_S = 600.0        # 10분마다 수집 시작(min) + 창 전체 다시 읽기 -- 덧붙이기가 놓친 것도 여기서 바로잡힌다
+
+
+def _bybit_liq_refresh(symbol: str, db: Path) -> None:
+    """스레드에서 돈다. 2026-11-20 loop_stall 454~1856ms(read_rows ← bybit_liq_events ← supply_1s_payload ← api_stream):
+    전엔 1초마다 루프 위에서 min(ts_ms)(인덱스 못 쓰는 전 표 훑기) + 24h 창 전체를 다시 읽었다.
+    이제 평소엔 «마지막 청산 − 60초» 이후만 읽어 꼬리를 갈아 끼우고 24h 밖은 앞에서 자른다(시험: 창 전체 다시 읽기와 같은 결과).
+    ponytail: 60초보다 늦게 써진 행(ts_ms 가 꼬리보다 앞)은 다음 10분 전체 읽기까지 빠진다 -- 수집기는 2초 flush 라 평소엔 없다."""
+    key = (symbol, db)
+    hit = _BYBIT_LIQ_CACHE.get(key)
+    try:
+        now = time.time()
+        since = int((now - FOOTPRINT_KEEP_BARS * FOOTPRINT_BAR_SECONDS) * 1000)
+        st = _BYBIT_LIQ_START.get(db)
+        full = hit is None or st is None or st[1] is None or now - st[0] >= BYBIT_LIQ_FULL_S
+        if full:
+            st = (now, _read_only_rows(db, "SELECT min(ts_ms) FROM bybit_liquidations", [])[0][0])
+        old = [] if full or hit is None else hit[1]
+        cut = max(since, old[-1]["ts_ms"] - BYBIT_LIQ_TAIL_MS) if old else since
+        rows = _read_only_rows(db, "SELECT ts_ms, side, qty, price FROM bybit_liquidations WHERE symbol = ? AND ts_ms >= ? "
+                                   "ORDER BY ts_ms", [symbol, cut])
+        ev = [e for e in old if since <= e["ts_ms"] < cut] + [
+            {"ts_ms": int(t), "side": "long" if sd == "Buy" else "short", "qty": float(q), "price": float(px),
+             "usd": float(q) * float(px)} for t, sd, q, px in rows]
+        if full:
+            _BYBIT_LIQ_START[db] = st
+        _BYBIT_LIQ_CACHE[key] = (time.time(), ev, int(st[1]) if st[1] is not None else None)
+    except (duckdb.Error, sqlite3.Error, OSError, IndexError):
+        if hit:   # 일시 실패는 가진 값을 지키고 ttl 뒤 다시 -- ([], None)(«Bybit 모름»)으로 덮지 않는다
+            _BYBIT_LIQ_CACHE[key] = (time.time(), hit[1], hit[2])
+    finally:
+        with _BYBIT_LIQ_LOCK:
+            _BYBIT_LIQ_BUSY.discard(key)
 
 
 def bybit_liq_events(symbol: str, db: Path = BYBIT_LIQ_DB, ttl: float = 1.0) -> tuple[list[dict], int | None]:
@@ -781,21 +818,17 @@ def bybit_liq_events(symbol: str, db: Path = BYBIT_LIQ_DB, ttl: float = 1.0) -> 
     원소는 라이브 okx_liq_events 와 같은 모양. 🔴Bybit `side` 는 **청산된 포지션 방향**(Buy = 롱 청산) --
     바이낸스 S(강제 주문, 롱 청산 = SELL)와 반대다. 수집 시작 = 표 전체(전 종목) 첫 청산 시각 -- 그 전 봉은 «Bybit 모름».
     ponytail: 수집기 재시작 공백(gaps 표)은 빼지 않는다(공백 봉은 Bybit 0 으로 보인다) -- 필요하면 gaps 로 봉을 거른다.
-    깊이를 고정하고 1초 캐시 -- 수급 폴링(0.25초)·청산 원 요청마다 SQLite 를 열지 않는다. 없거나 실패면 ([], None)."""
-    hit = _BYBIT_LIQ_CACHE.get(symbol)
-    if hit and time.time() - hit[0] < ttl:
-        return hit[1], hit[2]
-    since = int((time.time() - FOOTPRINT_KEEP_BARS * FOOTPRINT_BAR_SECONDS) * 1000)
-    try:
-        start = _read_only_rows(db, "SELECT min(ts_ms) FROM bybit_liquidations", [])[0][0]
-        rows = _read_only_rows(db, "SELECT ts_ms, side, qty, price FROM bybit_liquidations WHERE symbol = ? AND ts_ms >= ? "
-                                   "ORDER BY ts_ms", [symbol, since])
-    except (duckdb.Error, sqlite3.Error, OSError, IndexError):
-        return [], None
-    ev = [{"ts_ms": int(t), "side": "long" if sd == "Buy" else "short", "qty": float(q), "price": float(px),
-           "usd": float(q) * float(px)} for t, sd, q, px in rows]
-    _BYBIT_LIQ_CACHE[symbol] = (time.time(), ev, int(start) if start is not None else None)
-    return ev, _BYBIT_LIQ_CACHE[symbol][2]
+    🔴기다리지 않는다(2026-11-20): 루프(api_stream·api_supply_1s)에서도 불린다. 캐시가 ttl 넘게 묵으면 갱신을 스레드로 보내고
+    지금 가진 값을 바로 준다(종목당 갱신 하나). 첫 갱신이 끝나기 전·없음·처음부터 실패면 ([], None)."""
+    key = (symbol, db)
+    hit = _BYBIT_LIQ_CACHE.get(key)
+    if hit is None or time.time() - hit[0] >= ttl:
+        with _BYBIT_LIQ_LOCK:
+            go = key not in _BYBIT_LIQ_BUSY
+            _BYBIT_LIQ_BUSY.add(key)
+        if go:
+            threading.Thread(target=_bybit_liq_refresh, args=key, name="bybit_liq", daemon=True).start()
+    return (hit[1], hit[2]) if hit else ([], None)
 
 
 def merge_bybit_liq(bars: list[dict], events: list[dict], start_ms: int | None, bar_seconds: int) -> list[dict]:
@@ -1292,6 +1325,10 @@ def make_app() -> web.Application:
     @web.middleware
     async def json_compress_etag(request: web.Request, handler: Any) -> web.StreamResponse:
         response = await handler(request)
+        # 2026-11-20 loop_stall 294ms(compress_sync, 본문 4.28MB): 서버 aiohttp 3.13 은 zlib_executor_size 기본 None = 크기와 무관하게
+        #   루프 위에서 압축한다. 3.14 기본값(4KB 넘으면 실행기)으로 맞춘다 -- 모든 web.Response(json_response()·index.html 포함)가 여기를 지난다.
+        if isinstance(response, web.Response):
+            response._zlib_executor_size = 4096
         # SSE(StreamResponse)·POST·비JSON·비200 은 건드리지 않는다. 304 는 본문이 없어야 한다.
         if (request.method != "GET" or not isinstance(response, web.Response)
                 or response.status != 200 or response.body is None
@@ -2184,6 +2221,20 @@ def make_app() -> web.Application:
     okx_bar_net_by: dict[str, dict[int, tuple[float, ...]]] = {}
     flow_all_hold: dict[str, dict[str, Any]] = {}   # 2026-10-06 리뷰: 봉 마감 직후 Bybit 마지막 봉이 아직 없을 때 직전 합산값 유지   # 2026-10-06 합산 -- OKX 봉별 (순, 고래 순, 리테일 순, 매수, 매도). fr_bar_net 과 같은 갱신 규칙
 
+    card30_lock = threading.Lock()   # 코인마다 도는 compute_situation 이 재시작 직후 한꺼번에 읽으러 온다 -- 하나만 읽고 나머지는 스레드에서 기다렸다 그냥 돌아간다
+
+    def _card30_load() -> None:
+        # 2026-11-20 loop_stall 1424ms(numpy_pickle read_array): 재시작 뒤 첫 읽기가 루프 위였다 -- compute_situation 이 to_thread 로 먼저 부른다
+        with card30_lock:
+            if card30["m"] is not None or card30["err"]:
+                return
+            try:
+                import joblib
+                card30["m"] = {"dir": joblib.load(CARD30_MODEL_PATH), "reach": joblib.load(CARD30_REACH_PATH)}
+            except Exception as exc:  # noqa: BLE001 -- 한 번만 알리고 표로 물러선다(매초 재시도 안 함)
+                card30["err"] = repr(exc)[:160]
+                print(f"card30 model: {card30['err']}", flush=True)
+
     def _card30_pred(bars: list[dict[str, Any]], asset: str = "eth") -> dict[str, float]:
         """완결 5분봉 → {"dir": 닿는다면 위 먼저, "reach": 30분 안 한쪽에 닿음} 보정 확률. 모델·피쳐가 없으면 빈 dict(카드는 표로 물러선다)."""
         if not bars or card30["err"]:
@@ -2192,12 +2243,8 @@ def make_app() -> web.Application:
         if cache["bar"] == bars[-1]["time"]:
             return cache["p"]
         if card30["m"] is None:
-            try:
-                import joblib
-                card30["m"] = {"dir": joblib.load(CARD30_MODEL_PATH), "reach": joblib.load(CARD30_REACH_PATH)}
-            except Exception as exc:  # noqa: BLE001 -- 한 번만 알리고 표로 물러선다(매초 재시도 안 함)
-                card30["err"] = repr(exc)[:160]
-                print(f"card30 model: {card30['err']}", flush=True)
+            _card30_load()
+            if card30["m"] is None:
                 return {}
         f = fr.card30_features(bars)
         p: dict[str, float] = {}
@@ -2398,6 +2445,8 @@ def make_app() -> web.Application:
         # 슈미트 트리거의 «이전 레짐». classify 는 순수 함수라 상태를 여기서 들고 넘긴다.
         # 재기동 직후엔 0(중립)에서 시작한다 -- 추세로 들어가려면 ENTER 를 넘어야 한다.
         inp["prev_dir"] = (situation_state.get("now") or {}).get("dir") or 0
+        if card30["m"] is None and not card30["err"]:
+            await asyncio.to_thread(_card30_load)   # 아래 _flow_read_ctx 가 루프 위에서 처음 읽지 않게(2026-11-20 loop_stall)
         res = sit.classify(inp)
         res["computed_at"] = now
         situation_state["now"] = res
@@ -5024,7 +5073,7 @@ async def start_loop_watch(app: web.Application) -> None:
 
     def stack() -> str:
         f = sys._current_frames().get(tid)
-        return " ← ".join(f"{os.path.basename(s.filename)}:{s.lineno} {s.name}" for s in reversed(traceback.extract_stack(f)[-5:])) if f else "?"
+        return " ← ".join(f"{os.path.basename(s.filename)}:{s.lineno} {s.name}" for s in reversed(traceback.extract_stack(f)[-12:])) if f else "?"   # 12단(11-20 5단은 압축·모델 읽기 호출자가 잘렸다)
 
     def watch() -> None:
         hold, last = None, 0.0   # hold = [최대 ms, 스택]

@@ -18,7 +18,10 @@ def test_bybit_liq_events_and_merge(tmp_path):
     c.executemany("INSERT INTO bybit_liquidations VALUES (?,?,?,?,?,?)",
                   [((now - 900) * 1000, "ETHUSDT", "Buy", 1, 2000, 0), ((now - 290) * 1000, "ETHUSDT", "Sell", 2, 2000, 0)])
     c.commit()
-    ev, start = srv.bybit_liq_events("ETHUSDT", d, ttl=0)
+    srv.bybit_liq_events("ETHUSDT", d, ttl=0)   # 2026-11-20 갱신은 스레드 -- 끝나길 기다렸다 다시 읽는다
+    while ("ETHUSDT", d) in srv._BYBIT_LIQ_BUSY:
+        time.sleep(0.01)
+    ev, start = srv.bybit_liq_events("ETHUSDT", d, ttl=60)
     assert [e["side"] for e in ev] == ["long", "short"] and start == (now - 900) * 1000
     bars = [{"ts": datetime.fromtimestamp(now - k * 300, timezone.utc).isoformat(), "long_usd": 10.0, "short_usd": 0.0, "events": 1}
             for k in (3, 2, 1)]
