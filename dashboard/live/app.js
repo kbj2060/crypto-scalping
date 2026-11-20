@@ -11399,7 +11399,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       const v = bh >= 60 ? `${bh}px` : "0px"; if (mcBubbleEl.style.height !== v) mcBubbleEl.style.height = v; mcBubbleEl.hidden = bh < 60; }
     if (FP_SIDE) post.push(() => fpSidePlace(svg, true, sX, s1Y));
     post.push(() => mcPlace(svg, mcSplit0 ? { x: sX, y: s1Y + s1Hd + 12, w: Math.max(0, sW - 16), h: floorY - (s1Y + s1Hd + 12) } : null,   // 전체화면도 넓은 배치(mc-cmp)로 둔다 -- 풀면 머리 금리 띠·지지/저항 목록이 차트 아래로 튀어나왔다(CSS 가 #mcBody 를 숨김)
-            mcSplit0 && TRADE_W ? (FP_BUB ? { x: ml, y: h - FP_BUB + 8, w: w - mr - ml, h: FP_BUB - 14 }   // 2026-11-10 차트 아래 전폭 체결 버블 띠(플롯 왼쪽 ~ 호가 칸 오른쪽)
+            mcSplit0 && TRADE_W && !FPM ? (FP_BUB ? { x: ml, y: h - FP_BUB + 8, w: w - mr - ml, h: FP_BUB - 14 }   // 2026-11-10 차트 아래 전폭 체결 버블 띠(플롯 왼쪽 ~ 호가 칸 오른쪽)
               : (() => { const y = plotBottom + 12;   // 2026-10-01(4) 프로파일 아래 = 2026-10-04 모의 판(renderPaper 가 채운다)
               return { x: tradeX0 + 4, y, w: REG_W - 8, h: floorY - y }; })()) : null));   // 10-26 레인 값 칸(옛 LANE_VAL_W 144)을 빼 지지/저항 칸이 제자리로
     supply1sSubBox = FP_SIDE ? fpSideS1(sW, s1Hd) : FPW ? null : {
