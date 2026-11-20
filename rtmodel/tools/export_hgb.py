@@ -36,10 +36,14 @@ def b1(x) -> int:
 
 
 def hgb(m) -> dict:
-    assert type(m).__name__ == "HistGradientBoostingClassifier", type(m)
+    reg = type(m).__name__ == "HistGradientBoostingRegressor"     # 2026-11-21 4시간 방향(dir4h): 제곱 오차 · 항등 연결 → predict = raw
+    assert reg or type(m).__name__ == "HistGradientBoostingClassifier", type(m)
     assert m.is_categorical_ is None and m._preprocessor is None, "범주형·전처리기 있는 HGB 는 아직 안 옮김"
-    assert type(m._loss).__name__ == "HalfBinomialLoss" and type(m._loss.link).__name__ == "LogitLink", m._loss
-    assert m.n_trees_per_iteration_ == 1 and list(m.classes_) == [0, 1], m.classes_
+    if reg:
+        assert type(m._loss).__name__ == "HalfSquaredError" and type(m._loss.link).__name__ == "IdentityLink", m._loss
+    else:
+        assert type(m._loss).__name__ == "HalfBinomialLoss" and type(m._loss.link).__name__ == "LogitLink", m._loss
+    assert m.n_trees_per_iteration_ == 1 and (reg or list(m.classes_) == [0, 1])
     assert m._baseline_prediction.shape == (1, 1)
     trees = []
     for it in m._predictors:
@@ -50,7 +54,7 @@ def hgb(m) -> dict:
         assert n["value"].dtype == np.float64 and n["num_threshold"].dtype == np.float64
         trees.append({"feat": n["feature_idx"].tolist(), "thr": bits(n["num_threshold"]), "mgl": n["missing_go_to_left"].astype(bool).tolist(),
                       "left": n["left"].tolist(), "right": n["right"].tolist(), "leaf": n["is_leaf"].astype(bool).tolist(), "value": bits(n["value"])})
-    return {"type": "hgb", "n_features": int(m.n_features_in_), "baseline": b1(m._baseline_prediction[0, 0]), "trees": trees}
+    return {"type": "hgb", "n_features": int(m.n_features_in_), "baseline": b1(m._baseline_prediction[0, 0]), "trees": trees, **({"regress": True} if reg else {})}
 
 
 def step(name: str, s) -> dict:
@@ -74,7 +78,7 @@ def step(name: str, s) -> dict:
     if t == "LogisticRegression":
         assert s.coef_.shape[0] == 1 and list(s.classes_) == [0, 1], s.coef_.shape
         return {"type": "lr", "coef": bits(s.coef_[0]), "intercept": b1(s.intercept_[0])}
-    if t == "HistGradientBoostingClassifier":
+    if t in ("HistGradientBoostingClassifier", "HistGradientBoostingRegressor"):
         return hgb(s)
     raise SystemExit(f"모르는 단계 {name}:{t}")
 

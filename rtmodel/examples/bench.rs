@@ -86,4 +86,37 @@ fn main() {
     }
     stats("레벨 5분 second() 채점 없는 초", plain);
     stats("레벨 5분 second() 채점이 든 초", scored);
+
+    // 4시간 방향: SOL «normal» 벌(9,000봉 · 20코인) → 피쳐 + payload 한 번 -- tools/bench_py_dir.py 와 같은 입력
+    let dx: serde_json::Value = read_json(&d.join("dir4h_fixture.json")).unwrap();
+    let s = dx["sets"].as_array().unwrap().iter().find(|s| s["coin"] == "SOL" && s["name"] == "normal").unwrap();
+    let col = |v: &serde_json::Value| v.as_array().unwrap().iter().map(|b| f64::from_bits(b.as_u64().unwrap())).collect::<Vec<f64>>();
+    let mc = ["sum_open_interest", "count_toptrader_long_short_ratio", "sum_toptrader_long_short_ratio", "count_long_short_ratio", "sum_taker_long_short_vol_ratio"];
+    let fr: std::collections::HashMap<String, dir4h::Frame> = s["frames"].as_object().unwrap().iter().map(|(k, f)| (k.clone(), dir4h::Frame {
+        ts: f["ts"].as_array().unwrap().iter().map(|t| t.as_i64().unwrap()).collect(), high: col(&f["high"]), low: col(&f["low"]), close: col(&f["close"]),
+        volume: col(&f["volume"]), trades: col(&f["trades"]), tbb: col(&f["taker_buy_base"]), m: mc.map(|c| col(&f[c])) })).collect();
+    let dc: Vec<(i64, f64)> = s["dc"][0].as_array().unwrap().iter().zip(col(&s["dc"][1])).map(|(t, v)| (t.as_i64().unwrap(), v)).collect();
+    let art = dir4h::Art::load(&d.join("dir4h_sol.json")).unwrap();
+    let mut ns = vec![];
+    for _ in 0..20 {
+        let t = Instant::now();
+        let f = dir4h::build_features(&dir4h::frames_for(&fr, "SOL"), &dc).unwrap();
+        std::hint::black_box(dir4h::payload(&art, &f));
+        ns.push(t.elapsed().as_nanos());
+    }
+    stats("4h 피쳐 + payload(9,000봉·20코인)", ns);
+    // 15분·1시간 LightGBM: ETH 65열판 모델 40개(지평 2 × 시드 5 × 표적 4) 앙상블 한 줄
+    let lx: serde_json::Value = read_json(&d.join("lgb_eth.json")).unwrap();
+    let hs: Vec<Vec<Vec<(lgb::Booster, f64)>>> = lx["models"].as_object().unwrap().values().map(|v| lgb::load_seeds(v).unwrap()).collect();
+    let rows = col(&lx["rows"]);
+    let mut ns = vec![];
+    for i in 0..2000 {
+        let r = &rows[(i % 10_000) * 65..(i % 10_000 + 1) * 65];
+        let t = Instant::now();
+        for h in &hs {
+            std::hint::black_box(lgb::ensemble(h, r));
+        }
+        ns.push(t.elapsed().as_nanos());
+    }
+    stats("15분·1시간 LightGBM 앙상블 한 줄(40)", ns);
 }

@@ -31,7 +31,7 @@ OUT = ROOT / "rtmodel" / "tests" / "fixtures"
 HIST_MIN = 3060            # 체결 메시지 시작 전 분봉 자료(REST limit 1500 · 꽉 찬 프레임 벌은 3,000분)
 
 
-def tape(rng, t0, n, px0, sig, rate, drift=(), jumps=(), vol_x=(), quiet=(), wave=None):
+def tape(rng, t0, n, px0, sig, rate, drift=(), jumps=(), vol_x=(), quiet=(), wave=None, jit=2e-5):
     """초 t0..t0+n-1 의 체결. drift = [(시작 초, 끝 초, 총 로그수익)] · jumps = [(초, 로그 크기)] · vol_x = [(시작, 끝, σ 배수)] · quiet = [(시작, 끝, 체결률 배수)] ·
     wave = (주기 초, 로그 폭) -- 박스 장(주기가 60분보다 길어 1h 고저 접근·돌파가 주기마다 다시 «첫 사건»이 된다)."""
     sd = np.full(n, sig); r = np.full(n, rate)
@@ -50,7 +50,7 @@ def tape(rng, t0, n, px0, sig, rate, drift=(), jumps=(), vol_x=(), quiet=(), wav
     cnt = rng.poisson(r)
     sec = np.repeat(np.arange(n), cnt); N = len(sec)
     ms = rng.integers(0, 1000, N); o = np.lexsort((ms, sec)); sec, ms = sec[o], ms[o]
-    p = np.round(np.exp(lp[sec] + rng.normal(0, 2e-5, N)), 2)
+    p = np.round(np.exp(lp[sec] + rng.normal(0, 1, N) * jit), 2)   # jit = 체결마다 가격 흔들림(0 = 그 초의 경로 가격 그대로)
     q = np.maximum(np.round(rng.exponential(0.8, N), 3), 0.001)
     span = rng.integers(0, 3, N); first = 10_000_000 + np.cumsum(span + 1) - span - 1; last = first + span   # 묶음 하나에 체결 1~3건
     bm = rng.random(N) < 0.5 + 0.1 * np.sign(np.r_[0, np.diff(p)])
@@ -109,6 +109,18 @@ def scenarios(rng):
         S.append((f"full_frame{i}", dict(t0=base(), live=10800, sig=1e-4, rate=2.0, wave=wave() if i else None, kl_n=3000)))
     for nm, at in (("fri_sat", "2026-03-06 23:30:00"), ("sun_mon", "2026-03-08 23:30:00")):     # 사건이 요일·자정 경계에 걸리게(준비 1시간 뒤 = 경계 앞 30분)
         S.append((nm, dict(t0=int(pd.Timestamp(at, tz="UTC").timestamp()) - H - 3600 + int(rng.integers(0, 60)), live=10800, sig=1.2e-4, rate=2.0, wave=wave())))
+    # ── 2026-11-21 빈틈 메우기(앞 벌들의 난수 순서를 안 바꾸게 맨 뒤에 덧붙인다)
+    T1 = H + 4000
+    # 정확히 3,600초 간격 사건 쌍: T1 에 위로 튐(그 초에 체결 강제) · T1+3600 에 아래로 튐 → 둘째 사건의 m_prev60 이 첫 사건(a−3600 정확히)을 센다
+    S.append(("pair3600", dict(t0=base(), live=10800, sig=5e-5, rate=2.0, jit=0.0,
+                               jumps=[(T1, 0.006), (T1 + 1, -0.006), (T1 + 3600, -0.006), (T1 + 3601, 0.006)],
+                               quiet=[(T1, T1 + 1, 30.0), (T1 + 3600, T1 + 3601, 30.0)])))
+    # 고점이 60분 창에서 빠지며 문턱이 직전가 아래로 내려옴 → 분 첫 체결(초 > 5)보다 앞선 초가 사건 초(lag > 0) ·
+    #   그 뒤 가격이 호가 단위로 그대로 → 300초 안 배리어 없음(hit_s None)·끝 수익 0(y None)
+    S.append(("expire_flat", dict(t0=base(), live=10800, sig=1e-4, rate=0.1, jit=0.0, jumps=[(T1, 0.006), (T1 + 30, -0.0045)],
+                                  vol_x=[(T1 + 30, T1 + 6000, 1e-3)])))
+    # 시작 직전 4분 반 체결 없음 → 1분봉 v=0 분(h·l·c NaN) 이 «2분 뒤 다시 확인» 10분 안에 든다
+    S.append(("quiet_before", dict(t0=base(), live=10800, sig=1e-4, rate=2.0, wave=wave(), quiet=[(H - 300, H - 30, 0.0)])))
     return S
 
 
@@ -165,7 +177,7 @@ def one_set(nm_cfg):
         art = LS.load_art()
         srng = np.random.default_rng(int.from_bytes(__import__("hashlib").sha256(nm.encode()).digest()[:8], "little"))   # 벌마다 고정 시드(--only 로 하나만 돌려도 같은 입력)
         H = HIST_MIN * 60; n = H + cfg["live"] + 400
-        tr = tape(srng, cfg["t0"], n, 3000.0 * np.exp(srng.normal(0, .3)), cfg["sig"], cfg["rate"], cfg.get("drift", ()), cfg.get("jumps", ()), cfg.get("vol_x", ()), cfg.get("quiet", ()), cfg.get("wave"))
+        tr = tape(srng, cfg["t0"], n, 3000.0 * np.exp(srng.normal(0, .3)), cfg["sig"], cfg["rate"], cfg.get("drift", ()), cfg.get("jumps", ()), cfg.get("vol_x", ()), cfg.get("quiet", ()), cfg.get("wave"), cfg.get("jit", 2e-5))
         t_ = time.perf_counter(); ops, mn, ft, st, sec_ns = drive(art, tr, cfg["t0"] + H, cfg); el = time.perf_counter() - t_
         # 확률(반올림 전): _score 와 같은 식을 피쳐 줄 값으로 한 번 더(json 은 repr 왕복이라 비트 그대로)
         P, tim = [], []
@@ -185,18 +197,19 @@ def one_set(nm_cfg):
 
 def main():
     args = sys.argv[1:]
-    only = args[args.index("--only") + 1] if "--only" in args else None
+    only = set(args[args.index("--only") + 1].split(",")) if "--only" in args else None   # 쉼표 목록
     name = next((a for a in args if a.endswith(".json")), "sr_fixture.json")
-    S = [x for x in scenarios(np.random.default_rng(20261121)) if not only or x[0] == only]
+    S = [x for x in scenarios(np.random.default_rng(20261121)) if not only or x[0] in only]
     fx = {"npy_disable": os.environ.get("NPY_DISABLE_CPU_FEATURES", ""), "sets": []}
     from concurrent.futures import ProcessPoolExecutor
     with ProcessPoolExecutor(int(os.environ.get("SR_PROCS", "6"))) as ex:     # 벌 하나 약 270MB · 초 하나 약 20ms(파이썬)
         for d, msg in ex.map(one_set, S):
             print(msg, flush=True); fx["sets"].append(d)
     path = OUT / name
-    if only and path.exists():     # 한 벌만 다시 만들면 그 파일의 같은 이름 벌만 바꿔 넣는다
+    if only and path.exists():     # 몇 벌만 다시 만들면 그 파일의 같은 이름 벌을 바꾸고 없는 이름은 뒤에 붙인다
         old = json.loads(path.read_text()); assert old["npy_disable"] == fx["npy_disable"], "AVX 설정이 다른 정답지에 섞지 않는다"
-        old["sets"] = [fx["sets"][0] if x["name"] == only else x for x in old["sets"]]; fx = old
+        new = {d["name"]: d for d in fx["sets"]}; names = {x["name"] for x in old["sets"]}
+        old["sets"] = [new.get(x["name"], x) for x in old["sets"]] + [d for d in fx["sets"] if d["name"] not in names]; fx = old
     path.write_text(json.dumps(fx))
     print(f"{path.name} {path.stat().st_size:,} 바이트 · 벌 {len(fx['sets'])} · NPY_DISABLE_CPU_FEATURES={fx['npy_disable']!r}")
 

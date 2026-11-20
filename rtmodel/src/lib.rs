@@ -12,7 +12,10 @@
 use serde::{Deserialize, Deserializer};
 
 pub mod box_hold;
+pub mod dir4h;
+pub mod lgb;
 pub mod sr_lean;
+pub mod sr_live;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -84,6 +87,9 @@ pub enum Step {
         #[serde(deserialize_with = "bit")]
         baseline: f64,
         trees: Vec<HgbTree>,
+        /// 회귀(HistGradientBoostingRegressor · 제곱 오차 · 항등 연결): predict = raw 그대로 (2026-11-21 dir4h)
+        #[serde(default)]
+        regress: bool,
     },
     Imputer {
         #[serde(deserialize_with = "bits")]
@@ -113,18 +119,18 @@ pub fn expit(z: f64) -> f64 {
     1.0 / (1.0 + (-z).exp())
 }
 
-/// `predict_proba(x)[0, 1]` 한 줄. x = 학습 열 순서 그대로.
+/// `predict_proba(x)[0, 1]` 한 줄(회귀 HGB 면 `predict(x)[0]`). x = 학습 열 순서 그대로.
 pub fn predict_proba(model: &[Step], x: &[f64]) -> Option<f64> {
     let mut x = x.to_vec();
     for s in model {
         match s {
-            Step::Hgb { n_features, baseline, trees } => {
+            Step::Hgb { n_features, baseline, trees, regress } => {
                 assert_eq!(x.len(), *n_features);
                 let mut raw = 0.0 + baseline;
                 for t in trees {
                     raw += t.raw(&x);
                 }
-                return Some(expit(raw));
+                return Some(if *regress { raw } else { expit(raw) });
             }
             Step::Imputer { fill } => {
                 if x.iter().any(|v| v.is_infinite()) {
