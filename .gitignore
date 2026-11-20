@@ -129,3 +129,6 @@ scripts/ops/handoff.hosts.conf*
 dashboard/box_hold_platt90_eth_1h.json
 dashboard/box_hold_platt90_xrp_1h.json
 dashboard/box_hold_platt90_btc_1h.json
+
+# rtcore (Rust) 빌드 산출물
+rtcore/target/
