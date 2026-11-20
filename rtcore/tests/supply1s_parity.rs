@@ -94,6 +94,10 @@ fn supply1s_matches_python() {
         if let Some(m) = rtcore::feed::parse(&text(r, &sym.to_uppercase()), r[7].as_i64().unwrap() * 1000) {
             st.apply(m);
         }
+        // 묶어 보내기(state.rs FLUSH_MS): 몇 사건마다 한 번 -- 흩어진 간격으로 불러 «묶어도 화면 값이 같다»를 본다. 마지막 줄 뒤엔 꼭.
+        if (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 60 < 5 || i + 1 == rows.len() {
+            st.flush();
+        }
         while let Ok(m) = rx.try_recv() {
             if let Event::Supply1s(up) = m.ev {
                 pushes += 1;

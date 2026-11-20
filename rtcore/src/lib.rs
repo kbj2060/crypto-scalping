@@ -1,6 +1,7 @@
 //! rtcore M1: 바이낸스 선물 웹소켓 → 메모리 상태 → 화면 웹소켓 밀기. 읽기 전용(주문·계좌·키 없음).
 //! 설계: docs/rtcore_design_20261120.md
 pub mod feed;
+pub mod footprint;
 pub mod hub;
 pub mod proto;
 pub mod state;
@@ -96,6 +97,15 @@ pub fn start(cfg: &Cfg, listener: TcpListener) -> (Arc<state::State>, tokio::tas
         feeds.push((src.url.clone(), tokio::spawn(feed::run_src(src, state.clone(), cfg.silence))));
     }
     tokio::spawn(hub::serve(listener, state.clone()));
+    let st = state.clone();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_millis(state::FLUSH_MS));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay); // 밀렸으면 몰아서 여러 번 돌지 않는다
+        loop {
+            tick.tick().await;
+            st.flush();
+        }
+    });
     (state, tokio::spawn(first_exit(feeds)))
 }
 

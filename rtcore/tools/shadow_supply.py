@@ -5,9 +5,13 @@ rtcore 는 구독 → 스냅숏 1회 → 밀기(바뀐 초만, 초 단위로 덮
 끝나면 칸(lane)마다 «양쪽 다 닫힌 초»만 필드별로 비교해 한 줄씩 찍는다.
   닫힌 초: bn·liq < 둘 중 작은 now · spot < 작은 spotNow · okx·okxLiq < 작은 okxNow · okxOi < 둘 중 작은 마지막 OI 초
            bybitLiq ≤ 파이썬 마지막 응답 시각 − 10초(파이썬은 수집기 2초 flush·1초 캐시·3초 지연 뒤에 본다)
-  비교 범위 시작: rtcore 가 처음 본 초(bn 은 bn 칸 첫 초 · spot·okx 는 제 칸 첫 초 · 청산은 그 원천 체결 칸 첫 초)
+  비교 범위 시작: rtcore 가 처음 본 초의 **다음 초**(bn 은 bn 칸 · spot·okx 는 제 칸 · 청산은 그 원천 체결 칸)
      -- 파이썬은 재시작 때 테이프에서 11분을 되살리지만 rtcore 는 안 한다(그 앞은 비교하지 않는다).
-  안 보는 것: partial(진행 중) · oi(코어가 안 옮김) · meta 는 끝에 나란히 찍기만.
+     처음 본 초는 rtcore 가 그 초 중간에 붙어 반쪽이다(2026-11-20 서버 그림자: bn·OKX 첫 초만 불일치 1건씩).
+  partial(진행 중인 초)도 app.js applySupply1s 처럼 칸에 넣는다. 🔴2026-11-20 서버 그림자에서 현물 4초·OKX 6초만 지어졌다 --
+     현물·OKX 는 주문 단위라 닫힌 초를 목록으로 다시 보내지 않고 «마지막 partial = 그 초의 끝값»으로 끝난다(supply.rs flow).
+     바이낸스 선물은 다음 초에 닫히는 주문이 앞 초를 목록에 다시 실어 가려져 있었다. 비교는 여전히 닫힌 초만.
+  안 보는 것: oi(코어가 안 옮김) · meta 는 끝에 나란히 찍기만.
     python3 rtcore/tools/shadow_supply.py eth 300        # 코인 · 몇 초
     python3 rtcore/tools/shadow_supply.py --selftest     # 네트워크 없이 비교 함수만
 """
@@ -28,6 +32,9 @@ def put(view: dict, payload: dict) -> None:
     for lane in LANES:
         for r in payload.get(KEY[lane]) or []:
             view.setdefault(lane, {})[int(r[0])] = list(r[1:])
+    for lane, r in (payload.get("partial") or {}).items():   # 목록 다음에 -- app.js 와 같은 순서
+        if r:
+            view.setdefault(lane, {})[int(r[0])] = list(r[1:])
 
 
 def same(a: list, b: list) -> bool:
@@ -37,7 +44,7 @@ def same(a: list, b: list) -> bool:
 def compare(rt: dict, py: dict, rt_meta: dict, py_meta: dict, py_at: float) -> list[str]:
     """rt/py: 칸 -> {초: 값}. *_meta: 마지막 now·spotNow·okxNow. py_at: 파이썬 마지막 응답 시각(초)."""
     def first(lane):
-        return min(rt.get(lane) or {0: 0})
+        return min(rt.get(lane) or {0: 0}) + 1   # 처음 본 초는 반쪽 -- 머리 주석
     lo = {"bn": first("bn"), "liq": first("bn"), "bybitLiq": first("bn"), "spot": first("spot"),
           "okx": first("okx"), "okxLiq": first("okx"), "okxOi": first("okxOi")}
     m = lambda k: min(rt_meta.get(k) or 0, py_meta.get(k) or 0)  # noqa: E731
@@ -120,10 +127,20 @@ def selftest() -> None:
              "bybitLiq": [[50, 1, 0, 2, 0]]})
     put(py, {"seconds": [[9, 9, 0, 0, 0, 9, 0, 3.0], [10, 1, 0, 0, 0, 1, 0, 3.0], [11, 2, 0, 0, 0, 2.5, 0, 3.0]],
              "liq": [[10, 1.0, 0, 3, 0]], "bybitLiq": [[50, 1, 0, 2, 0]]})
+    put(rt, {"seconds": [[9, 0, 0, 0, 0, 0.5, 0, 3.0]]})   # rtcore 가 9 초 중간에 붙음(반쪽) -- 다음 초부터 본다
     out = dict(line.split(":", 1) for line in compare(rt, py, {"now": 12}, {"now": 12}, 100))
-    assert "비교 초 2 · 불일치 1" in out["bn"] and "파이썬만 0" in out["bn"], out["bn"]     # 9 는 rtcore 시작 전이라 범위 밖
+    assert "비교 초 2 · 불일치 1" in out["bn"] and "파이썬만 0" in out["bn"], out["bn"]     # 9 는 처음 본 초라 범위 밖
     assert "비교 초 1 · 불일치 0" in out["liq"], out["liq"]
     assert "비교 초 1 · 불일치 0" in out["bybitLiq"], out["bybitLiq"]
+    # 현물·OKX 실제 순서: 닫힌 초는 목록에 다시 안 오고 partial 로만 지나간다(사이에 다른 원천 메시지 · 체결 0건 초 13).
+    rt, py = {}, {}
+    for m in ({"partial": {"spot": [10, 1, 0, 0, 0, 1, 0, 5.0]}}, {"partial": {"spot": [11, 1, 0, 0, 0, 1, 0, 5.0]}},
+              {"seconds": [[11, 0, 0, 0, 0, 2, 0, 3.0]], "partial": {"bn": [12, 0, 0, 0, 0, 1, 0, 3.0], "spot": [11, 2, 0, 0, 0, 2, 0, 5.0]}},
+              {"partial": {"spot": [12, 1, 0, 0, 0, 1, 0, 5.0]}}, {"partial": {"spot": [14, 1, 0, 0, 0, 1, 0, 5.0]}}):
+        put(rt, m)
+    put(py, {"spot": [[11, 2, 0, 0, 0, 2, 0, 5.0], [12, 1, 0, 0, 0, 1, 0, 5.0]], "partial": {"spot": [14, 1, 0, 0, 0, 1, 0, 5.0]}})
+    out = dict(line.split(":", 1) for line in compare(rt, py, {"spotNow": 14}, {"spotNow": 14}, 100))
+    assert "비교 초 2 · 불일치 0 · 파이썬만 0" in out["spot"], out["spot"]
     print("selftest ok")
 
 

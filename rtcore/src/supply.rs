@@ -21,7 +21,7 @@
 //! - 보관: 새 초가 생길 때만 «그 초 − 660» 보다 오래된 초를 지운다(coin_flow.py 87~94 · 323~333 · 2026-09-20 660 결정).
 //!   그래서 뒤늦게 온 오래된 체결도 칸을 만든다(다음 새 초 때 지워진다) -- 파이썬과 같게 둔다.
 //! - 24시간 봉 창: 체결의 5분봉이 아직 없고 «수신 시각의 봉 − 287봉» 보다 오래되면 **통째로 버린다**(1초 칸도 안 건드린다)
-//!   (coin_flow.py 355~365 · KEEP_BARS 288). 봉 목록 자체는 풋프린트 몫이라 여기선 봉 시작 시각 집합만 든다.
+//!   (coin_flow.py 355~365 · KEEP_BARS 288). 봉과 가격 칸은 footprint.rs 가 들고, 같은 add 에서 같이 쌓는다(체결을 한 번만 처리).
 //! - 내보내기: 진행 중인 초(가장 새 초)는 seconds 에 넣지 않고 partial 로 따로(server.py supply_1s_payload 도크스트링 · 2026-09-24),
 //!   seconds 는 (가장 새 초 − 660, 가장 새 초) 열린 구간, 값은 파이썬 round(x, 3) 과 같은 수(아래 r3).
 //!
@@ -40,12 +40,11 @@
 //!   벽시계 초 − 3] -- 파이썬의 «수집기 2초 flush 를 기다리는 3초»를 스냅숏은 그대로 따른다(밀기는 기다리지 않는다).
 //! - 밀기: 사건마다 «그 사건으로 바뀐 초»만 싣는다. 청산은 파이썬 창의 오른쪽 끝(아직 안 닫힌 초)이어도 바로 민다 --
 //!   파이썬은 그 초가 닫혀야 보이지만 값은 같다(화면은 초 단위로 덮어쓴다). 창 왼쪽 밖은 앞으로도 안 보이므로 밀지 않는다.
-use crate::proto::{LiqRow, OkxMeta, Partial, SecRow, SpotMeta, Supply1s, Venue};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use crate::footprint::{bar_of, ring_floor, Bars};
+use crate::proto::{Footprint, LiqRow, OkxMeta, Partial, SecRow, SpotMeta, Supply1s, Venue};
+use std::collections::{BTreeMap, VecDeque};
 
 pub const SUPPLY_1S_SECONDS: i64 = 660;
-const BAR_SECONDS: i64 = 300;
-const KEEP_BARS: i64 = 288;
 const ORDER_GAP_MS: i64 = 100;
 /// (심볼, 리테일 상한, 고래 하한) USD. 표에 없으면 ETH 경계(collector 135~136).
 // ponytail: 파이썬 표를 옮겨 적은 사본 -- 경계를 바꾸면 tools/gen_supply1s_fixture.py 를 다시 돌려 정답지 bands 대조가 잡는다.
@@ -102,7 +101,7 @@ pub fn size_bands(symbol: &str) -> (f64, f64) {
 
 /// 파이썬 round(x, 3) 과 같은 수: 정확한 이진값을 십진 3자리로 반올림(동률은 짝수) → 다시 f64.
 /// Rust `{:.3}` 도 정확값 기준·동률 짝수라 같다(0.0625→0.062 · 2.0005→2.001 · 1.0005→1.0 대조, 2026-11-20).
-fn r3(x: f64) -> f64 {
+pub(crate) fn r3(x: f64) -> f64 {
     format!("{x:.3}").parse().unwrap_or(x)
 }
 
@@ -195,7 +194,7 @@ pub struct Supply {
     pub retail_max: f64,
     pub whale_min: f64,
     sec: BTreeMap<i64, [f64; 7]>,
-    bars: BTreeSet<i64>,
+    fp: Bars,
     open: Option<Order>,
     liq: VecDeque<LiqEv>,
     spot: Lane,
@@ -207,10 +206,6 @@ pub struct Supply {
     bybit: VecDeque<LiqEv>,
 }
 
-fn bar_of(ms: i64) -> i64 {
-    ms.div_euclid(1000).div_euclid(BAR_SECONDS) * BAR_SECONDS
-}
-
 impl Supply {
     pub fn new(symbol: &str) -> Supply {
         let (retail_max, whale_min) = size_bands(symbol);
@@ -218,7 +213,7 @@ impl Supply {
             retail_max,
             whale_min,
             sec: BTreeMap::new(),
-            bars: BTreeSet::new(),
+            fp: Bars::new(symbol),
             open: None,
             liq: VecDeque::new(),
             spot: Lane::default(),
@@ -390,6 +385,21 @@ impl Supply {
         m
     }
 
+    /// 풋프린트 스냅숏(파이썬 /api/footprint since=0 의 봉·칸). 표에 없는 종목은 None.
+    pub fn footprint(&self) -> Option<Footprint> {
+        self.fp.snapshot(&self.sec, self.retail_max, self.whale_min)
+    }
+
+    /// 풋프린트 바뀐 몫(밀기 묶음마다 한 번 -- state.rs flush).
+    pub fn footprint_delta(&mut self) -> Option<Footprint> {
+        self.fp.take_delta(&self.sec, self.retail_max, self.whale_min)
+    }
+
+    /// 시험용: 봉 → 칸(반올림 전).
+    pub fn footprint_raw(&self) -> Vec<(i64, Vec<(i64, [f64; 6])>)> {
+        self.fp.raw()
+    }
+
     /// 목록 칸이 빈 메시지(밀기는 바뀐 초만 채운다).
     fn base(&self, now_us: i64) -> Supply1s {
         let (bn, sp, ok) = (newest(&self.sec), newest(&self.spot.sec), newest(&self.okx.sec));
@@ -434,21 +444,28 @@ impl Supply {
         done
     }
 
-    /// footprint_add 의 1초 칸 몫. order=false 면 총량·가격, true 면 크기 구간.
+    /// footprint_add: 봉 칸(footprint.rs)과 1초 칸을 같은 호출에서. order=false 면 총량·가격, true 면 크기 구간.
     #[allow(clippy::too_many_arguments)]
     fn add(&mut self, px: f64, qty: f64, ts_ms: i64, sell: bool, order: bool, now_ms: i64, touched: &mut Vec<i64>) {
         let bar = bar_of(ts_ms);
-        if !self.bars.contains(&bar) {
-            let cutoff = bar_of(now_ms) - (KEEP_BARS - 1) * BAR_SECONDS;
-            if bar < cutoff {
-                return; // 창을 벗어난 봉 -- 넣어봐야 바로 지워진다(coin_flow.py 360~361)
-            }
-            self.bars.insert(bar);
-            self.bars = self.bars.split_off(&cutoff); // 새 봉이 생길 때만 정리(체결마다 돌 일이 아니다)
+        if !self.fp.keep(bar, now_ms) {
+            return; // 창을 벗어난 봉(coin_flow.py 360~361) -- 1초 칸도 안 건드린다
         }
+        self.fp.add(bar, px, qty, sell, order, self.whale_min, self.retail_max);
         let s = ts_ms.div_euclid(1000);
-        let c = sec_cell(&mut self.sec, s);
+        // 가장 새 초가 앞으로 가면 링이 s − 660 밑을 지운다(sec_cell) -- 그 사이에서 시작하는 봉은 지우기 전 링으로 dhl 을 얼린다.
+        if let Some(f) = ring_floor(&self.sec) {
+            if s - SUPPLY_1S_SECONDS > f {
+                self.fp.freeze(&self.sec, f, s - SUPPLY_1S_SECONDS);
+            }
+        }
         let side = sell as usize;
+        if !order && bar < s.max(newest(&self.sec)) - SUPPLY_1S_SECONDS {
+            // 링이 첫 초를 이미 지운 봉에 체결이 왔다 -- 얼려 둔 dhl 은 이제 틀리다(footprint.rs 머리 주석).
+            // 주문 단위 칸(order)은 dhl 이 안 쓰는 칸(크기 구간)만 바꾸므로 안 지운다 -- 드문 체결에서 닫히는 주문이 늦게 와도 그대로.
+            self.fp.forget_dhl(bar);
+        }
+        let c = sec_cell(&mut self.sec, s);
         if !order {
             c[4 + side] += qty;
             c[6] = px; // 그 초의 «마지막으로 받은» 체결가 = 1초 가격선
