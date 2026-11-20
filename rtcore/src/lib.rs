@@ -49,6 +49,11 @@ pub struct Cfg {
     pub symbols: Vec<String>,
     pub ws_base: String,
     pub market_ws_base: String,
+    /// 나머지 원천(1초 수급). 빈 문자열 = 그 원천을 켜지 않는다(시험·부분 가동).
+    pub force_url: String,
+    pub spot_ws_base: String,
+    pub okx_url: String,
+    pub bybit_url: String,
     pub silence: Duration,
 }
 
@@ -63,6 +68,11 @@ impl Cfg {
                 .collect(),
             ws_base: env("RTCORE_WS_BASE", "wss://fstream.binance.com/ws/"),
             market_ws_base: env("RTCORE_MARKET_WS_BASE", "wss://fstream.binance.com/market/ws/"),
+            // 주소는 파이썬과 같다: server.py FORCE_ORDER_WS_URL · coin_flow.py _flow_spec spot_url · OKX_WS_URL · Bybit 청산 수집기 WS
+            force_url: env("RTCORE_FORCE_WS_URL", "wss://fstream.binance.com/market/ws/!forceOrder@arr"),
+            spot_ws_base: env("RTCORE_SPOT_WS_BASE", "wss://stream.binance.com:9443/ws/"),
+            okx_url: env("RTCORE_OKX_WS_URL", "wss://ws.okx.com:8443/ws/v5/public"),
+            bybit_url: env("RTCORE_BYBIT_WS_URL", "wss://stream.bybit.com/v5/public/linear"),
             silence: Duration::from_secs_f64(env("RTCORE_SILENCE_SECS", "30").parse().unwrap_or(30.0)),
         }
     }
@@ -82,8 +92,48 @@ pub fn start(cfg: &Cfg, listener: TcpListener) -> (Arc<state::State>, tokio::tas
             feeds.push((url.clone(), tokio::spawn(feed::run(url, state.clone(), cfg.silence))));
         }
     }
+    for src in sources(cfg) {
+        feeds.push((src.url.clone(), tokio::spawn(feed::run_src(src, state.clone(), cfg.silence))));
+    }
     tokio::spawn(hub::serve(listener, state.clone()));
     (state, tokio::spawn(first_exit(feeds)))
+}
+
+/// 1초 수급의 나머지 원천 연결: 강제청산 1(전 종목) · 현물 종목마다 1 · OKX 1 · Bybit 1.
+pub fn sources(cfg: &Cfg) -> Vec<feed::Src> {
+    use feed::{Kind, Src};
+    use tokio_tungstenite::tungstenite::Message;
+    let frame = || Some(Message::Ping(Vec::new().into()));
+    let mut out = vec![];
+    if !cfg.force_url.is_empty() {
+        out.push(Src { url: cfg.force_url.clone(), kind: Kind::Futures, sub: None, ping: frame(), syms: vec![] });
+    }
+    if !cfg.spot_ws_base.is_empty() {
+        for s in cfg.symbols.iter().filter(|s| !supply::NO_SPOT.contains(&s.as_str())) {
+            let url = format!("{}{s}@aggTrade", cfg.spot_ws_base);
+            out.push(Src { url, kind: Kind::Spot, sub: None, ping: frame(), syms: vec![s.clone()] });
+        }
+    }
+    let okx: Vec<&String> = cfg.symbols.iter().filter(|s| supply::okx_ct_val(&supply::okx_inst(s)).is_some()).collect();
+    if !cfg.okx_url.is_empty() && !okx.is_empty() {
+        let mut args: Vec<serde_json::Value> = okx
+            .iter()
+            .flat_map(|s| {
+                let inst = supply::okx_inst(s);
+                [serde_json::json!({"channel": "trades", "instId": inst}), serde_json::json!({"channel": "open-interest", "instId": inst})]
+            })
+            .collect();
+        args.push(serde_json::json!({"channel": "liquidation-orders", "instType": "SWAP"}));
+        let sub = serde_json::json!({"op": "subscribe", "args": args}).to_string();
+        out.push(Src { url: cfg.okx_url.clone(), kind: Kind::Okx, sub: Some(sub), ping: Some(Message::text("ping")), syms: okx.into_iter().cloned().collect() });
+    }
+    let bybit: Vec<String> =
+        cfg.symbols.iter().filter(|s| supply::BYBIT_SYMBOLS.contains(&s.as_str())).map(|s| format!("allLiquidation.{}", s.to_uppercase())).collect();
+    if !cfg.bybit_url.is_empty() && !bybit.is_empty() {
+        let sub = serde_json::json!({"op": "subscribe", "args": bybit}).to_string();
+        out.push(Src { url: cfg.bybit_url.clone(), kind: Kind::Bybit, sub: Some(sub), ping: Some(Message::text(r#"{"op":"ping"}"#)), syms: vec![] });
+    }
+    out
 }
 
 /// 태스크들 중 처음 끝난 것의 사유. 2026-11-20 실서버: wss 패닉으로 수신 태스크가 전부 죽었는데

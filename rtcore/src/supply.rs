@@ -1,4 +1,4 @@
-//! 1초 수급 -- 바이낸스 선물 `@trade` 만으로 쌓는 몫(2026-11-20 파이썬에서 옮김). tokio 비의존.
+//! 1초 수급(2026-11-20 파이썬에서 옮김). tokio 비의존. 바이낸스 선물 `@trade` 몫이 먼저, 그 뒤 나머지 원천(아래 «다른 원천»).
 //!
 //! 원본: dashboard/coin_flow.py `footprint_add`(338~394) · `supply_1s_cell`(323~333) · `collect_footprint`(576~636)
 //!       · scripts/live_trade_tape_collector_20260916.py `TakerOrderAggregator`(162~248) · `size_bands`(145~159)
@@ -24,8 +24,24 @@
 //!   (coin_flow.py 355~365 · KEEP_BARS 288). 봉 목록 자체는 풋프린트 몫이라 여기선 봉 시작 시각 집합만 든다.
 //! - 내보내기: 진행 중인 초(가장 새 초)는 seconds 에 넣지 않고 partial 로 따로(server.py supply_1s_payload 도크스트링 · 2026-09-24),
 //!   seconds 는 (가장 새 초 − 660, 가장 새 초) 열린 구간, 값은 파이썬 round(x, 3) 과 같은 수(아래 r3).
-use crate::proto::{Partial, SecRow, Supply1s};
-use std::collections::{BTreeMap, BTreeSet};
+//!
+//! 다른 원천(정답지: tools/gen_supply1s_venues_fixture.py → tests/supply1s_venues_parity.rs):
+//! - `liq` 바이낸스 강제청산(server.py collect_force_orders · supply_1s_payload 의 liq_rows): 사건을 받은 순서대로 링(5000건,
+//!   deque maxlen)에 넣고, 내보낼 때 초별로 더한다. 창 = (바이낸스 선물 가장 새 초 − 660, 그 초) -- **@trade 의 초로 자른다**
+//!   (청산 스트림에는 «진행 중인 초»가 없다). 칸 = [롱수량, 숏수량, 롱USD, 숏USD], usd = 사건마다 qty × 그 사건 가격
+//!   (2026-09-22: 수량 × «그 초 마지막 체결가»로 곱하면 캐스케이드에서 벌어진다). 수량 round(x,3) · USD round(x) 정수.
+//! - `spot` 바이낸스 현물 @aggTrade · `okx` OKX trades(coin_flow.py collect_spot_flow · collect_okx_flow): 둘 다 **이미 테이커
+//!   주문 단위**라 되묶지 않고 한 체결로 총량·가격·크기 구간을 함께 센다(2026-09-23 실측: OKX trades-all 4,810건 vs trades 1,780건,
+//!   sz 합 1.0000x). 24시간 봉 창 없음(봉은 풋프린트 몫). 보관·내보내기 규칙은 바이낸스 선물 칸과 같고 창은 각자의 가장 새 초.
+//! - `okxOi`: 같은 초는 마지막 값으로 덮고, 넣을 때마다 «그 초 − 660» 앞을 지운다. 창 = 가장 새 OI 초 − 660 **초과**(끝 포함).
+//! - `okxLiq`: OKX 체결의 가장 새 초로 자른다(바이낸스 liq 가 @trade 로 자르는 것과 같은 모양).
+//! - `bybitLiq`(server.py bybit_liq_events · 2026-10-03): 파이썬은 수집기 SQLite 를 `ORDER BY ts_ms` 로 읽어 더한다 -- 그래서
+//!   여기도 사건을 **거래소 시각 순**(같은 ms 는 받은 순)으로 끼워 넣어 더하는 순서까지 같게 한다. 창 = (벽시계 초 − 3 − 660,
+//!   벽시계 초 − 3] -- 파이썬의 «수집기 2초 flush 를 기다리는 3초»를 스냅숏은 그대로 따른다(밀기는 기다리지 않는다).
+//! - 밀기: 사건마다 «그 사건으로 바뀐 초»만 싣는다. 청산은 파이썬 창의 오른쪽 끝(아직 안 닫힌 초)이어도 바로 민다 --
+//!   파이썬은 그 초가 닫혀야 보이지만 값은 같다(화면은 초 단위로 덮어쓴다). 창 왼쪽 밖은 앞으로도 안 보이므로 밀지 않는다.
+use crate::proto::{LiqRow, OkxMeta, Partial, SecRow, SpotMeta, Supply1s, Venue};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 pub const SUPPLY_1S_SECONDS: i64 = 660;
 const BAR_SECONDS: i64 = 300;
@@ -44,6 +60,41 @@ const SIZE_BANDS_USD: &[(&str, f64, f64)] = &[
     ("muusdt", 700.0, 5_400.0),
 ];
 
+/// server.py liq_events_by · coin_flow.py okx_liq_events 의 deque(maxlen=5000).
+pub const LIQ_RING: usize = 5000;
+/// server.py supply_1s_payload `_bnow = int(time.time()) - 3`(수집기가 2초마다 쓴다).
+const BYBIT_LAG_S: i64 = 3;
+/// OKX 계약 크기(1계약 = 기초자산 몇 개). scripts/live_okx_trade_tape_collector_20260923.py CT_VALS 사본.
+/// 🔴안 곱하면 레인이 10배(coin_flow.py 112~114). 표에 없는 종목은 OKX 레인을 켜지 않는다(collect_okx_flow 723~726).
+// ponytail: 파이썬 표 사본 + 정답지 대조 -- 파이썬은 기동 때 거래소 REST(ctVal)와도 대조하지만 코어는 REST 를 안 부른다(범위 밖).
+pub const OKX_CT_VALS: &[(&str, f64)] = &[
+    ("ETH-USDT-SWAP", 0.1),
+    ("BTC-USDT-SWAP", 0.01),
+    ("SOL-USDT-SWAP", 1.0),
+    ("XRP-USDT-SWAP", 100.0),
+    ("HYPE-USDT-SWAP", 0.1),
+    ("ZEC-USDT-SWAP", 0.01),
+    ("SNDK-USDT-SWAP", 1.0),
+    ("SOXL-USDT-SWAP", 1.0),
+    ("SKHYNIX-USDT-SWAP", 1.0),
+    ("MU-USDT-SWAP", 1.0),
+];
+/// 현물이 없는 종목(TradFi 선물) -- coin_flow.py FLOW_SPECS 의 spot=False. 정답지가 대조한다.
+pub const NO_SPOT: &[&str] = &["sndkusdt", "soxlusdt", "skhynixusdt", "muusdt"];
+/// Bybit 청산을 받는 종목 -- 수집기(live_bybit_liquidation_collector_20261003.py) SYMBOLS 기본값 사본. 파이썬 bybitLiq 는
+/// 이 수집기가 쓴 표만 읽으므로 여기 없는 종목은 파이썬도 늘 빈 목록이다. 정답지가 대조한다.
+// ponytail: 서버가 BYBIT_LIQ_SYMBOLS 환경변수로 수집기 목록을 바꿨다면 어긋난다 -- 그때 이 표를 맞춘다.
+pub const BYBIT_SYMBOLS: &[&str] = &["ethusdt", "btcusdt", "solusdt", "xrpusdt", "hypeusdt"];
+
+/// `ethusdt` → `ETH-USDT-SWAP`(coin_flow.py _flow_spec okx_inst).
+pub fn okx_inst(symbol: &str) -> String {
+    format!("{}-USDT-SWAP", symbol.strip_suffix("usdt").unwrap_or(symbol).to_uppercase())
+}
+
+pub fn okx_ct_val(inst: &str) -> Option<f64> {
+    OKX_CT_VALS.iter().find(|c| c.0 == inst).map(|c| c.1)
+}
+
 pub fn size_bands(symbol: &str) -> (f64, f64) {
     let s = symbol.to_lowercase();
     SIZE_BANDS_USD.iter().find(|b| b.0 == s).map_or((10_000.0, 100_000.0), |b| (b.1, b.2))
@@ -53,6 +104,82 @@ pub fn size_bands(symbol: &str) -> (f64, f64) {
 /// Rust `{:.3}` 도 정확값 기준·동률 짝수라 같다(0.0625→0.062 · 2.0005→2.001 · 1.0005→1.0 대조, 2026-11-20).
 fn r3(x: f64) -> f64 {
     format!("{x:.3}").parse().unwrap_or(x)
+}
+
+/// 파이썬 round(x, 1)(같은 방식 -- r3 주석).
+fn r1(x: f64) -> f64 {
+    format!("{x:.1}").parse().unwrap_or(x)
+}
+
+/// 파이썬 round(x) -- 정수, 동률은 짝수.
+fn r0(x: f64) -> i64 {
+    x.round_ties_even() as i64
+}
+
+/// server.py supply_1s_payload `_age`: 보낸 시각 − 마지막 사건(초, 0 에서 자름), 사건 없으면 None.
+fn age(now_us: i64, ms: i64) -> Option<f64> {
+    (ms != 0).then(|| r1(f64::max(0.0, (now_us as f64 / 1000.0 - ms as f64) / 1000.0)))
+}
+
+fn newest(m: &BTreeMap<i64, [f64; 7]>) -> i64 {
+    m.keys().next_back().copied().unwrap_or(0)
+}
+
+/// 그 초의 칸. 오래된 초는 새 초가 생길 때만 버린다(coin_flow.py supply_1s_cell · okx_sec_cell · spot_sec_cell 셋이 같은 몸).
+fn sec_cell(m: &mut BTreeMap<i64, [f64; 7]>, s: i64) -> &mut [f64; 7] {
+    if !m.contains_key(&s) {
+        m.insert(s, [0.0; 7]);
+        *m = m.split_off(&(s - SUPPLY_1S_SECONDS));
+    }
+    m.get_mut(&s).expect("방금 넣었다")
+}
+
+fn sec_row(m: &BTreeMap<i64, [f64; 7]>, s: i64) -> Option<SecRow> {
+    let c = m.get(&s)?;
+    Some((s, r3(c[0]), r3(c[1]), r3(c[2]), r3(c[3]), r3(c[4]), r3(c[5]), r3(c[6])))
+}
+
+/// (가장 새 초 − 660, 가장 새 초) -- 진행 중인 초는 partial 로 따로.
+fn window_rows(m: &BTreeMap<i64, [f64; 7]>, top: i64) -> Vec<SecRow> {
+    m.range(top - SUPPLY_1S_SECONDS + 1..top).filter_map(|(&s, _)| sec_row(m, s)).collect()
+}
+
+struct LiqEv {
+    ts_ms: i64,
+    long: bool,
+    qty: f64,
+    usd: f64,
+}
+
+/// 링 순서대로 초별로 더한다(파이썬 setdefault 루프와 같은 순서 -- 더하는 순서가 달라지면 끝자리가 갈린다).
+fn liq_rows(ev: &VecDeque<LiqEv>, keep: impl Fn(i64) -> bool) -> Vec<LiqRow> {
+    let mut by: BTreeMap<i64, [f64; 4]> = BTreeMap::new();
+    for e in ev {
+        let s = e.ts_ms.div_euclid(1000);
+        if keep(s) {
+            let c = by.entry(s).or_insert([0.0; 4]);
+            let i = (!e.long) as usize;
+            c[i] += e.qty;
+            c[2 + i] += e.usd;
+        }
+    }
+    by.into_iter().map(|(s, c)| (s, r3(c[0]), r3(c[1]), r0(c[2]), r0(c[3]))).collect()
+}
+
+fn push_capped(ring: &mut VecDeque<LiqEv>, e: LiqEv) {
+    if ring.len() == LIQ_RING {
+        ring.pop_front();
+    }
+    ring.push_back(e);
+}
+
+/// 현물·OKX 한 레인: 초 칸 + 화면 meta(server.py okx_meta · spot_meta).
+#[derive(Default)]
+struct Lane {
+    sec: BTreeMap<i64, [f64; 7]>,
+    last_ms: i64,
+    connected: bool,
+    errors: u64,
 }
 
 struct Order {
@@ -70,6 +197,14 @@ pub struct Supply {
     sec: BTreeMap<i64, [f64; 7]>,
     bars: BTreeSet<i64>,
     open: Option<Order>,
+    liq: VecDeque<LiqEv>,
+    spot: Lane,
+    okx: Lane,
+    okx_inst: String,
+    okx_oi: BTreeMap<i64, f64>,
+    okx_last_oi_ms: i64,
+    okx_liq: VecDeque<LiqEv>,
+    bybit: VecDeque<LiqEv>,
 }
 
 fn bar_of(ms: i64) -> i64 {
@@ -79,7 +214,21 @@ fn bar_of(ms: i64) -> i64 {
 impl Supply {
     pub fn new(symbol: &str) -> Supply {
         let (retail_max, whale_min) = size_bands(symbol);
-        Supply { retail_max, whale_min, sec: BTreeMap::new(), bars: BTreeSet::new(), open: None }
+        Supply {
+            retail_max,
+            whale_min,
+            sec: BTreeMap::new(),
+            bars: BTreeSet::new(),
+            open: None,
+            liq: VecDeque::new(),
+            spot: Lane::default(),
+            okx: Lane::default(),
+            okx_inst: okx_inst(symbol),
+            okx_oi: BTreeMap::new(),
+            okx_last_oi_ms: 0,
+            okx_liq: VecDeque::new(),
+            bybit: VecDeque::new(),
+        }
     }
 
     /// 재연결: 열린 주문 묶음을 버린다(끊긴 사이가 빠진 주문을 «한 주문»이라 부르지 않게).
@@ -87,13 +236,35 @@ impl Supply {
         self.open = None;
     }
 
-    pub fn cells(&self) -> &BTreeMap<i64, [f64; 7]> {
-        &self.sec
+    /// 시험용: 원천별 1초 칸(반올림 전).
+    pub fn cells_of(&self, venue: Venue) -> &BTreeMap<i64, [f64; 7]> {
+        match venue {
+            Venue::Spot => &self.spot.sec,
+            Venue::Okx => &self.okx.sec,
+            _ => &self.sec,
+        }
+    }
+
+    /// 시험용: OKX OI 칸.
+    pub fn okx_oi_cells(&self) -> &BTreeMap<i64, f64> {
+        &self.okx_oi
+    }
+
+    /// 수신 연결이 붙거나 끊김(feed). 파이썬 connected 와 errors(끊김마다 +1).
+    pub fn feed_status(&mut self, venue: Venue, up: bool) {
+        let lane = match venue {
+            Venue::Spot => &mut self.spot,
+            Venue::Okx => &mut self.okx,
+            _ => return,
+        };
+        lane.connected = up;
+        lane.errors += (!up) as u64;
     }
 
     /// 체결 하나(가격 0 은 이미 걸렀다). `now_ms` = 수신 벽시계(24시간 봉 창 판정).
     /// 밀 것이 있으면 «바뀐 닫힌 초 + 진행 중인 초»를 돌려준다.
-    pub fn trade(&mut self, px: f64, qty: f64, ts_ms: i64, sell: bool, tid: i64, now_ms: i64) -> Option<Supply1s> {
+    pub fn trade(&mut self, px: f64, qty: f64, ts_ms: i64, sell: bool, tid: i64, now_us: i64) -> Option<Supply1s> {
+        let now_ms = now_us.div_euclid(1000);
         let mut touched: Vec<i64> = Vec::with_capacity(2);
         // 순서도 파이썬 그대로: 총량 먼저, 그다음 이 체결로 닫힌 주문의 구간(coin_flow.py 619~624).
         self.add(px, qty, ts_ms, sell, false, now_ms, &mut touched);
@@ -108,30 +279,143 @@ impl Supply {
         touched.sort_unstable();
         touched.dedup();
         // 뒤늦은 체결로 바뀐 닫힌 초도 다시 보낸다(덮어쓰기). 파이썬 커서 방식은 이미 받은 초를 다시 안 보내 화면이 옛값에 머문다.
-        let seconds = touched.into_iter().filter(|&s| newest - SUPPLY_1S_SECONDS < s && s < newest).filter_map(|s| self.row(s)).collect();
-        Some(self.msg(newest, seconds))
+        let mut m = self.base(now_us);
+        m.seconds = touched.into_iter().filter(|&s| newest - SUPPLY_1S_SECONDS < s && s < newest).filter_map(|s| sec_row(&self.sec, s)).collect();
+        Some(m)
     }
 
-    /// 구독 직후 1회: 파이썬 `supply_1s_payload(since=0)` 의 바이낸스 선물 몫과 같은 행.
-    pub fn snapshot(&self) -> Supply1s {
-        let Some(&newest) = self.sec.keys().next_back() else { return self.msg(0, vec![]) };
-        let seconds = self.sec.range(newest - SUPPLY_1S_SECONDS + 1..newest).filter_map(|(&s, _)| self.row(s)).collect();
-        self.msg(newest, seconds)
+    /// 강제청산 한 건(바이낸스·OKX·Bybit). 받은 시각 `now_us` 는 Bybit 창(벽시계)과 meta 나이에만 쓴다.
+    pub fn liq(&mut self, venue: Venue, long: bool, qty: f64, px: f64, ts_ms: i64, now_us: i64) -> Option<Supply1s> {
+        let s = ts_ms.div_euclid(1000);
+        let e = LiqEv { ts_ms, long, qty, usd: qty * px };
+        // 창 왼쪽 끝. 링(5000건)은 창 밖 사건도 넣어야 파이썬 deque 와 같은 때 같은 것이 밀려난다.
+        let lo = match venue {
+            Venue::Bn => {
+                push_capped(&mut self.liq, e);
+                newest(&self.sec) - SUPPLY_1S_SECONDS
+            }
+            Venue::Okx => {
+                push_capped(&mut self.okx_liq, e);
+                newest(&self.okx.sec) - SUPPLY_1S_SECONDS
+            }
+            Venue::Bybit => {
+                // 파이썬은 24시간을 들지만 내보내는 창은 벽시계를 따라 앞으로만 간다 -- 창 밖은 버린다.
+                let lo = now_us.div_euclid(1_000_000) - BYBIT_LAG_S - SUPPLY_1S_SECONDS;
+                while self.bybit.front().is_some_and(|f| f.ts_ms.div_euclid(1000) <= lo) {
+                    self.bybit.pop_front();
+                }
+                if s > lo {
+                    let i = self.bybit.partition_point(|f| f.ts_ms <= ts_ms);
+                    self.bybit.insert(i, e);
+                }
+                lo
+            }
+            Venue::Spot => return None,
+        };
+        if s <= lo {
+            return None;
+        }
+        let ring = match venue {
+            Venue::Bn => &self.liq,
+            Venue::Okx => &self.okx_liq,
+            _ => &self.bybit,
+        };
+        let rows = liq_rows(ring, |x| x == s);
+        let mut m = self.base(now_us);
+        match venue {
+            Venue::Bn => m.liq = rows,
+            Venue::Okx => m.okx_liq = rows,
+            _ => m.bybit_liq = rows,
+        }
+        Some(m)
     }
 
-    fn msg(&self, now: i64, seconds: Vec<SecRow>) -> Supply1s {
+    /// 현물·OKX 테이커 주문 하나(가격·수량 0 이하는 feed 가 걸렀다). coin_flow.py collect_spot_flow 887~898 · collect_okx_flow 767~777.
+    pub fn flow(&mut self, venue: Venue, px: f64, qty: f64, sell: bool, ts_ms: i64, now_us: i64) -> Option<Supply1s> {
+        let (whale_min, retail_max) = (self.whale_min, self.retail_max);
+        let lane = match venue {
+            Venue::Spot => &mut self.spot,
+            Venue::Okx => &mut self.okx,
+            _ => return None,
+        };
+        let s = ts_ms.div_euclid(1000);
+        let c = sec_cell(&mut lane.sec, s);
+        let i = sell as usize;
+        c[4 + i] += qty;
+        c[6] = px;
+        let notional = px * qty;
+        if notional >= whale_min {
+            c[2 + i] += qty;
+        } else if notional < retail_max {
+            c[i] += qty;
+        }
+        lane.last_ms = ts_ms;
+        let top = newest(&lane.sec);
+        let row = if top - SUPPLY_1S_SECONDS < s && s < top { sec_row(&lane.sec, s) } else { None };
+        let mut m = self.base(now_us);
+        match venue {
+            Venue::Spot => m.spot.extend(row),
+            _ => m.okx.extend(row),
+        }
+        Some(m)
+    }
+
+    /// OKX 미결제약정(oi > 0 · ts > 0 은 feed 가 걸렀다). coin_flow.py collect_okx_flow 797~814.
+    pub fn oi(&mut self, oi: f64, ts_ms: i64, now_us: i64) -> Option<Supply1s> {
+        let s = ts_ms.div_euclid(1000);
+        self.okx_oi.insert(s, oi);
+        self.okx_last_oi_ms = ts_ms;
+        self.okx_oi = self.okx_oi.split_off(&(s - SUPPLY_1S_SECONDS));
+        let top = *self.okx_oi.keys().next_back().expect("방금 넣었다");
+        let mut m = self.base(now_us);
+        if s > top - SUPPLY_1S_SECONDS {
+            m.okx_oi.push((s, oi));
+        }
+        Some(m)
+    }
+
+    /// 구독 직후 1회: 파이썬 `supply_1s_payload(since=0)` 와 같은 행(`symbol`·`oi` 빼고). `now_us` = 보내는 벽시계.
+    pub fn snapshot(&self, now_us: i64) -> Supply1s {
+        let mut m = self.base(now_us);
+        let (bn, sp, ok) = (m.now, m.spot_now, m.okx_now);
+        m.seconds = window_rows(&self.sec, bn);
+        m.liq = liq_rows(&self.liq, |s| bn - SUPPLY_1S_SECONDS < s && s < bn);
+        m.spot = window_rows(&self.spot.sec, sp);
+        m.okx = window_rows(&self.okx.sec, ok);
+        let oi_top = self.okx_oi.keys().next_back().copied().unwrap_or(0);
+        m.okx_oi = self.okx_oi.range(oi_top - SUPPLY_1S_SECONDS + 1..).map(|(&s, &v)| (s, v)).collect();
+        m.okx_liq = liq_rows(&self.okx_liq, |s| ok - SUPPLY_1S_SECONDS < s && s < ok);
+        let b = now_us.div_euclid(1_000_000) - BYBIT_LAG_S;
+        m.bybit_liq = liq_rows(&self.bybit, |s| b - SUPPLY_1S_SECONDS < s && s <= b);
+        m
+    }
+
+    /// 목록 칸이 빈 메시지(밀기는 바뀐 초만 채운다).
+    fn base(&self, now_us: i64) -> Supply1s {
+        let (bn, sp, ok) = (newest(&self.sec), newest(&self.spot.sec), newest(&self.okx.sec));
         Supply1s {
-            now,
+            now: bn,
             retail_max_usd: self.retail_max,
             whale_min_usd: self.whale_min,
-            seconds,
-            partial: Partial { bn: if now > 0 { self.row(now) } else { None } },
+            seconds: vec![],
+            partial: Partial { bn: sec_row(&self.sec, bn), okx: sec_row(&self.okx.sec, ok), spot: sec_row(&self.spot.sec, sp) },
+            liq: vec![],
+            spot: vec![],
+            spot_now: sp,
+            spot_meta: SpotMeta { connected: self.spot.connected, trade_age: age(now_us, self.spot.last_ms), errors: self.spot.errors },
+            okx: vec![],
+            okx_now: ok,
+            okx_meta: OkxMeta {
+                connected: self.okx.connected,
+                trade_age: age(now_us, self.okx.last_ms),
+                oi_age: age(now_us, self.okx_last_oi_ms),
+                inst: self.okx_inst.clone(),
+                errors: self.okx.errors,
+            },
+            okx_liq: vec![],
+            okx_oi: vec![],
+            bybit_liq: vec![],
         }
-    }
-
-    fn row(&self, s: i64) -> Option<SecRow> {
-        let c = self.sec.get(&s)?;
-        Some((s, r3(c[0]), r3(c[1]), r3(c[2]), r3(c[3]), r3(c[4]), r3(c[5]), r3(c[6])))
     }
 
     /// TakerOrderAggregator.add -- 묶음이 닫히면 (가격, 수량, 첫 체결 ms, 매도).
@@ -163,11 +447,7 @@ impl Supply {
             self.bars = self.bars.split_off(&cutoff); // 새 봉이 생길 때만 정리(체결마다 돌 일이 아니다)
         }
         let s = ts_ms.div_euclid(1000);
-        if !self.sec.contains_key(&s) {
-            self.sec.insert(s, [0.0; 7]);
-            self.sec = self.sec.split_off(&(s - SUPPLY_1S_SECONDS)); // 오래된 초는 새 초가 생길 때만 버린다
-        }
-        let c = self.sec.get_mut(&s).expect("방금 넣었다");
+        let c = sec_cell(&mut self.sec, s);
         let side = sell as usize;
         if !order {
             c[4 + side] += qty;
