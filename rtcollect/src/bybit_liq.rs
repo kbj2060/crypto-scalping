@@ -1,7 +1,7 @@
 //! Bybit 청산 수집기(`scripts/live_bybit_liquidation_collector_20261003.py`, 줄 번호는 그 파일)에서 소켓을 뺀 것.
 //! REST 없음. 시계는 원본처럼 **벽시계**(time.time() 초) 하나 -- `recv_ms` 칸과 공백의 끝이 이 시계다.
 //! 🔴`side` 는 Bybit 규약 그대로 = **청산된 포지션의 방향**(Buy = 롱 청산). 바이낸스 S(강제 주문, 롱 청산 = SELL)와 반대.
-use crate::{need, py_float, py_int, py_truthy, Reconnect};
+use crate::{ms, need, py_float, py_int, py_sql, py_truthy, Reconnect};
 use rusqlite::types::Value as Sql;
 use rusqlite::{params, Connection};
 use serde_json::Value;
@@ -24,17 +24,6 @@ const DDL: [&str; 3] = [
 /// (거래소 시각 ms, 종목, 쪽, 수량, 가격, 받은 시각 ms). 종목·쪽은 메시지 값 그대로 묶는다(파이썬 바인딩 = 문자열·정수·실수·None).
 pub type Row = (i64, Sql, Sql, f64, f64, i64);
 
-fn scalar(v: &Value) -> Result<Sql, Reconnect> {
-    Ok(match v {
-        Value::String(s) => Sql::Text(s.clone()),
-        Value::Null => Sql::Null,
-        Value::Bool(b) => Sql::Integer(*b as i64),
-        Value::Number(n) => n.as_i64().map_or_else(|| Sql::Real(n.as_f64().unwrap_or(f64::NAN)), Sql::Integer),
-        // 원본은 여기서 안 죽고 쓰기 때 바인딩 오류로 매 플러시가 실패한다(보고서 «이상한 점») -- 그 메시지만 재연결로.
-        _ => return Err(Reconnect("InterfaceError: 바인딩할 수 없는 값".into())),
-    })
-}
-
 /// allLiquidation 메시지 → 행(:32-36). 다른 메시지(구독 응답·pong)는 []. 한 건이라도 못 읽으면 메시지 전체가 예외(= 재연결).
 pub fn parse(msg: &Value, recv_ms: i64) -> Result<Vec<Row>, Reconnect> {
     let Value::Object(m) = msg else { return Err(Reconnect("AttributeError: .get".into())) };
@@ -52,8 +41,8 @@ pub fn parse(msg: &Value, recv_ms: i64) -> Result<Vec<Row>, Reconnect> {
             let Value::Object(d) = d else { return Err(Reconnect("TypeError: 원소가 사전이 아님".into())) };
             // 평가 순서 = 튜플 순서(T, s, S, v, p)
             let ts = py_int(need(d, "T")?)?;
-            let s = scalar(need(d, "s")?)?;
-            let side = scalar(need(d, "S")?)?;
+            let s = py_sql(need(d, "s")?)?;
+            let side = py_sql(need(d, "S")?)?;
             Ok((ts, s, side, py_float(need(d, "v")?)?, py_float(need(d, "p")?)?, recv_ms))
         })
         .collect()
@@ -104,10 +93,6 @@ pub struct LiqCollector {
     last_ping: f64,
     last_flush: f64,
     last_msg: f64,
-}
-
-fn ms(t: f64) -> i64 {
-    (t * 1000.0) as i64 // 파이썬 int(time.time() * 1000) -- 양수라 0 쪽 자르기 = 내림
 }
 
 impl LiqCollector {

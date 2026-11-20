@@ -68,6 +68,35 @@ pub fn open_db(path: &Path) -> rusqlite::Result<Rc<Connection>> {
     Ok(Rc::new(con))
 }
 
+/// 맥락 hot 파일 열기 = `data_store.sqlite_init`(auto_vacuum → WAL, 새 파일에서만 효과) + 쓰기 연결(`rw_connect`·`sqlite_shared`:
+/// 시한 30초 · synchronous NORMAL) + 표·인덱스(글자 그대로). OKX·바이낸스 맥락·xyz100 공용.
+pub fn open_hot(path: &Path, ddl: &[&str]) -> rusqlite::Result<Connection> {
+    if let Some(d) = path.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    let con = Connection::open(path)?;
+    con.busy_timeout(std::time::Duration::from_secs(30))?;
+    con.execute_batch("PRAGMA auto_vacuum = INCREMENTAL")?;
+    con.query_row("PRAGMA journal_mode = WAL", [], |_| Ok(()))?;
+    con.execute_batch("PRAGMA synchronous = NORMAL")?;
+    for d in ddl {
+        con.execute(d, [])?;
+    }
+    Ok(con)
+}
+
+/// BEGIN … COMMIT 한 번(실패하면 ROLLBACK -- 원본은 연결을 버려 같은 효과). 성공하면 쓰기 박동.
+pub fn in_tx(con: &Connection, f: impl FnOnce() -> rusqlite::Result<()>) -> rusqlite::Result<()> {
+    con.execute_batch("BEGIN")?;
+    let r = f().and_then(|_| con.execute_batch("COMMIT"));
+    if r.is_err() {
+        let _ = con.execute_batch("ROLLBACK");
+    } else {
+        crate::wrote();
+    }
+    r
+}
+
 /// 행 묶음 INSERT OR REPLACE(트랜잭션은 부르는 쪽). 건수 칸은 파이썬 int(c[k]) -- INTEGER 로, 나머지는 REAL 로 묶는다.
 /// 🔴NaN 은 SQLite 가 NULL 로 쌓는다(sqlite3_bind_double) -- REST 복구 행의 buy_max/sell_max «모른다»(원본 None)를 그렇게 싣는다.
 pub(crate) fn insert_rows(con: &Connection, symbol: &str, rows: &[(i64, i64, Cell)]) -> rusqlite::Result<()> {

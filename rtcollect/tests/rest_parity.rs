@@ -7,57 +7,11 @@ use rtcollect::rest::{Clock, Rest, BACKFILL_SECONDS};
 use rtcollect::store::{open_db, TapeStore};
 use rtcollect::tape::bucket;
 use serde_json::Value;
-use std::collections::HashMap;
-use std::io::{Read, Write};
-use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const INPUT: &str = include_str!("fixtures/rest_input.json");
 const GOLDEN: &str = include_str!("fixtures/rest_golden.json");
-
-/// 가짜 바이낸스 REST: 요청 대상(경로?쿼리)마다 정해 둔 응답을 차례로. `timeout` = 1.5초 동안 답하지 않는다(클라이언트 시한 0.3초).
-fn serve(responses: &serde_json::Map<String, Value>) -> (String, Arc<Mutex<Vec<String>>>) {
-    let l = TcpListener::bind("127.0.0.1:0").unwrap();
-    let base = format!("http://{}", l.local_addr().unwrap());
-    let q: Arc<Mutex<HashMap<String, Vec<Value>>>> =
-        Arc::new(Mutex::new(responses.iter().map(|(k, v)| (k.clone(), v.as_array().unwrap().clone())).collect()));
-    let log = Arc::new(Mutex::new(vec![]));
-    let log2 = log.clone();
-    std::thread::spawn(move || {
-        for s in l.incoming() {
-            let (mut s, q, log) = (s.unwrap(), q.clone(), log2.clone());
-            std::thread::spawn(move || {
-                let mut buf = vec![];
-                let mut b = [0u8; 4096];
-                while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
-                    match s.read(&mut b) {
-                        Ok(0) | Err(_) => return,
-                        Ok(n) => buf.extend_from_slice(&b[..n]),
-                    }
-                }
-                let target = String::from_utf8_lossy(&buf).split_whitespace().nth(1).unwrap().to_string();
-                log.lock().unwrap().push(target.clone());
-                let r = q.lock().unwrap().get_mut(&target).filter(|v| !v.is_empty()).map(|v| v.remove(0));
-                let Some(r) = r else {
-                    let _ = s.write_all(b"HTTP/1.1 599 NO FIXTURE\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-                    return;
-                };
-                if r["timeout"] == true {
-                    std::thread::sleep(Duration::from_millis(1500));
-                    return;
-                }
-                let body = r["body"].to_string();
-                let mut h = format!("HTTP/1.1 {} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n", r["status"], body.len());
-                for (k, v) in r["headers"].as_object().into_iter().flatten() {
-                    h += &format!("{k}: {}\r\n", v.as_str().unwrap());
-                }
-                let _ = s.write_all(format!("{h}\r\n{body}").as_bytes());
-            });
-        }
-    });
-    (base, log)
-}
 
 fn row(v: &Value) -> (i64, i64, [f64; 16]) {
     let a = v.as_array().unwrap();
@@ -86,7 +40,7 @@ fn rest_rows_match_python_collector() {
     let (mut n_req, mut n_rows, mut n_cells) = (0, 0, 0);
     for (k, (sc, want)) in input["scenarios"].as_array().unwrap().iter().zip(golden["scenarios"].as_array().unwrap()).enumerate() {
         let name = sc["name"].as_str().unwrap();
-        let (base, served) = serve(sc["responses"].as_object().unwrap());
+        let (base, served) = common::serve(sc["responses"].as_object().unwrap());
         assert!(base.starts_with("http://127.0.0.1:"), "가짜 서버만 -- {base}");
         let (sym, spot) = (sc["symbol"].as_str().unwrap(), sc["market"] == "spot");
         let dir = common::tmpdir(&format!("rest_{k}"));

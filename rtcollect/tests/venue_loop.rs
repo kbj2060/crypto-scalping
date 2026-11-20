@@ -89,6 +89,10 @@ async fn serve(script: Vec<Conn>) -> (u16, Arc<Mutex<Seen>>) {
                     seen.lock().unwrap().frames.push((k, [0.0; 2], format!("sub:{}", t.as_str())));
                 }
                 for m in &c.msgs {
+                    if let Some(ms) = m.strip_prefix("SLEEP:") {
+                        tokio::time::sleep(Duration::from_millis(ms.parse().unwrap())).await; // 각본의 쉼(xyz 플러시 2초)
+                        continue;
+                    }
                     ws.send(Message::text(m.clone())).await.unwrap();
                     tokio::time::sleep(Duration::from_millis(3)).await;
                 }
@@ -427,4 +431,280 @@ async fn okx_loop_matches_replay() {
     assert_eq!(a.iter().filter(|r| r.starts_with("gaps|")).count(), 4, "startup + 재연결 셋: {a:#?}");
     eprintln!("OKX 접속 루프 = replay: 행 {} · PING {:?} · 다시 붙기 {:.2}·{:.2}·{:.2}초", a.len(), p, redial(&s, 0, 0), redial(&s, 1, 0), redial(&s, 2, 0));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── OKX 맥락 ────────────────────────────────────────────────────────────────────────────────────────
+fn okx_ctx_msgs(k: i64) -> Vec<String> {
+    let i = "ETH-USDT-SWAP";
+    let mut out = vec![json!({"event": "subscribe", "arg": {"channel": "mark-price", "instId": i}, "connId": "c"}).to_string()];
+    let t0 = T0 + k * 7_000;
+    for s in 0..6i64 {
+        let ts = (t0 + s * 200).to_string();
+        out.push(json!({"arg": {"channel": "mark-price", "instId": i}, "data": [{"instId": i, "markPx": format!("{:.2}", 2745.0 + (s + k) as f64 * 0.13), "ts": ts}]}).to_string());
+        if s % 2 == 0 {
+            out.push(json!({"arg": {"channel": "open-interest", "instId": i}, "data": [{"instId": i, "oi": format!("{}", 5_000_000 + s * 10 + k), "oiCcy": format!("{}", 500_000 + s + k), "oiUsd": "1.5e9", "ts": ts}]}).to_string());
+        }
+    }
+    out.push(json!({"arg": {"channel": "funding-rate", "instId": i}, "data": [{"instId": i, "fundingRate": "0.0000588", "fundingTime": "1790092800000", "minFundingRate": "-0.0075", "maxFundingRate": "0.0075", "method": "current_period", "ts": (t0 + 900).to_string()}]}).to_string());
+    out.push(json!({"arg": {"channel": "liquidation-orders", "instType": "SWAP"}, "data": [{"instId": i, "instFamily": "ETH-USDT", "details": [{"bkLoss": "0", "bkPx": "2735.52", "posSide": "short", "side": "buy", "sz": format!("{}.97", 7 + k), "ts": (t0 + 950).to_string()}]}]}).to_string());
+    out
+}
+
+#[tokio::test]
+async fn okx_ctx_loop_matches_replay() {
+    let dir = tmpdir("okx_ctx");
+    let (port, seen) = serve(vec![
+        Conn { msgs: okx_ctx_msgs(0), end: End::Close },
+        Conn { msgs: okx_ctx_msgs(1), end: End::Read(Duration::from_secs(23)) }, // PING 프레임 하나(20초)
+        Conn { msgs: okx_ctx_msgs(2), end: End::Mute(Duration::from_secs(50)) }, // 죽은 연결 -- 40초에 다시 붙는다
+        Conn { msgs: okx_ctx_msgs(3), end: End::Read(Duration::from_secs(60)) },
+    ])
+    .await;
+    let db = dir.join("rs").join("okx_ctx.sqlite");
+    let env = [("RTCOLLECT_KIND", "okx_ctx".into()), ("OKX_CTX_INST", "eth-usdt-swap".into()), ("OKX_CTX_DB_PATH", db.display().to_string()),
+               ("RTCOLLECT_WS_URL", format!("ws://127.0.0.1:{port}/ws/v5/public"))];
+    run_bin(&env, &seen, 4, 100).await;
+    let s = seen.lock().unwrap();
+    let want = r#"{"op": "subscribe", "args": [{"channel": "open-interest", "instId": "ETH-USDT-SWAP"}, {"channel": "mark-price", "instId": "ETH-USDT-SWAP"}, {"channel": "funding-rate", "instId": "ETH-USDT-SWAP"}, {"channel": "liquidation-orders", "instType": "SWAP"}]}"#;
+    for k in 0..4 {
+        assert_eq!(sub(&s, k), want, "연결 {k} 구독 글자");
+    }
+    let p = pings(&s, 1, "PING", 0);
+    assert_eq!(p.len(), 1, "23초 동안 PING 프레임 하나: {:?}", s.frames);
+    within(p[0], 19.5, 21.0, "PING(마지막 수신 뒤 20초)");
+    within(redial(&s, 0, 0), 2.9, 4.0, "끊김 뒤 3초");
+    within(redial(&s, 1, 0), 25.9, 27.0, "서버가 23초에 닫음 + 3초");
+    within(redial(&s, 2, 0), 42.9, 44.0, "40초 무음 + 3초");
+
+    let mut ev = vec![];
+    let mut t = 1.0;
+    for (k, end) in [(0, "c"), (1, "c"), (2, "w"), (3, "c")] {
+        ev.push(json!([t, "o", ""]));
+        for m in okx_ctx_msgs(k) {
+            t += 0.003;
+            ev.push(json!([t, "t", m]));
+        }
+        ev.push(json!([t, end, ""]));
+        t += 5.0;
+    }
+    let rd = dir.join("replay.sqlite");
+    rtcollect::okx_ctx::replay(&[json!({"inst": "ETH-USDT-SWAP", "t0": 0.5, "events": ev})], &rd).unwrap();
+    // 공백의 시각은 벽시계라 두 쪽이 다르다 -- 채널·이유만
+    let tables: [(&str, &str, &[usize]); 6] = [("okx_oi", "rowid", &[]), ("okx_mark", "rowid", &[]), ("okx_funding", "rowid", &[]),
+        ("okx_liquidations", "rowid", &[]), ("gaps", "rowid", &[1, 2]), ("meta", "rowid", &[])];
+    let (a, b) = (dump(&db, &tables), dump(&rd, &tables));
+    assert_eq!(a, b, "실행 파일 DB != replay DB");
+    assert_eq!(a.iter().filter(|r| r.starts_with("gaps|")).count(), 3, "재연결 셋: {a:#?}");
+    eprintln!("OKX 맥락 접속 루프 = replay: 행 {} · PING {:?} · 다시 붙기 {:.2}·{:.2}·{:.2}초", a.len(), p, redial(&s, 0, 0), redial(&s, 1, 0), redial(&s, 2, 0));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── 바이낸스 맥락(구독 글자 없음 · 경로가 스트림) ─────────────────────────────────────────────────────────
+/// 경로마다 연결 각본 차례로. 반환 = 경로별 (받아들인 시각, 메시지를 다 보낸 시각) · 받은 PING 시각(보낸 뒤 초).
+async fn serve_paths(script: Vec<(&'static str, Vec<Conn>)>) -> (u16, Arc<Mutex<Vec<(String, f64, f64)>>>, Arc<Mutex<Vec<(String, f64)>>>) {
+    use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = l.local_addr().unwrap().port();
+    let conns = Arc::new(Mutex::new(vec![]));
+    let pings = Arc::new(Mutex::new(vec![]));
+    let queues = Arc::new(Mutex::new(script.into_iter().map(|(p, c)| (p.to_string(), c.into_iter().collect::<std::collections::VecDeque<_>>())).collect::<Vec<_>>()));
+    let (c2, p2) = (conns.clone(), pings.clone());
+    let t0 = Instant::now();
+    tokio::spawn(async move {
+        loop {
+            let (s, _) = l.accept().await.unwrap();
+            let (conns, pings, queues) = (c2.clone(), p2.clone(), queues.clone());
+            tokio::spawn(async move {
+                let path = Arc::new(Mutex::new(String::new()));
+                let p3 = path.clone();
+                let cb = move |req: &Request, resp: Response| {
+                    *p3.lock().unwrap() = req.uri().path().to_string();
+                    Ok(resp)
+                };
+                let mut ws = tokio_tungstenite::accept_hdr_async(s, cb).await.unwrap();
+                let path = path.lock().unwrap().clone();
+                let acc = t0.elapsed().as_secs_f64();
+                let c = queues.lock().unwrap().iter_mut().find(|q| path.ends_with(&q.0)).and_then(|q| q.1.pop_front());
+                let Some(c) = c else {
+                    tokio::time::sleep(Duration::from_secs(600)).await; // 각본 끝 -- 쥐고만 있는다
+                    return;
+                };
+                for m in &c.msgs {
+                    ws.send(Message::text(m.clone())).await.unwrap();
+                    tokio::time::sleep(Duration::from_millis(3)).await;
+                }
+                let sent = Instant::now();
+                conns.lock().unwrap().push((path.clone(), acc, t0.elapsed().as_secs_f64()));
+                match c.end {
+                    End::Close => {
+                        let _ = ws.close(None).await;
+                    }
+                    End::Read(d) => {
+                        while let Ok(Some(Ok(f))) = tokio::time::timeout_at((sent + d).into(), ws.next()).await {
+                            if let Message::Ping(_) = f {
+                                pings.lock().unwrap().push((path.clone(), sent.elapsed().as_secs_f64()));
+                            }
+                        }
+                        let _ = ws.close(None).await;
+                    }
+                    End::Mute(d) => {
+                        tokio::time::sleep(d).await;
+                        drop(ws);
+                    }
+                }
+            });
+        }
+    });
+    (port, conns, pings)
+}
+
+fn bn_mark_msgs(k: i64) -> Vec<String> {
+    (0..5i64).map(|s| json!({"e": "markPriceUpdate", "E": T0 + (k * 10 + s) * 1000, "s": "ETHUSDT", "p": format!("{:.8}", 2500.0 + s as f64 * 0.1),
+        "P": "0", "i": "2500.00000000", "r": "0.00010000", "T": 1_763_712_000_000i64}).to_string())
+        .chain([json!({"e": "forceOrder", "E": T0, "o": {"s": "ETHUSDT", "S": "SELL", "q": "1", "p": "1", "ap": "1", "z": "1", "T": T0}}).to_string()])
+        .collect()
+}
+
+fn bn_force_msgs() -> Vec<String> {
+    let syms = ["ETHUSDT", "DOGEUSDT", "ZECUSDT", "BTCUSDT"];
+    (0..4i64).map(|s| json!({"e": "forceOrder", "E": T0 + s, "o": {"s": syms[s as usize],
+        "S": if s % 2 == 0 { "SELL" } else { "BUY" }, "q": "0.5", "p": "2400", "ap": "2410.5", "z": format!("0.{}", s + 1), "T": T0 + s * 100}}).to_string())
+        .chain([json!({"e": "markPriceUpdate", "E": T0, "s": "ETHUSDT", "p": "1", "i": "1", "r": "1", "T": 0}).to_string()])
+        .collect()
+}
+
+#[tokio::test]
+async fn binance_ctx_loop_matches_replay() {
+    let dir = tmpdir("binance_ctx");
+    let (port, conns, pings) = serve_paths(vec![
+        ("ethusdt@markPrice@1s", vec![
+            Conn { msgs: bn_mark_msgs(0), end: End::Close },
+            Conn { msgs: bn_mark_msgs(1), end: End::Read(Duration::from_secs(33)) }, // PING 하나(30초) -- 서버가 pong 하니 안 끊긴다
+            Conn { msgs: bn_mark_msgs(2), end: End::Mute(Duration::from_secs(60)) }, // pong 없음 -- 30+15초에 닫고 3초 뒤
+            Conn { msgs: bn_mark_msgs(3), end: End::Read(Duration::from_secs(120)) },
+        ]),
+        ("!forceOrder@arr", vec![Conn { msgs: bn_force_msgs(), end: End::Read(Duration::from_secs(200)) }]),
+    ])
+    .await;
+    let db = dir.join("rs").join("binance_ctx.sqlite");
+    let env = [("RTCOLLECT_KIND", "binance_ctx".into()), ("BN_CTX_MARK_SYMBOLS", "ETHUSDT".into()), ("BN_CTX_DB", db.display().to_string()),
+               ("RTCOLLECT_WS_URL", format!("ws://127.0.0.1:{port}/market/ws/"))];
+    // run_bin 은 Seen 을 보므로 따로 띄운다: 연결 5개(마크 4 + 청산 1)가 다 오면 1.5초 뒤 SIGTERM
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_rtcollect"));
+    for (k, v) in &env {
+        cmd.env(k, v);
+    }
+    let mut child = cmd.stdout(Stdio::null()).stderr(Stdio::piped()).spawn().unwrap();
+    let t0 = Instant::now();
+    while conns.lock().unwrap().len() < 5 {
+        assert!(t0.elapsed() < Duration::from_secs(150), "연결 5개가 150초 안에 안 왔다");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(Command::new("kill").args(["-TERM", &child.id().to_string()]).status().unwrap().success());
+    let st = tokio::task::spawn_blocking(move || child.wait().unwrap()).await.unwrap();
+    assert_eq!(st.code(), Some(0), "SIGTERM 은 0");
+    let c = conns.lock().unwrap().clone();
+    let m: Vec<_> = c.iter().filter(|x| x.0.ends_with("markPrice@1s")).collect();
+    let redial = |k: usize| m[k + 1].1 - m[k].2;
+    within(redial(0), 2.9, 4.0, "끊김 뒤 3초");
+    within(redial(1), 35.9, 37.0, "서버가 33초에 닫음 + 3초");
+    within(redial(2), 47.9, 49.0, "PING 30초 + pong 15초 없음 + 3초");
+    let p: Vec<f64> = pings.lock().unwrap().iter().filter(|x| x.0.ends_with("markPrice@1s")).map(|x| x.1).collect();
+    assert!(p.len() == 1 && (29.5..31.0).contains(&p[0]), "33초 동안 PING 하나(30초): {p:?}");
+
+    let mut feeds = vec![];
+    let mut ev = vec![];
+    for k in 0..4 {
+        ev.push(json!([1.0, "o", ""]));
+        ev.extend(bn_mark_msgs(k).into_iter().map(|m| json!([1.0, "t", m])));
+        ev.push(json!([1.0, "c", ""]));
+    }
+    feeds.push(json!({"kind": "mark", "events": ev}));
+    let mut ev = vec![json!([1.0, "o", ""])];
+    ev.extend(bn_force_msgs().into_iter().map(|m| json!([1.0, "t", m])));
+    feeds.push(json!({"kind": "force", "events": ev}));
+    let rd = dir.join("replay.sqlite");
+    let con = rtcollect::binance_ctx::open_db(&rd).unwrap();
+    let pend = Arc::new(Mutex::new(rtcollect::binance_ctx::Pending::default()));
+    let slow: Vec<String> = rtcollect::binance_ctx::OI_SLOW_SYMBOLS.split(',').map(str::to_string).collect();
+    rtcollect::binance_ctx::replay_ws(&feeds, &slow, &pend);
+    rtcollect::binance_ctx::flush(&con, &pend);
+    drop(con);
+    let tables: [(&str, &str, &[usize]); 3] = [("oi_1s", "ts_ms, symbol", &[]), ("mark_price_1s", "ts_ms, symbol", &[]), ("liquidations", "rowid", &[])];
+    let (a, b) = (dump(&db, &tables), dump(&rd, &tables));
+    assert_eq!(a, b, "실행 파일 DB != replay DB");
+    assert_eq!((a.iter().filter(|r| r.starts_with("mark_price_1s|")).count(), a.iter().filter(|r| r.starts_with("liquidations|")).count()), (20, 3));
+    eprintln!("바이낸스 맥락 접속 루프 = replay: 행 {} · PING {p:?} · 다시 붙기 {:.2}·{:.2}·{:.2}초", a.len(), redial(0), redial(1), redial(2));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── xyz100 ──────────────────────────────────────────────────────────────────────────────────────────
+/// 연결 k: ctx(종목마다 다른 이름 -- 받은 «초»가 두 쪽에서 달라도 열쇠가 안 겹치게) · candle · 2.1초 쉼 · ctx 하나(= 플러시) · 뒤 행(끊기면 버려진다).
+fn xyz_msgs(k: i64) -> Vec<String> {
+    let ctx = |j: i64| json!({"channel": "activeAssetCtx", "data": {"coin": format!("xyz:C{k}_{j}"), "ctx": {"midPx": format!("{}.5", 30_000 + j), "markPx": "30001.0", "oraclePx": null}}}).to_string();
+    let candle = |j: i64| json!({"channel": "candle", "data": {"t": T0 / 60_000 * 60_000 + (k * 10 + j) * 60_000, "s": "xyz:XYZ100", "o": "1", "h": "2", "l": "0.5", "c": format!("1.{j}"), "v": "0.1", "n": j}}).to_string();
+    let mut out = vec![json!({"channel": "subscriptionResponse", "data": {"method": "subscribe"}}).to_string()];
+    out.extend((0..3).map(ctx));
+    out.extend((0..2).map(candle));
+    out.push("SLEEP:2100".into());
+    out.push(ctx(3));
+    out.extend([ctx(4), candle(5)]); // 플러시 뒤 -- 연결이 끝나면 버려진다
+    out
+}
+
+#[tokio::test]
+async fn xyz_loop_matches_replay() {
+    let dir = tmpdir("xyz");
+    let (port, seen) = serve(vec![
+        Conn { msgs: xyz_msgs(0), end: End::Close },
+        Conn { msgs: xyz_msgs(1), end: End::Read(Duration::from_secs(28)) }, // PING 프레임(25초) → pong → 30초 시한이 다시 재진다 = 글자 ping 없음
+        Conn { msgs: xyz_msgs(2)[..4].to_vec(), end: End::Mute(Duration::from_secs(60)) }, // pong 없음: 25초 PING + 12.5초 = 닫힘
+        Conn { msgs: xyz_msgs(3), end: End::Read(Duration::from_secs(60)) },
+    ])
+    .await;
+    let db = dir.join("rs").join("hl_xyz.sqlite");
+    let env = [("RTCOLLECT_KIND", "xyz".into()), ("HL_XYZ_COINS", "xyz:XYZ100,xyz:SP500".into()), ("HL_XYZ_DB", db.display().to_string()),
+               ("RTCOLLECT_WS_URL", format!("ws://127.0.0.1:{port}/ws"))];
+    run_bin(&env, &seen, 4, 130).await;
+    let s = seen.lock().unwrap();
+    // 첫 프레임(구독 넷 중 첫째)만 serve 가 sub: 로 적는다 -- 나머지 셋·ping 은 Read 동안 받은 것
+    for k in 0..4 {
+        assert_eq!(sub(&s, k), r#"{"method": "subscribe", "subscription": {"type": "candle", "coin": "xyz:XYZ100", "interval": "1m"}}"#, "연결 {k} 첫 구독");
+    }
+    let p = pings(&s, 1, "PING", 0);
+    assert!(p.len() == 1 && (24.5..26.0).contains(&p[0]), "28초 동안 PING 프레임 하나(마지막 수신 뒤 25초): {p:?}");
+    assert!(!s.frames.iter().any(|f| f.2 == xyz_ping()), "pong 이 오면 글자 ping 은 안 나간다: {:?}", s.frames);
+    within(redial(&s, 0, 0), 0.9, 1.6, "끊김 뒤 1초(플러시가 대기를 1로)");
+    within(redial(&s, 1, 0), 28.9, 29.6, "28초 닫힘 + 1초");
+    within(redial(&s, 2, 0), 39.3, 40.2, "PING 25초 + pong 12.5초 + 2초(플러시 없던 연결 -- 대기 두 배)");
+
+    let mut ev = vec![];
+    let mut t = 10.0;
+    for (k, end) in [(0, "c"), (1, "c"), (2, "c"), (3, "c")] {
+        ev.push(json!([t, "o", ""]));
+        let msgs = if k == 2 { xyz_msgs(2)[..4].to_vec() } else { xyz_msgs(k) };
+        for m in msgs {
+            if let Some(ms) = m.strip_prefix("SLEEP:") {
+                t += ms.parse::<f64>().unwrap() / 1000.0;
+                continue;
+            }
+            t += 0.003;
+            ev.push(json!([t, "t", m]));
+        }
+        ev.push(json!([t, end, ""]));
+        t += 50.0;
+    }
+    let rd = dir.join("replay.sqlite");
+    rtcollect::xyz::replay(&ev, &["xyz:XYZ100".into(), "xyz:SP500".into()], &rd).unwrap();
+    let tables: [(&str, &str, &[usize]); 2] = [("hl_xyz_1m", "rowid", &[]), ("hl_xyz_ctx_1s", "rowid", &[1])]; // recv_sec = 벽시계
+    let (a, b) = (dump(&db, &tables), dump(&rd, &tables));
+    assert_eq!(a, b, "실행 파일 DB != replay DB");
+    assert_eq!((a.iter().filter(|r| r.starts_with("hl_xyz_1m|")).count(), a.iter().filter(|r| r.starts_with("hl_xyz_ctx_1s|")).count()), (6, 12), "{a:#?}");
+    eprintln!("xyz 접속 루프 = replay: 행 {} · PING {p:?} · 다시 붙기 {:.2}·{:.2}·{:.2}초", a.len(), redial(&s, 0, 0), redial(&s, 1, 0), redial(&s, 2, 0));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn xyz_ping() -> String {
+    rtcollect::xyz::PING.to_string()
 }

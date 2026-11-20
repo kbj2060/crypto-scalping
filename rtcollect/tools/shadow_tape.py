@@ -6,6 +6,11 @@
   trade_tape_1s                 열쇠 (symbol, ts_sec, price_bin) → 나머지 칸 전부(REAL 은 비트까지 -- 같은 규칙이면 같은 값)
   bybit_liquidations            행 묶음(중복 포함) -- recv_ms 는 뺀다(두 프로세스가 받은 시각은 원래 다르다)
   bybit_oi · bybit_mark · bybit_funding   행 묶음
+  okx_oi · okx_mark · okx_funding · okx_liquidations(OKX 맥락)   행 묶음
+  mark_price_1s · oi_1s(바이낸스 맥락)   열쇠 (ts_ms, symbol) · liquidations   행 묶음
+  hl_xyz_1m(xyz100)   열쇠 (coin, ts_sec) · hl_xyz_ctx_1s   행 묶음 -- recv_sec 는 뺀다(받은 초 = 벽시계, 두 프로세스가 원래 다르다)
+  🔴바이낸스 맥락에는 gaps 표가 없다(원본에 없다) -- 재연결 언저리의 «한쪽에만»은 로그(`ws:`)의 끊긴 시각과 맞춰 본다.
+     xyz100 의 ctx 는 받은 초가 1칸 밀리면 같은 초로 합쳐지는 행 수가 갈린다 -- 불일치 0 이 아니라 «비율»로 본다(SHADOW.md §5).
 빼는 분(뺀 분 수를 같이 찍는다):
   · 각 DB 의 gaps 구간 ±margin 초(재연결·재시작 주변 -- 두 프로세스가 끊긴 때가 다르다). symbol 열이 있으면 그 종목만.
   · 두 쪽 backfill_1m 의 ok=1 분(REST 로 통째로 갈아 끼운 분 -- Rust 는 REST 가 기본 꺼짐이라 보통 파이썬 쪽뿐)
@@ -32,8 +37,19 @@ TABLES = {  # 표 → (시각 열, 시각 단위 ms 인가, 열쇠 열 또는 No
     "bybit_oi": ("ts_ms", True, None, ()),
     "bybit_mark": ("ts_ms", True, None, ()),
     "bybit_funding": ("ts_ms", True, None, ()),
+    "okx_oi": ("ts_ms", True, None, ()),
+    "okx_mark": ("ts_ms", True, None, ()),
+    "okx_funding": ("ts_ms", True, None, ()),
+    "okx_liquidations": ("ts_ms", True, None, ()),
+    "mark_price_1s": ("ts_ms", True, ("ts_ms", "symbol"), ()),
+    "oi_1s": ("ts_ms", True, ("ts_ms", "symbol"), ()),
+    "liquidations": ("ts_ms", True, None, ()),
+    "hl_xyz_1m": ("ts_sec", False, ("coin", "ts_sec"), ()),
+    "hl_xyz_ctx_1s": ("recv_sec", False, None, ("recv_sec",)),
 }
-SYM_COL = {"trade_tape_1s": "symbol", "bybit_liquidations": "symbol", "bybit_oi": "inst", "bybit_mark": "inst", "bybit_funding": "inst"}
+SYM_COL = {"trade_tape_1s": "symbol", "bybit_liquidations": "symbol", "bybit_oi": "inst", "bybit_mark": "inst", "bybit_funding": "inst",
+           "okx_oi": "inst", "okx_mark": "inst", "okx_funding": "inst", "okx_liquidations": "inst_id",
+           "mark_price_1s": "symbol", "oi_1s": "symbol", "liquidations": "symbol", "hl_xyz_1m": "coin", "hl_xyz_ctx_1s": "coin"}
 
 
 def ro(p: Path) -> sqlite3.Connection:
@@ -85,15 +101,17 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
     s0, s1 = max(a[0], b[0], lo if lo is not None else a[0]), min(a[1], b[1], hi if hi is not None else a[1]) - 10
     if s1 <= s0:
         return f"{t}: 겹치는 범위 없음 (파이썬 {a} · Rust {b})"
-    names = [c for c in cols(py, t) if c not in drop]
-    assert names == [c for c in cols(rs, t) if c not in drop], f"{t} 열이 다르다"
+    names = cols(py, t)
+    assert names == cols(rs, t), f"{t} 열이 다르다"
     sel = ", ".join(names)
     si, ti = names.index(SYM_COL[t]), names.index(tcol)
     kidx = [names.index(k) for k in key] if key else None
+    keepcols = [i for i, c in enumerate(names) if c not in drop]   # 비교에서 빼는 열(받은 시각) -- 창·종목 거르기에는 쓴다
     allsym = excl.get(None, set())
     n_cmp = n_bad = only_py = only_rs = 0
     skipped: set = set()
     first: list = []
+    carry: tuple = (Counter(), Counter())
 
     def keep(r) -> bool:
         sec = r[ti] // 1000 if ms else r[ti]
@@ -109,6 +127,8 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
         q = f"SELECT {sel} FROM {t} WHERE {tcol} >= ? AND {tcol} < ?"
         rp = [r for r in py.execute(q, args) if keep(r)]
         rr = [r for r in rs.execute(q, args) if keep(r)]
+        if not kidx:
+            rp, rr = [tuple(r[i] for i in keepcols) for r in rp], [tuple(r[i] for i in keepcols) for r in rr]
         if kidx:
             dp = {tuple(r[i] for i in kidx): r for r in rp}
             dr = {tuple(r[i] for i in kidx): r for r in rr}
@@ -120,13 +140,20 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
                         first.append(f"다름 {k}: 파이썬 {dp[k]} · Rust {dr[k]}")
             po, ro_ = dp.keys() - dr.keys(), dr.keys() - dp.keys()
         else:
-            cp, cr = Counter(rp), Counter(rr)
+            # 행 묶음: 못 맞춘 행은 다음 창으로 넘긴다(창 경계에 걸린 행 · 받은 시각이 한쪽만 늦은 행)
+            cp, cr = Counter(rp) + carry[0], Counter(rr) + carry[1]
             n_cmp += sum((cp & cr).values())
-            po, ro_ = cp - cr, cr - cp
-        only_py += sum(po.values()) if isinstance(po, Counter) else len(po)
-        only_rs += sum(ro_.values()) if isinstance(ro_, Counter) else len(ro_)
+            carry = (cp - cr, cr - cp)
+            continue
+        only_py += len(po)
+        only_rs += len(ro_)
         for tag, extra in (("파이썬에만", po), ("Rust에만", ro_)):
             for k in sorted(extra)[: max(0, show - len(first))]:
+                first.append(f"{tag} {k}")
+    if not kidx:
+        only_py, only_rs = sum(carry[0].values()), sum(carry[1].values())
+        for tag, extra in (("파이썬에만", carry[0]), ("Rust에만", carry[1])):
+            for k in sorted(extra, key=repr)[: max(0, show - len(first))]:
                 first.append(f"{tag} {k}")
     line = (f"{t}: 비교 {n_cmp:,}행 · 불일치 {n_bad:,} · 파이썬에만 {only_py:,} · Rust에만 {only_rs:,} · 범위 [{s0}, {s1}) 초 · "
             f"뺀 (종목,분) {len(skipped):,}")
@@ -151,7 +178,8 @@ def selftest() -> None:
            "CREATE TABLE verify_1m(symbol TEXT, ts_min INTEGER, tape_qty REAL, kline_qty REAL, rel_err REAL, checked_at TEXT)",
            "CREATE TABLE backfill_1m(symbol TEXT, ts_min INTEGER, source TEXT, n_rows INTEGER, tape_qty REAL, kline_qty REAL, "
            "rel_err REAL, ok INTEGER, attempts INTEGER, note TEXT, done_at TEXT)",
-           "CREATE TABLE bybit_liquidations(ts_ms INTEGER, symbol TEXT, side TEXT, qty REAL, price REAL, recv_ms INTEGER)"]
+           "CREATE TABLE bybit_liquidations(ts_ms INTEGER, symbol TEXT, side TEXT, qty REAL, price REAL, recv_ms INTEGER)",
+           "CREATE TABLE hl_xyz_ctx_1s(coin TEXT NOT NULL, recv_sec INTEGER NOT NULL, mid REAL, mark REAL, oracle REAL, PRIMARY KEY(coin, recv_sec))"]
     T = 1_763_683_200                          # 분 경계
     with tempfile.TemporaryDirectory() as d:
         p, r = Path(d) / "py.sqlite", Path(d) / "rs.sqlite"
@@ -164,6 +192,9 @@ def selftest() -> None:
                             [("ethusdt", T + s, b, 1.5 + s, 0.25) for s in range(1200) for b in (25000, 25001)])
             con.executemany("INSERT INTO bybit_liquidations VALUES (?,?,?,?,?,?)",
                             [(1000 * (T + s), "ETHUSDT", "Buy", 0.1 * s, 2500.0, 1000 * (T + s) + (7 if f == p else 9)) for s in range(0, 1200, 30)])
+            # 받은 초가 한쪽만 1초 늦다(벽시계) -- 값이 같으면 같은 행
+            con.executemany("INSERT INTO hl_xyz_ctx_1s VALUES (?,?,?,?,?)",
+                            [("xyz:XYZ100", T + s + (f == r), 30000.0 + s, 30001.0, None) for s in range(0, 1100, 10)])
             con.commit()
             con.close()
         con = sqlite3.connect(p)
@@ -194,6 +225,9 @@ def selftest() -> None:
         assert "다름 ('ethusdt', 1763683300, 25000)" in tape_line, tape_line
         liq_line = next(x for x in out if x.startswith("bybit_liquidations"))
         assert "불일치 0 · 파이썬에만 0 · Rust에만 1" in liq_line and "비교 38행" in liq_line, liq_line   # recv_ms 는 달라도 같다
+        xyz_line = next(x for x in out if x.startswith("hl_xyz_ctx_1s"))
+        # recv_sec 는 빼고 비교 · 창 경계를 넘어 맞춘다. 남는 1행 = 범위 첫 초(파이썬 T 는 범위 밖, Rust 의 같은 행은 T+1 이라 안) -- 벽시계 열의 한계
+        assert "불일치 0 · 파이썬에만 0 · Rust에만 1" in xyz_line and "비교 107행" in xyz_line, xyz_line
         # 읽기 전용: 두 파일은 그대로
         try:
             ro(p).execute("DELETE FROM gaps")

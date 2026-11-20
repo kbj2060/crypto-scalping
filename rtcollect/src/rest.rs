@@ -69,6 +69,11 @@ pub fn wall_s() -> f64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
 }
 
+/// REST 연결(요청마다 시한 · 상태 코드는 오류로 안 바꾼다 · 프록시 안 씀). 수집기 REST 전부 공용.
+pub fn agent(timeout: Duration) -> ureq::Agent {
+    ureq::Agent::config_builder().timeout_global(Some(timeout)).http_status_as_error(false).proxy(None).build().into()
+}
+
 /// 프로세스 전체 «다음 aggTrades 슬롯»(단조 초).
 pub type Pace = Arc<Mutex<f64>>;
 
@@ -82,25 +87,36 @@ pub enum Fail {
     Other(String),
 }
 
-struct Resp {
-    status: u16,
+pub(crate) struct Resp {
+    pub(crate) status: u16,
     weight: Option<String>,
-    body: String,
+    pub(crate) ctype: String,
+    pub(crate) body: String,
 }
 
-fn at<'a>(v: &'a Value, i: usize) -> Result<&'a Value, Fail> {
+/// 어느 거래소의 REST 인가. 복구·대조 뼈대(`backfill_cycle`·`settle`·`candidates`·`verify`)는 원본 `backfill_loop`·`TapeStore` 하나를 같이 쓴다.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Venue {
+    Binance,
+    /// OKX history-candles·history-trades(rest_venue.rs). ct = 계약당 기초자산.
+    Okx { ct: f64 },
+    /// Bybit v5 kline 1분봉 대조만(복구 없음, rest_venue.rs).
+    Bybit,
+}
+
+pub(crate) fn at<'a>(v: &'a Value, i: usize) -> Result<&'a Value, Fail> {
     v.as_array().and_then(|a| a.get(i)).ok_or_else(|| Fail::Other("IndexError/TypeError".into()))
 }
 
-fn key<'a>(v: &'a Value, k: &str) -> Result<&'a Value, Fail> {
+pub(crate) fn key<'a>(v: &'a Value, k: &str) -> Result<&'a Value, Fail> {
     v.get(k).ok_or_else(|| Fail::Other(format!("KeyError: '{k}'")))
 }
 
-fn int(v: &Value) -> Result<i64, Fail> {
+pub(crate) fn int(v: &Value) -> Result<i64, Fail> {
     py_int(v).map_err(|e| Fail::Other(e.0))
 }
 
-fn float(v: &Value) -> Result<f64, Fail> {
+pub(crate) fn float(v: &Value) -> Result<f64, Fail> {
     py_float(v).map_err(|e| Fail::Other(e.0))
 }
 
@@ -136,16 +152,23 @@ pub fn ban_note(file: &Path, status: u16, body: &str, retry_after: Option<&str>,
 
 /// 한 심볼의 REST 검증·복구.
 pub struct Rest {
-    con: Connection,
+    pub(crate) con: Connection,
     pub symbol: String,
-    bucket: f64,
-    per_cycle: usize,
-    klines_url: String,
-    agg_url: String,
+    pub(crate) bucket: f64,
+    pub(crate) per_cycle: usize,
+    /// 1분봉 주소(OKX history-candles · Bybit kline)
+    pub(crate) klines_url: String,
+    /// 체결 주소(OKX history-trades)
+    pub(crate) agg_url: String,
     agent: ureq::Agent,
-    clock: Arc<Clock>,
-    pace: Pace,
+    pub(crate) clock: Arc<Clock>,
+    pub(crate) pace: Pace,
     ban_file: PathBuf,
+    pub(crate) venue: Venue,
+    /// 복구 대상 창(바이낸스 47시간 · OKX 원본 기본 7일)
+    pub(crate) lookback: i64,
+    pub(crate) source: &'static str,
+    pub(crate) note: &'static str,
     /// 가짜 시계일 때만: 나간 요청 (단조, 벽, 경로?쿼리) -- 정답지의 «요청 열»과 대조.
     pub sent: Vec<(f64, f64, String)>,
 }
@@ -157,7 +180,7 @@ impl Rest {
         let con = Connection::open(db)?;
         con.busy_timeout(Duration::from_secs(30))?;
         con.execute_batch("PRAGMA synchronous = NORMAL")?;
-        let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(timeout)).http_status_as_error(false).proxy(None).build().into();
+        let agent = agent(timeout);
         Ok(Rest {
             con,
             symbol: symbol.to_string(),
@@ -170,6 +193,10 @@ impl Rest {
             clock,
             pace,
             ban_file,
+            venue: Venue::Binance,
+            lookback: LOOKBACK_S,
+            source: SOURCE,
+            note: NOTE,
             sent: vec![],
         })
     }
@@ -177,6 +204,15 @@ impl Rest {
     /// 영원히: 60초마다 복구 한 주기, 300초마다 1분봉 대조(원본은 대조를 WS 수신 루프 안에서 기다린다 -- 여기는 이 스레드에서).
     pub fn run(mut self) {
         let mut verified = self.clock.mono();
+        if self.venue == Venue::Bybit {
+            // 원본은 WS 루프가 300초마다 따로 태스크로 띄운다(:256-258) -- 복구는 없다
+            loop {
+                self.clock.sleep(VERIFY_SECONDS);
+                if let Err(e) = self.verify_recent() {
+                    eprintln!("[{}] 1분봉 대조 실패(수집은 계속): {e:?}", self.symbol);
+                }
+            }
+        }
         loop {
             self.clock.sleep(BACKFILL_SECONDS);
             if self.clock.mono() - verified >= VERIFY_SECONDS {
@@ -189,9 +225,10 @@ impl Rest {
         }
     }
 
-    fn get(&mut self, url: &str, q: &str) -> Result<Resp, Fail> {
+    pub(crate) fn get(&mut self, url: &str, q: &str) -> Result<Resp, Fail> {
         let (mono, wall) = (self.clock.mono(), self.clock.wall());
-        let left = ban_left(&self.ban_file, wall);
+        let binance = self.venue == Venue::Binance;
+        let left = if binance { ban_left(&self.ban_file, wall) } else { 0.0 };
         if left > 0.0 {
             return Err(Fail::Other(format!("binance IP ban: {left:.0}s left -- request not sent")));
         }
@@ -200,16 +237,21 @@ impl Rest {
             let path = target.splitn(4, '/').nth(3).map_or(String::new(), |p| format!("/{p}"));
             self.sent.push((mono, wall, path));
         }
-        let mut r = match self.agent.get(&target).call() {
+        let req = self.agent.get(&target);
+        // 🔴User-Agent 가 없으면 OKX REST 가 403(2026-09-23 실측)
+        let req = if matches!(self.venue, Venue::Okx { .. }) { req.header("User-Agent", crate::rest_venue::UA) } else { req };
+        let mut r = match req.call() {
             Ok(r) => r,
             Err(ureq::Error::Timeout(_)) => return Err(Fail::Other("TimeoutError".into())),
             Err(e) => return Err(Fail::Other(format!("ClientError: {e}"))),
         };
         let h = |n: &str| r.headers().get(n).and_then(|v| v.to_str().ok()).map(str::to_string);
-        let (status, weight, retry_after) = (r.status().as_u16(), h("x-mbx-used-weight-1m"), h("retry-after"));
+        let (status, weight, retry_after, ctype) = (r.status().as_u16(), h("x-mbx-used-weight-1m"), h("retry-after"), h("content-type").unwrap_or_default());
         let body = r.body_mut().read_to_string().map_err(|e| Fail::Other(format!("ClientPayloadError: {e}")))?;
-        ban_note(&self.ban_file, status, &body, retry_after.as_deref(), self.clock.wall());
-        Ok(Resp { status, weight, body })
+        if binance {
+            ban_note(&self.ban_file, status, &body, retry_after.as_deref(), self.clock.wall());
+        }
+        Ok(Resp { status, weight, ctype, body })
     }
 
     /// `_bn_note_weight`: IP 1분 사용량이 문턱 이상이면 다음 분(+1초)까지 슬롯을 민다.
@@ -221,13 +263,14 @@ impl Rest {
         }
     }
 
-    /// `_bn_pace`: 슬롯을 먼저 예약하고 기다린다 -- 동시에 깬 심볼이 같은 슬롯을 안 잡는다.
-    fn wait_slot(&self) {
+    /// `_bn_pace`·OKX `_pace`: 슬롯을 먼저 예약하고 기다린다 -- 동시에 깬 심볼이 같은 슬롯을 안 잡는다.
+    pub(crate) fn wait_slot(&self) {
+        let gap = if self.venue == Venue::Binance { AGG_GAP_S } else { crate::rest_venue::OKX_MIN_GAP_S };
         let wait = {
             let mut n = self.pace.lock().unwrap();
             let now = self.clock.mono();
             let w = *n - now;
-            *n = n.max(now) + AGG_GAP_S;
+            *n = n.max(now) + gap;
             w
         };
         if wait > 0.0 {
@@ -240,12 +283,15 @@ impl Rest {
         if r.status >= 400 {
             return Err(Fail::Status(r.status));
         }
-        serde_json::from_str(&r.body).map_err(|e| Fail::Other(format!("JSONDecodeError: {e}")))
+        aio_json(&r.ctype, &r.body)
     }
 
     /// `binance_minute_fetcher.fetch`: 1분봉이 확정됐으면 aggTrades 로 그 분을 다시 만든다. Ok(None) = 아직 확정 전(다음 주기로).
     /// aggTrade = 테이커 주문 조각 · 🔴buy_max/sell_max 는 NULL(«그 초의 최대 개별 체결»은 REST 에 없다 -- 0 이 아니다: 「없었다」≠「모른다」).
     pub fn fetch(&mut self, m: i64) -> Result<Option<(Vec<Row>, f64)>, Fail> {
+        if let Venue::Okx { ct } = self.venue {
+            return self.fetch_okx(m, ct);
+        }
         let (start, end) = (m * 1000, m * 1000 + 59_999);
         let sym = self.symbol.to_uppercase();
         let (ku, au) = (self.klines_url.clone(), self.agg_url.clone());
@@ -295,7 +341,7 @@ impl Rest {
             let (rows, kline_qty) = match self.fetch(m) {
                 // 🔴영구 거부(예: -4166 «최근 2일만»)를 일시 오류처럼 다루면 같은 분을 1분마다 영원히 다시 받는다(2026-09-24 서버 실측).
                 Err(Fail::Status(s)) if (400..500).contains(&s) && s != 418 && s != 429 => {
-                    if let Err(e) = self.mark(m, SOURCE, 0, 0.0, 0.0, 0.0, false, &format!("거부 {s} · {NOTE}")) {
+                    if let Err(e) = self.mark(m, self.source, 0, 0.0, 0.0, 0.0, false, &format!("거부 {s} · {}", self.note)) {
                         eprintln!("[{}] 복구 {m} 실패 기록 못 함: {e}", self.symbol); // ponytail: 원본은 여기서 복구 태스크가 죽는다
                     }
                     eprintln!("[{}] 복구 {m} 거부됨 {s} -- 실패로 기록(3번이면 포기)", self.symbol);
@@ -329,11 +375,11 @@ impl Rest {
         for (cand, how) in [(&hybrid, "라이브+REST"), (&rows, "REST")] {
             (got, rel) = qty_rel(cand, kline_qty);
             if rel.abs() <= TOL {
-                self.replace_minute(m, cand, kline_qty, SOURCE, &format!("{how} · {NOTE}"))?;
+                self.replace_minute(m, cand, kline_qty, self.source, &format!("{how} · {}", self.note))?;
                 return Ok(true);
             }
         }
-        self.mark(m, SOURCE, rows.len() as i64, got, kline_qty, rel, false, NOTE)?;
+        self.mark(m, self.source, rows.len() as i64, got, kline_qty, rel, false, self.note)?;
         eprintln!("[{}] ⚠️복구 {m} REST 합이 1분봉과 안 맞는다 rel {rel:+.4e} -- 교체 안 함", self.symbol);
         Ok(false)
     }
@@ -342,7 +388,7 @@ impl Rest {
     /// 거래소가 더는 안 주는 옛 분(47시간)은 뺀다. 최근 분부터 `per_cycle` 개.
     pub fn candidates(&self) -> rusqlite::Result<Vec<i64>> {
         let now = self.clock.wall() as i64; // int(time.time())
-        let lo = now - LOOKBACK_S;
+        let lo = now - self.lookback;
         let mut st = self.con.prepare("SELECT from_ms, to_ms FROM gaps WHERE symbol = ? AND to_ms > ?")?;
         let gaps: Vec<(i64, i64)> = st.query_map(params![self.symbol, lo * 1000], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
         let mut st = self.con.prepare("SELECT ts_min, rel_err FROM verify_1m WHERE symbol = ? AND ts_min >= ?")?;
@@ -467,6 +513,11 @@ impl Rest {
 
     /// `verify_recent`: 직전 분들을 1분봉 거래량과 대조. 200 이 아니면 조용히 끝(원본). 실패해도 수집은 계속.
     pub fn verify_recent(&mut self) -> Result<(), Fail> {
+        match self.venue {
+            Venue::Okx { .. } => return self.verify_okx(),
+            Venue::Bybit => return self.verify_bybit(),
+            Venue::Binance => {}
+        }
         let minutes = self.unverified_minutes().map_err(|e| Fail::Other(e.to_string()))?;
         let (Some(&hi), Some(&lo)) = (minutes.first(), minutes.last()) else { return Ok(()) };
         let q = format!("symbol={}&interval=1m&startTime={}&limit={}", self.symbol.to_uppercase(), lo * 1000, 1500.min((hi - lo).div_euclid(60) + 2));
@@ -475,7 +526,7 @@ impl Rest {
         if r.status != 200 {
             return Ok(());
         }
-        let k: Value = serde_json::from_str(&r.body).map_err(|e| Fail::Other(format!("JSONDecodeError: {e}")))?;
+        let k: Value = aio_json(&r.ctype, &r.body)?;
         let mut kvol = HashMap::new();
         for row in k.as_array().ok_or_else(|| Fail::Other("TypeError".into()))? {
             kvol.insert(int(at(row, 0)?)?.div_euclid(1000), float(at(row, 5)?)?);
@@ -494,4 +545,17 @@ impl Rest {
 fn qty_rel(rows: &[Row], kline_qty: f64) -> (f64, f64) {
     let got = rows.iter().fold(0.0, |s, r| s + (r.2[0] + r.2[1]));
     (got, if kline_qty != 0.0 { (got - kline_qty) / kline_qty } else { 0.0 })
+}
+
+/// aiohttp `resp.json()`: 본문 형식이 JSON 이 아니면 ContentTypeError(`^application/(…+)?json`) · 빈 본문은 None · 그 밖은 json.loads.
+pub(crate) fn aio_json(ctype: &str, body: &str) -> Result<Value, Fail> {
+    let c = ctype.trim().to_ascii_lowercase();
+    let json = c.strip_prefix("application/").is_some_and(|r| r.starts_with("json") || r.split(';').next().unwrap_or("").contains("+json"));
+    if !json {
+        return Err(Fail::Other(format!("ContentTypeError: {ctype:?}")));
+    }
+    if body.trim().is_empty() {
+        return Ok(Value::Null);
+    }
+    serde_json::from_str(body).map_err(|e| Fail::Other(format!("JSONDecodeError: {e}")))
 }
