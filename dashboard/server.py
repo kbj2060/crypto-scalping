@@ -2221,6 +2221,9 @@ def make_app() -> web.Application:
     okx_bar_net_by: dict[str, dict[int, tuple[float, ...]]] = {}
     flow_all_hold: dict[str, dict[str, Any]] = {}   # 2026-10-06 리뷰: 봉 마감 직후 Bybit 마지막 봉이 아직 없을 때 직전 합산값 유지   # 2026-10-06 합산 -- OKX 봉별 (순, 고래 순, 리테일 순, 매수, 매도). fr_bar_net 과 같은 갱신 규칙
 
+    # 2026-11-20 loop_stall 435~2976ms(predict_proba 가 루프 위): 예측은 compute_situation 이 스레드에서 돌린다.
+    #   코인 8개가 같은 봉 마감에 몰려도 한 번에 하나만 -- 동시에 돌면 CPU·GIL 경합으로 루프가 다시 느려진다.
+    card30_pred_lock = threading.Lock()
     card30_lock = threading.Lock()   # 코인마다 도는 compute_situation 이 재시작 직후 한꺼번에 읽으러 온다 -- 하나만 읽고 나머지는 스레드에서 기다렸다 그냥 돌아간다
 
     def _card30_load() -> None:
@@ -2246,16 +2249,23 @@ def make_app() -> web.Application:
             _card30_load()
             if card30["m"] is None:
                 return {}
-        f = fr.card30_features(bars)
-        p: dict[str, float] = {}
-        if f is not None:
-            lg = lambda q: np.log(q / (1 - q))   # noqa: E731
-            for key, M in card30["m"].items():
-                row = np.array([[f[c] for c in M["cols"]]], dtype=np.float32)
-                raw = float(np.mean([m.predict_proba(row)[0, 1] for m in M["models"]]))
-                p[key] = float(1 / (1 + np.exp(-(M["k"] * lg(raw) + (1 - M["k"]) * lg(M["base"])))))
-        cache.update(bar=bars[-1]["time"], p=p)
+        with card30_pred_lock:
+            f = fr.card30_features(bars)
+            p: dict[str, float] = {}
+            if f is not None:
+                lg = lambda q: np.log(q / (1 - q))   # noqa: E731
+                for key, M in card30["m"].items():
+                    row = np.array([[f[c] for c in M["cols"]]], dtype=np.float32)
+                    raw = float(np.mean([m.predict_proba(row)[0, 1] for m in M["models"]]))
+                    p[key] = float(1 / (1 + np.exp(-(M["k"] * lg(raw) + (1 - M["k"]) * lg(M["base"])))))
+            cache.update(bar=bars[-1]["time"], p=p)   # 두 칸을 한 번에(GIL 아래 C 수준 병합) -- 루프가 bar 새것·p 옛것을 보지 않는다
         return p
+
+    def _card30_bars(now: float, situation_state: dict[str, Any]) -> list[dict[str, Any]]:
+        """_card30_pred 입력 = 완결 5분봉(테이커 있는 것). _flow_read_ctx 와 compute_situation 미리 계산이 같은 입력을 쓰게 한 곳에서."""
+        bar_start = int(now) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS
+        day5 = situation_state.get("candles_day") or situation_state.get("candles") or []
+        return [c for c in day5 if int(c["time"]) < bar_start and "taker" in c]
 
     def _flow_read_ctx(now: float, inp: dict[str, Any], asset: str = "eth") -> dict[str, Any]:
         C, F = cctx[asset], flows[asset]
@@ -2366,7 +2376,7 @@ def make_app() -> web.Application:
             win = np.lib.stride_tricks.sliding_window_view
             rg = (win(hh, 6).max(1) - win(lo, 6).min(1)) / cc[5:]
             x["range30_pct"] = float(np.mean(rg <= rg[-1]))
-        pr = _card30_pred([c for c in day5 if int(c["time"]) < bar_start and "taker" in c], asset)   # ETH 모델(SOL·XRP 도 그대로 -- 검정 통과)
+        pr = _card30_pred(_card30_bars(now, situation_state), asset)   # ETH 모델(SOL·XRP 도 그대로 -- 검정 통과) · 보통은 compute_situation 이 스레드에서 미리 채운 캐시
         x["dir_p"], x["reach_p"] = pr.get("dir"), pr.get("reach")
         mp = micro_state["payload"] if micro_state["payload"].get("available") else {}
         imb = mp.get("imb40")
@@ -2452,6 +2462,11 @@ def make_app() -> web.Application:
         situation_state["now"] = res
         situation_state["computed_at"] = now
         try:   # 관계 읽기는 상황 카드가 «완결 봉 부족»이어도 읽을 수 있는 만큼 읽는다. 죽어도 카드는 산다
+            # 2026-11-20 loop_stall: 방향·닿음 예측을 스레드에서 먼저 -- 아래 _flow_read_ctx 는 같은 입력으로 캐시만 읽는다(사이에 await 없음)
+            #   봉이 안 바뀌었으면(캐시 맞음 = 5분 중 대부분) 스레드로 안 넘긴다 -- 매초 코인마다 스레드를 타면 그 자체가 지연이다
+            b30, c30 = _card30_bars(now, situation_state), card30 if asset == "eth" else card30_by.get(asset)
+            if b30 and not (c30 and c30["bar"] == b30[-1]["time"]):
+                await asyncio.to_thread(_card30_pred, b30, asset)
             situation_state["ctx"] = _flow_read_ctx(now, inp, asset)     # 시장 맥락 카드도 같은 값을 읽는다(다시 안 센다)
             if asset != "eth":
                 return   # 융합 읽기·장부는 ETH 에서 검정한 것 -- 다른 코인은 시장 맥락 입력(ctx·evidence)까지만(2026-10-04 사용자 선택)
@@ -5076,16 +5091,17 @@ async def start_loop_watch(app: web.Application) -> None:
         return " ← ".join(f"{os.path.basename(s.filename)}:{s.lineno} {s.name}" for s in reversed(traceback.extract_stack(f)[-12:])) if f else "?"   # 12단(11-20 5단은 압축·모델 읽기 호출자가 잘렸다)
 
     def watch() -> None:
-        hold, last = None, 0.0   # hold = [최대 ms, 스택]
+        hold, last = None, 0.0   # hold = [최대 ms, 스택, 멈춘 시각]
         while not stop.wait(0.05):
             try:
                 lag = int((time.monotonic() - beat[0]) * 1000)
                 if lag >= LOOP_STALL_MS:
-                    hold = [lag, hold[1] if hold else stack()]
+                    # t = 멈춘 시작 시각(서버 현지) -- 5분봉 마감 순간에 몰리는지 보려고(2026-11-20)
+                    hold = [lag, *(hold[1:] if hold else (stack(), time.strftime("%H:%M:%S", time.localtime(time.time() - lag / 1000))))]
                 elif hold is not None:
                     if time.monotonic() - last >= 1.0:
                         last = time.monotonic()
-                        print(f"loop_stall ms={hold[0]} at={hold[1]}", flush=True)
+                        print(f"loop_stall ms={hold[0]} at={hold[1]} t={hold[2]}", flush=True)
                     hold = None
             except Exception:  # noqa: BLE001 -- 측정은 실패해도 조용히
                 hold = None
