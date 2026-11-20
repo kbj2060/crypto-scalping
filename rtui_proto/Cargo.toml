@@ -1,0 +1,28 @@
+[package]
+name = "rtui_proto"
+version = "0.1.0"
+edition = "2024"
+
+# 측정용 시제품: 데스크톱 풋프린트 한 장을 egui 로 그릴 때의 CPU 시간(UI 구성 + 테셀레이션)
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["kfont"]
+kfont = [] # 한글 글꼴(Pretendard) 포함 -- 끄면 wasm 크기 비교용(한글은 □)
+
+[dependencies]
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "=0.2.130"
+wasm-bindgen-futures = "0.4"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+opt-level = 3

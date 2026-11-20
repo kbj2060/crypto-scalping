@@ -132,3 +132,8 @@ dashboard/box_hold_platt90_btc_1h.json
 
 # rtcore (Rust) 빌드 산출물
 rtcore/target/
+
+# rtui_proto (egui 측정용 시제품) 빌드 산출물 · 큰 글꼴(라이선스 txt 는 커밋)
+rtui_proto/target/
+rtui_proto/dist/
+rtui_proto/fonts/*.ttf

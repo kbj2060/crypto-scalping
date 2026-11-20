@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>rtui_proto</title>
+<style>html,body{margin:0;background:#161a22}canvas{display:block;width:1920px;height:1080px}</style></head>
+<body><canvas id="c"></canvas>
+<script type="module">
+// ?font=kfont|nofont&mode=bench|app&sc=0|1&n=300&churn=0|1 -- 결과는 window.RESULT
+const q = new URLSearchParams(location.search), t0 = performance.now();
+const m = await import(`./${q.get("font") || "kfont"}/rtui_proto.js`);
+await m.default();
+const tInit = performance.now();
+const sc = +q.get("sc"), n = +(q.get("n") || 300);
+if (q.get("mode") === "bench") {
+  const b = new m.WBench(sc, q.get("churn") === "1");
+  const first = b.frame(); const out = [];
+  for (let i = 0; i < 29; i++) await new Promise((r) => requestAnimationFrame(r)), b.frame();
+  for (let i = 0; i < n; i++) { await new Promise((r) => requestAnimationFrame(r)); out.push([...b.frame()]); }
+  window.RESULT = { tInit: tInit - t0, first: [...first], frames: out };
+} else {
+  await m.start("c", sc, n);
+  const tStart = performance.now();
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const tFirst = performance.now();
+  const poll = () => { const v = m.web_cpu(); if (v.length) window.RESULT = { tInit: tInit - t0, tStart: tStart - t0, tFirst: tFirst - t0, nav: tFirst, cpu: [...v] }; else setTimeout(poll, 100); };
+  poll();
+}
+</script></body></html>
