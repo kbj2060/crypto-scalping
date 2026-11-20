@@ -4033,6 +4033,18 @@ el("fpLockBtn")?.addEventListener("click", () => fpLockSet(!document.documentEle
 // 2026-11-09 사용자 «디폴트 값을 잠금으로»: 휠 있는 기기는 처음부터 잠금(폰은 버튼이 없으니 안 잠근다) · 위 카드가 그려진 뒤(load) 맞춘다.
 if (!matchMedia("(hover: none)").matches) addEventListener("load", () => fpLockSet(true), { once: true });
 // 2026-11-13 펜 메모 «전체화면 아이콘 -- 오른쪽 칸이 접히고 왼쪽이 카드 전체»: renderCandleSvg 의 FPW 가 읽는다 · 넓은 화면(2단)에서만 버튼이 보인다 · 고른 상태는 기억
+const FPW_MQ = "(min-width: 1700px) and (orientation: landscape) and (hover: hover), (orientation: landscape) and (hover: none) and (max-height: 600px)";   // 🔴styles.css 전체화면 블록과 같은 조건(넓은 마우스 화면 · 가로로 눕힌 휴대폰)
+// 2026-11-20 사용자 «모바일 전체화면 -- 누르면 자동으로 가로모드로 바뀌면서 전체화면»: 터치 기기는 문서 전체화면(주소창·상태바 숨김) 뒤 가로 고정.
+//   ponytail: 아이폰 사파리는 요소 전체화면·방향 고정 API 가 없다 -- 그때는 화면 덮기만 켜지고 «가로로 돌리세요» 안내(돌리면 CSS 가 펼친다).
+async function fpMobFs(on) {
+  const d = document, de = d.documentElement;
+  try {
+    if (on && !d.fullscreenElement && de.requestFullscreen) await de.requestFullscreen({ navigationUI: "hide" });
+    if (on) await screen.orientation.lock("landscape");
+    else { try { screen.orientation.unlock(); } catch (e) { /* 고정 안 했으면 없음 */ } if (d.fullscreenElement) await d.exitFullscreen(); }
+  } catch (e) { /* 지원 안 함(아이폰) · 거부 -- 화면 덮기는 그대로 */ }
+}
+document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && matchMedia("(hover: none)").matches && document.documentElement.classList.contains("fp-wide")) fpWideSet(false); });   // 뒤로 가기·밀어 내리기로 전체화면을 나가면 덮기도 끈다
 function fpWideSet(on) {
   const b = el("fpWideBtn"); if (!b) return;
   document.documentElement.classList.toggle("fp-wide", on);
@@ -4043,7 +4055,7 @@ function fpWideSet(on) {
   if (typeof scheduleSnapshotChartRender === "function") scheduleSnapshotChartRender();
   window.dispatchEvent(new Event("resize"));   // 일봉·옵션 칸 등 폭을 재는 곳
 }
-el("fpWideBtn")?.addEventListener("click", () => fpWideSet(!document.documentElement.classList.contains("fp-wide")));
+el("fpWideBtn")?.addEventListener("click", () => { const on = !document.documentElement.classList.contains("fp-wide"); fpWideSet(on); if (matchMedia("(hover: none)").matches) fpMobFs(on); });
 // 2026-11-15 시안 B: 전체화면은 카드가 창을 덮으니 Esc 로 나간다 -- Esc 를 먼저 쓰는 것(관리 막대·선 초안·선 확인·지표 팝업·측정·코인 고르기·주문 캡슐·대화상자)이
 //   열려 있으면 그것만 닫히게 둔다. 🔴검증 11-15: 그 처리기들은 document 에서 먼저 닫아 버려(preventDefault 없음) window 에서 보면 이미 없다 -- 그래서 캡처 단계에서 미리 본다.
 addEventListener("keydown", (e) => {
@@ -8383,8 +8395,9 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   const SPLIT_GAP = 20;
   // 2026-11-13 펜 메모 «풋프린트에 전체화면 아이콘 -- 누르면 오른쪽 칸(1초 수급·시장 맥락)이 접히고 왼쪽이 카드 전체를»: 2단 배치는 그대로 두고 오른쪽 칸 폭만 0
   //   (위 한 줄·체결/호가 기둥·차트 아래 띠는 2단 그대로) · 1초 수급·시장 맥락은 안 그린다(#mcBody 는 CSS 가 숨김). fpWideSet 이 켜고 끈다.
-  const FPW = !!splitR && document.documentElement.classList.contains("fp-wide") && matchMedia("(hover: hover)").matches;   // 검증: 버튼이 안 보이는 기기(터치)에서 접힌 채 고정되지 않게
-  if (svg.id === "candleSvgSnapshot") fpBoard = mobileChart ? null : { rows: [], cond: [], top: FPW ? 16 : 6 };   // 11-16 지표 방향 판(데스크톱) -- 렌더마다 비우고 SMA50·스윙·OB·방향 표식이 채운다 · 휴대폰은 옛 가장자리 꼬리표
+  const FPW = !!splitR && document.documentElement.classList.contains("fp-wide") && matchMedia(FPW_MQ).matches;
+  const FPM = FPW && matchMedia("(hover: none)").matches;   // 2026-11-20 휴대폰 가로 전체화면(높이 ~390) -- 지표 판·체결 버블 띠를 빼 가격 칸에 높이를 준다   // 검증: 버튼이 안 보이는 기기(터치)에서 접힌 채 고정되지 않게
+  if (svg.id === "candleSvgSnapshot") fpBoard = mobileChart || FPM ? null : { rows: [], cond: [], top: FPW ? 16 : 6 };   // 11-16 지표 방향 판(데스크톱) -- 렌더마다 비우고 SMA50·스윙·OB·방향 표식이 채운다 · 휴대폰은 옛 가장자리 꼬리표
   const FP_SIDE_OK = FPW && !fpAltOn(), FP_SIDE = FP_SIDE_OK && fpSideOpen;   // 11-15 시안 B: 전체화면 오른쪽 칸 서랍(손잡이는 _OK 일 때만)
   if (svg.id === "candleSvgSnapshot" && !FP_SIDE) fpSidePlace(svg, FP_SIDE_OK, null);
   const subW = splitR ? (FPW ? 0 : Math.round((wAll - SPLIT_GAP) * splitR) + FP_LEFT_SHIFT) : wAll;   // 10-15 풋프린트를 왼쪽으로 옮긴 만큼 오른쪽 칸을 넓힌다(플롯 폭은 그대로 -- 아래 ml 도 같은 만큼 줄인다)
@@ -8456,7 +8469,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // 2026-09-30 풋프린트(데스크톱)는 왼쪽 여백 71 -> 36(사용자 «풋프린트를 왼쪽으로»).
   // 2026-11-10 펜 메모 «선택한 박스들을 선·화살표 방향으로»: ⓪ 레버리지·수급 게이지 → 오른쪽 칸 맨 위(옛 체결 버블 자리) · ② 체결 버블 → 차트 아래 전폭 띠 ·
   //   ④ 차트 아래 줄(사분면·거래대금·시각)은 그 띠 높이만큼 위로. 띠 = 바닥 여백(mb)에 더해 플롯·레인·시각 줄을 통째로 올린다(#mcWall 이 띠를 맡는다).
-  const FP_BUB = svg.id === "candleSvgSnapshot" && splitR && !mobileChart && footprint && flowOn() ? FP_BUB_BAND : 0;
+  const FP_BUB = svg.id === "candleSvgSnapshot" && splitR && !mobileChart && !FPM && footprint && flowOn() ? FP_BUB_BAND : 0;
   const ml = (mobileChart ? (footprint ? 4 : 44) : footprint ? 36 - CENTER_NUDGE : 45) + CENTER_NUDGE + TRADE_L - (splitR ? FP_LEFT_SHIFT : 0),
         // 2026-09-27 풋프린트는 가격 배지를 전부 왼쪽 글자로 옮겼다(사용자 «호가가 잘 보이게») -- 오른쪽은 호가 띠가 쓴다.
         mr = (mobileChart ? 10 : footprint ? 34 : 112) - CENTER_NUDGE,
@@ -8508,7 +8521,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   🔴데스크톱 거래대금 줄은 24 → 54px: 넓은 화면은 프로파일 아래 지지/저항 칸(#mcWall, 7줄 · 바닥 = 플롯 바닥 + 12)이 이 높이를 같이 쓴다 --
   //     58 로 줄이면 칸이 216 → 78px, 줄이 10px 라 글자가 겹쳤다(실측). 88 이면 108px · 줄 ~15px.
   //   막대 밑 글자 칸(QUAD_TXT)·모바일 «레인 아래 한 줄»(ROW_H)도 같이 뺐다 -- 다섯 줄 높이 몫이었다.
-  const QUAD_H = fpBars.length ? (mobileChart ? 42 : 108) : 0;   // 2026-11-04 88 → 108 (위 여백 -20 과 맞교환 · #mcWall 높이 = QUAD_H + 20)
+  const QUAD_H = fpBars.length ? (mobileChart || FPM ? 42 : 108) : 0;   // 11-20 휴대폰 가로 전체화면도 휴대폰 높이   // 2026-11-04 88 → 108 (위 여백 -20 과 맞교환 · #mcWall 높이 = QUAD_H + 20)
   const CUM_H = fpBars.length ? (mobileChart ? 104 : 160) : 0;
   // 2026-09-27 데스크톱은 누적 CVD·OI 를 사분면 막대 **뒤에** 흐리게 깐다(사용자 선택 A) -- 제 줄(160+6)을 풋프린트에 준다.
   //   가격 플롯 400 -> 566. 모바일은 제 줄 그대로(사용자 «모바일은 지금대로»).
@@ -11374,7 +11387,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           lb.style.top = y; lb.style.left = `${Math.round(a.left - c.left + chartGeo.ml + chartGeo.cw / 2)}px`;
           // 2026-11-20 펜 메모 «도구 상자를 LONG/SHORT/MANAGE 줄 왼쪽으로 · 컨셉 통일»: 전체화면이면 머리(도구 줄)의 세로 가운데를 이 줄에 맞춘다(모양은 CSS html.fp-wide)
           const hd = card.querySelector(":scope > .ops-health-head");
-          if (hd) hd.style.top = FPW ? `${Math.round(parseFloat(y) - hd.offsetHeight / 2)}px` : "";   // 2026-11-04 펜 메모 «롱/숏 버튼을 풋프린트 차트 중앙에» -- 옛 = 왼쪽 칸 전체(체결·호가 기둥 포함) 가운데
+          if (hd) hd.style.top = FPW ? `${Math.round(parseFloat(y) - hd.offsetHeight / 2)}px` : "";
+          if (FPM && hd) { const L = hd.getBoundingClientRect().right - c.left + 14 + lb.offsetWidth / 2; if (parseFloat(lb.style.left) < L) lb.style.left = `${Math.round(L)}px`; }   // 휴대폰 가로: 가운데 두면 왼쪽 도구 줄과 겹친다 -- 그 오른쪽으로   // 2026-11-04 펜 메모 «롱/숏 버튼을 풋프린트 차트 중앙에» -- 옛 = 왼쪽 칸 전체(체결·호가 기둥 포함) 가운데
         }); else if (pan) { pan.style.top = pan.style.left = ""; }
         card.classList.toggle("fp-toprow", on);   // 이 줄이 있으면 체결 기둥 토글의 작은 «선 주문»은 숨긴다(큰 버튼 하나)
         fpMobRowSet(!on && mobileChart && flowOn() && !fpAltOn(), card, fs);   // 2026-10-28 휴대폰 = 머리 마지막 줄 [· | SLTP | 지표]

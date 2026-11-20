@@ -238,7 +238,7 @@
     var units = LN.reduce(function (t, l) { return t + (l[2] || 1); }, 0), fixed = axisH + LN.length * gap + 6;
     // 검증 11-13: 레인 9칸이 가격 칸을 데스크톱 500 → 351px · 휴대폰 → 197px 로 눌렀다 -- 가격 칸이 높이의 55% 아래로 안 가게 레인 한 칸을 줄인다
     laneH = BIG ? Math.max(14, Math.floor((H - fixed - Math.max(48, Math.round(0.1 * (H - axisH)))) / units))   // 가격은 시점 맞춤용 얇은 띠(높이 10%)만
-      : Math.max(14, Math.min(laneH, Math.floor((H - fixed - 0.55 * (H - axisH)) / units)));
+      : Math.max(H < 360 ? 6 : 14, Math.min(laneH, Math.floor((H - fixed - 0.55 * (H - axisH)) / units)));   // 11-20 휴대폰 가로 전체화면(상자 ~250): 하한 14 × 9칸이 가격 칸을 0 으로 눌렀다
     var priceH = H - fixed - units * laneH;
     var lanes = {}, y = 6 + priceH + gap;
     LN.forEach(function (l) { var hh = Math.round(laneH * (l[2] || 1)); lanes[l[0]] = { y: y, h: hh }; y += hh + gap; });

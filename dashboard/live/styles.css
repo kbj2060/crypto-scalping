@@ -3937,8 +3937,15 @@ html.fp-lock { overflow: hidden; scrollbar-gutter: stable; }
 /* 2026-11-13 펜 메모 «풋프린트 전체화면 아이콘»(app.js fpWideSet): 넓은 화면(2단)에서만 · 켜면 오른쪽 칸(1초 수급·시장 맥락)을 접는다 -- 차트 폭은 renderCandleSvg(FPW)가 정한다 */
 #fpWideBtn { display: none; }
 #fpWideBtn[aria-pressed="false"] .wd-off, #fpWideBtn[aria-pressed="true"] .wd-on { display: none; }
-@media (min-width: 1700px) and (orientation: landscape) and (hover: hover) {
+/* 2026-11-20 사용자 «전체화면은 모바일엔 없어? 누르면 가로로 바뀌며 전체화면»: 휴대폰(세로)은 시간 단위 줄 오른쪽 끝에 같은 단추 → app.js fpWideSet 이 문서 전체화면 + 가로 고정.
+   아래 블록은 가로로 눕힌 휴대폰(높이 600 이하 · 터치)에도 켠다 -- 🔴app.js FPW_MQ 와 같은 조건 */
+@media (max-width: 720px) {
+  #fpWideBtn { display: inline-flex; order: 1; flex: none; width: 44px; height: 44px; align-self: center; }
+  #chartWindowTabs { flex: 1 1 0; }
+}
+@media (min-width: 1700px) and (orientation: landscape) and (hover: hover), (orientation: landscape) and (hover: none) and (max-height: 600px) {
   #fpWideBtn { display: inline-flex; }
+  html.fp-wide #candleSvgSnapshot { --fp-split: 0.25; }   /* 휴대폰 가로는 2단 판정(1700 블록)이 없다 -- 전체화면 경로(FPW, 오른쪽 칸 폭 0)를 타게 */
   html.fp-wide:not(.fp-side) #mcBody { display: none !important; }
   /* 2026-11-15 펜 메모 시안 B: 오른쪽 끝 손잡이(#ofabTab 문법) + 차트 위 오른쪽 칸 서랍 -- 위치·폭은 app.js fpSidePlace(평소 오른쪽 칸 자리 그대로) */
   .fp-side-tab { position: absolute; right: 0; top: 50%; transform: translateY(-50%); z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 7px;
@@ -4108,3 +4115,19 @@ html.fp-lock { overflow: hidden; scrollbar-gutter: stable; }
 .drm-r.up > svg, .drm-r.up > em { color: var(--good); } .drm-r.dn > svg, .drm-r.dn > em { color: var(--bad); } .drm-r.big > i, .drm-r.big > em { color: var(--warn); }
 .drm-d { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 0 8px; text-align: left; font-size: 12px; font-weight: 650; color: var(--muted); }
 .drm-d span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
+
+/* 2026-11-20 휴대폰 전체화면(app.js fpWideSet + fpMobFs): 가로면 코인은 도구 줄의 코인 단추가 맡는다 · 세로로 남으면(아이폰 = 방향 고정 없음) 돌리라는 안내 */
+@media (orientation: landscape) and (hover: none) and (max-height: 600px) {
+  html.fp-wide #snapshotAssetTabs, html.fp-wide #assetMore, html.fp-wide #posChips { display: none !important; }
+  /* 폭 ~844: 도구 줄 + LONG·SHORT·관리 + 지표가 한 줄에 들게 -- 세로 휴대폰 머리 줄과 같은 생략(«보기·봉» 이름 · «MANAGE» 글자 · 비중) */
+  html.fp-wide .fp-dd i, html.fp-wide #fpCard .pm-tab > span, html.fp-wide #fpCard .pm-w { display: none; }
+  html.fp-wide .fp-dd { padding: 0 10px; }
+  html.fp-wide #fpCard .fp-line-btn button { padding: 0 8px; letter-spacing: .04em; }
+  html.fp-wide #fpDaily > .fpd-head { padding-left: 330px; }
+  html.fp-wide #fpDaily > .fpd-rib { display: none; }   /* 높이 ~390: 리본(롱·숏 우세·펀딩·청산 대기)까지 두면 일봉 가격 칸이 사라진다 -- 세로 화면·데스크톱에서 본다 */   /* ponytail: 떠 있는 도구 줄 폭(~300) 고정값 -- 넓은 화면 630 과 같은 방식 */
+}
+@media (orientation: portrait) and (hover: none) {
+  html.fp-wide body::after { content: "가로로 돌리면 차트가 화면 전체로 펼쳐집니다"; position: fixed; left: 16px; right: 16px; top: calc(env(safe-area-inset-top) + 12px); z-index: 950;
+    padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-strong); color: var(--text); font: 600 13px/1.4 var(--font-sans); text-align: center;
+    box-shadow: 0 8px 24px rgb(var(--shadow) / .32); pointer-events: none; }
+}
