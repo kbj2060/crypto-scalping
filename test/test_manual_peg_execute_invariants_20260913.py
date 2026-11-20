@@ -20,12 +20,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # PYTHONPATH 없�
 import live.execution.live_manual_peg_execute_20260912 as ex  # noqa: E402
 
 REAL_MAKER_PRICE = ex.maker_price   # 갈아끼우기 전 원본 -- 가짜의 인자 모양을 이것과 대조한다
+CALL_CAP = 20_000                   # 가짜 호출 상한 -- 조회·재호가 루프가 안 끝나면 여기서 터진다(메모리·시간 폭주 방지)
 
 
 class FakeExchange:
     """주문 장부를 들고 있는 최소 모의체. 실패는 `fail` 로 주입한다."""
 
-    def __init__(self, *, fill_after=1, fail=(), ok_first=0, partial=None, post_only_rejects=0):
+    def __init__(self, *, fill_after=1, fail=(), ok_first=0, partial=None, post_only_rejects=0,
+                 place_err=None, lookup_miss=0):
+        # 2026-11-20 D2: 다음 지정가 POST 한 번을 (오류 문자열, 실제로 접수됐나) 로 -- 접수됐으면 «유령» 주문이 장부에 산다
+        self.place_err = place_err
+        self.lookup_miss = lookup_miss        # 표식(origClientOrderId) 조회 처음 n 번은 있어도 «없음»(거래소가 아직 처리 전)
+        self.cid_lookups = 0
+        self.cid_deletes: list[str] = []      # 표식으로 보낸 DELETE
+        self.attempt_cids: list[str] = []     # 보낸 지정가 POST 의 표식(거부·불명 포함)
+        self.n_calls = 0
         self.post_only_rejects = post_only_rejects   # 처음 몇 번의 지정가를 -5022(«지금 걸면 테이커»)로 거부
         self.orders: dict[int, dict] = {}
         self.next_id = 1000
@@ -55,23 +64,53 @@ class FakeExchange:
         resting = sum(o["qty"] - o["filled"] for i, o in self.orders.items() if i in self.live_limit_ids())
         return filled, resting
 
+    def _by_cid(self, cid):
+        return next((i for i, o in self.orders.items() if o.get("cid") == cid), None)
+
     async def signed(self, session, method, path, params, key, secret, offset):
+        self.n_calls += 1
+        assert self.n_calls <= CALL_CAP, f"가짜 호출 상한 {CALL_CAP} 초과 -- 루프가 안 끝난다"
         if path == "/fapi/v1/order" and method == "POST":
             if params.get("type") == "MARKET":
                 self.market_orders.append(dict(params))
                 return {"orderId": -1, "status": "FILLED",
                         "executedQty": str(params["quantity"])}
+            self.attempt_cids.append(params.get("newClientOrderId"))
             if self.post_only_rejects > 0:
                 self.post_only_rejects -= 1
                 return {"__error__": "400 [-5022] Due to the order could not be executed as maker"}
             if self._fails("place"):
-                return {"__error__": "500 boom"}
-            self.next_id += 1
-            self.orders[self.next_id] = {"type": "LIMIT", "status": "NEW", "filled": 0.0,
-                                         "qty": float(params["quantity"])}
-            self.placed.append(dict(params))
-            self.polls[self.next_id] = 0
+                # 확정 거부(4xx). 2026-11-20 전엔 "500 boom" 이었다 -- 5xx 는 «체결 상태 불명»이라(D2 수정) 확정 거부 사례로 쓸 수 없다
+                return {"__error__": "400 [-2019] Margin is insufficient."}
+            ghost, self.place_err = self.place_err, None
+            if ghost is None or ghost[1]:
+                self.next_id += 1
+                self.orders[self.next_id] = {"type": "LIMIT", "status": "NEW", "filled": 0.0,
+                                             "qty": float(params["quantity"]), "cid": params.get("newClientOrderId")}
+                self.placed.append(dict(params))
+                self.polls[self.next_id] = 0
+            if ghost is not None:
+                return {"__error__": ghost[0]}
             return {"orderId": self.next_id, "status": "NEW", "executedQty": "0"}
+        if path == "/fapi/v1/order" and method == "GET" and "origClientOrderId" in params:
+            self.cid_lookups += 1
+            if self._fails("lookup"):
+                return {"__error__": "TimeoutError: lookup"}
+            oid = self._by_cid(params["origClientOrderId"])
+            if oid is None or self.cid_lookups <= self.lookup_miss:
+                return {"__error__": "400 [-2013] Order does not exist."}
+            o = self.orders[oid]
+            return {"orderId": oid, "status": o["status"], "executedQty": str(o["filled"])}
+        if path == "/fapi/v1/order" and method == "DELETE" and "origClientOrderId" in params:
+            self.cid_deletes.append(params["origClientOrderId"])
+            if self._fails("delete_cid"):
+                return {"__error__": "TimeoutError: delete"}
+            oid = self._by_cid(params["origClientOrderId"])
+            if oid is None:
+                return {"__error__": "400 [-2011] Unknown order sent."}
+            if self.orders[oid]["status"] == "NEW":
+                self.orders[oid]["status"] = "CANCELED"
+            return {"orderId": oid, "status": "CANCELED"}
         if path == "/fapi/v1/order" and method == "GET":
             oid = params.get("orderId")
             o = self.orders.get(oid)
@@ -118,6 +157,31 @@ def run(plan, fx, *, drift=False, entry=False):
     fn = ex.run_entry if entry else ex.run_exit
     asyncio.run(fn(None, plan, state))
     return state
+
+
+def run_path(plan, fx, path):
+    """«나갔는지 모르는» POST 사례용(2026-11-20 D2): 청산·진입(fill_maker) · 기다리기 · 지정가 대기를 같은 가짜로.
+    표식 조회 사이 1초 대기는 실제로 기다리지 않는다(asyncio.sleep 을 잠시 갈아끼움 -- 횟수만 센다)."""
+    state: dict = {}
+    ex.signed = fx.signed
+    ex.POLL_SEC = 0.0
+    async def mp(session, order_side, symbol):
+        return (float(plan["price"]), 2470.00, 2470.01)
+    ex.maker_price = mp
+    ex.drifted = lambda *a: False
+    sleeps: list[float] = []
+    real_sleep = asyncio.sleep
+    async def no_sleep(sec, *a, **k):
+        sleeps.append(sec)
+    fn = {"exit": lambda: ex.run_exit(None, plan, state), "entry": lambda: ex.run_entry(None, plan, state),
+          "wait": lambda: ex.run_entry_wait(None, plan, state, 5.0),
+          "limit": lambda: ex.run_entry_limit(None, plan, state, max_sec=5.0)}[path]
+    asyncio.sleep = no_sleep
+    try:
+        asyncio.run(fn())
+    finally:
+        asyncio.sleep = real_sleep
+    return state, sleeps
 
 
 BASE = {"symbol": "ETHUSDT", "side": "SELL", "positionSide": "LONG", "type": "LIMIT",
@@ -266,12 +330,51 @@ def main() -> int:
         except AssertionError as e:
             fails.append(str(e))
 
+    # 12) 🔴«나갔는지 모르는» 지정가 POST(2026-11-20 D2): 바이낸스는 5xx·-1007·-1006·네트워크 오류를 «체결 상태 불명»이라 한다.
+    #     세 경로(fill_maker = 청산·진입 · 기다리기 · 지정가 대기)가 같게: 표식으로 3번 조회 → 찾으면 이어 감 → 끝내 모르면 표식 DELETE 뒤 error.
+    #     고치기 전: fill_maker 는 네트워크 오류만 한 번 조회 · 기다리기는 조회 없음 → 살아 있는 유령 GTX 를 두고 phase=rejected.
+    timeout = "TimeoutError: read"
+    unknown_cases = (
+        # (이름, 가짜 설정, 기대 phase, 기대 표식 조회 수, 표식 DELETE 있나, 끝에 살아 있는 지정가 수)
+        ("a 503·접수됨", dict(place_err=("503 Service Unavailable", True)), "filled_maker", 1, False, 0),
+        ("b -1007·접수됨", dict(place_err=("408 [-1007] Timeout waiting for response from backend server. "
+                                           "Send status unknown; execution status unknown.", True)), "filled_maker", 1, False, 0),
+        ("b' -1006·접수됨", dict(place_err=("400 [-1006] An unexpected response was received from the message bus. "
+                                            "Execution status unknown.", True)), "filled_maker", 1, False, 0),
+        ("c 시간초과·둘째 조회에 보임", dict(place_err=(timeout, True), lookup_miss=1), "filled_maker", 2, False, 0),
+        ("d 접수 안 됨·3번 다 없음", dict(place_err=(timeout, False)), "error", 3, True, 0),
+        ("e 조회·DELETE 전부 실패", dict(place_err=(timeout, True), fail=("lookup", "delete_cid")), "error", 3, True, 1),
+        ("음성: 4xx 확정 거부", dict(place_err=("400 [-2019] Margin is insufficient.", False)), "rejected", 0, False, 0),
+    )
+    for path in ("exit", "entry", "wait", "limit"):
+        for name, kw, phase, lookups, deleted, live_n in unknown_cases:
+            label = f"불명 POST {path}/{name}"
+            fx = FakeExchange(fill_after=1, **kw)
+            plan = dict(BASE) if path == "exit" else {**BASE, "side": "BUY"}
+            try:
+                st, sleeps = run_path(plan, fx, path)
+                check(label, st, fx, 2.0)
+                live = fx.live_limit_ids()
+                assert not (live and st.get("phase") == "rejected"), f"{label}: 살아 있는 지정가 {live} 인데 rejected"
+                assert st["phase"] == phase, f"{label}: phase={st['phase']} (기대 {phase}) {st.get('error')}"
+                assert fx.cid_lookups == lookups, f"{label}: 표식 조회 {fx.cid_lookups}번 (기대 {lookups})"
+                assert fx.cid_deletes == ([fx.attempt_cids[-1]] if deleted else []), f"{label}: 표식 DELETE {fx.cid_deletes}"
+                assert len(live) == live_n, f"{label}: 살아 있는 지정가 {live}"
+                assert len(fx.placed) <= 1 and not fx.market_orders, f"{label}: 지정가 {len(fx.placed)}건 · 시장가 {len(fx.market_orders)}건"
+                if phase == "filled_maker":
+                    assert abs(st["filled"] - 2.0) < 1e-9, f"{label}: 체결 {st['filled']}"
+                if phase == "error":
+                    assert "확인하지 못했습니다" in str(st.get("error")), f"{label}: 사람에게 넘기는 문구가 없다 {st.get('error')}"
+            except AssertionError as e:
+                fails.append(str(e))
+
     if fails:
         print(f"🔴 불변식 위반 {len(fails)}건")
         for f in fails:
             print("   -", f)
         return 1
-    print("통과 11/11 — 과청산 없음 · 중복 주문 없음 · 항상 종료 · 실패시 멈춤(재호가 0·1·3회 뒤) · 진입 리페그 · post-only 재호가")
+    print("통과 12/12 — 과청산 없음 · 중복 주문 없음 · 항상 종료 · 실패시 멈춤(재호가 0·1·3회 뒤) · 진입 리페그 · post-only 재호가"
+          " · 불명 POST 4경로×7사례")
     return 0
 
 
