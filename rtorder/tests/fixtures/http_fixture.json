@@ -1,0 +1,7858 @@
+{
+"base_note": "포트는 실행마다 다르다 -- 요청 대상은 경로+쿼리만 적는다",
+"timeout": 0.5,
+"hang": 0.8,
+"t0": 1800000000.0,
+"scenarios": [
+{
+"name": "sign 0",
+"calls": [
+{
+"fn": "sign",
+"args": {
+"params": [
+[
+"symbol",
+"ETHUSDC"
+]
+],
+"secret": "test_secret",
+"offset": 0
+},
+"advance": 0.0
+}
+],
+"responses": [],
+"keys": true,
+"requests": [],
+"results": [
+"symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000000&signature=670a3e362530e6967745c79e92bea204d3bdaa2b9ce3bc5ff9909f8f83260bcd"
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "sign 1",
+"calls": [
+{
+"fn": "sign",
+"args": {
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"side",
+"BUY"
+],
+[
+"positionSide",
+"LONG"
+],
+[
+"type",
+"LIMIT"
+],
+[
+"timeInForce",
+"GTX"
+],
+[
+"price",
+2500.01
+],
+[
+"quantity",
+1.234
+],
+[
+"newClientOrderId",
+"dbpgL1800000000000"
+]
+],
+"secret": "test_secret",
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [],
+"keys": true,
+"requests": [],
+"results": [
+"symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.01&quantity=1.234&newClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=a6149554539fb1b1cbef9def7d31685f645aa5a130d5d5ddfede4d5ad4a3f9be"
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "sign 2",
+"calls": [
+{
+"fn": "sign",
+"args": {
+"params": [
+[
+"price",
+0.30000000000000004
+],
+[
+"quantity",
+1e-05
+],
+[
+"x",
+1e+16
+],
+[
+"y",
+-0.0
+],
+[
+"z",
+1.2345678901234568e+17
+],
+[
+"w",
+2.5e-07
+]
+],
+"secret": "test_secret",
+"offset": -1000
+},
+"advance": 12.3456
+}
+],
+"responses": [],
+"keys": true,
+"requests": [],
+"results": [
+"price=0.30000000000000004&quantity=1e-05&x=1e%2B16&y=-0.0&z=1.2345678901234568e%2B17&w=2.5e-07&recvWindow=5000&timestamp=1800000011345&signature=85d4e495270ebd316c270a6e3989c231a556872e7b7c178eefbc61af57a4483f"
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "sign 3",
+"calls": [
+{
+"fn": "sign",
+"args": {
+"params": [
+[
+"orderId",
+null
+],
+[
+"leverage",
+20
+],
+[
+"closePosition",
+"true"
+],
+[
+"flag",
+true
+]
+],
+"secret": "test_secret",
+"offset": 5
+},
+"advance": 0.001
+}
+],
+"responses": [],
+"keys": true,
+"requests": [],
+"results": [
+"orderId=None&leverage=20&closePosition=true&flag=True&recvWindow=5000&timestamp=1800000000006&signature=fc43e6214c0db3c9ec8757ab18a9418ee2083efcca3d83b8ce3db1638d877725"
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "sign 4",
+"calls": [
+{
+"fn": "sign",
+"args": {
+"params": [
+[
+"sp ace",
+"a b+c&d=e/f?g~h_i.j-k"
+],
+[
+"한글",
+"가격 2,500"
+],
+[
+"pct",
+"100%"
+],
+[
+"emoji",
+"✓"
+]
+],
+"secret": "test_secret",
+"offset": 0
+},
+"advance": 0.0
+}
+],
+"responses": [],
+"keys": true,
+"requests": [],
+"results": [
+"sp+ace=a+b%2Bc%26d%3De%2Ff%3Fg~h_i.j-k&%ED%95%9C%EA%B8%80=%EA%B0%80%EA%B2%A9+2%2C500&pct=100%25&emoji=%E2%9C%93&recvWindow=5000&timestamp=1800000000000&signature=7df8899466228c2a18efb9036f7531c0f37aa514fed34083b82d77e4db8d540f"
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "sign 5",
+"calls": [
+{
+"fn": "sign",
+"args": {
+"params": [
+[
+"symbol",
+"ETHUSDC"
+]
+],
+"secret": "다른 비밀값 with space",
+"offset": 1
+},
+"advance": 99.999
+}
+],
+"responses": [],
+"keys": true,
+"requests": [],
+"results": [
+"symbol=ETHUSDC&recvWindow=5000&timestamp=1800000100000&signature=504d89ea5b1cc942b273fd803fed4915c6ee5627ce775c4cf2e5010bc333c57a"
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "sign 6",
+"calls": [
+{
+"fn": "sign",
+"args": {
+"params": [],
+"secret": "test_secret",
+"offset": 0
+},
+"advance": 0.0
+}
+],
+"responses": [],
+"keys": true,
+"requests": [],
+"results": [
+"recvWindow=5000&timestamp=1800000000000&signature=ea2af65b459eda75e6b8ddfee3dd9c530943ab6f922dbfbc6136b6be4dfa20a3"
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 200 dict GET",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"orderId": 77,
+"status": "NEW",
+"executedQty": "0.000",
+"price": "2500.01"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+{
+"orderId": 77,
+"status": "NEW",
+"executedQty": "0.000",
+"price": "2500.01"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 200 list GET",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": [
+{
+"a": 1
+},
+{
+"b": [
+1.5,
+null,
+true
+]
+}
+]
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+[
+{
+"a": 1
+},
+{
+"b": [
+1.5,
+null,
+true
+]
+}
+]
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 200 charset GET",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"x": 1
+},
+"ctype": "application/json; charset=utf-8"
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+{
+"x": 1
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 200 empty GET",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"raw": ""
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+null
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 200 bad json GET",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"raw": "{nope"
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 400 -5022 POST",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "POST",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 400,
+"body": {
+"code": -5022,
+"msg": "Due to the order could not be executed as maker, the Post Only order will be rejected. The order will not be recorded in the order history"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "400 [-5022] Due to the order could not be executed as maker, the Post Only order will be rejected. The order will not be recorded in the order history"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+true
+]
+},
+{
+"name": "signed 400 -5022 DELETE",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "DELETE",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 400,
+"body": {
+"code": -5022,
+"msg": "Due to the order could not be executed as maker, the Post Only order will be rejected. The order will not be recorded in the order history"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "400 [-5022] Due to the order could not be executed as maker, the Post Only order will be rejected. The order will not be recorded in the order history"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+true
+]
+},
+{
+"name": "signed 400 no code GET",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 400,
+"body": {
+"msg": "Bad thing"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "400 Bad thing"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 400 code null GET",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 400,
+"body": {
+"code": null,
+"msg": "m"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "400 m"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 400 no msg GET",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 400,
+"body": {
+"code": -1,
+"foo": "it's",
+"bar": [
+1,
+2.5,
+null,
+false
+],
+"q": "a\"b",
+"k": "한글\n"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "400 [-1] {'code': -1, 'foo': \"it's\", 'bar': [1, 2.5, None, False], 'q': 'a\"b', 'k': '한글\\n'}"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 400 msg null GET",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 400,
+"body": {
+"code": -1,
+"msg": null
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "400 [-1] None"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 400 list GET",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 400,
+"body": [
+1,
+2
+]
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "AttributeError: 'list' object has no attribute 'get'"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 400 empty GET",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 400,
+"raw": ""
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "AttributeError: 'NoneType' object has no attribute 'get'"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 503 html GET",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 503,
+"raw": "<html>busy</html>",
+"ctype": "text/html"
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "ContentTypeError: 503, message='Attempt to decode JSON with unexpected mimetype: text/html', url='{BASE}/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900'"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 503 json GET",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 503,
+"body": {
+"msg": "Service Unavailable"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "503 Service Unavailable"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 408 -1007 GET",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 408,
+"body": {
+"code": -1007,
+"msg": "Timeout waiting for response from backend server. Send status unknown; execution status unknown."
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "408 [-1007] Timeout waiting for response from backend server. Send status unknown; execution status unknown."
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 500 -1006 GET",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 500,
+"body": {
+"code": -1006,
+"msg": "An unexpected response was received from the message bus. Execution status unknown."
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "500 [-1006] An unexpected response was received from the message bus. Execution status unknown."
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 418 banned GET",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 418,
+"body": {
+"code": -1003,
+"msg": "Way too many requests; IP(1.2.3.4) banned until 1800000600000. Please use the websocket for live updates to avoid bans."
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "418 [-1003] Way too many requests; IP(1.2.3.4) banned until 1800000600000. Please use the websocket for live updates to avoid bans."
+}
+],
+"ban": "1800000600.000\n",
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 429 retry-after GET",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 429,
+"body": {
+"code": -1003,
+"msg": "Too many requests."
+},
+"headers": {
+"Retry-After": "5"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "429 [-1003] Too many requests."
+}
+],
+"ban": "1795184889.643\n",
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 429 no header GET",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 429,
+"body": {
+"code": -1003,
+"msg": "Too many requests."
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "429 [-1003] Too many requests."
+}
+],
+"ban": "1795184914.646\n",
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 시간초과 GET",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"act": "hang"
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=056414e44b743a8aeeb710840dfb9497622c27a93c132594b55cac5cca798900",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "TimeoutError: "
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 끊김 GET 2",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 0
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"act": "close"
+},
+{
+"act": "close"
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000000&signature=5dfb038b1eb88b984422c78b13ef88ca359154c67dfc29b99228575ee2f6d55b",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000000&signature=5dfb038b1eb88b984422c78b13ef88ca359154c67dfc29b99228575ee2f6d55b",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "ServerDisconnectedError: Server disconnected"
+}
+],
+"ban": null,
+"conns": 2,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 끊김 DELETE 2",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "DELETE",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 0
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"act": "close"
+},
+{
+"act": "close"
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000000&signature=5dfb038b1eb88b984422c78b13ef88ca359154c67dfc29b99228575ee2f6d55b",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000000&signature=5dfb038b1eb88b984422c78b13ef88ca359154c67dfc29b99228575ee2f6d55b",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "ServerDisconnectedError: Server disconnected"
+}
+],
+"ban": null,
+"conns": 2,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 끊김 PUT 2",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "PUT",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 0
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"act": "close"
+},
+{
+"act": "close"
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "PUT",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000000&signature=5dfb038b1eb88b984422c78b13ef88ca359154c67dfc29b99228575ee2f6d55b",
+"key": "test_key"
+},
+{
+"method": "PUT",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000000&signature=5dfb038b1eb88b984422c78b13ef88ca359154c67dfc29b99228575ee2f6d55b",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "ServerDisconnectedError: Server disconnected"
+}
+],
+"ban": null,
+"conns": 2,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 끊김 POST 1",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "POST",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 0
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"act": "close"
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000000&signature=5dfb038b1eb88b984422c78b13ef88ca359154c67dfc29b99228575ee2f6d55b",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "ServerDisconnectedError: Server disconnected"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 끊김 GET 2",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "GET",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 0
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"act": "close"
+},
+{
+"status": 200,
+"body": {
+"orderId": 1
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000000&signature=5dfb038b1eb88b984422c78b13ef88ca359154c67dfc29b99228575ee2f6d55b",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000000&signature=5dfb038b1eb88b984422c78b13ef88ca359154c67dfc29b99228575ee2f6d55b",
+"key": "test_key"
+}
+],
+"results": [
+{
+"orderId": 1
+}
+],
+"ban": null,
+"conns": 2,
+"post_only": [
+false
+]
+},
+{
+"name": "signed 끊김 DELETE 2",
+"calls": [
+{
+"fn": "signed",
+"args": {
+"method": "DELETE",
+"path": "/fapi/v1/order",
+"params": [
+[
+"symbol",
+"ETHUSDC"
+],
+[
+"orderId",
+77
+]
+],
+"offset": 0
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"act": "close"
+},
+{
+"status": 400,
+"body": {
+"code": -2011,
+"msg": "Unknown order sent."
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000000&signature=5dfb038b1eb88b984422c78b13ef88ca359154c67dfc29b99228575ee2f6d55b",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=77&recvWindow=5000&timestamp=1800000000000&signature=5dfb038b1eb88b984422c78b13ef88ca359154c67dfc29b99228575ee2f6d55b",
+"key": "test_key"
+}
+],
+"results": [
+{
+"__error__": "400 [-2011] Unknown order sent."
+}
+],
+"ban": null,
+"conns": 2,
+"post_only": [
+false
+]
+},
+{
+"name": "clock_offset ok",
+"calls": [
+{
+"fn": "clock_offset",
+"args": {},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+}
+],
+"results": [
+37
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "clock_offset html",
+"calls": [
+{
+"fn": "clock_offset",
+"args": {},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 502,
+"raw": "x",
+"ctype": "text/html"
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+}
+],
+"results": [
+0
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "clock_offset 끊김",
+"calls": [
+{
+"fn": "clock_offset",
+"args": {},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"act": "close"
+},
+{
+"act": "close"
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+}
+],
+"results": [
+0
+],
+"ban": null,
+"conns": 2,
+"post_only": [
+false
+]
+},
+{
+"name": "maker_price ok",
+"calls": [
+{
+"fn": "maker_price",
+"args": {
+"side": "SELL",
+"symbol": "ETHUSDC"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.00",
+"askPrice": "2500.01"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+}
+],
+"results": [
+[
+2500.01,
+2500.0,
+2500.01
+]
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "maker_price 400",
+"calls": [
+{
+"fn": "maker_price",
+"args": {
+"side": "BUY",
+"symbol": "ETHUSDC"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 400,
+"body": {
+"code": -1121,
+"msg": "Invalid symbol."
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+}
+],
+"results": [
+{
+"__raise__": "KeyError: 'bidPrice'"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "load_filters 캐시",
+"calls": [
+{
+"fn": "load_filters",
+"args": {
+"symbol": "ETHUSDC"
+},
+"advance": 0.0
+},
+{
+"fn": "load_filters",
+"args": {
+"symbol": "ETHUSDC"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"symbols": [
+{
+"symbol": "ETHUSDT"
+},
+{
+"symbol": "ETHUSDC",
+"filters": [
+{
+"filterType": "PRICE_FILTER",
+"tickSize": "0.01"
+},
+{
+"filterType": "LOT_SIZE",
+"stepSize": "0.001",
+"minQty": "0.001"
+},
+{
+"filterType": "MIN_NOTIONAL",
+"notional": "20"
+}
+]
+}
+]
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/exchangeInfo",
+"key": null
+}
+],
+"results": [
+{
+"step": 0.001,
+"tick": 0.01,
+"min_qty": 0.001,
+"min_notional": 20.0
+},
+{
+"step": 0.001,
+"tick": 0.01,
+"min_qty": 0.001,
+"min_notional": 20.0
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false,
+false
+]
+},
+{
+"name": "load_filters 없음",
+"calls": [
+{
+"fn": "load_filters",
+"args": {
+"symbol": "NOPE"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"symbols": [
+{
+"symbol": "ETHUSDT"
+},
+{
+"symbol": "ETHUSDC",
+"filters": [
+{
+"filterType": "PRICE_FILTER",
+"tickSize": "0.01"
+},
+{
+"filterType": "LOT_SIZE",
+"stepSize": "0.001",
+"minQty": "0.001"
+},
+{
+"filterType": "MIN_NOTIONAL",
+"notional": "20"
+}
+]
+}
+]
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/exchangeInfo",
+"key": null
+}
+],
+"results": [
+{
+"__raise__": "RuntimeError: symbol not in exchangeInfo: NOPE"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "ensure_closed 두 번째에 확인",
+"calls": [
+{
+"fn": "ensure_closed",
+"args": {
+"oid": 77,
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"orderId": 77,
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 77,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2011,
+"msg": "Unknown order sent."
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 77,
+"status": "CANCELED",
+"executedQty": "0.4"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=85d06bf81ba3e6f1194dca4a5257c505b4d103ce8a17bfd9d22f34ad671ee482",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=85d06bf81ba3e6f1194dca4a5257c505b4d103ce8a17bfd9d22f34ad671ee482",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=77&recvWindow=5000&timestamp=1800000001037&signature=7fb9d4a56a7e5306e120155d2b8b5b984edb4f975d9ba9042aaee42e19252d43",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=77&recvWindow=5000&timestamp=1800000001037&signature=7fb9d4a56a7e5306e120155d2b8b5b984edb4f975d9ba9042aaee42e19252d43",
+"key": "test_key"
+}
+],
+"results": [
+0.4
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "ensure_closed 확인 못 함",
+"calls": [
+{
+"fn": "ensure_closed",
+"args": {
+"oid": 77,
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 500,
+"body": {
+"code": -1000,
+"msg": "x"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 77,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 500,
+"body": {
+"code": -1000,
+"msg": "x"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 77,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 500,
+"body": {
+"code": -1000,
+"msg": "x"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 77,
+"status": "NEW",
+"executedQty": "0"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=85d06bf81ba3e6f1194dca4a5257c505b4d103ce8a17bfd9d22f34ad671ee482",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=77&recvWindow=5000&timestamp=1800000000037&signature=85d06bf81ba3e6f1194dca4a5257c505b4d103ce8a17bfd9d22f34ad671ee482",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=77&recvWindow=5000&timestamp=1800000001037&signature=7fb9d4a56a7e5306e120155d2b8b5b984edb4f975d9ba9042aaee42e19252d43",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=77&recvWindow=5000&timestamp=1800000001037&signature=7fb9d4a56a7e5306e120155d2b8b5b984edb4f975d9ba9042aaee42e19252d43",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=77&recvWindow=5000&timestamp=1800000002037&signature=8290919211f852c279996cd55cabfc08b90be3b2a2c0bb590ce8a1641bb49906",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=77&recvWindow=5000&timestamp=1800000002037&signature=8290919211f852c279996cd55cabfc08b90be3b2a2c0bb590ce8a1641bb49906",
+"key": "test_key"
+}
+],
+"results": [
+null
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "ensure_closed oid None",
+"calls": [
+{
+"fn": "ensure_closed",
+"args": {
+"oid": null,
+"offset": 0
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 400,
+"body": {
+"code": -2011,
+"msg": "Unknown order sent."
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2013,
+"msg": "Order does not exist."
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2011,
+"msg": "Unknown order sent."
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2013,
+"msg": "Order does not exist."
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2011,
+"msg": "Unknown order sent."
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2013,
+"msg": "Order does not exist."
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=None&recvWindow=5000&timestamp=1800000000000&signature=17dbd3a27ba1018fb9067c6dc6c8c16818a66d9e10e55c1cf1c25ceddeb5e009",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=None&recvWindow=5000&timestamp=1800000000000&signature=17dbd3a27ba1018fb9067c6dc6c8c16818a66d9e10e55c1cf1c25ceddeb5e009",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=None&recvWindow=5000&timestamp=1800000001000&signature=7617b95fc6d095c917305594c7ba8f82e7e811f8ddfc1e9594a984682102635f",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=None&recvWindow=5000&timestamp=1800000001000&signature=7617b95fc6d095c917305594c7ba8f82e7e811f8ddfc1e9594a984682102635f",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=None&recvWindow=5000&timestamp=1800000002000&signature=c7352f0ba82eecd050ac01a5df5b70f3b0297b80171fa1136a4b972d84e67fa8",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=None&recvWindow=5000&timestamp=1800000002000&signature=c7352f0ba82eecd050ac01a5df5b70f3b0297b80171fa1136a4b972d84e67fa8",
+"key": "test_key"
+}
+],
+"results": [
+null
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "resolve 4xx 그대로",
+"calls": [
+{
+"fn": "resolve_unknown_post",
+"args": {
+"cid": "dbpgL1",
+"order": {
+"__error__": "400 [-2019] Margin is insufficient."
+},
+"offset": 0
+},
+"advance": 0.0
+}
+],
+"responses": [],
+"keys": true,
+"requests": [],
+"results": [
+{
+"__error__": "400 [-2019] Margin is insufficient."
+}
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "resolve 둘째에 찾음",
+"calls": [
+{
+"fn": "resolve_unknown_post",
+"args": {
+"cid": "dbpgL1",
+"order": {
+"__error__": "503 Service Unavailable"
+},
+"offset": 0
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 400,
+"body": {
+"code": -2013,
+"msg": "Order does not exist."
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 9,
+"status": "NEW",
+"executedQty": "0"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbpgL1&recvWindow=5000&timestamp=1800000000000&signature=4f451676601acbaa07c1219a70e3a6fe88b1bbf0177f5b42046353650010b341",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbpgL1&recvWindow=5000&timestamp=1800000001000&signature=09a6c3989cae9ec781799d106d6e639b9edff6a2b3aedd3c98e409489bcac284",
+"key": "test_key"
+}
+],
+"results": [
+{
+"orderId": 9,
+"status": "NEW",
+"executedQty": "0"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "resolve 끝내 없음",
+"calls": [
+{
+"fn": "resolve_unknown_post",
+"args": {
+"cid": "dbwtS1",
+"order": {
+"__error__": "TimeoutError: "
+},
+"offset": 0
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 400,
+"body": {
+"code": -2013,
+"msg": "Order does not exist."
+}
+},
+{
+"act": "close"
+},
+{
+"status": 400,
+"body": {
+"code": -2013,
+"msg": "Order does not exist."
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2013,
+"msg": "Order does not exist."
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2011,
+"msg": "Unknown order sent."
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbwtS1&recvWindow=5000&timestamp=1800000000000&signature=de8fdb60e6ccce43f60f2258fb01aef593d62e372e674c0ef9b84a3cdd1b20a6",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbwtS1&recvWindow=5000&timestamp=1800000001000&signature=ca01bf0453e466c4e653dab50b2d3b677a2bdc0ff3c98033a2dab8328eaf24e8",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbwtS1&recvWindow=5000&timestamp=1800000001000&signature=ca01bf0453e466c4e653dab50b2d3b677a2bdc0ff3c98033a2dab8328eaf24e8",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbwtS1&recvWindow=5000&timestamp=1800000002000&signature=9f4c2ed0a8719e3ce9ceedad4ddc878b8e664a5020714125f58553a36ac0d00d",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbwtS1&recvWindow=5000&timestamp=1800000003000&signature=fcfdd148fd0f32d5950fc7ff53dba5adf1abad42c8f68ef99dee3fad995ef0ce",
+"key": "test_key"
+}
+],
+"results": [
+null
+],
+"ban": null,
+"conns": 2,
+"post_only": [
+false
+]
+},
+{
+"name": "fill_maker 정상",
+"calls": [
+{
+"fn": "fill_maker",
+"args": {
+"price": 2500.0,
+"total": 2.0,
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.00",
+"askPrice": "2500.01"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "FILLED",
+"executedQty": "2.0"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.0&quantity=2.0&newClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=997398d5de72d8dc32e1e0f4a5981cad12880b3fcbc761efb53f9c180ced3912",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000006037&signature=ed3bc2e8062c2a39dd53e00cb8eec53afb53419aa4a3c0c8ff8bceaf89be0c04",
+"key": "test_key"
+}
+],
+"results": [
+{
+"out": [
+2.0,
+2500.0,
+0,
+null
+],
+"state": {
+"filled": 2.0,
+"repegs": null,
+"limit_price": 2500.0,
+"order_id": 101
+}
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "fill_maker 앞지름 1번",
+"calls": [
+{
+"fn": "fill_maker",
+"args": {
+"price": 2500.0,
+"total": 2.0,
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.05",
+"askPrice": "2500.06"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 102,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 102,
+"status": "FILLED",
+"executedQty": "1.5"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.0&quantity=2.0&newClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=997398d5de72d8dc32e1e0f4a5981cad12880b3fcbc761efb53f9c180ced3912",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.05&quantity=1.5&newClientOrderId=dbpgL1800000003000&recvWindow=5000&timestamp=1800000003037&signature=5e460cf87678a570894023d409dbb3f5d9c174e1aabca18c637bead3a5904d95",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=102&recvWindow=5000&timestamp=1800000006037&signature=9201da232d09dc8b40bcb6a9f6b9d80c6a9e02bd79592cc9222656af0e220ce7",
+"key": "test_key"
+}
+],
+"results": [
+{
+"out": [
+2.0,
+2500.05,
+1,
+null
+],
+"state": {
+"filled": 2.0,
+"repegs": 1,
+"limit_price": 2500.05,
+"order_id": 102
+}
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "fill_maker -5022 뒤",
+"calls": [
+{
+"fn": "fill_maker",
+"args": {
+"price": 2500.0,
+"total": 2.0,
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 400,
+"body": {
+"code": -5022,
+"msg": "Due to the order could not be executed as maker, the Post Only order will be rejected. The order will not be recorded in the order history"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2499.99",
+"askPrice": "2500.00"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 103,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 103,
+"status": "FILLED",
+"executedQty": "2"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.0&quantity=2.0&newClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=997398d5de72d8dc32e1e0f4a5981cad12880b3fcbc761efb53f9c180ced3912",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2499.99&quantity=2.0&newClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=82ec414befde13a98d0ede95f53439cba2464598e8960b8999e1ac54346f0266",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=103&recvWindow=5000&timestamp=1800000003037&signature=9600ea2832c28fe815586cd91efef940b61cddaa457fdf828ab5d3f73758836f",
+"key": "test_key"
+}
+],
+"results": [
+{
+"out": [
+2.0,
+2499.99,
+1,
+null
+],
+"state": {
+"filled": 2.0,
+"repegs": 1,
+"limit_price": 2499.99,
+"order_id": 103
+}
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "fill_maker 503 접수됨",
+"calls": [
+{
+"fn": "fill_maker",
+"args": {
+"price": 2500.0,
+"total": 2.0,
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 503,
+"body": {
+"msg": "Service Unavailable"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 104,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 104,
+"status": "FILLED",
+"executedQty": "2.0"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.0&quantity=2.0&newClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=997398d5de72d8dc32e1e0f4a5981cad12880b3fcbc761efb53f9c180ced3912",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=b7eb4a3d1579e1de13556e44a5583dc44e3a4040a842247cd6fdcc321f6a3f8e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=104&recvWindow=5000&timestamp=1800000003037&signature=e73f249a5a4115516cd12b3a8ba63f5572769043495e802dc9f0e5169ee2970f",
+"key": "test_key"
+}
+],
+"results": [
+{
+"out": [
+2.0,
+2500.0,
+0,
+null
+],
+"state": {
+"filled": 2.0,
+"repegs": null,
+"limit_price": 2500.0,
+"order_id": 104
+}
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "fill_maker 끊김 끝내 모름",
+"calls": [
+{
+"fn": "fill_maker",
+"args": {
+"price": 2500.0,
+"total": 2.0,
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"act": "close"
+},
+{
+"status": 400,
+"body": {
+"code": -2013,
+"msg": "Order does not exist."
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2013,
+"msg": "Order does not exist."
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2013,
+"msg": "Order does not exist."
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2011,
+"msg": "Unknown order sent."
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.0&quantity=2.0&newClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=997398d5de72d8dc32e1e0f4a5981cad12880b3fcbc761efb53f9c180ced3912",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=b7eb4a3d1579e1de13556e44a5583dc44e3a4040a842247cd6fdcc321f6a3f8e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000001037&signature=7932646731e6903cf0905c8ad97cfe2f589315badbfbb313fad42b1485335de1",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000002037&signature=1ac70b857c1e0c11c4025a6a65dad36ca58d4f7923b01ebfb7a557d28fa75bbb",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000003037&signature=099c06e4a082b02498c274d8e41a121f40a923cb6642ba7d4c09a817d64860f3",
+"key": "test_key"
+}
+],
+"results": [
+{
+"out": [
+0.0,
+2500.0,
+0,
+{
+"phase": "error",
+"error": "주문 접수 여부를 확인하지 못했습니다(ServerDisconnectedError: Server disconnected) — 거래소에서 직접 확인하세요"
+}
+],
+"state": {
+"filled": null,
+"repegs": null,
+"limit_price": null,
+"order_id": null
+}
+}
+],
+"ban": null,
+"conns": 2,
+"post_only": [
+false
+]
+},
+{
+"name": "fill_maker 시간초과 접수됨",
+"calls": [
+{
+"fn": "fill_maker",
+"args": {
+"price": 2500.0,
+"total": 2.0,
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"act": "hang"
+},
+{
+"status": 200,
+"body": {
+"orderId": 105,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 105,
+"status": "FILLED",
+"executedQty": "2.0"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.0&quantity=2.0&newClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=997398d5de72d8dc32e1e0f4a5981cad12880b3fcbc761efb53f9c180ced3912",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=b7eb4a3d1579e1de13556e44a5583dc44e3a4040a842247cd6fdcc321f6a3f8e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=105&recvWindow=5000&timestamp=1800000003037&signature=7bf4295a911575195a75e872d40998ae6cc19a23c6cadb4f999d53803c95814e",
+"key": "test_key"
+}
+],
+"results": [
+{
+"out": [
+2.0,
+2500.0,
+0,
+null
+],
+"state": {
+"filled": 2.0,
+"repegs": null,
+"limit_price": 2500.0,
+"order_id": 105
+}
+}
+],
+"ban": null,
+"conns": 2,
+"post_only": [
+false
+]
+},
+{
+"name": "fill_maker 취소 확인 못 함",
+"calls": [
+{
+"fn": "fill_maker",
+"args": {
+"price": 2500.0,
+"total": 2.0,
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.3"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.05",
+"askPrice": "2500.06"
+}
+},
+{
+"status": 500,
+"body": {
+"code": -1000,
+"msg": "x"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0.3"
+}
+},
+{
+"status": 500,
+"body": {
+"code": -1000,
+"msg": "x"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0.3"
+}
+},
+{
+"status": 500,
+"body": {
+"code": -1000,
+"msg": "x"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0.3"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.0&quantity=2.0&newClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=997398d5de72d8dc32e1e0f4a5981cad12880b3fcbc761efb53f9c180ced3912",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000004037&signature=c59fa1a5ed9bdf62783bbce25ce979d2c7d0dde745380821d7563032f5932f48",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000004037&signature=c59fa1a5ed9bdf62783bbce25ce979d2c7d0dde745380821d7563032f5932f48",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000005037&signature=c92ef18821dcafe88fd1d2a6a0af98cbbd25a5b68c89bbf5d5271cb706d5cf62",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000005037&signature=c92ef18821dcafe88fd1d2a6a0af98cbbd25a5b68c89bbf5d5271cb706d5cf62",
+"key": "test_key"
+}
+],
+"results": [
+{
+"out": [
+0.3,
+2500.05,
+0,
+{
+"phase": "error",
+"error": "주문 101 취소를 확인하지 못했습니다 — 거래소에서 직접 확인하세요"
+}
+],
+"state": {
+"filled": 0.3,
+"repegs": null,
+"limit_price": 2500.0,
+"order_id": 101
+}
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "fill_maker 매도 조회 실패 재시도",
+"calls": [
+{
+"fn": "fill_maker",
+"args": {
+"common": {
+"symbol": "ETHUSDC",
+"side": "SELL",
+"positionSide": "LONG"
+},
+"price": 2500.01,
+"total": 0.5,
+"offset": 0
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"orderId": 106,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"act": "close"
+},
+{
+"act": "close"
+},
+{
+"status": 502,
+"body": {
+"code": -1001,
+"msg": "Internal error"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 106,
+"status": "FILLED",
+"executedQty": "0.5"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.01&quantity=0.5&newClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000000&signature=8a83d5daab26394ae3193eeb70d681ea94acd33c7df618860e00ef272adf77e6",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=106&recvWindow=5000&timestamp=1800000003000&signature=0066d6e5bd5749279809fc82caca656afa93910191f196d40b24737cec82070e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=106&recvWindow=5000&timestamp=1800000003000&signature=0066d6e5bd5749279809fc82caca656afa93910191f196d40b24737cec82070e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=106&recvWindow=5000&timestamp=1800000006000&signature=4ad0d33ed1e541746c5e2d7ded473495fa656d780837f3ac7c6d38f39d450cff",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=106&recvWindow=5000&timestamp=1800000009000&signature=b1678d7480c5fc5ffcb15c8da940d44269305af1495ff8f4f03bc71f2f9b5a9f",
+"key": "test_key"
+}
+],
+"results": [
+{
+"out": [
+0.5,
+2500.01,
+0,
+null
+],
+"state": {
+"filled": 0.5,
+"repegs": null,
+"limit_price": 2500.01,
+"order_id": 106
+}
+}
+],
+"ban": null,
+"conns": 3,
+"post_only": [
+false
+]
+},
+{
+"name": "ensure_leverage 목표 없음",
+"calls": [
+{
+"fn": "ensure_leverage",
+"args": {
+"target": 0,
+"offset": 0
+},
+"advance": 0.0
+}
+],
+"responses": [],
+"keys": true,
+"requests": [],
+"results": [
+{
+"changed": false,
+"reason": "목표값 없음"
+}
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "ensure_leverage 이미 같음",
+"calls": [
+{
+"fn": "ensure_leverage",
+"args": {
+"target": 5,
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "0.0",
+"leverage": "5",
+"marginType": "cross"
+},
+{
+"symbol": "ETHUSDC",
+"positionSide": "SHORT",
+"positionAmt": "0.0",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+{
+"changed": false,
+"from": 5,
+"to": 5,
+"reason": "이미 같음"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "ensure_leverage 바꿈",
+"calls": [
+{
+"fn": "ensure_leverage",
+"args": {
+"target": 20,
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "0.0",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"leverage": 20,
+"maxNotionalValue": "1000"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/leverage?symbol=ETHUSDC&leverage=20&recvWindow=5000&timestamp=1800000000037&signature=a90abb6aeba77aca1b786b7307501e0c77d2667f0f5adfa17de3d23f16d52bad",
+"key": "test_key"
+}
+],
+"results": [
+{
+"changed": true,
+"from": 5,
+"to": 20
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "ensure_leverage 응답에 값 없음",
+"calls": [
+{
+"fn": "ensure_leverage",
+"args": {
+"target": 7,
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "0.0",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/leverage?symbol=ETHUSDC&leverage=7&recvWindow=5000&timestamp=1800000000037&signature=5b0d2622567fde7801629c5da6b3332ebee7e3f06fd45aee31534cef9b9afc0d",
+"key": "test_key"
+}
+],
+"results": [
+{
+"changed": true,
+"from": 5,
+"to": 7
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "ensure_leverage 거부",
+"calls": [
+{
+"fn": "ensure_leverage",
+"args": {
+"target": 3,
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "1.0",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 400,
+"body": {
+"code": -4028,
+"msg": "Leverage 3 is not valid"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/leverage?symbol=ETHUSDC&leverage=3&recvWindow=5000&timestamp=1800000000037&signature=ebbc8045a50f90da364c524f6537e39e507bfee758895f6700c0e59cfb7abaf6",
+"key": "test_key"
+}
+],
+"results": [
+{
+"changed": false,
+"from": 5,
+"to": 3,
+"error": "400 [-4028] Leverage 3 is not valid"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "ensure_leverage 조회 실패",
+"calls": [
+{
+"fn": "ensure_leverage",
+"args": {
+"target": 10,
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"act": "close"
+},
+{
+"act": "close"
+},
+{
+"status": 200,
+"body": {
+"leverage": "10"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/leverage?symbol=ETHUSDC&leverage=10&recvWindow=5000&timestamp=1800000000037&signature=4af09baa51735d412bc9c480be3ba13f0b59ef15b9106db0a3f4940bbff46154",
+"key": "test_key"
+}
+],
+"results": [
+{
+"changed": true,
+"from": null,
+"to": 10
+}
+],
+"ban": null,
+"conns": 3,
+"post_only": [
+false
+]
+},
+{
+"name": "current_leverage 빈 목록",
+"calls": [
+{
+"fn": "current_leverage",
+"args": {
+"offset": 0
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": []
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000000&signature=670a3e362530e6967745c79e92bea204d3bdaa2b9ce3bc5ff9909f8f83260bcd",
+"key": "test_key"
+}
+],
+"results": [
+null
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "current_leverage 0",
+"calls": [
+{
+"fn": "current_leverage",
+"args": {
+"offset": 0
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": [
+{
+"leverage": "0"
+}
+]
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000000&signature=670a3e362530e6967745c79e92bea204d3bdaa2b9ce3bc5ff9909f8f83260bcd",
+"key": "test_key"
+}
+],
+"results": [
+null
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "margin_type 키 없음",
+"calls": [
+{
+"fn": "margin_type",
+"args": {},
+"advance": 0.0
+}
+],
+"responses": [],
+"keys": false,
+"requests": [],
+"results": [
+null
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "margin_type cross",
+"calls": [
+{
+"fn": "margin_type",
+"args": {},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "0",
+"leverage": "5",
+"marginType": "cross"
+},
+{
+"symbol": "ETHUSDC",
+"positionSide": "SHORT",
+"positionAmt": "0",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+"cross"
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "margin_type 섞임",
+"calls": [
+{
+"fn": "margin_type",
+"args": {},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"marginType": "cross"
+},
+{
+"marginType": "ISOLATED"
+}
+]
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+"isolated"
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "margin_type 빈칸",
+"calls": [
+{
+"fn": "margin_type",
+"args": {},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"marginType": null
+}
+]
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+null
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "margin_type 실패",
+"calls": [
+{
+"fn": "margin_type",
+"args": {},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 401,
+"body": {
+"code": -2015,
+"msg": "Invalid API-key, IP, or permissions for action."
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+null
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "commission_bp 캐시·TTL",
+"calls": [
+{
+"fn": "commission_bp",
+"args": {},
+"advance": 0.0
+},
+{
+"fn": "commission_bp",
+"args": {},
+"advance": 3599.0
+},
+{
+"fn": "commission_bp",
+"args": {},
+"advance": 1.5
+},
+{
+"fn": "commission_bp",
+"args": {},
+"advance": 299.0
+},
+{
+"fn": "commission_bp",
+"args": {},
+"advance": 2.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"makerCommissionRate": "0.000200",
+"takerCommissionRate": "0.000500"
+}
+},
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 400,
+"body": {
+"code": -1000,
+"msg": "boom"
+}
+},
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"makerCommissionRate": "0",
+"takerCommissionRate": "0.0004"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/commissionRate?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/commissionRate?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/commissionRate?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+{
+"symbol": "ETHUSDC",
+"maker_bp": 2.0,
+"taker_bp": 5.0,
+"source": "live"
+},
+{
+"symbol": "ETHUSDC",
+"maker_bp": 2.0,
+"taker_bp": 5.0,
+"source": "live"
+},
+{
+"symbol": "ETHUSDC",
+"maker_bp": 2.0,
+"taker_bp": 5.0,
+"source": "stale"
+},
+{
+"symbol": "ETHUSDC",
+"maker_bp": 2.0,
+"taker_bp": 5.0,
+"source": "stale"
+},
+{
+"symbol": "ETHUSDC",
+"maker_bp": 0.0,
+"taker_bp": 4.0,
+"source": "live"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false,
+false,
+false,
+false,
+false
+]
+},
+{
+"name": "commission_bp 처음부터 실패",
+"calls": [
+{
+"fn": "commission_bp",
+"args": {},
+"advance": 0.0
+},
+{
+"fn": "commission_bp",
+"args": {},
+"advance": 301.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"act": "close"
+},
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": {
+"makerCommissionRate": "x"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/commissionRate?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/commissionRate?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/commissionRate?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000301000&signature=85c4a3e01089a09725ccc6f1ec53c962ebe866cd7357c8436b6b2129024e3082",
+"key": "test_key"
+}
+],
+"results": [
+{
+"symbol": "ETHUSDC",
+"maker_bp": 2.0,
+"taker_bp": 5.0,
+"source": "fallback"
+},
+{
+"symbol": "ETHUSDC",
+"maker_bp": 2.0,
+"taker_bp": 5.0,
+"source": "fallback"
+}
+],
+"ban": null,
+"conns": 2,
+"post_only": [
+false,
+false
+]
+},
+{
+"name": "commission_bp 키 없음",
+"calls": [
+{
+"fn": "commission_bp",
+"args": {},
+"advance": 0.0
+}
+],
+"responses": [],
+"keys": false,
+"requests": [],
+"results": [
+{
+"symbol": "ETHUSDC",
+"maker_bp": 2.0,
+"taker_bp": 5.0,
+"source": "fallback"
+}
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "cancel_bracket 전부",
+"calls": [
+{
+"fn": "cancel_bracket",
+"args": {
+"pside": "LONG",
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": [
+{
+"orderId": 1,
+"clientOrderId": "dbtpL1800000000000",
+"positionSide": "LONG"
+},
+{
+"orderId": 2,
+"clientOrderId": "dbtpS1800000000000",
+"positionSide": "SHORT"
+},
+{
+"orderId": 3,
+"clientOrderId": "dbadL1800000000000",
+"positionSide": "LONG"
+},
+{
+"orderId": 4,
+"clientOrderId": "aos_user_app",
+"positionSide": "LONG"
+},
+{
+"orderId": 5,
+"clientOrderId": null
+},
+{
+"orderId": 6,
+"clientOrderId": "dbtpL1800000000001",
+"positionSide": "LONG"
+}
+]
+},
+{
+"status": 200,
+"body": {}
+},
+{
+"status": 200,
+"body": {}
+},
+{
+"status": 200,
+"body": {}
+},
+{
+"status": 200,
+"body": [
+{
+"algoId": 11,
+"clientAlgoId": "dbslL1",
+"symbol": "ETHUSDC"
+},
+{
+"algoId": 12,
+"clientAlgoId": "dbslL2",
+"symbol": "ETHUSDT"
+},
+{
+"algoId": 13,
+"clientAlgoId": "dbslS1",
+"symbol": "ETHUSDC"
+},
+{
+"algoId": 14,
+"clientAlgoId": "dbslL3"
+}
+]
+},
+{
+"status": 200,
+"body": {}
+},
+{
+"status": 200,
+"body": {}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=1&recvWindow=5000&timestamp=1800000000037&signature=3b6930f2703a9be6959d35841aeb5cd30a52a2a546b008d00dcfc57136b250f7",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=3&recvWindow=5000&timestamp=1800000000037&signature=628e477d119635fb089c31393919fd20016d890735997024b1e3fcb5fc789a06",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=6&recvWindow=5000&timestamp=1800000000037&signature=63630e049905c9f42f4a1ca68c8869ec3214a078dee87ed461be2acf52846485",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/algoOrder?algoId=11&recvWindow=5000&timestamp=1800000000037&signature=1b274fab378c39b7afcdc148f21113f995699e1c89b342cc166b2f018a681475",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/algoOrder?algoId=14&recvWindow=5000&timestamp=1800000000037&signature=9616ded41af9beb91169b256f9b7c37f9a4a7b181ad56d48a0048965ebb2489b",
+"key": "test_key"
+}
+],
+"results": [
+{
+"cancelled": 5,
+"errors": []
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "cancel_bracket 삭제 실패 섞임",
+"calls": [
+{
+"fn": "cancel_bracket",
+"args": {
+"pside": "LONG",
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": [
+{
+"orderId": 1,
+"clientOrderId": "dbtpL1800000000000",
+"positionSide": "LONG"
+},
+{
+"orderId": 2,
+"clientOrderId": "dbtpS1800000000000",
+"positionSide": "SHORT"
+},
+{
+"orderId": 3,
+"clientOrderId": "dbadL1800000000000",
+"positionSide": "LONG"
+},
+{
+"orderId": 4,
+"clientOrderId": "aos_user_app",
+"positionSide": "LONG"
+},
+{
+"orderId": 5,
+"clientOrderId": null
+},
+{
+"orderId": 6,
+"clientOrderId": "dbtpL1800000000001",
+"positionSide": "LONG"
+}
+]
+},
+{
+"status": 400,
+"body": {
+"code": -2011,
+"msg": "Unknown order sent."
+}
+},
+{
+"status": 200,
+"body": {}
+},
+{
+"act": "close"
+},
+{
+"act": "close"
+},
+{
+"status": 200,
+"body": [
+{
+"algoId": 11,
+"clientAlgoId": "dbslL1",
+"symbol": "ETHUSDC"
+},
+{
+"algoId": 12,
+"clientAlgoId": "dbslL2",
+"symbol": "ETHUSDT"
+},
+{
+"algoId": 13,
+"clientAlgoId": "dbslS1",
+"symbol": "ETHUSDC"
+},
+{
+"algoId": 14,
+"clientAlgoId": "dbslL3"
+}
+]
+},
+{
+"status": 400,
+"body": {
+"code": -20130,
+"msg": "algo gone"
+}
+},
+{
+"status": 200,
+"body": {}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=1&recvWindow=5000&timestamp=1800000000037&signature=3b6930f2703a9be6959d35841aeb5cd30a52a2a546b008d00dcfc57136b250f7",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=3&recvWindow=5000&timestamp=1800000000037&signature=628e477d119635fb089c31393919fd20016d890735997024b1e3fcb5fc789a06",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=6&recvWindow=5000&timestamp=1800000000037&signature=63630e049905c9f42f4a1ca68c8869ec3214a078dee87ed461be2acf52846485",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=6&recvWindow=5000&timestamp=1800000000037&signature=63630e049905c9f42f4a1ca68c8869ec3214a078dee87ed461be2acf52846485",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/algoOrder?algoId=11&recvWindow=5000&timestamp=1800000000037&signature=1b274fab378c39b7afcdc148f21113f995699e1c89b342cc166b2f018a681475",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/algoOrder?algoId=14&recvWindow=5000&timestamp=1800000000037&signature=9616ded41af9beb91169b256f9b7c37f9a4a7b181ad56d48a0048965ebb2489b",
+"key": "test_key"
+}
+],
+"results": [
+{
+"cancelled": 2,
+"errors": [
+"400 [-2011] Unknown order sent.",
+"ServerDisconnectedError: Server disconnected",
+"400 [-20130] algo gone"
+]
+}
+],
+"ban": null,
+"conns": 3,
+"post_only": [
+false
+]
+},
+{
+"name": "cancel_bracket 목록 실패",
+"calls": [
+{
+"fn": "cancel_bracket",
+"args": {
+"pside": "LONG",
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 500,
+"body": {
+"code": -1001,
+"msg": "x"
+}
+},
+{
+"status": 200,
+"body": "not a list"
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+{
+"cancelled": 0,
+"errors": [
+"openOrders: 500 [-1001] x",
+"openAlgoOrders: not a list"
+]
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "cancel_bracket only_sl",
+"calls": [
+{
+"fn": "cancel_bracket",
+"args": {
+"only_sl": true,
+"pside": "LONG",
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": [
+{
+"algoId": 11,
+"clientAlgoId": "dbslL1",
+"symbol": "ETHUSDC"
+},
+{
+"algoId": 12,
+"clientAlgoId": "dbslL2",
+"symbol": "ETHUSDT"
+},
+{
+"algoId": 13,
+"clientAlgoId": "dbslS1",
+"symbol": "ETHUSDC"
+},
+{
+"algoId": 14,
+"clientAlgoId": "dbslL3"
+}
+]
+},
+{
+"status": 200,
+"body": {}
+},
+{
+"status": 200,
+"body": {}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/algoOrder?algoId=11&recvWindow=5000&timestamp=1800000000037&signature=1b274fab378c39b7afcdc148f21113f995699e1c89b342cc166b2f018a681475",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/algoOrder?algoId=14&recvWindow=5000&timestamp=1800000000037&signature=9616ded41af9beb91169b256f9b7c37f9a4a7b181ad56d48a0048965ebb2489b",
+"key": "test_key"
+}
+],
+"results": [
+{
+"cancelled": 2,
+"errors": []
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "cancel_bracket only_tp",
+"calls": [
+{
+"fn": "cancel_bracket",
+"args": {
+"only_tp": true,
+"pside": "LONG",
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": [
+{
+"orderId": 1,
+"clientOrderId": "dbtpL1800000000000",
+"positionSide": "LONG"
+},
+{
+"orderId": 2,
+"clientOrderId": "dbtpS1800000000000",
+"positionSide": "SHORT"
+},
+{
+"orderId": 3,
+"clientOrderId": "dbadL1800000000000",
+"positionSide": "LONG"
+},
+{
+"orderId": 4,
+"clientOrderId": "aos_user_app",
+"positionSide": "LONG"
+},
+{
+"orderId": 5,
+"clientOrderId": null
+},
+{
+"orderId": 6,
+"clientOrderId": "dbtpL1800000000001",
+"positionSide": "LONG"
+}
+]
+},
+{
+"status": 200,
+"body": {}
+},
+{
+"status": 200,
+"body": {}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=1&recvWindow=5000&timestamp=1800000000037&signature=3b6930f2703a9be6959d35841aeb5cd30a52a2a546b008d00dcfc57136b250f7",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=6&recvWindow=5000&timestamp=1800000000037&signature=63630e049905c9f42f4a1ca68c8869ec3214a078dee87ed461be2acf52846485",
+"key": "test_key"
+}
+],
+"results": [
+{
+"cancelled": 2,
+"errors": [],
+"tp_open": [
+"dbtpL1800000000000",
+"dbtpL1800000000001"
+]
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "cancel_bracket only_tp 목록 실패",
+"calls": [
+{
+"fn": "cancel_bracket",
+"args": {
+"only_tp": true,
+"pside": "LONG",
+"offset": 37
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"act": "close"
+},
+{
+"act": "close"
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+{
+"cancelled": 0,
+"errors": [
+"openOrders: ServerDisconnectedError: Server disconnected"
+],
+"tp_open": null
+}
+],
+"ban": null,
+"conns": 2,
+"post_only": [
+false
+]
+},
+{
+"name": "cancel_bracket 숏",
+"calls": [
+{
+"fn": "cancel_bracket",
+"args": {
+"pside": "SHORT",
+"offset": 0
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": [
+{
+"orderId": 1,
+"clientOrderId": "dbtpL1800000000000",
+"positionSide": "LONG"
+},
+{
+"orderId": 2,
+"clientOrderId": "dbtpS1800000000000",
+"positionSide": "SHORT"
+},
+{
+"orderId": 3,
+"clientOrderId": "dbadL1800000000000",
+"positionSide": "LONG"
+},
+{
+"orderId": 4,
+"clientOrderId": "aos_user_app",
+"positionSide": "LONG"
+},
+{
+"orderId": 5,
+"clientOrderId": null
+},
+{
+"orderId": 6,
+"clientOrderId": "dbtpL1800000000001",
+"positionSide": "LONG"
+}
+]
+},
+{
+"status": 200,
+"body": {}
+},
+{
+"status": 200,
+"body": [
+{
+"algoId": 11,
+"clientAlgoId": "dbslL1",
+"symbol": "ETHUSDC"
+},
+{
+"algoId": 12,
+"clientAlgoId": "dbslL2",
+"symbol": "ETHUSDT"
+},
+{
+"algoId": 13,
+"clientAlgoId": "dbslS1",
+"symbol": "ETHUSDC"
+},
+{
+"algoId": 14,
+"clientAlgoId": "dbslL3"
+}
+]
+},
+{
+"status": 200,
+"body": {}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000000&signature=670a3e362530e6967745c79e92bea204d3bdaa2b9ce3bc5ff9909f8f83260bcd",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=2&recvWindow=5000&timestamp=1800000000000&signature=99c4e3af4cc30a7b9895341249acae25b839d2e163e2d0395a20d8b2e24cdd3d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000000&signature=670a3e362530e6967745c79e92bea204d3bdaa2b9ce3bc5ff9909f8f83260bcd",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/algoOrder?algoId=13&recvWindow=5000&timestamp=1800000000000&signature=b16819561da5594c5d74ea010156ae3c875ba0b36451ef3f93d5673955a5baf9",
+"key": "test_key"
+}
+],
+"results": [
+{
+"cancelled": 2,
+"errors": []
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "clear_bracket 키 없음",
+"calls": [
+{
+"fn": "clear_bracket",
+"args": {
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [],
+"keys": false,
+"requests": [],
+"results": [
+{
+"cancelled": 0,
+"errors": [
+"API 키가 없습니다"
+]
+}
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "clear_bracket",
+"calls": [
+{
+"fn": "clear_bracket",
+"args": {
+"pside": "LONG",
+"only_sl": true
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": []
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+{
+"cancelled": 0,
+"errors": []
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_add_order 키 없음",
+"calls": [
+{
+"fn": "place_add_order",
+"args": {
+"pside": "LONG",
+"price": 2481.25,
+"qty": 0.5
+},
+"advance": 0.0
+}
+],
+"responses": [],
+"keys": false,
+"requests": [],
+"results": [
+{
+"placed": false,
+"reason": "API 키가 없습니다"
+}
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "place_add_order 접수",
+"calls": [
+{
+"fn": "place_add_order",
+"args": {
+"pside": "LONG",
+"price": 2481.25,
+"qty": 0.5
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 201,
+"status": "NEW",
+"executedQty": "0"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTC&price=2481.25&quantity=0.5&newClientOrderId=dbadL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=00f8cdaaa7f5a7ef33813a4f8d7e03ab805b4378aa58606234cf67eadcaed0c8",
+"key": "test_key"
+}
+],
+"results": [
+{
+"placed": true,
+"price": 2481.25,
+"qty": 0.5,
+"order_id": 201,
+"error": null
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_add_order 숏 거부",
+"calls": [
+{
+"fn": "place_add_order",
+"args": {
+"pside": "SHORT",
+"price": 2518.75,
+"qty": 0.123
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2019,
+"msg": "Margin is insufficient."
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=SHORT&type=LIMIT&timeInForce=GTC&price=2518.75&quantity=0.123&newClientOrderId=dbadS1800000000000&recvWindow=5000&timestamp=1800000000037&signature=0a87c303209dc49da1f72e0a048595aadc901571f49b74f2de19016946c6fa81",
+"key": "test_key"
+}
+],
+"results": [
+{
+"placed": false,
+"price": 2518.75,
+"qty": 0.123,
+"order_id": null,
+"error": "400 [-2019] Margin is insufficient."
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_add_order 시간초과",
+"calls": [
+{
+"fn": "place_add_order",
+"args": {
+"pside": "LONG",
+"price": 2481.25,
+"qty": 0.5
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"act": "hang"
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTC&price=2481.25&quantity=0.5&newClientOrderId=dbadL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=00f8cdaaa7f5a7ef33813a4f8d7e03ab805b4378aa58606234cf67eadcaed0c8",
+"key": "test_key"
+}
+],
+"results": [
+{
+"placed": false,
+"price": 2481.25,
+"qty": 0.5,
+"order_id": null,
+"error": "TimeoutError: "
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_stop 키 없음",
+"calls": [
+{
+"fn": "place_stop",
+"args": {
+"pside": "LONG",
+"price": 2375.0
+},
+"advance": 0.0
+}
+],
+"responses": [],
+"keys": false,
+"requests": [],
+"results": [
+{
+"placed": false,
+"error": "API 키가 없습니다"
+}
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "place_stop 조회 실패",
+"calls": [
+{
+"fn": "place_stop",
+"args": {
+"pside": "LONG",
+"price": 2375.0
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 500,
+"body": {
+"code": -1001,
+"msg": "x"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+{
+"placed": false,
+"error": "포지션 조회 실패: 500 [-1001] x"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_stop 포지션 없음",
+"calls": [
+{
+"fn": "place_stop",
+"args": {
+"pside": "LONG",
+"price": 2375.0
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "0.000",
+"leverage": "5",
+"marginType": "cross"
+},
+{
+"symbol": "ETHUSDC",
+"positionSide": "SHORT",
+"positionAmt": "-1.0",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+{
+"placed": false,
+"error": "포지션 없음"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_stop 정리 실패",
+"calls": [
+{
+"fn": "place_stop",
+"args": {
+"pside": "LONG",
+"price": 2375.0
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "1.0",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"act": "close"
+},
+{
+"act": "close"
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+{
+"placed": false,
+"error": "남은 스탑 정리 실패: openAlgoOrders: ServerDisconnectedError: Server disconnected"
+}
+],
+"ban": null,
+"conns": 2,
+"post_only": [
+false
+]
+},
+{
+"name": "place_stop 정상",
+"calls": [
+{
+"fn": "place_stop",
+"args": {
+"pside": "LONG",
+"price": 2375.0
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "1.0",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": [
+{
+"algoId": 11,
+"clientAlgoId": "dbslL1",
+"symbol": "ETHUSDC"
+},
+{
+"algoId": 12,
+"clientAlgoId": "dbslL2",
+"symbol": "ETHUSDT"
+},
+{
+"algoId": 13,
+"clientAlgoId": "dbslS1",
+"symbol": "ETHUSDC"
+},
+{
+"algoId": 14,
+"clientAlgoId": "dbslL3"
+}
+]
+},
+{
+"status": 200,
+"body": {}
+},
+{
+"status": 200,
+"body": {}
+},
+{
+"status": 200,
+"body": {
+"algoId": 31
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/algoOrder?algoId=11&recvWindow=5000&timestamp=1800000000037&signature=1b274fab378c39b7afcdc148f21113f995699e1c89b342cc166b2f018a681475",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/algoOrder?algoId=14&recvWindow=5000&timestamp=1800000000037&signature=9616ded41af9beb91169b256f9b7c37f9a4a7b181ad56d48a0048965ebb2489b",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/algoOrder?algoType=CONDITIONAL&symbol=ETHUSDC&side=SELL&positionSide=LONG&type=STOP_MARKET&triggerPrice=2375.0&closePosition=true&workingType=MARK_PRICE&clientAlgoId=dbslL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=63218cf1b6aa6b237845fd2b5ea7a6c2dcee700cfa4bbe25caa1f02b72dd6807",
+"key": "test_key"
+}
+],
+"results": [
+{
+"placed": true,
+"price": 2375.0,
+"algo_id": 31,
+"error": null
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_stop 숏 -2021",
+"calls": [
+{
+"fn": "place_stop",
+"args": {
+"pside": "SHORT",
+"price": 2625.5
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "SHORT",
+"positionAmt": "-2.0",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 400,
+"body": {
+"code": -2021,
+"msg": "Order would immediately trigger."
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/algoOrder?algoType=CONDITIONAL&symbol=ETHUSDC&side=BUY&positionSide=SHORT&type=STOP_MARKET&triggerPrice=2625.5&closePosition=true&workingType=MARK_PRICE&clientAlgoId=dbslS1800000000000&recvWindow=5000&timestamp=1800000000037&signature=a51236918c0d7acad62d4249edb1fbee8a345aaf36a83940a75a4c4b80aa6a51",
+"key": "test_key"
+}
+],
+"results": [
+{
+"placed": false,
+"price": 2625.5,
+"algo_id": null,
+"error": "400 [-2021] Order would immediately trigger."
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_bracket 키 없음",
+"calls": [
+{
+"fn": "place_bracket",
+"args": {
+"bracket": {
+"tp_price": 2600.5,
+"backstop_price": 2375.0
+},
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [],
+"keys": false,
+"requests": [],
+"results": [
+{
+"placed": false,
+"reason": "API 키가 없습니다"
+}
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "place_bracket 조회 실패",
+"calls": [
+{
+"fn": "place_bracket",
+"args": {
+"bracket": {
+"tp_price": 2600.5,
+"backstop_price": 2375.0
+},
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"act": "close"
+},
+{
+"act": "close"
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+{
+"placed": false,
+"reason": "포지션 조회 실패: ServerDisconnectedError: Server disconnected"
+}
+],
+"ban": null,
+"conns": 2,
+"post_only": [
+false
+]
+},
+{
+"name": "place_bracket 포지션 없음",
+"calls": [
+{
+"fn": "place_bracket",
+"args": {
+"bracket": {
+"tp_price": 2600.5,
+"backstop_price": 2375.0
+},
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "SHORT",
+"positionAmt": "-1",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+{
+"placed": false,
+"reason": "포지션 없음"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_bracket 정상",
+"calls": [
+{
+"fn": "place_bracket",
+"args": {
+"bracket": {
+"tp_price": 2600.5,
+"backstop_price": 2375.0
+},
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "0.7",
+"leverage": "5",
+"marginType": "cross"
+},
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "0.3000001",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": {
+"orderId": 301,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"algoId": 41
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2600.5&quantity=1.0000001&newClientOrderId=dbtpL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=bf1ac5585c6670caed6591c44a20f9f65629e17723b9e3fb500feb2ebc28ec7f",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/algoOrder?algoType=CONDITIONAL&symbol=ETHUSDC&side=SELL&positionSide=LONG&type=STOP_MARKET&triggerPrice=2375.0&closePosition=true&workingType=MARK_PRICE&clientAlgoId=dbslL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=63218cf1b6aa6b237845fd2b5ea7a6c2dcee700cfa4bbe25caa1f02b72dd6807",
+"key": "test_key"
+}
+],
+"results": [
+{
+"qty": 1.0000001,
+"cleared": {
+"cancelled": 0,
+"errors": []
+},
+"tp": {
+"placed": true,
+"price": 2600.5,
+"order_id": 301,
+"error": null
+},
+"backstop": {
+"placed": true,
+"price": 2375.0,
+"algo_id": 41,
+"error": null
+},
+"placed": true
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_bracket 익절 실패",
+"calls": [
+{
+"fn": "place_bracket",
+"args": {
+"bracket": {
+"tp_price": 2600.5,
+"backstop_price": 2375.0
+},
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "1",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 400,
+"body": {
+"code": -5022,
+"msg": "Due to the order could not be executed as maker, the Post Only order will be rejected. The order will not be recorded in the order history"
+}
+},
+{
+"status": 200,
+"body": {
+"algoId": 42
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2600.5&quantity=1.0&newClientOrderId=dbtpL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=52778898d9c2d50baf5b2623519459679520a4bcc086d54179a175d545214382",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/algoOrder?algoType=CONDITIONAL&symbol=ETHUSDC&side=SELL&positionSide=LONG&type=STOP_MARKET&triggerPrice=2375.0&closePosition=true&workingType=MARK_PRICE&clientAlgoId=dbslL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=63218cf1b6aa6b237845fd2b5ea7a6c2dcee700cfa4bbe25caa1f02b72dd6807",
+"key": "test_key"
+}
+],
+"results": [
+{
+"qty": 1.0,
+"cleared": {
+"cancelled": 0,
+"errors": []
+},
+"tp": {
+"placed": false,
+"price": 2600.5,
+"order_id": null,
+"error": "400 [-5022] Due to the order could not be executed as maker, the Post Only order will be rejected. The order will not be recorded in the order history"
+},
+"backstop": {
+"placed": true,
+"price": 2375.0,
+"algo_id": 42,
+"error": null
+},
+"placed": false
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_bracket 익절 불명(남은 위험)",
+"calls": [
+{
+"fn": "place_bracket",
+"args": {
+"bracket": {
+"tp_price": 2600.5,
+"backstop_price": 2375.0
+},
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "1",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": []
+},
+{
+"act": "close"
+},
+{
+"act": "hang"
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2600.5&quantity=1.0&newClientOrderId=dbtpL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=52778898d9c2d50baf5b2623519459679520a4bcc086d54179a175d545214382",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/algoOrder?algoType=CONDITIONAL&symbol=ETHUSDC&side=SELL&positionSide=LONG&type=STOP_MARKET&triggerPrice=2375.0&closePosition=true&workingType=MARK_PRICE&clientAlgoId=dbslL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=63218cf1b6aa6b237845fd2b5ea7a6c2dcee700cfa4bbe25caa1f02b72dd6807",
+"key": "test_key"
+}
+],
+"results": [
+{
+"qty": 1.0,
+"cleared": {
+"cancelled": 0,
+"errors": []
+},
+"tp": {
+"placed": false,
+"price": 2600.5,
+"order_id": null,
+"error": "ServerDisconnectedError: Server disconnected"
+},
+"backstop": {
+"placed": false,
+"price": 2375.0,
+"algo_id": null,
+"error": "TimeoutError: "
+},
+"placed": false
+}
+],
+"ban": null,
+"conns": 2,
+"post_only": [
+false
+]
+},
+{
+"name": "place_bracket strict 정리 실패",
+"calls": [
+{
+"fn": "place_bracket",
+"args": {
+"bracket": {
+"tp_price": 2600.5,
+"backstop_price": 2375.0
+},
+"pside": "LONG",
+"strict": true
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "1",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": [
+{
+"orderId": 1,
+"clientOrderId": "dbtpL1800000000000",
+"positionSide": "LONG"
+},
+{
+"orderId": 2,
+"clientOrderId": "dbtpS1800000000000",
+"positionSide": "SHORT"
+},
+{
+"orderId": 3,
+"clientOrderId": "dbadL1800000000000",
+"positionSide": "LONG"
+},
+{
+"orderId": 4,
+"clientOrderId": "aos_user_app",
+"positionSide": "LONG"
+},
+{
+"orderId": 5,
+"clientOrderId": null
+},
+{
+"orderId": 6,
+"clientOrderId": "dbtpL1800000000001",
+"positionSide": "LONG"
+}
+]
+},
+{
+"status": 400,
+"body": {
+"code": -2011,
+"msg": "Unknown order sent."
+}
+},
+{
+"status": 200,
+"body": {}
+},
+{
+"status": 200,
+"body": {}
+},
+{
+"status": 200,
+"body": []
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=1&recvWindow=5000&timestamp=1800000000037&signature=3b6930f2703a9be6959d35841aeb5cd30a52a2a546b008d00dcfc57136b250f7",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=3&recvWindow=5000&timestamp=1800000000037&signature=628e477d119635fb089c31393919fd20016d890735997024b1e3fcb5fc789a06",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=6&recvWindow=5000&timestamp=1800000000037&signature=63630e049905c9f42f4a1ca68c8869ec3214a078dee87ed461be2acf52846485",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+{
+"qty": 1.0,
+"cleared": {
+"cancelled": 2,
+"errors": [
+"400 [-2011] Unknown order sent."
+]
+},
+"placed": false,
+"reason": "옛 주문 정리 실패"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_bracket 정리 실패 그래도 건다",
+"calls": [
+{
+"fn": "place_bracket",
+"args": {
+"bracket": {
+"tp_price": 2600.5,
+"backstop_price": 2375.0
+},
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "1",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"act": "close"
+},
+{
+"act": "close"
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": {
+"orderId": 302,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"algoId": 43
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2600.5&quantity=1.0&newClientOrderId=dbtpL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=52778898d9c2d50baf5b2623519459679520a4bcc086d54179a175d545214382",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/algoOrder?algoType=CONDITIONAL&symbol=ETHUSDC&side=SELL&positionSide=LONG&type=STOP_MARKET&triggerPrice=2375.0&closePosition=true&workingType=MARK_PRICE&clientAlgoId=dbslL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=63218cf1b6aa6b237845fd2b5ea7a6c2dcee700cfa4bbe25caa1f02b72dd6807",
+"key": "test_key"
+}
+],
+"results": [
+{
+"qty": 1.0,
+"cleared": {
+"cancelled": 0,
+"errors": [
+"openOrders: ServerDisconnectedError: Server disconnected"
+]
+},
+"tp": {
+"placed": true,
+"price": 2600.5,
+"order_id": 302,
+"error": null
+},
+"backstop": {
+"placed": true,
+"price": 2375.0,
+"algo_id": 43,
+"error": null
+},
+"placed": true
+}
+],
+"ban": null,
+"conns": 3,
+"post_only": [
+false
+]
+},
+{
+"name": "place_bracket 숏 익절만",
+"calls": [
+{
+"fn": "place_bracket",
+"args": {
+"bracket": {
+"tp_price": 2400.25,
+"backstop_price": null
+},
+"pside": "SHORT"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "SHORT",
+"positionAmt": "-1.5",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": {
+"orderId": 303,
+"status": "NEW",
+"executedQty": "0"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=SHORT&type=LIMIT&timeInForce=GTX&price=2400.25&quantity=1.5&newClientOrderId=dbtpS1800000000000&recvWindow=5000&timestamp=1800000000037&signature=f4d843d1ab5a7ea40690bf7f6ef16ed90dfc5f50a65816096ce0edadcf60902c",
+"key": "test_key"
+}
+],
+"results": [
+{
+"qty": 1.5,
+"cleared": {
+"cancelled": 0,
+"errors": []
+},
+"tp": {
+"placed": true,
+"price": 2400.25,
+"order_id": 303,
+"error": null
+},
+"placed": true
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_bracket 스탑만",
+"calls": [
+{
+"fn": "place_bracket",
+"args": {
+"bracket": {
+"tp_price": 0,
+"backstop_price": 2375
+},
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "1",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": {
+"algoId": 44
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/algoOrder?algoType=CONDITIONAL&symbol=ETHUSDC&side=SELL&positionSide=LONG&type=STOP_MARKET&triggerPrice=2375&closePosition=true&workingType=MARK_PRICE&clientAlgoId=dbslL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=6377da501012d2867917dcb24d1eb8bccfe78b0b08d44d6b7fe92491093932f1",
+"key": "test_key"
+}
+],
+"results": [
+{
+"qty": 1.0,
+"cleared": {
+"cancelled": 0,
+"errors": []
+},
+"backstop": {
+"placed": true,
+"price": 2375,
+"algo_id": 44,
+"error": null
+},
+"placed": true
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_bracket 둘 다 없음",
+"calls": [
+{
+"fn": "place_bracket",
+"args": {
+"bracket": {},
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "1",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": []
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+{
+"qty": 1.0,
+"cleared": {
+"cancelled": 0,
+"errors": []
+},
+"placed": true
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_tp_ladder 키 없음",
+"calls": [
+{
+"fn": "place_tp_ladder",
+"args": {
+"legs": [
+{
+"price": 2600.0,
+"w": 1.0
+},
+{
+"price": 2650.0,
+"w": 1.0
+}
+],
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [],
+"keys": false,
+"requests": [],
+"results": [
+{
+"placed": false,
+"reason": "API 키가 없습니다"
+}
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "place_tp_ladder 조회 실패",
+"calls": [
+{
+"fn": "place_tp_ladder",
+"args": {
+"legs": [
+{
+"price": 2600.0,
+"w": 1.0
+},
+{
+"price": 2650.0,
+"w": 1.0
+}
+],
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": "x"
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+{
+"placed": false,
+"reason": "포지션 조회 실패: x"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_tp_ladder 포지션 없음",
+"calls": [
+{
+"fn": "place_tp_ladder",
+"args": {
+"legs": [
+{
+"price": 2600.0,
+"w": 1.0
+},
+{
+"price": 2650.0,
+"w": 1.0
+}
+],
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "0",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+{
+"placed": false,
+"reason": "포지션 없음"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_tp_ladder 정리 실패",
+"calls": [
+{
+"fn": "place_tp_ladder",
+"args": {
+"legs": [
+{
+"price": 2600.0,
+"w": 1.0
+},
+{
+"price": 2650.0,
+"w": 1.0
+}
+],
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "1",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": [
+{
+"orderId": 1,
+"clientOrderId": "dbtpL1800000000000",
+"positionSide": "LONG"
+},
+{
+"orderId": 2,
+"clientOrderId": "dbtpS1800000000000",
+"positionSide": "SHORT"
+},
+{
+"orderId": 3,
+"clientOrderId": "dbadL1800000000000",
+"positionSide": "LONG"
+},
+{
+"orderId": 4,
+"clientOrderId": "aos_user_app",
+"positionSide": "LONG"
+},
+{
+"orderId": 5,
+"clientOrderId": null
+},
+{
+"orderId": 6,
+"clientOrderId": "dbtpL1800000000001",
+"positionSide": "LONG"
+}
+]
+},
+{
+"status": 200,
+"body": {}
+},
+{
+"status": 400,
+"body": {
+"code": -2011,
+"msg": "Unknown order sent."
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=1&recvWindow=5000&timestamp=1800000000037&signature=3b6930f2703a9be6959d35841aeb5cd30a52a2a546b008d00dcfc57136b250f7",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=6&recvWindow=5000&timestamp=1800000000037&signature=63630e049905c9f42f4a1ca68c8869ec3214a078dee87ed461be2acf52846485",
+"key": "test_key"
+}
+],
+"results": [
+{
+"qty": 1.0,
+"cleared": {
+"cancelled": 1,
+"errors": [
+"400 [-2011] Unknown order sent."
+],
+"tp_open": [
+"dbtpL1800000000000",
+"dbtpL1800000000001"
+]
+},
+"placed": false,
+"reason": "옛 익절 정리 실패"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_tp_ladder 정상",
+"calls": [
+{
+"fn": "place_tp_ladder",
+"args": {
+"legs": [
+{
+"price": 2600.0,
+"w": 1.0
+},
+{
+"price": 2650.0,
+"w": 1.0
+}
+],
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "1.001",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": {
+"symbols": [
+{
+"symbol": "ETHUSDT"
+},
+{
+"symbol": "ETHUSDC",
+"filters": [
+{
+"filterType": "PRICE_FILTER",
+"tickSize": "0.01"
+},
+{
+"filterType": "LOT_SIZE",
+"stepSize": "0.001",
+"minQty": "0.001"
+},
+{
+"filterType": "MIN_NOTIONAL",
+"notional": "20"
+}
+]
+}
+]
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 401,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 400,
+"body": {
+"code": -5022,
+"msg": "Due to the order could not be executed as maker, the Post Only order will be rejected. The order will not be recorded in the order history"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/exchangeInfo",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2600.0&quantity=0.5&newClientOrderId=dbtpL18000000000000&recvWindow=5000&timestamp=1800000000037&signature=c41e4141ca0852315f301bc812b97490587d281a5337dcbf4e6fcd4592d7f29f",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2650.0&quantity=0.501&newClientOrderId=dbtpL18000000000001&recvWindow=5000&timestamp=1800000000037&signature=f111860fcf1da8b000d2b43a14d588792e68147e2e2c7cda5575c828e73a0f54",
+"key": "test_key"
+}
+],
+"results": [
+{
+"qty": 1.001,
+"cleared": {
+"cancelled": 0,
+"errors": [],
+"tp_open": []
+},
+"legs": [
+{
+"price": 2600.0,
+"w": 1.0,
+"filled": false,
+"qty": 0.5,
+"merged": false,
+"resting": true,
+"order_id": 401,
+"error": null,
+"cid": "dbtpL18000000000000"
+},
+{
+"price": 2650.0,
+"w": 1.0,
+"filled": false,
+"qty": 0.501,
+"merged": false,
+"resting": false,
+"order_id": null,
+"error": "400 [-5022] Due to the order could not be executed as maker, the Post Only order will be rejected. The order will not be recorded in the order history",
+"cid": "dbtpL18000000000001"
+}
+],
+"placed": false
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_tp_ladder 걸린 조각 사라짐(체결·취소)",
+"calls": [
+{
+"fn": "place_tp_ladder",
+"args": {
+"pside": "LONG",
+"legs": [
+{
+"price": 2600.0,
+"w": 1,
+"resting": true,
+"cid": "dbtpL1800000000000",
+"tag": "가"
+},
+{
+"price": 2650.0,
+"w": 1,
+"resting": true,
+"cid": "dbtpL1800000000009"
+},
+{
+"price": 2700.0,
+"w": 2,
+"resting": true,
+"cid": "dbtpL1800000000008"
+},
+{
+"price": 2750.0,
+"w": 1,
+"filled": true,
+"cid": "old",
+"qty": 0.2
+}
+]
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "0.8",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": [
+{
+"orderId": 1,
+"clientOrderId": "dbtpL1800000000000",
+"positionSide": "LONG"
+},
+{
+"orderId": 2,
+"clientOrderId": "dbtpS1800000000000",
+"positionSide": "SHORT"
+},
+{
+"orderId": 3,
+"clientOrderId": "dbadL1800000000000",
+"positionSide": "LONG"
+},
+{
+"orderId": 4,
+"clientOrderId": "aos_user_app",
+"positionSide": "LONG"
+},
+{
+"orderId": 5,
+"clientOrderId": null
+},
+{
+"orderId": 6,
+"clientOrderId": "dbtpL1800000000001",
+"positionSide": "LONG"
+}
+]
+},
+{
+"status": 200,
+"body": {}
+},
+{
+"status": 200,
+"body": {}
+},
+{
+"status": 200,
+"body": {
+"status": "FILLED"
+}
+},
+{
+"status": 200,
+"body": {
+"status": "CANCELED"
+}
+},
+{
+"status": 200,
+"body": {
+"symbols": [
+{
+"symbol": "ETHUSDT"
+},
+{
+"symbol": "ETHUSDC",
+"filters": [
+{
+"filterType": "PRICE_FILTER",
+"tickSize": "0.01"
+},
+{
+"filterType": "LOT_SIZE",
+"stepSize": "0.001",
+"minQty": "0.001"
+},
+{
+"filterType": "MIN_NOTIONAL",
+"notional": "20"
+}
+]
+}
+]
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 402,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 403,
+"status": "NEW",
+"executedQty": "0"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=1&recvWindow=5000&timestamp=1800000000037&signature=3b6930f2703a9be6959d35841aeb5cd30a52a2a546b008d00dcfc57136b250f7",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=6&recvWindow=5000&timestamp=1800000000037&signature=63630e049905c9f42f4a1ca68c8869ec3214a078dee87ed461be2acf52846485",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbtpL1800000000009&recvWindow=5000&timestamp=1800000000037&signature=0fd074c43542c5a2930a8fb7325ee02ecdfe764622cd5dd3e5a4ee976a904460",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbtpL1800000000008&recvWindow=5000&timestamp=1800000000037&signature=99478105b60dc1f41eadf2948ae39367832ec9ffccf80c79018b69e6e0fb9466",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/exchangeInfo",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2600.0&quantity=0.266&newClientOrderId=dbtpL18000000000000&recvWindow=5000&timestamp=1800000000037&signature=702021b3b8c93e076264c98d77b1cddb8ada193b7bba7aab80941987d4f1cfd5",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2700.0&quantity=0.534&newClientOrderId=dbtpL18000000000001&recvWindow=5000&timestamp=1800000000037&signature=adcaf1aa1131e14d53d71e1698d475fc1346a6a21db375cb8aaa48ec5414dd4b",
+"key": "test_key"
+}
+],
+"results": [
+{
+"qty": 0.8,
+"cleared": {
+"cancelled": 2,
+"errors": [],
+"tp_open": [
+"dbtpL1800000000000",
+"dbtpL1800000000001"
+]
+},
+"legs": [
+{
+"price": 2600.0,
+"w": 1,
+"resting": true,
+"cid": "dbtpL18000000000000",
+"tag": "가",
+"filled": false,
+"qty": 0.266,
+"merged": false,
+"order_id": 402,
+"error": null
+},
+{
+"price": 2650.0,
+"w": 1,
+"resting": true,
+"cid": "dbtpL1800000000009",
+"filled": true
+},
+{
+"price": 2700.0,
+"w": 2,
+"resting": true,
+"cid": "dbtpL18000000000001",
+"filled": false,
+"qty": 0.534,
+"merged": false,
+"order_id": 403,
+"error": null
+},
+{
+"price": 2750.0,
+"w": 1,
+"filled": true,
+"cid": "old",
+"qty": 0.2
+}
+],
+"placed": true
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_tp_ladder 전부 체결",
+"calls": [
+{
+"fn": "place_tp_ladder",
+"args": {
+"pside": "LONG",
+"legs": [
+{
+"price": 2600.0,
+"w": 1,
+"filled": true
+}
+]
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "0.5",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": {
+"symbols": [
+{
+"symbol": "ETHUSDT"
+},
+{
+"symbol": "ETHUSDC",
+"filters": [
+{
+"filterType": "PRICE_FILTER",
+"tickSize": "0.01"
+},
+{
+"filterType": "LOT_SIZE",
+"stepSize": "0.001",
+"minQty": "0.001"
+},
+{
+"filterType": "MIN_NOTIONAL",
+"notional": "20"
+}
+]
+}
+]
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/exchangeInfo",
+"key": null
+}
+],
+"results": [
+{
+"qty": 0.5,
+"cleared": {
+"cancelled": 0,
+"errors": [],
+"tp_open": []
+},
+"legs": [
+{
+"price": 2600.0,
+"w": 1,
+"filled": true
+}
+],
+"placed": true
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_tp_ladder 먼지 조각 합침",
+"calls": [
+{
+"fn": "place_tp_ladder",
+"args": {
+"pside": "SHORT",
+"legs": [
+{
+"price": 2400.0,
+"w": 0.01
+},
+{
+"price": 2300.0,
+"w": 0.99
+}
+]
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "SHORT",
+"positionAmt": "-0.5",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": {
+"symbols": [
+{
+"symbol": "ETHUSDT"
+},
+{
+"symbol": "ETHUSDC",
+"filters": [
+{
+"filterType": "PRICE_FILTER",
+"tickSize": "0.01"
+},
+{
+"filterType": "LOT_SIZE",
+"stepSize": "0.001",
+"minQty": "0.001"
+},
+{
+"filterType": "MIN_NOTIONAL",
+"notional": "20"
+}
+]
+}
+]
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 404,
+"status": "NEW",
+"executedQty": "0"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/exchangeInfo",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=SHORT&type=LIMIT&timeInForce=GTX&price=2300.0&quantity=0.5&newClientOrderId=dbtpS18000000000001&recvWindow=5000&timestamp=1800000000037&signature=795c9b02e667f3f2d1948ccd11865a11d1f47bc55316858adb6f8de3cb2c3e4d",
+"key": "test_key"
+}
+],
+"results": [
+{
+"qty": 0.5,
+"cleared": {
+"cancelled": 0,
+"errors": [],
+"tp_open": []
+},
+"legs": [
+{
+"price": 2400.0,
+"w": 0.01,
+"filled": false,
+"qty": 0.0,
+"merged": true,
+"resting": false,
+"order_id": null,
+"error": null,
+"cid": "dbtpS18000000000000"
+},
+{
+"price": 2300.0,
+"w": 0.99,
+"filled": false,
+"qty": 0.5,
+"merged": false,
+"resting": true,
+"order_id": 404,
+"error": null,
+"cid": "dbtpS18000000000001"
+}
+],
+"placed": true
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_tp_ladder 필터 실패(예외)",
+"calls": [
+{
+"fn": "place_tp_ladder",
+"args": {
+"legs": [
+{
+"price": 2600.0,
+"w": 1.0
+},
+{
+"price": 2650.0,
+"w": 1.0
+}
+],
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "1",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"raw": "x",
+"ctype": "text/plain"
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/exchangeInfo",
+"key": null
+}
+],
+"results": [
+{
+"__raise__": "ContentTypeError: 200, message='Attempt to decode JSON with unexpected mimetype: text/plain', url='{BASE}/fapi/v1/exchangeInfo'"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "cancel_wait_orphans 키 없음",
+"calls": [
+{
+"fn": "cancel_wait_orphans",
+"args": {
+"symbols": [
+"ETHUSDC"
+]
+},
+"advance": 0.0
+}
+],
+"responses": [],
+"keys": false,
+"requests": [],
+"results": [
+{
+"cancelled": [],
+"errors": [
+"API 키가 없습니다"
+]
+}
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "cancel_wait_orphans",
+"calls": [
+{
+"fn": "cancel_wait_orphans",
+"args": {
+"symbols": [
+"ETHUSDC",
+"ETHUSDT",
+"SOLUSDC"
+]
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"orderId": 7,
+"clientOrderId": "dbwtL1",
+"positionSide": "LONG",
+"executedQty": "0.25",
+"origQty": "1.0"
+},
+{
+"orderId": 8,
+"clientOrderId": "dbpgS1",
+"positionSide": "SHORT",
+"executedQty": null
+},
+{
+"orderId": 9,
+"clientOrderId": "dbtpL1"
+},
+{
+"orderId": 10,
+"clientOrderId": "dbwtX"
+}
+]
+},
+{
+"status": 200,
+"body": {}
+},
+{
+"status": 200,
+"body": {}
+},
+{
+"status": 400,
+"body": {
+"code": -2011,
+"msg": "Unknown order sent."
+}
+},
+{
+"status": 500,
+"body": {
+"code": -1001,
+"msg": "x"
+}
+},
+{
+"status": 200,
+"body": [
+{
+"orderId": 11,
+"clientOrderId": "dbwtS2",
+"origQty": "3"
+}
+]
+},
+{
+"act": "close"
+},
+{
+"act": "close"
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=7&recvWindow=5000&timestamp=1800000000037&signature=009d114f38c63d6f39a028d216821cb7cc331fcae1b4bdcea7b7dcb9f6373d20",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=8&recvWindow=5000&timestamp=1800000000037&signature=9feda45e0b6625bf295b40311a6dd7f8d71ddeae77d79a8e18a29dcea9363cf6",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=10&recvWindow=5000&timestamp=1800000000037&signature=30d835df47b6ede1d5e2301ee125ee500b132f9e9d6b2f96d010d929d089fcca",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDT&recvWindow=5000&timestamp=1800000000037&signature=875a94b41d397dbcdd7ec9c09d3da33dcd0cbecbd3a8efe8c49a59ae4341c773",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=SOLUSDC&recvWindow=5000&timestamp=1800000000037&signature=b70fdc8c8e8f527aab33dce6c0559c44739b7872c94f2202a192a41eda1b3555",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=SOLUSDC&orderId=11&recvWindow=5000&timestamp=1800000000037&signature=4c12ba077fc939682f50a2db07dc8700227704ef7041a140bd3c3d185c8756db",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=SOLUSDC&orderId=11&recvWindow=5000&timestamp=1800000000037&signature=4c12ba077fc939682f50a2db07dc8700227704ef7041a140bd3c3d185c8756db",
+"key": "test_key"
+}
+],
+"results": [
+{
+"cancelled": [
+{
+"symbol": "ETHUSDC",
+"order_id": 7,
+"side": "LONG",
+"filled": 0.25,
+"qty": 1.0
+},
+{
+"symbol": "ETHUSDC",
+"order_id": 8,
+"side": "SHORT",
+"filled": 0.0,
+"qty": 0.0
+}
+],
+"errors": [
+"400 [-2011] Unknown order sent.",
+"ETHUSDT openOrders: 500 [-1001] x",
+"ServerDisconnectedError: Server disconnected"
+]
+}
+],
+"ban": null,
+"conns": 2,
+"post_only": [
+false
+]
+}
+]
+}

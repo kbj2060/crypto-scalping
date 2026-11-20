@@ -8,6 +8,7 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parents[1]
 W = SRC / "target" / "mutwork"
 P, X, F = "src/plan.rs", "src/exec.rs", "src/pyfmt.rs"
+S, H, B = "src/sign.rs", "src/http.rs", "src/bracket.rs"
 PLAN = [  # (이름, 파일, 원래, 바꾼 것) -- plan_fixture 로 잡혀야 한다
     ("내림 경계 +1e-9 → -1e-9", P, "Ok(int_trunc(value / grid + 1e-9)? * grid)", "Ok(int_trunc(value / grid - 1e-9)? * grid)"),
     ("올림 경계 -1e-9 → +1e-9", P, "Ok(py_ceil(value / grid - 1e-9)? * grid)", "Ok(py_ceil(value / grid + 1e-9)? * grid)"),
@@ -37,7 +38,7 @@ EXEC = [  # exec_invariants 로 잡혀야 한다
     ("-5022 판정이 코드 앞머리만 봄(09-20)", X, 'err.contains("5022") || err.contains("could not be executed as maker")', 'err.starts_with("-5022")'),
     ("앞지름 부등호 뒤집음", X, 'if order_side == "BUY" { bid > price } else { ask < price }', 'if order_side == "BUY" { bid < price } else { ask > price }'),
     ("알림에 깨도 매번 리페그 판단(E16)", X, "if ex.now() - last_chk < POLL_SEC {", "if ex.now() - last_chk < 0.0 {"),
-    ("불명 접수의 표식 조회 빼기(E6)", X, "if !e.starts_with(|ch: char| ch.is_ascii_digit()) {\n                // 🔴", "if false {\n                // 🔴"),
+    ("불명 접수의 표식 조회 빼기(E6 · 네트워크 오류를 확정 거부로)", X, "if !(!e0.starts_with(|ch: char| ch.is_ascii_digit()) ||", "if !(false ||"),
     ("잔량 대신 전량 재주문", X, "let remaining = r8(total - done);\n        let cid = format!(\"{PEG_TAG}", "let remaining = total;\n        let cid = format!(\"{PEG_TAG}"),
     ("부분 체결 뒤에도 수정 적용(D4)", X, "if g.action.is_none() && done == 0.0 {", "if g.action.is_none() {"),
     ("감시 진입 maker_only 무시", X, "if plan.maker_only {", "if false {"),
@@ -46,6 +47,33 @@ EXEC = [  # exec_invariants 로 잡혀야 한다
     ("지정가 대기 5xx 를 확정 거부로", X, "|| e0.starts_with('5') || e0.contains(\"-1007\")", "|| e0.contains(\"-1007\")"),
     ("거래소 취소를 취소로 안 봄(기다리기)", X, "let outside_cancel = terminal(&status) && status != \"FILLED\";", "let outside_cancel = false;"),
     ("대기 취소를 무시하고 따라가기 계속", X, "let cancel = |s: &Shared| st(s).action == Some(Action::Cancel);", "let cancel = |_s: &Shared| false;"),
+    ("감시 진입: 선 옮겨도 닿음 판정 시작점 그대로", X, "since = ex.wall_ms() as f64 / 1000.0;\n            let Some(q)", "let Some(q)"),
+    ("감시 진입: 닿은 뒤 maker_only 빠짐(시장가 전락)", X, "run_entry(ex, &ExecPlan { price, maker_only: true, ..plan }, s).await;", "run_entry(ex, &ExecPlan { price, maker_only: false, ..plan }, s).await;"),
+    ("감시 진입 TAKER 분기 번호 M5 빠짐", X, "st(s).market_branch = Some(\"M5\");", ""),
+]
+HTTP = [  # http_replay(원본 파이썬 + aiohttp 정답지)로 잡혀야 한다
+    ("quote_plus 빈칸 + → %20", S, "b' ' => o.push('+'),", "b' ' => o.push_str(\"%20\"),"),
+    ("quote_plus ~ 를 안전 글자에서 뺌", S, "| b'-' | b'~' =>", "| b'-' =>"),
+    ("recvWindow·timestamp 순서 바꿈", S, "    all.push((\"recvWindow\", P::I(RECV_WINDOW_MS)));\n    all.push((\"timestamp\", P::I(ts)));", "    all.push((\"timestamp\", P::I(ts)));\n    all.push((\"recvWindow\", P::I(RECV_WINDOW_MS)));"),
+    ("오류 문자열에서 code 버림(09-20)", S, "Some(c) => format!(\"[{}] \", py_str(c)),", "Some(_) => String::new(),"),
+    ("msg 없을 때 payload repr 대신 None", S, ".unwrap_or_else(|| py_repr(payload));", ".unwrap_or_else(|| \"None\".into());"),
+    ("418 만 밴 기록(429 빠짐)", S, "if status != 418 && status != 429 {", "if status != 418 {"),
+    ("GET·DELETE 끊김 한 번 더 안 보냄", H, "let mut retry = IDEMPOTENT.contains(&method);", "let mut retry = false;"),
+    ("POST 끊김도 다시 보냄(주문 두 번)", H, "let mut retry = IDEMPOTENT.contains(&method);", "let mut retry = true;"),
+    ("빈 본문을 None 대신 오류로", H, "return Ok(Value::Null);", "return Err(\"JSONDecodeError: empty\".into());"),
+    ("주문 번호 조회에서 side·positionSide 뺌", H, "(\"side\", P::s(c.side)), (\"positionSide\", P::s(c.position_side)), (\"orderId\"", "(\"orderId\""),
+    ("시계 보정 부호 뒤집음", H, "s as i64 - sign::ms(self.time())", "sign::ms(self.time()) - s as i64"),
+    ("익절만 지우기인데 물타기도 지움", B, "(!only_tp && cid.starts_with(&add_pre))", "cid.starts_with(&add_pre)"),
+    ("다른 코인 스탑도 지움(10-20)", B, "let same = a.get(\"symbol\").map_or(true, |s| s.as_str() == Some(symbol));", "let same = true;"),
+    ("strict 무시(같은 쪽 전량 익절 둘)", B, "if strict && truthy(cleared.get(\"errors\")) {", "if false {"),
+    ("사라진 조각을 조회 없이 체결로(11-12)", B, "json!(o.is_object() && o.get(\"status\").and_then(Value::as_str) == Some(\"FILLED\"))", "json!(true)"),
+    ("레버리지 같아도 다시 보냄", B, "if now == Some(target) {", "if false {"),
+    ("수수료 실패 캐시 5분 → 1시간", B, "if src == \"live\" { FEE_TTL_SEC } else { FEE_RETRY_SEC }", "FEE_TTL_SEC"),
+    ("수수료 stale 대신 fallback", B, "hit.filter(|h| h.3 != \"fallback\")", "None::<(f64, f64, f64, &str)>"),
+    ("물타기 GTC → GTX", B, "(\"timeInForce\", P::s(\"GTC\"))", "(\"timeInForce\", P::s(\"GTX\"))"),
+    ("비상 스탑 마크가 → 체결가 기준", B, "(\"workingType\", P::s(\"MARK_PRICE\"))", "(\"workingType\", P::s(\"CONTRACT_PRICE\"))"),
+    ("고아 정리가 dbtp 도 지움", B, "|| cid.starts_with(crate::exec::PEG_TAG) {", "|| cid.starts_with(crate::exec::PEG_TAG) || cid.starts_with(\"dbtp\") {"),
+    ("손절 다시 켜기 전 옛 스탑 안 지움", B, "let cl = cancel_bracket(bx, symbol, pside, true, false).await;", "let cl = json!({\"errors\": []});"),
 ]
 
 
@@ -57,8 +85,8 @@ def main() -> int:
     before = digest()
     env = dict(os.environ, CARGO_TARGET_DIR=str(SRC / "target" / "mut"), PATH=f"{Path.home()}/.cargo/bin:" + os.environ["PATH"])
     caught = total = 0
-    only = sys.argv[1] if len(sys.argv) > 1 else ""   # "plan" | "exec" | "" = 둘 다
-    for test, muts in (("plan_fixture", PLAN), ("exec_invariants", EXEC)):
+    only = sys.argv[1] if len(sys.argv) > 1 else ""   # "plan" | "exec" | "http" | "" = 전부
+    for test, muts in (("plan_fixture", PLAN), ("exec_invariants", EXEC), ("http_replay", HTTP)):
         if only and not test.startswith(only):
             continue
         for name, f, a, b in muts:

@@ -8,4 +8,10 @@ publish = false
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 # float_roundtrip: 기본 파서는 «최선 노력» 정밀도라 파이썬 repr 이 낸 실수를 비트 그대로 못 읽을 수 있다(정답지 비교가 흔들린다).
-serde_json = { version = "1", features = ["float_roundtrip"] }
+serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
+# 둘째 조각(2026-11-20): HMAC-SHA256 = ring(rustls 가 이미 쓰는 검증된 구현 -- hmac·sha2 를 따로 안 들임) · 16진 = hex ·
+# HTTP = ureq 3(rustls+ring, 동기 -- tokio blocking 풀에서) · tokio 는 잠·알림·blocking 풀만. 전부 개발기 cargo 캐시에 있던 것(새로 안 내려받음).
+ring = "0.17"
+hex = "0.4"
+tokio = { version = "1", features = ["rt", "time", "sync", "macros"] }
+ureq = { version = "3", default-features = false, features = ["rustls"] }
