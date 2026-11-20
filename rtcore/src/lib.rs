@@ -4,8 +4,9 @@ pub mod feed;
 pub mod hub;
 pub mod proto;
 pub mod state;
+pub mod supply;
 
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicI64, AtomicU64};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
@@ -19,6 +20,8 @@ pub const QUEUE_CAP: usize = 16384;
 pub static BAD_JSON: AtomicU64 = AtomicU64::new(0);
 pub static SKIPPED: AtomicU64 = AtomicU64::new(0);
 pub static RECONNECTS: AtomicU64 = AtomicU64::new(0);
+/// 지금 붙어 있는 수신 연결 수(60초 로그). 0 이면 수신이 하나도 없다.
+pub static LIVE_FEEDS: AtomicI64 = AtomicI64::new(0);
 static LATENCY_US: Mutex<Vec<u32>> = Mutex::new(Vec::new());
 
 pub fn now_us() -> i64 {
@@ -66,17 +69,30 @@ impl Cfg {
 }
 
 /// 수신 연결들과 화면 서버를 띄운다(tokio 런타임 안에서 부른다).
-pub fn start(cfg: &Cfg, listener: TcpListener) -> Arc<state::State> {
+/// 둘째 값은 수신 태스크 하나라도 끝나면(feed::run 은 영원히 돌므로 끝 = 패닉) 그 사유를 내는 핸들이다.
+pub fn start(cfg: &Cfg, listener: TcpListener) -> (Arc<state::State>, tokio::task::JoinHandle<String>) {
     let state = state::State::new(&cfg.symbols, RING_CAP, QUEUE_CAP);
+    let mut feeds = Vec::new();
     for s in &cfg.symbols {
         for url in [
             format!("{}{s}@trade", cfg.ws_base),
             format!("{}{s}@bookTicker", cfg.ws_base),
             format!("{}{s}@markPrice@1s", cfg.market_ws_base),
         ] {
-            tokio::spawn(feed::run(url, state.clone(), cfg.silence));
+            feeds.push((url.clone(), tokio::spawn(feed::run(url, state.clone(), cfg.silence))));
         }
     }
     tokio::spawn(hub::serve(listener, state.clone()));
-    state
+    (state, tokio::spawn(first_exit(feeds)))
+}
+
+/// 태스크들 중 처음 끝난 것의 사유. 2026-11-20 실서버: wss 패닉으로 수신 태스크가 전부 죽었는데
+/// 프로세스는 살아 «n=0» 만 찍었다 -- 이 사유를 받은 main 이 0 아닌 코드로 끝낸다.
+pub async fn first_exit(tasks: Vec<(String, tokio::task::JoinHandle<()>)>) -> String {
+    let (names, hs): (Vec<_>, Vec<_>) = tasks.into_iter().unzip();
+    let (r, i, _) = futures_util::future::select_all(hs).await;
+    match r {
+        Err(e) if e.is_panic() => format!("수신 태스크 패닉 {}", names[i]),
+        _ => format!("수신 태스크 종료 {}", names[i]),
+    }
 }

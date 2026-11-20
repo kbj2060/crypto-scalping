@@ -9,4 +9,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+# 2026-11-20 실서버: rustls 0.23 이 암호 제공자를 못 골라 wss 접속마다 패닉(tokio-tungstenite 는 rustls 를 default-features=false 로 받는다).
+#   이미 의존성 나무에 있는 rustls 에 `ring` 하나만 켠다 -- 제공자가 하나뿐이면 rustls 가 스스로 고른다(crypto/mod.rs from_crate_features).
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
