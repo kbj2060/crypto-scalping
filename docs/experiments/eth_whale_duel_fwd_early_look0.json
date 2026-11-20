@@ -1,0 +1,31 @@
+{
+ "look": 0,
+ "kind": "기각 전용",
+ "window": [
+  "2026-10-08",
+  "2026-11-14 22:00:00+00:00"
+ ],
+ "missing_days": [],
+ "thin_days": {},
+ "n": 52,
+ "event_days": 26,
+ "mean_bp": -1.994,
+ "se": 7.187,
+ "z": -0.277,
+ "ci95": [
+  -15.82,
+  12.32
+ ],
+ "z_reject": -1.96,
+ "z_candidate": -1.28,
+ "result": "계속",
+ "report_only": {
+  "maker_net": -4.194,
+  "taker_net": -9.994,
+  "always_long_bp": -5.082,
+  "always_short_bp": 5.082,
+  "whale_buy_events": 21,
+  "whale_sell_events": 31,
+  "perm_pctile": 40.4
+ }
+}
