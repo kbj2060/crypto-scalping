@@ -75,6 +75,12 @@ impl<R: AccountRest, O: WatchIo> DeskIo for Acct<'_, R, O> {
     async fn clear_bracket(&mut self, _s: &str, _p: &str, _a: bool, _b: bool) -> Result<Value, String> {
         unreachable!("청산 조립은 손절 해제를 안 부른다")
     }
+    async fn place_bracket(&mut self, _: &Value, _: &str, _: &str, _: bool) -> Result<Value, String> {
+        unreachable!("청산 조립은 익절을 안 건다")
+    }
+    async fn place_tp_ladder(&mut self, _: &Value, _: &str, _: &str) -> Result<Value, String> {
+        unreachable!("청산 조립은 익절을 안 건다")
+    }
 }
 
 impl<O: WatchIo, R: AccountRest, Q: Quotes, E: Exchange> WatchIo for Wired<O, R, Q, E> {
@@ -144,5 +150,8 @@ impl<O: WatchIo, R: AccountRest, Q: Quotes, E: Exchange> WatchIo for Wired<O, R,
     }
     fn alert(&mut self, msg: &str) {
         self.ops.alert(msg)
+    }
+    async fn ensure_leverage(&mut self, symbol: &str, target: i64) -> Value {
+        self.ops.ensure_leverage(symbol, target).await
     }
 }

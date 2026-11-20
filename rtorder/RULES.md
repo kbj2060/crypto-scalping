@@ -5,6 +5,7 @@
 
 상태: **옮김** = Rust 에 있고 시험이 지킨다 · **부분** = 규칙의 일부만 이 조각에 있다(나머지 몫과 조각을 적음) · **범위 아님** = 다음 조각 · **⚠시험 없음** = 옮긴 몫에 지켜 주는 시험이 없다.
 시험 약어: `fx` = tests/plan_fixture.rs(파이썬 정답지 2,266건) · `sc` = tests/plan_selfcheck.rs(원본 자체점검 이전) · `inv` = tests/exec_invariants.rs · `rp` = tests/http_replay.rs(원본 파이썬 + 진짜 aiohttp 정답지 112시나리오 -- 요청 열 글자까지·결과·밴 기록·연결 수) · `mesh` = tests/http_mesh.rs(가짜 거래소를 HTTP 뒤에) · `mut` = tools/mutate.py(양성 대조) · `wf` = tests/watch_fixture.rs(원본 orders.py 감시 클로저 정답지 97사례·120틱·호출 419 -- 호출 열·저장본·상태 칸·로그·예외 · 양방향 왕복) · `wi` = tests/watch_invariants.rs(퍼즈 300×20틱 · 루프 · 재시작 · busy_or) · `wx` = tests/watch_exec.rs(감시 → exec::run_exit → 가짜 거래소 · 시장가 분기) · `rt` = tools/check_watch_roundtrip.py(Rust 가 쓴 파일을 파이썬 읽는 쪽으로 96/96). 감시 양성 대조 = mutate.py `watch` 27/27(wf 22 · wx 2 · wi 3).
+여섯째 조각 시험: `re` = tests/runner_e2e.rs(접수 → 실행기 → 무장 → 감시 → 청산 · 실패 주입) · `us` = tests/userstream_ws.rs(127.0.0.1 HTTP·웹소켓) · `ah` = tests/account_http.rs(동시 계좌 조회 대 원본).
 넷째 조각 시험: `dk` = tests/desk_fixture.rs(원본 파이썬 정답지 tools/gen_desk_fixture.py -- 계좌 19 · 스트림 8 · 계획 64 · 접수 85(그중 시장가 미정 거절 6) · (가)=(나) 149사례 · 낡음 7 · 스트림 계좌 규칙 · 캐시 규칙) · `we` = tests/wire_e2e.rs(감시 → 계좌 → 조립 → 집행 5). 양성 대조 = mutate.py `desk` 30 + `wire` 2.
 다음 조각 이름: **접수**(라우트·confirm·게이트·잠금·칸) · **조립**(assemble_entry/exit_plan·계좌·풀·basis) · **감시**(bracket_tick·무장 파일·arm_bracket 등 orders.py 쪽) · **대기 관리**(대기 칸·복구 파일·재시작 훅) · **계좌·알림**(사용자 스트림).
 
@@ -13,8 +14,8 @@
 | # | 상태 | Rust 위치 · 시험 / 조각 |
 |---|---|---|
 | G1 | 부분 | `intake::POST_ONLY` 표(주문을 바꾸는 8개 핸들러) -- 라우트에 강제하는 것은 웹 서버 조각 |
-| G2 | 부분 | 옮긴 10개 핸들러 전부 confirm=1(진입·청산·전량·지정가 수정·대기 동작·진입 취소·손절 해제·다시 켜기) · `dk` sub_no_confirm·xs_no_confirm·xall_no_confirm·am_no_confirm·ec_no_confirm · mut «진입 confirm 빠짐» · 익절 on/off·분할 조각·선 추가·선 수정 4개는 안 옮김(다음) |
-| G3 | 부분 | `plan::exec_enabled` + 접수는 `DeskIo::exec_enabled`(매 요청) · 403 = `intake` 10개 · `dk` sub_exec_off·xs_exec_off·xall_exec_off · 미리보기 dry_run(fx·dk) · 나머지 4개 핸들러는 다음 |
+| G2 | 옮김 | 주문을 바꾸는 핸들러 14개 전부 confirm=1(넷째 10 + 여섯째 익절 on/off·분할 조각·선 추가·선 수정) · `dk` *_no_confirm |
+| G3 | 옮김 | `DeskIo::exec_enabled`(매 요청) · 403 = 핸들러 14개 · 미리보기 dry_run · `dk` |
 | G4 | 부분 | 감시 틱 정지 = `Watcher::bracket_tick`(스위치 꺼짐이면 계좌도 안 읽음 · 무장 파일 그대로) · wf `exec_switch_off`·`exec_switch_off_during_tick_still_fires`(틱 도중 꺼져도 그 틱은 끝까지 = 원본) · wi(퍼즈: 꺼짐이면 호출 0·저장본 불변) · mut «스위치 꺼져도 감시» · 고아 정리 시작 게이트(start_wait_cleanup)·사용자 스트림은 접수·계좌·알림 |
 | G5 | 옮김 | `api_entry_submit`(진입 칸 하나 · 같은 코인 청산 칸도 봄) 409 · `dk` sub_entry_busy·sub_side_exit_busy · mut «같은 코인 청산 칸이 바빠도 진입» |
 | G6 | 옮김 | `Watcher::exit_slot`(코인 칸을 만들어 둠 · 같은 코인 사용 중 None) · wf `two_coins_other_entry_busy_uses_side_slot`·`same_coin_entry_busy_skips`·`same_coin_side_slot_busy_skips` · wi(퍼즈: ETH 칸이 바쁘면 ETH 청산 0) · mut «같은 코인 칸이 바빠도» |
@@ -50,14 +51,14 @@
 | P13 | 옮김 | positionSide 필수 · reduceOnly 없음(계획·`exec::LimitOrder` 에 칸 자체가 없다) · sc(reduceOnly 키 없음) |
 | P14 | 옮김 | `assemble_exit_plan`(fresh · 실제 열린 심볼 · only_symbol · other_symbol_open) · `dk` exit_both_symbols_leftover·exit_only_symbol_* · 감시 wf |
 | P15 | 옮김 | `build_exit_plan`(전량이면 곱셈 안 함 · min) · fx · sc · mut «min → max» |
-| P16 | 부분 | `bracket::ensure_leverage`(rp) · 진입 작업이 부르는 자리(entry_then_bracket)는 다음 조각 |
+| P16 | 옮김 | `runner::entry_then_bracket` 가 원본 run_entry·run_entry_wait 처럼 진입 전 `WatchIo::ensure_leverage`(결과 = 칸 leverage · 실패해도 주문) · 거래소 쪽 `bracket::ensure_leverage` rp · `re` · mut «레버리지 빠짐» |
 | P17 | 옮김 | 권장배수 읽기·margin_type·commit_rule_l·rec_rule_size·레버리지 묶임 · `dk` rule_c_eth_first·rule_h_eth_add·rule_low_lev_binds |
 | P18 | 옮김 | `rec_rule_size`(add_stop_frac) · `rec_rule_add_order` · fx · sc |
 | P19 | 옮김 | 규칙 무장(auto, 옛 기록은 rule) 있으면 계좌 명목 ≤ 순자산×2 · `dk` other_symbol_orders_and_waits_rule_shared·same_side_add_rule_keeps_stop |
 | P20 | 옮김 | `rec_rule_bracket` 를 조립이 부름(기준 = 첫 진입가/평단 · 규칙 손절 유지) · `dk` same_side_add_rule_keeps_stop |
 | P21 | 옮김 | `Desk::basis_for`(못 읽으면 1.0 · 0 이어도 1.0) · `dk` basis_ref_fails · mut «1.0 대신 다른 값» |
 | P22 | 옮김 | 지정가 = 선×basis 롱 내림·숏 올림 · 호가 넘으면 400(감시 진입 예외) · 명목 유지 수량 · `dk` limit_long·limit_short·limit_marketable·stop_entry_above · mut «롱 내림 → 올림» |
-| P23 | 범위 아님 | 대기 관리(limit_reprice = 지정가 대기 작업의 재조정 콜백 -- entry_then_bracket 과 같이) |
+| P23 | 옮김 | `runner::RunEx::reprice`(원본 limit_reprice: basis 1.0 이면 None · 호가 넘으면 None · 롱 내림·숏 올림) · ⚠원본 정답지 없음(자동 재조정 20초 각본) -- 집행 쪽 E23 inv |
 | P24 | 옮김 | `line_bracket` · fx(177) · sc · mut «롱 올림 → 내림» |
 | P25 | 옮김 | 선 주문은 1초 체결가 원천 필수(400) · `dk` lines_no_feed |
 | P26 | 옮김 | 같은 쪽 포지션 = 보낸 선 무시(add_keep) · 선 포지션 아니면 버림+notes · 지정가 추가 409 · 규칙 크기 409 · 청산 중 409 · `dk` add_on_lines_*·lines_on_plain_position_dropped·limit_on_plain_position_409·rule_on_lines_position_409·exiting_* |
@@ -103,15 +104,15 @@
 |---|---|---|
 | W1 | 옮김 | `Watcher::waits` · `wkey`·`wasset`·`wslots`(칸 번호 순)·`wait_slot`(setdefault) · wf(감시가 같은 쪽 대기를 거둘 때 · 재시작 기록 칸) · 칸을 여는 접수는 접수 |
 | W2 | 옮김 | `WAIT_SLOTS_MAX` 10 · `dk` sub_limit_all_slots_running |
-| W3 | 부분 | `LIMIT_MAX_SEC`(4시간) 만료 취소 · inv `limit_paths`(만료) · `e25_stop_entry_paths`(감시 진입 만료) · 기다리기 마감 잔량 시장가는 미정 M3 |
-| W4 | 부분 | `Watcher::limit_save`·`limit_path`(심볼·칸 _n · 임시 파일 → 교체 · 못 쓰면 로그만) · wf `limit_save_writes` · 왕복 wf `limit_file_round_trip` + rt(Rust 가 쓴 복구 파일을 파이썬 limit_recover 가 읽음) · «정상 종료에서만 지움»은 대기 관리(entry_then_bracket) |
+| W3 | 옮김 | 4시간 만료(E21·E25 inv) · 기다리기 마감 잔량 시장가(M3 · rp 2) |
+| W4 | 옮김 | 접수·수정 때 `limit_save_at` · 정상 종료에서만 복구 파일 지움(`entry_then_bracket` -- error 면 남김) · wf·rt |
 | W5 | 옮김 | `Watcher::limit_recover`(6시간 · 계좌 못 읽음 유지 · 포지션 있고 무장 없으면 저장한 선으로 무장하고 placed 확인 · 고아 실패면 유지 · 예외 = «복구 실패» 유지) · wf `restart_cleanup_and_recover`·`restart_orphan_errors_keep_file`·`restart_account_fails_and_cleanup_raises`·`restart_already_armed_or_no_position` · mut «고아 실패여도 지움» «6시간 넘어도 복구» |
 | W6 | 옮김 | `api_limit_amend`(mode=limit·working·동작 없음·주문 있음/감시 닿기 전 · 일부 체결 뒤 거절 · 반영 중 거절 · 조립 뒤 다시 봄 · 선은 복구 파일에) · `dk` am_* 9 · mut «일부 체결 뒤에도 수정» |
-| W7 | 부분 | PEG(내 쪽 호가로 선 다시 검사 · 시세 못 읽으면 502 · 걸리기 전·따라가는 중 409) `api_wait_action` · `dk` wa_peg_* 5 · «지금 시장가»는 미정 M13(접수 거절) |
+| W7 | 옮김 | «지금 시장가»(체결될 쪽 호가 = 반대편)·«PEG»(내 쪽) 둘 다 선 재검사 `api_wait_action` · `dk` wa_* |
 | W8 | 옮김 | PEG 는 지정가 대기만(400) · `dk` wa_peg_on_wait_mode |
 | W9 | 옮김 | `bracket_tick`(clear·fire 때 같은 심볼·같은 쪽 대기에 action=cancel · 다른 코인·반대쪽은 둠 · 분할 손절(sl_leg)엔 안 함 = 원본) · wf `position_gone_clears_and_cancels_same_side_wait` · mut «같은 쪽 대기 취소 빼기» |
-| W10 | 부분 | 무장 함수 `keep_rearm`·`plan_from_current`·`arm_bracket` 은 옮김(wf) · 첫 체결 순간 부르는 고리(entry_then_bracket.first_fill)는 대기 관리 |
-| W11 | 부분 | `plan_from_current`(지금 저장된 선 · fired·조각·exiting 이면 None) · wf `plan_from_current_variants`·`plan_from_current_fired_none` · entry_then_bracket 의 «mod·sl_off·tp_off·fired 면 덮지 않음» 분기는 대기 관리 |
+| W10 | 옮김 | 첫 체결 순간 `RunEx::on_fill` = 추가 진입이면 keep_rearm · 아니면 plan_from_current 로 물타기 없이 무장 · 예외는 칸 bracket 에 · `re` |
+| W11 | 옮김 | 대기 종료 뒤: 선 주문 = plan_from_current · 지정가 대기에서 mod·sl_off·tp_off·fired 면 덮지 않음(`entry_then_bracket`) · ⚠원본 전체 흐름 정답지 없음 |
 | W12 | 옮김 | `exec::Shared`(집행 루프와 API 가 같은 칸) · inv(가짜가 시각표대로 action·amend 를 넣는다) |
 
 ## 5. 브래킷 B1–B33
@@ -120,7 +121,7 @@
 |---|---|---|
 | B1 | 옮김 | `watch::bracket_load`(못 읽으면 {} · 옛 키 옮김)·`bracket_save`(임시 파일 → 교체) · 양방향 왕복: 파이썬이 쓴 원문 95개 → Rust 가 같은 값으로 읽음(wf) · Rust 가 다시 쓴 95개 + 대기 복구 파일 1 → 파이썬 bracket_load·limit_recover 가 형·repr 까지 같은 값으로 읽음(rt 96/96 · 까다로운 값 사례: 0.1+0.2·1e-07·1e+16·-0.0·2^53+1·5e-324·최대 실수·이모지·이스케이프·옛 키) · 🔴NaN·Infinity 는 파이썬만 읽는다(아래 «새로 본 것») |
 | B2 | 옮김 | `bracket_key`·`bracket_rekey` · fx · wf `legacy_key_migrates_on_load`(옛 키 무장이 발동 · 저장 때 새 키로) · `legacy_and_new_key_collide`(같은 칸이면 파일 순서상 뒤의 것 = 파이썬 dict -- serde_json preserve_order 라 같다) |
-| B3 | 부분 | `arm_bracket`(결과 칸 state["bracket"] 은 예외여도 채움 · 원본 칸 순서·값 그대로 무장 기록) · wf `arm_bracket_*` 4사례 · «체결이 있으면 모든 종료 경로»는 대기 관리(entry_then_bracket) |
+| B3 | 옮김 | 체결이 있으면(부분 포함) 모든 종료 경로에서 무장 · 결과 칸은 예외여도 채움 · `re` entry_* · mut «체결 뒤 무장 안 함» |
 | B4 | 옮김(M10 차이) | `bracket::place_bracket`(포지션 새로 읽어 그 측면 전량 · 옛 우리 주문 정리 → TP GTX · strict) · 🔴비상 스탑은 걸지 않는다(M10 제거 -- 결과에 backstop 칸 없음 · 의도한 차이) · 익절 불명 응답 = `resolve_resting`(결함 수정 2026-11-21) · rp(«원본 요청 열에서 스탑 요청만 뺀 것») · mut «불명 응답 조회 안 함» |
 | B5 | 제거(M10) | 2026-11-21 사용자 결정 «−5% 비상 스탑 Rust 에서 제거» -- `post_stop`·`place_stop` 코드 지움 · 스탑 목록·취소 요청도 없음 · rp 스탑 시나리오 15 는 스탑 요청을 뺀 열과 대조 · place_stop 시나리오 6 은 함수째 없음 |
 | B6 | 옮김(M10 결과) | `arm_rule_add`(스탑 placed 아니면 물타기 안 건다) -- 스탑을 안 걸므로 **자동 물타기 지정가(M12)는 이제 늘 안 걸린다**(«주문을 더 내지 않는 쪽» · 의도한 차이) · wf 는 가짜 place_bracket 이라 원본 동작 고정 그대로 |
@@ -130,7 +131,7 @@
 | B10 | 옮김 | clear 정리 실패 → 무장 남김 + retry_after 30초 · wf `position_gone_clear_fails_retry_30s`·`filled_but_cleanup_fails_then_clear` · mut «정리 실패에도 무장 내림» |
 | B11 | 옮김 | `bracket_sl_hit`(마감 5분봉 종가 · watch_from) · fx · sc · 입력 고르기(time+300 ≤ 지금인 봉 중 마지막 · 못 읽으면 None + 로그) = `bracket_tick` · wf `rule_*` 10사례(정확히 같은 값·한 틱 차이·무장 전 봉·꼬리만·sl_price 대체·미마감) · mut «미마감 봉도 씀» |
 | B12 | 옮김 | `bracket_action` 선 분기 · `line_hit`(손절 먼저) · `sl_legs_hit` · fx · sc · 입력(무장·watch_from 뒤 1초 가격 범위) = `bracket_tick` · wf `lines_*` 14사례 · mut «닿음 >= → >»(fx) «무장 전 1초 가격도 씀»(wf) |
-| B13 | 부분 | `sl_up_of`·`line_bracket(sl_watch)` · fx · sc · check_lines 는 접수 |
+| B13 | 옮김 | `check_lines`(sl_watch · 화면이 보낸 slup) · 익절만 옮기면 손절 방향 그대로(`api_bracket_modify`) · `dk` mod_tp_only_keeps_sl_up·add_new_arm_sl |
 | B14 | 옮김 | `bracket_tick` 선 발동(exiting 먼저 → 익절 지정가 먼저 지움 → 실패면 10초 · 지웠으면 fired 를 곧바로 파일) · wf `lines_long_touch_exact`·`lines_tp_cancel_fails_waits_10s`(호출 열의 run_exit 에 그 순간 저장본을 함께 적어 «fired 가 청산 전에 파일에»를 대조) · wi 재시작(청산 도중 죽어도 fired 가 파일에) · mut «10초 → 30초» «fired 를 청산 전에 안 씀» |
 | B15 | 옮김 | 발동 직전 armed_at·mod.at 다시 비교 · wf `line_moved_before_fire_skips` · mut «mod.at 비교 빼기» |
 | B16 | 옮김 | 조립 뒤 sl_off 다시 봄(선 무장의 익절 fire 는 예외) · wf `disarm_during_plan_rule`·`disarm_before_fire_lines`·`sl_leg_disarmed_during_plan` · mut «조립 뒤 손절 해제 검사 빼기» |
@@ -141,15 +142,15 @@
 | B21 | 옮김 | `api_bracket_disarm`(우리 스탑만 · 취소 실패면 아무것도 안 바꿈 · 그 사이 새 무장 409) · `dk` dis_* 6 · mut «취소 실패에도 바꿈» «새 무장 무시» |
 | B22 | 옮김(M10 차이) | `api_bracket_rearm` 선 무장 = 감시만 다시 · 규칙 무장 = 거래소 스탑 없이 sl_off 만 지움(5분봉 감시 다시) · 응답 backstop=null · `dk` re_* (re_rule_ok·re_rule_place_fails 는 의도한 차이) |
 | B23 | 옮김 | `bracket_action` sl_off + fired "tp"/True · fx · sc · 실행 wf `lines_sl_off_tp_watch_fires_tp`(fired="tp")·`lines_fired_true_sl_off_holds` |
-| B24 | 부분 | 끄기의 거래소 쪽 = `cancel_bracket(only_tp)`(tp_open 함께) · rp · `tp_watch_only`·켜기 검사는 접수·감시 |
-| B25 | 범위 아님 | 안 함 -- 다음 조각(선 수정 `api_manual_bracket_modify`) |
-| B26 | 범위 아님 | 안 함 -- 다음 조각(선 추가 `api_manual_bracket_add`) |
+| B24 | 옮김 | `api_bracket_tp`(off = 우리 dbtp 만 · 일부 실패면 서버 감시로 · on = 5초 안 1초 체결가가 이미 너머면 409 · strict · 그 사이 무장 바뀌면 방금 건 것 지움) · `dk` tp_* 10 |
+| B25 | 옮김 | `api_bracket_modify`(익절 레벨 그대로면 안 건드림 F3 · 옮기면 strict F2 · 정리 실패 = 서버 감시+경고 · 무장 바뀌면 방금 건 지정가 지움 S2 · 조각 tpi·sli · 지운 쪽 선 검사 안 함) · `dk` mod_* 15 |
+| B26 | 옮김 | `api_bracket_add`(규칙 무장 409 · 그 선이 있으면 분할 조각(최대 4 · ±0.05% 같은 가격 거절) · 무장 없으면 새 선 무장(다른 쪽 never) · 익절 strict) · `dk` add_* 15 |
 | B27 | 옮김 | `split_tp_qty` · fx(194) · sc · mut «carry 버림» |
 | B28 | 옮김 | `bracket::place_tp_ladder`(옛 익절 다 지운 뒤에만 · 사라진 조각은 직접 조회해 FILLED 일 때만 체결 · 필터는 조각이 없어도 읽음 · split_tp_qty) · rp(9사례: 정상·사라진 조각 체결/취소·전부 체결·먼지 합침·정리 실패·필터 예외·조회 실패·포지션 없음·키 없음) · mut «조회 없이 체결로» · `ladder_apply`(O) 는 접수 |
-| B29 | 부분 | `watch::set_tp_legs`(다 빠지면 tp_resting False · 하나면 단일 칸으로)·`set_sl_legs`·`tp_watch_only` · wf `sl_leg_with_tp_ladder_rearm`·`sl_leg_tp_ladder_partial_cancel_watch_only` · mut «일부 취소 실패를 서버 감시로 안 넘김» · 사용자 스트림의 dbtp FILLED 반영(tp_leg_filled)은 계좌·알림 |
+| B29 | 옮김 | `set_tp_legs`·`set_sl_legs` · 조각 조작 `api_bracket_tp_legs`(`dk` tl_* 13) · 스트림 «우리 dbtp FILLED» → `userstream::Hub::tp_fills` 대기열(감시가 빼는 연결은 다음) · ⚠대기열 소비자 없음 |
 | B30 | 옮김 | `Watcher::partial_exit_rearm_tp`(조각 = place_tp_ladder · 단일 = place_bracket · 서버 감시·fired·tp_off·exiting 제외 · 그 사이 새 무장이면 안 덮음 · 조회 실패면 상태 그대로 · 예외는 tp_rearm 에) · wf `partial_exit_rearm_tp_single`·`…_lookup_fails_keeps_state`·`…_skips`·`…_rearmed_meanwhile`·`sl_leg_tp_ladder_raises`·`exit_then_rearm_partial` · mut «strict 로 몰래 고침(D7)» · D7 원본 그대로(strict=false) |
 | B31 | 옮김 | `Watcher::keep_rearm`(무장 없으면 arm_bracket · 손절 조각 청산 중이면 건너뜀 · 아니면 익절 수량만) · wf `keep_rearm_paths`·`keep_rearm_sl_leg_fired_skips` · ponytail: 포지션별 asyncio.Lock 대신 `&mut self` 가 한 줄로 세운다 |
-| B32 | 부분 | 청산 진행 표시 `Watcher::exiting`(감시가 첫 await 전에 넣고 끝나면 뺀다 · 예외로 새면 남는다 = 원본) · wf `exiting` 칸 대조 · 거절하는 API 는 접수 |
+| B32 | 옮김 | 청산 진행 중(exiting·fired·청산 칸 없음) 선 수정·익절 on/off·선 추가·조각 조작·추가 진입 거절 · `dk` *_fired |
 | B33 | 범위 아님 | 응답 서버(계좌 응답의 `unprotected` -- with_bracket) |
 
 ## 6. 청산 C1–C6
@@ -158,7 +159,7 @@
 |---|---|---|
 | C1 | 옮김 | 청산 미리보기·제출·전량·감시 = fresh(감시는 스트림 계좌 가능 -- 아래) · `dk` · `we` |
 | C2 | 옮김 | 부분 청산 = `Task::Exit{rearm:true}`(exit_then_rearm) · 전량 = run_exit · `dk` xs_partial_ok·xs_full_ok · 실행 = `Watcher::exit_then_rearm`(wf) |
-| C3 | 부분 | 스위칭 접수 = 원본대로 `Task::Switch`(청산 market=True · 칸 switch 표시 · dk xs_switch_m11 원본과 같음) · 실행기 `exit_then_switch` 는 안 옮김(작업 실행기 -- 다음) |
+| C3 | 옮김 | `runner::exit_then_switch`(다 닫혔을 때만 · 칸을 await 없이 진입 상태로 · 같은 조립 fresh · 막히면 사유 · 반대 진입 MARKET M2 → entry_then_bracket) · ⚠원본 정답지 없음(Rust 시험은 접수까지 dk) |
 | C4 | 옮김 | 스위칭은 위 칸만(`api_exit_submit`) · dk |
 | C5 | 옮김 ⚠불확실 | `api_exit_all_submit`(코인·방향 하나씩 · 같은 코인·방향 다른 심볼 already_working · 모르는 심볼 unknown_symbol · 먼지·고변동성 = 코인별 미정) · `dk` xall_* 6 · ⚠docs/rtcore_port_scope: 화면 단추가 삭제됨 -- 쓰는 곳이 없을 수 있다 |
 | C6 | 옮김 | `api_entry_cancel` 청산·스위칭·MARKET 은 취소 안 받음 · `dk` ec_* |
@@ -169,24 +170,24 @@
 |---|---|---|
 | R1 | 옮김 | `bracket::cancel_wait_orphans`(dbwt·dbpg 만 · rp 2 · mut «dbtp 도») + 재시작 훅 `Watcher::wait_cleanup`(지운 주문은 그 코인 대기 칸 · 정리 실패는 eth 칸 · 예외면 errors 에 · restart_cancelled 기록) · wf `restart_*` 4사례 · wi `restart_mid_exit_keeps_arming_and_next_process_finishes` · 훅을 «스위치 켜진 곳에서만» 띄우는 것은 G4(접수) |
 | R2 | 옮김 | `wait_cleanup` 이 정리 뒤 복구 파일(이름순)마다 `limit_recover` · 결과를 그 칸 recovered 에 · wf `restart_cleanup_and_recover`(6시간 넘은 SOL 파일 지움 + ETH 무장) |
-| R3 | 부분 | 감시가 부르는 청산의 settle(예외 → phase=error «집행 오류 … — 거래소에서 직접 확인하세요» · done_at) = `Watcher::settle` · wf `exit_raises_settle_error` · 진입·대기·청산 버튼의 settle 은 접수 |
+| R3 | 옮김 | `runner::settle`(진입·대기·청산 작업) + 감시 settle · `re` |
 | R4 | 부분 | 취소 확인 실패·지정가 접수 불명·PEG/감시 진입 호가 실패 → `Phase::Error` · inv03·05·07·d2·e25 · mesh(HTTP 로도 같은 error) · API 키 없음 = `Binance::has_keys`(브래킷 함수들이 원본 문구로) -- 집행 함수(run_*)의 키 검사는 호출부 · 스위칭은 접수 |
 | R5 | 범위 아님 | 웹 서버(종료 훅 · 세션 닫기 전 작업 취소) |
 | R6 | 범위 아님 | 웹 서버(shutdown_timeout 2초) |
 | R7 | 옮김 | `Binance::nap` = tokio select(잠 · 알림) -- future 를 버리면 바로 끝나 «깨움·취소가 같은 틱이면 취소를 삼킴»(gh-86296)이 생길 자리가 없다 · mesh `nap_wakes_early_on_fill_alert` |
-| R8 | 범위 아님 | 대기 관리(entry_then_bracket -- 취소되면 복구 파일이 남는다) |
+| R8 | 옮김 | `entry_then_bracket`: phase=error 면 복구 파일을 남김(정상 종료에서만 지움) |
 | R9 | 옮김 | 진행 상태(entry·side_exits·waits·exiting)는 `Watcher` 메모리 -- 재시작하면 사라지고 무장 파일이 감시를 잇는다 · wi `restart_mid_exit_keeps_arming_and_next_process_finishes`(청산 도중 죽음 → 새 프로세스: 고아 정리 → fired 래치로 익절 취소 없이 바로 청산 → 닫힘 → 무장 내림) · wf `lines_fired_latch_after_restart` |
 
 ## 8. 계좌·체결 알림 A1–A11
 
 | # | 상태 | Rust 위치 · 시험 / 조각 |
 |---|---|---|
-| A1 | 부분 | `account::AccountBook::produce`(조회 한 곳 · 수동 주문 심볼 포함 · 시세만 코인 뺌) + `fetch_account` · `dk` 계좌 19사례 요청 열 글자까지 · 원장 기록·income·day_start(화면 몫)는 안 옮김 |
+| A1 | 옮김 | `AccountBook::produce` + `fetch_account`(동시 조회 `get_many` · 원본 gather 와 같은 요청 집합 · `ah` account_http 5) · 원장·income 은 화면 몫(안 옮김) |
 | A2 | 옮김 | `AccountBook` last_good(30분 · 실패는 ok=false 그대로) · `dk` account_cache_rules_and_last_good |
 | A3 | 옮김 | `account::fresh_needs_fetch`(1초) + `swr_decide`(10초 + 묵은 값) · `dk` 같은 시험 · 실제 캐시 자리 = `wire::Wired::account`(ponytail: 묵은 값 대신 기다려 새로) |
 | A4 | 옮김 | `USER_STREAM_WS`(/private) · `dk` 스트림 사건 열의 connect 주소 |
-| A5 | 부분 | listenKey POST · 30분 PUT 연장(실패는 로그만) · 지우지 않음 · 밴 중이면 안 부름 = `user_stream_run` · `dk` keepalive_and_long_conn_resets_wait·ban_waits_then_connects · 실제 HTTP(418/429 본문을 JSON 전에 기록)는 다음(전송 조각) |
-| A6 | 부분 | heartbeat 120 · 수신 60초 시간초과는 계속 · TEXT 아님·listenKeyExpired 면 다시 연결 = 루프 · `dk` · 웹소켓 전송 자체(전용 세션)는 다음 -- 새 의존성(tokio-tungstenite) 필요 |
+| A5 | 옮김 | `Binance::listen_key`(POST·PUT·DELETE · 밴 중이면 안 부름 · 200 아니면 본문을 JSON 전에 밴 기록) · 닫기는 안 부른다 · `us` userstream_ws |
+| A6 | 옮김 | `userstream::LiveStream`(tokio-tungstenite 0.26 · rustls ring 박아 둠 · heartbeat 120 ping · 수신 60초 시간초과 계속 · CLOSE·만료면 다시) · `us` · ponytail: pong 은 안 기다림 |
 | A7 | 옮김 | 재연결 5초 ×2 최대 300 · 5분 넘게 붙었으면 5초 · 밴이면 남은+1초 · `dk` expired_reconnect_backoff·keepalive_* · mut «5분 → 50분» «+1 → +0» |
 | A8 | 옮김 | 연결되자마자 dirty + wake · `dk` |
 | A9 | 옮김 | `account::user_event_kind`(+ «o» 가 dict 아니면 원본처럼 예외 → 다시 연결) · `dk` connect_events_close·tp_leg_filled_raises_keeps_stream · mut «체결에 계좌 다시 읽기 빠짐» |
@@ -307,3 +308,12 @@
 | 규칙 손절 자체 | 거래소 스탑(1차) + 서버 5분봉 종가(2차) | 서버 5분봉 종가 감시만(B11 그대로) |
 
 🔴전환 때 결정 필요: 파이썬 시절에 걸린 dbsl 스탑이 거래소에 남아 있으면 Rust 는 지우지 않는다(목록 조회를 안 한다) -- 포지션이 닫힌 뒤 그 closePosition 스탑이 다음 포지션을 닫을 수 있다. 전환 절차에서 한 번 정리할지(정리 = 주문 취소만, 새 주문 아님).
+
+## 여섯째 조각 (2026-11-21)
+
+- 선 핸들러 4개(`intake.rs` api_bracket_tp · _tp_legs · _add · _modify + ladder_apply·lines_quote·check_lines·tp_legs_of·sl_legs_of) -- 원본 정답지 51사례(dk) 상태코드·본문·호출·무장 파일·로그 전부 일치 · (가)=(나) 도 같이.
+- 작업 실행기 `runner.rs`(entry_then_bracket · exit_then_switch · limit_reprice · settle · ensure_leverage 자리 · 상태 칸↔집행 상태 다리 slot_to_exec/exec_to_slot · run_task) -- `re` 4(정상 흐름 · 익절 못 걸림 → 서버 감시로 닫힘 · 청산 오류 → 재발동 전 정리 · 따라가기 미체결 → M1 시장가 → 무장).
+- 전송: `Binance::listen_key` + `userstream::LiveStream`(tokio-tungstenite 0.26.2 · rustls 0.23.46 ring -- rtcore 와 같은 판 · Cargo.lock 에 새 줄은 이 둘과 그 의존성) -- `us` 1(연결·사건·끊김·재연결·listenKey 만료·알림 누락 뒤 REST 대조 = 어긋남).
+- 계좌 조회 동시화: `AccountRest::get_many`(Binance = spawn_blocking 동시 · 가짜 = 차례로) -- `ah` 5사례 «요청 집합(순서 무관)·스냅숏» == 원본(429 사례는 정답지 생성기가 밴 판정을 막아 두어 뺐다).
+- M4 원본 정답지: http 생성기에 «n 번째 주문 조회 때 state action 넣기» 훅 · Rust 재생도 같은 자리(Virt::get_order) -- rp 2(바로 · 부분 체결 뒤) 일치.
+- ⚠원본과 대조 못 한 것: 실행기 «전체 흐름» 정답지(원본 entry_then_bracket+bracket_tick 을 실제 X 함수로 127.0.0.1 에 돌리는 각본)는 만들지 못했다 -- 이번엔 Rust 끝에서 끝 시험(`re`)과 조각별 원본 대조(rp·wf·dk)로 갈음.

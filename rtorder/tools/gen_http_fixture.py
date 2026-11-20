@@ -65,6 +65,8 @@ X.asyncio = types.SimpleNamespace(sleep=fsleep)
 
 
 class S:
+    hook = None   # (state dict, n번째 주문 조회, action) -- 대기 루프 도중 화면이 action 을 넣는 각본(M4)
+    gets = 0
     auto = None
     given: list = []
     queue: list = []
@@ -196,6 +198,12 @@ async def call(session, fn, a):
         return await X.cancel_wait_orphans(session, a["symbols"])
     if fn == "cancel_exit_orders":
         return await X.cancel_exit_orders(session, SYM, a["pside"])
+    if fn == "run_entry_limit":
+        st = {}
+        S.hook, S.gets = (st, a["act_at"], a["action"]), 0
+        await X.run_entry_limit(session, dict(a["plan"]), st, max_sec=a.get("max_sec", 600.0))
+        S.hook = None
+        return {k: st.get(k) for k in EXEC_KEYS}
     if fn in ("run_entry", "run_exit", "run_entry_wait", "run_entry_stop"):
         st = dict(a.get("state0") or {})
         if fn == "run_entry_wait":
@@ -228,6 +236,10 @@ def auto_book(market, fill_get="0", fill_status="NEW"):
             n["id"] += 1
             return NEW(n["id"])
         oid = int(q.get("orderId") or 0)
+        if method == "GET" and "orderId" in q and S.hook is not None:
+            S.gets += 1
+            if S.gets == S.hook[1]:
+                S.hook[0]["action"] = S.hook[2]
         if method == "GET":
             return ok({"orderId": oid, "status": "CANCELED" if oid in n.setdefault("gone", set()) else fill_status, "executedQty": fill_get})
         if method == "DELETE":
@@ -449,6 +461,9 @@ scn("집행 M9 청산 마감 잔량 시장가", c("run_exit", plan=XP), auto=aut
 scn("집행 M9 부분 뒤 잔량 시장가", c("run_exit", plan=XP), auto=auto_book(MK("1.2"), fill_get="0.8", fill_status="PARTIALLY_FILLED"))
 scn("집행 M3 기다리기 마감 시장가", c("run_entry_wait", plan=EP, wait_sec=60.0), auto=auto_book(MK("2")))
 scn("집행 M3 지금 시장가(사용자)", c("run_entry_wait", plan=EP, wait_sec=60.0, state0={"action": "market"}), auto=auto_book(MK("2")))
+scn("집행 M4 지정가 대기 지금 시장가(2번째 조회 뒤)", c("run_entry_limit", plan={**EP, "price": 2490.0, "limit": {"usdt": 2490.0}}, act_at=2, action="market"), auto=auto_book(MK("2")))
+scn("집행 M4 부분 체결 뒤 지금 시장가", c("run_entry_limit", plan={**EP, "price": 2490.0, "limit": {"usdt": 2490.0}}, act_at=3, action="market"),
+    auto=auto_book(MK("1.5"), fill_get="0.5", fill_status="PARTIALLY_FILLED"))
 scn("집행 M5 감시 진입 지금 시장가", c("run_entry_stop", plan={**EP, "limit": {"usdt": 2600.0}}, state0={"action": "market"}), auto=auto_book(MK("2")))
 
 

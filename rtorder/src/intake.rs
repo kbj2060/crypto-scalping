@@ -753,3 +753,533 @@ impl Desk {
         Value::Object(self.slot_obj(s).clone())
     }
 }
+
+// ── 선 핸들러 4개(2026-11-21 여섯째 조각) -- orders.py 의 api_manual_bracket_tp_legs · _tp · _add · _modify ──────────────
+// 방어 = 진입과 같다(POST + confirm=1 + 게이트 + 주문 잠금 -- LOCKED 표). 손절 = 서버 감시 레벨뿐(거래소 주문 없음) · 익절 = 우리 post-only 지정가.
+
+fn tp_legs_of(b: &Obj) -> Vec<Value> {
+    if truthy(b.get("tp_legs")) {
+        return b["tp_legs"].as_array().cloned().unwrap_or_default();
+    }
+    if truthy(b.get("tp_level")) && truthy(b.get("tp_price")) {
+        return vec![json!({"level": b["tp_level"], "price": b["tp_price"], "w": 1.0, "resting": truthy(b.get("tp_resting")), "cid": null})];
+    }
+    vec![]
+}
+fn sl_legs_of(b: &Obj) -> Vec<Value> {
+    if truthy(b.get("sl_legs")) {
+        return b["sl_legs"].as_array().cloned().unwrap_or_default();
+    }
+    if truthy(b.get("sl_level")) {
+        return vec![json!({"level": b["sl_level"], "price": b.get("sl_price"), "up": b.get("sl_up"), "w": 1.0})];
+    }
+    vec![]
+}
+fn query_slup(q: &Query) -> Option<bool> {
+    match g(q, "slup") {
+        Some("1") => Some(true),
+        Some("0") => Some(false),
+        _ => None,
+    }
+}
+fn rearmed() -> Resp {
+    bad(409, "rearmed", "그 사이 무장이 바뀌었거나 청산이 시작됐습니다 — 다시 확인하세요")
+}
+fn fired_busy() -> Resp {
+    bad(409, "fired", "청산이 진행 중입니다 — 끝난 뒤 다시")
+}
+fn fv(v: Option<&Value>) -> f64 {
+    v.and_then(|x| py_float(x).ok()).unwrap_or(0.0)
+}
+
+impl Desk {
+    fn same_arm(&self, key: &str, b: &Value) -> bool {
+        let st = self.w.load();
+        st.get(key).is_some_and(|c| crate::watch::same_armed(c.get("armed_at"), b.get("armed_at")) && !truthy(c.get("fired"))) && !self.w.exiting.contains(key)
+    }
+
+    /// 선 검사 기준 = (지금가 USDT, basis, 필터). 지금가 = 1초 마지막 체결(5초 넘게 묵으면 안 씀, 검토 S6) · 없으면 주문 심볼 중간가 ÷ basis.
+    async fn lines_quote<Q: Quotes, I: DeskIo>(&self, qs: &mut Q, io: &mut I, symbol: &str, asset: &str) -> Result<(f64, f64, plan::Filters), String> {
+        let book = qs.book(symbol).await?;
+        let basis = self.basis_for(qs, &book, asset).await;
+        let filters = qs.filters(symbol).await?;
+        let pts = io.sec_prices(asset).unwrap_or_default();
+        let r = match pts.last() {
+            Some((t, p)) if io.now() - t <= 5.0 => *p,
+            _ => {
+                let k = |n: &str| book.get(n).ok_or_else(|| format!("KeyError: '{n}'")).and_then(py_float);
+                (k("bidPrice")? + k("askPrice")?) / 2.0 / basis
+            }
+        };
+        Ok((r, basis, filters))
+    }
+
+    /// line_bracket(sl_watch) 을 한쪽 선만으로도 -- 없는 쪽은 늘 통과하는 자리(지금가 ±1%). ponytail(원본): 대역 값을 넣는 꼼수.
+    fn check_lines(side: &str, r: f64, basis: f64, filters: &plan::Filters, tp: Option<f64>, sl: Option<f64>, slup: Option<bool>) -> Result<Obj, String> {
+        let up = side == "LONG";
+        let lb = plan::line_bracket(side, r, tp.filter(|x| *x != 0.0).unwrap_or(r * if up { 1.01 } else { 0.99 }), sl.filter(|x| *x != 0.0).unwrap_or(r * if up { 0.99 } else { 1.01 }),
+                                    basis, filters, true).map_err(|e| e.py_msg())?;
+        let mut nb = obj(&serde_json::to_value(lb).unwrap());
+        if let (Some(_), Some(u)) = (sl.filter(|x| *x != 0.0), slup) {
+            nb.insert("sl_up".into(), json!(u)); // 2026-11-12 검토 «손절 방향 뒤집힘»: 화면이 놓은 순간의 방향
+        }
+        Ok(nb)
+    }
+
+    /// 조각을 거래소에 다시 걸고 무장에 쓴다. 실패 = 오류 응답 -- 🔴키·포지션 조회 실패나 옛 익절 정리 실패면 아무것도 안 바꾼다 · 그 사이 무장이 바뀌면 방금 건 조각을 지운다.
+    async fn ladder_apply<I: DeskIo>(&mut self, io: &mut I, key: &str, b: &Value, symbol: &str, side: &str, legs: &[Value]) -> Result<Obj, Resp> {
+        let r = io.place_tp_ladder(&json!(legs), symbol, side).await.map_err(|e| server_error(&e))?;
+        if r.get("cleared").is_none() {
+            return Err(bad(502, "tp_place_failed", &format!("익절 지정가를 못 바꿨습니다(아무것도 안 바뀜): {}", r.get("reason").filter(|v| truthy(Some(v))).map_or("?".into(), py_str))));
+        }
+        if truthy(r["cleared"].get("errors")) {
+            let _ = self.w.tp_watch_only_at(io.now(), key, &obj(b));
+            let es: Vec<String> = r["cleared"]["errors"].as_array().map(|a| a.iter().map(py_str).collect()).unwrap_or_default();
+            return Err(bad(502, "tp_partial_cancel", &format!("익절 주문 정리가 일부 실패해 새로 걸지 않았습니다 — 기존 익절선은 이제 서버가 닿으면 닫습니다(거래소에 익절 주문이 일부 남았을 수 있으니 확인하세요): {}", es.join("; "))));
+        }
+        let rl = r.get("legs").and_then(Value::as_array).cloned().unwrap_or_default();
+        if !self.same_arm(key, b) {
+            if rl.iter().any(|x| truthy(x.get("resting"))) {
+                io.clear_bracket(symbol, side, false, true).await.map_err(|e| server_error(&e))?;
+            }
+            return Err(rearmed());
+        }
+        let mut st = self.w.load();
+        let now = io.now();
+        let cur = st.get_mut(key).and_then(Value::as_object_mut).unwrap();
+        crate::watch::set_tp_legs(cur, &rl).map_err(|e| server_error(&e))?;
+        let n = cur.get("tp_legs").and_then(Value::as_array).map_or(1, Vec::len);
+        let m = json!({"at": now, "tp": cur.get("tp_level"), "sl": cur.get("sl_level"), "legs": n});
+        cur.insert("watch_from".into(), json!(now));
+        cur.insert("mod".into(), m);
+        let out = cur.clone();
+        self.w.save(&st).map_err(|e| server_error(&e))?;
+        let tup: Vec<String> = rl.iter().map(|x| format!("({}, {}, {})", x.get("level").map_or("None".into(), crate::sign::py_repr), x.get("qty").map_or("None".into(), crate::sign::py_repr),
+                                                       x.get("resting").map_or("None".into(), crate::sign::py_repr))).collect();
+        self.w.log(format!("bracket {side}: 분할 익절 다시 걸음(사용자) [{}]", tup.join(", ")));
+        Ok(out)
+    }
+
+    /// 2026-11-11 분할 익절·손절 조각 조작: act=remove&i=N · act=weights&w=1,1,2 · kind=tp|sl.
+    pub async fn api_bracket_tp_legs<I: DeskIo>(&mut self, io: &mut I, q: &Query) -> Resp {
+        if g(q, "confirm") != Some("1") {
+            return bad(400, "confirm_required", "confirm=1 이 필요합니다");
+        }
+        if !io.exec_enabled() {
+            return exec_off();
+        }
+        let (side, symbol, act, kind) = (g(q, "side").unwrap_or(""), g(q, "symbol").unwrap_or(""), g(q, "act").unwrap_or(""), g(q, "kind").unwrap_or("tp"));
+        if !(side == "LONG" || side == "SHORT") || !self.exec_symbols().iter().any(|s| s == symbol) || !(act == "remove" || act == "weights") || !(kind == "tp" || kind == "sl") {
+            return bad(400, "bad_args", "side · symbol · act=remove|weights · kind=tp|sl 이 필요합니다");
+        }
+        let (key, asset, name) = (bracket_key(symbol, side), self.w.exec_asset_of(Some(&json!(symbol))).unwrap_or("eth"), if kind == "tp" { "익절" } else { "손절" });
+        let b = self.w.load().get(&key).cloned().unwrap_or(json!({}));
+        let bo = obj(&b);
+        let mut legs = if kind == "tp" { tp_legs_of(&bo) } else { sl_legs_of(&bo) };
+        if !truthy(Some(&b)) || !truthy(b.get("lines")) || truthy(b.get(&format!("{kind}_off"))) || legs.len() < 2 {
+            return bad(409, "no_legs", &format!("나눠 걸린 {name}선이 없습니다"));
+        }
+        if truthy(b.get("fired")) || self.w.exiting.contains(&key) || self.w.exit_slot(asset).is_none() || legs.iter().any(|x| truthy(x.get("fired"))) {
+            return fired_busy();
+        }
+        let parsed: Option<Vec<Value>> = if act == "remove" {
+            g(q, "i").unwrap_or("").trim().parse::<i64>().ok().filter(|i| (0..legs.len() as i64).contains(i)).map(|i| { legs.remove(i as usize); legs.clone() })
+        } else {
+            let w: Option<Vec<f64>> = g(q, "w").unwrap_or("").split(',').map(pf).collect();
+            w.filter(|w| w.len() == legs.len() && w.iter().all(|x| *x > 0.0 && x.is_finite()))
+                .map(|w| legs.iter().zip(w).map(|(x, v)| { let mut m = obj(x); m.insert("w".into(), json!(v)); Value::Object(m) }).collect())
+        };
+        let Some(legs) = parsed else { return bad(400, "bad_args", "i(조각 번호) 또는 w(조각 수만큼 양수)가 맞지 않습니다") };
+        if kind == "sl" {
+            // 2026-11-11 분할 손절 = 서버 감시 레벨뿐(거래소 주문 없음)
+            if !self.w.load().get(&key).is_some_and(|c| crate::watch::same_armed(c.get("armed_at"), b.get("armed_at")) && !truthy(c.get("fired"))) {
+                return rearmed();
+            }
+            let mut st = self.w.load();
+            let now = io.now();
+            let cur = st.get_mut(&key).and_then(Value::as_object_mut).unwrap();
+            crate::watch::set_sl_legs(cur, &legs);
+            let n = cur.get("sl_legs").and_then(Value::as_array).map_or(1, Vec::len);
+            let m = json!({"at": now, "tp": cur.get("tp_level"), "sl": cur.get("sl_level"), "sl_legs": n});
+            cur.insert("watch_from".into(), json!(now));
+            cur.insert("mod".into(), m);
+            let body = json!({"ok": true, "act": act, "kind": "sl", "sl_legs": cur.get("sl_legs"), "sl_level": cur.get("sl_level"), "sl_price": cur.get("sl_price"), "sl_up": cur.get("sl_up")});
+            if let Err(e) = self.w.save(&st) {
+                return server_error(&e);
+            }
+            let tup: Vec<String> = legs.iter().map(|x| format!("({}, {})", crate::sign::py_repr(&x["level"]), x.get("w").map_or("None".into(), crate::sign::py_repr))).collect();
+            self.w.log(format!("bracket {side}: 분할 손절 {act}(사용자) [{}]", tup.join(", ")));
+            return resp(200, body);
+        }
+        match self.ladder_apply(io, &key, &b, symbol, side, &legs).await {
+            Err(r) => r,
+            Ok(cur) => resp(200, json!({"ok": true, "act": act, "tp_legs": cur.get("tp_legs"), "tp_level": cur.get("tp_level"), "tp_resting": cur.get("tp_resting")})),
+        }
+    }
+
+    /// 2026-11-11 «익절선 지우기 버튼»: act=off = 우리 익절(dbtp)만 지우고 tp_off · act=on = 저장된 익절 주문가로 post-only 다시(지금가가 이미 너머면 409).
+    pub async fn api_bracket_tp<I: DeskIo>(&mut self, io: &mut I, q: &Query) -> Resp {
+        if g(q, "confirm") != Some("1") {
+            return bad(400, "confirm_required", "confirm=1 이 필요합니다");
+        }
+        if !io.exec_enabled() {
+            return exec_off();
+        }
+        let (side, symbol, act) = (g(q, "side").unwrap_or(""), g(q, "symbol").unwrap_or(""), g(q, "act").unwrap_or(""));
+        if !(side == "LONG" || side == "SHORT") || !self.exec_symbols().iter().any(|s| s == symbol) || !(act == "off" || act == "on") {
+            return bad(400, "bad_side", "side=LONG|SHORT · symbol · act=off|on 이 필요합니다");
+        }
+        let (key, asset) = (bracket_key(symbol, side), self.w.exec_asset_of(Some(&json!(symbol))).unwrap_or("eth"));
+        let b = self.w.load().get(&key).cloned().unwrap_or(json!({}));
+        if !truthy(Some(&b)) || !truthy(b.get("lines")) || !truthy(b.get("tp_price")) {
+            return bad(409, "not_armed_lines", "선으로 들어간 익절이 없습니다");
+        }
+        if truthy(b.get("fired")) || self.w.exiting.contains(&key) || self.w.exit_slot(asset).is_none() {
+            return fired_busy();
+        }
+        if (act == "off") == truthy(b.get("tp_off")) {
+            return resp(200, json!({"ok": true, "already": true, "tp_off": b.get("tp_off")}));
+        }
+        let now = io.now();
+        let mut res = Obj::new();
+        if act == "off" {
+            let r = match io.clear_bracket(symbol, side, false, true).await { Ok(r) => r, Err(e) => return server_error(&e) };
+            if truthy(r.get("errors")) {
+                // 2026-11-12 검토: 조각 몇 개는 지워졌을 수 있다 -- «그대로»가 아니라 서버 감시로 돌린다
+                let _ = self.w.tp_watch_only_at(now, &key, &obj(&b));
+                let es: Vec<String> = r["errors"].as_array().map(|a| a.iter().map(py_str).collect()).unwrap_or_default();
+                return bad(502, "cancel_failed", &format!("거래소 익절 지정가 취소가 일부 실패했습니다 — 익절선은 남아 이제 서버가 닿으면 닫습니다(거래소에 익절 주문이 일부 남았을 수 있음): {}", es.join("; ")));
+            }
+            res.insert("tp_off".into(), json!({"at": now, "cancelled": fv(r.get("cancelled")) as i64}));
+            res.insert("tp_resting".into(), json!(false));
+            if truthy(b.get("tp_legs")) {
+                let mut st0 = self.w.load();
+                if let Some(Value::Object(c)) = st0.get_mut(&key) {
+                    c.remove("tp_legs");
+                    if let Err(e) = self.w.save(&st0) {
+                        return server_error(&e);
+                    }
+                }
+            }
+        } else {
+            let pts = io.sec_prices(asset).unwrap_or_default();
+            let r0 = match pts.last() { Some((t, p)) if now - t <= 5.0 => *p, _ => 0.0 };
+            let tp = fv(b.get("tp_level"));
+            if !(r0 > 0.0) {
+                return bad(502, "quote_failed", "지금가를 못 읽었습니다 — 잠시 뒤 다시");
+            }
+            if if side == "LONG" { r0 >= tp } else { r0 <= tp } {
+                return bad(409, "past_tp", &format!("지금가 {} 가 이미 익절선 {} 너머입니다 — 다시 걸면 바로 닫힙니다", crate::pyfmt::fixed(r0, 2, false), crate::pyfmt::fixed(tp, 2, false)));
+            }
+            let r = match io.place_bracket(&json!({"tp_price": b["tp_price"]}), symbol, side, true).await { Ok(r) => r, Err(e) => return server_error(&e) };
+            if r.get("cleared").is_none() {
+                return bad(502, "tp_place_failed", &format!("익절 지정가를 못 걸었습니다(아무것도 안 바뀜): {}", r.get("reason").filter(|v| truthy(Some(v))).map_or("?".into(), py_str)));
+            }
+            res.insert("tp_resting".into(), json!(truthy(r.get("tp").and_then(|t| t.get("placed")))));
+            res.insert("watch_from".into(), json!(now));
+            let mut placed = obj(b.get("placed").unwrap_or(&Value::Null));
+            placed.insert("tp".into(), r.get("tp").cloned().unwrap_or(Value::Null));
+            res.insert("placed".into(), Value::Object(placed));
+        }
+        if !self.same_arm(&key, &b) {
+            if act == "on" && truthy(res.get("placed").and_then(|p| p.get("tp")).and_then(|t| t.get("placed"))) {
+                let _ = io.clear_bracket(symbol, side, false, true).await; // 방금 건 지정가가 고아로 남지 않게
+            }
+            return rearmed();
+        }
+        let mut st = self.w.load();
+        let cur = st.get_mut(&key).and_then(Value::as_object_mut).unwrap();
+        for (k, v) in &res {
+            cur.insert(k.clone(), v.clone());
+        }
+        if act == "on" {
+            cur.remove("tp_off");
+        }
+        let body = json!({"ok": true, "act": act, "tp_resting": cur.get("tp_resting"), "tp_off": cur.get("tp_off")});
+        if let Err(e) = self.w.save(&st) {
+            return server_error(&e);
+        }
+        self.w.log(format!("bracket {side}: 익절선 {}(사용자) {}", if act == "off" { "지움" } else { "다시 걸음" }, crate::sign::py_repr(&Value::Object(res))));
+        resp(200, body)
+    }
+
+    /// 2026-11-11 «손절/익절 라인 추가»(leg=sl|tp · level USDT): 지운 쪽 다시 · 무장 없는 포지션 = 새 선 무장 · 그 선이 이미 있으면 분할 조각 하나 더(최대 4).
+    pub async fn api_bracket_add<Q: Quotes, I: DeskIo>(&mut self, qs: &mut Q, io: &mut I, q: &Query) -> Resp {
+        if g(q, "confirm") != Some("1") {
+            return bad(400, "confirm_required", "confirm=1 이 필요합니다");
+        }
+        if !io.exec_enabled() {
+            return exec_off();
+        }
+        let (side, symbol, leg) = (g(q, "side").unwrap_or(""), g(q, "symbol").unwrap_or(""), g(q, "leg").unwrap_or(""));
+        let level = g(q, "level").filter(|s| !s.is_empty()).map_or(Some(0.0), pf).unwrap_or(0.0);
+        if !(side == "LONG" || side == "SHORT") || !self.exec_symbols().iter().any(|s| s == symbol) || !(leg == "sl" || leg == "tp") || !(level > 0.0 && level.is_finite()) {
+            return bad(400, "bad_args", "side=LONG|SHORT · symbol · leg=sl|tp · level(양수) 이 필요합니다");
+        }
+        let (key, asset, name) = (bracket_key(symbol, side), self.w.exec_asset_of(Some(&json!(symbol))).unwrap_or("eth"), if leg == "sl" { "손절" } else { "익절" });
+        let b: Option<Value> = self.w.load().get(&key).cloned().filter(|v| truthy(Some(v)));
+        if b.as_ref().is_some_and(|b| !truthy(b.get("lines"))) {
+            return bad(409, "rule_armed", "규칙 손절(거래소 스탑)이 걸린 포지션이라 선을 더하지 않습니다");
+        }
+        if b.as_ref().is_some_and(|b| truthy(b.get("fired"))) || self.w.exiting.contains(&key) || self.w.exit_slot(asset).is_none() {
+            return fired_busy();
+        }
+        let bo = b.as_ref().map(obj).unwrap_or_default();
+        let ladder = b.is_some() && !truthy(bo.get(&format!("{leg}_off"))) && truthy(bo.get(&format!("{leg}_level")));
+        if b.is_some() && !truthy(bo.get(&format!("{leg}_off"))) && !ladder {
+            return bad(409, "has_line", &format!("{name}선이 이미 있습니다 — 끌어서 옮기세요"));
+        }
+        if ladder && (if leg == "tp" { tp_legs_of(&bo) } else { sl_legs_of(&bo) }).len() >= plan::TP_LEGS_MAX {
+            return bad(409, "too_many", &format!("{name}선은 {}개까지입니다", plan::TP_LEGS_MAX));
+        }
+        if ladder && leg == "sl" && bo.get("sl_legs").and_then(Value::as_array).is_some_and(|l| l.iter().any(|x| truthy(x.get("fired")))) {
+            return bad(409, "fired", "손절 조각 청산이 진행 중입니다 — 끝난 뒤 다시");
+        }
+        let account = match io.account(false).await { Ok(a) => a, Err(e) => return server_error(&e) };
+        let pos = account.get("positions").and_then(Value::as_array).is_some_and(|ps| ps.iter().any(|p| p.get("symbol").and_then(Value::as_str) == Some(symbol)
+            && p.get("side").and_then(Value::as_str) == Some(side) && fv(p.get("qty")).abs() > 0.0));
+        if !(truthy(account.get("ok")) && pos) {
+            return bad(409, "no_position", "그 포지션을 계좌에서 못 찾았습니다");
+        }
+        let (basis, nb) = match self.lines_quote(qs, io, symbol, asset).await {
+            Err(e) => return bad(502, "quote_failed", &e),
+            Ok((r, basis, filters)) => match Self::check_lines(side, r, basis, &filters, (leg == "tp").then_some(level), (leg == "sl").then_some(level), query_slup(q)) {
+                Err(m) => return bad(400, "bad_lines", &m),
+                Ok(nb) => (basis, nb),
+            },
+        };
+        let now = io.now();
+        let near = |old: &[Value], lv: f64| old.iter().any(|x| (fv(x.get("level")) / lv - 1.0).abs() < 5e-4);
+        let wavg = |old: &[Value]| old.iter().map(|x| { let w = fv(x.get("w")); if w == 0.0 { 1.0 } else { w } }).sum::<f64>() / old.len() as f64;
+        if ladder && leg == "sl" {
+            let old = sl_legs_of(&bo);
+            if near(&old, fv(nb.get("sl_level"))) {
+                return bad(409, "same_level", "이미 그 가격(±0.05%)에 손절선이 있습니다");
+            }
+            if !self.same_arm(&key, b.as_ref().unwrap()) {
+                return rearmed();
+            }
+            let mut st = self.w.load();
+            let cur = st.get_mut(&key).and_then(Value::as_object_mut).unwrap();
+            let mut all = old.clone();
+            all.push(json!({"level": nb["sl_level"], "price": nb["sl_price"], "up": nb["sl_up"], "w": wavg(&old)}));
+            crate::watch::set_sl_legs(cur, &all);
+            let m = json!({"at": now, "tp": cur.get("tp_level"), "sl": cur.get("sl_level"), "add": "sl"});
+            cur.insert("watch_from".into(), json!(now));
+            cur.insert("mod".into(), m);
+            let n = cur.get("sl_legs").and_then(Value::as_array).map_or(1, Vec::len);
+            let body = json!({"ok": true, "leg": "sl", "level": nb["sl_level"], "sl_legs": cur.get("sl_legs"), "sl_level": cur.get("sl_level"), "sl_price": cur.get("sl_price"),
+                              "sl_up": cur.get("sl_up"), "basis": basis});
+            if let Err(e) = self.w.save(&st) {
+                return server_error(&e);
+            }
+            self.w.log(format!("bracket {side}: 손절 조각 추가(사용자) {} -- {n}개", crate::sign::py_repr(&nb["sl_level"])));
+            return resp(200, body);
+        }
+        if ladder {
+            let old = tp_legs_of(&bo);
+            if near(&old, fv(nb.get("tp_level"))) {
+                return bad(409, "same_level", "이미 그 가격(±0.05%)에 익절선이 있습니다");
+            }
+            let mut all = old.clone();
+            all.push(json!({"level": nb["tp_level"], "price": nb["tp_price"], "w": wavg(&old), "resting": false, "cid": null}));
+            return match self.ladder_apply(io, &key, b.as_ref().unwrap(), symbol, side, &all).await {
+                Err(r) => r,
+                Ok(cur) => resp(200, json!({"ok": true, "leg": "tp", "level": nb["tp_level"], "tp_legs": cur.get("tp_legs"), "tp_resting": cur.get("tp_resting"), "basis": basis,
+                                            "warn": if truthy(cur.get("tp_resting")) { Value::Null } else { json!("일부 익절 지정가를 못 걸어 서버가 닿으면 닫습니다") }})),
+            };
+        }
+        let mut tp_res: Option<Value> = None;
+        if leg == "tp" {
+            let r = match io.place_bracket(&json!({"tp_price": nb["tp_price"]}), symbol, side, true).await { Ok(r) => r, Err(e) => return server_error(&e) };
+            if r.get("cleared").is_none() {
+                return bad(502, "tp_place_failed", &format!("익절 지정가를 못 걸었습니다(아무것도 안 바뀜): {}", r.get("reason").filter(|v| truthy(Some(v))).map_or("?".into(), py_str)));
+            }
+            tp_res = Some(r);
+        }
+        let now = io.now();
+        let mut st = self.w.load();
+        let cur0 = st.get(&key).cloned();
+        let same = crate::watch::same_armed(cur0.as_ref().and_then(|c| c.get("armed_at")), b.as_ref().and_then(|b| b.get("armed_at")));
+        if !same || cur0.as_ref().is_some_and(|c| truthy(c.get("fired"))) || self.w.exiting.contains(&key) {
+            if tp_res.as_ref().is_some_and(|r| truthy(r.get("tp").and_then(|t| t.get("placed")))) {
+                let _ = io.clear_bracket(symbol, side, false, true).await;
+            }
+            return rearmed();
+        }
+        if cur0.is_none() {
+            // 무장 없는 포지션 = 새 선 무장 · 다른 쪽은 꺼진 채(never = 걸린 적 없음 -- «다시 켜기» 대상이 아님)
+            let other = if leg == "sl" { "tp" } else { "sl" };
+            st.insert(key.clone(), json!({"symbol": symbol, "side": side, "lines": true, "rule": false, "armed_at": now, "backstop_price": null, "basis": basis,
+                                          format!("{other}_off"): {"at": now, "never": true}}));
+        }
+        let cur = st.get_mut(&key).and_then(Value::as_object_mut).unwrap();
+        if leg == "sl" {
+            for k in ["sl_level", "sl_price", "sl_name", "sl_up"] {
+                cur.insert(k.into(), nb.get(k).cloned().unwrap_or(Value::Null));
+            }
+            cur.remove("sl_legs"); // 지운 뒤 새로 거는 손절 = 하나(옛 조각은 버린다)
+        } else {
+            let r = tp_res.as_ref().unwrap();
+            cur.insert("tp_level".into(), nb["tp_level"].clone());
+            cur.insert("tp_price".into(), nb["tp_price"].clone());
+            cur.insert("tp_resting".into(), json!(truthy(r.get("tp").and_then(|t| t.get("placed")))));
+            let mut placed = obj(cur.get("placed").unwrap_or(&Value::Null));
+            placed.insert("tp".into(), r.get("tp").cloned().unwrap_or(Value::Null));
+            cur.insert("placed".into(), Value::Object(placed));
+        }
+        cur.remove(&format!("{leg}_off"));
+        let m = json!({"at": now, "tp": cur.get("tp_level"), "sl": cur.get("sl_level"), "add": leg});
+        cur.insert("watch_from".into(), json!(now));
+        cur.insert("mod".into(), m);
+        let body = json!({"ok": true, "leg": leg, "level": nb[&format!("{leg}_level")], "sl_up": cur.get("sl_up"), "tp_resting": cur.get("tp_resting"), "basis": basis,
+                          "warn": if leg == "tp" && !truthy(cur.get("tp_resting")) { json!("익절 지정가를 못 걸어 서버가 닿으면 닫습니다") } else { Value::Null }});
+        if let Err(e) = self.w.save(&st) {
+            return server_error(&e);
+        }
+        self.w.log(format!("bracket {side}: {name}선 추가(사용자) {} · {} · {}", crate::sign::py_repr(&nb[&format!("{leg}_level")]), if b.is_none() { "새 무장" } else { "지운 쪽 다시" },
+                           tp_res.as_ref().map_or("None".into(), |r| r.get("tp").map_or("None".into(), crate::sign::py_repr))));
+        resp(200, body)
+    }
+
+    /// 2026-10-29 «선을 끌면 그대로 주문 수정»(선 무장만). 익절 레벨(USDT)이 그대로면 지정가를 안 건드린다(검토 F3) · 옮기면 strict 로 다시(F2) ·
+    /// 무장이 바뀌면 방금 건 지정가를 지운다(S2) · watch_from = 지금 · 지운 쪽 선은 검사·갱신하지 않음.
+    pub async fn api_bracket_modify<Q: Quotes, I: DeskIo>(&mut self, qs: &mut Q, io: &mut I, q: &Query) -> Resp {
+        if g(q, "confirm") != Some("1") {
+            return bad(400, "confirm_required", "confirm=1 이 필요합니다");
+        }
+        if !io.exec_enabled() {
+            return exec_off();
+        }
+        let Some((side, symbol)) = self.side_symbol(q) else { return bad(400, "bad_side", "side=LONG|SHORT · symbol 이 필요합니다") };
+        let Lines::Some(ltp, lsl) = query_lines(q) else { return bad(400, "bad_lines", "익절·손절 선(tp·sl)은 둘 다 양수여야 합니다") };
+        let (key, asset) = (bracket_key(&symbol, &side), self.w.exec_asset_of(Some(&json!(symbol))).unwrap_or("eth"));
+        let mut b = self.w.load().get(&key).cloned().unwrap_or(json!({}));
+        if !truthy(Some(&b)) || !truthy(b.get("lines")) {
+            return bad(409, "not_armed_lines", "선으로 들어간 무장이 없습니다");
+        }
+        if truthy(b.get("fired")) || self.w.exiting.contains(&key) || self.w.exit_slot(asset).is_none() {
+            return fired_busy(); // 청산이 도는 중엔 익절을 다시 걸지 않는다(검토 B1)
+        }
+        let account = match io.account(false).await { Ok(a) => a, Err(e) => return server_error(&e) };
+        let pos = account.get("positions").and_then(Value::as_array).and_then(|ps| ps.iter().find(|p| p.get("symbol").and_then(Value::as_str) == Some(symbol.as_str())
+            && p.get("side").and_then(Value::as_str) == Some(side.as_str()) && fv(p.get("qty")).abs() > 0.0).cloned());
+        if !(truthy(account.get("ok")) && pos.as_ref().is_some_and(|p| fv(p.get("entry_price")) > 0.0)) {
+            return bad(409, "no_position", "그 포지션을 계좌에서 못 찾았습니다");
+        }
+        let (mut tp_off, mut sl_off) = (truthy(b.get("tp_off")), truthy(b.get("sl_off")));
+        let (basis_unused, mut nb) = match self.lines_quote(qs, io, &symbol, asset).await {
+            Err(e) => return bad(502, "quote_failed", &e),
+            Ok((r, basis, filters)) => match Self::check_lines(&side, r, basis, &filters, (!tp_off).then_some(ltp), (!sl_off).then_some(lsl), query_slup(q)) {
+                Err(m) => return bad(400, "bad_lines", &m),
+                Ok(nb) => (basis, nb),
+            },
+        };
+        let _ = basis_unused;
+        if !sl_off && !truthy(b.get("sl_legs")) && (fv(nb.get("sl_level")) - fv(b.get("sl_level"))).abs() <= 1e-9 {
+            // 2026-11-12 검토: 손절을 안 옮겼으면(익절만 끌기) 방향도 그대로
+            nb.insert("sl_up".into(), json!(plan::sl_up_of(&side, &plan::Armed::from_value(&b))));
+        }
+        let mut sl_new: Option<Vec<Value>> = None;
+        let slegs = b.get("sl_legs").and_then(Value::as_array).cloned().filter(|l| !l.is_empty());
+        if let (Some(slegs), false) = (&slegs, sl_off) {
+            if slegs.iter().any(|x| truthy(x.get("fired"))) {
+                return bad(409, "fired", "손절 조각 청산이 진행 중입니다 — 끝난 뒤 다시");
+            }
+            let sli = g(q, "sli").unwrap_or("-1").trim().parse::<i64>().unwrap_or(-1);
+            if (0..slegs.len() as i64).contains(&sli) && (fv(nb.get("sl_level")) - fv(slegs[sli as usize].get("level"))).abs() > 1e-9 {
+                let lv = fv(nb.get("sl_level"));
+                if slegs.iter().enumerate().any(|(j, x)| j as i64 != sli && (fv(x.get("level")) / lv - 1.0).abs() < 5e-4) {
+                    return bad(409, "same_level", "다른 손절선과 같은 가격(±0.05%)입니다");
+                }
+                sl_new = Some(slegs.iter().enumerate().map(|(j, x)| if j as i64 == sli {
+                    let mut m = obj(x);
+                    for (k, n) in [("level", "sl_level"), ("price", "sl_price"), ("up", "sl_up")] {
+                        m.insert(k.into(), nb.get(n).cloned().unwrap_or(Value::Null));
+                    }
+                    Value::Object(m)
+                } else { x.clone() }).collect());
+            }
+            sl_off = true; // 아래 단일 손절 갱신은 건너뛴다(조각은 저장 때 sl_new 로)
+        }
+        let legs = b.get("tp_legs").and_then(Value::as_array).cloned().filter(|l| !l.is_empty());
+        if let (Some(legs), false) = (&legs, tp_off) {
+            let tpi = g(q, "tpi").unwrap_or("-1").trim().parse::<i64>().unwrap_or(-1);
+            if (0..legs.len() as i64).contains(&tpi) && (fv(nb.get("tp_level")) - fv(legs[tpi as usize].get("level"))).abs() > 1e-9 {
+                let lv = fv(nb.get("tp_level"));
+                if legs.iter().enumerate().any(|(j, x)| j as i64 != tpi && (fv(x.get("level")) / lv - 1.0).abs() < 5e-4) {
+                    return bad(409, "same_level", "다른 익절선과 같은 가격(±0.05%)입니다");
+                }
+                let nl: Vec<Value> = legs.iter().enumerate().map(|(j, x)| if j as i64 == tpi {
+                    let mut m = obj(x);
+                    m.insert("level".into(), nb["tp_level"].clone());
+                    m.insert("price".into(), nb["tp_price"].clone());
+                    Value::Object(m)
+                } else { x.clone() }).collect();
+                match self.ladder_apply(io, &key, &b, &symbol, &side, &nl).await {
+                    Err(r) => return r,
+                    Ok(cur2) => b = Value::Object(cur2), // 아래 손절 갱신·무장 확인은 방금 쓴 무장 기준
+                }
+            }
+            tp_off = true;
+        }
+        let tp_moved = !tp_off && (fv(nb.get("tp_level")) - fv(b.get("tp_level"))).abs() > 1e-9;
+        let (mut tp_res, mut warn) = (None::<Value>, Value::Null);
+        if !tp_moved {
+            let p = if truthy(b.get("tp_price")) { b["tp_price"].clone() } else { nb.get("tp_price").cloned().unwrap_or(Value::Null) };
+            nb.insert("tp_price".into(), p);
+        } else {
+            // strict = 옛 주문을 다 못 지웠으면 새로 안 건다(같은 쪽 전량 익절이 둘 되지 않게, 검토 F2)
+            let r = match io.place_bracket(&json!({"tp_price": nb["tp_price"]}), &symbol, &side, true).await { Ok(r) => r, Err(e) => return server_error(&e) };
+            if r.get("cleared").is_none() {
+                return bad(502, "tp_replace_failed", &format!("익절 지정가를 못 바꿨습니다(아무것도 안 바뀜): {}", r.get("reason").filter(|v| truthy(Some(v))).map_or("?".into(), py_str)));
+            }
+            if truthy(r["cleared"].get("errors")) {
+                let es: Vec<String> = r["cleared"]["errors"].as_array().map(|a| a.iter().map(py_str).collect()).unwrap_or_default();
+                warn = json!(format!("익절 지정가 정리 실패 — 새 익절선은 서버가 감시합니다. 거래소에 옛 익절 지정가가 남았을 수 있으니 확인하세요: {}", es.join("; ")));
+            }
+            tp_res = Some(r);
+        }
+        if !self.same_arm(&key, &b) {
+            if tp_moved && tp_res.as_ref().is_some_and(|r| truthy(r.get("tp").and_then(|t| t.get("placed")))) {
+                let _ = io.clear_bracket(&symbol, &side, false, false).await; // 방금 건 지정가가 고아로 남지 않게(검토 S2)
+            }
+            return rearmed();
+        }
+        let now = io.now();
+        let mut st = self.w.load();
+        let cur = st.get_mut(&key).and_then(Value::as_object_mut).unwrap();
+        if !tp_off {
+            cur.insert("tp_level".into(), nb["tp_level"].clone());
+            cur.insert("tp_price".into(), nb["tp_price"].clone());
+        }
+        if !sl_off {
+            for k in ["sl_level", "sl_price", "sl_name", "sl_up"] {
+                cur.insert(k.into(), nb.get(k).cloned().unwrap_or(Value::Null));
+            }
+        }
+        if let Some(sn) = &sl_new {
+            crate::watch::set_sl_legs(cur, sn);
+        }
+        let m = json!({"at": now, "tp": cur.get("tp_level"), "sl": cur.get("sl_level")});
+        cur.insert("watch_from".into(), json!(now));
+        cur.insert("mod".into(), m);
+        if let Some(r) = &tp_res {
+            cur.insert("tp_resting".into(), json!(truthy(r.get("tp").and_then(|t| t.get("placed")))));
+            let mut placed = obj(cur.get("placed").unwrap_or(&Value::Null));
+            placed.insert("tp".into(), r.get("tp").cloned().unwrap_or(Value::Null));
+            cur.insert("placed".into(), Value::Object(placed));
+        }
+        let body = json!({"ok": true, "tp_level": cur.get("tp_level"), "sl_level": cur.get("sl_level"), "sl_price": cur.get("sl_price"), "sl_up": cur.get("sl_up"),
+                          "tp_resting": cur.get("tp_resting"), "tp_legs": cur.get("tp_legs"), "sl_legs": cur.get("sl_legs"),
+                          "tp": tp_res.as_ref().map_or(Value::Null, |r| r.get("tp").cloned().unwrap_or(Value::Null)), "warn": warn});
+        let (new_tp, new_sl) = (cur.get("tp_level").cloned().unwrap_or(Value::Null), cur.get("sl_level").cloned().unwrap_or(Value::Null));
+        if let Err(e) = self.w.save(&st) {
+            return server_error(&e);
+        }
+        let pr = |v: Option<&Value>| v.map_or("None".into(), crate::sign::py_repr);
+        self.w.log(format!("bracket {side}: 선 수정(사용자) 익절 {}→{} 손절 {}→{} · 익절 지정가 {} {}", pr(b.get("tp_level")), pr(Some(&new_tp)), pr(b.get("sl_level")), pr(Some(&new_sl)),
+                           if tp_moved { "다시 걸음" } else { "그대로" }, tp_res.as_ref().map_or("None".into(), |r| pr(r.get("tp")))));
+        resp(200, body)
+    }
+}

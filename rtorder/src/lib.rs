@@ -14,6 +14,8 @@ pub mod http;
 pub mod intake;
 pub mod plan;
 pub mod pyfmt;
+pub mod runner;
 pub mod sign;
+pub mod userstream;
 pub mod watch;
 pub mod wire;

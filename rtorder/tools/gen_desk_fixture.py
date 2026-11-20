@@ -489,6 +489,16 @@ async def f_clear(_s, symbol, pside, *, only_sl=False, only_tp=False):
     return resp_of("clear_bracket")
 
 
+async def f_place_bracket(_s, bracket, symbol, pside, *, strict=False):
+    note("place_bracket", bracket, symbol, pside, strict)
+    return resp_of("place_bracket")
+
+
+async def f_ladder(_s, legs, symbol, pside):
+    note("place_tp_ladder", legs, symbol, pside)
+    return resp_of("place_tp_ladder")
+
+
 async def f_place_stop(_s, symbol, pside, price):
     note("place_stop", symbol, pside, price)
     return resp_of("place_stop")
@@ -562,7 +572,7 @@ async def run_desk_case(c):
     with mock.patch.multiple(orders, LIVE_DIR=tmp, time=FAKE_TIME, datetime=FakeDT, asyncio=fa, exec_enabled=lambda: Ctl.exec_on,
                              load_filters=f_filters, commission_bp=f_fees, margin_type=f_margin, clear_bracket=f_clear, place_stop=f_place_stop,
                              run_exit=run_exit, SIZING_CAP_OVERRIDE_X=c.get("override_x", 0.0),
-                             fetch_account=boom, run_entry=boom, place_bracket=boom):
+                             fetch_account=boom, run_entry=boom, place_bracket=f_place_bracket, place_tp_ladder=f_ladder):
         api = register(tmp, tasks=tasks, fetch=f_fetch, swr=f_swr, situation=c.get("situation", {}),
                        sec=lambda a: None if Ctl.sec.get(a) is None else [tuple(x) for x in Ctl.sec[a]])
         cells = closure_map([api.api_manual_entry_submit, api.api_manual_exit_submit, api.api_manual_limit_amend, api.busy_or, api.bracket_tick,
@@ -740,6 +750,76 @@ LIMIT_W = {"phase": "working", "mode": "limit", "side": "LONG", "asset": "eth", 
            "plan": {"symbol": "ETHUSDC", "positionSide": "LONG", "price": 2450.11, "quantity": 0.3, "fraction": 0.5, "target_leverage": 10, "wid": 1,
                     "limit": {"usdt": 2450.0, "price": 2450.11}, "bracket": {"tp_level": 2600.0, "sl_level": 2300.0}}}
 ADD_W = {**LIMIT_W, "plan": {**LIMIT_W["plan"], "add_keep": True}}
+
+LA = LINES_ARM["ETHUSDC:LONG"]
+TPL3 = [{"level": 2600.0, "price": 2600.25, "w": 1.0, "resting": True, "cid": "dbtpL1"}, {"level": 2650.0, "price": 2650.3, "w": 1.0, "resting": True, "cid": "dbtpL2"},
+        {"level": 2700.0, "price": 2700.3, "w": 2.0, "resting": True, "cid": "dbtpL3"}]
+SLL2 = [{"level": 2400.0, "price": 2400.2, "up": False, "w": 1.0}, {"level": 2380.0, "price": 2380.2, "up": False, "w": 1.0}]
+F_LEGS = {"ETHUSDC:LONG": {**LA, "tp_legs": TPL3}}
+F_SL = {"ETHUSDC:LONG": {**LA, "sl_legs": SLL2}}
+LAD_OK = lambda *lv: {"ret": {"qty": 0.4, "cleared": {"cancelled": 3, "errors": []}, "placed": True,   # noqa: E731
+                              "legs": [{"level": l, "price": l + 0.25, "w": 1.0, "qty": 0.1, "resting": True, "merged": False, "cid": f"dbtpL{i}", "order_id": 20 + i, "error": None} for i, l in enumerate(lv)]}}
+PB_OK = {"ret": {"qty": 0.4, "cleared": {"cancelled": 1, "errors": []}, "tp": {"placed": True, "price": 2650.3, "order_id": 31, "error": None}, "placed": True}}
+PB_FAILTP = {"ret": {"qty": 0.4, "cleared": {"cancelled": 0, "errors": ["400 [-2011] x"]}, "tp": {"placed": False, "price": 2650.3, "order_id": None, "error": "400 [-5022] maker"}, "placed": False}}
+ACCP = ACC(positions=P_ETH)
+LQ = lambda **kw: Q(confirm=1, side="LONG", symbol="ETHUSDC", **kw)   # noqa: E731
+LINE_CASES = [
+    ("tl_no_confirm", API("api_manual_bracket_tp_legs", Q(side="LONG", symbol="ETHUSDC", act="remove", i=0))),
+    ("tl_bad_args", API("api_manual_bracket_tp_legs", LQ(act="drop"))),
+    ("tl_no_legs", API("api_manual_bracket_tp_legs", LQ(act="remove", i=0), file0=LINES_ARM)),
+    ("tl_fired", API("api_manual_bracket_tp_legs", LQ(act="remove", i=0), file0={"ETHUSDC:LONG": {**LA, "tp_legs": TPL3, "fired": True}})),
+    ("tl_bad_i", API("api_manual_bracket_tp_legs", LQ(act="remove", i=3), file0=F_LEGS)),
+    ("tl_bad_w", API("api_manual_bracket_tp_legs", LQ(act="weights", w="1,0,1"), file0=F_LEGS)),
+    ("tl_remove_ok", API("api_manual_bracket_tp_legs", LQ(act="remove", i=1), file0=F_LEGS, script={"place_tp_ladder": [LAD_OK(2600.0, 2700.0)]})),
+    ("tl_weights_ok", API("api_manual_bracket_tp_legs", LQ(act="weights", w="1,2,3"), file0=F_LEGS, script={"place_tp_ladder": [LAD_OK(2600.0, 2650.0, 2700.0)]})),
+    ("tl_place_failed", API("api_manual_bracket_tp_legs", LQ(act="remove", i=0), file0=F_LEGS, script={"place_tp_ladder": [{"ret": {"placed": False, "reason": "포지션 없음"}}]})),
+    ("tl_partial_cancel", API("api_manual_bracket_tp_legs", LQ(act="remove", i=0), file0=F_LEGS, script={"place_tp_ladder": [{"ret": {"qty": 0.4, "cleared": {"cancelled": 1, "errors": ["400 [-2011] gone"]}, "legs": [], "placed": False}}]})),
+    ("tl_rearmed_race", API("api_manual_bracket_tp_legs", LQ(act="remove", i=0), file0=F_LEGS,
+                            script={"place_tp_ladder": [{**LAD_OK(2650.0, 2700.0), "patch_file": {"ETHUSDC:LONG": {**LA, "tp_legs": TPL3, "armed_at": T0}}}], "clear_bracket": [{"ret": {"cancelled": 2, "errors": []}}]})),
+    ("tl_sl_weights_ok", API("api_manual_bracket_tp_legs", LQ(act="weights", kind="sl", w="2,1"), file0=F_SL)),
+    ("tl_sl_remove_ok", API("api_manual_bracket_tp_legs", LQ(act="remove", kind="sl", i=0), file0=F_SL)),
+    ("tp_not_lines", API("api_manual_bracket_tp", LQ(act="off"), file0=RULE_ARM)),
+    ("tp_already_on", API("api_manual_bracket_tp", LQ(act="on"), file0=LINES_ARM)),
+    ("tp_off_ok", API("api_manual_bracket_tp", LQ(act="off"), file0=LINES_ARM, script={"clear_bracket": [{"ret": {"cancelled": 1, "errors": [], "tp_open": ["dbtpL1"]}}]})),
+    ("tp_off_with_legs", API("api_manual_bracket_tp", LQ(act="off"), file0=F_LEGS, script={"clear_bracket": [{"ret": {"cancelled": 3, "errors": []}}]})),
+    ("tp_off_cancel_fails", API("api_manual_bracket_tp", LQ(act="off"), file0=F_LEGS, script={"clear_bracket": [{"ret": {"cancelled": 1, "errors": ["400 [-2011] x"]}}]})),
+    ("tp_on_ok", API("api_manual_bracket_tp", LQ(act="on"), sec=SEC, file0={"ETHUSDC:LONG": {**LA, "tp_off": {"at": 1}, "tp_resting": False, "placed": {"tp": None}}}, script={"place_bracket": [PB_OK]})),
+    ("tp_on_past", API("api_manual_bracket_tp", LQ(act="on"), sec={"eth": [[T0 - 1, 2610.0]]}, file0={"ETHUSDC:LONG": {**LA, "tp_off": {"at": 1}}})),
+    ("tp_on_no_quote", API("api_manual_bracket_tp", LQ(act="on"), sec={"eth": [[T0 - 9, 2500.0]]}, file0={"ETHUSDC:LONG": {**LA, "tp_off": {"at": 1}}})),
+    ("tp_on_place_failed", API("api_manual_bracket_tp", LQ(act="on"), sec=SEC, file0={"ETHUSDC:LONG": {**LA, "tp_off": {"at": 1}}}, script={"place_bracket": [{"ret": {"placed": False, "reason": "포지션 없음"}}]})),
+    ("tp_on_rearmed_race", API("api_manual_bracket_tp", LQ(act="on"), sec=SEC, file0={"ETHUSDC:LONG": {**LA, "tp_off": {"at": 1}}},
+                               script={"place_bracket": [{**PB_OK, "patch_file": {"ETHUSDC:LONG": {**LA, "armed_at": T0}}}], "clear_bracket": [{"ret": {"cancelled": 1, "errors": []}}]})),
+    ("add_bad_args", API("api_manual_bracket_add", LQ(leg="sl", level="x"))),
+    ("add_rule_armed", API("api_manual_bracket_add", LQ(leg="sl", level=2400), file0=RULE_ARM)),
+    ("add_has_line", API("api_manual_bracket_add", LQ(leg="sl", level=2390), file0={"ETHUSDC:LONG": {**{k: v for k, v in LA.items() if k not in ("sl_level",)}}}, account=ACCP, sec=SEC)),
+    ("add_no_position", API("api_manual_bracket_add", LQ(leg="sl", level=2400), account=ACC(), sec=SEC)),
+    ("add_new_arm_sl", API("api_manual_bracket_add", LQ(leg="sl", level=2400, slup=0), account=ACCP, sec=SEC)),
+    ("add_new_arm_tp", API("api_manual_bracket_add", LQ(leg="tp", level=2650), account=ACCP, sec=SEC, script={"place_bracket": [PB_OK]})),
+    ("add_new_arm_tp_not_resting", API("api_manual_bracket_add", LQ(leg="tp", level=2650), account=ACCP, sec=SEC, script={"place_bracket": [PB_FAILTP]})),
+    ("add_readd_sl_off", API("api_manual_bracket_add", LQ(leg="sl", level=2410), account=ACCP, sec=SEC, file0={"ETHUSDC:LONG": {**LA, "sl_off": {"at": 1}, "sl_legs": SLL2}})),
+    ("add_ladder_tp", API("api_manual_bracket_add", LQ(leg="tp", level=2650), account=ACCP, sec=SEC, file0=LINES_ARM, script={"place_tp_ladder": [LAD_OK(2600.0, 2650.0)]})),
+    ("add_ladder_sl", API("api_manual_bracket_add", LQ(leg="sl", level=2380), account=ACCP, sec=SEC, file0=LINES_ARM)),
+    ("add_same_level", API("api_manual_bracket_add", LQ(leg="sl", level=2400.5), account=ACCP, sec=SEC, file0=LINES_ARM)),
+    ("add_too_many", API("api_manual_bracket_add", LQ(leg="tp", level=2800), account=ACCP, sec=SEC, file0={"ETHUSDC:LONG": {**LA, "tp_legs": TPL3 + [{"level": 2750.0, "price": 2750.3, "w": 1.0}]}})),
+    ("add_bad_lines", API("api_manual_bracket_add", LQ(leg="tp", level=2400), account=ACCP, sec=SEC)),
+    ("add_quote_fail", API("api_manual_bracket_add", LQ(leg="sl", level=2400), account=ACCP, sec=SEC, books={})),
+    ("mod_bad_lines", API("api_manual_bracket_modify", LQ(tp=2650))),
+    ("mod_not_lines", API("api_manual_bracket_modify", LQ(tp=2650, sl=2410), file0=RULE_ARM)),
+    ("mod_fired", API("api_manual_bracket_modify", LQ(tp=2650, sl=2410), file0={"ETHUSDC:LONG": {**LA, "fired": True}})),
+    ("mod_no_position", API("api_manual_bracket_modify", LQ(tp=2650, sl=2410), file0=LINES_ARM, account=ACC(), sec=SEC)),
+    ("mod_sl_only", API("api_manual_bracket_modify", LQ(tp=2600, sl=2410), file0=LINES_ARM, account=ACCP, sec=SEC)),
+    ("mod_tp_only_keeps_sl_up", API("api_manual_bracket_modify", LQ(tp=2650, sl=2400, slup=1), file0=LINES_ARM, account=ACCP, sec=SEC, script={"place_bracket": [PB_OK]})),
+    ("mod_tp_move_cleanup_err", API("api_manual_bracket_modify", LQ(tp=2650, sl=2410), file0=LINES_ARM, account=ACCP, sec=SEC, script={"place_bracket": [PB_FAILTP]})),
+    ("mod_tp_replace_failed", API("api_manual_bracket_modify", LQ(tp=2650, sl=2410), file0=LINES_ARM, account=ACCP, sec=SEC, script={"place_bracket": [{"ret": {"placed": False, "reason": "포지션 조회 실패: x"}}]})),
+    ("mod_bad_direction", API("api_manual_bracket_modify", LQ(tp=2400, sl=2410), file0=LINES_ARM, account=ACCP, sec=SEC)),
+    ("mod_tp_off_ignores_tp", API("api_manual_bracket_modify", LQ(tp=2400, sl=2410), file0={"ETHUSDC:LONG": {**LA, "tp_off": {"at": 1}}}, account=ACCP, sec=SEC)),
+    ("mod_tp_legs_tpi", API("api_manual_bracket_modify", LQ(tp=2720, sl=2400, tpi=2), file0=F_LEGS, account=ACCP, sec=SEC, script={"place_tp_ladder": [LAD_OK(2600.0, 2650.0, 2720.0)]})),
+    ("mod_tp_legs_same_level", API("api_manual_bracket_modify", LQ(tp=2650.5, sl=2400, tpi=0), file0=F_LEGS, account=ACCP, sec=SEC)),
+    ("mod_sl_legs_sli", API("api_manual_bracket_modify", LQ(tp=2600, sl=2370, sli=1), file0=F_SL, account=ACCP, sec=SEC)),
+    ("mod_rearmed_race", API("api_manual_bracket_modify", LQ(tp=2650, sl=2410), file0=LINES_ARM, account=ACCP, sec=SEC,
+                             script={"place_bracket": [{**PB_OK, "patch_file": {"ETHUSDC:LONG": {**LA, "armed_at": T0}}}], "clear_bracket": [{"ret": {"cancelled": 1, "errors": []}}]})),
+]
+
 API_CASES = [
     # 진입 제출
     ("sub_bad_side", API("api_manual_entry_submit", Q(side="UP", confirm=1))),
@@ -850,6 +930,8 @@ API_CASES = [
     ("re_rule_no_price", API("api_manual_bracket_rearm", Q(confirm=1, side="LONG", symbol="ETHUSDC"), file0={"ETHUSDC:LONG": {"symbol": "ETHUSDC", "rule": True, "sl_off": {"at": 1}, "armed_at": 1}})),
     ("re_rule_place_fails", API("api_manual_bracket_rearm", Q(confirm=1, side="LONG", symbol="ETHUSDC"), file0={"ETHUSDC:LONG": {**RULE_ARM["ETHUSDC:LONG"], "sl_off": {"at": 1}}},
                                 script={"place_stop": [{"ret": {"placed": False, "error": "400 [-2021] Order would immediately trigger."}}]})),
+    # 2026-11-21 여섯째 조각: 선 핸들러 4개(익절 on/off · 분할 조각 · 선 추가 · 선 수정)
+    *LINE_CASES,
     ("re_rule_ok", API("api_manual_bracket_rearm", Q(confirm=1, side="LONG", symbol="ETHUSDC"), file0={"ETHUSDC:LONG": {**RULE_ARM["ETHUSDC:LONG"], "sl_off": {"at": 1}, "placed": {"tp": None}}},
                        script={"place_stop": [{"ret": {"placed": True, "algoId": 9}}]})),
 ]

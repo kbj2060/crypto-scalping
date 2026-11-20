@@ -81,6 +81,10 @@ pub trait DeskIo {
     fn vol_mult(&self, asset: &str) -> Value;
     /// 손절 해제(접수 문) -- bracket::clear_bracket.
     async fn clear_bracket(&mut self, symbol: &str, pside: &str, only_sl: bool, only_tp: bool) -> Result<Value, String>;
+    /// 선 핸들러(익절 켜기·선 추가·선 수정) -- bracket::place_bracket(strict).
+    async fn place_bracket(&mut self, spec: &Value, symbol: &str, pside: &str, strict: bool) -> Result<Value, String>;
+    /// 분할 익절(조각 조작·선 추가) -- bracket::place_tp_ladder. Err = 원본에서 새던 예외(→ 500).
+    async fn place_tp_ladder(&mut self, legs: &Value, symbol: &str, pside: &str) -> Result<Value, String>;
 }
 
 // ── (나) 받아 둔 값 ────────────────────────────────────────────────────────────

@@ -154,6 +154,23 @@ WATCH_NEW = [  # watch_fixture(결함 수정본 정답지)로 잡혀야 한다
     ("망가진 칸이 틱을 죽임(결함 되살림)", W_, "                    self.tick_alert(io, &key, &e);\n                }", "                    return Err(e);\n                }"),
     ("알림 한 번 → 매 틱", W_, "        if !self.alerted.insert((key.to_string(), kind)) {", "        if !self.alerted.insert((key.to_string(), kind)) && false {"),
 ]
+RN, US = "src/runner.rs", "src/userstream.rs"
+SIX = [  # 여섯째 조각: desk_fixture(선 핸들러 51 · 원본 정답지) · runner_e2e · userstream_ws · account_http 로 잡혀야 한다
+    ("desk_fixture", "선 조각 같은 가격 ±0.05% → 0", IN, "let near = |old: &[Value], lv: f64| old.iter().any(|x| (fv(x.get(\"level\")) / lv - 1.0).abs() < 5e-4);", "let near = |old: &[Value], lv: f64| old.iter().any(|x| (fv(x.get(\"level\")) / lv - 1.0).abs() < 0.0);"),
+    ("desk_fixture", "익절 켜기: 이미 너머 검사 >= → >", IN, "if if side == \"LONG\" { r0 >= tp } else { r0 <= tp } {", "if if side == \"LONG\" { r0 > tp + 100.0 } else { r0 < tp - 100.0 } {"),
+    ("desk_fixture", "익절 끄기 일부 실패에도 바꿈(서버 감시로 안 넘김)", IN, "            if truthy(r.get(\"errors\")) {\n                // 2026-11-12 검토: 조각 몇 개는", "            if false {\n                // 2026-11-12 검토: 조각 몇 개는"),
+    ("desk_fixture", "그 사이 무장 바뀜에도 방금 건 조각을 안 지움", IN, "            if rl.iter().any(|x| truthy(x.get(\"resting\"))) {", "            if false {"),
+    ("desk_fixture", "선 수정: 익절 레벨 그대로여도 다시 걸음(F3)", IN, "let tp_moved = !tp_off && (fv(nb.get(\"tp_level\")) - fv(b.get(\"tp_level\"))).abs() > 1e-9;", "let tp_moved = !tp_off;"),
+    ("desk_fixture", "선 수정 strict 빠짐(F2)", IN, "match io.place_bracket(&json!({\"tp_price\": nb[\"tp_price\"]}), &symbol, &side, true).await", "match io.place_bracket(&json!({\"tp_price\": nb[\"tp_price\"]}), &symbol, &side, false).await"),
+    ("desk_fixture", "선 추가 새 무장에 다른 쪽 never 표시 빠짐", IN, "format!(\"{other}_off\"): {\"at\": now, \"never\": true}}));", "\"x\": 0}));"),
+    ("runner_e2e", "진입 전 레버리지 빠짐(P16)", RN, "        slot.insert(\"leverage\".into(), io.ensure_leverage(&ep.symbol, target).await);", ""),
+    ("runner_e2e", "체결 뒤 무장 안 함(B3)", RN, "    if filled > 0.0 {\n        let key", "    if filled > 1e9 {\n        let key"),
+    ("runner_e2e", "작업 끝나도 칸 이름 남음(G12)", RN, "            put_slot(desk, &slot, st);\n            desk.task_done(&key);\n        }\n        Task::Exit", "            put_slot(desk, &slot, st);\n        }\n        Task::Exit"),
+    ("userstream_ws", "웹소켓 주소 /private 빠짐(A4)", US, "let url = url.replacen(USER_STREAM_WS, &self.ws_base, 1);", "let url = url.replacen(USER_STREAM_WS, &self.ws_base.replace(\"/private\", \"\"), 1);"),
+    ("userstream_ws", "익절 조각 체결을 대기열에 안 넣음", US, "        self.hub.tp_fills.lock().unwrap().push((s.into(), ps.into(), c.into()));", ""),
+    ("userstream_ws", "스트림 사건을 계좌에 반영 안 함", US, "        self.hub.stream_account.lock().unwrap().apply(msg);", ""),
+    ("account_http", "동시 조회가 openOrders 를 빼먹음", "src/account.rs", "    let all_rows = rest.get_many(&oo, off).await;", "    let all_rows: Vec<Value> = oo.iter().map(|_| serde_json::json!([])).collect();"),
+]
 WIRE = [  # wire_e2e(감시 → 계좌 → 조립 → 집행)로 잡혀야 한다
     ("스트림 계좌를 쓸 수 있어도 REST 로 읽음", A_, 'Ok(v) => Ok((v, "stream")),', 'Ok(_) => Ok((book.produce(rest).await?, "stream")),'),
     ("감시 청산 조립이 for_order=True(원본은 화면 조회까지 함)", "src/wire.rs", "pside, fraction, true, asset, false, false, Some(only_symbol)", "pside, fraction, true, asset, false, true, Some(only_symbol)"),
@@ -183,6 +200,20 @@ def main() -> int:
             assert s.count(a) >= 1, (name, a)
             p.write_text(s.replace(a, b, 1))
             r = subprocess.run(["cargo", "test", "-j", "2", "--offline", "--test", test], cwd=W, env=env, capture_output=True, text=True, timeout=600)
+            out = r.stdout + r.stderr
+            failed = sorted({l.split()[1] for l in out.splitlines() if l.startswith("test ") and l.endswith("FAILED")})
+            ok = r.returncode != 0
+            caught, total = caught + ok, total + 1
+            print(f"{'잡음' if ok else '🔴못 잡음'} | {test} | {name} | {', '.join(failed)[:110]}", flush=True)
+    if not only or only == "six":
+        for test, name, f, a, b in SIX:
+            shutil.rmtree(W, ignore_errors=True)
+            shutil.copytree(SRC, W, ignore=shutil.ignore_patterns("target"))
+            p = W / f
+            t = p.read_text()
+            assert t.count(a) >= 1, (name, a)
+            p.write_text(t.replace(a, b, 1))
+            r = subprocess.run(["cargo", "test", "-j", "2", "--offline", "--test", test], cwd=W, env=env, capture_output=True, text=True, timeout=900)
             out = r.stdout + r.stderr
             failed = sorted({l.split()[1] for l in out.splitlines() if l.startswith("test ") and l.endswith("FAILED")})
             ok = r.returncode != 0

@@ -144,7 +144,7 @@ fn plans_and_intake_match_python() {
         }
         assert_same(&sorted(calls), &sorted(c["calls"].as_array().unwrap().clone()), &format!("{name}: 나간 조회(순서 무시 -- 원본은 gather)"));
     }
-    assert_eq!((n_plan, n_api, n_stop), (64, 86, 5), "사례 수(접수 91 = 원본과 같음 86(시장가 6 포함) + 스탑 제거로 의도한 차이 5)");
+    assert_eq!((n_plan, n_api, n_stop), (64, 137, 5), "사례 수(접수 142 = 원본과 같음 137(시장가 6 · 선 핸들러 51 포함) + 스탑 제거로 의도한 차이 5)");
 }
 
 #[test]

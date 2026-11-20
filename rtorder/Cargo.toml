@@ -13,5 +13,9 @@ serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
 # HTTP = ureq 3(rustls+ring, 동기 -- tokio blocking 풀에서) · tokio 는 잠·알림·blocking 풀만. 전부 개발기 cargo 캐시에 있던 것(새로 안 내려받음).
 ring = "0.17"
 hex = "0.4"
-tokio = { version = "1", features = ["rt", "time", "sync", "macros"] }
+tokio = { version = "1", features = ["rt", "time", "sync", "macros", "net"] }
+# 2026-11-21 여섯째 조각: 사용자 스트림 웹소켓 = rtcore·rtcollect 와 같은 판(0.26 · rustls · ring 하나만 -- 2026-11-20 실서버 «CryptoProvider 미설정 패닉» 방지)
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 ureq = { version = "3", default-features = false, features = ["rustls"] }

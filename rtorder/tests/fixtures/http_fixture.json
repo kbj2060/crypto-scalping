@@ -1264,7 +1264,7 @@ false
 "__error__": "429 [-1003] Too many requests."
 }
 ],
-"ban": "1795204414.957\n",
+"ban": "1795206489.444\n",
 "conns": 1,
 "post_only": [
 false
@@ -1315,7 +1315,7 @@ false
 "__error__": "429 [-1003] Too many requests."
 }
 ],
-"ban": "1795204439.959\n",
+"ban": "1795206514.446\n",
 "conns": 1,
 "post_only": [
 false
@@ -15960,6 +15960,293 @@ false
 "filled": 2.0,
 "quantity": 2.0,
 "taker_qty": 2.0,
+"taker_order_id": 9001,
+"taker_reason": "지금 시장가(사용자)",
+"error": null,
+"repegs": 0,
+"cancel_reason": null
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "집행 M4 지정가 대기 지금 시장가(2번째 조회 뒤)",
+"calls": [
+{
+"fn": "run_entry_limit",
+"args": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": 2490.0,
+"quantity": 2.0,
+"target_leverage": 0,
+"limit": {
+"usdt": 2490.0
+}
+},
+"act_at": 2,
+"action": "market"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 9001,
+"status": "FILLED",
+"executedQty": "2"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2490.0&quantity=2.0&newClientOrderId=dbwtL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=a2d96ad2b03b599dc5ad1d56894c0fc442cea9a6ba5fa4bc35def4feeac0a4bb",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000006037&signature=ed3bc2e8062c2a39dd53e00cb8eec53afb53419aa4a3c0c8ff8bceaf89be0c04",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000006037&signature=ed3bc2e8062c2a39dd53e00cb8eec53afb53419aa4a3c0c8ff8bceaf89be0c04",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000006037&signature=ed3bc2e8062c2a39dd53e00cb8eec53afb53419aa4a3c0c8ff8bceaf89be0c04",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=MARKET&quantity=2.0&recvWindow=5000&timestamp=1800000006037&signature=cdd99d6c44ec061c557be8fbfad1e4adc379f3cd71c2bfc1b8ffb3e6ea480d6e",
+"key": "test_key"
+}
+],
+"results": [
+{
+"phase": "filled_taker",
+"filled": 2.0,
+"quantity": 2.0,
+"taker_qty": 2.0,
+"taker_order_id": 9001,
+"taker_reason": "지금 시장가(사용자)",
+"error": null,
+"repegs": 0,
+"cancel_reason": null
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "집행 M4 부분 체결 뒤 지금 시장가",
+"calls": [
+{
+"fn": "run_entry_limit",
+"args": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": 2490.0,
+"quantity": 2.0,
+"target_leverage": 0,
+"limit": {
+"usdt": 2490.0
+}
+},
+"act_at": 3,
+"action": "market"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 9001,
+"status": "FILLED",
+"executedQty": "1.5"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2490.0&quantity=2.0&newClientOrderId=dbwtL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=a2d96ad2b03b599dc5ad1d56894c0fc442cea9a6ba5fa4bc35def4feeac0a4bb",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000006037&signature=ed3bc2e8062c2a39dd53e00cb8eec53afb53419aa4a3c0c8ff8bceaf89be0c04",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=MARKET&quantity=1.5&recvWindow=5000&timestamp=1800000009037&signature=ffd0050c13e91451d6e125384c8f1cb82fbc5b41164ce075ca659ffdaf7ea60d",
+"key": "test_key"
+}
+],
+"results": [
+{
+"phase": "filled_taker",
+"filled": 2.0,
+"quantity": 2.0,
+"taker_qty": 1.5,
 "taker_order_id": 9001,
 "taker_reason": "지금 시장가(사용자)",
 "error": null,

@@ -377,6 +377,14 @@ impl DeskIo for FakeDeskIo {
     fn vol_mult(&self, asset: &str) -> Value {
         self.situation.get(asset).and_then(|s| s.get("vol_mult")).cloned().unwrap_or(json!({}))
     }
+    async fn place_bracket(&mut self, spec: &Value, symbol: &str, pside: &str, strict: bool) -> Result<Value, String> {
+        self.calls.push(json!(["place_bracket", spec, symbol, pside, strict]));
+        self.respond("place_bracket")
+    }
+    async fn place_tp_ladder(&mut self, legs: &Value, symbol: &str, pside: &str) -> Result<Value, String> {
+        self.calls.push(json!(["place_tp_ladder", legs, symbol, pside]));
+        self.respond("place_tp_ladder")
+    }
     async fn clear_bracket(&mut self, symbol: &str, pside: &str, only_sl: bool, only_tp: bool) -> Result<Value, String> {
         self.calls.push(json!(["clear_bracket", symbol, pside, only_sl, only_tp]));
         self.respond("clear_bracket")
@@ -484,6 +492,10 @@ pub fn dispatch<Q: Quotes>(desk: &mut Desk, q: &mut Q, io: &mut FakeDeskIo, c: &
                 "api_manual_entry_cancel" => desk.api_entry_cancel(io, &qy),
                 "api_manual_bracket_disarm" => block_on(desk.api_bracket_disarm(io, &qy)),
                 "api_manual_bracket_rearm" => block_on(desk.api_bracket_rearm(io, &qy)),
+                "api_manual_bracket_tp_legs" => block_on(desk.api_bracket_tp_legs(io, &qy)),
+                "api_manual_bracket_tp" => block_on(desk.api_bracket_tp(io, &qy)),
+                "api_manual_bracket_add" => block_on(desk.api_bracket_add(q, io, &qy)),
+                "api_manual_bracket_modify" => block_on(desk.api_bracket_modify(q, io, &qy)),
                 x => panic!("모르는 op {x}"),
             };
             json!({"status": r.status, "body": r.body, "started": r.task.iter().map(task_json).collect::<Vec<_>>()})

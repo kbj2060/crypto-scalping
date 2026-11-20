@@ -61,6 +61,10 @@ pub trait WatchIo {
     async fn cancel_exit_orders(&mut self, symbol: &str, pside: &str) -> Result<Value, String>;
     /// 망가진 칸 알림(텔레그램 -- 뒤에서 보내 감시를 막지 않는다). 기본 = 안 보냄.
     fn alert(&mut self, _msg: &str) {}
+    /// 진입 전 거래소 레버리지 맞추기(bracket::ensure_leverage -- 실패해도 주문은 보낸다, P16). 기본 = 원본의 «목표값 없음» 결과(요청 없음).
+    async fn ensure_leverage(&mut self, _symbol: &str, target: i64) -> Value {
+        if target <= 0 { json!({"changed": false, "reason": "목표값 없음"}) } else { json!({"changed": false, "error": "ensure_leverage 구현 없음"}) }
+    }
 }
 
 // ── 파이썬 값 다루기 ──────────────────────────────────────────────────────────
@@ -819,6 +823,10 @@ impl Watcher {
     /// 2026-11-12 검토: 우리 익절 지정가 취소가 **일부만** 됐을 수 있다 -- 어느 게 남았는지 모르니 익절선(조각 포함)을 «거래소에 안 걸림»으로 바꿔
     /// 서버가 1초 닿음으로 닫게 한다. 레벨은 그대로. 무장이 바뀌었으면 손대지 않는다(false).
     pub fn tp_watch_only<I: WatchIo>(&mut self, io: &I, key: &str, b: &Obj) -> Result<bool, String> {
+        self.tp_watch_only_at(io.now(), key, b)
+    }
+    /// 접수 문(익절 끄기·분할 조각)이 시계만 넘겨 부른다.
+    pub fn tp_watch_only_at(&mut self, now: f64, key: &str, b: &Obj) -> Result<bool, String> {
         let mut st = self.load();
         let Some(Value::Object(cur)) = st.get_mut(key) else { return Ok(false) };
         if cur.is_empty() || !py_eq(cur.get("armed_at"), b.get("armed_at")) {
@@ -830,7 +838,6 @@ impl Watcher {
                 .map(|x| { let mut m = x.as_object().cloned().unwrap_or_default(); m.insert("resting".into(), json!(false)); Value::Object(m) }).collect();
             cur.insert("tp_legs".into(), Value::Array(legs));
         }
-        let now = io.now();
         cur.insert("watch_from".into(), f(now));
         let m = json!({"at": now, "tp": val(cur, "tp_level"), "sl": val(cur, "sl_level"), "watch_only": true});
         cur.insert("mod".into(), m);

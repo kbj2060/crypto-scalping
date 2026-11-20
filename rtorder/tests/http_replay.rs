@@ -39,6 +39,9 @@ fn act_of(r: &Value, hang: f64) -> Act {
 pub struct Virt {
     pub bx: Binance,
     pub t: Arc<Mutex<f64>>,
+    /// M4 각본: n 번째 주문 번호 조회 때 집행 상태에 action 을 넣는다(원본 생성기의 S.hook 과 같은 자리 -- 화면이 대기 중에 누른 것).
+    pub hook: Option<(Shared, u32, exec::Action)>,
+    pub gets: u32,
 }
 impl Virt {
     fn new(base: &str, keys: bool, timeout: f64, t0: f64, ban: std::path::PathBuf) -> Virt {
@@ -50,7 +53,7 @@ impl Virt {
         bx.clock = Arc::new(move || t0 + *tc.lock().unwrap());
         let ts = t.clone();
         bx.virtual_sleep = Some(Arc::new(move |sec| *ts.lock().unwrap() += sec)); // 불명 응답 조회 사이 1초(resolve_resting) -- 원본 가짜 잠과 같이 시계만
-        Virt { bx, t }
+        Virt { bx, t, hook: None, gets: 0 }
     }
     fn adv(&self, s: f64) {
         *self.t.lock().unwrap() += s;
@@ -64,6 +67,12 @@ impl Exchange for Virt {
         self.bx.place_market(c, q).await
     }
     async fn get_order(&mut self, c: &Common<'_>, r: &OrderRef) -> Reply {
+        if let (OrderRef::Id(_), Some((s, n, a))) = (r, &self.hook) {
+            self.gets += 1;
+            if self.gets == *n {
+                s.lock().unwrap().action = Some(*a);
+            }
+        }
         self.bx.get_order(c, r).await
     }
     async fn cancel_order(&mut self, c: &Common<'_>, r: &OrderRef) -> Reply {
@@ -169,6 +178,18 @@ async fn run(v: &mut Virt, fn_: &str, a: &Value) -> Value {
         "commission_bp" => bracket::commission_bp(&mut v.bx, SYM).await,
         "place_add_order" => bracket::place_add_order(&mut v.bx, SYM, &s("pside"), f("price"), f("qty")).await,
         "cancel_exit_orders" => bracket::cancel_exit_orders(&mut v.bx, SYM, &s("pside")).await,
+        "run_entry_limit" => {
+            let plan = rtorder::watch::exec_plan_of(&a["plan"]).unwrap();
+            let st: Shared = Arc::new(Mutex::new(ExecState::default()));
+            v.hook = Some((st.clone(), a["act_at"].as_u64().unwrap() as u32, exec::Action::Market));
+            v.gets = 0;
+            v.bx.sync_clock().await;
+            exec::run_entry_limit(v, &plan, &st, a.get("max_sec").and_then(Value::as_f64).unwrap_or(600.0), false, false).await;
+            v.hook = None;
+            let g = st.lock().unwrap().clone();
+            json!({"phase": rtorder::watch::phase_name(g.phase), "filled": g.filled, "quantity": g.quantity, "taker_qty": g.taker_qty, "taker_order_id": g.taker_order_id,
+                   "taker_reason": g.taker_reason, "error": g.error, "repegs": g.repegs, "cancel_reason": g.cancel_reason})
+        }
         "run_entry" | "run_exit" | "run_entry_wait" | "run_entry_stop" => {
             // 원본 run_* 는 시작에 _clock_offset(시계 요청 1)을 한다 -- Rust 는 호출부 몫이라 여기서(같은 요청 열)
             let plan = rtorder::watch::exec_plan_of(&a["plan"]).unwrap();
@@ -419,7 +440,7 @@ async fn http_fixture_replay_matches_python() {
     println!("스탑 요청을 뺀 시나리오 {n_stripped} · place_stop(제거)이라 건너뜀 {n_skipped}");
     assert_eq!((n_stripped, n_skipped), (15, 6), "스탑이 닿는 시나리오 수");
     println!("집행 시장가 다리 시나리오 {nexec}");
-    assert_eq!(nexec, 13, "집행 시나리오 수");
+    assert_eq!(nexec, 15, "집행 시나리오 수(M4 2 포함)");
     println!("시나리오 {} · 호출 {ncalls} · 가짜 서버가 받은 요청 {nreq} · 글자까지 비교한 서명 URL {nurl} · 연결 {} · 연결 수 대조 시나리오 {nconn_eq}", scns.len(), srv.conns.load(Ordering::SeqCst));
     for b in &bad {
         println!("불일치 {b}");

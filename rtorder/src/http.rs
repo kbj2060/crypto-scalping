@@ -167,11 +167,42 @@ impl Binance {
     pub async fn signed(&mut self, method: &'static str, path: &str, params: &[(&str, P)]) -> Value {
         let ts = sign::ms(self.time()) + self.offset;
         let url = format!("{}{}?{}", self.base, path, sign_query(params, &self.secret, ts));
-        let r = match self.send(method, &url, true).await {
+        let r = self.send(method, &url, true).await;
+        self.finish(r, &url)
+    }
+
+    /// 2026-11-21 계좌 조회 동시화(원본 fetch_account 의 asyncio.gather -- 같은 요청 집합 · 순서는 정해지지 않는다): 서명 GET 여럿을 한꺼번에 보내고 같은 순서로 돌려준다.
+    pub async fn signed_get_many(&mut self, reqs: &[(String, Vec<(String, P)>)]) -> Vec<Value> {
+        let mut hs = vec![];
+        let mut urls = vec![];
+        for (path, params) in reqs {
+            let ts = sign::ms(self.time()) + self.offset;
+            let p: Vec<(&str, P)> = params.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+            let url = format!("{}{}?{}", self.base, path, sign_query(&p, &self.secret, ts));
+            let (agent, u, k) = (self.agent.clone(), url.clone(), self.key.clone());
+            hs.push(tokio::task::spawn_blocking(move || {
+                // aiohttp 처럼 GET 은 끊기면 한 번 더
+                match once(&agent, "GET", &u, Some(&k)) {
+                    Err(Fail::Retryable(_)) => once(&agent, "GET", &u, Some(&k)).map_err(|(Fail::Retryable(e) | Fail::Final(e))| e),
+                    r => r.map_err(|(Fail::Retryable(e) | Fail::Final(e))| e),
+                }
+            }));
+            urls.push(url);
+        }
+        let mut out = vec![];
+        for (h, url) in hs.into_iter().zip(urls) {
+            let r = h.await.map_err(|e| format!("JoinError: {e}")).and_then(|r| r);
+            out.push(self.finish(r, &url));
+        }
+        out
+    }
+
+    fn finish(&self, r: Result<Resp, String>, url: &str) -> Value {
+        let r = match r {
             Ok(r) => r,
             Err(e) => return err_value(e), // 네트워크/TLS/시간초과 -- 숫자로 시작하지 않는다(= «나갔는지 모름»)
         };
-        let payload = match json_of(&r, &url) {
+        let payload = match json_of(&r, url) {
             Ok(v) => v,
             Err(e) => return err_value(e), // 원본: JSON 을 못 읽으면 밴 기록 전에 예외 -- 418 이라도 기록 안 됨(원본 그대로)
         };
@@ -185,6 +216,23 @@ impl Binance {
             return err_value(format!("EmptyResponse: HTTP {} 본문 {}", r.status, sign::py_repr(&payload)));
         }
         payload
+    }
+
+    /// 원본 orders.listen_key(method): POST = 만들기 · PUT = 연장(30분) · DELETE = 닫기(원본은 안 부른다 -- 같은 계좌의 다른 연결까지 끊긴다, A5).
+    /// 밴 중이면 부르지 않는다 · 200 이 아니면 본문을 JSON 으로 읽기 전에 밴 기록(418·429 본문이 JSON 이 아니어도). Err = 파이썬 예외 문자열.
+    pub async fn listen_key(&self, method: &'static str) -> Result<String, String> {
+        if self.ban_left() > 0.0 {
+            return Err("RuntimeError: 바이낸스 차단 중".into());
+        }
+        let url = format!("{}/fapi/v1/listenKey", self.base);
+        let r = self.send(method, &url, true).await?; // X-MBX-APIKEY 만(서명 없음)
+        if r.status != 200 {
+            sign::ban_note(&self.ban_file, r.status, &r.body, r.retry_after.as_deref(), sys_time());
+            return Err(format!("RuntimeError: listenKey {method} {} {}", r.status, r.body.chars().take(120).collect::<String>()));
+        }
+        let t = r.body.trim();
+        let v: Value = if t.is_empty() { Value::Null } else { serde_json::from_str(t).map_err(|e| format!("JSONDecodeError: {e}"))? };
+        Ok(v.get("listenKey").filter(|x| sign::truthy(Some(x))).map(sign::py_str).unwrap_or_default())
     }
 
     /// 서명 없는 GET(aiohttp `session.get(url, params=...)` -- 상태 코드를 안 보고 JSON 을 읽는다). 실패 = 파이썬 예외 문자열.

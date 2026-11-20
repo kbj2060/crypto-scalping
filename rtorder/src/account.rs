@@ -302,6 +302,15 @@ pub trait AccountRest {
     fn now(&self) -> f64; // time.time()
     async fn clock_offset(&mut self) -> i64;
     async fn get(&mut self, path: &str, params: &[(&str, P)], offset: i64) -> Value;
+    /// 여러 GET 을 한꺼번에(원본 asyncio.gather). 기본 = 차례로(가짜·정답지용 -- 요청 열이 정해진다).
+    async fn get_many(&mut self, reqs: &[(String, Vec<(String, P)>)], offset: i64) -> Vec<Value> {
+        let mut out = vec![];
+        for (path, params) in reqs {
+            let p: Vec<(&str, P)> = params.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+            out.push(self.get(path, &p, offset).await);
+        }
+        out
+    }
 }
 
 impl AccountRest for crate::http::Binance {
@@ -322,6 +331,14 @@ impl AccountRest for crate::http::Binance {
         }
         self.offset = offset;
         self.signed("GET", path, params).await
+    }
+    async fn get_many(&mut self, reqs: &[(String, Vec<(String, P)>)], offset: i64) -> Vec<Value> {
+        let left = self.ban_left();
+        if left > 0.0 {
+            return reqs.iter().map(|_| err_value(format!("binance IP ban: {left:.0}s left -- request not sent"))).collect();
+        }
+        self.offset = offset;
+        self.signed_get_many(reqs).await
     }
 }
 
@@ -383,15 +400,11 @@ pub async fn fetch_account<R: AccountRest>(rest: &mut R, symbols: &[String], quo
             open_qty.insert((req_s(p, "symbol")?, ps.to_string()), req_f(p, "positionAmt")?.abs());
         }
     }
-    // 2026-11-05 원본은 심볼별 조회를 동시에 보낸다 -- 요청 수·무게는 같다. ponytail: 여기는 차례로(가짜 거래소 시험의 요청 열이 정해진다) -- 실제 연결 때 join 으로.
-    let mut all_fills = vec![];
-    for s in symbols {
-        all_fills.push(rest.get("/fapi/v1/userTrades", &[("symbol", P::s(s)), ("limit", P::I(trade_limit))], off).await);
-    }
-    let mut all_rows = vec![];
-    for s in symbols {
-        all_rows.push(rest.get("/fapi/v1/openOrders", &[("symbol", P::s(s))], off).await);
-    }
+    // 2026-11-05 원본은 심볼별 조회를 한꺼번에(gather) -- 요청 수·무게는 같다. 2026-11-21 Rust 도 `get_many`(Binance = 동시 · 가짜 = 차례로)
+    let tr: Vec<(String, Vec<(String, P)>)> = symbols.iter().map(|s| ("/fapi/v1/userTrades".to_string(), vec![("symbol".into(), P::s(s)), ("limit".into(), P::I(trade_limit))])).collect();
+    let all_fills = rest.get_many(&tr, off).await;
+    let oo: Vec<(String, Vec<(String, P)>)> = symbols.iter().map(|s| ("/fapi/v1/openOrders".to_string(), vec![("symbol".into(), P::s(s))])).collect();
+    let all_rows = rest.get_many(&oo, off).await;
     let (mut trips, mut truncated, mut failed) = (vec![], vec![], vec![]);
     for (s, fills) in symbols.iter().zip(&all_fills) {
         let Some(fl) = fills.as_array() else {
@@ -614,6 +627,7 @@ pub async fn user_stream_run<S: StreamIo>(io: &mut S, us: &mut UserStream) {
                 };
                 let Ok(data) = serde_json::from_str::<Value>(&msg) else { continue };
                 let kind = user_event_kind(&data)?;
+                io.event(&data); // 스트림 계좌(받아 둔 값) -- NEW 접수 등 원본이 무시하는 사건도 미체결 목록엔 필요하다
                 let o = if data.get("e").and_then(Value::as_str) == Some("ORDER_TRADE_UPDATE") { data.get("o").and_then(Value::as_object).cloned().unwrap_or_default() } else { Obj::new() };
                 if o.get("X").and_then(Value::as_str) == Some("FILLED") && truthy(o.get("c")) && py_str(&o["c"]).starts_with("dbtp") {
                     // 2026-11-11 분할 익절 조각 체결
@@ -631,7 +645,6 @@ pub async fn user_stream_run<S: StreamIo>(io: &mut S, us: &mut UserStream) {
                         first = false;
                     }
                     us.last_event_at = Some(io.wall());
-                    io.event(&data);
                     io.wake();
                     if kind == "fill" {
                         io.dirty();
