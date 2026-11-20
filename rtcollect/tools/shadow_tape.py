@@ -8,8 +8,8 @@
   bybit_oi · bybit_mark · bybit_funding   행 묶음
 빼는 분(뺀 분 수를 같이 찍는다):
   · 각 DB 의 gaps 구간 ±margin 초(재연결·재시작 주변 -- 두 프로세스가 끊긴 때가 다르다). symbol 열이 있으면 그 종목만.
-  · 파이썬 쪽 backfill_1m 의 ok=1 분(REST 로 통째로 갈아 끼운 분 -- Rust 는 REST 복구가 없다)
-  · 파이썬 쪽 verify_1m 의 |rel_err| > 1e-4 분(1분봉과 안 맞은 분 = 곧 복구 대상이거나 유실)
+  · 두 쪽 backfill_1m 의 ok=1 분(REST 로 통째로 갈아 끼운 분 -- Rust 는 REST 가 기본 꺼짐이라 보통 파이썬 쪽뿐)
+  · 두 쪽 verify_1m 의 |rel_err| > 1e-4 분(1분봉과 안 맞은 분 = 곧 복구 대상이거나 유실)
   · 범위 끝 10초(진행 중인 초 · 5초 플러시 지연)
 범위 = 두 DB 에 그 표 자료가 함께 있는 구간(--from/--to 로 좁힌다, 초).
 
@@ -59,13 +59,14 @@ def excluded_minutes(py, rs, margin: int) -> dict:
         for sym, a, b in con.execute(q):
             lo, hi = (a // 1000 - margin) // 60, (b // 1000 + margin) // 60
             out.setdefault(sym, set()).update(range(lo, hi + 1))
-    t = tables(py)
-    if "backfill_1m" in t:
-        for sym, m in py.execute("SELECT symbol, ts_min FROM backfill_1m WHERE ok"):
-            out.setdefault(sym, set()).add(m // 60)
-    if "verify_1m" in t:
-        for sym, m in py.execute("SELECT symbol, ts_min FROM verify_1m WHERE abs(rel_err) > ?", [TOL]):
-            out.setdefault(sym, set()).add(m // 60)
+    for con in (py, rs):      # Rust 도 REST 를 켜면(RTCOLLECT_REST=1) 자기 표에 적는다 -- 꺼져 있으면 비어 있다
+        t = tables(con)
+        if "backfill_1m" in t:
+            for sym, m in con.execute("SELECT symbol, ts_min FROM backfill_1m WHERE ok"):
+                out.setdefault(sym, set()).add(m // 60)
+        if "verify_1m" in t:
+            for sym, m in con.execute("SELECT symbol, ts_min FROM verify_1m WHERE abs(rel_err) > ?", [TOL]):
+                out.setdefault(sym, set()).add(m // 60)
     return out
 
 

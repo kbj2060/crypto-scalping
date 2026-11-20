@@ -89,7 +89,7 @@ impl Collector {
     }
 
     pub fn subscribe(&self) -> String {
-        serde_json::json!({"op": "subscribe", "args": [{"channel": "trades", "instId": self.inst}]}).to_string()
+        crate::py_subscribe(&[format!(r#"{{"channel": "trades", "instId": {}}}"#, Value::from(self.inst.as_str()))])
     }
 
     pub fn on_connect(&mut self) {

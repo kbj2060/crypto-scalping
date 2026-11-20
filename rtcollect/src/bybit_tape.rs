@@ -235,13 +235,11 @@ impl BybitCollector {
         Ok(Self { syms, ctx, tick: Default::default(), ctx_buf: Default::default(), down_ms: None, t_ping: 0.0, t_flush: 0.0, t_msg: 0.0, beat: now })
     }
 
-    /// 구독 메시지(:219) -- 체결 다음 tickers, 종목 순서대로.
+    /// 구독 메시지(:219) -- 체결 다음 tickers, 종목 순서대로. 글자는 aiohttp send_json(= json.dumps 기본) 그대로.
     pub fn subscribe(&self) -> String {
-        let args: Vec<String> = ["publicTrade", "tickers"]
-            .iter()
-            .flat_map(|t| self.syms.iter().map(move |s| format!("{t}.{}", s.name)))
-            .collect();
-        serde_json::json!({"op": "subscribe", "args": args}).to_string()
+        let args: Vec<String> =
+            ["publicTrade", "tickers"].iter().flat_map(|t| self.syms.iter().map(move |s| Value::from(format!("{t}.{}", s.name)).to_string())).collect();
+        crate::py_subscribe(&args)
     }
 
     pub fn on_open(&mut self, now: f64) {

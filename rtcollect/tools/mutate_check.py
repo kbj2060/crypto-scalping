@@ -6,7 +6,8 @@
 <작업 폴더>/mut_target 하나를 같이 쓰되 변이마다 `cargo clean -p rtcollect` -- 🔴처음엔 안 지워서 cargo 가 직전 변이의 산출물을
 그대로 써(파일 시각 비교) 결과가 전부 틀렸다. 빌드에는 메모리 상한을 안 걸고, 시험 실행만 `ulimit -v 4000000` + timeout 으로.
 
-    python3 rtcollect/tools/mutate_check.py <작업 폴더> [이름 일부 ...]
+    python3 rtcollect/tools/mutate_check.py <작업 폴더> [이름 일부 ...]      # 예: REST · 루프
+일치 시험(tape·venue·rest_parity)을 기본으로, 다섯째 칸이 있는 변이(접속 루프 상수)는 그 시험(venue_loop)만 돌린다.
 """
 import hashlib
 import os
@@ -87,7 +88,38 @@ M = [
     ("OKX 끊길 때 쓰기 빼기", "src/okx.rs", "let rows = self.buffer.take_closed(false);\n        self.store.write(rows)", "0"),
     ("OKX meta ct_val 열쇠", "src/okx.rs", "format!(\"ct_val:{inst}\")", "format!(\"ctval:{inst}\")"),
     ("OKX startup 공백 분 시작 → 1초 전", "src/okx.rs", "ts_ms.div_euclid(60_000) * 60_000", "ts_ms - 1000"),
+    # ── 바이낸스 REST 검증·복구(rest_parity) ──
+    ("REST 47시간 → 48시간", "src/rest.rs", "LOOKBACK_S: i64 = 47 * 3600", "LOOKBACK_S: i64 = 48 * 3600"),
+    ("REST 끝난 지 3분 → 2분", "src/rest.rs", "*m <= now - 180", "*m <= now - 120"),
+    ("REST 3번 실패 → 4번", "src/rest.rs", "MAX_ATTEMPTS: i64 = 3", "MAX_ATTEMPTS: i64 = 4"),
+    ("REST 맞는 분도 후보", "src/rest.rs", "(bad.contains(m) || !good.contains(m))", "true"),
+    ("REST 공백 끝 분 (b-1) → b", "src/rest.rs", "(b - 1).div_euclid(60_000)", "b.div_euclid(60_000)"),
+    ("REST 허용오차 1e-4 → 1e-1", "src/rest.rs", "TOL: f64 = 1e-4", "TOL: f64 = 1e-1"),
+    ("REST 라이브+REST 보다 REST 먼저", "src/rest.rs", "[(&hybrid, \"라이브+REST\"), (&rows, \"REST\")]", "[(&rows, \"REST\"), (&hybrid, \"라이브+REST\")]"),
+    ("REST 최대 칸 NULL 안 함", "src/rest.rs", "(r.2[4], r.2[5]) = (f64::NAN, f64::NAN);", ""),
+    ("REST 간격 2→1초", "src/rest.rs", "AGG_GAP_S: f64 = 2.0", "AGG_GAP_S: f64 = 1.0"),
+    ("REST 가중치 문턱 1500→1501", "src/rest.rs", "WEIGHT_YIELD: i64 = 1500", "WEIGHT_YIELD: i64 = 1501"),
+    ("REST 양보 61→60초", "src/rest.rs", "self.clock.mono() + 61.0 -", "self.clock.mono() + 60.0 -"),
+    ("REST 영구 거부 없음", "src/rest.rs", "(400..500).contains(&s) && s != 418 && s != 429", "false"),
+    ("REST 429 도 영구 거부", "src/rest.rs", "(400..500).contains(&s) && s != 418 && s != 429", "(400..500).contains(&s) && s != 418"),
+    ("REST 쪽 끝 판정(분 뒤 체결) 빼기", "src/rest.rs", "if batch.len() < 1000 || int(key(last.unwrap(), \"T\")?)? > end {", "if batch.len() < 1000 {"),
+    ("REST fromId +1 빼기", "src/rest.rs", "\"a\")?)? + 1)", "\"a\")?)?)"),
+    ("REST 분 끝 59_999 → 60_000", "src/rest.rs", "m * 1000 + 59_999", "m * 1000 + 60_000"),
+    ("REST 대조 limit +2 → +1", "src/rest.rs", ".div_euclid(60) + 2))", ".div_euclid(60) + 1))"),
+    ("REST 시도 횟수 이어 세기 빼기", "src/rest.rs", "ok as i64, prev + 1, note]", "ok as i64, 1, note]"),
+    ("REST 교체 때 옛 검사 안 지움", "src/rest.rs", "DELETE FROM verify_1m WHERE symbol = ? AND ts_min = ?", "DELETE FROM verify_1m WHERE symbol = ? AND ts_min = ? AND 0"),
+    ("REST 1분봉 0 이면 rel 0 빼기", "src/rest.rs", "(got, if kline_qty != 0.0 { (got - kline_qty) / kline_qty } else { 0.0 })", "(got, (got - kline_qty) / kline_qty)"),
+    # ── 접속 루프(venue_loop -- 원본 상수 그대로라 하나에 약 70초) ──
+    ("루프 OKX PING 20→15초", "src/net.rs", "OKX_HEARTBEAT: Duration = Duration::from_secs(20)", "OKX_HEARTBEAT: Duration = Duration::from_secs(15)", ["venue_loop"]),
+    ("루프 OKX 무음 25→30초", "src/okx.rs", "RECV_TIMEOUT_S: f64 = 25.0", "RECV_TIMEOUT_S: f64 = 30.0", ["venue_loop"]),
+    ("루프 Bybit 테이프 재접속 3→2초", "src/net.rs", "        self.on_error(now, wall, why);\n        3.0", "        self.on_error(now, wall, why);\n        2.0", ["venue_loop"]),
+    ("루프 Bybit ping 글자 공백 없음", "src/net.rs", "BYBIT_PING: &str = r#\"{\"op\": \"ping\"}\"#", "BYBIT_PING: &str = r#\"{\"op\":\"ping\"}\"#", ["venue_loop"]),
+    ("루프 Bybit 테이프 ping 20→25초", "src/bybit_tape.rs", "PING_S: f64 = 20.0", "PING_S: f64 = 25.0", ["venue_loop"]),
+    ("루프 Bybit 청산 침묵 60→70초", "src/bybit_liq.rs", "IDLE_S: f64 = 60.0", "IDLE_S: f64 = 70.0", ["venue_loop"]),
+    ("루프 구독 글자 json.dumps 모양 아님", "src/lib.rs", "args.join(\", \")", "args.join(\",\")", ["venue_loop"]),
+    ("루프 Bybit 테이프 정지 종료코드 3→70", "src/net.rs", "EXIT_TRADE_STALL: i32 = 3", "EXIT_TRADE_STALL: i32 = 70", ["venue_loop"]),
 ]
+PARITY = ["tape_parity", "venue_parity", "rest_parity"]
 
 
 def digest() -> str:
@@ -105,7 +137,9 @@ def main() -> None:
     env = dict(os.environ, CARGO_TARGET_DIR=str(work / "mut_target"), PATH=f"{Path.home()}/.cargo/bin:" + os.environ["PATH"])
     before = digest()
     caught, missed, n = 0, [], 0
-    for name, f, a, b in M:
+    for name, f, a, b, *tests in M:
+        tests = tests[0] if tests else PARITY
+        targs = " ".join(f"--test {t}" for t in tests)
         if pick and name != M[0][0] and not any(x in name for x in pick):
             continue
         shutil.rmtree(w, ignore_errors=True)
@@ -115,10 +149,10 @@ def main() -> None:
         assert s.count(a) == 1, (name, s.count(a))
         p.write_text(s.replace(a, b))
         subprocess.run(["cargo", "clean", "-q", "-p", "rtcollect"], cwd=w, env=env, check=True)
-        subprocess.run(["cargo", "test", "-q", "-j", "2", "--no-run", "--test", "tape_parity", "--test", "venue_parity"], cwd=w, env=env,
-                       check=True, capture_output=True)
-        r = subprocess.run(["bash", "-c", "ulimit -v 4000000; timeout 300 cargo test -q -j 2 --test tape_parity --test venue_parity "
-                            "-- --test-threads 1"], cwd=w, env=env, capture_output=True, text=True)
+        subprocess.run(["cargo", "test", "-q", "-j", "2", "--no-run", *targs.split()], cwd=w, env=env, check=True, capture_output=True)
+        # 접속 루프 시험은 나란히(각 70초) · 일치 시험은 하나씩
+        r = subprocess.run(["bash", "-c", f"ulimit -v 4000000; timeout 300 cargo test -q -j 2 {targs} -- "
+                            + ("" if tests != PARITY else "--test-threads 1")], cwd=w, env=env, capture_output=True, text=True)
         out = r.stdout + r.stderr
         failed_tests = sorted({ln.split()[1] for ln in out.splitlines() if ln.startswith("test ") and ln.rstrip().endswith("FAILED")}
                               | {ln.strip() for ln in out.splitlines() if ln.startswith("    ") and "match_python" in ln})
@@ -132,7 +166,7 @@ def main() -> None:
                 missed.append(name)
         else:
             assert not failed, f"무변경 사본이 실패했다:\n{out[-2000:]}"
-        print(f"{'실패(잡음)' if failed else '통과'} | {name} | {','.join(t.replace('_rows_match_python_collector', '') for t in failed_tests)} | {msg[:140]}",
+        print(f"{'실패(잡음)' if failed else '통과'} | {name} | {','.join(t.replace('_rows_match_python_collector', '').replace('_loop_matches_replay', '') for t in failed_tests)} | {msg[:140]}",
               flush=True)
     shutil.rmtree(w, ignore_errors=True)
     assert digest() == before, "원본 rtcollect 의 src·tests 가 바뀌었다"

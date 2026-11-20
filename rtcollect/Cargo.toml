@@ -15,3 +15,5 @@ tokio = { version = "1", features = ["rt", "macros", "net", "time", "signal"] }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+# REST 검증·복구(src/rest.rs, 기본 꺼짐)만 쓴다. rtorder 와 같은 판(동기 · rustls+ring · 이미 cargo 캐시에 있다).
+ureq = { version = "3", default-features = false, features = ["rustls"] }

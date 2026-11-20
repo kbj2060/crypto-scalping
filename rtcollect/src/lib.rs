@@ -5,13 +5,14 @@
 //! - `okx`       = scripts/live_okx_trade_tape_collector_20260923.py    (okx_tape.sqlite)
 //! 세 체결 테이프는 원본처럼 `tape`(칸 규칙)·`store`(표·쓰기)를 나눠 쓴다. 정답지 대조 = tests/*_parity.rs.
 //!
-//! 옮기지 않은 것(REST): 1분봉 대조(verify_1m 쓰기) · aggTrades/history-trades 복구(backfill_1m) · OKX ctVal REST 대조.
-//! 표는 원본과 같이 만들되 쓰지 않는다 -- 그림자 대조 도구(tools/shadow_tape.py)가 파이썬 쪽 두 표로 «REST 가 채운 분»을 뺀다.
+//! - `rest`      = 바이낸스 테이프의 REST 1분봉 대조(verify_1m)·aggTrades 복구(backfill_1m) -- 기본 꺼짐(main.rs `RTCOLLECT_REST=1`).
+//! 옮기지 않은 REST: OKX ctVal 대조·1분봉 대조·history-trades 복구 · Bybit 1분봉 대조(rtcollect/SHADOW.md 표). 그 표들은 만들되 비어 있다.
 pub mod binance;
 pub mod bybit_liq;
 pub mod bybit_tape;
 pub mod net;
 pub mod okx;
+pub mod rest;
 pub mod store;
 pub mod tape;
 
@@ -59,6 +60,11 @@ pub(crate) fn py_int(v: &Value) -> Result<i64, Reconnect> {
         Value::Bool(b) => Ok(*b as i64),
         _ => Err(Reconnect("TypeError: int".into())),
     }
+}
+
+/// 구독 글자 = 원본 `json.dumps({"op": "subscribe", "args": [...]})` 기본 모양(", " · ": "). `args` = 이미 JSON 글자인 원소들.
+pub fn py_subscribe(args: &[String]) -> String {
+    format!(r#"{{"op": "subscribe", "args": [{}]}}"#, args.join(", "))
 }
 
 /// 파이썬 bool(x)

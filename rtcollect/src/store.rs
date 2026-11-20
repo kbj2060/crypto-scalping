@@ -68,6 +68,17 @@ pub fn open_db(path: &Path) -> rusqlite::Result<Rc<Connection>> {
     Ok(Rc::new(con))
 }
 
+/// 행 묶음 INSERT OR REPLACE(트랜잭션은 부르는 쪽). 건수 칸은 파이썬 int(c[k]) -- INTEGER 로, 나머지는 REAL 로 묶는다.
+/// 🔴NaN 은 SQLite 가 NULL 로 쌓는다(sqlite3_bind_double) -- REST 복구 행의 buy_max/sell_max «모른다»(원본 None)를 그렇게 싣는다.
+pub(crate) fn insert_rows(con: &Connection, symbol: &str, rows: &[(i64, i64, Cell)]) -> rusqlite::Result<()> {
+    let mut st = con.prepare_cached(INSERT)?;
+    for (sec, b, c) in rows {
+        let n = |j: usize| c[j] as i64;
+        st.execute(params![symbol, sec, b, c[0], c[1], n(2), n(3), c[4], c[5], c[6], c[7], c[8], c[9], n(10), n(11), n(12), n(13), n(14), n(15)])?;
+    }
+    Ok(())
+}
+
 /// `TapeStore` 의 hot(.sqlite) 몫(:470-688). DuckDB 몫(옛 OKX·현물 파일)은 옮기지 않는다.
 pub struct TapeStore {
     con: Rc<Connection>,
@@ -149,17 +160,7 @@ impl TapeStore {
 
     fn commit_pending(&self) -> rusqlite::Result<()> {
         self.con.execute_batch("BEGIN")?;
-        {
-            let mut st = self.con.prepare_cached(INSERT)?;
-            for (sec, b, c) in &self.pending {
-                // 건수 칸은 파이썬 int(c[k]) -- INTEGER 로, 나머지는 REAL 로 묶는다.
-                let n = |j: usize| c[j] as i64;
-                st.execute(params![
-                    self.symbol, sec, b, c[0], c[1], n(2), n(3), c[4], c[5], c[6], c[7], c[8], c[9],
-                    n(10), n(11), n(12), n(13), n(14), n(15)
-                ])?;
-            }
-        }
+        insert_rows(&self.con, &self.symbol, &self.pending)?;
         self.con.execute_batch("COMMIT")
     }
 

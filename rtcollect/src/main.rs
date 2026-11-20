@@ -1,76 +1,189 @@
-//! ⚠️기본 웹소켓 주소는 **실제 바이낸스**다. 개발기에서 실행하지 않는다(서버와 IP 한도를 같이 쓴다 -- 밴 위험). 서버 그림자 전용.
-//! ⚠️파이썬 수집기를 대체하지 않는다: REST 백필·1분봉 대조(backfill_1m·verify_1m 쓰기)가 없다. 그림자로 다른 파일에 쓴다.
+//! ⚠️기본 웹소켓·REST 주소는 **실제 거래소**다. 개발기에서 실행하지 않는다(바이낸스는 서버와 IP 한도를 같이 쓴다 -- 밴 위험). 서버 그림자 전용.
+//! ⚠️그림자: 파이썬 수집기와 다른 파일(기본 data/hot/rtcollect/…)에 쓴다 -- 파이썬 파일을 가리키면 켜지지 않는다(전환 때만 RTCOLLECT_TAKEOVER=1).
+//! 절차·대조·전환: rtcollect/SHADOW.md.
 //!
-//! 바이낸스 체결 테이프 수집기(scripts/live_trade_tape_collector_20260916.py 의 `main()`·`run_all()`). 환경변수:
-//!   TAPE_SYMBOL         쉼표 목록, 기본 ethusdt (원본과 같은 이름)
-//!   TAPE_MARKET         futures(@trade, 기본) | spot(@aggTrade)
-//!   TAPE_DB_PATH        기본 data/hot/rtcollect/binance_tape.sqlite · 현물 data/hot/rtcollect/binance_spot_tape.sqlite (현재 폴더 기준)
-//!                       🔴파이썬과 같은 파일이면 gaps·meta 가 두 벌로 쌓인다 -- 기본값이 일부러 다르다
-//!   RTCOLLECT_WS_URL    주소 틀({symbol} 자리), 기본 = 원본 MARKETS 의 WS (시험은 가짜 서버로 덮는다)
-//!   RTCOLLECT_SILENCE_S 아무 프레임 없이 이만큼이면 재연결, 기본 45 (aiohttp heartbeat=30 + pong 15초)
-//!   RTCOLLECT_WD_LOOP_S · RTCOLLECT_WD_WRITE_S  정지 감시 문턱, 기본 120 · 600 (원본 상수 -- 시험만 짧게)
-//! 종료코드: 정지 감시 70 · 심볼 루프가 끝나면 70 · SIGTERM/SIGINT 0(닫힌 초를 쓰고 끝낸다 -- 원본은 안 쓰고 죽는다, 보고서 참고).
-use rtcollect::binance::Collector;
+//! 수집기 하나를 고른다: RTCOLLECT_KIND = binance_tape(기본) | bybit_liq | bybit_tape | okx_tape. 종류마다 원본과 같은 이름의 환경변수:
+//!   binance_tape  TAPE_SYMBOL(쉼표, 기본 ethusdt) · TAPE_MARKET(futures @trade | spot @aggTrade) · TAPE_DB_PATH
+//!                 (기본 data/hot/rtcollect/binance_tape.sqlite · 현물 …/binance_spot_tape.sqlite)
+//!                 RTCOLLECT_REST=1 이면 REST 1분봉 대조·aggTrades 복구도(기본 꺼짐 -- src/rest.rs) · RTCOLLECT_KLINES_URL · RTCOLLECT_AGG_URL ·
+//!                 RTCOLLECT_BAN_FILE(기본 data/live/binance_ban_until = scripts/binance_ban_guard.py 와 같은 파일)
+//!   bybit_liq     BYBIT_LIQ_SYMBOLS(기본 ETHUSDT,BTCUSDT,SOLUSDT,XRPUSDT,HYPEUSDT) · BYBIT_LIQ_DB(기본 data/hot/rtcollect/bybit_liq.sqlite)
+//!   bybit_tape    BYBIT_TAPE_SYMBOLS(같은 기본) · BYBIT_TAPE_DB · BYBIT_CTX_DB(기본 data/hot/rtcollect/bybit_{tape,ctx}.sqlite)
+//!   okx_tape      OKX_TAPE_INST(쉼표, 기본 ETH-USDT-SWAP) · OKX_TAPE_DB_PATH(기본 data/hot/rtcollect/okx_tape.sqlite)
+//! 공통: RTCOLLECT_WS_URL(주소 틀, 바이낸스는 {symbol} 자리 -- 시험은 가짜 서버로) · 경로는 현재 폴더 기준.
+//! 시험만: RTCOLLECT_SILENCE_S(바이낸스 침묵 45) · RTCOLLECT_WD_LOOP_S·RTCOLLECT_WD_WRITE_S(정지 감시 120·600) · RTCOLLECT_WD_TRADE_S(Bybit 테이프 600).
+//! 종료코드(원본 그대로): 바이낸스·OKX 정지 감시 70 · 수집 태스크가 끝나면 70 · Bybit 테이프 체결 멈춤 3 · OKX 모르는 종목(ctVal) 1 ·
+//!   설정 오류 2 · SIGTERM/SIGINT 0(원본이 연결 끝에 하던 쓰기를 하고 끝낸다 -- 원본은 안 쓰고 죽는다).
 use rtcollect::net::{self, EXIT_STALL};
+use rtcollect::rest::{wall_s, Clock, Rest, TIMEOUT};
 use rtcollect::store::open_db;
+use rtcollect::{binance, bybit_liq, bybit_tape, okx};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::Ordering::Relaxed;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::signal::unix::{signal, SignalKind};
+use tokio::task::JoinSet;
 
 fn env_f(k: &str, d: f64) -> f64 {
     std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
 }
 
-fn main() {
-    let syms: Vec<String> =
-        std::env::var("TAPE_SYMBOL").unwrap_or_else(|_| "ethusdt".into()).to_lowercase().split(',').filter(|s| !s.is_empty()).map(String::from).collect();
-    let market = std::env::var("TAPE_MARKET").unwrap_or_else(|_| "futures".into());
-    let (url, file) = match market.as_str() {
-        "futures" => ("wss://fstream.binance.com/ws/{symbol}@trade", "binance_tape.sqlite"),
-        "spot" => ("wss://stream.binance.com:9443/ws/{symbol}@aggTrade", "binance_spot_tape.sqlite"),
-        m => panic!("TAPE_MARKET={m} -- futures|spot"),
-    };
-    let url = std::env::var("RTCOLLECT_WS_URL").unwrap_or_else(|_| url.into());
-    let db = std::env::var("TAPE_DB_PATH").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("data/hot/rtcollect").join(file));
-    let silence = Duration::from_secs_f64(env_f("RTCOLLECT_SILENCE_S", 45.0));
-    net::start_watchdog(env_f("RTCOLLECT_WD_LOOP_S", net::WD_LOOP_STALL_S), env_f("RTCOLLECT_WD_WRITE_S", net::WD_WRITE_STALL_S));
+fn env_s(k: &str, d: &str) -> String {
+    std::env::var(k).unwrap_or_else(|_| d.into())
+}
 
+fn die(code: i32, msg: &str) -> ! {
+    eprintln!("{msg}");
+    std::process::exit(code)
+}
+
+/// 쉼표 목록(원본 `[s.strip().upper() for s in …split(",") if s.strip()]` · 바이낸스는 lower).
+fn list(k: &str, d: &str, upper: bool) -> Vec<String> {
+    env_s(k, d).split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).map(|s| if upper { s.to_uppercase() } else { s.to_lowercase() }).collect()
+}
+
+/// 기본 data/hot/rtcollect/<file>. 🔴파이썬 수집기의 파일(data/hot/<같은 이름>)이면 그림자 기록이 섞인다(gaps·meta 두 벌 · 전진 검정 자료 오염)
+/// -- 전환 때만 RTCOLLECT_TAKEOVER=1 로 연다.
+fn db_path(var: &str, file: &str) -> PathBuf {
+    let p = std::env::var(var).map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("data/hot/rtcollect").join(file));
+    let python = p.file_name() == Some(file.as_ref()) && p.parent().and_then(|d| d.file_name()) == Some("hot".as_ref());
+    if python && env_s("RTCOLLECT_TAKEOVER", "") != "1" {
+        die(2, &format!("🔴{} 는 파이썬 수집기의 파일이다 -- 그림자는 다른 경로에(기본 data/hot/rtcollect/). 전환이면 RTCOLLECT_TAKEOVER=1", p.display()));
+    }
+    p
+}
+
+/// SIGTERM·SIGINT 까지. 수집 태스크 하나라도 끝나면(= 죽으면) 프로세스를 끝낸다(원본 run_all -- 감독이 전부 다시 띄운다). 60초마다 `tick`.
+async fn wait_term(tasks: &mut JoinSet<()>, tick: impl Fn()) {
+    let (mut term, mut int) = (signal(SignalKind::terminate()).unwrap(), signal(SignalKind::interrupt()).unwrap());
+    let mut every = tokio::time::interval(Duration::from_secs(60));
+    every.tick().await;
+    loop {
+        tokio::select! {
+            _ = term.recv() => return,
+            _ = int.recv() => return,
+            r = tasks.join_next() => die(EXIT_STALL, &format!("수집 태스크 종료: {r:?} -- 감시자가 다시 띄운다")),
+            _ = every.tick() => tick(),
+        }
+    }
+}
+
+fn main() {
+    let kind = env_s("RTCOLLECT_KIND", "binance_tape");
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     let local = tokio::task::LocalSet::new();
     local.block_on(&rt, async move {
-        let con = open_db(&db).expect("DB 열기");
-        let mut cs = vec![];
-        let mut tasks = tokio::task::JoinSet::new();
-        for s in &syms {
-            let c = Rc::new(RefCell::new(Collector::new(con.clone(), s, &market, net::mono_ms() as f64 / 1000.0).expect("TapeStore")));
-            println!("{s} {market} 수집 시작 (빈 {}, db {})", rtcollect::tape::bucket(s), db.display());
-            tasks.spawn_local(net::run_symbol(c.clone(), url.replace("{symbol}", s), silence));
-            cs.push(c);
+        match kind.as_str() {
+            "binance_tape" => run_binance().await,
+            "bybit_liq" => run_bybit_liq().await,
+            "bybit_tape" => run_bybit_tape().await,
+            "okx_tape" => run_okx().await,
+            k => die(2, &format!("RTCOLLECT_KIND={k} -- binance_tape|bybit_liq|bybit_tape|okx_tape")),
         }
-        tasks.spawn_local(net::beat());
-        let (mut term, mut int) = (signal(SignalKind::terminate()).unwrap(), signal(SignalKind::interrupt()).unwrap());
-        let mut tick = tokio::time::interval(Duration::from_secs(60));
-        tick.tick().await;
-        loop {
-            tokio::select! {
-                _ = term.recv() => break,
-                _ = int.recv() => break,
-                r = tasks.join_next() => {
-                    // 하나라도 끝나면(= 죽으면) 전부 걷는다(run_all) -- supervisor 가 다시 띄운다
-                    eprintln!("수집 태스크 종료: {r:?} -- 감시자가 다시 띄운다");
-                    std::process::exit(EXIT_STALL);
-                }
-                _ = tick.tick() => {
-                    let st: Vec<String> = cs.iter().map(|c| { let c = c.borrow(); format!("{} 보류 {} 늦은버림 {}", c.store.symbol, c.store.pending.len(), c.buffer.dropped_late) }).collect();
-                    println!("rtcollect 60s · 재연결 {} (누적) · {}", net::RECONNECTS.load(Relaxed), st.join(" · "));
-                }
-            }
-        }
-        // 닫힌 초만 쓰고 끝낸다(진행 중인 초는 버린다 = 다음 판 gaps 가 덮는다). 값은 원본이 그 순간 플러시했을 때와 같다.
-        let n: usize = cs.iter().map(|c| c.borrow_mut().on_disconnect()).sum();
-        println!("종료 신호 -- 닫힌 초 {n}행 쓰고 끝낸다");
     });
+}
+
+/// 바이낸스 체결 테이프(live_trade_tape_collector_20260916.py `main()`·`run_all()`).
+async fn run_binance() {
+    let syms = list("TAPE_SYMBOL", "ethusdt", false);
+    let market = env_s("TAPE_MARKET", "futures");
+    let (url, file, rest) = match market.as_str() {
+        "futures" => ("wss://fstream.binance.com/ws/{symbol}@trade", "binance_tape.sqlite", "https://fapi.binance.com/fapi/v1"),
+        "spot" => ("wss://stream.binance.com:9443/ws/{symbol}@aggTrade", "binance_spot_tape.sqlite", "https://api.binance.com/api/v3"),
+        m => die(2, &format!("TAPE_MARKET={m} -- futures|spot")),
+    };
+    let url = env_s("RTCOLLECT_WS_URL", url);
+    let db = db_path("TAPE_DB_PATH", file);
+    let silence = Duration::from_secs_f64(env_f("RTCOLLECT_SILENCE_S", 45.0));
+    net::start_watchdog(env_f("RTCOLLECT_WD_LOOP_S", net::WD_LOOP_STALL_S), env_f("RTCOLLECT_WD_WRITE_S", net::WD_WRITE_STALL_S));
+    let con = open_db(&db).expect("DB 열기");
+    let mut cs = vec![];
+    let mut tasks = JoinSet::new();
+    for s in &syms {
+        let c = Rc::new(RefCell::new(binance::Collector::new(con.clone(), s, &market, net::mono_s()).expect("TapeStore")));
+        println!("{s} {market} 수집 시작 (빈 {}, db {})", rtcollect::tape::bucket(s), db.display());
+        tasks.spawn_local(net::run_symbol(c.clone(), url.replace("{symbol}", s), silence));
+        cs.push(c);
+    }
+    tasks.spawn_local(net::beat());
+    if env_s("RTCOLLECT_REST", "") == "1" {
+        // 꺼 두는 게 기본: 그림자 기간엔 파이썬이 같은 REST 를 이미 부른다. 심볼마다 스레드 · 속도 슬롯은 프로세스 하나.
+        let (ku, au) = (env_s("RTCOLLECT_KLINES_URL", &format!("{rest}/klines")), env_s("RTCOLLECT_AGG_URL", &format!("{rest}/aggTrades")));
+        let (clock, pace) = (Arc::new(Clock::real()), Arc::new(Mutex::new(0.0)));
+        let ban = PathBuf::from(env_s("RTCOLLECT_BAN_FILE", "data/live/binance_ban_until"));
+        for s in &syms {
+            let r = Rest::new(&db, s, &ku, &au, clock.clone(), pace.clone(), ban.clone(), TIMEOUT).expect("REST 용 DB 연결");
+            std::thread::spawn(move || r.run());
+        }
+        println!("REST 검증·복구 켬 ({ku} · {au})");
+    }
+    wait_term(&mut tasks, || {
+        let st: Vec<String> = cs.iter().map(|c| { let c = c.borrow(); format!("{} 보류 {} 늦은버림 {}", c.store.symbol, c.store.pending.len(), c.buffer.dropped_late) }).collect();
+        println!("rtcollect 60s · 재연결 {} (누적) · {}", net::RECONNECTS.load(Relaxed), st.join(" · "));
+    })
+    .await;
+    // 닫힌 초만 쓰고 끝낸다(진행 중인 초는 버린다 = 다음 판 gaps 가 덮는다). 값은 원본이 그 순간 연결이 끊겼을 때 쓰는 것과 같다.
+    let n: usize = cs.iter().map(|c| c.borrow_mut().on_disconnect()).sum();
+    println!("종료 신호 -- 닫힌 초 {n}행 쓰고 끝낸다");
+}
+
+/// OKX 체결 테이프(live_okx_trade_tape_collector_20260923.py `main()` -- `_bn.run_all` 이라 정지 감시도 바이낸스와 같다).
+async fn run_okx() {
+    let insts = list("OKX_TAPE_INST", "ETH-USDT-SWAP", true);
+    let url = env_s("RTCOLLECT_WS_URL", "wss://ws.okx.com:8443/ws/v5/public");
+    let db = db_path("OKX_TAPE_DB_PATH", "okx_tape.sqlite");
+    net::start_watchdog(env_f("RTCOLLECT_WD_LOOP_S", net::WD_LOOP_STALL_S), env_f("RTCOLLECT_WD_WRITE_S", net::WD_WRITE_STALL_S));
+    let con = open_db(&db).expect("DB 열기");
+    let mut cs = vec![];
+    let mut tasks = JoinSet::new();
+    for i in &insts {
+        let Some(c) = okx::Collector::new(con.clone(), i, net::mono_s()).expect("TapeStore") else {
+            die(1, &format!("🔴{i} 의 ctVal 을 모른다 -- CT_VALS 에 실측값을 적고 다시 돌릴 것")) // 원본 SystemExit
+        };
+        println!("{i} 수집 시작 (빈 {}, db {})", okx::bucket(i), db.display());
+        let c = Rc::new(RefCell::new(c));
+        tasks.spawn_local(net::run_okx(c.clone(), url.clone()));
+        cs.push(c);
+    }
+    tasks.spawn_local(net::beat());
+    wait_term(&mut tasks, || println!("rtcollect okx 60s · 재연결 {} (누적)", net::RECONNECTS.load(Relaxed))).await;
+    let n: usize = cs.iter().map(|c| c.borrow_mut().on_disconnect()).sum();
+    println!("종료 신호 -- 닫힌 초 {n}행 쓰고 끝낸다");
+}
+
+/// Bybit 청산(live_bybit_liquidation_collector_20261003.py `run()`). 정지 감시 없음(원본 그대로).
+async fn run_bybit_liq() {
+    let syms = list("BYBIT_LIQ_SYMBOLS", bybit_liq::SYMBOLS, true);
+    let db = db_path("BYBIT_LIQ_DB", "bybit_liq.sqlite");
+    let url = env_s("RTCOLLECT_WS_URL", "wss://stream.bybit.com/v5/public/linear");
+    let c = Rc::new(RefCell::new(bybit_liq::LiqCollector::new(bybit_liq::open_db(&db).expect("DB 열기"))));
+    let sub = rtcollect::py_subscribe(&syms.iter().map(|s| serde_json::Value::from(format!("allLiquidation.{s}")).to_string()).collect::<Vec<_>>());
+    println!("구독 {} → {}", syms.join(","), db.display());
+    let mut tasks = JoinSet::new();
+    tasks.spawn_local(net::run_bybit(c.clone(), url, sub));
+    wait_term(&mut tasks, || println!("rtcollect bybit_liq 60s · 재연결 {} (누적)", net::RECONNECTS.load(Relaxed))).await;
+    // 원본이 연결이 끊길 때 하는 쓰기(남은 행) -- 끊긴 시각은 프로세스와 함께 사라진다(다음 판은 공백을 모른다 -- 원본도 같다).
+    c.borrow_mut().on_error(wall_s(), "SIGTERM");
+    println!("종료 신호 -- 남은 행 쓰고 끝낸다");
+}
+
+/// Bybit 체결 테이프 + 맥락(live_bybit_trade_tape_collector_20261006.py `run()`). 체결이 600초 없으면 종료코드 3.
+async fn run_bybit_tape() {
+    let syms = list("BYBIT_TAPE_SYMBOLS", bybit_tape::SYMBOLS, true);
+    let (tape, ctx) = (db_path("BYBIT_TAPE_DB", "bybit_tape.sqlite"), db_path("BYBIT_CTX_DB", "bybit_ctx.sqlite"));
+    let url = env_s("RTCOLLECT_WS_URL", "wss://stream.bybit.com/v5/public/linear");
+    net::start_trade_guard(env_f("RTCOLLECT_WD_TRADE_S", bybit_tape::STALL_S));
+    let c = bybit_tape::BybitCollector::new(&tape, &ctx, &syms, net::mono_s()).expect("DB 열기");
+    let sub = c.subscribe();
+    println!("구독 {} → {} · {}", syms.join(","), tape.display(), ctx.display());
+    let c = Rc::new(RefCell::new(c));
+    let mut tasks = JoinSet::new();
+    tasks.spawn_local(net::run_bybit(c.clone(), url, sub));
+    wait_term(&mut tasks, || println!("rtcollect bybit_tape 60s · 재연결 {} (누적)", net::RECONNECTS.load(Relaxed))).await;
+    // 원본이 연결이 끊길 때 하는 쓰기(flush(True): 열린 묶음·진행 중인 초까지) -- 다음 판은 last_ts_ms 부터 공백을 적는다.
+    c.borrow_mut().on_error(net::mono_s(), wall_s(), "SIGTERM");
+    println!("종료 신호 -- 남은 행 쓰고 끝낸다");
 }
