@@ -110,7 +110,7 @@ def main(out: Path) -> None:
     for m in a["models"]:
         assert list(m.feature_names_in_) == list(a["cols"])
     (out / "sr_lean.json").write_text(json.dumps({**meta, "source": p.name, "sha256": sha(p), "cols": list(a["cols"]), "thr": bits(a["thr"]),
-                                                  "models": [model(m) for m in a["models"]]}))
+                                                  "rate": a["rate"], "models": [model(m) for m in a["models"]]}))
     p = DASH / ISO
     d = json.loads(p.read_text())
     (out / "qx4i_iso.json").write_text(json.dumps({"source": p.name, "sha256": sha(p), "x": bits(d["x"]), "y": bits(d["y"]),

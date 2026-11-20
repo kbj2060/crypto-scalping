@@ -12,6 +12,7 @@
 use serde::{Deserialize, Deserializer};
 
 pub mod box_hold;
+pub mod sr_lean;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -237,6 +238,14 @@ pub struct SrLean {
     #[serde(deserialize_with = "bits")]
     pub thr: Vec<f64>,
     pub models: Vec<Model>,
+    /// 2023 확인 검정의 «사건 쪽 먼저» 건수(화면 확률의 출처) -- 워커가 생존 표시 파일에 그대로 쓴다.
+    pub rate: SrRate,
+}
+
+#[derive(Deserialize)]
+pub struct SrRate {
+    pub top: [i64; 2],
+    pub bot: [i64; 2],
 }
 
 impl SrLean {

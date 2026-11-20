@@ -57,4 +57,33 @@ fn main() {
         }
         stats(&format!("박스 {asset} 봉 열 → payload"), ns);
     }
+
+    // 레벨 5분: 정답지 한 벌(normal0)의 연산을 Live 로 다시 흘려 second() 한 번 시간(사건 채점이 든 초 · 안 든 초 따로) -- tools/bench_py.py sr 와 같은 벌
+    let sx: serde_json::Value = read_json(&d.join("sr_fixture.json")).unwrap();
+    let set = sx["sets"].as_array().unwrap().iter().find(|s| s["name"] == "normal0").unwrap();
+    let kl = |v: &serde_json::Value| -> Vec<sr_lean::Kline> { v.as_array().unwrap().iter().map(|r| sr_lean::Kline::from_rest(r.as_array().unwrap()).unwrap()).collect() };
+    let mut lv = sr_lean::Live::new(&sr);
+    let (mut plain, mut scored) = (vec![], vec![]);
+    for op in set["ops"].as_array().unwrap() {
+        let o = op.as_array().unwrap();
+        let i = |k: usize| o[k].as_i64().unwrap();
+        match o[0].as_str().unwrap() {
+            "trade" => lv.trade(i(1), o[2].as_f64().unwrap(), o[3].as_f64().unwrap(), i(4), i(5), o[6].as_bool().unwrap()),
+            "init" => (lv.t0, lv.done) = (Some(i(1)), Some(i(1))),
+            "klines" => lv.klines(&kl(&o[1]), i(2)),
+            "recheck" => lv.recheck(&kl(&o[1])),
+            "hole" => lv.hole(i(1)),
+            _ => {
+                for s in lv.done.unwrap() + 1..=i(1) {
+                    let k0 = lv.feat.len();
+                    let t = Instant::now();
+                    lv.second(s);
+                    let dt = t.elapsed().as_nanos();
+                    if lv.feat.len() > k0 { scored.push(dt) } else { plain.push(dt) }
+                }
+            }
+        }
+    }
+    stats("레벨 5분 second() 채점 없는 초", plain);
+    stats("레벨 5분 second() 채점이 든 초", scored);
 }

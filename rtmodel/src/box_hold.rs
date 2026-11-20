@@ -34,7 +34,7 @@ pub const PLATT90_ASSETS: [&str; 3] = ["eth", "xrp", "btc"];
 const VOL_STALE_MS: f64 = 15.0 * 60_000.0;
 
 // ── numpy·pandas 와 같은 순서의 기본 연산
-fn npsum(a: &[f64]) -> f64 {
+pub(crate) fn npsum(a: &[f64]) -> f64 {
     let n = a.len();
     if n < 8 {
         let mut s = 0.0;
@@ -69,7 +69,7 @@ fn tail(a: &[f64], w: usize) -> &[f64] {
     &a[a.len() - w..]
 }
 /// np.max / np.min: NaN 이 있으면 NaN.
-fn npext(a: &[f64], max: bool) -> f64 {
+pub(crate) fn npext(a: &[f64], max: bool) -> f64 {
     let mut m = a[0];
     for &v in a {
         if v.is_nan() {
