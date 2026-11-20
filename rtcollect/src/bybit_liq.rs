@@ -1,5 +1,7 @@
 //! Bybit 청산 수집기(`scripts/live_bybit_liquidation_collector_20261003.py`, 줄 번호는 그 파일)에서 소켓을 뺀 것.
-//! REST 없음. 시계는 원본처럼 **벽시계**(time.time() 초) 하나 -- `recv_ms` 칸과 공백의 끝이 이 시계다.
+//! REST 없음. 시계 둘: `now` = 단조 초(ping·플러시·침묵 간격) · `wall` = 벽시계 초(`recv_ms` 칸과 공백의 시각).
+//! 🔧의도한 차이(SHADOW.md §11): 원본은 간격도 벽시계로 잰다(시계가 뒤로 뛰면 ping·플러시가 멎는다 -- 개발기 WSL 실측 32초마다 2.4초) ·
+//!   원본은 바인딩 못 하는 값(목록·사전 종목)이 든 행 하나가 버퍼에 남아 **재시작까지 모든 쓰기가 실패**한다 -- 여기는 그 행만 버리고 계속 쓴다.
 //! 🔴`side` 는 Bybit 규약 그대로 = **청산된 포지션의 방향**(Buy = 롱 청산). 바이낸스 S(강제 주문, 롱 청산 = SELL)와 반대.
 use crate::{ms, need, py_float, py_int, py_sql, py_truthy, Reconnect};
 use rusqlite::types::Value as Sql;
@@ -41,11 +43,19 @@ pub fn parse(msg: &Value, recv_ms: i64) -> Result<Vec<Row>, Reconnect> {
             let Value::Object(d) = d else { return Err(Reconnect("TypeError: 원소가 사전이 아님".into())) };
             // 평가 순서 = 튜플 순서(T, s, S, v, p)
             let ts = py_int(need(d, "T")?)?;
-            let s = py_sql(need(d, "s")?)?;
-            let side = py_sql(need(d, "S")?)?;
-            Ok((ts, s, side, py_float(need(d, "v")?)?, py_float(need(d, "p")?)?, recv_ms))
+            let (s, side) = (need(d, "s")?, need(d, "S")?);
+            let (v, p) = (py_float(need(d, "v")?)?, py_float(need(d, "p")?)?);
+            // 🔧원본: 여기서 안 죽고 쓰기 때 바인딩 오류 → 그 행이 버퍼에 남아 매 플러시가 실패(기록 멈춤). 여기: 그 행만 버린다.
+            match (py_sql(s), py_sql(side)) {
+                (Ok(s), Ok(side)) => Ok(Some((ts, s, side, v, p, recv_ms))),
+                _ => {
+                    eprintln!("⚠️바인딩 못 하는 청산 행 버림: {}", serde_json::Value::Object(d.clone()));
+                    Ok(None)
+                }
+            }
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()
+        .map(|v| v.into_iter().flatten().collect())
 }
 
 pub fn open_db(path: &Path) -> rusqlite::Result<Connection> {
@@ -101,28 +111,28 @@ impl LiqCollector {
     }
 
     /// 구독을 보낸 직후(:72-75). 끊겼던 구간을 gaps 에 쓴다(못 쓰면 예외 = 재연결, 공백은 들고 간다).
-    pub fn on_open(&mut self, t: f64) -> Result<(), Reconnect> {
+    pub fn on_open(&mut self, now: f64, wall: f64) -> Result<(), Reconnect> {
         if let Some((from, why)) = &self.down {
-            write(&self.con, &[], &[(*from, ms(t), why.clone())]).map_err(|e| Reconnect(format!("OperationalError: {e}")))?;
+            write(&self.con, &[], &[(*from, ms(wall), why.clone())]).map_err(|e| Reconnect(format!("OperationalError: {e}")))?;
             self.down = None;
         }
-        (self.backoff, self.last_ping, self.last_flush, self.last_msg) = (1.0, t, t, t);
+        (self.backoff, self.last_ping, self.last_flush, self.last_msg) = (1.0, now, now, now);
         Ok(())
     }
 
-    pub fn on_text(&mut self, t: f64, text: &str) -> Result<bool, Reconnect> {
-        self.last_msg = t;
+    pub fn on_text(&mut self, now: f64, wall: f64, text: &str) -> Result<bool, Reconnect> {
+        self.last_msg = now;
         let v: Value = serde_json::from_str(text).map_err(|e| Reconnect(format!("JSONDecodeError: {e}")))?;
-        let rows = parse(&v, ms(t))?;
+        let rows = parse(&v, ms(wall))?;
         self.buf.extend(rows);
-        self.after(t)
+        self.after(now)
     }
 
-    pub fn on_timeout(&mut self, t: f64) -> Result<bool, Reconnect> {
-        if t - self.last_msg > IDLE_S {
+    pub fn on_timeout(&mut self, now: f64) -> Result<bool, Reconnect> {
+        if now - self.last_msg > IDLE_S {
             return Err(Reconnect("ConnectionError: 응답 없음 60초".into()));
         }
-        self.after(t)
+        self.after(now)
     }
 
     fn after(&mut self, now: f64) -> Result<bool, Reconnect> {
@@ -163,8 +173,8 @@ pub fn replay(events: &[Value], path: &Path) -> rusqlite::Result<()> {
     for e in events {
         let (t, kind, body) = (e[0].as_f64().unwrap(), e[1].as_str().unwrap(), e[2].as_str().unwrap_or(""));
         let r = match kind {
-            "o" => c.on_open(t).map(|_| false),
-            "t" => c.on_text(t, body),
+            "o" => c.on_open(t, t).map(|_| false),
+            "t" => c.on_text(t, t, body),
             "w" => c.on_timeout(t),
             _ => Err(Reconnect(body.to_string())), // 'c' · 'f'
         };

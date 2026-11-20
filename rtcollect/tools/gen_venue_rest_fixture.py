@@ -215,6 +215,30 @@ def ctval(rng) -> dict:
             "responses": {f"{IU}?{urlencode(p)}": rs}}
 
 
+def okx_edges(rng) -> list:
+    """양성 대조 보강: 한 주기 15분(공백 분 16개 → 최근 15개만) · 창 7일(3일 전 공백도 후보) · 대조 구간 경계(앵커 - 100분 = 둘째 구간)."""
+    out = []
+    g = Gen(rng)
+    ms = [NOW - 300 - 60 * k for k in range(16)]
+    for m in ms[:15]:
+        g.put(CU, {"instId": INST, "bar": "1m", "after": (m + 60) * 1000, "limit": 1}, ok([]))
+    out.append({"name": "OKX 한 주기 15분", "venue": "okx", "symbol": INST, "mono0": M0, "wall0": W0,
+                "setup": [["gap", m * 1000, m * 1000 + 9_000, "ws_reconnect"] for m in ms], "steps": ["cycle"], "responses": g.resp})
+    g = Gen(rng)
+    old = NOW - 3 * 86400
+    g.put(CU, {"instId": INST, "bar": "1m", "after": (old + 60) * 1000, "limit": 1}, ok([]))
+    out.append({"name": "OKX 창 7일", "venue": "okx", "symbol": INST, "mono0": M0, "wall0": W0,
+                "setup": [["gap", old * 1000, old * 1000 + 9_000, "ws_reconnect"]], "steps": ["cycle"], "responses": g.resp})
+    g = Gen(rng)
+    a = NOW - 600
+    setup = [["write", live_rows(g.trades(m, 4))] for m in (a, a - 100 * 60)]
+    q = lambda x: {"instId": INST, "bar": "1m", "limit": "100", "after": str((x + 60) * 1000)}  # noqa: E731
+    g.put(CU, q(a), ok([]))
+    g.put(CU, q(a - 100 * 60), ok([]))
+    out.append({"name": "OKX 대조 구간 경계", "venue": "okx", "symbol": INST, "mono0": M0, "wall0": W0, "setup": setup, "steps": ["verify"], "responses": g.resp})
+    return out
+
+
 # ── 원본 돌리기 ──────────────────────────────────────────────────────────────
 class _Stop(BaseException):
     pass
@@ -342,6 +366,7 @@ def python_reference(sc, d: Path) -> dict:
 def main() -> None:
     rng = random.Random(SEED)
     scs = [okx_backfill(rng), okx_codes(rng), okx_verify(rng), bybit_verify(rng), ctval(rng)]
+    scs += okx_edges(rng)
     out = []
     for sc in scs:
         with tempfile.TemporaryDirectory() as td:

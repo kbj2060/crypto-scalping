@@ -280,14 +280,14 @@ pub trait Bybit {
 impl Bybit for LiqCollector {
     const AIOHTTP: bool = false;
     const CONNECT: Duration = Duration::from_secs(10);
-    fn open(&mut self, _now: f64, wall: f64) -> Result<(), Reconnect> {
-        self.on_open(wall)
+    fn open(&mut self, now: f64, wall: f64) -> Result<(), Reconnect> {
+        self.on_open(now, wall)
     }
-    fn text(&mut self, _now: f64, wall: f64, t: &str) -> Result<bool, Reconnect> {
-        self.on_text(wall, t)
+    fn text(&mut self, now: f64, wall: f64, t: &str) -> Result<bool, Reconnect> {
+        self.on_text(now, wall, t)
     }
-    fn idle(&mut self, _now: f64, wall: f64) -> Result<bool, Reconnect> {
-        self.on_timeout(wall)
+    fn idle(&mut self, now: f64, _wall: f64) -> Result<bool, Reconnect> {
+        self.on_timeout(now)
     }
     fn fail(&mut self, _now: f64, wall: f64, why: &str) -> f64 {
         self.on_error(wall, why) // 1 → 2 → 4 … 60초
@@ -410,13 +410,14 @@ pub fn start_trade_guard(stall_s: f64) {
 /// `ws_connect(url, heartbeat=30)`: 마지막 수신 뒤 30초면 PING, 그 뒤 15초 안에 아무 프레임도 없으면 aiohttp 가 닫는다(수신 시한은 없다).
 pub const AIO_HEARTBEAT: Duration = Duration::from_secs(30);
 
-/// 한 URL 영원히(live_binance_ctx_collector_20261001.py `ws_loop` :152-168): 접속(15초 시한) → 글자마다 `on_text`(Err = 연결을 접는다) →
-/// 글자 아닌 메시지·끊김·예외 → 3초 → 다시. 끊긴 구간 기록은 원본에 없다.
-pub async fn run_aio(url: String, name: String, mut on_text: impl FnMut(&str) -> Result<(), Reconnect>) {
+/// 한 URL 영원히(live_binance_ctx_collector_20261001.py `ws_loop` :152-168): 접속(15초 시한) → 글자마다 `Stream::text`(Err = 연결을 접는다) →
+/// 글자 아닌 메시지·끊김·예외 → 3초 → 다시. 🔧끊긴 구간은 gaps 에(원본에 없다).
+pub async fn run_aio(url: String, name: String, mut s: crate::binance_ctx::Stream) {
     loop {
         match timeout(CONNECT_TIMEOUT, connect_async(url.as_str())).await {
             Ok(Ok((ws, _))) => {
                 eprintln!("{name} ws connected");
+                s.connected(crate::rest::wall_s());
                 let (mut tx, mut rx) = ws.split();
                 let mut last = tokio::time::Instant::now();
                 let mut pinged: Option<tokio::time::Instant> = None;
@@ -439,7 +440,7 @@ pub async fn run_aio(url: String, name: String, mut on_text: impl FnMut(&str) ->
                     match r {
                         Some(Ok(Message::Text(t))) => {
                             (last, pinged) = (tokio::time::Instant::now(), None);
-                            if let Err(e) = on_text(t.as_str()) {
+                            if let Err(e) = s.text(crate::rest::wall_s(), t.as_str()) {
                                 eprintln!("{name} ws: {}", e.0);
                                 break;
                             }
@@ -457,6 +458,7 @@ pub async fn run_aio(url: String, name: String, mut on_text: impl FnMut(&str) ->
             Err(_) => eprintln!("{name} ws: 접속 {}초 초과", CONNECT_TIMEOUT.as_secs()),
         }
         RECONNECTS.fetch_add(1, Relaxed);
+        s.ended(crate::rest::wall_s());
         sleep(RECONNECT_WAIT).await;
     }
 }
@@ -465,31 +467,74 @@ pub async fn run_aio(url: String, name: String, mut on_text: impl FnMut(&str) ->
 /// aiohttp heartbeat=25(:118): 마지막 수신(제어 프레임 포함) 뒤 25초면 PING, 12.5초 안에 아무 프레임도 없으면 aiohttp 가 닫는다.
 /// 🔴그래서 원본의 «30초 조용하면 {"method":"ping"}, 세 번이면 끊김»은 pong 이 오는 한 시한(30초)이 25초 PING·pong 으로 늘 다시 재져 거의 안 탄다.
 pub const XYZ_HEARTBEAT: Duration = Duration::from_secs(25);
-const XYZ_CONNECT: Duration = Duration::from_secs(30); // wait_for(ws_connect(...), 30) -- 핸드셰이크가 멈추면 30초에 끊는다
+/// 하이퍼리퀴드 공개 WS 수집기 둘(xyz100 · 자산 맥락)의 같은 뼈대: 접속 → 구독 글자들 → 수신(30초 시한이면 {"method": "ping"}) → 끊김이면 쉬고 다시.
+pub trait Hl {
+    /// 접속 시한: xyz `wait_for(…, 30)` · 자산 맥락 `wait_for(…, 15)`.
+    const CONNECT: Duration;
+    fn open(&mut self, now: f64) -> Vec<String>;
+    fn text(&mut self, now: f64, wall: f64, t: &str) -> Result<(), Reconnect>;
+    /// 30초 시한. Ok = ping 을 보낸다.
+    fn idle(&mut self) -> Result<(), Reconnect>;
+    /// 연결 끝. 반환 = 쉴 초.
+    fn fail(&mut self) -> f64;
+}
 
-/// 영원히(live_xyz100_collector_20261014.py `run()` :107-152): [REST 메움(켰을 때)] → 접속 → 구독 → 수신(30초 시한) → 끊김이면 1·2·4…60초 쉬고 다시.
-pub async fn run_xyz(c: Rc<RefCell<crate::xyz::XyzCollector>>, url: String, mut before: impl FnMut()) {
-    let silence = Duration::from_secs_f64(crate::xyz::RECV_TIMEOUT_S);
+impl Hl for crate::xyz::XyzCollector {
+    const CONNECT: Duration = Duration::from_secs(30); // 핸드셰이크가 멈추면 30초에 끊는다
+    fn open(&mut self, now: f64) -> Vec<String> {
+        self.on_open(now)
+    }
+    fn text(&mut self, now: f64, wall: f64, t: &str) -> Result<(), Reconnect> {
+        self.on_text(now, wall, t)
+    }
+    fn idle(&mut self) -> Result<(), Reconnect> {
+        self.on_timeout()
+    }
+    fn fail(&mut self) -> f64 {
+        self.on_error()
+    }
+}
+
+impl Hl for crate::hl_ctx::HlCtx {
+    const CONNECT: Duration = Duration::from_secs(15);
+    fn open(&mut self, _now: f64) -> Vec<String> {
+        self.subscribe()
+    }
+    fn text(&mut self, now: f64, wall: f64, t: &str) -> Result<(), Reconnect> {
+        self.on_text(now, wall, t)
+    }
+    fn idle(&mut self) -> Result<(), Reconnect> {
+        Ok(()) // 끊지 않는다(재연결이 더 비싸다)
+    }
+    fn fail(&mut self) -> f64 {
+        self.on_disconnect();
+        3.0
+    }
+}
+
+/// 영원히(xyz `run()` :107-152 · 자산 맥락 `run()` :120-168): [before = REST 메움(켰을 때)] → 접속 → 구독 → 수신 → 끊김이면 쉬고 다시.
+pub async fn run_hl<C: Hl>(c: Rc<RefCell<C>>, url: String, mut before: impl FnMut()) {
+    let silence = Duration::from_secs_f64(crate::xyz::RECV_TIMEOUT_S); // 둘 다 receive(timeout=30)
     loop {
         before();
-        let why = match timeout(XYZ_CONNECT, connect_async(url.as_str())).await {
+        let why = match timeout(C::CONNECT, connect_async(url.as_str())).await {
             Ok(Ok((ws, _))) => xyz_session(&c, ws, silence).await,
             Ok(Err(e)) => format!("ClientConnectorError: {e}"),
             Err(_) => "TimeoutError: ".into(),
         };
         RECONNECTS.fetch_add(1, Relaxed);
-        let wait = c.borrow_mut().on_error();
-        eprintln!("[xyz100] 끊김 {why} -- {wait:.0}초 뒤 재접속");
+        let wait = c.borrow_mut().fail();
+        eprintln!("[hl] 끊김 {why} -- {wait:.0}초 뒤 재접속");
         sleep(Duration::from_secs_f64(wait)).await;
     }
 }
 
-async fn xyz_session<S>(c: &Rc<RefCell<crate::xyz::XyzCollector>>, ws: tokio_tungstenite::WebSocketStream<S>, silence: Duration) -> String
+async fn xyz_session<C: Hl, S>(c: &Rc<RefCell<C>>, ws: tokio_tungstenite::WebSocketStream<S>, silence: Duration) -> String
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
     let (mut tx, mut rx) = ws.split();
-    let subs = c.borrow_mut().on_open(mono_s());
+    let subs = c.borrow_mut().open(mono_s());
     for s in subs {
         if let Err(e) = tx.send(Message::text(s)).await {
             return format!("ClientConnectionResetError: {e}");
@@ -512,7 +557,7 @@ where
         let step = match r {
             Err(_) => {
                 last = tokio::time::Instant::now(); // 다음 receive(timeout=30)
-                match c.borrow_mut().on_timeout() {
+                match c.borrow_mut().idle() {
                     Ok(()) => {
                         if let Err(e) = tx.send(Message::text(crate::xyz::PING)).await {
                             return format!("ClientConnectionResetError: {e}");
@@ -524,7 +569,7 @@ where
             }
             Ok(Some(Ok(Message::Text(t)))) => {
                 (last, pinged) = (tokio::time::Instant::now(), None);
-                c.borrow_mut().on_text(mono_s(), crate::rest::wall_s(), t.as_str())
+                c.borrow_mut().text(mono_s(), crate::rest::wall_s(), t.as_str())
             }
             Ok(Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)))) => {
                 (last, pinged) = (tokio::time::Instant::now(), None);
@@ -536,6 +581,79 @@ where
         };
         if let Err(e) = step {
             return e.0;
+        }
+    }
+}
+
+// ── depth_diff(websockets 라이브러리) ─────────────────────────────────────────────────────────────────
+/// websockets ping_interval=20 · ping_timeout=10(:131-132): 20초마다 PING(받는 것과 무관), 10초 안에 pong 이 없으면 끊는다 · 접속 시한 = 기본 open_timeout 10초.
+pub const DEPTH_PING: Duration = Duration::from_secs(20);
+const DEPTH_PONG: Duration = Duration::from_secs(10);
+const DEPTH_CONNECT: Duration = Duration::from_secs(10);
+
+/// 영원히(live_depth_diff_collector_20260915.py `run()` :126-160): 접속 → 프레임마다 쓰기 → 깨끗한 닫힘이면 **곧바로** 다시(파일 유지) ·
+/// 예외(끊김·접속 실패·프레임 예외)면 파일을 닫고 3초 뒤 다시.
+pub async fn run_depth(c: Rc<RefCell<crate::depth::DepthCollector>>, url: String, mut snap: impl FnMut() -> Option<serde_json::Value>) {
+    loop {
+        let clean = match timeout(DEPTH_CONNECT, connect_async(url.as_str())).await {
+            Ok(Ok((ws, _))) => {
+                c.borrow_mut().on_connect();
+                let (mut tx, mut rx) = ws.split();
+                let mut ping_at = tokio::time::Instant::now() + DEPTH_PING;
+                let mut pong_by: Option<tokio::time::Instant> = None;
+                loop {
+                    let r = tokio::select! {
+                        _ = sleep_until(ping_at) => {
+                            ping_at += DEPTH_PING;
+                            if tx.send(Message::Ping(Default::default())).await.is_err() {
+                                break false;
+                            }
+                            pong_by.get_or_insert(tokio::time::Instant::now() + DEPTH_PONG);
+                            continue;
+                        }
+                        _ = sleep_until(pong_by.unwrap_or(ping_at)), if pong_by.is_some() => {
+                            eprintln!("depth ws: pong 10초 없음 -- 끊는다");
+                            break false;
+                        }
+                        r = rx.next() => r,
+                    };
+                    match r {
+                        Some(Ok(Message::Text(t))) => {
+                            if let Err(e) = c.borrow_mut().on_text(t.as_str(), crate::rest::wall_s(), &mut snap) {
+                                eprintln!("depth ws 끊김 {}", e.0);
+                                break false;
+                            }
+                        }
+                        Some(Ok(Message::Binary(b))) => {
+                            let t = String::from_utf8_lossy(&b).to_string(); // 원본 raw.decode()
+                            if let Err(e) = c.borrow_mut().on_text(&t, crate::rest::wall_s(), &mut snap) {
+                                eprintln!("depth ws 끊김 {}", e.0);
+                                break false;
+                            }
+                        }
+                        Some(Ok(Message::Pong(_))) => pong_by = None,
+                        Some(Ok(Message::Close(_))) | None => break true, // ConnectionClosedOK = `async for` 가 그냥 끝난다
+                        Some(Ok(_)) => {}
+                        Some(Err(e)) => {
+                            eprintln!("depth ws 끊김 {e}");
+                            break false;
+                        }
+                    }
+                }
+            }
+            Ok(Err(e)) => {
+                eprintln!("depth ws 접속 실패 {e}");
+                false
+            }
+            Err(_) => {
+                eprintln!("depth ws 접속 10초 초과");
+                false
+            }
+        };
+        RECONNECTS.fetch_add(1, Relaxed);
+        if !clean {
+            c.borrow_mut().on_error();
+            sleep(RECONNECT_WAIT).await;
         }
     }
 }

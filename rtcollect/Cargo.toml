@@ -8,7 +8,8 @@ publish = false
 # bundled = 서버의 시스템 SQLite 버전과 무관하게 같은 SQLite 를 묶는다(파일·WAL 형식은 3.7.0 이래 그대로).
 rusqlite = { version = "0.37", features = ["bundled"] }
 # float_roundtrip: JSON 숫자 → f64 를 파이썬 float() 처럼 정확 반올림으로(기본 파서는 긴 가수에서 1ulp 틀릴 수 있다).
-serde_json = { version = "1", features = ["float_roundtrip"] }
+serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
+# preserve_order: 원본 json.dumps(파싱한 REST 응답) 를 글자까지 같게 -- 열쇠 순서를 받은 대로(depth 스냅숏 줄). 기본 Map 은 열쇠를 정렬한다.
 # 접속 루프(src/net.rs · main.rs)만 쓴다. rtcore 와 같은 판: 2026-11-20 실서버에서 rustls 0.23 이 암호 제공자를 못 골라 wss 접속마다 패닉
 #   -- tokio-tungstenite 가 rustls 를 default-features=false 로 받으므로 `ring` 하나만 켠다(제공자가 하나면 rustls 가 스스로 고른다).
 tokio = { version = "1", features = ["rt", "macros", "net", "time", "signal"] }
@@ -17,3 +18,5 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 # REST 검증·복구(src/rest.rs, 기본 꺼짐)만 쓴다. rtorder 와 같은 판(동기 · rustls+ring · 이미 cargo 캐시에 있다).
 ureq = { version = "3", default-features = false, features = ["rustls"] }
+# depth_diff 의 시각 파일 gzip(원본 gzip.open(compresslevel=6)) -- 순수 Rust 백엔드(miniz_oxide), C 없음.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }

@@ -46,6 +46,8 @@ class _Feed:
         if self.i >= len(self.ev):
             raise asyncio.CancelledError()
         t, k, body = self.ev[self.i]
+        if gv.LENIENT["on"] and k in "of" and "o" not in ks:
+            return "c", ""          # 고친 수집기는 원본이 끊었던 자리에서 안 끊는다 -- 그 접속은 서버가 닫은 것으로(먹지 않는다)
         gv._want(k in ks, (self.i, k, ks))
         self.i += 1
         self.clock[0] = t
@@ -529,6 +531,8 @@ def gen_xyz(rng):
     for over in ({"coin": D}, {"coin": ""}, {"ctx": {"midPx": D, "markPx": D, "oraclePx": D}}, {"ctx": {"midPx": "", "markPx": None, "oraclePx": D}},
                  {"ctx": {"midPx": "x"}}, {"ctx": {"markPx": 0}}, {"ctx": {"midPx": False, "markPx": [1]}}, {"ctx": {"oraclePx": " 1.5 "}}):
         ctx(0.1, X, **over)
+    # 양성 대조 보강: 다른 봉이 덮지 않는 분(2시간 전 · EUR)에 n 을 못 읽는 candle -- 원본은 그 봉을 버린다
+    e.msg(0.1, {"channel": "candle", "data": {"t": (int(e.t) // 60 - 120) * 60_000, "s": "xyz:EUR", "o": "1.08", "h": "1.09", "l": "1.07", "c": "1.08", "v": "5", "n": "4.0"}})
     e.msg(0.1, {"channel": "activeAssetCtx", "data": {"coin": X}})                  # ctx 없음 = 셋 다 None
     e.msg(0.1, {"channel": "activeAssetCtx", "data": {"coin": X, "ctx": {}}})
     e.msg(0.1, {"channel": "activeAssetCtx", "data": {"coin": X, "ctx": None}})
@@ -663,11 +667,130 @@ def run_xyz(inp, d: Path) -> dict:
 
 XYZ_TABLES = {"hl_xyz_1m": "rowid", "hl_xyz_ctx_1s": "rowid"}
 
+
+# ── ④ 하이퍼리퀴드 자산 맥락(HL_BT_CTX_ONLY) ─────────────────────────────────
+def gen_hl_ctx(rng):
+    D = gv._DROP
+    runs = []
+    for coin, px, n in (("ETH", 2747.4, 1), ("BTC", 90000.0, 0)):
+        e = gv.Ev(rng, W0 + (0 if coin == "ETH" else 3))
+
+        def ctx(dt, coin_=coin, **over):
+            c = {"funding": f"{rng.gauss(1.25e-5, 3e-6):.10f}", "openInterest": f"{1144067.9 + rng.gauss(0, 50):.4f}", "prevDayPx": "2758.6",
+                 "dayNtlVlm": "1344109438.2353596687", "premium": f"{rng.gauss(4e-4, 1e-4):.10f}", "oraclePx": f"{px:.1f}",
+                 "markPx": f"{px * 1.0001:.1f}", "midPx": f"{px * 1.00012:.2f}", "impactPxs": ["1", "2"], "dayBaseVlm": "487476.9786999995"}
+            c.update(over.pop("ctx", {}))
+            d = {"coin": coin_, "ctx": {k: v for k, v in c.items() if v is not D}}
+            d.update(over)
+            e.msg(dt, {"channel": "activeAssetCtx", "data": {k: v for k, v in d.items() if v is not D}})
+
+        e.add(0.2, "o")
+        e.msg(0.05, {"channel": "subscriptionResponse", "data": {"method": "subscribe", "subscription": {"type": "activeAssetCtx", "coin": coin}}})
+        for _ in range(40):
+            ctx(rng.uniform(0.8, 1.2))
+        if n:
+            # 값 모양: OI 없음/못 읽음 = 버림 · 다른 칸 없음 = NULL · coin 없음 = "" · None · 숫자
+            for over in ({"ctx": {"openInterest": D}}, {"ctx": {"openInterest": "x"}}, {"ctx": {"openInterest": None}}, {"ctx": {"funding": D, "premium": "x"}},
+                         {"ctx": {"markPx": None, "midPx": [1]}}, {"coin": D}, {"coin": None}, {"coin": 5}, {"ctx": {"openInterest": 7}}, {"ctx": {"openInterest": True}},
+                         {"ctx": {"openInterest": " 12.5 "}}):
+                ctx(0.3, **over)
+            for m in ({"channel": "activeAssetCtx", "data": {"coin": "ETH"}}, {"channel": "activeAssetCtx", "data": {"coin": "ETH", "ctx": [1]}},
+                      {"channel": "activeAssetCtx", "data": None}, {"channel": "activeAssetCtx"}, {"channel": "pong"}, {"channel": "error", "data": "x"},
+                      '{"channel":', {}, {"channel": "activeAssetCtx", "data": {}}):
+                e.msg(0.3, m)
+            # 30초 시한 = ping(끊지 않음) · 시한 뒤에는 플러시 판정 없음
+            e.add(30.0, "w")
+            e.add(30.0, "w")
+            for _ in range(5):
+                ctx(1.0)
+            # 재연결: 참인 비사전 data · 사전 아닌 JSON · 끊김 · 접속 실패 -- 남은 행은 끊길 때 쓴다
+            for bad in ({"channel": "activeAssetCtx", "data": [1]}, {"channel": "activeAssetCtx", "data": "abc"}, "[1]", "null"):
+                for _ in range(3):
+                    ctx(1.0)
+                e.msg(0.1, bad)
+                e.add(3.0, "o")
+            for _ in range(20):
+                ctx(1.0)
+            e.add(0.3, "c")
+            e.add(3.0, "f", "OSError: 가짜")
+            e.add(3.0, "o")
+            for _ in range(35):
+                ctx(1.0)
+        e.add(0.3, "c")
+        runs.append({"coin": coin, "t0": e.ev[0][0] - 0.2, "events": e.ev})
+    return runs
+
+
+def run_hl_ctx(runs, d: Path) -> list:
+    import logging
+    logging.disable(logging.CRITICAL)
+    m = _mod("live_hyperliquid_book_ticker_collector_20260923")
+    clock = [0.0]
+    m.time = gv._ns(time, time=lambda: clock[0], monotonic=lambda: clock[0])
+    m.asyncio = gv._ns(asyncio, sleep=gv._fast_sleep)
+    m.CTX_ONLY = True
+    sent, feed = [], {"f": None}
+    with gv._fake_modules(aiohttp=fake_aiohttp(lambda url: feed["f"])), gv._quiet():
+        for run in runs:
+            feed["f"] = _Feed(run["events"], clock)
+            clock[0] = run["t0"]
+            try:
+                asyncio.run(m.run(run["coin"], d / "bt", d / "hl_ctx.sqlite"))
+            except asyncio.CancelledError:
+                pass
+            assert feed["f"].i == len(run["events"]), "사건을 다 먹지 못했다"
+            sent += feed["f"].sent
+    return sent
+
+
+# ── 의도한 차이(결함은 Rust 에서만 고친다 -- gv.FixedSrc · rtcollect/SHADOW.md §11) ──────────
+def _gap_sym(url):
+    tail = url.rsplit("/", 1)[-1]
+    return None if tail.startswith("!") else tail.split("@")[0]
+
+
+def fixes(kind):
+    if kind == "okx_ctx":
+        m = _mod("live_okx_context_collector_20260923")
+        return gv.FixedSrc(m, [(m, "_ws_loop", [
+            ("    wrote = 0\n", "    wrote = 0\n    up = False\n"),
+            ('                log("스트림 연결됨")\n', '                log("스트림 연결됨")\n                up = True\n'),
+            ("        down_from = int(time.time() * 1000)\n        await store.aflush()",
+             "        if up:\n            down_from = int(time.time() * 1000)\n        up = False\n        await store.aflush()")])])
+    if kind == "binance_ctx":
+        m = _mod("live_binance_ctx_collector_20261001")
+        inserts = {**m.INSERTS, "gaps": "INSERT INTO gaps VALUES (?,?,?,?)"}
+        ddl = m.DDL + ("CREATE TABLE IF NOT EXISTS gaps(symbol TEXT, from_ms INTEGER, to_ms INTEGER, reason TEXT)",)
+        return gv.FixedSrc(m, [
+            (m, "ws_loop", [
+                ("    from aiohttp import WSMsgType\n", "    from aiohttp import WSMsgType\n    down = None\n    gsym = _rt_gap_sym(url)\n"),
+                ('                log(f"{table} ws connected")\n',
+                 '                log(f"{table} ws connected")\n                if down is not None and int(time.time() * 1000) - down >= 1500:\n'
+                 '                    pend.add("gaps", (gsym, down, int(time.time() * 1000), "reconnect"))\n                down = None\n'),
+                ("                    row = parse(json.loads(msg.data) or {})\n",
+                 "                    try:\n                        obj = json.loads(msg.data)\n                    except ValueError:\n                        continue\n"
+                 "                    row = parse(obj or {})\n"),
+                ("        await asyncio.sleep(3.0)", "        if down is None:\n            down = int(time.time() * 1000)\n        await asyncio.sleep(3.0)")]),
+            (m, "poll_oi", [
+                ("                seen.add(ts_ms)\n", '                row = (ts_ms, symbol.lower(), float(data["openInterest"]))\n                seen.add(ts_ms)\n'),
+                ('                pend.add("oi_1s", (ts_ms, symbol.lower(), float(data["openInterest"])))', '                pend.add("oi_1s", row)')])],
+            {"_rt_gap_sym": _gap_sym, "INSERTS": inserts, "DDL": ddl})
+    if kind == "xyz":
+        m = _mod("live_xyz100_collector_20261014")
+        return gv.FixedSrc(m, [(m, "run", [
+            ("            try:\n                await backfill()", "            bars, ctxs = {}, {}\n            try:\n                await backfill()"),
+            ("            except Exception as e:  # noqa: BLE001 -- 끊김·DNS·핸드셰이크 실패 모두 다시 붙는다\n",
+             "            except Exception as e:  # noqa: BLE001 -- 끊김·DNS·핸드셰이크 실패 모두 다시 붙는다\n"
+             "                if bars or ctxs:\n                    try:\n                        await asyncio.to_thread(write, list(bars.values()), list(ctxs.values()))\n"
+             "                    except Exception:  # noqa: BLE001\n                        pass\n")])])
+    return None
+
 # ── 공통 ─────────────────────────────────────────────────────────────────────
 KINDS = {
     "okx_ctx": (gen_okx_ctx, run_okx_ctx, {"okx_ctx.sqlite": OKX_CTX_TABLES}),
     "binance_ctx": (gen_binance_ctx, run_binance_ctx, {"binance_ctx.sqlite": BINANCE_CTX_TABLES}),
     "xyz": (gen_xyz, run_xyz, {"hl_xyz.sqlite": XYZ_TABLES, **{f"rest_{k}.sqlite": XYZ_TABLES for k in range(4)}}),
+    "hl_ctx": (gen_hl_ctx, run_hl_ctx, {"hl_ctx.sqlite": {"hl_asset_ctx": "rowid", "meta": "rowid"}}),
 }
 
 
@@ -679,7 +802,14 @@ def python_reference(kind, inp, d: Path):
 
 
 def dump_dir(kind, d: Path) -> dict:
-    return {name: gv.dump(d / name, t) for name, t in KINDS[kind][2].items()}
+    import sqlite3
+    out = {}
+    for name, t in KINDS[kind][2].items():
+        con = sqlite3.connect(f"file:{d / name}?mode=ro", uri=True)
+        have = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        con.close()
+        out[name] = gv.dump(d / name, {k: v for k, v in {**t, "gaps": "rowid"}.items() if k in have})   # 🔧바이낸스 맥락 gaps = 더한 표
+    return out
 
 
 def main() -> None:
@@ -692,8 +822,18 @@ def main() -> None:
     for kind in a.kinds:
         inp = KINDS[kind][0](random.Random(SEED + list(KINDS).index(kind)))
         with tempfile.TemporaryDirectory() as td:
-            extra = python_reference(kind, inp, Path(td))
-            golden = {"db": dump_dir(kind, Path(td)), "extra": extra}
+            extra = python_reference(kind, inp, Path(td) / "orig")
+            golden = {"db": dump_dir(kind, Path(td) / "orig"), "extra": extra}
+            fx = fixes(kind)
+            if fx:
+                gv.LENIENT["on"] = True
+                with fx:
+                    extra = python_reference(kind, inp, Path(td) / "fixed")
+                gv.LENIENT["on"] = False
+                fixed = {"db": dump_dir(kind, Path(td) / "fixed"), "extra": extra}
+                orig_db = golden["db"]
+                golden = fixed
+                golden["intended"] = gv.intended_diff(orig_db, fixed["db"])
         (FIX / f"{kind}_input.json").write_text(json.dumps({"seed": SEED, "input": inp}, separators=(",", ":"), ensure_ascii=False))
         (FIX / f"{kind}_golden.json").write_text(json.dumps(golden, separators=(",", ":"), ensure_ascii=False))
         sizes = [(FIX / f"{kind}_{x}.json").stat().st_size for x in ("input", "golden")]
@@ -773,6 +913,14 @@ def readers(kind, d: Path, inp) -> dict:
                           ("mark", "SELECT ts_ms, mark FROM mark_price_1s WHERE symbol='ethusdt' AND ts_ms>=? AND ts_ms<?")):
             q = lms._q("binance_ctx.sqlite", sql, (lo * 1000 - 5000, (hi + 1) * 1000))
             out[f"liqmap_scorer._q:{name}"] = [list(map(repr, r)) for r in q.itertuples(index=False)]
+    elif kind == "hl_ctx":
+        db = d / "hl_ctx.sqlite"
+        lo, hi = gv._span(db, "SELECT min(recv_ms) / 1000, max(recv_ms) / 1000 FROM hl_asset_ctx WHERE recv_ms BETWEEN ? AND ?", WIN)
+        out["read_rows"] = data_store.read_rows(db, "SELECT * FROM hl_asset_ctx ORDER BY rowid")
+        for c in ("ETH", "BTC"):
+            out[f"dqm.ctx_stats:ctx:hl:{c}"] = dqm.ctx_stats(*dqm.CTX["ctx:hl"][:4], c, lo, hi + 1)
+            # 대시보드 시장 맥락(server.py:2533)과 같은 SQL
+            out[f"server:hl_ctx:{c}"] = data_store.read_rows(db, "SELECT funding, open_interest, premium, mark_px, mid_px, recv_ms FROM hl_asset_ctx WHERE coin = ? ORDER BY recv_ms DESC LIMIT 1", [c])
     else:
         db = d / "hl_xyz.sqlite"
         lo, hi = gv._span(db, "SELECT min(ts_sec), max(ts_sec) FROM hl_xyz_1m WHERE ts_sec BETWEEN ? AND ?", [w // 1000 for w in WIN])
@@ -794,7 +942,14 @@ def check_readers(kinds) -> None:
             td = Path(td)
             ip = td / "input.json"
             ip.write_text(json.dumps({"input": inp}))
-            python_reference(kind, inp, td / "py")
+            fx = fixes(kind)                         # 🔧정답지와 같게: 결함 고친 파이썬(의도한 차이)
+            gv.LENIENT["on"] = bool(fx)
+            if fx:
+                with fx:
+                    python_reference(kind, inp, td / "py")
+            else:
+                python_reference(kind, inp, td / "py")
+            gv.LENIENT["on"] = False
             cargo_replay(kind, ip, td / "rs")
             a, b = readers(kind, td / "py", inp), readers(kind, td / "rs", inp)
             assert a.keys() == b.keys()
@@ -807,7 +962,14 @@ def check_readers(kinds) -> None:
             # 섞어 쓰기: 파이썬이 앞 판을 쓰고 Rust 가 같은 파일에 이어 쓴다(OKX 맥락 -- 종목 실행이 여럿)
             if kind == "okx_ctx":
                 k = len(inp) - 1
-                KINDS[kind][1](inp[:k], td / "mix")
+                fx = fixes(kind)
+                gv.LENIENT["on"] = bool(fx)
+                if fx:
+                    with fx:
+                        KINDS[kind][1](inp[:k], td / "mix")
+                else:
+                    KINDS[kind][1](inp[:k], td / "mix")
+                gv.LENIENT["on"] = False
                 gv.close_shared()
                 mp = td / "mix_input.json"
                 mp.write_text(json.dumps({"input": inp[k:]}))

@@ -1,4 +1,7 @@
-# rtcollect 로 아직 안 옮긴 수집기 (2026-11-21 조사 · 옮기지 않음)
+# rtcollect 로 아직 안 옮긴 수집기 (2026-11-21 조사)
+
+**옮김(다섯째 조각)**: depth_diff(`depth` -- flate2 · serde_json preserve_order 허용, 압축을 푼 내용 바이트 일치) · HL 자산 맥락 hl_ctx.sqlite(`hl_ctx`).
+아래 표의 그 두 줄은 조사 기록으로 남긴다. **안 옮김**: raster(.f32 -- 시간 부족) · HL 호가 .bt(불확실) · HL 체결·duckdb_persist_worker(duckdb 결정 전) · HL 포지션(입력이 duckdb) · 뉴스 RSS.
 
 저장 형식이 SQLite 가 아니거나(또는 입력이 SQLite 가 아니어서) 지금 크레이트(rusqlite·serde_json·tokio·tokio-tungstenite·rustls·ureq)만으로는
 «같은 파일»을 못 내는 것들. 줄 번호는 각 원본 파일. **형식을 SQLite 로 바꾸는 것은 «값이 바뀌는 변경»(읽는 쪽도 바뀐다) -- 사용자 결정.**

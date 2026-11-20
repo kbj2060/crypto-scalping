@@ -15,7 +15,9 @@ pub mod binance;
 pub mod binance_ctx;
 pub mod bybit_liq;
 pub mod bybit_tape;
+pub mod depth;
 pub mod net;
+pub mod hl_ctx;
 pub mod okx;
 pub mod okx_ctx;
 pub mod rest;
@@ -42,9 +44,9 @@ pub(crate) fn need<'a>(o: &'a Map<String, Value>, k: &str) -> Result<&'a Value, 
     o.get(k).ok_or_else(|| Reconnect(format!("KeyError: '{k}'")))
 }
 
-/// 원본 repr(float). ponytail: 1e-5 미만·1e16 이상에서 파이썬은 `1e-05` 꼴, Rust 는 `1e-5` -- 칸·경계·ctVal 엔 그런 수가 없다.
+/// 원본 repr(float) -- `py_float_repr`(지수 꼴까지 파이썬과 같다).
 pub(crate) fn py_repr(x: f64) -> String {
-    format!("{x:?}")
+    py_float_repr(x)
 }
 
 /// 파이썬 float(x). ponytail: 문자열의 밑줄(`1_0`)·JSON 의 NaN/Infinity 낱말은 파이썬만 받는다 -- 거래소는 안 보낸다.
@@ -145,5 +147,128 @@ pub(crate) fn py_iter<'a>(o: &'a Map<String, Value>, k: &str) -> Result<&'a [Val
         Some(Value::Array(a)) => Ok(a),
         Some(v @ (Value::Number(_) | Value::Bool(_))) if py_truthy(v) => Err(Reconnect("TypeError: not iterable".into())),
         _ => Ok(&[]),
+    }
+}
+
+/// 파이썬 float.__repr__(json.dumps 가 쓰는 것): 가장 짧은 왕복 숫자 · 지수가 -4 이상 16 미만이면 고정 소수(`.0` 붙음) · 아니면 `1e-05`·`1.5e+16`.
+pub(crate) fn py_float_repr(x: f64) -> String {
+    if !x.is_finite() {
+        return if x.is_nan() { "NaN".into() } else if x > 0.0 { "Infinity".into() } else { "-Infinity".into() }; // json.dumps 낱말
+    }
+    let e = format!("{x:e}"); // 예: "-1.2345e-5" -- 가장 짧은 왕복 자리
+    let (m, exp) = e.split_once('e').unwrap();
+    let exp: i32 = exp.parse().unwrap();
+    let (neg, m) = m.strip_prefix('-').map_or((false, m), |r| (true, r));
+    let digits: String = m.chars().filter(|c| *c != '.').collect();
+    let s = if (-4..16).contains(&exp) {
+        let point = exp + 1; // 소수점 앞 자리 수
+        if point <= 0 {
+            format!("0.{}{digits}", "0".repeat((-point) as usize))
+        } else if point as usize >= digits.len() {
+            format!("{digits}{}.0", "0".repeat(point as usize - digits.len()))
+        } else {
+            format!("{}.{}", &digits[..point as usize], &digits[point as usize..])
+        }
+    } else {
+        let mant = if digits.len() > 1 { format!("{}.{}", &digits[..1], &digits[1..]) } else { digits };
+        format!("{mant}e{}{:02}", if exp < 0 { '-' } else { '+' }, exp.abs())
+    };
+    if neg { format!("-{s}") } else { s }
+}
+
+/// 파이썬 `json.dumps(v, separators=(",", ":"))`(ensure_ascii=True): 열쇠 순서 그대로(serde_json preserve_order) · 비 ASCII 는 \uXXXX(대리쌍).
+pub(crate) fn py_dumps(v: &Value) -> String {
+    fn s(out: &mut String, t: &str) {
+        out.push('"');
+        for c in t.chars() {
+            match c {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                '\u{08}' => out.push_str("\\b"),
+                '\u{0c}' => out.push_str("\\f"),
+                c if (c as u32) < 0x20 || (c as u32) > 0x7e => {
+                    let mut b = [0u16; 2];
+                    for u in c.encode_utf16(&mut b) {
+                        out.push_str(&format!("\\u{u:04x}"));
+                    }
+                }
+                c => out.push(c),
+            }
+        }
+        out.push('"');
+    }
+    fn go(out: &mut String, v: &Value) {
+        match v {
+            Value::Null => out.push_str("null"),
+            Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            Value::Number(n) => match (n.as_i64(), n.as_u64()) {
+                (Some(i), _) => out.push_str(&i.to_string()),
+                (_, Some(u)) => out.push_str(&u.to_string()),
+                _ => out.push_str(&py_float_repr(n.as_f64().unwrap())),
+            },
+            Value::String(t) => s(out, t),
+            Value::Array(a) => {
+                out.push('[');
+                for (i, x) in a.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    go(out, x);
+                }
+                out.push(']');
+            }
+            Value::Object(o) => {
+                out.push('{');
+                for (i, (k, x)) in o.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    s(out, k);
+                    out.push(':');
+                    go(out, x);
+                }
+                out.push('}');
+            }
+        }
+    }
+    let mut out = String::new();
+    go(&mut out, v);
+    out
+}
+
+/// 파이썬 `a == b`(JSON 값): 숫자끼리는 값으로(1 == 1.0 · True == 1), 나머지는 모양 그대로.
+pub(crate) fn py_eq(a: &Value, b: &Value) -> bool {
+    let num = |v: &Value| match v {
+        Value::Number(n) => n.as_f64(),
+        Value::Bool(x) => Some(*x as i64 as f64),
+        _ => None,
+    };
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) if x.as_i64().is_some() && y.as_i64().is_some() => x.as_i64() == y.as_i64(),
+        _ => match (num(a), num(b)) {
+            (Some(x), Some(y)) => x == y,
+            (None, None) => a == b,
+            _ => false,
+        },
+    }
+}
+
+#[cfg(test)]
+mod py_tests {
+    use super::*;
+    #[test]
+    fn repr_and_dumps_match_python() {
+        // 파이썬 3.11 repr 로 확인한 값
+        for (x, want) in [(1e16, "1e+16"), (1e15, "1000000000000000.0"), (0.0001, "0.0001"), (0.00001, "1e-05"), (2500.1, "2500.1"),
+                          (-1.5e-7, "-1.5e-07"), (123456789012345680.0, "1.2345678901234568e+17"), (0.0, "0.0"), (5.0, "5.0"), (1.25e-4, "0.000125")] {
+            assert_eq!(py_float_repr(x), want, "{x}");
+        }
+        let v: Value = serde_json::from_str(r#"{"b":[["1.0","2"]],"a":1,"é":"가\n","f":1.0e16,"n":null,"t":true}"#).unwrap();
+        let want = concat!(r#"{"b":[["1.0","2"]],"a":1,""#, "\\u00e9", r#"":""#, "\\uac00", r#"\n","f":1e+16,"n":null,"t":true}"#);
+        assert_eq!(py_dumps(&v), want);
+        assert!(py_eq(&Value::from(1), &serde_json::from_str("1.0").unwrap()) && py_eq(&Value::from(true), &Value::from(1)));
     }
 }

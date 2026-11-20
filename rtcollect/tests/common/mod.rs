@@ -46,7 +46,7 @@ pub type Norm = fn(&str, &str, usize, &str) -> Option<String>;
 /// 반환 = (표 수, 행 수, 칸 수). `tables` = (표, 정렬) -- 정답지의 "order" 가 있으면 그것.
 pub fn compare(dir: &Path, golden: &Value, tables: &[(&str, &str)], norm: Option<Norm>) -> (usize, usize, usize) {
     let (mut n_tables, mut n_rows, mut n_cells) = (0, 0, 0);
-    for (db, want) in golden.as_object().unwrap() {
+    for (db, want) in golden.as_object().unwrap().iter().filter(|(k, _)| k.as_str() != "intended") {
         let con = Connection::open_with_flags(dir.join(db), OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         for (p, w) in want["pragma"].as_object().unwrap() {
             let g: Value = con

@@ -40,7 +40,7 @@ M = [
     ("뷰 DDL 공백 하나", "src/store.rs", "GROUP BY 1, 2, 3, 4\";", "GROUP BY 1,2, 3, 4\";"),
     ("테이프 auto_vacuum 빼기", "src/store.rs", "        con.execute_batch(\"PRAGMA auto_vacuum = INCREMENTAL\")?;", ""),
     ("건수 칸을 REAL 로 묶기", "src/store.rs", "let n = |j: usize| c[j] as i64;", "let n = |j: usize| c[j];"),
-    ("meta repr 형식(Display)", "src/lib.rs", "format!(\"{x:?}\")", "format!(\"{x}\")"),
+    ("meta repr 형식(Display)", "src/lib.rs", "pub(crate) fn py_repr(x: f64) -> String {\n    py_float_repr(x)", "pub(crate) fn py_repr(x: f64) -> String {\n    format!(\"{x}\")"),
     ("문자열 진릿값 = 항상 참", "src/lib.rs", "Value::String(s) => !s.is_empty(),", "Value::String(_) => true,"),
     ("가격 문자열 공백 안 벗김", "src/lib.rs", "Value::String(s) => s.trim().parse::<f64>()", "Value::String(s) => s.parse::<f64>()"),
     # ── 바이낸스 ──
@@ -53,14 +53,13 @@ M = [
     ("바이낸스 현물 체결 수 하한 1 빼기", "src/binance.rs", "+ 1).max(1);", "+ 1);"),
     # ── Bybit 청산 ──
     ("청산 플러시 2→3초", "src/bybit_liq.rs", "FLUSH_S: f64 = 2.0", "FLUSH_S: f64 = 3.0"),
-    ("청산 침묵 60→55초", "src/bybit_liq.rs", "if t - self.last_msg > IDLE_S {", "if t - self.last_msg > 55.0 {"),
+    ("청산 침묵 60→55초", "src/bybit_liq.rs", "if now - self.last_msg > IDLE_S {", "if now - self.last_msg > 55.0 {"),
     ("청산 이유 160→150 글자", "src/bybit_liq.rs", "take(160)", "take(150)"),
-    ("청산 공백 끝 = 끊긴 시각(접속 시각 아님)", "src/bybit_liq.rs", "&[(*from, ms(t), why.clone())]", "&[(*from, *from + 1, why.clone())]"),
+    ("청산 공백 끝 = 끊긴 시각(접속 시각 아님)", "src/bybit_liq.rs", "&[(*from, ms(wall), why.clone())]", "&[(*from, *from + 1, why.clone())]"),
     ("청산 끊길 때 남은 행 안 씀", "src/bybit_liq.rs", "        if !self.buf.is_empty() {\n            match write", "        if false {\n            match write"),
     ("청산 data 사전을 빈 것으로", "src/bybit_liq.rs", "Some(v) if py_truthy(v) => return Err", "Some(v) if py_truthy(v) && false => return Err"),
     ("청산 주제 접두 점 빼기", "src/bybit_liq.rs", "starts_with(\"allLiquidation.\")", "starts_with(\"allLiquidation\")"),
-    ("청산 recv_ms = 거래소 시각", "src/bybit_liq.rs", "Ok((ts, s, side, py_float(need(d, \"v\")?)?, py_float(need(d, \"p\")?)?, recv_ms))",
-     "Ok((ts, s, side, py_float(need(d, \"v\")?)?, py_float(need(d, \"p\")?)?, ts))"),
+    ("청산 recv_ms = 거래소 시각", "src/bybit_liq.rs", "(Ok(s), Ok(side)) => Ok(Some((ts, s, side, v, p, recv_ms))),", "(Ok(s), Ok(side)) => Ok(Some((ts, s, side, v, p, ts))),"),
     # ── Bybit 체결 테이프 ──
     ("Bybit 플러시 5→4초", "src/bybit_tape.rs", "FLUSH_S: f64 = 5.0", "FLUSH_S: f64 = 4.0"),
     ("Bybit 묶음 닫기 1초→2초", "src/bybit_tape.rs", "ORDER_IDLE_S: f64 = 1.0", "ORDER_IDLE_S: f64 = 2.0"),
@@ -124,7 +123,6 @@ M = [
     # ── OKX 맥락 ──
     ("OKX맥락 플러시 10→9초(디스크엔 안 보임 -- 끊길 때 다 쓴다)", "src/okx_ctx.rs", "FLUSH_SECONDS: f64 = 10.0", "FLUSH_SECONDS: f64 = 9.0", ["ctx_parity"]),
     ("OKX맥락 공백 문턱 1500→1000ms", "src/okx_ctx.rs", "if to - self.down_from < 1500 {", "if to - self.down_from < 1000 {", ["ctx_parity"]),
-    ("OKX맥락 접속 실패 때 공백 시작 안 옮김", "src/okx_ctx.rs", "        self.down_from = ms(wall);\n        self.flush();", "        self.flush();", ["ctx_parity"]),
     ("OKX맥락 ctVal 모름 → 0(NULL 아님)", "src/okx_ctx.rs", "ct.map(|c| sz * c)", "Some(ct.map_or(0.0, |c| sz * c))", ["ctx_parity"]),
     ("OKX맥락 마크 0·음수 가격 허용", "src/okx_ctx.rs", "px.filter(|x| *x > 0.0)", "px", ["ctx_parity"]),
     ("OKX맥락 펀딩 ts 없음 → 벽시계 대체 빼기", "src/okx_ctx.rs", "let ts = if ts != 0 { ts } else { ms(wall) };", "let ts = if ts != 0 { ts } else { 0 };", ["ctx_parity"]),
@@ -139,14 +137,12 @@ M = [
     ("바맥 청산 수량 z 보다 q 먼저", "src/binance_ctx.rs", "first(\"z\", \"q\")?", "first(\"q\", \"z\")?", ["ctx_parity"]),
     ("바맥 롱·숏 뒤집기", "src/binance_ctx.rs", "== Some(\"SELL\") { \"long\" } else { \"short\" }", "== Some(\"SELL\") { \"short\" } else { \"long\" }", ["ctx_parity"]),
     ("바맥 느린 OI 종목을 청산 종목에서 빼기", "src/binance_ctx.rs", ".chain(slow.iter().cloned())", "", ["ctx_parity"]),
-    ("바맥 OI seen 을 성공 뒤에만", "src/binance_ctx.rs", "if self.seen.insert(ts) {", "if !self.seen.contains(&ts) {", ["ctx_parity"]),
     ("바맥 거절 대기 30→20초", "src/binance_ctx.rs", "                _ => 30.0,", "                _ => 20.0,", ["ctx_parity"]),
     ("바맥 오류 뒤 1초 잠 빼기", "src/binance_ctx.rs", "                self.clock.sleep(1.0);\n", "", ["ctx_parity"]),
     ("바맥 밴 중에도 보냄", "src/binance_ctx.rs", "        if left > 0.0 {\n            // 다른", "        if false {\n            // 다른", ["ctx_parity"]),
     ("aiohttp 본문 형식 검사 빼기", "src/rest.rs", "    if !json {\n        return Err(Fail::Other(format!(\"ContentTypeError", "    if false {\n        return Err(Fail::Other(format!(\"ContentTypeError", ["ctx_parity"]),
     # ── xyz100 ──
     ("xyz 플러시 2→3초", "src/xyz.rs", "FLUSH_S: f64 = 2.0", "FLUSH_S: f64 = 3.0", ["ctx_parity"]),
-    ("xyz 끊길 때 버퍼 유지", "src/xyz.rs", "        (self.bars, self.ctxs) = (Ordered::default(), Ordered::default());\n        let b", "        let b", ["ctx_parity"]),
     ("xyz 시한 셋→넷", "src/xyz.rs", "if self.quiet >= 3 {", "if self.quiet >= 4 {", ["ctx_parity"]),
     ("xyz 같은 열쇠 = 새 자리", "src/xyz.rs", "            Some(&i) => self.rows[i] = r,", "            Some(_) => self.rows.push(r),", ["ctx_parity"]),
     ("xyz 참거짓 ≠ 숫자 열쇠", "src/xyz.rs", "Value::Bool(b) => format!(\"n{}\", *b as i64 as f64),", "Value::Bool(b) => format!(\"b{b}\"),", ["ctx_parity"]),
@@ -171,8 +167,30 @@ M = [
     ("OKX대조 물량 volCcy→vol(계약)", "src/rest_venue.rs", "float(at(row, 6)?)?);", "float(at(row, 5)?)?);", ["venue_rest_parity"]),
     ("Bybit대조 end 끝 분 +1분", "src/rest_venue.rs", "lo * 1000, hi * 1000))?;", "lo * 1000, (hi + 60) * 1000))?;", ["venue_rest_parity"]),
     ("ctVal 상태 코드를 본다(원본은 안 본다)", "src/rest_venue.rs", "    let (_, body) = get_json(agent, url)?;", "    let (st, body) = get_json(agent, url)?;\n    if st >= 400 {\n        return Err(Fail::Other(\"상태\".into()));\n    }", ["venue_rest_parity"]),
+    # ── 다섯째 조각: 의도한 차이(결함은 Rust 에서만 고침) -- 옛 동작으로 되돌리면 시험이 잡아야 한다 ──
+    ("원본으로: Bybit청산 바인딩 못 하는 행 = 재연결", "src/bybit_liq.rs", "serde_json::Value::Object(d.clone()));\n                    Ok(None)", "serde_json::Value::Object(d.clone()));\n                    Err(Reconnect(\"InterfaceError\".into()))", ["venue_parity"]),
+    ("원본으로: Bybit테이프 못 읽는 칸도 합침", "src/bybit_tape.rs", "if NUM_KEYS.contains(&k.as_str()) && !num_ok(k, v) {", "if false {", ["venue_parity"]),
+    ("원본으로: OKX맥락 공백 시작 = 마지막 실패", "src/okx_ctx.rs", "        if self.up {\n            self.down_from = ms(wall);\n        }", "        self.down_from = ms(wall);", ["ctx_parity"]),
+    ("원본으로: 바맥 깨진 JSON = 재연결", "src/binance_ctx.rs", "        if serde_json::from_str::<Value>(text).is_err() {", "        if false {", ["ctx_parity"]),
+    ("원본으로: 바맥 OI seen 먼저", "src/binance_ctx.rs", "if !self.seen.contains(&ts) {", "if self.seen.insert(ts) {", ["ctx_parity"]),
+    ("원본으로: 바맥 gaps 안 적음", "src/binance_ctx.rs", "            if now - d >= 1500 {", "            if false {", ["ctx_parity"]),
+    ("원본으로: xyz 끊길 때 남은 행 버림", "src/xyz.rs", "        self.write_rest();\n        let b", "        (self.bars, self.ctxs) = (Ordered::default(), Ordered::default());\n        let b", ["ctx_parity"]),
+    # ── HL 자산 맥락 ──
+    ("HL맥락 OI 없음도 적음", "src/hl_ctx.rs", "let oi = g(\"openInterest\")?;", "let oi = g(\"openInterest\").unwrap_or(0.0);", ["ctx_parity"]),
+    ("HL맥락 끊길 때 안 씀", "src/hl_ctx.rs", "    pub fn on_disconnect(&mut self) {\n        self.write();", "    pub fn on_disconnect(&mut self) {\n        self.buf.clear();", ["ctx_parity"]),
+    ("HL맥락 칸 NULL → 0", "src/hl_ctx.rs", "let g = |k: &str| ctx.get(k).and_then(|v| py_float(v).ok());", "let g = |k: &str| Some(ctx.get(k).and_then(|v| py_float(v).ok()).unwrap_or(0.0));", ["ctx_parity"]),
+    ("루프 HL맥락 재접속 3→1초", "src/net.rs", "        self.on_disconnect();\n        3.0", "        self.on_disconnect();\n        1.0", ["venue_loop"]),
+    # ── depth_diff ──
+    ("depth 스냅숏 열쇠 정렬(preserve_order 무시)", "src/lib.rs", "                for (i, (k, x)) in o.iter().enumerate() {", "                for (i, (k, x)) in { let mut v: Vec<_> = o.iter().collect(); v.sort_by(|a, b| a.0.cmp(b.0)); v }.into_iter().enumerate() {", ["depth_parity"]),
+    ("depth 시 열쇠 +1시간", "src/depth.rs", "    let secs = ts_ms.div_euclid(1000);", "    let secs = ts_ms.div_euclid(1000) + 3600;", ["depth_parity"]),
+    ("depth 압축 안 함", "src/depth.rs", "self.zips.push(std::thread::spawn(move || gzip_done(&p)));", "drop(p);", ["depth_parity"]),
+    ("depth 구멍 판정 값 비교 → 모양 비교", "src/depth.rs", "if !py_eq(&pu, prev) {", "if pu != *prev {", ["depth_parity"]),
+    ("depth 구멍 줄 got_pu 빼기", "src/depth.rs", 'json!({"_gap": true, "expected_pu": prev, "got_pu": pu})', 'json!({"_gap": true, "expected_pu": prev})', ["depth_parity"]),
+    ("depth 새 파일 스냅숏 안 씀", "src/depth.rs", "            if new {\n                let s = snap();", "            if false {\n                let s = snap();", ["depth_parity"]),
+    ("루프 depth 재접속 때 prev_u 유지", "src/depth.rs", "    pub fn on_connect(&mut self) {\n        self.prev_u = None;", "    pub fn on_connect(&mut self) {", ["venue_loop"]),
+    ("루프 depth 깨끗한 닫힘도 3초", "src/net.rs", "        if !clean {", "        if true {", ["venue_loop"]),
 ]
-PARITY = ["tape_parity", "venue_parity", "rest_parity", "ctx_parity", "venue_rest_parity"]
+PARITY = ["tape_parity", "venue_parity", "rest_parity", "ctx_parity", "venue_rest_parity", "depth_parity"]
 
 
 def digest() -> str:

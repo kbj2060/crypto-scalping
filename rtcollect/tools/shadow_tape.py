@@ -8,6 +8,7 @@
   bybit_oi · bybit_mark · bybit_funding   행 묶음
   okx_oi · okx_mark · okx_funding · okx_liquidations(OKX 맥락)   행 묶음
   mark_price_1s · oi_1s(바이낸스 맥락)   열쇠 (ts_ms, symbol) · liquidations   행 묶음
+  hl_asset_ctx(HL 자산 맥락)   행 묶음 -- recv_ms 는 뺀다(받은 시각)
   hl_xyz_1m(xyz100)   열쇠 (coin, ts_sec) · hl_xyz_ctx_1s   행 묶음 -- recv_sec 는 뺀다(받은 초 = 벽시계, 두 프로세스가 원래 다르다)
   🔴바이낸스 맥락에는 gaps 표가 없다(원본에 없다) -- 재연결 언저리의 «한쪽에만»은 로그(`ws:`)의 끊긴 시각과 맞춰 본다.
      xyz100 의 ctx 는 받은 초가 1칸 밀리면 같은 초로 합쳐지는 행 수가 갈린다 -- 불일치 0 이 아니라 «비율»로 본다(SHADOW.md §5).
@@ -46,10 +47,24 @@ TABLES = {  # 표 → (시각 열, 시각 단위 ms 인가, 열쇠 열 또는 No
     "liquidations": ("ts_ms", True, None, ()),
     "hl_xyz_1m": ("ts_sec", False, ("coin", "ts_sec"), ()),
     "hl_xyz_ctx_1s": ("recv_sec", False, None, ("recv_sec",)),
+    "hl_asset_ctx": ("recv_ms", True, None, ("recv_ms",)),
+}
+# 🔧의도한 차이(rtcollect/SHADOW.md §11 -- 결함은 Rust 에서만 고쳤다): 이 표들의 «Rust에만» 행은 원본이 잃는 행일 수 있다 -- 불일치로 세지 않고 따로 적는다.
+#   «파이썬에만»·값 불일치는 그대로 실패다(고친 Rust 가 원본보다 적게 쓸 까닭은 없다).
+INTENDED_EXTRA = {
+    "bybit_liquidations": "원본은 바인딩 못 하는 행 하나로 재시작까지 쓰기가 멈춘다",
+    "bybit_oi": "원본은 못 읽는 tickers 칸 뒤 OI 행을 잃는다",
+    "bybit_mark": "원본은 못 읽는 tickers 칸이 그 종목 맥락을 재연결 반복으로 막는다",
+    "bybit_funding": "같은 이유",
+    "oi_1s": "원본은 OI 를 못 읽은 시각을 영구히 버린다",
+    "mark_price_1s": "원본은 깨진 JSON 한 프레임에 그 연결을 끊는다",
+    "liquidations": "같은 이유",
+    "hl_xyz_1m": "원본은 끊길 때 마지막 플러시 뒤 행을 버린다",
+    "hl_xyz_ctx_1s": "같은 이유",
 }
 SYM_COL = {"trade_tape_1s": "symbol", "bybit_liquidations": "symbol", "bybit_oi": "inst", "bybit_mark": "inst", "bybit_funding": "inst",
            "okx_oi": "inst", "okx_mark": "inst", "okx_funding": "inst", "okx_liquidations": "inst_id",
-           "mark_price_1s": "symbol", "oi_1s": "symbol", "liquidations": "symbol", "hl_xyz_1m": "coin", "hl_xyz_ctx_1s": "coin"}
+           "mark_price_1s": "symbol", "oi_1s": "symbol", "liquidations": "symbol", "hl_xyz_1m": "coin", "hl_xyz_ctx_1s": "coin", "hl_asset_ctx": "coin"}
 
 
 def ro(p: Path) -> sqlite3.Connection:
@@ -155,7 +170,8 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
         for tag, extra in (("파이썬에만", carry[0]), ("Rust에만", carry[1])):
             for k in sorted(extra, key=repr)[: max(0, show - len(first))]:
                 first.append(f"{tag} {k}")
-    line = (f"{t}: 비교 {n_cmp:,}행 · 불일치 {n_bad:,} · 파이썬에만 {only_py:,} · Rust에만 {only_rs:,} · 범위 [{s0}, {s1}) 초 · "
+    rs_note = f"(의도한 차이 후보 -- {INTENDED_EXTRA[t]})" if t in INTENDED_EXTRA and only_rs else ""
+    line = (f"{t}: 비교 {n_cmp:,}행 · 불일치 {n_bad:,} · 파이썬에만 {only_py:,} · Rust에만 {only_rs:,}{rs_note} · 범위 [{s0}, {s1}) 초 · "
             f"뺀 (종목,분) {len(skipped):,}")
     return line + "".join(f"\n    {x}" for x in first)
 
@@ -169,6 +185,32 @@ def run(py_path: Path, rs_path: Path, lo=None, hi=None, margin=5, window=3600, s
     finally:
         py.close()
         rs.close()
+
+
+def compare_depth(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~") -> list[str]:
+    """depth_diff 시 파일(<폴더>/<SYM>/<UTC 시>.jsonl[.gz]) 대조: 시마다 거래소 프레임 줄(첫 줄 스냅숏·_gap 줄 빼고)을 글자 그대로 집합 비교.
+    스냅숏은 두 쪽이 다른 순간에 REST 를 불러 원래 다르다(Rust 는 기본 꺼짐 = null) · _gap 은 각자 연결 시각에 달렸다 -- 둘 다 센 수만 적는다."""
+    import gzip
+
+    def read(d: Path) -> dict:
+        out: dict = {}
+        for p in sorted(d.glob("*.jsonl*")):
+            h = p.name.split(".")[0]
+            if not (lo <= h <= hi):
+                continue
+            raw = gzip.decompress(p.read_bytes()) if p.suffix == ".gz" else p.read_bytes()
+            lines = [ln for ln in raw.decode("utf-8", "replace").split("\n") if ln]
+            out.setdefault(h, []).extend(lines)
+        return out
+    a, b = read(py_dir), read(rs_dir)
+    res = []
+    for h in sorted(a.keys() & b.keys()):
+        fa, fb = Counter(x for x in a[h] if not x.startswith('{"_')), Counter(x for x in b[h] if not x.startswith('{"_'))
+        ga, gb = sum(x.startswith('{"_gap"') for x in a[h]), sum(x.startswith('{"_gap"') for x in b[h])
+        sa, sb = sum(x.startswith('{"_snapshot":{') for x in a[h]), sum(x.startswith('{"_snapshot":{') for x in b[h])
+        res.append(f"depth {h}: 같은 프레임 {sum((fa & fb).values()):,} · 파이썬에만 {sum((fa - fb).values()):,} · Rust에만 {sum((fb - fa).values()):,} · "
+                   f"_gap 파이썬 {ga}·Rust {gb} · 스냅숏 있음 파이썬 {sa}·Rust {sb}")
+    return res or ["depth: 두 쪽에 같은 시 파일이 없다"]
 
 
 def selftest() -> None:
@@ -224,10 +266,10 @@ def selftest() -> None:
         assert f"비교 {(1189 - 180) * 2 - 1:,}행" in tape_line, tape_line
         assert "다름 ('ethusdt', 1763683300, 25000)" in tape_line, tape_line
         liq_line = next(x for x in out if x.startswith("bybit_liquidations"))
-        assert "불일치 0 · 파이썬에만 0 · Rust에만 1" in liq_line and "비교 38행" in liq_line, liq_line   # recv_ms 는 달라도 같다
+        assert "불일치 0 · 파이썬에만 0 · Rust에만 1(의도한 차이 후보" in liq_line and "비교 38행" in liq_line, liq_line   # recv_ms 는 달라도 같다
         xyz_line = next(x for x in out if x.startswith("hl_xyz_ctx_1s"))
         # recv_sec 는 빼고 비교 · 창 경계를 넘어 맞춘다. 남는 1행 = 범위 첫 초(파이썬 T 는 범위 밖, Rust 의 같은 행은 T+1 이라 안) -- 벽시계 열의 한계
-        assert "불일치 0 · 파이썬에만 0 · Rust에만 1" in xyz_line and "비교 107행" in xyz_line, xyz_line
+        assert "불일치 0 · 파이썬에만 0 · Rust에만 1(의도한 차이 후보" in xyz_line and "비교 107행" in xyz_line, xyz_line
         # 읽기 전용: 두 파일은 그대로
         try:
             ro(p).execute("DELETE FROM gaps")
@@ -247,11 +289,16 @@ def main() -> None:
     ap.add_argument("--window", type=int, default=3600)
     ap.add_argument("--show", type=int, default=3)
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--depth", action="store_true", help="두 경로 = depth_diff 종목 폴더(<root>/<SYM>) · --from/--to 대신 --hours 시작,끝(YYYY-MM-DDTHH)")
+    ap.add_argument("--hours", default="")
     a = ap.parse_args()
     if a.selftest:
         return selftest()
     if not (a.py and a.rs):
         ap.error("파이썬 DB 와 Rust DB 경로가 필요하다")
+    if a.depth:
+        lo, _, hi = a.hours.partition(",")
+        return print("\n".join(compare_depth(a.py, a.rs, lo, hi or "~")))
     print("\n".join(run(a.py, a.rs, a.lo, a.hi, a.margin, a.window, a.show)))
 
 

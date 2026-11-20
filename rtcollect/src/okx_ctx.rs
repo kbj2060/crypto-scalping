@@ -177,6 +177,8 @@ pub struct CtxCollector {
     pub pending: Batch,
     flushed_at: f64,
     down_from: i64,
+    /// 붙어 있는가(구독을 보냈다). 🔧끊김이 «처음» 시작된 시각만 잡으려고.
+    up: bool,
 }
 
 impl CtxCollector {
@@ -198,7 +200,7 @@ impl CtxCollector {
             con.execute("INSERT INTO meta VALUES (?, ?)", params![k, v])?;
         }
         // down_from = 시작 시각(:273) · flushed_at = 수신 루프 시작(:282)
-        Ok(Some(Self { con, inst: inst.into(), pending: Batch::default(), flushed_at: now, down_from: ms(wall) }))
+        Ok(Some(Self { con, inst: inst.into(), pending: Batch::default(), flushed_at: now, down_from: ms(wall), up: false }))
     }
 
     /// 구독 글자(:268-271, json.dumps 기본 모양).
@@ -215,6 +217,7 @@ impl CtxCollector {
     /// 구독을 보낸 직후(:288): 끊긴 구간(채널 "all"). 1.5초 미만은 안 적는다 · 실패해도 수집은 계속.
     pub fn on_connect(&mut self, wall: f64) {
         let to = ms(wall);
+        self.up = true;
         if to - self.down_from < 1500 {
             return;
         }
@@ -250,10 +253,13 @@ impl CtxCollector {
         Ok(())
     }
 
-    /// 연결이 끝났다(시한·끊김·접속 실패·예외, :323-325): 공백 시작을 지금으로 · 보류분 쓰기.
-    /// 🔴원본 그대로: 접속 실패마다 down_from 을 다시 잡아 다음 공백은 «마지막 실패 ~ 붙은 시각»만 적힌다(첫 끊김부터가 아니다).
+    /// 연결이 끝났다(시한·끊김·접속 실패·예외, :323-325): 보류분 쓰기 · 공백 시작은 **처음 끊긴 시각**.
+    /// 🔧의도한 차이(SHADOW.md §11): 원본은 접속 실패마다 down_from 을 다시 잡아 공백이 «마지막 실패 ~ 붙은 시각»만 적힌다.
     pub fn on_disconnect(&mut self, wall: f64) {
-        self.down_from = ms(wall);
+        if self.up {
+            self.down_from = ms(wall);
+        }
+        self.up = false;
         self.flush();
     }
 

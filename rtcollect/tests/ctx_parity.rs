@@ -101,3 +101,16 @@ fn xyz_rows_match_python_collector() {
     eprintln!("xyz 일치: 파일 {} · 표 {t} · 행 {r} · 칸 {c} · 보낸 글자 {} · REST 요청 {n_req}", gold["db"].as_object().unwrap().len(), sent.len());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// 하이퍼리퀴드 자산 맥락(CTX_ONLY): 구독·ping 글자 + 행(recv_ms 는 정답지와 같은 가짜 시계).
+#[test]
+fn hl_ctx_rows_match_python_collector() {
+    let (inp, gold) = load(include_str!("fixtures/hl_ctx_input.json"), include_str!("fixtures/hl_ctx_golden.json"));
+    let dir = common::tmpdir("hl_ctx");
+    let sent = rtcollect::hl_ctx::replay(inp["input"].as_array().unwrap(), &dir.join("hl_ctx.sqlite")).unwrap();
+    let want: Vec<&str> = gold["extra"].as_array().unwrap().iter().map(|s| s.as_str().unwrap()).filter(|s| !s.starts_with("<connect")).collect();
+    assert_eq!(sent, want, "보낸 글자");
+    let (t, r, c) = common::compare(&dir, &gold["db"], &[], None);
+    eprintln!("hl_ctx 일치: 표 {t} · 행 {r} · 칸 {c} · 보낸 글자 {}", sent.len());
+    let _ = std::fs::remove_dir_all(&dir);
+}

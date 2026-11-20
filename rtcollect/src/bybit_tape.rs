@@ -113,6 +113,13 @@ impl Rows {
     }
 }
 
+/// 행을 만드는 숫자 칸(float 로 읽는다 · nextFundingTime 은 int 로도).
+const NUM_KEYS: [&str; 6] = ["openInterest", "openInterestValue", "fundingRate", "nextFundingTime", "markPrice", "indexPrice"];
+
+fn num_ok(k: &str, v: &Value) -> bool {
+    py_float(v).is_ok_and(|x| k != "nextFundingTime" || x.is_finite())
+}
+
 /// tickers 는 첫 메시지만 스냅샷이고 뒤는 «바뀐 칸만» 온다 -- 종목별로 합쳐 들고 있다가 행으로 낸다(:106-135).
 /// 평가 순서·중간 상태 변경까지 원본과 같다(OI 를 갱신한 뒤 펀딩에서 예외가 나면 OI 상태만 바뀐 채 행은 안 나간다).
 #[derive(Default)]
@@ -149,6 +156,12 @@ impl TickerState {
         let c = self.cur.entry(s.to_string()).or_default();
         for (k, v) in d {
             if !(v.is_null() || v.as_str() == Some("")) {
+                // 🔧의도한 차이(SHADOW.md §11): 원본은 못 읽는 숫자 칸(예: fundingRate "x")도 합쳐 두어 그 종목의 **모든 다음 tickers 가 예외**
+                //   (= 재연결 반복, 상태 오염)이고, 그 메시지에서 OI 상태만 먼저 바뀌어 **OI 행이 영영 빠진다**. 여기는 그 칸만 버린다.
+                if NUM_KEYS.contains(&k.as_str()) && !num_ok(k, v) {
+                    eprintln!("⚠️{s} tickers 칸 {k}={v} 못 읽음 -- 그 칸만 버림");
+                    continue;
+                }
                 c.insert(k.clone(), v.clone());
             }
         }
@@ -367,8 +380,15 @@ pub fn replay(runs: &[Value], dir: &Path) -> rusqlite::Result<()> {
     for run in runs {
         let syms: Vec<String> = run["symbols"].as_array().unwrap().iter().map(|s| s.as_str().unwrap().to_string()).collect();
         let mut c = BybitCollector::new(&dir.join("bybit_tape.sqlite"), &dir.join("bybit_ctx.sqlite"), &syms, run["t0"].as_f64().unwrap())?;
+        let (mut open, mut prev) = (false, run["t0"].as_f64().unwrap());
         for e in run["events"].as_array().unwrap() {
             let (t, kind, body) = (e[0].as_f64().unwrap(), e[1].as_str().unwrap(), e[2].as_str().unwrap_or(""));
+            // 🔧고친 동작은 원본이 끊었던 자리(못 읽는 tickers 칸)에서 안 끊는다 -- 그 뒤 접속 사건이 오면 서버가 닫은 것으로(정답지도 같게)
+            if kind == "o" && open {
+                c.on_error(prev, prev, "ConnectionError: ws CLOSE");
+            }
+            prev = t;
+            open = kind == "o" || (open && (kind == "t" || kind == "w"));
             let r = match kind {
                 "o" => {
                     c.on_open(t);
@@ -379,6 +399,7 @@ pub fn replay(runs: &[Value], dir: &Path) -> rusqlite::Result<()> {
                 _ => Err(Reconnect(body.to_string())),
             };
             if let Err(Reconnect(why)) = r {
+                open = false;
                 c.on_error(t, t, &why);
             }
         }

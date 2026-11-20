@@ -4,7 +4,7 @@
 //! · 접속할 때마다 REST candleSnapshot 으로 마지막 저장 봉(없으면 72시간 전)부터 메운다 -- 🔴기본 꺼짐(`backfill`, main.rs `RTCOLLECT_REST=1`).
 //!   메움이 실패해도 웹소켓은 그대로 붙는다(실시간이 REST 에 묶이지 않게, 10-14 검토).
 //! 🔴주말엔 CME 가 쉬어 XYZ100 도 거의 안 움직인다 · JPY·EUR 은 얇다(체결 없는 분은 1분봉이 빈다 -- 가격은 ctx 의 oracle 이 낫다).
-//! 보류는 연결 안에만 있다: 🔴원본 그대로 끊기면(예외·시한 셋·글자 아닌 메시지) 마지막 플러시 뒤 받은 행(최대 2초)은 버려진다.
+//! 🔧의도한 차이(SHADOW.md §11): 원본은 끊기면(예외·시한 셋·글자 아닌 메시지) 마지막 플러시 뒤 받은 행(최대 2초)을 버린다 -- 여기는 끊길 때 쓴다(종료 때도).
 use crate::store::{in_tx, open_hot};
 use crate::{py_float, py_int, py_sql, py_truthy, Reconnect};
 use rusqlite::{params, Connection};
@@ -204,12 +204,24 @@ impl XyzCollector {
         Ok(())
     }
 
-    /// 끊김·접속 실패(:149-152). 이 연결의 버퍼는 버린다(원본 그대로). 반환 = 쉴 초(1·2·4…60).
+    /// 끊김·접속 실패(:149-152). 남은 버퍼를 쓴다(못 쓰면 로그 -- 목록·사전 종목은 열쇠에서 이미 걸렀다). 반환 = 쉴 초(1·2·4…60).
     pub fn on_error(&mut self) -> f64 {
-        (self.bars, self.ctxs) = (Ordered::default(), Ordered::default());
+        self.write_rest();
         let b = self.backoff;
         self.backoff = (b * 2.0).min(60.0);
         b
+    }
+
+    /// 마지막 플러시 뒤 받은 행을 쓴다(끊길 때·종료 때).
+    pub fn write_rest(&mut self) -> usize {
+        let n = self.bars.rows.len() + self.ctxs.rows.len();
+        if n > 0 {
+            if let Err(e) = write(&self.con, &self.bars.rows, &self.ctxs.rows) {
+                eprintln!("[xyz100] 끊길 때 남은 {n}행 쓰기 실패: {e}");
+            }
+        }
+        (self.bars, self.ctxs) = (Ordered::default(), Ordered::default());
+        n
     }
 
     /// REST 메움(:71-104) -- 종목마다: 마지막 저장 봉(포함)부터 지금까지. 한 종목이 실패해도 로그만 남기고 다음 종목으로.

@@ -5,6 +5,8 @@
 //! · OI: REST `/fapi/v1/openInterest` 폴링(0.5초 · 느린 종목 5초) → oi_1s(stamp `time` 의 집합으로 중복을 거른다 -- 도착 순서가 뒤바뀐다
 //!   2026-09-19 실측 3.5%). 🔴기본 꺼짐(main.rs `RTCOLLECT_REST=1`): 그림자 동안 켜면 같은 IP 에서 OI 호출이 두 배다(분당 약 540 -- SHADOW.md).
 //! 보류 행은 표마다 하나(원본 `Pending`), 10초마다 한 트랜잭션. 못 쓰면 앞에 되돌려 붙이고 20만 행을 넘으면 말하고 버린다.
+//! 🔧의도한 차이(SHADOW.md §11): ① 깨진 JSON 한 프레임은 건너뛴다(원본은 그 연결을 끊는다) ② OI 는 값을 읽은 뒤에 seen 에 넣는다(원본은 먼저 넣어
+//!   못 읽은 시각이 영구히 버려진다) ③ 재연결 공백을 `gaps` 표에 적는다(원본에 없다 -- 표를 «더하기»만 해서 읽는 쪽은 그대로) ④ SIGTERM 때 보류분을 쓴다.
 use crate::rest::{ban_left, ban_note, Clock, Fail};
 use crate::store::{in_tx, open_hot};
 use crate::{ms, py_float, py_int, py_str, py_truthy, Reconnect};
@@ -32,10 +34,12 @@ pub const PENDING_CAP: usize = 200_000;
 /// rest ClientSession(timeout=ClientTimeout(total=10)) (:176)
 pub const REST_TIMEOUT: Duration = Duration::from_secs(10);
 
-const DDL: [&str; 6] = [
+const DDL: [&str; 7] = [
     "CREATE TABLE IF NOT EXISTS oi_1s(ts_ms INTEGER, symbol TEXT, open_interest REAL, PRIMARY KEY (ts_ms, symbol)) WITHOUT ROWID",
     "CREATE TABLE IF NOT EXISTS mark_price_1s(ts_ms INTEGER, symbol TEXT, mark REAL, index_px REAL, funding_rate REAL, next_funding_ms INTEGER, PRIMARY KEY (ts_ms, symbol)) WITHOUT ROWID",
     "CREATE TABLE IF NOT EXISTS liquidations(ts_ms INTEGER, side TEXT, qty REAL, price REAL, usd REAL, symbol TEXT)",
+    // 🔧더한 표: 스트림(마크 = 소문자 종목 · 강제청산 = NULL = 전 종목)마다 끊긴 구간. 1.5초 미만은 안 적는다(다른 수집기와 같다).
+    "CREATE TABLE IF NOT EXISTS gaps(symbol TEXT, from_ms INTEGER, to_ms INTEGER, reason TEXT)",
     "CREATE INDEX IF NOT EXISTS oi_1s_sym ON oi_1s(symbol, ts_ms)",
     "CREATE INDEX IF NOT EXISTS mark_sym ON mark_price_1s(symbol, ts_ms)",
     "CREATE INDEX IF NOT EXISTS liq_sym ON liquidations(symbol, ts_ms)",
@@ -48,17 +52,19 @@ pub fn open_db(path: &Path) -> rusqlite::Result<Connection> {
 type Oi = (i64, String, f64);
 type Mark = (i64, String, f64, f64, f64, i64);
 type Liq = (i64, &'static str, f64, f64, f64, String);
+type Gap = (Option<String>, i64, i64, &'static str);
 
 #[derive(Default)]
 pub struct Pending {
     pub oi: Vec<Oi>,
     pub mark: Vec<Mark>,
     pub liq: Vec<Liq>,
+    pub gaps: Vec<Gap>,
 }
 
 impl Pending {
     pub fn len(&self) -> usize {
-        self.oi.len() + self.mark.len() + self.liq.len()
+        self.oi.len() + self.mark.len() + self.liq.len() + self.gaps.len()
     }
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -83,6 +89,9 @@ pub fn flush(con: &Connection, p: &Shared) -> usize {
         for r in &batch.liq {
             con.prepare_cached("INSERT INTO liquidations VALUES (?,?,?,?,?,?)")?.execute(params![r.0, r.1, r.2, r.3, r.4, r.5])?;
         }
+        for r in &batch.gaps {
+            con.prepare_cached("INSERT INTO gaps VALUES (?,?,?,?)")?.execute(params![r.0, r.1, r.2, r.3])?;
+        }
         Ok(())
     });
     let n = batch.len();
@@ -90,11 +99,12 @@ pub fn flush(con: &Connection, p: &Shared) -> usize {
         Ok(()) => n,
         Err(e) => {
             let mut g = p.lock().unwrap();
-            let (mut oi, mut mark, mut liq) = (batch.oi, batch.mark, batch.liq);
+            let (mut oi, mut mark, mut liq, mut gaps) = (batch.oi, batch.mark, batch.liq, batch.gaps);
             oi.append(&mut g.oi);
             mark.append(&mut g.mark);
             liq.append(&mut g.liq);
-            *g = Pending { oi, mark, liq };
+            gaps.append(&mut g.gaps);
+            *g = Pending { oi, mark, liq, gaps };
             let n = g.len();
             if n > PENDING_CAP {
                 *g = Pending::default();
@@ -107,7 +117,7 @@ pub fn flush(con: &Connection, p: &Shared) -> usize {
     }
 }
 
-/// `json.loads(msg.data) or {}` → 사전. 거짓 값 = {} · 참인 비사전 = `.get` AttributeError(재연결) · 깨진 JSON = ValueError(재연결).
+/// `json.loads(msg.data) or {}` → 사전. 거짓 값 = {} · 참인 비사전 = `.get` AttributeError(재연결). 깨진 JSON 은 부르는 쪽이 먼저 거른다(`Feed`).
 fn obj(text: &str) -> Result<Map<String, Value>, Reconnect> {
     let v: Value = serde_json::from_str(text).map_err(|e| Reconnect(format!("JSONDecodeError: {e}")))?;
     match v {
@@ -186,6 +196,11 @@ pub enum Feed {
 
 impl Feed {
     pub fn on_text(&self, p: &Shared, wall: f64, text: &str) -> Result<(), Reconnect> {
+        // 🔧깨진 JSON 한 프레임 = 건너뜀(원본: ValueError 로 그 연결을 끊는다)
+        if serde_json::from_str::<Value>(text).is_err() {
+            eprintln!("⚠️깨진 JSON 프레임 건너뜀: {}", text.chars().take(120).collect::<String>());
+            return Ok(());
+        }
         match self {
             Feed::Mark => {
                 if let Some(r) = parse_mark(text)? {
@@ -288,32 +303,85 @@ impl OiPoll {
         }
         let obj = data.as_object().ok_or_else(|| Fail::Other("TypeError: indices".into()))?;
         let ts = py_int(&obj["time"]).map_err(|e| Fail::Other(e.0))?;
-        if self.seen.insert(ts) {
+        if !self.seen.contains(&ts) {
+            // 🔧값을 먼저 읽는다(원본은 seen 에 먼저 넣어, 이 응답의 OI 를 못 읽으면 그 시각이 영구히 버려진다)
+            let oi = py_float(obj.get("openInterest").ok_or_else(|| Fail::Other("KeyError: 'openInterest'".into()))?).map_err(|e| Fail::Other(e.0))?;
+            self.seen.insert(ts);
             if self.seen.len() > 8192 {
                 self.seen.retain(|s| *s >= ts - 600_000);
             }
-            let oi = py_float(obj.get("openInterest").ok_or_else(|| Fail::Other("KeyError: 'openInterest'".into()))?).map_err(|e| Fail::Other(e.0))?;
             self.out.lock().unwrap().oi.push((ts, self.symbol.to_lowercase(), oi));
         }
         Ok(None)
     }
 }
 
-/// 정답지 입력의 웹소켓 몫을 먹인다: [{kind: mark|force, events: [[초, 종류, 본문]…]}…] -- 사건 'o' 접속 · 't' 글자 · 'c' 끝 · 'f' 접속 실패.
-/// 원본은 연결 안 예외면 그 연결을 접고 3초 뒤 다시 붙는다(남은 상태 없음). 행은 `p` 에 쌓인다(쓰기는 부르는 쪽 `flush`).
+/// 웹소켓 하나(마크 종목 또는 강제청산)의 연결 상태 -- 🔧끊긴 구간을 gaps 에(원본에 없다).
+pub struct Stream {
+    pub feed: Feed,
+    /// gaps.symbol: 마크 = 소문자 종목 · 강제청산 = None(전 종목)
+    pub sym: Option<String>,
+    pub p: Shared,
+    down: Option<i64>,
+}
+
+impl Stream {
+    pub fn new(feed: Feed, sym: Option<String>, p: Shared) -> Self {
+        Self { feed, sym, p, down: None }
+    }
+    pub fn connected(&mut self, wall: f64) {
+        let now = ms(wall);
+        if let Some(d) = self.down.take() {
+            if now - d >= 1500 {
+                self.p.lock().unwrap().gaps.push((self.sym.clone(), d, now, "reconnect"));
+            }
+        }
+    }
+    pub fn text(&mut self, wall: f64, t: &str) -> Result<(), Reconnect> {
+        self.feed.on_text(&self.p, wall, t)
+    }
+    /// 끊김·접속 실패: 처음 끊긴 시각만 잡는다.
+    pub fn ended(&mut self, wall: f64) {
+        self.down.get_or_insert(ms(wall));
+    }
+}
+
+/// 정답지 입력의 웹소켓 몫을 먹인다: [{kind: mark|force, url, events: [[초, 종류, 본문]…]}…] -- 사건 'o' 접속 · 't' 글자 · 'c' 끝 · 'f' 접속 실패.
+/// 행은 `p` 에 쌓인다(쓰기는 부르는 쪽 `flush`).
 pub fn replay_ws(feeds: &[Value], slow: &[String], p: &Shared) {
     let liq = liq_symbols(slow);
     for f in feeds {
-        let feed = if f["kind"] == "mark" { Feed::Mark } else { Feed::Force(liq.clone()) };
-        let mut open = false;
+        let (feed, sym) = if f["kind"] == "mark" {
+            (Feed::Mark, Some(f["url"].as_str().unwrap_or("").split('@').next().unwrap().to_string()))
+        } else {
+            (Feed::Force(liq.clone()), None)
+        };
+        let mut s = Stream::new(feed, sym, p.clone());
+        let (mut open, mut prev) = (false, 0.0);
         for e in f["events"].as_array().unwrap() {
             let (t, kind, body) = (e[0].as_f64().unwrap(), e[1].as_str().unwrap(), e[2].as_str().unwrap_or(""));
             match kind {
-                "o" => open = true,
-                "t" if open => open = feed.on_text(p, t, body).is_ok(),
-                "t" => panic!("연결 밖 메시지"),
-                _ => open = false,
+                "o" => {
+                    // 🔧고친 쪽은 원본이 끊었던 자리(깨진 JSON)에서 안 끊는다 -- 접속 사건이 연결 중에 오면 서버가 닫은 것으로(정답지도 같게)
+                    if open {
+                        s.ended(prev);
+                    }
+                    open = true;
+                    s.connected(t);
+                }
+                "t" if open => {
+                    if s.text(t, body).is_err() {
+                        open = false;
+                        s.ended(t);
+                    }
+                }
+                "t" => {} // 원본이 끊은 뒤의 프레임(이 연결은 이미 접었다 -- 다음 'o' 까지 버린다)
+                _ => {
+                    open = false;
+                    s.ended(t);
+                }
             }
+            prev = t;
         }
     }
 }

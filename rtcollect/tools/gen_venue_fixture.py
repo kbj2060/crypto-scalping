@@ -143,7 +143,20 @@ def gen_liq(rng: random.Random) -> list:
     for _ in range(3):                    # 플러시(2초) 사이에 끝난다 → 남은 행은 except 의 쓰기로만 남는다
         liq(0.2, one())
     e.add(0.5, "c", "ConnectionClosedOK: received 1000 (OK)")
+    e.add(1.0, "o")
+    liq_tail(e, one)
     return e.ev
+
+
+def liq_tail(e: "Ev", one) -> None:
+    """🔧맨 끝: 바인딩 못 하는 종목(목록)이 든 메시지 → 끊김 → 다시 붙음 → 정상 셋 → 시한. 원본은 그 행이 버퍼에 남아 그 뒤 쓰기가 전부 실패
+    (정상 행까지 못 씀 = 기록 멈춤) · 고친 쪽은 그 행만 버리고 다 쓴다. 시한 뒤 입력이 끝나 두 쪽 다 같은 자리에서 멈춘다."""
+    e.msg(0.3, {"topic": "allLiquidation.ETHUSDT", "data": [one(), one(s=["ETHUSDT"]), one()]})
+    e.add(0.2, "c", "ConnectionClosedError: 가짜")
+    e.add(1.0, "o")
+    for _ in range(3):
+        e.msg(0.3, {"topic": "allLiquidation.ETHUSDT", "data": [one()]})
+    e.add(5.0, "w")
 
 
 def run_liq(events: list, db: Path) -> None:
@@ -603,6 +616,9 @@ def _exc(body: str) -> Exception:
     return type(name, (Exception,), {})(text) if text else type(name, (Exception,), {})()
 
 
+LENIENT = {"on": False}   # 고친 정답지를 만들 때만: 다음 접속 사건이 수신 중에 오면 «서버가 닫음»으로 본다(Rust replay 도 같게)
+
+
 class _MT:
     TEXT, CLOSED = "TEXT", "CLOSED"
 
@@ -614,6 +630,8 @@ def _fake_aiohttp(st: dict, clock: list, kinds: str):
         if i >= len(ev):
             raise asyncio.CancelledError()          # 입력 끝 = 수집 끝
         t, k, body = ev[i]
+        if LENIENT["on"] and k in "of" and "o" not in ks:
+            return "c", ""                          # 고친 수집기는 원본이 끊었던 자리에서 안 끊는다 -- 그 접속은 서버가 닫은 것으로(먹지 않는다)
         _want(k in ks, (i, k, ks))
         st["i"] = i + 1
         clock[0] = t
@@ -692,6 +710,96 @@ def close_shared() -> None:
             ent[1] = None
     tc._SQLITE.clear()
 
+
+
+# ── 의도한 차이(사용자 결정 2026-11-21: 결함은 Rust 에서만 고친다) ─────────────────────────────
+# 정답지는 «원본 + 결함 고침 한 곳» 파이썬으로 만든다: 원본 함수의 글자에서 정해 둔 몇 줄만 바꿔 다시 정의한다(바꾼 글자 = rtcollect/SHADOW.md §11).
+# 고치지 않은 원본으로도 한 번 더 돌려, 두 결과가 어디서 몇 행 다른지를 정답지 "intended" 에 적는다(차이가 0 이면 그 결함을 시험이 안 건드린다는 뜻).
+class FixedSrc:
+    """with FixedSrc(모듈, [(주인, 이름, [(옛 글자, 새 글자)…]), …], 더할 이름들): -- 들어갈 때 바꾸고 나올 때 되돌린다."""
+
+    def __init__(self, mod, fixes, inject=None):
+        self.mod, self.fixes, self.inject, self.old = mod, fixes, inject or {}, []
+
+    def __enter__(self):
+        import inspect
+        import textwrap
+        self.saved = {k: getattr(self.mod, k, None) for k in self.inject}
+        for k, v in self.inject.items():
+            setattr(self.mod, k, v)
+        for owner, name, reps in self.fixes:
+            f = getattr(owner, name)
+            src = textwrap.dedent(inspect.getsource(f))
+            for a, b in reps:
+                assert src.count(a) == 1, (name, a, src.count(a))
+                src = src.replace(a, b)
+            ns = self.mod.__dict__
+            keep = ns.get(name)
+            exec(compile(src, f"<고침 {name}>", "exec"), ns)
+            new = ns[name]
+            if owner is not self.mod:
+                ns[name] = keep
+                if keep is None:
+                    ns.pop(name)
+            self.old.append((owner, name, f))
+            setattr(owner, name, new)
+        return self
+
+    def __exit__(self, *a):
+        for owner, name, f in reversed(self.old):
+            setattr(owner, name, f)
+        self.old.clear()
+        for k, v in self.saved.items():
+            if v is None:
+                delattr(self.mod, k)
+            else:
+                setattr(self.mod, k, v)
+
+
+def intended_diff(orig: dict, fixed: dict) -> dict:
+    """{파일.표: [원본 행 수, 고친 행 수, 다른 행 수(앞에서부터 짝지어)]} -- 0 이 아닌 표만."""
+    out = {}
+    for db, g in fixed.items():
+        for t, rows in g["tables"].items():
+            o = orig.get(db, {}).get("tables", {}).get(t, [])
+            n = sum(a != b for a, b in zip(o, rows)) + abs(len(o) - len(rows))
+            if n:
+                out[f"{db}.{t}"] = [len(o), len(rows), n]
+    return out
+
+
+def _bindable(r) -> bool:
+    return all(isinstance(x, (str, int, float, type(None))) for x in r[1:3])
+
+
+_NUM = ("openInterest", "openInterestValue", "fundingRate", "nextFundingTime", "markPrice", "indexPrice")
+
+
+def _num_ok(k, v) -> bool:
+    import math
+    if k not in _NUM:
+        return True
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return False
+    return k != "nextFundingTime" or math.isfinite(x)
+
+
+def fixes(kind: str):
+    if kind == "bybit_liq":
+        m = __import__("scripts.live_bybit_liquidation_collector_20261003", fromlist=["x"])
+        return FixedSrc(m, [(m, "parse", [(
+            '    return [(int(d["T"]), d["s"], d["S"], float(d["v"]), float(d["p"]), recv_ms) for d in msg.get("data") or []]',
+            '    return [r for r in [(int(d["T"]), d["s"], d["S"], float(d["v"]), float(d["p"]), recv_ms) for d in msg.get("data") or []] if _rt_bindable(r)]')])],
+            {"_rt_bindable": _bindable})
+    if kind == "bybit_tape":
+        m = __import__("scripts.live_bybit_trade_tape_collector_20261006", fromlist=["x"])
+        return FixedSrc(m, [(m.TickerState, "rows", [(
+            'c.update({k: v for k, v in d.items() if v not in (None, "")})',
+            'c.update({k: v for k, v in d.items() if v not in (None, "") and _rt_num_ok(k, v)})')])],
+            {"_rt_num_ok": _num_ok})
+    return None
 
 # ── 종류 ─────────────────────────────────────────────────────────────────────
 TAPE_TABLES = {"trade_tape_1s": "symbol, ts_sec, price_bin", "gaps": "rowid", "verify_1m": "rowid",
@@ -817,7 +925,14 @@ def check_readers(kinds) -> None:
         inp = json.loads(inp_path.read_text())["input"]
         with tempfile.TemporaryDirectory() as td:
             td = Path(td)
-            python_reference(kind, inp, td / "py")
+            fx = fixes(kind)                         # 🔧정답지와 같게: 결함 고친 파이썬(의도한 차이)
+            LENIENT["on"] = bool(fx)
+            if fx:
+                with fx:
+                    python_reference(kind, inp, td / "py")
+            else:
+                python_reference(kind, inp, td / "py")
+            LENIENT["on"] = False
             cargo_replay(kind, inp_path, td / "rs")
             a, b = readers(kind, td / "py", inp), readers(kind, td / "rs", inp)
             assert a.keys() == b.keys()
@@ -830,7 +945,14 @@ def check_readers(kinds) -> None:
             # 섞어 쓰기: 파이썬이 앞 판을 쓰고 연결을 열어 둔 채(WAL 미정리) Rust 가 뒤 판을 이어 쓴다 → 전부 파이썬과 같아야 한다
             if kind != "bybit_liq":
                 k = len(inp) - 1
-                KINDS[kind][1](inp[:k], td / "mix")
+                fx = fixes(kind)
+                LENIENT["on"] = bool(fx)
+                if fx:
+                    with fx:
+                        KINDS[kind][1](inp[:k], td / "mix")
+                else:
+                    KINDS[kind][1](inp[:k], td / "mix")
+                LENIENT["on"] = False
                 assert (td / "mix" / next(iter(KINDS[kind][2]))).with_suffix(".sqlite-wal").exists(), "파이썬 연결이 열려 있어야 한다"
                 mix_inp = td / "mix_input.json"
                 mix_inp.write_text(json.dumps({"input": inp[k:]}))
@@ -853,13 +975,23 @@ def main() -> None:
         gen = KINDS[kind][0]
         inp = gen(random.Random(SEED + list(KINDS).index(kind)))
         with tempfile.TemporaryDirectory() as td:
-            python_reference(kind, inp, Path(td))
-            golden = dump_dir(kind, Path(td))
+            python_reference(kind, inp, Path(td) / "orig")
+            orig = dump_dir(kind, Path(td) / "orig")
+            fx = fixes(kind)
+            if fx:
+                LENIENT["on"] = True
+                with fx:
+                    python_reference(kind, inp, Path(td) / "fixed")
+                LENIENT["on"] = False
+            golden = dump_dir(kind, Path(td) / ("fixed" if fx else "orig"))
+            if fx:
+                golden["intended"] = intended_diff(orig, golden)
         FIX.mkdir(parents=True, exist_ok=True)
         (FIX / f"{kind}_input.json").write_text(json.dumps({"seed": SEED, "input": inp}, separators=(",", ":"), ensure_ascii=False))
         (FIX / f"{kind}_golden.json").write_text(json.dumps(golden, separators=(",", ":"), ensure_ascii=False))
         n_ev = len(inp) if kind == "bybit_liq" else sum(len(r["events"]) for r in inp)
-        print(f"{kind}: 사건 {n_ev:,} · " + " · ".join(f"{db} {t} {len(v)}행" for db, g in golden.items() for t, v in g["tables"].items() if v))
+        print(f"{kind}: 사건 {n_ev:,} · " + " · ".join(f"{db} {t} {len(v)}행" for db, g in golden.items() if db != "intended" for t, v in g["tables"].items() if v)
+              + (f" · 의도한 차이 {golden['intended']}" if "intended" in golden else ""))
 
 
 if __name__ == "__main__":

@@ -209,13 +209,14 @@ async fn bybit_liq_loop_matches_replay() {
     for k in 0..3 {
         assert_eq!(sub(&s, k), want_sub, "연결 {k} 구독 글자");
     }
-    // 원본은 ping·침묵을 벽시계(time.time)로 잰다 -- 벽시계로 본 시각으로 판정한다. 판정은 5초 수신 시한마다라 «20초 이상 · 25초 미만».
-    let p = pings(&s, 1, r#"{"op": "ping"}"#, 1);
+    // 🔧의도한 차이: 원본은 ping·침묵을 벽시계(time.time)로 잰다(개발기 WSL 벽시계는 약 32초마다 2.4초씩 뒤로 뛴다) -- Rust 는 단조 시계로 잰다.
+    //   그래서 단조 시각으로 판정한다. 판정은 5초 수신 시한마다라 «20초 이상 · 25초 미만».
+    let p = pings(&s, 1, r#"{"op": "ping"}"#, 0);
     assert_eq!(p.len(), 2, "침묵 60초 동안 ping 20초마다 둘: {:?}", s.frames);
-    within(p[0], 19.95, 25.0, "첫 ping(벽시계)");
-    within(p[1] - p[0], 19.95, 25.0, "ping 간격(벽시계)");
-    within(redial(&s, 0, 1), 0.9, 2.0, "끊김 뒤 다시 붙기(지수 대기 첫 1초)");
-    within(redial(&s, 1, 1) - 1.0, 59.95, 65.5, "침묵 60초(벽시계) + 대기 1초(붙으면 대기가 1초로 돌아간다)");
+    within(p[0], 19.95, 25.0, "첫 ping(단조)");
+    within(p[1] - p[0], 19.95, 25.0, "ping 간격(단조)");
+    within(redial(&s, 0, 0), 0.9, 2.0, "끊김 뒤 다시 붙기(지수 대기 첫 1초)");
+    within(redial(&s, 1, 0) - 1.0, 59.95, 65.5, "침묵 60초(단조) + 대기 1초(붙으면 대기가 1초로 돌아간다)");
 
     let mut ev = vec![];
     let mut t = 1.0;
@@ -235,8 +236,8 @@ async fn bybit_liq_loop_matches_replay() {
     let (a, b) = (dump(&db, &tables), dump(&rd, &tables));
     assert_eq!(a, b, "실행 파일 DB != replay DB");
     assert_eq!(a.iter().filter(|r| r.starts_with("gaps|")).count(), 2, "{a:#?}");
-    eprintln!("Bybit 청산 접속 루프 = replay: 행 {} · ping(벽시계) {:?} · 다시 붙기 {:.2}·{:.2}초(벽시계) · 단조 {:?}", a.len(), p, redial(&s, 0, 1), redial(&s, 1, 1),
-              pings(&s, 1, r#"{"op": "ping"}"#, 0));
+    eprintln!("Bybit 청산 접속 루프 = replay: 행 {} · ping(단조) {:?} · 다시 붙기 {:.2}·{:.2}초(단조) · 벽시계 {:?}", a.len(), p, redial(&s, 0, 0), redial(&s, 1, 0),
+              pings(&s, 1, r#"{"op": "ping"}"#, 1));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -635,6 +636,9 @@ async fn binance_ctx_loop_matches_replay() {
     let (a, b) = (dump(&db, &tables), dump(&rd, &tables));
     assert_eq!(a, b, "실행 파일 DB != replay DB");
     assert_eq!((a.iter().filter(|r| r.starts_with("mark_price_1s|")).count(), a.iter().filter(|r| r.starts_with("liquidations|")).count()), (20, 3));
+    // 🔧더한 gaps: 마크 연결이 세 번 끊겼다(3초·36초·48초 -- 다 1.5초 넘음) · 강제청산은 안 끊겼다
+    let g = dump(&db, &[("gaps", "rowid", &[1, 2])]);
+    assert_eq!(g, vec![r#"gaps|"ethusdt"|"reconnect""#; 3], "{g:?}");
     eprintln!("바이낸스 맥락 접속 루프 = replay: 행 {} · PING {p:?} · 다시 붙기 {:.2}·{:.2}·{:.2}초", a.len(), redial(0), redial(1), redial(2));
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -649,7 +653,7 @@ fn xyz_msgs(k: i64) -> Vec<String> {
     out.extend((0..2).map(candle));
     out.push("SLEEP:2100".into());
     out.push(ctx(3));
-    out.extend([ctx(4), candle(5)]); // 플러시 뒤 -- 연결이 끝나면 버려진다
+    out.extend([ctx(4), candle(5)]); // 플러시 뒤 -- 🔧원본은 연결이 끝나면 버린다 · Rust 는 끊길 때(종료 때도) 쓴다
     out
 }
 
@@ -700,11 +704,133 @@ async fn xyz_loop_matches_replay() {
     let tables: [(&str, &str, &[usize]); 2] = [("hl_xyz_1m", "rowid", &[]), ("hl_xyz_ctx_1s", "rowid", &[1])]; // recv_sec = 벽시계
     let (a, b) = (dump(&db, &tables), dump(&rd, &tables));
     assert_eq!(a, b, "실행 파일 DB != replay DB");
-    assert_eq!((a.iter().filter(|r| r.starts_with("hl_xyz_1m|")).count(), a.iter().filter(|r| r.starts_with("hl_xyz_ctx_1s|")).count()), (6, 12), "{a:#?}");
+    // 🔧의도한 차이: 끊길 때·종료 때 남은 행을 쓴다(원본이면 (6, 12) -- 플러시 뒤 행·플러시 없던 연결 2 의 행이 버려진다)
+    assert_eq!((a.iter().filter(|r| r.starts_with("hl_xyz_1m|")).count(), a.iter().filter(|r| r.starts_with("hl_xyz_ctx_1s|")).count()), (9, 18), "{a:#?}");
     eprintln!("xyz 접속 루프 = replay: 행 {} · PING {p:?} · 다시 붙기 {:.2}·{:.2}·{:.2}초", a.len(), redial(&s, 0, 0), redial(&s, 1, 0), redial(&s, 2, 0));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 fn xyz_ping() -> String {
     rtcollect::xyz::PING.to_string()
+}
+
+// ── 하이퍼리퀴드 자산 맥락 ─────────────────────────────────────────────────────────────────────────────
+fn hl_ctx_msgs(k: i64) -> Vec<String> {
+    (0..5i64).map(|j| json!({"channel": "activeAssetCtx", "data": {"coin": "ETH", "ctx": {"funding": "0.0000125", "openInterest": format!("{}.5", 1_144_000 + k * 10 + j),
+        "premium": "0.0004", "oraclePx": "2746.1", "markPx": "2747.4", "midPx": "2747.45", "dayNtlVlm": "1.3e9", "dayBaseVlm": "487476.9"}}}).to_string()).collect()
+}
+
+#[tokio::test]
+async fn hl_ctx_loop_matches_replay() {
+    let dir = tmpdir("hl_ctx");
+    let (port, seen) = serve(vec![
+        Conn { msgs: hl_ctx_msgs(0), end: End::Close },
+        Conn { msgs: hl_ctx_msgs(1), end: End::Read(Duration::from_secs(28)) }, // PING 프레임(25초) → pong 이 시한을 다시 잰다 = 글자 ping 없음
+        Conn { msgs: hl_ctx_msgs(2), end: End::Mute(Duration::from_secs(60)) }, // pong 없음: 25초 PING + 12.5초 = 닫힘 (그 사이 30초에 글자 ping)
+        Conn { msgs: hl_ctx_msgs(3), end: End::Read(Duration::from_secs(60)) },
+    ])
+    .await;
+    let db = dir.join("rs").join("hl_ctx.sqlite");
+    let env = [("RTCOLLECT_KIND", "hl_ctx".into()), ("HL_BT_COIN", "eth".into()), ("HL_CTX_DB_PATH", db.display().to_string()),
+               ("RTCOLLECT_WS_URL", format!("ws://127.0.0.1:{port}/ws"))];
+    run_bin(&env, &seen, 4, 120).await;
+    let s = seen.lock().unwrap();
+    for k in 0..4 {
+        assert_eq!(sub(&s, k), r#"{"method": "subscribe", "subscription": {"type": "activeAssetCtx", "coin": "ETH"}}"#, "연결 {k} 구독");
+    }
+    let p = pings(&s, 1, "PING", 0);
+    assert!(p.len() == 1 && (24.5..26.0).contains(&p[0]), "PING 하나(25초): {p:?}");
+    within(redial(&s, 0, 0), 2.9, 4.0, "끊김 뒤 3초");
+    within(redial(&s, 1, 0), 30.9, 32.0, "28초 닫힘 + 3초");
+    within(redial(&s, 2, 0), 40.3, 41.5, "PING 25초 + pong 12.5초 + 3초");
+    let mut ev = vec![];
+    let mut t = 10.0;
+    for k in 0..4 {
+        ev.push(json!([t, "o", ""]));
+        for m in hl_ctx_msgs(k) {
+            t += 0.003;
+            ev.push(json!([t, "t", m]));
+        }
+        ev.push(json!([t, "c", ""]));
+        t += 50.0;
+    }
+    let rd = dir.join("replay.sqlite");
+    rtcollect::hl_ctx::replay(&[json!({"coin": "ETH", "t0": 9.0, "events": ev})], &rd).unwrap();
+    let tables: [(&str, &str, &[usize]); 2] = [("hl_asset_ctx", "rowid", &[1]), ("meta", "rowid", &[])]; // recv_ms = 벽시계
+    let (a, b) = (dump(&db, &tables), dump(&rd, &tables));
+    assert_eq!(a, b, "실행 파일 DB != replay DB");
+    assert_eq!(a.iter().filter(|r| r.starts_with("hl_asset_ctx|")).count(), 20);
+    eprintln!("HL 맥락 접속 루프 = replay: 행 {} · PING {p:?} · 다시 붙기 {:.2}·{:.2}·{:.2}초", a.len(), redial(&s, 0, 0), redial(&s, 1, 0), redial(&s, 2, 0));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── depth_diff ─────────────────────────────────────────────────────────────────────────────────────────
+fn depth_msgs(k: i64) -> Vec<String> {
+    (0..6i64).map(|j| {
+        let u = 1_000 + k * 100 + j * 10;
+        json!({"e": "depthUpdate", "E": T0 + k * 7_000 + j * 100 + 2, "T": T0 + k * 7_000 + j * 100, "s": "ETHUSDT", "U": u - 9, "u": u, "pu": if j == 0 { u - 10 - 5 } else { u - 10 },
+               "b": [["2500.00", format!("{}.5", j)]], "a": []}).to_string()
+    }).collect()
+}
+
+/// 파일 내용(시 파일 이름 · 줄) -- 첫 줄 스냅숏의 at_ms(벽시계)는 지운다.
+fn depth_dump(root: &Path) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(root.join("ETHUSDT")).unwrap().flat_map(|e| {
+        let p = e.unwrap().path();
+        let name = p.file_name().unwrap().to_string_lossy().to_string();
+        std::fs::read_to_string(&p).unwrap().lines().map(|l| {
+            let l = if l.starts_with(r#"{"_snapshot""#) { l.split(r#","at_ms""#).next().unwrap().to_string() } else { l.to_string() };
+            format!("{name}|{l}")
+        }).collect::<Vec<_>>()
+    }).collect();
+    v.sort();
+    v
+}
+
+#[tokio::test]
+async fn depth_loop_matches_replay() {
+    let dir = tmpdir("depth");
+    let (port, conns, pings) = serve_paths(vec![("ethusdt@depth@100ms", vec![
+        Conn { msgs: depth_msgs(0), end: End::Close },                            // 깨끗한 닫힘 = 곧바로 다시(파일 유지)
+        Conn { msgs: depth_msgs(1), end: End::Mute(Duration::from_secs(60)) },    // pong 없음: 20초 PING + 10초 = 끊고 3초 뒤
+        Conn { msgs: depth_msgs(2), end: End::Read(Duration::from_secs(45)) },    // PING 20·40초 -- 서버가 pong
+    ])])
+    .await;
+    let root = dir.join("rs");
+    let env = [("RTCOLLECT_KIND", "depth".into()), ("DD_SYMBOL", "ETHUSDT".into()), ("DD_ROOT", root.display().to_string()),
+               ("RTCOLLECT_WS_URL", format!("ws://127.0.0.1:{port}/ws/{{symbol}}@depth@100ms"))];
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_rtcollect"));
+    for (k, v) in &env {
+        cmd.env(k, v);
+    }
+    let mut child = cmd.stdout(Stdio::null()).stderr(Stdio::piped()).spawn().unwrap();
+    let t0 = Instant::now();
+    while conns.lock().unwrap().len() < 3 {
+        assert!(t0.elapsed() < Duration::from_secs(90), "연결 3개가 90초 안에 안 왔다");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(Duration::from_secs(42)).await; // 셋째 연결의 PING 둘(20·40초)
+    assert!(Command::new("kill").args(["-TERM", &child.id().to_string()]).status().unwrap().success());
+    let st = tokio::task::spawn_blocking(move || child.wait().unwrap()).await.unwrap();
+    assert_eq!(st.code(), Some(0), "SIGTERM 은 0");
+    let c = conns.lock().unwrap().clone();
+    let redial = |k: usize| c[k + 1].1 - c[k].2;
+    within(redial(0), 0.0, 0.5, "깨끗한 닫힘 = 곧바로 다시");
+    within(redial(1), 32.9, 34.0, "PING 20초 + pong 10초 + 3초");
+    let p: Vec<f64> = pings.lock().unwrap().iter().map(|x| x.1).collect();
+    assert!(p.len() == 2 && (19.0..21.0).contains(&p[0]) && (39.0..41.0).contains(&p[1]), "PING 20초마다(받는 것과 무관): {p:?}");
+    let mut ev = vec![];
+    for (k, end) in [(0, "e"), (1, "c"), (2, "c")] {
+        ev.push(json!([1.0, "o", ""]));
+        ev.extend(depth_msgs(k).into_iter().map(|m| json!([1.0, "t", m])));
+        ev.push(json!([1.0, end, ""]));
+    }
+    let rd = dir.join("replay");
+    rtcollect::depth::replay(&ev, "ethusdt", &rd, &[]).unwrap();
+    let (a, b) = (depth_dump(&root), depth_dump(&rd));
+    assert_eq!(a, b, "실행 파일 파일 != replay 파일");
+    // 원본 그대로: 접속마다 prev_u 를 비워 첫 프레임은 대조하지 않는다 -- 재접속 사이 구멍은 _gap 으로 안 남는다(첫 프레임 pu 가 어긋나도)
+    assert_eq!(a.iter().filter(|l| l.contains("_gap")).count(), 0, "{a:#?}");
+    eprintln!("depth 접속 루프 = replay: 줄 {} · PING {p:?} · 다시 붙기 {:.2}·{:.2}초", a.len(), redial(0), redial(1));
+    let _ = std::fs::remove_dir_all(&dir);
 }

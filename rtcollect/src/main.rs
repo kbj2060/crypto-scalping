@@ -21,11 +21,11 @@
 //! 시험만: RTCOLLECT_SILENCE_S(바이낸스 침묵 45) · RTCOLLECT_WD_LOOP_S·RTCOLLECT_WD_WRITE_S(정지 감시 120·600) · RTCOLLECT_WD_TRADE_S(Bybit 테이프 600).
 //! 종료코드(원본 그대로): 바이낸스·OKX 정지 감시 70 · 수집 태스크가 끝나면 70 · Bybit 테이프 체결 멈춤 3 · OKX 모르는 종목(ctVal) 1 ·
 //!   설정 오류 2 · SIGTERM/SIGINT 0(원본이 연결 끝에 하던 쓰기를 하고 끝낸다 -- 원본은 안 쓰고 죽는다).
-//!   맥락: OKX 맥락은 바이낸스처럼 정지 감시 70 · 바이낸스 맥락·xyz 는 정지 감시 없음(원본 그대로) · xyz 는 종료 때 쓰지 않는다(원본이 끊길 때 버퍼를 버린다).
+//!   맥락: OKX 맥락은 바이낸스처럼 정지 감시 70 · 바이낸스 맥락·xyz·HL 맥락은 정지 감시 없음(원본 그대로) · 종료 때 남은 행을 쓴다.
 use rtcollect::net::{self, EXIT_STALL};
 use rtcollect::rest::{wall_s, Clock, Rest, TIMEOUT};
 use rtcollect::store::open_db;
-use rtcollect::{binance, binance_ctx, bybit_liq, bybit_tape, okx, okx_ctx, rest_venue, xyz};
+use rtcollect::{binance, binance_ctx, bybit_liq, bybit_tape, depth, hl_ctx, okx, okx_ctx, rest_venue, xyz};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -35,7 +35,7 @@ use std::time::Duration;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::task::JoinSet;
 
-const KINDS: &str = "binance_tape|bybit_liq|bybit_tape|okx_tape|okx_ctx|binance_ctx|xyz";
+const KINDS: &str = "binance_tape|bybit_liq|bybit_tape|okx_tape|okx_ctx|binance_ctx|xyz|hl_ctx|depth";
 
 fn env_f(k: &str, d: f64) -> f64 {
     std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
@@ -94,6 +94,8 @@ fn main() {
             "okx_ctx" => run_okx_ctx().await,
             "binance_ctx" => run_binance_ctx().await,
             "xyz" => run_xyz().await,
+            "hl_ctx" => run_hl_ctx().await,
+            "depth" => run_depth().await,
             k => die(2, &format!("RTCOLLECT_KIND={k} -- {KINDS}")),
         }
     });
@@ -217,12 +219,11 @@ async fn run_binance_ctx() {
     let p: binance_ctx::Shared = Arc::new(Mutex::new(binance_ctx::Pending::default()));
     let mut tasks = JoinSet::new();
     for s in &marks {
-        let p = p.clone();
-        tasks.spawn_local(net::run_aio(format!("{base}{s}@markPrice@1s"), "mark_price_1s".into(),
-            move |t| binance_ctx::Feed::Mark.on_text(&p, wall_s(), t)));
+        let st = binance_ctx::Stream::new(binance_ctx::Feed::Mark, Some(s.clone()), p.clone());
+        tasks.spawn_local(net::run_aio(format!("{base}{s}@markPrice@1s"), format!("mark_price_1s {s}"), st));
     }
-    let (pf, feed) = (p.clone(), binance_ctx::Feed::Force(binance_ctx::liq_symbols(&slow)));
-    tasks.spawn_local(net::run_aio(format!("{base}!forceOrder@arr"), "liquidations".into(), move |t| feed.on_text(&pf, wall_s(), t)));
+    let st = binance_ctx::Stream::new(binance_ctx::Feed::Force(binance_ctx::liq_symbols(&slow)), None, p.clone());
+    tasks.spawn_local(net::run_aio(format!("{base}!forceOrder@arr"), "liquidations".into(), st));
     if env_s("RTCOLLECT_REST", "") == "1" {
         // 꺼 두는 게 기본: 그림자 기간엔 파이썬이 같은 OI 를 이미 폴링한다(켜면 같은 IP 에서 호출 두 배 -- SHADOW.md).
         let url = env_s("RTCOLLECT_OI_URL", binance_ctx::OI_URL);
@@ -263,10 +264,71 @@ async fn run_xyz() {
     let before = move || if rest { cb.borrow().backfill(&agent, &info, wall_s()); };
     println!("xyz100 {coins:?} → {} (REST 메움 {})", db.display(), if rest { "켬" } else { "꺼짐" });
     let mut tasks = JoinSet::new();
-    tasks.spawn_local(net::run_xyz(c, url, before));
+    let cx = c.clone();
+    tasks.spawn_local(net::run_hl(c, url, before));
     wait_term(&mut tasks, || println!("rtcollect xyz 60s · 재연결 {} (누적)", net::RECONNECTS.load(Relaxed))).await;
-    // 원본은 끊길 때 마지막 플러시 뒤 행을 버린다(연결 안 버퍼) -- 종료도 같게(쓰지 않는다).
-    println!("종료 신호 -- 끝낸다");
+    // 🔧원본은 끊길 때·종료 때 마지막 플러시 뒤 행을 버린다 -- 여기는 쓴다(SHADOW.md §11).
+    let n = cx.borrow_mut().write_rest();
+    println!("종료 신호 -- 남은 {n}행 쓰고 끝낸다");
+}
+
+/// 하이퍼리퀴드 자산 맥락(live_hyperliquid_book_ticker_collector_20260923.py · HL_BT_CTX_ONLY=1). 코인마다 WS 하나(원본은 코인마다 프로세스).
+/// 정지 감시 없음(원본 그대로). 종료 때 남은 행을 쓴다(원본이 연결 끝에 하는 쓰기).
+async fn run_hl_ctx() {
+    let coins = list("HL_BT_COIN", "ETH", true);
+    let db = db_path("HL_CTX_DB_PATH", "hl_ctx.sqlite");
+    let url = env_s("RTCOLLECT_WS_URL", hl_ctx::WS_URL);
+    let con = hl_ctx::open_db(&db).expect("DB 열기");
+    let mut cs = vec![];
+    let mut tasks = JoinSet::new();
+    for c in &coins {
+        let c = Rc::new(RefCell::new(hl_ctx::HlCtx::new(con.clone(), c, net::mono_s())));
+        tasks.spawn_local(net::run_hl(c.clone(), url.clone(), || {}));
+        cs.push(c);
+    }
+    println!("hl_ctx {coins:?} → {}", db.display());
+    wait_term(&mut tasks, || println!("rtcollect hl_ctx 60s · 재연결 {} (누적)", net::RECONNECTS.load(Relaxed))).await;
+    let n: usize = cs.iter().map(|c| c.borrow_mut().write()).sum();
+    println!("종료 신호 -- 남은 {n}행 쓰고 끝낸다");
+}
+
+/// depth_diff(live_depth_diff_collector_20260915.py `run()`). 종목 하나(원본과 같다 -- DD_SYMBOL). 정지 감시 없음(원본 그대로).
+/// 🔴기본 폴더 = data/live/rtcollect/orderflow/depthdiff -- 파이썬 폴더(data/live/orderflow/depthdiff)면 켜지지 않는다(전환 때만 RTCOLLECT_TAKEOVER=1).
+async fn run_depth() {
+    let sym = env_s("DD_SYMBOL", "ethusdt").to_lowercase();
+    let root = PathBuf::from(env_s("DD_ROOT", "data/live/rtcollect/orderflow/depthdiff"));
+    if root.ends_with("data/live/orderflow/depthdiff") && env_s("RTCOLLECT_TAKEOVER", "") != "1" {
+        die(2, &format!("🔴{} 는 파이썬 수집기의 폴더다 -- 그림자는 다른 경로에. 전환이면 RTCOLLECT_TAKEOVER=1", root.display()));
+    }
+    let url = env_s("RTCOLLECT_WS_URL", depth::WS).replace("{symbol}", &sym);
+    let c = Rc::new(RefCell::new(depth::DepthCollector::new(&root, &sym).expect("폴더")));
+    let rest = env_s("RTCOLLECT_REST", "") == "1";
+    let rest_url = env_s("RTCOLLECT_DEPTH_URL", depth::REST).replace("{SYM}", &sym.to_uppercase());
+    let ban = PathBuf::from(env_s("RTCOLLECT_BAN_FILE", "data/live/binance_ban_until"));
+    let agent = rtcollect::rest::agent(Duration::from_secs(10)); // urlopen(timeout=10)
+    // 새 시 파일마다 REST 스냅숏 1회(가중치 20). 끄면 null(원본이 실패 때 쓰는 줄). 🔧밴 중이면 안 보내고 418·429 는 공용 밴 파일에(원본은 모른다).
+    let snap = move || -> Option<serde_json::Value> {
+        if !rest || rtcollect::rest::ban_left(&ban, wall_s()) > 0.0 {
+            return None;
+        }
+        let mut r = agent.get(&rest_url).call().map_err(|e| eprintln!("스냅샷 실패: {e} -- diff 만 적는다")).ok()?;
+        let st = r.status().as_u16();
+        let ra = r.headers().get("retry-after").and_then(|v| v.to_str().ok()).map(str::to_string);
+        let body = r.body_mut().read_to_string().ok()?;
+        rtcollect::rest::ban_note(&ban, st, &body, ra.as_deref(), wall_s());
+        if !(200..300).contains(&st) {
+            eprintln!("스냅샷 실패: HTTP {st} -- diff 만 적는다");
+            return None;
+        }
+        serde_json::from_str(&body).map_err(|e| eprintln!("스냅샷 실패: {e} -- diff 만 적는다")).ok()
+    };
+    println!("depth {sym} → {} (스냅숏 REST {})", root.display(), if rest { "켬" } else { "꺼짐 = 첫 줄 null" });
+    let mut tasks = JoinSet::new();
+    tasks.spawn_local(net::run_depth(c.clone(), url, snap));
+    wait_term(&mut tasks, || { let c = c.borrow(); println!("rtcollect depth 60s · 재연결 {} · 프레임 {} · 구멍 {}", net::RECONNECTS.load(Relaxed), c.frames, c.gaps) }).await;
+    c.borrow_mut().out.close(false);
+    c.borrow_mut().out.join();
+    println!("종료 신호 -- 파일 닫고 끝낸다");
 }
 
 /// Bybit 청산(live_bybit_liquidation_collector_20261003.py `run()`). 정지 감시 없음(원본 그대로).

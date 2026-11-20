@@ -23,6 +23,8 @@ Rust 수집기(`rtcollect`)를 서버에서 **파이썬 수집기 옆에 나란�
 | `okx_ctx` | `OKX_CTX_INST`(쉼표 -- 청산 전 종목 구독은 ETH 종목만) | `data/hot/rtcollect/okx_ctx.sqlite` | `data/hot/okx_ctx.sqlite` |
 | `binance_ctx` | `BN_CTX_MARK_SYMBOLS` · `BN_CTX_OI_SYMBOLS` · `BN_CTX_OI_SLOW_SYMBOLS` | `data/hot/rtcollect/binance_ctx.sqlite` | `data/hot/binance_ctx.sqlite` |
 | `xyz` | `HL_XYZ_COINS`(글자 그대로) | `data/hot/rtcollect/hl_xyz.sqlite` | `data/hot/hl_xyz.sqlite` |
+| `hl_ctx` | `HL_BT_COIN`(쉼표 -- 원본은 코인마다 프로세스·`HL_BT_CTX_ONLY=1`) | `data/hot/rtcollect/hl_ctx.sqlite` | `data/hot/hl_ctx.sqlite` |
+| `depth` | `DD_SYMBOL`(한 종목 -- 원본과 같다) | 폴더 `data/live/rtcollect/orderflow/depthdiff/<SYM>/` | `data/live/orderflow/depthdiff/<SYM>/`(폴더를 가리키면 종료코드 2) |
 
 - 심볼 목록은 **지금 도는 파이썬과 같게**: `tr '\0' '\n' < /proc/<파이썬 pid>/environ | grep -E 'TAPE_SYMBOL|TAPE_MARKET|OKX_TAPE_INST|BYBIT_'`.
 - 경로를 바꾸려면 `TAPE_DB_PATH` · `OKX_TAPE_DB_PATH` · `BYBIT_TAPE_DB` · `BYBIT_CTX_DB` · `BYBIT_LIQ_DB` · `OKX_CTX_DB_PATH` · `HL_XYZ_DB`(파이썬과 같은 이름)
@@ -67,7 +69,12 @@ python3 rtcollect/tools/shadow_tape.py data/hot/bybit_liq.sqlite         data/ho
 python3 rtcollect/tools/shadow_tape.py data/hot/okx_ctx.sqlite           data/hot/rtcollect/okx_ctx.sqlite           --from … --to …
 python3 rtcollect/tools/shadow_tape.py data/hot/binance_ctx.sqlite       data/hot/rtcollect/binance_ctx.sqlite       --from … --to …
 python3 rtcollect/tools/shadow_tape.py data/hot/hl_xyz.sqlite            data/hot/rtcollect/hl_xyz.sqlite            --from … --to …
+python3 rtcollect/tools/shadow_tape.py data/hot/hl_ctx.sqlite            data/hot/rtcollect/hl_ctx.sqlite            --from … --to …
+python3 rtcollect/tools/shadow_tape.py --depth data/live/orderflow/depthdiff/ETHUSDT data/live/rtcollect/orderflow/depthdiff/ETHUSDT --hours 2026-11-22T00,2026-11-22T23
 ```
+depth 는 시 파일을 풀어 **거래소 프레임 줄을 글자 그대로** 맞춘다(스냅숏 줄은 두 쪽이 다른 순간에 REST 를 불러 원래 다르고 Rust 는 기본 null · `_gap` 줄은
+연결 시각에 달렸다 -- 센 수만). 통과 = 날마다 «파이썬에만 0 · Rust에만 0», 단 두 쪽 로그의 끊김 시각 ±5초 안 프레임은 뺀다(제안).
+`«Rust에만 N(의도한 차이 후보 -- …)»` 는 §11 의 고친 결함으로 Rust 가 더 쓴 행이다 -- 불일치로 세지 않는다(그 수는 적는다).
 표준 라이브러리만 · 두 파일 다 읽기 전용(`mode=ro`) · 한 시간 창씩 읽는다(큰 표를 통째로 안 올린다).
 빼는 분: 두 쪽 gaps ±5초 · 두 쪽 backfill_1m ok 분 · 두 쪽 verify_1m 불일치 분 · 범위 끝 10초. 뺀 (종목, 분) 수를 같이 찍는다.
 
@@ -109,6 +116,7 @@ python3 rtcollect/tools/shadow_tape.py data/hot/hl_xyz.sqlite            data/ho
 | `okx_ctx` | 시작 때 ctVal 1회 | 종목당 시작마다 1회 |
 | `bybit_tape` | 300초마다 종목마다 v5 kline 1회(복구 없음 -- 원본에 없다) | 5종목 = 1회/분 |
 | `xyz` | 접속할 때마다 종목마다 candleSnapshot POST(마지막 저장 봉부터, 없으면 72시간) | 재접속 때만(4회/접속) |
+| `depth` | 새 시 파일마다 `/fapi/v1/depth?limit=1000`(가중치 20 · 🔧밴 파일을 지킨다) | 시간당 1회(= 분당 약 0.3 가중치). 끄면 첫 줄 `{"_snapshot":null}` -- 읽는 쪽(ob5m·bookdepth_feat)이 그 시 파일로 북을 못 세운다(«no_snapshot») → **전환 때 반드시 켠다** |
 
 - 바이낸스 OI 의 418·429 는 공용 밴 파일(`RTCOLLECT_BAN_FILE`, 기본 `data/live/binance_ban_until`)에 적고 그때까지 안 보낸다(원본 binance_ban_guard 와 같다).
 - 원본과 다른 한 곳: 원본은 1분봉 대조를 WS 수신 루프 안에서 기다려, 대조 응답이 이상하면(모양이 틀린 1분봉 행 · 바이낸스는 시간초과까지) 그 WS 연결이
@@ -149,3 +157,29 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
 - 파이썬 수집기·감독·crontab·파이썬 파일은 그대로다. 고래 맞대결(whale_duel1 · 바이낸스+OKX 테이프)·liqmap 전진(Bybit 청산)이 읽는 파일은 파이썬 것 그대로.
 - 대조 도구는 두 파일을 `mode=ro` 로만 연다.
 - 전환 때 끊기는 것은 «파이썬을 끈 순간 ~ Rust 첫 체결»(재시작 한 번과 같은 수 초)이고 gaps 에 적힌다 -- 지금 감독이 파이썬을 다시 띄울 때와 같은 모양이다.
+
+## 11. 의도한 차이 — 결함은 Rust 에서만 고쳤다 (사용자 결정 2026-11-21 질문지 7번)
+
+파이썬 수집기는 그대로다. 아래 자리에서 Rust 는 원본과 **다르게** 동작하고, 그림자 대조 때 그 차이는 불일치가 아니라 «의도한 차이»로 적는다.
+스위치는 없다(고친 동작 하나). 일치 시험의 정답지는 «원본 + 그 결함 고침» 파이썬으로 만든다(`gen_venue_fixture.FixedSrc` -- 원본 함수 글자에서 정해 둔 줄만
+바꿔 다시 정의) · 고치지 않은 원본과 어디서 몇 행 다른지를 정답지 `intended` 에 적는다(아래 «정답지에서 본 차이» = [원본 행, 고친 행, 다른 행]).
+고친 수집기가 원본이 끊던 자리에서 안 끊으면, 다음 접속 사건은 «서버가 닫음»으로 둔다(정답지·Rust replay 같게 -- `LENIENT`).
+
+| # | 수집기 | 원본(파이썬) | Rust | 디스크에 나타나는 차이 | 정답지에서 본 차이 | 시험 |
+|---|---|---|---|---|---|---|
+| 1 | Bybit 청산 | 바인딩 못 하는 값(목록·사전 종목)이 든 행 하나가 버퍼에 남아 **재시작까지 모든 쓰기가 실패**(기록 멈춤) | 그 행만 버리고(로그) 계속 쓴다 | Rust 에만 그 뒤 청산 행이 있다 | bybit_liquidations 189 → 194 (5행) | venue_parity(끝 시나리오) |
+| 2 | Bybit 청산 | ping·플러시·60초 침묵을 **벽시계**로 잰다(시계가 뒤로 뛰면 늦어진다) | 단조 시계로 잰다(recv_ms·공백 시각은 벽시계 그대로) | 시계가 뛴 날에만 ping·끊김 시각이 다르다(행 값은 같다) | — (가짜 시계 하나라 같다) | venue_loop(단조로 판정 · 개발기 실측 벽 19.28초 대 단조 20.02초) |
+| 3 | Bybit 테이프 | tickers 의 못 읽는 숫자 칸(예: fundingRate "x")을 합쳐 두어 **그 종목의 모든 다음 tickers 가 예외 = 재연결 반복**(상태 오염), 그 메시지에서 OI 상태만 먼저 바뀌어 **OI 행이 빠진다** | 그 칸만 버리고(로그) 나머지 칸으로 행을 낸다 | Rust 에만 OI·마크 행이 더 있고 재연결(gaps)이 적다 | bybit_oi 17 → 18 · bybit_mark 62 → 63 · gaps 14 → 16(«서버가 닫음» 모형 포함) | venue_parity |
+| 4 | OKX·바이낸스 테이프 | 1분봉 대조를 **WS 수신 루프 안에서** 기다려, 대조 응답이 이상하면(모양 틀린 행 · 바이낸스는 시간초과도) WS 가 끊기고 재연결 공백이 적힌다 | 대조는 따로 스레드 -- 로그만 | REST 를 켰을 때만 · 이상한 응답에서만 원본에 공백이 더 있다 | OKX 대조 «모양 틀린 행» = 원본 예외 · Rust 는 Err 로그 | venue_rest_parity(결과 "raised") |
+| 5 | 테이프 복구(공용 backfill_loop) | 영구 거부 기록(`mark_backfill_failed`)이 실패하면 **복구 태스크가 조용히 죽는다**(수집은 계속 · 복구는 재시작까지 멈춤) | 로그 남기고 다음 분 · 다음 주기에 다시 | 그 경우 원본은 그 뒤 공백이 안 메워진다 | — (쓰기 실패 주입은 정답지에 없다) | 코드(rest.rs backfill_cycle) |
+| 6 | 테이프 REST(바이낸스) | aiohttp 라 공용 밴 파일(binance_ban_guard)을 모른다 -- 차단 중에도 두드려 해제가 늦어진다(2026-09-26 사고) | 418·429 를 밴 파일에 적고 그때까지 안 보낸다(depth 스냅숏·바이낸스 맥락 OI 도) | 밴 중엔 Rust 요청 0 | rest_parity «오류»(밴 중 요청 0) | rest_parity |
+| 7 | OKX 맥락 | 접속에 실패할 때마다 공백 시작을 다시 잡아 gaps 가 **마지막 실패 ~ 붙은 시각**만 적힌다 | **처음 끊긴 시각** ~ 붙은 시각 | gaps.from_ms 가 Rust 쪽이 이르다(대조는 두 쪽 gaps 를 합쳐 빼므로 행 비교엔 영향 없음) | gaps 1행 다름 | ctx_parity |
+| 8 | 바이낸스 맥락 | 깨진 JSON 한 프레임에 **그 연결 전체를 끊는다** | 그 프레임만 건너뛴다 | 원본은 재연결 동안 마크·청산을 놓친다(Rust 에만 그 행) | (정답지에선 다음 접속이 바로 와 행 차이 0) | ctx_parity |
+| 9 | 바이낸스 맥락 | OI 응답의 `time` 을 seen 에 **먼저** 넣고 값을 읽어, 값을 못 읽은 시각은 그 뒤 정상 응답도 **영구히 버린다** | 값을 읽은 뒤에 seen 에 넣는다 | REST 를 켰을 때 Rust 에만 그 시각 OI 행 | oi_1s 18 → 19 | ctx_parity |
+| 10 | 바이낸스 맥락 | SIGTERM 이면 보류 행(최대 10초분)을 잃는다(asyncio 기본 처리 = finally 없이 끝) | 쓰고 끝낸다 | 재시작마다 원본이 최대 10초 비고 Rust 는 안 빈다 | — | 코드(main.rs) |
+| 11 | 바이낸스 맥락 | 재연결 기록이 없다(gaps 표 없음) | `gaps(symbol, from_ms, to_ms, reason)` 표를 **더했다**(마크 = 소문자 종목 · 강제청산 = NULL) -- 기존 표·열은 그대로라 대시보드·dqm·liqmap 은 안 바뀐다 | Rust 파일에만 gaps 표 | gaps 0 → 20 | ctx_parity · venue_loop(끊김 셋 = gaps 셋) |
+| 12 | xyz100 | 끊기면(예외·시한 셋·글자 아닌 메시지) 마지막 플러시 뒤 받은 행(최대 2초)을 **버린다** · 종료 때도 | 끊길 때·종료 때 쓴다 | Rust 에만 끊김 직전 행 | hl_xyz_1m 11 → 13 · hl_xyz_ctx_1s 73 → 124 | ctx_parity · venue_loop((9, 18) -- 원본이면 (6, 12)) |
+
+`shadow_tape.py` 는 1·3·8·9·12 의 표에서 «Rust에만» 을 `(의도한 차이 후보 -- 이유)` 로 따로 적는다(«파이썬에만»·값 불일치는 그대로 실패).
+원본 그대로 둔 것(고치지 않음 -- 범위 밖이거나 값이 원본 정의다): depth 의 재접속 사이 구멍이 `_gap` 으로 안 남는 것 · 재시작이 시 경계를 넘으면 지난 시
+`.jsonl` 이 압축되지 않는 것 · 압축 중인 파일을 다시 열어 이어 쓴 줄이 사라질 수 있는 경쟁(보고 «이상한 점»).

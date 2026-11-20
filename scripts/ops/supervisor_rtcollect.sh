@@ -3,10 +3,10 @@
 #
 # 실행 파일: rtcollect/target/release/rtcollect 를 개발기에서 빌드해 옮긴 것(RTCOLLECT_BIN, 기본 $ROOT/bin/rtcollect).
 # 종류·심볼은 환경변수(수집기 실행 파일과 같은 이름) 또는 인자:
-#   bash scripts/ops/supervisor_rtcollect.sh <binance_tape|bybit_liq|bybit_tape|okx_tape|okx_ctx|binance_ctx|xyz> [심볼 쉼표 목록]
+#   bash scripts/ops/supervisor_rtcollect.sh <binance_tape|bybit_liq|bybit_tape|okx_tape|okx_ctx|binance_ctx|xyz|hl_ctx|depth> [심볼 쉼표 목록]
 #   RTCOLLECT_KIND=okx_tape OKX_TAPE_INST=ETH-USDT-SWAP,BTC-USDT-SWAP bash scripts/ops/supervisor_rtcollect.sh
 #   (binance_tape: TAPE_SYMBOL·TAPE_MARKET · bybit_liq: BYBIT_LIQ_SYMBOLS · bybit_tape: BYBIT_TAPE_SYMBOLS · okx_tape: OKX_TAPE_INST ·
-#    okx_ctx: OKX_CTX_INST · binance_ctx: BN_CTX_MARK_SYMBOLS(OI·청산 목록은 BN_CTX_OI_SYMBOLS·BN_CTX_OI_SLOW_SYMBOLS) · xyz: HL_XYZ_COINS)
+#    okx_ctx: OKX_CTX_INST · hl_ctx: HL_BT_COIN(쉼표 -- 원본은 코인마다 프로세스, 여기는 한 프로세스) · depth: DD_SYMBOL(한 종목 -- 원본과 같다, 폴더 DD_ROOT 기본 data/live/rtcollect/orderflow/depthdiff) · binance_ctx: BN_CTX_MARK_SYMBOLS(OI·청산 목록은 BN_CTX_OI_SYMBOLS·BN_CTX_OI_SLOW_SYMBOLS) · xyz: HL_XYZ_COINS)
 # 쓰는 곳: 기본 data/hot/rtcollect/<파이썬과 같은 파일 이름> -- 파이썬 수집기의 data/hot/<이름> 은 실행 파일이 거부한다(전환 때만 RTCOLLECT_TAKEOVER=1).
 # 로그: logs/supervisor/rtcollect_<KEY>_YYYYMMDD.log · 락: data/live/.supervisor_rtcollect_<KEY>.lock
 # 종료코드와 무관하게 다시 띄운다(_supervise.sh: 15초 뒤 · 10분에 5번이면 300초 쉼) -- 정지 감시 70(바이낸스·OKX) · 3(Bybit 테이프) · 2(설정 오류) 모두.
@@ -36,7 +36,9 @@ case "$KIND" in
   okx_ctx)      VAR=OKX_CTX_INST;       DEF=ETH-USDT-SWAP ;;
   binance_ctx)  VAR=BN_CTX_MARK_SYMBOLS; DEF=ethusdt,btcusdt,solusdt,xrpusdt,zecusdt,sndkusdt,soxlusdt,skhynixusdt,muusdt ;;
   xyz)          VAR=HL_XYZ_COINS;       DEF=xyz:XYZ100,xyz:SP500,xyz:JPY,xyz:EUR ;;
-  *) echo "[$(date -Iseconds)] 모르는 종류 '$KIND' -- binance_tape|bybit_liq|bybit_tape|okx_tape|okx_ctx|binance_ctx|xyz" >&2; exit 2 ;;
+  hl_ctx)       VAR=HL_BT_COIN;         DEF=ETH ;;
+  depth)        VAR=DD_SYMBOL;          DEF=ethusdt ;;
+  *) echo "[$(date -Iseconds)] 모르는 종류 '$KIND' -- binance_tape|bybit_liq|bybit_tape|okx_tape|okx_ctx|binance_ctx|xyz|hl_ctx|depth" >&2; exit 2 ;;
 esac
 if [ ! -x "$BIN" ]; then
   echo "[$(date -Iseconds)] 실행 파일이 없다: $BIN (rtcollect/SHADOW.md «실행 파일 두기»)" >&2
