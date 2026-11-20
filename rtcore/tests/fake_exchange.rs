@@ -94,6 +94,10 @@ async fn core(addr: &str, silence_ms: u64) -> String {
         symbols: vec!["ethusdt".into()],
         ws_base: format!("ws://{addr}/ws/"),
         market_ws_base: format!("ws://{addr}/market/ws/"),
+        force_url: String::new(),
+        spot_ws_base: String::new(),
+        okx_url: String::new(),
+        bybit_url: String::new(),
         silence: Duration::from_millis(silence_ms),
     };
     let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -176,7 +180,7 @@ async fn t1_events_in_order_with_three_stamps() {
                 assert!(*mark == 3000.15 && *funding == 0.0001 && *next_funding_ms == 1_700_028_800_000)
             }
             Event::Snapshot { .. } => panic!("스냅숏은 한 번"),
-            Event::Supply1s(_) => unreachable!(),
+            _ => unreachable!("1초 수급·다른 원천은 이 시험에서 끔"),
         }
     }
     assert_eq!(ids, vec![1, 2, 3]);
