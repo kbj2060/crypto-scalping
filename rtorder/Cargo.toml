@@ -1,0 +1,11 @@
+[package]
+name = "rtorder"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# 주문 계획(순수 함수) + 지정가 집행 상태 기계. 거래소·네트워크·키를 전혀 모른다(거래소는 `exec::Exchange` trait 뒤).
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+# float_roundtrip: 기본 파서는 «최선 노력» 정밀도라 파이썬 repr 이 낸 실수를 비트 그대로 못 읽을 수 있다(정답지 비교가 흔들린다).
+serde_json = { version = "1", features = ["float_roundtrip"] }
