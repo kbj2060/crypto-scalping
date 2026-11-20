@@ -9,7 +9,7 @@
 // ponytail: 연결을 (심볼×3)개 연다 -- 심볼이 늘어 연결 한도가 문제되면 /stream?streams= 묶음으로 바꾼다(감싸기 모양 대조 필요).
 use crate::proto::{Event, Stamped};
 use crate::state::State;
-use crate::{now_us, BAD_JSON, RECONNECTS, SKIPPED};
+use crate::{now_us, BAD_JSON, LIVE_FEEDS, RECONNECTS, SKIPPED};
 use futures_util::StreamExt;
 use serde::Deserialize;
 use std::sync::atomic::Ordering::Relaxed;
@@ -97,6 +97,19 @@ pub fn parse(text: &str, rx_us: i64) -> Option<Stamped> {
     Some(Stamped { s: s.to_lowercase(), seq: 0, ex_ms, rx_us, tx_us: 0, ev })
 }
 
+struct Live;
+impl Live {
+    fn up() -> Live {
+        LIVE_FEEDS.fetch_add(1, Relaxed);
+        Live
+    }
+}
+impl Drop for Live {
+    fn drop(&mut self) {
+        LIVE_FEEDS.fetch_sub(1, Relaxed);
+    }
+}
+
 /// 영원히 돈다. 끊김·침묵(`silence` 동안 아무 프레임 없음)·접속 실패 → 재연결.
 /// 바이낸스 24시간 강제 끊김도 같은 길이다: 데이터를 받던 연결이 끊기면 첫 재시도는 기다리지 않는다.
 // ponytail: 24시간 끊김 때 재연결 사이(수십~수백 ms)가 빈다 -- 빈 구간이 문제되면 23시간에 새 연결을 먼저 열고 겹쳐 넘긴다.
@@ -105,7 +118,12 @@ pub async fn run(url: String, state: Arc<State>, silence: Duration) {
     loop {
         let mut got = false;
         match timeout(Duration::from_secs(10), connect_async(url.as_str())).await {
-            Ok(Ok((mut ws, _))) => loop {
+            Ok(Ok((mut ws, _))) => {
+                let _live = Live::up(); // 패닉으로 풀려도 Drop 이 센다
+                if let Some(sym) = url.rsplit('/').next().and_then(|t| t.strip_suffix("@trade")) {
+                    state.reset_orders(sym); // 끊김 전 열린 주문 묶음은 버린다(coin_flow.py 613)
+                }
+                loop {
                 match timeout(silence, ws.next()).await {
                     Err(_) => {
                         println!("rtcore feed {url}: {}s 침묵 -> 재연결", silence.as_secs_f64());
@@ -125,7 +143,8 @@ pub async fn run(url: String, state: Arc<State>, silence: Duration) {
                         break;
                     }
                 }
-            },
+                }
+            }
             Ok(Err(e)) => println!("rtcore feed {url}: 접속 실패 {e}"),
             Err(_) => println!("rtcore feed {url}: 접속 10초 초과"),
         }

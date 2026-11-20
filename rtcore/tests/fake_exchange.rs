@@ -153,7 +153,10 @@ async fn t1_events_in_order_with_three_stamps() {
     assert!(matches!(snap.ev, Event::Snapshot { .. }), "첫 메시지는 스냅숏");
     let mut got = vec![];
     while got.len() < 5 {
-        got.push(next(&mut ws).await);
+        let m = next(&mut ws).await;
+        if !matches!(m.ev, Event::Supply1s(_)) {
+            got.push(m); // 1초 수급은 supply1s_parity.rs 가 본다
+        }
     }
     let mut last_seq = snap.seq;
     let mut ids = vec![];
@@ -173,6 +176,7 @@ async fn t1_events_in_order_with_three_stamps() {
                 assert!(*mark == 3000.15 && *funding == 0.0001 && *next_funding_ms == 1_700_028_800_000)
             }
             Event::Snapshot { .. } => panic!("스냅숏은 한 번"),
+            Event::Supply1s(_) => unreachable!(),
         }
     }
     assert_eq!(ids, vec![1, 2, 3]);
@@ -305,10 +309,62 @@ fn t6_trade_ring_is_bounded() {
     }
     st.apply(rtcore::feed::parse(&book(5), 1).unwrap());
     let snap = st.snapshot("ethusdt", 0).unwrap();
-    assert_eq!(snap.seq, 101);
+    assert_eq!(snap.seq, 201); // 체결 100 + 체결마다 1초 수급 1건 + 호가 1
     let Event::Snapshot { trades, book, .. } = snap.ev else { panic!() };
     assert_eq!(trades.len(), 16);
-    assert_eq!(trades.first().map(|t| t.seq), Some(85));
+    assert!(matches!(trades.first().map(|t| &t.ev), Some(Event::Trade { id: 85, .. })));
     assert!(book.is_some());
     assert!(st.snapshot("btcusdt", 0).is_none());
+}
+
+// 7. 속도 실측(기본 제외): 체결 1건 수신 → 그 초의 1초 수급 칸이 구독자에게 송신·도착. 가짜 거래소 20건마다 1ms 쉼(개발기에서 약 수천 건/초).
+//    `cargo test --release -j 2 --test fake_exchange -- --ignored --nocapture t7`
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore]
+async fn t7_supply1s_latency_bench() {
+    const N: u64 = 50_000;
+    let (addr, _) = fake(Arc::new(|p: &str, _| {
+        if !is(p, "@trade") {
+            return vec![];
+        }
+        let t0 = rtcore::now_us() / 1000 + 500;
+        let mut v = vec![Act::Sleep(500)];
+        for i in 1..=N {
+            let q = [0.01, 0.2, 1.5, 4.0, 40.0][(i % 5) as usize]; // 리테일·중형·고래가 다 나오게
+            let px = 3000.0 + (i / 7 % 5) as f64 * 0.01; // 같은 가격 연속 → 되묶기
+            v.push(Act::Send(
+                json!({"e":"trade","E":t0 + (i / 20) as i64,"T":t0 + (i / 20) as i64,"s":"ETHUSDT","t":i,
+                       "p":format!("{px:.2}"),"q":format!("{q:.3}"),"X":"MARKET","m":i % 11 < 5})
+                .to_string(),
+            ));
+            if i % 20 == 0 {
+                v.push(Act::Sleep(1));
+            }
+        }
+        v
+    }))
+    .await;
+    let hub = core(&addr, 30_000).await;
+    let mut ws = subscribe(&hub).await;
+    let (mut core_us, mut e2e_us, mut trades) = (vec![], vec![], 0u64);
+    let t0 = Instant::now();
+    while trades < N {
+        let m = next(&mut ws).await;
+        let arrived = rtcore::now_us();
+        match m.ev {
+            Event::Supply1s(_) => {
+                core_us.push(m.tx_us - m.rx_us);
+                e2e_us.push(arrived - m.rx_us);
+            }
+            Event::Trade { .. } => trades += 1,
+            _ => {}
+        }
+    }
+    let took = t0.elapsed().as_secs_f64();
+    for (name, v) in [("수신->송신(코어 안)", &mut core_us), ("수신->구독자 도착", &mut e2e_us)] {
+        v.sort_unstable();
+        let n = v.len();
+        println!("t7 1초 수급 {name}: n={n} 중앙 {}µs 상위1% {}µs 최대 {}µs", v[n / 2], v[n * 99 / 100], v[n - 1]);
+    }
+    println!("t7 체결 {trades}건 / {took:.1}초 = {:.0}건/초", trades as f64 / took);
 }
