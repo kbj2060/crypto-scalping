@@ -51,6 +51,10 @@ fn handle(fx: &Mutex<Fake>, g: &Got) -> Act {
         None => OrderRef::Client(m["origClientOrderId"].clone()),
     };
     let res = match (g.method.as_str(), path) {
+        ("POST", "/fapi/v1/order") if m["type"] == "MARKET" => {
+            assert!(!m.contains_key("timeInForce") && !m.contains_key("price") && !m.contains_key("reduceOnly"), "시장가 다리 모양 {}", g.target);
+            order_body(block_on(f.place_market(&c, m["quantity"].parse().unwrap())))
+        }
         ("POST", "/fapi/v1/order") => {
             assert_eq!((m["type"].as_str(), m["timeInForce"].as_str()), ("LIMIT", "GTX"), "지정가 GTX 만 나간다");
             let o = LimitOrder { symbol: m["symbol"].clone(), side: side.clone(), position_side: ps.clone(), price: m["price"].parse().unwrap(),
@@ -73,6 +77,9 @@ struct Mesh {
 impl Exchange for Mesh {
     async fn place_limit_gtx(&mut self, o: &LimitOrder) -> Reply {
         self.bx.place_limit_gtx(o).await
+    }
+    async fn place_market(&mut self, c: &Common<'_>, q: f64) -> Reply {
+        self.bx.place_market(c, q).await
     }
     async fn get_order(&mut self, c: &Common<'_>, r: &OrderRef) -> Reply {
         self.bx.get_order(c, r).await
@@ -121,10 +128,10 @@ async fn mesh_normal_fill() {
 }
 
 #[tokio::test]
-async fn mesh_drift_repegs_then_needs_market_decision() {
+async fn mesh_drift_repegs_then_market_remainder_m9() {
     let (st, fx, n) = go_http(Fake { drift: true, ..Default::default() }, &exit_plan(), false).await;
     check("HTTP 리페그", &st, &fx, 2.0);
-    assert!(st.repegs >= 30 && (st.phase, st.market_branch) == (Phase::NeedsMarketDecision, Some("M9")), "{st:?}");
+    assert!(st.repegs >= 30 && st.phase == Phase::FilledTaker && st.filled == 2.0 && fx.markets.len() == 1, "{st:?}"); // M9 = 마감 잔량 시장가(HTTP 모양은 서버가 단언)
     assert!(fx.placed.windows(2).all(|w| w[1].price < w[0].price) && n > 4 * st.repegs as usize);
 }
 

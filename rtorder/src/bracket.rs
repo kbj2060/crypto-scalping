@@ -1,13 +1,12 @@
 //! 손절·익절 걸기와 그 주변 -- `live/execution/live_manual_peg_execute_20260912.py` 의 `current_leverage`·`ensure_leverage`·`margin_type`·
-//! `commission_bp`·`bracket_tag`·`cancel_bracket`·`clear_bracket`·`place_add_order`·`_post_stop`·`place_stop`·`place_bracket`·`place_tp_ladder`·
+//! `commission_bp`·`bracket_tag`·`cancel_bracket`·`clear_bracket`·`place_add_order`·`place_bracket`·`place_tp_ladder`·
 //! `cancel_wait_orphans` 를 그대로(2026-11-20 둘째 조각). 돌려주는 값은 원본 dict 와 같은 JSON(호출부 orders.py 가 dict 로 읽는다).
 //! 정답지: tests/fixtures/http_fixture.json 의 «같은 순서로 같은 요청(글자까지) + 같은 결과».
 //! 원본의 «키 없음» 검사는 `Binance::has_keys`, `_clock_offset` 은 `Binance::sync_clock`, 키·시계보정을 인자로 받는 함수(cancel_bracket 등)는 `bx.offset` 을 그대로 쓴다.
 //!
-//! 🔴원본 그대로 옮긴 «남은 위험»(고치지 않음 -- 보고만): 여기의 POST(익절 GTX · 분할 익절 · 자동 물타기 GTC · 비상 스탑)는
-//!   `resolve_unknown_post` 를 거치지 않는다. 끊김·시간초과·5xx·-1007 이면 그대로 «못 걸었다»(placed=false)로 돌려준다 -- 실제로는 걸렸을 수 있다.
-//! 🔴비상 스탑(STOP_MARKET closePosition, `post_stop`)은 **시장가형 주문**이다(발동 시 거래소가 전량 시장가로 닫는다, 시장가 분기 M10) --
-//!   요청 모양만 옮겨 정답지와 맞췄다. 이 크레이트에서 쓸지는 사용자 결정 목록에 올림.
+//! 2026-11-21 결함 수정(파이썬 main 0ecc754a): 익절 GTX · 분할 익절 · 자동 물타기 GTC 의 불명 응답도 `resolve_resting`(= exec::resolve_unknown_post) 을 지난다.
+//! 🔴비상 스탑(STOP_MARKET closePosition · 시장가 분기 M10)은 **옮기지 않는다**(2026-11-21 사용자 결정 «Rust 에서는 제거») --
+//!   place_bracket 은 backstop_price 를 받아도 안 걸고, cancel_bracket 은 스탑 목록·취소 요청을 안 보낸다. 시험(rp)은 «원본 요청 열에서 스탑 요청만 뺀 것».
 
 use crate::http::Binance;
 use crate::plan::{split_tp_qty, TpLegIn};
@@ -130,8 +129,11 @@ pub async fn commission_bp(bx: &mut Binance, symbol: &str) -> Value {
 /// 이 측면에 **우리가 건** TP 지정가와 비상 스탑을 지운다. 목록을 못 읽으면 그 사실을 돌려준다(못 지웠는데 «지웠다»로 넘어가면 닫힌 포지션 위에 주문이 남는다).
 /// only_sl(2026-10-15 «손절 해제») = 비상 스탑만 -- 물타기·TP 는 그대로 · only_tp(2026-11-11 «익절선 지우기») = TP 만 -- 물타기·스탑 그대로.
 pub async fn cancel_bracket(bx: &mut Binance, symbol: &str, pside: &str, only_sl: bool, only_tp: bool) -> Value {
-    let (tp_pre, sl_pre, add_pre) = (bracket_tag(TP_TAG, pside), bracket_tag(SL_TAG, pside), bracket_tag(ADD_TAG, pside));
+    let (tp_pre, add_pre) = (bracket_tag(TP_TAG, pside), bracket_tag(ADD_TAG, pside));
     let (mut n, mut errors) = (0i64, Vec::<String>::new());
+    if only_sl {
+        return json!({"cancelled": 0, "errors": []}); // 스탑만 지우기 = 지울 스탑이 없다(M10 제거)
+    }
     let opens = if only_sl { json!([]) } else { bx.signed("GET", "/fapi/v1/openOrders", &[("symbol", P::s(symbol))]).await };
     if !opens.is_array() {
         errors.push(format!("openOrders: {}", why(&opens)));
@@ -154,22 +156,53 @@ pub async fn cancel_bracket(bx: &mut Binance, symbol: &str, pside: &str, only_sl
     if only_tp {
         return json!({"cancelled": n, "errors": errors, "tp_open": tp_open});
     }
-    let algos = bx.signed("GET", "/fapi/v1/openAlgoOrders", &[("symbol", P::s(symbol))]).await;
-    if !algos.is_array() {
-        errors.push(format!("openAlgoOrders: {}", why(&algos)));
+    // 2026-11-21 사용자 결정 «−5% 비상 스탑(STOP_MARKET · M10) Rust 에서 제거»: 비상 스탑(dbsl, Algo)을 걸지 않으므로 목록·취소 요청도 없다.
+    //   ponytail: 파이썬 시절에 걸린 dbsl 스탑이 전환 때 남아 있으면 Rust 는 지우지 않는다 -- 전환 절차에서 한 번 정리한다(보고 «결정 필요»).
+    json!({"cancelled": n, "errors": errors})
+}
+
+/// 2026-11-21 결함 수정(파이썬 cancel_exit_orders): 손절 청산이 «오류»로 끝난 뒤 30초 재발동 전에 앞선 청산 따라가기(fill_maker)가 남긴 GTX 를 지우고
+/// **목록을 다시 읽어 없음을 확인**한다. 고르는 기준 = 표식 dbpg+측면 글자 AND 닫는 쪽(롱 = SELL) -- reduceOnly 는 못 쓴다(헤지 모드라 안 보낸다).
+/// 읽기 → 대상마다 DELETE(응답 무시 -- 목록을 믿는다) → 다시 읽기 · 처음부터 0건이면 조회 1번. errors 가 있으면 호출부는 새 청산을 시작하지 않는다.
+pub async fn cancel_exit_orders(bx: &mut Binance, symbol: &str, pside: &str) -> Value {
+    if !bx.has_keys() {
+        return json!({"cancelled": 0, "errors": [NO_KEYS]});
     }
-    for a in algos.as_array().cloned().unwrap_or_default() {
-        // 2026-10-20 두 코인 보유: 다른 코인 스탑은 절대 안 지운다(심볼 칸이 없으면 이 심볼로 본다 -- 원본 a.get("symbol", symbol))
-        let same = a.get("symbol").map_or(true, |s| s.as_str() == Some(symbol));
-        if str_or_empty(&a, "clientAlgoId").starts_with(&sl_pre) && same {
-            let r = bx.signed("DELETE", "/fapi/v1/algoOrder", &[("algoId", P::of(a.get("algoId")))]).await;
-            match error_of(&r) {
-                None => n += 1,
-                Some(e) => errors.push(e.into()),
-            }
+    bx.sync_clock().await;
+    let pre = format!("{}{}", crate::exec::PEG_TAG, pside.chars().next().map(String::from).unwrap_or_default());
+    let side = close_side(pside);
+    let mut n = 0i64;
+    for attempt in 0..2 {
+        let opens = bx.signed("GET", "/fapi/v1/openOrders", &[("symbol", P::s(symbol))]).await;
+        let Some(list) = opens.as_array() else {
+            return json!({"cancelled": n, "errors": [format!("openOrders: {}", why(&opens))]});
+        };
+        let left: Vec<Value> = list.iter().filter(|o| str_or_empty(o, "clientOrderId").starts_with(&pre) && o.get("side").and_then(Value::as_str) == Some(side)).cloned().collect();
+        if left.is_empty() {
+            return json!({"cancelled": n, "errors": []});
+        }
+        if attempt == 1 {
+            let ids: Vec<String> = left.iter().map(|o| py_str(&get(o, "orderId"))).collect();
+            return json!({"cancelled": n, "errors": [format!("앞선 청산 주문 [{}] 이 아직 살아 있습니다", ids.join(", "))]});
+        }
+        for o in &left {
+            let _ = bx.signed("DELETE", "/fapi/v1/order", &[("symbol", P::s(symbol)), ("orderId", P::of(o.get("orderId")))]).await;
+            n += 1;
         }
     }
-    json!({"cancelled": n, "errors": errors})
+    json!({"cancelled": n, "errors": []})
+}
+
+/// 2026-11-21 결함 수정(파이썬 resolve_resting): 익절 GTX·분할 익절·물타기 POST 도 진입과 같은 «나갔는지 모름» 규칙(exec::resolve_unknown_post) --
+/// 확정 거부(4xx·-5022)는 그대로 · 찾으면 그 주문 · 끝내 모르면 표식 DELETE 를 보냈으니 «안 걸림»(문구에 그 사실).
+async fn resolve_resting(bx: &mut Binance, symbol: &str, cid: &str, r: Value) -> Value {
+    let Some(e) = error_of(&r).map(String::from) else { return r };
+    let c = crate::exec::Common { symbol, side: "", position_side: "" }; // 표식 조회·취소는 심볼만 보낸다
+    match crate::exec::resolve_unknown_post(bx, &c, cid, Err(e.clone())).await {
+        Ok(Ok(o)) => json!({"orderId": o.order_id, "status": o.status, "executedQty": o.executed_qty}),
+        Ok(Err(e)) => crate::sign::err_value(e),
+        Err(_) => crate::sign::err_value(format!("주문 접수 여부를 확인하지 못했습니다({e}) — 표식으로 취소를 보냈습니다")),
+    }
 }
 
 /// cancel_bracket 을 키·시계보정까지 스스로 챙겨 부른다(서버 감시 루프 · «손절 해제» 버튼).
@@ -191,52 +224,13 @@ pub async fn place_add_order(bx: &mut Binance, symbol: &str, pside: &str, price:
     bx.sync_clock().await;
     let side = if pside == "LONG" { "BUY" } else { "SELL" };
     let r = bx.signed("POST", "/fapi/v1/order", &[("symbol", P::s(symbol)), ("side", P::s(side)), ("positionSide", P::s(pside)), ("type", P::s("LIMIT")),
-        ("timeInForce", P::s("GTC")), ("price", P::F(price)), ("quantity", P::F(qty)), ("newClientOrderId", P::S(cid))]).await;
+        ("timeInForce", P::s("GTC")), ("price", P::F(price)), ("quantity", P::F(qty)), ("newClientOrderId", P::S(cid.clone()))]).await;
+    let r = resolve_resting(bx, symbol, &cid, r).await; // 2026-11-21 결함 수정: 불명 응답이면 표식으로 찾는다(물타기 유령 = 손절 없이 크기만 늘어남)
     json!({"placed": no_err(&r), "price": price, "qty": qty, "order_id": get(&r, "orderId"), "error": get(&r, "__error__")})
 }
 
-/// 비상 스탑 = Algo STOP_MARKET closePosition(마크가 기준). place_bracket · place_stop 이 같이 쓴다.
-/// 🔴조건부 주문은 `/fapi/v1/algoOrder` 로만(2026-09-25: `/fapi/v1/order` 의 STOP_MARKET 은 -4120 거부 -- 4일 이력 STOP 0건, 실패는 메모리에만 있었다).
-/// 🔴시장가형 주문(발동 시 전량 시장가, M10) -- 사용자 결정 목록.
-pub async fn post_stop(bx: &mut Binance, symbol: &str, pside: &str, price: &Value, stamp: i64) -> Value {
-    let r = bx.signed("POST", "/fapi/v1/algoOrder", &[("algoType", P::s("CONDITIONAL")), ("symbol", P::s(symbol)), ("side", P::s(close_side(pside))),
-        ("positionSide", P::s(pside)), ("type", P::s("STOP_MARKET")), ("triggerPrice", P::of(Some(price))), ("closePosition", P::s("true")),
-        ("workingType", P::s("MARK_PRICE")), ("clientAlgoId", P::S(format!("{}{stamp}", bracket_tag(SL_TAG, pside))))]).await;
-    json!({"placed": no_err(&r), "price": price, "algo_id": get(&r, "algoId"), "error": get(&r, "__error__")})
-}
-
-/// 2026-10-15 «손절 다시 켜기» -- 비상 스탑만 다시 건다(place_bracket 은 TP·물타기까지 지우고 다시 걸어서 못 쓴다).
-/// 남은 우리 스탑은 먼저 지운다(두 개 걸리지 않게). 포지션이 없거나 못 걸면 placed=false -- 🔴호출 쪽은 그때 아무것도 안 바꾼다.
-pub async fn place_stop(bx: &mut Binance, symbol: &str, pside: &str, price: f64) -> Value {
-    if !bx.has_keys() {
-        return json!({"placed": false, "error": NO_KEYS});
-    }
-    bx.sync_clock().await;
-    let pos = bx.signed("GET", "/fapi/v2/positionRisk", &[("symbol", P::s(symbol))]).await;
-    let Some(list) = pos.as_array() else {
-        return json!({"placed": false, "error": format!("포지션 조회 실패: {}", why(&pos))});
-    };
-    let mut any = false;
-    for p in list {
-        if p.get("positionSide").and_then(Value::as_str) == Some(pside) {
-            let v = p.get("positionAmt").filter(|v| truthy(Some(v)));
-            if v.map_or(Ok(0.0), py_float).unwrap_or(0.0).abs() > 0.0 {
-                any = true;
-                break;
-            }
-        }
-    }
-    if !any {
-        return json!({"placed": false, "error": "포지션 없음"});
-    }
-    let cl = cancel_bracket(bx, symbol, pside, true, false).await;
-    let errs = cl["errors"].as_array().cloned().unwrap_or_default();
-    if !errs.is_empty() {
-        return json!({"placed": false, "error": format!("남은 스탑 정리 실패: {}", errs.iter().map(py_str).collect::<Vec<_>>().join("; "))});
-    }
-    let stamp = crate::sign::ms(bx.time());
-    post_stop(bx, symbol, pside, &json!(price), stamp).await
-}
+// 2026-11-21 사용자 결정 «−5% 비상 스탑(STOP_MARKET closePosition · 시장가 분기 M10) Rust 에서 제거»: 원본의 _post_stop·place_stop 은 옮기지 않는다
+//   (넷째 조각까지 있던 요청 모양 코드는 지웠다). 손절은 서버 감시(5분봉 종가 · 선 1초 닿음 → run_exit)만.
 
 /// 체결 뒤 TP 지정가(GTX, 포지션 **전량**)와 비상 스탑(Algo STOP_MARKET closePosition)을 건다. 물타기면 우리 옛 주문을 지우고 새 레벨·새 수량으로 다시.
 /// 🔴실패해도 진입을 되돌리지 않는다(이미 체결됐다) -- 결과를 그대로 돌려 화면이 크게 말하게 한다.
@@ -273,15 +267,13 @@ pub async fn place_bracket(bx: &mut Binance, bracket: &Value, symbol: &str, psid
         let r = bx.signed("POST", "/fapi/v1/order", &[("symbol", P::s(symbol)), ("side", P::s(close_side(pside))), ("positionSide", P::s(pside)),
             ("type", P::s("LIMIT")), ("timeInForce", P::s("GTX")), ("price", P::of(Some(tp))), ("quantity", P::F(qty)),
             ("newClientOrderId", P::S(format!("{}{stamp}", bracket_tag(TP_TAG, pside))))]).await;
-        // 🔴남은 위험(원본 그대로): 익절 GTX 의 불명 응답(끊김·시간초과·5xx·-1007)을 조회하지 않고 placed=false 로 돌려준다 -- 실제로 걸렸을 수 있다
+        // 2026-11-21 결함 수정(파이썬 resolve_resting): 불명 응답(끊김·시간초과·5xx·-1007·-1006·빈 본문)이면 표식으로 3번 찾고 끝내 모르면 표식 DELETE
+        let r = resolve_resting(bx, symbol, &format!("{}{stamp}", bracket_tag(TP_TAG, pside)), r).await;
         out.insert("tp".into(), json!({"placed": no_err(&r), "price": tp, "order_id": get(&r, "orderId"), "error": get(&r, "__error__")}));
     }
-    if truthy(bracket.get("backstop_price")) {
-        let b = post_stop(bx, symbol, pside, &bracket["backstop_price"], stamp).await;
-        out.insert("backstop".into(), b);
-    }
-    // all(...) -- 둘 다 없으면 all([]) = True(원본 그대로)
-    let placed = ["tp", "backstop"].iter().filter_map(|k| out.get(*k)).all(|v| truthy(v.get("placed")));
+    // backstop_price(비상 스탑)는 받아도 걸지 않는다(M10 제거 · 사용자 결정 2026-11-21) -- 결과에 "backstop" 칸이 없다(의도한 차이)
+    // all(...) -- 익절이 없으면 all([]) = True(원본 그대로)
+    let placed = ["tp"].iter().filter_map(|k| out.get(*k)).all(|v| truthy(v.get("placed")));
     out.insert("placed".into(), json!(placed));
     Value::Object(out)
 }
@@ -350,8 +342,8 @@ pub async fn place_tp_ladder(bx: &mut Binance, legs: &[Value], symbol: &str, psi
         }
         let price = l["price"].clone();
         let r = bx.signed("POST", "/fapi/v1/order", &[("symbol", P::s(symbol)), ("side", P::s(close_side(pside))), ("positionSide", P::s(pside)),
-            ("type", P::s("LIMIT")), ("timeInForce", P::s("GTX")), ("price", P::of(Some(&price))), ("quantity", P::F(q)), ("newClientOrderId", P::S(cid))]).await;
-        // 🔴남은 위험(원본 그대로): 불명 응답이면 resting=false -- 서버 감시로 넘어가지만 거래소엔 걸렸을 수 있다
+            ("type", P::s("LIMIT")), ("timeInForce", P::s("GTX")), ("price", P::of(Some(&price))), ("quantity", P::F(q)), ("newClientOrderId", P::S(cid.clone()))]).await;
+        let r = resolve_resting(bx, symbol, &cid, r).await; // 2026-11-21 결함 수정: 조각마다 불명 응답 처리(파이썬 resolve_resting)
         let l = &mut live[i];
         l.insert("resting".into(), json!(no_err(&r)));
         l.insert("order_id".into(), get(&r, "orderId"));

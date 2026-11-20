@@ -20,7 +20,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
+# 2026-11-21 원본 파이썬 위치 -- 기본 = 이 저장소 · RTORDER_PY_ROOT = 결함 수정본 작업 폴더(읽기만 · 정답지는 이 저장소에 쓴다)
+PY_ROOT = Path(os.environ.get("RTORDER_PY_ROOT") or ROOT)
+sys.path.insert(0, str(PY_ROOT))
+# 감시가 망가진 칸을 알릴 때 텔레그램 모듈을 부른다(진짜는 서버 비밀 설정을 읽고 보낸다) -- 가짜를 먼저 넣는다
+_wd = types.ModuleType("scripts.ops_watchdog")
+_wd.send_telegram = lambda *_a, **_k: None
+sys.modules["scripts.ops_watchdog"] = _wd
 for _k in ("BINANCE_API_KEY", "BINANCE_SECRET_KEY"):
     os.environ.pop(_k, None)
 
@@ -59,6 +65,8 @@ X.asyncio = types.SimpleNamespace(sleep=fsleep)
 
 
 class S:
+    auto = None
+    given: list = []
     queue: list = []
     log: list = []
     conns: set = set()
@@ -82,7 +90,11 @@ class H(BaseHTTPRequestHandler):
             self.rfile.read(n)
         S.log.append({"method": self.command, "target": self.path, "key": self.headers.get("X-MBX-APIKEY")})
         S.conns.add(self.client_address)
-        r = S.queue.pop(0) if S.queue else {"status": 599, "body": {"msg": "각본 소진"}}
+        if S.auto is not None:   # 2026-11-21 집행 각본: 규칙으로 답하고 준 답을 적는다(Rust 재생은 그 열을 차례로 받는다)
+            r = S.auto(self.command, self.path)
+            S.given.append(r)
+        else:
+            r = S.queue.pop(0) if S.queue else {"status": 599, "body": {"msg": "각본 소진"}}
         if r.get("act") == "close":
             self.close_connection = True
             return
@@ -182,14 +194,54 @@ async def call(session, fn, a):
         return await X.place_tp_ladder(session, a["legs"], SYM, a["pside"])
     if fn == "cancel_wait_orphans":
         return await X.cancel_wait_orphans(session, a["symbols"])
+    if fn == "cancel_exit_orders":
+        return await X.cancel_exit_orders(session, SYM, a["pside"])
+    if fn in ("run_entry", "run_exit", "run_entry_wait", "run_entry_stop"):
+        st = dict(a.get("state0") or {})
+        if fn == "run_entry_wait":
+            await X.run_entry_wait(session, dict(a["plan"]), st, a["wait_sec"])
+        elif fn == "run_entry_stop":
+            await X.run_entry_stop(session, dict(a["plan"]), st, lambda since: False, max_sec=a.get("max_sec", 60.0))
+        else:
+            await getattr(X, fn)(session, dict(a["plan"]), st)
+        return {k: st.get(k) for k in EXEC_KEYS}
     raise KeyError(fn)
+
+
+EXEC_KEYS = ("phase", "filled", "quantity", "taker_qty", "taker_order_id", "taker_reason", "error", "repegs", "cancel_reason")
+
+
+def auto_book(market, fill_get="0", fill_status="NEW"):
+    """집행 각본 규칙: 시계 · 호가(안 움직임) · GTX 접수 NEW · 조회 = fill_status/fill_get · 취소 = CANCELED(같은 체결량) · 시장가 = market."""
+    n = {"id": 100}
+
+    def r(method, path):
+        p = path.split("?")[0]
+        q = dict(x.split("=", 1) for x in path.split("?", 1)[1].split("&")) if "?" in path else {}
+        if p.endswith("/time"):
+            return TIME
+        if p.endswith("/bookTicker"):
+            return BOOK("2500.0", "2500.1")
+        if method == "POST" and q.get("type") == "MARKET":
+            return market
+        if method == "POST":
+            n["id"] += 1
+            return NEW(n["id"])
+        oid = int(q.get("orderId") or 0)
+        if method == "GET":
+            return ok({"orderId": oid, "status": "CANCELED" if oid in n.setdefault("gone", set()) else fill_status, "executedQty": fill_get})
+        if method == "DELETE":
+            n.setdefault("gone", set()).add(oid)
+            return ok({"orderId": oid, "status": "CANCELED", "executedQty": fill_get})
+        return {"status": 599, "body": {"msg": "규칙 없음"}}
+    return r
 
 
 SCN: list[dict] = []
 
 
-def scn(name, calls, responses=(), keys=True):
-    SCN.append({"name": name, "calls": calls if isinstance(calls, list) else [calls], "responses": list(responses), "keys": keys})
+def scn(name, calls, responses=(), keys=True, auto=None):
+    SCN.append({"name": name, "calls": calls if isinstance(calls, list) else [calls], "responses": list(responses), "keys": keys, "auto": auto})
 
 
 def c(fn, advance=0.0, **a):
@@ -319,6 +371,11 @@ scn("place_add_order 키 없음", c("place_add_order", pside="LONG", price=2481.
 scn("place_add_order 접수", c("place_add_order", pside="LONG", price=2481.25, qty=0.5), [TIME, NEW(201)])
 scn("place_add_order 숏 거부", c("place_add_order", pside="SHORT", price=2518.75, qty=0.123), [TIME, err(400, -2019, "Margin is insufficient.")])
 scn("place_add_order 시간초과", c("place_add_order", pside="LONG", price=2481.25, qty=0.5), [TIME, HANGR])
+# 2026-11-21 결함 수정본: 불명 응답 = 표식으로 3번 찾기 → 찾으면 걸림 · 끝내 못 찾으면 표식 DELETE · 확정 거부는 그대로 · 200 빈 본문 = 불명
+scn("place_add_order 빈 본문 → 찾음", c("place_add_order", pside="LONG", price=2481.25, qty=0.5), [TIME, ok(None), NOTFOUND, ok({"orderId": 77, "status": "NEW", "executedQty": "0"})])
+scn("place_add_order 5xx → 끝내 모름", c("place_add_order", pside="LONG", price=2481.25, qty=0.5), [TIME, err(502, -1001, "x"), NOTFOUND, NOTFOUND, NOTFOUND, UNKNOWN])
+scn("place_add_order -1007 → 찾음", c("place_add_order", pside="LONG", price=2481.25, qty=0.5), [TIME, err(408, -1007, "Timeout waiting for response from backend server."), ok({"orderId": 78, "status": "NEW", "executedQty": "0"})])
+scn("place_add_order 4xx 확정 거부(조회 없음)", c("place_add_order", pside="LONG", price=2481.25, qty=0.5), [TIME, err(400, -2019, "Margin is insufficient.")])
 scn("place_stop 키 없음", c("place_stop", pside="LONG", price=2375.0), keys=False)
 scn("place_stop 조회 실패", c("place_stop", pside="LONG", price=2375.0), [TIME, err(500, -1001, "x")])
 scn("place_stop 포지션 없음", c("place_stop", pside="LONG", price=2375.0), [TIME, POS(("LONG", "0.000"), ("SHORT", "-1.0"))])
@@ -331,7 +388,9 @@ scn("place_bracket 조회 실패", c("place_bracket", bracket=BR, pside="LONG"),
 scn("place_bracket 포지션 없음", c("place_bracket", bracket=BR, pside="LONG"), [TIME, POS(("SHORT", "-1"))])
 scn("place_bracket 정상", c("place_bracket", bracket=BR, pside="LONG"), [TIME, POS(("LONG", "0.7"), ("LONG", "0.3000001")), ok([]), ok([]), NEW(301), ok({"algoId": 41})])
 scn("place_bracket 익절 실패", c("place_bracket", bracket=BR, pside="LONG"), [TIME, POS(("LONG", "1")), ok([]), ok([]), M5022, ok({"algoId": 42})])
-scn("place_bracket 익절 불명(남은 위험)", c("place_bracket", bracket=BR, pside="LONG"), [TIME, POS(("LONG", "1")), ok([]), ok([]), CLOSE, HANGR])
+scn("place_bracket 익절 불명 → 두 번째 조회에서 찾음", c("place_bracket", bracket=BR, pside="LONG"), [TIME, POS(("LONG", "1")), ok([]), ok([]), CLOSE, NOTFOUND,
+    ok({"orderId": 301, "status": "NEW", "executedQty": "0"}), ok({"algoId": 42})])   # 2026-11-21 결함 수정본(resolve_resting)
+scn("place_bracket 익절 불명 → 끝내 모름 · 표식 취소", c("place_bracket", bracket=BR, pside="LONG"), [TIME, POS(("LONG", "1")), ok([]), ok([]), CLOSE, NOTFOUND, NOTFOUND, NOTFOUND, UNKNOWN, ok({"algoId": 42})])
 scn("place_bracket strict 정리 실패", c("place_bracket", bracket=BR, pside="LONG", strict=True), [TIME, POS(("LONG", "1")), OPENS, UNKNOWN, ok({}), ok({}), ok([])])
 scn("place_bracket 정리 실패 그래도 건다", c("place_bracket", bracket=BR, pside="LONG"), [TIME, POS(("LONG", "1")), CLOSE, CLOSE, ok([]), NEW(302), ok({"algoId": 43})])
 scn("place_bracket 숏 익절만", c("place_bracket", bracket={"tp_price": 2400.25, "backstop_price": None}, pside="SHORT"), [TIME, POS(("SHORT", "-1.5")), ok([]), ok([]), NEW(303)])
@@ -363,10 +422,41 @@ scn("cancel_wait_orphans", c("cancel_wait_orphans", symbols=[SYM, "ETHUSDT", "SO
     ok({}), ok({}), UNKNOWN, err(500, -1001, "x"), ok([{"orderId": 11, "clientOrderId": "dbwtS2", "origQty": "3"}]), CLOSE, CLOSE])
 
 
+# ── 2026-11-21 결함 수정본: 재발동 전 앞선 청산 따라가기 정리(cancel_exit_orders) ─────────────────────
+PG = lambda i, cid, side: {"orderId": i, "clientOrderId": cid, "side": side, "positionSide": "LONG", "type": "LIMIT"}   # noqa: E731
+OTHERS = [PG(5, "dbpgL1", "BUY"), PG(6, "dbtpL1", "SELL"), PG(8, "dbwtL1", "SELL"), PG(9, "aos_x", "SELL")]
+scn("cancel_exit_orders 없음(조회 1번)", c("cancel_exit_orders", pside="LONG"), [TIME, ok(OTHERS)])
+scn("cancel_exit_orders 지우고 확인", c("cancel_exit_orders", pside="LONG"), [TIME, ok([PG(7, "dbpgL18", "SELL"), *OTHERS]), UNKNOWN, ok(OTHERS)])
+scn("cancel_exit_orders 다시 읽어도 남음", c("cancel_exit_orders", pside="LONG"), [TIME, ok([PG(7, "dbpgL18", "SELL")]), ok({}), ok([PG(7, "dbpgL18", "SELL")])])
+scn("cancel_exit_orders 목록 실패 418", c("cancel_exit_orders", pside="LONG"), [TIME, err(418, -1003, "banned until 1800000999000")])
+scn("cancel_exit_orders 숏", c("cancel_exit_orders", pside="SHORT"), [TIME, ok([PG(3, "dbpgS1", "BUY"), PG(4, "dbpgS2", "SELL")]), ok({}), ok([PG(4, "dbpgS2", "SELL")])])
+scn("cancel_exit_orders 키 없음", c("cancel_exit_orders", pside="LONG"), keys=False)
+
+
+# ── 집행 시장가 다리(2026-11-21 사용자 결정 «원본 동작 유지» -- M1·M2·M3·M5·M6·M9) ─────────────────────
+EP = {"symbol": SYM, "side": "BUY", "positionSide": "LONG", "type": "LIMIT", "price": 2500.0, "quantity": 2.0, "target_leverage": 0}
+XP = {"symbol": SYM, "side": "SELL", "positionSide": "LONG", "type": "LIMIT", "price": 2500.1, "quantity": 2.0, "fallback_after_sec": 30.0, "vol_bpm": 9.0}
+MK = lambda q: FILLED(9001, q)   # noqa: E731
+scn("집행 M1 따라가기 마감 → 시장가", c("run_entry", plan=EP), auto=auto_book(MK("2")))
+scn("집행 M1 부분 체결 뒤 시장가", c("run_entry", plan=EP), auto=auto_book(MK("1.5"), fill_get="0.5", fill_status="PARTIALLY_FILLED"))
+scn("집행 M1 시장가 ACK(체결량 0)", c("run_entry", plan=EP), auto=auto_book(MK("0")))
+scn("집행 M1 시장가 거부", c("run_entry", plan=EP), auto=auto_book(err(400, -2019, "Margin is insufficient.")))
+scn("집행 M1 시장가 불명(끊김)", c("run_entry", plan=EP), auto=auto_book(CLOSE))
+scn("집행 M2 시장가 계획", c("run_entry", plan={**EP, "type": "MARKET"}), auto=auto_book(MK("2")))
+scn("집행 M6 청산 시장가 계획", c("run_exit", plan={k: v for k, v in {**XP, "type": "MARKET", "market_reason": "변동성"}.items() if k != "price"}), auto=auto_book(MK("2")))
+scn("집행 M6 청산 시장가 거부", c("run_exit", plan={k: v for k, v in {**XP, "type": "MARKET"}.items() if k != "price"}), auto=auto_book(err(400, -2022, "ReduceOnly Order is rejected.")))
+scn("집행 M9 청산 마감 잔량 시장가", c("run_exit", plan=XP), auto=auto_book(MK("0")))
+scn("집행 M9 부분 뒤 잔량 시장가", c("run_exit", plan=XP), auto=auto_book(MK("1.2"), fill_get="0.8", fill_status="PARTIALLY_FILLED"))
+scn("집행 M3 기다리기 마감 시장가", c("run_entry_wait", plan=EP, wait_sec=60.0), auto=auto_book(MK("2")))
+scn("집행 M3 지금 시장가(사용자)", c("run_entry_wait", plan=EP, wait_sec=60.0, state0={"action": "market"}), auto=auto_book(MK("2")))
+scn("집행 M5 감시 진입 지금 시장가", c("run_entry_stop", plan={**EP, "limit": {"usdt": 2600.0}}, state0={"action": "market"}), auto=auto_book(MK("2")))
+
+
 async def main():
     out = []
     for s in SCN:
         S.queue, S.log, S.conns = [dict(r) for r in s["responses"]], [], set()
+        S.auto, S.given = s.pop("auto", None), []
         Clock.t = 0.0
         X._fee_cache.clear()
         P._filters.clear()
@@ -386,6 +476,8 @@ async def main():
                     r = {"__raise__": f"{type(e).__name__}: {e}"}
                 results.append(jsonable(r))
         assert not S.queue, (s["name"], "각본이 남았다", S.queue)
+        if S.auto is not None:
+            s["responses"] = S.given
         assert all(r.get("act") or True for r in s["responses"])
         out.append({**s, "requests": S.log, "results": results, "ban": BAN.read_text() if BAN.exists() else None,
                     "conns": len(S.conns), "post_only": [X.is_post_only_reject(r.get("__error__", "")) if isinstance(r, dict) else False for r in results]})

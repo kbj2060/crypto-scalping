@@ -75,9 +75,6 @@ impl<R: AccountRest, O: WatchIo> DeskIo for Acct<'_, R, O> {
     async fn clear_bracket(&mut self, _s: &str, _p: &str, _a: bool, _b: bool) -> Result<Value, String> {
         unreachable!("청산 조립은 손절 해제를 안 부른다")
     }
-    async fn place_stop(&mut self, _s: &str, _p: &str, _x: f64) -> Result<Value, String> {
-        unreachable!("청산 조립은 스탑을 안 건다")
-    }
 }
 
 impl<O: WatchIo, R: AccountRest, Q: Quotes, E: Exchange> WatchIo for Wired<O, R, Q, E> {
@@ -141,5 +138,11 @@ impl<O: WatchIo, R: AccountRest, Q: Quotes, E: Exchange> WatchIo for Wired<O, R,
     }
     async fn cancel_wait_orphans(&mut self, symbols: &[String]) -> Result<Value, String> {
         self.ops.cancel_wait_orphans(symbols).await
+    }
+    async fn cancel_exit_orders(&mut self, symbol: &str, pside: &str) -> Result<Value, String> {
+        self.ops.cancel_exit_orders(symbol, pside).await
+    }
+    fn alert(&mut self, msg: &str) {
+        self.ops.alert(msg)
     }
 }

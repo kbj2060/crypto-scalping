@@ -381,10 +381,6 @@ impl DeskIo for FakeDeskIo {
         self.calls.push(json!(["clear_bracket", symbol, pside, only_sl, only_tp]));
         self.respond("clear_bracket")
     }
-    async fn place_stop(&mut self, symbol: &str, pside: &str, price: f64) -> Result<Value, String> {
-        self.calls.push(json!(["place_stop", symbol, pside, price]));
-        self.respond("place_stop")
-    }
 }
 
 pub struct TmpDir(pub PathBuf);
@@ -443,6 +439,7 @@ pub fn task_json(t: &Task) -> Value {
     match t {
         Task::Entry { plan, wait_sec, limit, .. } => json!({"fn": "entry_then_bracket", "plan": plan, "wait_sec": wait_sec, "limit": limit}),
         Task::Exit { plan, rearm, .. } => json!({"fn": if *rearm { "settle(exit_then_rearm)" } else { "settle(run_exit)" }, "plan": plan}),
+        Task::Switch { plan, sw, asset, .. } => json!({"fn": "exit_then_switch", "plan": plan, "sw": sw, "asset": asset}),
     }
 }
 

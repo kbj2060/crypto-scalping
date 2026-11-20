@@ -2,7 +2,7 @@
 //! `run_entry_wait`·`run_entry_limit`·`run_entry_stop` 을 그대로 옮긴 것. 거래소 호출·시계는 `Exchange` trait 뒤(구현 = 시험의 가짜 · `http::Binance`).
 //!
 //! 🔴시장가는 **보내지 않는다**(사용자 결정 2026-11-20: 지정가로만 설계 · 기존 시장가 분기는 «옮길지 뺄지» 미정).
-//! 파이썬이 시장가로 넘기는 자리마다 `Phase::NeedsMarketDecision` 으로 멈추고 `market_qty`·`market_branch`(규칙 문서 §9 번호)를 남긴다.
+//! 시장가 다리(M1·M2·M3·M4·M5·M6·M7·M8·M9)는 원본과 같은 순서·같은 요청·같은 결과(2026-11-21 사용자 결정 «원본 동작 유지») -- `Exchange::place_market`.
 //! 그래서 trait 에 시장가 메서드가 없다 -- 시장가가 «구조적으로» 못 나간다.
 //!
 //! 호출부 몫으로 남김(접수 조각): API 키 없음 → error · `_clock_offset` · `ensure_leverage`(함수는 `bracket`·`http` 에 있다).
@@ -57,6 +57,8 @@ pub struct LimitOrder {
 #[allow(async_fn_in_trait)]
 pub trait Exchange {
     async fn place_limit_gtx(&mut self, o: &LimitOrder) -> Reply;
+    /// 시장가 다리 `{**common, "type": "MARKET", "quantity": q}`(2026-11-21 사용자 결정: 원본 동작 유지). reduceOnly 없음(헤지 모드).
+    async fn place_market(&mut self, c: &Common<'_>, quantity: f64) -> Reply;
     /// `c` = 원본의 `common`(심볼·측면·포지션 측면) -- 주문 번호로 묻고 지울 때 원본은 셋 다 보낸다(`{**common, "orderId": oid}`), 표식이면 심볼만.
     async fn get_order(&mut self, c: &Common<'_>, r: &OrderRef) -> Reply;
     async fn cancel_order(&mut self, c: &Common<'_>, r: &OrderRef) -> Reply;
@@ -82,8 +84,10 @@ pub enum Phase {
     Rejected,
     Error,
     Cancelled,
-    /// 파이썬은 여기서 시장가를 보낸다. Rust 는 멈추고 사용자 결정을 기다린다(시장가 분기 §9).
-    NeedsMarketDecision,
+    /// 시장가 다리가 체결됐다(2026-11-21 사용자 결정 «원본 동작 유지» -- M1·M2·M3·M4·M5·M6·M7·M8·M9).
+    FilledTaker,
+    /// 시장가 다리 접수가 오류(원본 그대로 조회·재시도 없이 멈춤 -- 불명 응답도 같다).
+    TakerFailed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,9 +127,8 @@ pub struct ExecState {
     pub pegged: bool,
     pub vol_bpm: Option<f64>,
     pub market_reason: Option<String>,
-    /// NeedsMarketDecision 일 때 파이썬이 시장가로 보냈을 수량과 분기 번호(규칙 문서 §9 M1~M13).
-    pub market_qty: f64,
-    pub market_branch: Option<&'static str>,
+    /// 시장가 다리의 주문 번호(원본 taker_order_id).
+    pub taker_order_id: Option<i64>,
     pub taker_reason: Option<&'static str>,
     /// 감시 진입(run_entry_stop) 표시 · 닿아서 따라가기를 시작했나(원본은 시각 문자열).
     pub stop: bool,
@@ -312,11 +315,28 @@ fn finish(s: &Shared, phase: Phase) {
     (g.phase, g.done) = (phase, true);
 }
 
-fn needs_market(s: &Shared, qty: f64, branch: &'static str) {
-    let mut g = st(s);
-    (g.market_qty, g.market_branch, g.taker_qty) = (qty, Some(branch), 0.0);
-    drop(g);
-    finish(s, Phase::NeedsMarketDecision);
+/// 시장가 다리(원본 signed POST MARKET). 오류면 taker_failed(taker_qty 0 · error) -- 원본은 불명 응답도 조회하지 않는다(그대로).
+/// 성공이면 체결량 = 응답 executedQty, 0 이면 보낸 수량(«ACK 면 전량», E10). `filled_of` 가 상태 filled 를 정한다(경로마다 원본이 다르다 -- D3).
+async fn taker<E: Exchange>(ex: &mut E, c: &Common<'_>, qty: f64, s: &Shared, filled_of: impl Fn(f64, f64) -> f64, reason: Option<&'static str>) {
+    match ex.place_market(c, qty).await {
+        Err(e) => {
+            let mut g = st(s);
+            (g.taker_qty, g.error) = (0.0, Some(e));
+            drop(g);
+            finish(s, Phase::TakerFailed);
+        }
+        Ok(o) => {
+            let done = if o.executed_qty != 0.0 { o.executed_qty } else { qty };
+            let mut g = st(s);
+            g.filled = filled_of(g.filled, done);
+            (g.taker_qty, g.taker_order_id) = (done, o.order_id);
+            if reason.is_some() {
+                g.taker_reason = reason;
+            }
+            drop(g);
+            finish(s, Phase::FilledTaker);
+        }
+    }
 }
 
 /// peg 를 걸고 호가가 달아나면 따라가며 다시 걸다가 마감에서 멈춘다(파이썬: 마감 잔량 시장가).
@@ -327,11 +347,8 @@ pub async fn run_entry<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Shared) {
         let mut g = st(s);
         (g.phase, g.filled, g.limit_price, g.quantity, g.repegs, g.deadline_sec) = (Phase::Working, 0.0, plan.price, total, 0, FALLBACK_SEC);
     }
-    if plan.market {
-        // 미정: 시장가 분기 #M2 — 사용자 결정 대기. 파이썬은 지정가 없이 전량 시장가(2026-10-10 스위칭 반대 진입 · 감시 진입 TAKER).
-        return needs_market(s, total, "M2");
-    }
-    let (done, price, repegs, err) = fill_maker(ex, &c, plan.price, total, ex.now() + FALLBACK_SEC, s).await;
+    // M2(2026-10-10 스위칭 반대 진입·감시 진입 TAKER): 지정가 없이 아래 시장가 다리로 바로
+    let (done, price, repegs, err) = if plan.market { (0.0, plan.price, 0, None) } else { fill_maker(ex, &c, plan.price, total, ex.now() + FALLBACK_SEC, s).await };
     {
         let mut g = st(s);
         (g.filled, g.repegs, g.limit_price) = (done, repegs, price);
@@ -357,8 +374,8 @@ pub async fn run_entry<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Shared) {
         st(s).cancel_reason = Some("따라가기 마감 — 남은 수량 버림(시장가 없음)".into());
         return finish(s, Phase::Cancelled);
     }
-    // 미정: 시장가 분기 #M1 — 사용자 결정 대기. 파이썬은 여기서 남은 수량을 MARKET 으로 보낸다(사용자 선택 b).
-    needs_market(s, remaining, "M1");
+    // M1: 따라가기 마감 잔량 = 시장가(사용자 선택 b · 2026-11-21 «원본 동작 유지») -- 체결량은 응답에서 읽는다(«보통»을 적지 않는다)
+    taker(ex, &c, remaining, s, |f, d| r8(f + d), None).await;
 }
 
 /// 메이커로 포지션을 닫는다(진입과 같은 루프 · 리페그). 🔴헤지 모드라 reduceOnly 없음 -- 과청산 방어는 수량(`total - done`)뿐.
@@ -366,12 +383,12 @@ pub async fn run_exit<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Shared) {
     let c = Common { symbol: &plan.symbol, side: &plan.side, position_side: &plan.position_side };
     let total = plan.quantity;
     if plan.market {
-        // 미정: 시장가 분기 #M6·#M7·#M8 — 사용자 결정 대기. 계획이 MARKET(변동성 ≥30 · 먼지 · exec=market)이면 파이썬은 전량 시장가.
+        // M6·M7·M8: 계획이 MARKET(변동성 ≥30 · 먼지 · exec=market) -- 지정가 없이 전량 시장가 · 체결량 = 응답(스위칭이 «다 닫혔나»를 본다), ACK 면 전량
         {
             let mut g = st(s);
             (g.phase, g.mode, g.quantity, g.filled, g.repegs, g.market_reason) = (Phase::Working, "exit", total, 0.0, 0, plan.market_reason.clone());
         }
-        return needs_market(s, total, "M6/M7/M8");
+        return taker(ex, &c, total, s, |_, d| d, None).await;
     }
     // 마감은 **계획이 정한다** -- 모듈 상수를 쓰면 변동성 연동이 조용히 무력화된다(P27).
     let window = if plan.fallback_after_sec != 0.0 { plan.fallback_after_sec } else { FALLBACK_SEC };
@@ -393,8 +410,21 @@ pub async fn run_exit<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Shared) {
         st(s).taker_qty = 0.0;
         return finish(s, Phase::FilledMaker);
     }
-    // 미정: 시장가 분기 #M9 — 사용자 결정 대기. 파이썬은 마감 잔량을 시장가로 보내고 체결량을 응답에서 안 읽고 전량으로 적는다(D3).
-    needs_market(s, remaining, "M9");
+    // M9: 마감 잔량 = 시장가(2026-11-21 «원본 동작 유지»). D3 원본 그대로: taker_qty = 보낸 잔량 · filled = 전량(응답 체결량을 안 읽는다)
+    match ex.place_market(&c, remaining).await {
+        Err(e) => {
+            let mut g = st(s);
+            (g.taker_qty, g.error) = (0.0, Some(e));
+            drop(g);
+            finish(s, Phase::TakerFailed);
+        }
+        Ok(o) => {
+            let mut g = st(s);
+            (g.taker_qty, g.filled, g.taker_order_id) = (remaining, total, o.order_id);
+            drop(g);
+            finish(s, Phase::FilledTaker);
+        }
+    }
 }
 
 /// 진입 «기다리기»(2026-10-10): GTX 를 **한 번** 걸고 앞질러도 다시 걸지 않는다(처음 -5022 만 새 호가로 재시도, E20).
@@ -482,9 +512,9 @@ pub async fn run_entry_wait<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Shared
         drop(g);
         return finish(s, Phase::Cancelled);
     }
-    // 미정: 시장가 분기 #M3 — 사용자 결정 대기. 파이썬은 대기 마감 잔량(또는 action=market)을 시장가로(X:569 «미체결 포기는 안 된다»).
-    st(s).taker_reason = Some(if action == Some(Action::Market) { "지금 시장가(사용자)" } else { "대기 마감" });
-    needs_market(s, remaining, "M3");
+    // M3: 대기 마감 잔량(또는 action=market) = 시장가(X:569 «미체결 포기는 안 된다» · 2026-11-21 «원본 동작 유지»)
+    let why = if action == Some(Action::Market) { "지금 시장가(사용자)" } else { "대기 마감" };
+    taker(ex, &c, remaining, s, |f, d| r8(f + d), Some(why)).await;
 }
 
 /// 감시 진입(2026-11-09 사용자 «롱은 지금가 위·숏은 아래 선을 감시하다가 걸기»): 닿기 전엔 거래소에 주문이 없다 · 닿으면 따라가기(maker_only) --
@@ -531,10 +561,8 @@ pub async fn run_entry_stop<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Shared
         g.action
     };
     if action == Some(Action::Market) {
-        // 미정: 시장가 분기 #M5 — 사용자 결정 대기. 파이썬은 run_entry({**plan, "type": "MARKET"}) = 전량 시장가(TAKER 두 번).
-        run_entry(ex, &ExecPlan { market: true, ..plan }, s).await;
-        st(s).market_branch = Some("M5");
-        return;
+        // M5: run_entry({**plan, "type": "MARKET"}) = 전량 시장가(TAKER 두 번 · 2026-11-21 «원본 동작 유지»)
+        return run_entry(ex, &ExecPlan { market: true, ..plan }, s).await;
     }
     if action.is_some() {
         let mut g = st(s);
@@ -675,9 +703,9 @@ pub async fn run_entry_limit<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Share
         st(s).taker_qty = 0.0;
         finish(s, Phase::FilledMaker);
     } else if action == Some(Action::Market) && !outside {
-        // 미정: 시장가 분기 #M4 — 사용자 결정 대기. 파이썬은 걸린 지정가를 취소 확인한 뒤(위 ensure_closed) 남은 수량만 시장가(2026-11-04).
-        st(s).taker_reason = Some("지금 시장가(사용자)");
-        needs_market(s, remaining, "M4");
+        // M4: 걸린 지정가를 취소 확인한 뒤(위 ensure_closed) 남은 수량만 시장가(2026-11-04 · 2026-11-21 «원본 동작 유지»)
+        st(s).filled = r8(done);
+        taker(ex, &c, remaining, s, |f, d| r8(f + d), Some("지금 시장가(사용자)")).await;
     } else if action == Some(Action::Peg) && !outside {
         // 2026-11-09 사용자 «taker 말고 peg 버튼»: 취소 확인 뒤 남은 수량을 최우선 호가 따라가기 · 마감 뒤 잔량은 버림(시장가 없음, E26).
         {

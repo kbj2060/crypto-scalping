@@ -50,7 +50,6 @@ EXEC = [  # exec_invariants 로 잡혀야 한다
     ("대기 취소를 무시하고 따라가기 계속", X, "let cancel = |s: &Shared| st(s).action == Some(Action::Cancel);", "let cancel = |_s: &Shared| false;"),
     ("감시 진입: 선 옮겨도 닿음 판정 시작점 그대로", X, "since = ex.wall_ms() as f64 / 1000.0;\n            let Some(q)", "let Some(q)"),
     ("감시 진입: 닿은 뒤 maker_only 빠짐(시장가 전락)", X, "run_entry(ex, &ExecPlan { price, maker_only: true, ..plan }, s).await;", "run_entry(ex, &ExecPlan { price, maker_only: false, ..plan }, s).await;"),
-    ("감시 진입 TAKER 분기 번호 M5 빠짐", X, "st(s).market_branch = Some(\"M5\");", ""),
 ]
 HTTP = [  # http_replay(원본 파이썬 + aiohttp 정답지)로 잡혀야 한다
     ("quote_plus 빈칸 + → %20", S, "b' ' => o.push('+'),", "b' ' => o.push_str(\"%20\"),"),
@@ -65,16 +64,13 @@ HTTP = [  # http_replay(원본 파이썬 + aiohttp 정답지)로 잡혀야 한�
     ("주문 번호 조회에서 side·positionSide 뺌", H, "(\"side\", P::s(c.side)), (\"positionSide\", P::s(c.position_side)), (\"orderId\"", "(\"orderId\""),
     ("시계 보정 부호 뒤집음", H, "s as i64 - sign::ms(self.time())", "sign::ms(self.time()) - s as i64"),
     ("익절만 지우기인데 물타기도 지움", B, "(!only_tp && cid.starts_with(&add_pre))", "cid.starts_with(&add_pre)"),
-    ("다른 코인 스탑도 지움(10-20)", B, "let same = a.get(\"symbol\").map_or(true, |s| s.as_str() == Some(symbol));", "let same = true;"),
     ("strict 무시(같은 쪽 전량 익절 둘)", B, "if strict && truthy(cleared.get(\"errors\")) {", "if false {"),
     ("사라진 조각을 조회 없이 체결로(11-12)", B, "json!(o.is_object() && o.get(\"status\").and_then(Value::as_str) == Some(\"FILLED\"))", "json!(true)"),
     ("레버리지 같아도 다시 보냄", B, "if now == Some(target) {", "if false {"),
     ("수수료 실패 캐시 5분 → 1시간", B, "if src == \"live\" { FEE_TTL_SEC } else { FEE_RETRY_SEC }", "FEE_TTL_SEC"),
     ("수수료 stale 대신 fallback", B, "hit.filter(|h| h.3 != \"fallback\")", "None::<(f64, f64, f64, &str)>"),
     ("물타기 GTC → GTX", B, "(\"timeInForce\", P::s(\"GTC\"))", "(\"timeInForce\", P::s(\"GTX\"))"),
-    ("비상 스탑 마크가 → 체결가 기준", B, "(\"workingType\", P::s(\"MARK_PRICE\"))", "(\"workingType\", P::s(\"CONTRACT_PRICE\"))"),
     ("고아 정리가 dbtp 도 지움", B, "|| cid.starts_with(crate::exec::PEG_TAG) {", "|| cid.starts_with(crate::exec::PEG_TAG) || cid.starts_with(\"dbtp\") {"),
-    ("손절 다시 켜기 전 옛 스탑 안 지움", B, "let cl = cancel_bracket(bx, symbol, pside, true, false).await;", "let cl = json!({\"errors\": []});"),
 ]
 
 WATCH = [  # watch_fixture(원본 orders.py 감시 클로저 정답지)로 잡혀야 한다
@@ -102,8 +98,7 @@ WATCH = [  # watch_fixture(원본 orders.py 감시 클로저 정답지)로 잡�
     ("발동 로그 문구", W_, "이탈 -> {}", "이탈 => {}"),
 ]
 WATCH_EXEC = [  # watch_exec(실제 집행 + 가짜 거래소)로 잡혀야 한다
-    ("시장가 결정 대기를 체결로 봄", W_, "Phase::NeedsMarketDecision => \"needs_market_decision\",", "Phase::NeedsMarketDecision => \"filled_maker\","),
-    ("시장가 결정 대기 중 다시 쏨(조용히 지정가로)", W_, "if b.contains_key(\"market_wait\") && matches!(act, TickAction::Fire | TickAction::SlLeg) {", "if false {"),
+    ("시장가 거부를 체결로 봄", X, "            (g.taker_qty, g.error) = (0.0, Some(e));\n            drop(g);\n            finish(s, Phase::TakerFailed);\n        }\n        Ok(o) => {\n            let done", "            (g.taker_qty, g.error) = (0.0, Some(e));\n            drop(g);\n            finish(s, Phase::FilledTaker);\n        }\n        Ok(o) => {\n            let done"),
 ]
 WATCH_INV = [  # watch_invariants(퍼즈·루프·재시작)로 잡혀야 한다
     ("조립 뒤 잠금 무시(D9·G9)", W_, "if io.order_locked() || slot.is_none() {\n            return Ok((true, changed)); // D9", "if slot.is_none() {\n            return Ok((true, changed)); // D9"),
@@ -131,8 +126,6 @@ DESK = [  # desk_fixture(원본 파이썬 정답지 · (가)=(나) · 스트림 
     ("도는 작업이 있는 칸 재사용(G12)", IN, 'if self.running.contains(&format!("manual_wait_{}", Watcher::wkey(&asset, n))) && !taken.contains(&n) {', 'if false {'),
     ("같은 코인 청산 칸이 바빠도 진입(G5)", IN, '|| self.w.side_exits.get(&asset).and_then(Value::as_object).is_some_and(busy)', ''),
     ("일부 체결 뒤에도 지정가 수정(W6)", IN, 'if fl(st.get("filled")) > 0.0 {\n            return bad(409, "partially_filled"', 'if false {\n            return bad(409, "partially_filled"'),
-    ("손절 해제 취소 실패에도 바꿈(B21)", IN, 'if truthy(r.get("errors")) {\n            let es', 'if false {\n            let es'),
-    ("손절 해제 그 사이 새 무장 무시", IN, 'if !st.get(&key).is_some_and(|c| crate::watch::same_armed(c.get("armed_at"), b.get("armed_at"))) {\n            return bad(409, "rearmed", "그 사이 새로 무장됐습니다 — 다시 확인하세요");\n        }\n        let off', 'let off'),
     ("포지션 조회 실패를 ok·빈 목록으로(P2 · 09-26)", A_, "let Some(risk) = risk.as_array().cloned() else {", "let Some(risk) = risk.as_array().cloned().or(Some(vec![])) else {"),
     ("뒤집기 체결 앞끝 QTY_EPS 빠짐", A_, "if QTY_EPS < closing && closing < fl.qty - QTY_EPS {", "if 0.0 < closing && closing < fl.qty {"),
     ("멀티에셋 모드 무시", A_, 'if truthy(account.get("multiAssetsMargin")) {\n        return Ok((top()?', 'if false {\n        return Ok((top()?'),
@@ -143,6 +136,23 @@ DESK = [  # desk_fixture(원본 파이썬 정답지 · (가)=(나) · 스트림 
     ("재연결 뒤 스트림 계좌를 그대로 믿음", A_, '        if self.base_epoch != us.epoch {\n            return Err("reconnected");', '        if false {\n            return Err("reconnected");'),
     ("스트림 계좌 신뢰 60초 → 600초", A_, "pub const STREAM_TRUST_SEC: f64 = 60.0;", "pub const STREAM_TRUST_SEC: f64 = 600.0;"),
     ("어긋남 뒤에도 스트림 계좌를 씀", A_, '        if self.suspect {\n            return Err("mismatch");', '        if false {\n            return Err("mismatch");'),
+]
+HTTP_NEW = [  # http_replay(원본 파이썬 결함 수정본 + 시장가 다리 정답지)로 잡혀야 한다
+    ("M9 잔량 시장가 뒤 filled 를 응답 체결량으로(D3 원본과 다름)", X, "(g.taker_qty, g.filled, g.taker_order_id) = (remaining, total, o.order_id);", "(g.taker_qty, g.filled, g.taker_order_id) = (remaining, done + o.executed_qty, o.order_id);"),
+    ("M1 시장가 다리 빠짐(잔량 버림)", X, "    taker(ex, &c, remaining, s, |f, d| r8(f + d), None).await;", "    finish(s, Phase::Cancelled);"),
+    ("시장가 ACK(체결 0)를 0 으로 적음", X, "let done = if o.executed_qty != 0.0 { o.executed_qty } else { qty };", "let done = o.executed_qty;"),
+    ("M3 대기 마감 사유 빠짐", X, 'let why = if action == Some(Action::Market) { "지금 시장가(사용자)" } else { "대기 마감" };', 'let why = "지금 시장가(사용자)";'),
+    ("시장가에 reduceOnly 를 붙임", H, '("type", P::s("MARKET")), ("quantity", P::F(quantity))];', '("type", P::s("MARKET")), ("quantity", P::F(quantity)), ("reduceOnly", P::s("true"))];'),
+    ("익절·물타기 불명 응답 조회 안 함(결함 되살림)", B, "    let Some(e) = error_of(&r).map(String::from) else { return r };", "    let Some(_e) = error_of(&r).map(String::from) else { return r };\n    if true { return r; }\n    let e = _e;"),
+    ("200 빈 본문을 정상으로", H, "        if !(payload.is_object() || payload.is_array()) {", "        if false {"),
+    ("청산 정리: 진입 따라가기(여는 쪽)도 지움", B, '.starts_with(&pre) && o.get("side").and_then(Value::as_str) == Some(side)).cloned().collect();', '.starts_with(&pre)).cloned().collect();'),
+    ("청산 정리: 다시 읽지 않고 성공", B, "        if attempt == 1 {\n            let ids", "        if attempt == 9 {\n            let ids"),
+]
+WATCH_NEW = [  # watch_fixture(결함 수정본 정답지)로 잡혀야 한다
+    ("재발동 전 정리 빠짐", W_, "        if !t(b, \"retry_after\") {\n            return Ok(true);", "        if true {\n            return Ok(true);"),
+    ("정리 실패에도 재발동", W_, "            b.insert(\"last_error\".into(), json!(format!(\"앞선 청산 주문 정리 실패: {}\", es.join(\"; \"))));\n            return Ok(false);", "            b.insert(\"last_error\".into(), json!(format!(\"앞선 청산 주문 정리 실패: {}\", es.join(\"; \"))));\n            return Ok(true);"),
+    ("망가진 칸이 틱을 죽임(결함 되살림)", W_, "                    self.tick_alert(io, &key, &e);\n                }", "                    return Err(e);\n                }"),
+    ("알림 한 번 → 매 틱", W_, "        if !self.alerted.insert((key.to_string(), kind)) {", "        if !self.alerted.insert((key.to_string(), kind)) && false {"),
 ]
 WIRE = [  # wire_e2e(감시 → 계좌 → 조립 → 집행)로 잡혀야 한다
     ("스트림 계좌를 쓸 수 있어도 REST 로 읽음", A_, 'Ok(v) => Ok((v, "stream")),', 'Ok(_) => Ok((book.produce(rest).await?, "stream")),'),
@@ -160,7 +170,7 @@ def main() -> int:
     caught = total = 0
     only = sys.argv[1] if len(sys.argv) > 1 else ""   # "plan" | "exec" | "http" | "watch" | "" = 전부
     for test, muts in (("plan_fixture", PLAN), ("exec_invariants", EXEC), ("http_replay", HTTP),
-                       ("watch_fixture", WATCH), ("watch_exec", WATCH_EXEC), ("watch_invariants", WATCH_INV), ("desk_fixture", DESK), ("wire_e2e", WIRE)):
+                       ("watch_fixture", WATCH), ("watch_exec", WATCH_EXEC), ("watch_invariants", WATCH_INV), ("desk_fixture", DESK), ("wire_e2e", WIRE), ("http_replay", HTTP_NEW), ("watch_fixture", WATCH_NEW)):
         if only and not test.startswith(only):
             continue
         for name, f, a, b in muts:

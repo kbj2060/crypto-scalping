@@ -494,7 +494,9 @@ false
 }
 ],
 "results": [
-null
+{
+"__error__": "EmptyResponse: HTTP 200 본문 None"
+}
 ],
 "ban": null,
 "conns": 1,
@@ -1262,7 +1264,7 @@ false
 "__error__": "429 [-1003] Too many requests."
 }
 ],
-"ban": "1795184889.643\n",
+"ban": "1795204414.957\n",
 "conns": 1,
 "post_only": [
 false
@@ -1313,7 +1315,7 @@ false
 "__error__": "429 [-1003] Too many requests."
 }
 ],
-"ban": "1795184914.646\n",
+"ban": "1795204439.959\n",
 "conns": 1,
 "post_only": [
 false
@@ -4501,7 +4503,7 @@ false
 "cancelled": 0,
 "errors": [
 "openOrders: 500 [-1001] x",
-"openAlgoOrders: not a list"
+"openAlgoOrders: EmptyResponse: HTTP 200 본문 'not a list'"
 ]
 }
 ],
@@ -5096,6 +5098,26 @@ false
 "method": "POST",
 "target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTC&price=2481.25&quantity=0.5&newClientOrderId=dbadL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=00f8cdaaa7f5a7ef33813a4f8d7e03ab805b4378aa58606234cf67eadcaed0c8",
 "key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbadL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=55effb9e9117e72d61cf2fe31d69693fe08ca3313c9512af51797c658ef3aa78",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbadL1800000000000&recvWindow=5000&timestamp=1800000001037&signature=c4064f3c9527de3da878814ea1fec49bc67582fd16b44e85ffe0e228aca34b16",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbadL1800000000000&recvWindow=5000&timestamp=1800000002037&signature=fca6216f41e7f6fde8d054bf75c7209f29220d021d4dc0b752f23f992c971c7d",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbadL1800000000000&recvWindow=5000&timestamp=1800000003037&signature=49fcf0fd5625206be986973a910d8b0069f20cd294f041a97e3eecc681eecb55",
+"key": "test_key"
 }
 ],
 "results": [
@@ -5104,7 +5126,314 @@ false
 "price": 2481.25,
 "qty": 0.5,
 "order_id": null,
-"error": "TimeoutError: "
+"error": "주문 접수 여부를 확인하지 못했습니다(TimeoutError: ) — 표식으로 취소를 보냈습니다"
+}
+],
+"ban": null,
+"conns": 2,
+"post_only": [
+false
+]
+},
+{
+"name": "place_add_order 빈 본문 → 찾음",
+"calls": [
+{
+"fn": "place_add_order",
+"args": {
+"pside": "LONG",
+"price": 2481.25,
+"qty": 0.5
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": null
+},
+{
+"status": 400,
+"body": {
+"code": -2013,
+"msg": "Order does not exist."
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 77,
+"status": "NEW",
+"executedQty": "0"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTC&price=2481.25&quantity=0.5&newClientOrderId=dbadL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=00f8cdaaa7f5a7ef33813a4f8d7e03ab805b4378aa58606234cf67eadcaed0c8",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbadL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=55effb9e9117e72d61cf2fe31d69693fe08ca3313c9512af51797c658ef3aa78",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbadL1800000000000&recvWindow=5000&timestamp=1800000001037&signature=c4064f3c9527de3da878814ea1fec49bc67582fd16b44e85ffe0e228aca34b16",
+"key": "test_key"
+}
+],
+"results": [
+{
+"placed": true,
+"price": 2481.25,
+"qty": 0.5,
+"order_id": 77,
+"error": null
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_add_order 5xx → 끝내 모름",
+"calls": [
+{
+"fn": "place_add_order",
+"args": {
+"pside": "LONG",
+"price": 2481.25,
+"qty": 0.5
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 502,
+"body": {
+"code": -1001,
+"msg": "x"
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2013,
+"msg": "Order does not exist."
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2013,
+"msg": "Order does not exist."
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2013,
+"msg": "Order does not exist."
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2011,
+"msg": "Unknown order sent."
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTC&price=2481.25&quantity=0.5&newClientOrderId=dbadL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=00f8cdaaa7f5a7ef33813a4f8d7e03ab805b4378aa58606234cf67eadcaed0c8",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbadL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=55effb9e9117e72d61cf2fe31d69693fe08ca3313c9512af51797c658ef3aa78",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbadL1800000000000&recvWindow=5000&timestamp=1800000001037&signature=c4064f3c9527de3da878814ea1fec49bc67582fd16b44e85ffe0e228aca34b16",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbadL1800000000000&recvWindow=5000&timestamp=1800000002037&signature=fca6216f41e7f6fde8d054bf75c7209f29220d021d4dc0b752f23f992c971c7d",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbadL1800000000000&recvWindow=5000&timestamp=1800000003037&signature=49fcf0fd5625206be986973a910d8b0069f20cd294f041a97e3eecc681eecb55",
+"key": "test_key"
+}
+],
+"results": [
+{
+"placed": false,
+"price": 2481.25,
+"qty": 0.5,
+"order_id": null,
+"error": "주문 접수 여부를 확인하지 못했습니다(502 [-1001] x) — 표식으로 취소를 보냈습니다"
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_add_order -1007 → 찾음",
+"calls": [
+{
+"fn": "place_add_order",
+"args": {
+"pside": "LONG",
+"price": 2481.25,
+"qty": 0.5
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 408,
+"body": {
+"code": -1007,
+"msg": "Timeout waiting for response from backend server."
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 78,
+"status": "NEW",
+"executedQty": "0"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTC&price=2481.25&quantity=0.5&newClientOrderId=dbadL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=00f8cdaaa7f5a7ef33813a4f8d7e03ab805b4378aa58606234cf67eadcaed0c8",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbadL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=55effb9e9117e72d61cf2fe31d69693fe08ca3313c9512af51797c658ef3aa78",
+"key": "test_key"
+}
+],
+"results": [
+{
+"placed": true,
+"price": 2481.25,
+"qty": 0.5,
+"order_id": 78,
+"error": null
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "place_add_order 4xx 확정 거부(조회 없음)",
+"calls": [
+{
+"fn": "place_add_order",
+"args": {
+"pside": "LONG",
+"price": 2481.25,
+"qty": 0.5
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2019,
+"msg": "Margin is insufficient."
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTC&price=2481.25&quantity=0.5&newClientOrderId=dbadL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=00f8cdaaa7f5a7ef33813a4f8d7e03ab805b4378aa58606234cf67eadcaed0c8",
+"key": "test_key"
+}
+],
+"results": [
+{
+"placed": false,
+"price": 2481.25,
+"qty": 0.5,
+"order_id": null,
+"error": "400 [-2019] Margin is insufficient."
 }
 ],
 "ban": null,
@@ -5918,7 +6247,7 @@ false
 ]
 },
 {
-"name": "place_bracket 익절 불명(남은 위험)",
+"name": "place_bracket 익절 불명 → 두 번째 조회에서 찾음",
 "calls": [
 {
 "fn": "place_bracket",
@@ -5963,7 +6292,25 @@ false
 "act": "close"
 },
 {
-"act": "hang"
+"status": 400,
+"body": {
+"code": -2013,
+"msg": "Order does not exist."
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 301,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"algoId": 42
+}
 }
 ],
 "keys": true,
@@ -5994,8 +6341,179 @@ false
 "key": "test_key"
 },
 {
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbtpL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=8f19de2af4ebe488531968c91980efeb8a956e6391e0297cf9fb321cca0707a7",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbtpL1800000000000&recvWindow=5000&timestamp=1800000001037&signature=b6320215e243c2ec271ef35d5d5d5d565d1437008e14fd9472664cb45a15f929",
+"key": "test_key"
+},
+{
 "method": "POST",
-"target": "/fapi/v1/algoOrder?algoType=CONDITIONAL&symbol=ETHUSDC&side=SELL&positionSide=LONG&type=STOP_MARKET&triggerPrice=2375.0&closePosition=true&workingType=MARK_PRICE&clientAlgoId=dbslL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=63218cf1b6aa6b237845fd2b5ea7a6c2dcee700cfa4bbe25caa1f02b72dd6807",
+"target": "/fapi/v1/algoOrder?algoType=CONDITIONAL&symbol=ETHUSDC&side=SELL&positionSide=LONG&type=STOP_MARKET&triggerPrice=2375.0&closePosition=true&workingType=MARK_PRICE&clientAlgoId=dbslL1800000000000&recvWindow=5000&timestamp=1800000001037&signature=c5ced32277cdb10cc2a9adfa7691355065278e82ef7f3d379eab398e82fcbcd7",
+"key": "test_key"
+}
+],
+"results": [
+{
+"qty": 1.0,
+"cleared": {
+"cancelled": 0,
+"errors": []
+},
+"tp": {
+"placed": true,
+"price": 2600.5,
+"order_id": 301,
+"error": null
+},
+"backstop": {
+"placed": true,
+"price": 2375.0,
+"algo_id": 42,
+"error": null
+},
+"placed": true
+}
+],
+"ban": null,
+"conns": 2,
+"post_only": [
+false
+]
+},
+{
+"name": "place_bracket 익절 불명 → 끝내 모름 · 표식 취소",
+"calls": [
+{
+"fn": "place_bracket",
+"args": {
+"bracket": {
+"tp_price": 2600.5,
+"backstop_price": 2375.0
+},
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "1",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": []
+},
+{
+"act": "close"
+},
+{
+"status": 400,
+"body": {
+"code": -2013,
+"msg": "Order does not exist."
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2013,
+"msg": "Order does not exist."
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2013,
+"msg": "Order does not exist."
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2011,
+"msg": "Unknown order sent."
+}
+},
+{
+"status": 200,
+"body": {
+"algoId": 42
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2600.5&quantity=1.0&newClientOrderId=dbtpL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=52778898d9c2d50baf5b2623519459679520a4bcc086d54179a175d545214382",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbtpL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=8f19de2af4ebe488531968c91980efeb8a956e6391e0297cf9fb321cca0707a7",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbtpL1800000000000&recvWindow=5000&timestamp=1800000001037&signature=b6320215e243c2ec271ef35d5d5d5d565d1437008e14fd9472664cb45a15f929",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbtpL1800000000000&recvWindow=5000&timestamp=1800000002037&signature=9788918c37bda1457e4041d07bb951e82f4445e1580f9e5f5c4ad0607b7a06ec",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&origClientOrderId=dbtpL1800000000000&recvWindow=5000&timestamp=1800000003037&signature=e5aa964530c76bd64eaf6901935953fe903b21dc91c99de7c079c3fb157407e9",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/algoOrder?algoType=CONDITIONAL&symbol=ETHUSDC&side=SELL&positionSide=LONG&type=STOP_MARKET&triggerPrice=2375.0&closePosition=true&workingType=MARK_PRICE&clientAlgoId=dbslL1800000000000&recvWindow=5000&timestamp=1800000003037&signature=76ab93e2a86b8dd1c182c11411bc1a7aef0121a12921f3b0dc42c16bc98fe87c",
 "key": "test_key"
 }
 ],
@@ -6010,13 +6528,13 @@ false
 "placed": false,
 "price": 2600.5,
 "order_id": null,
-"error": "ServerDisconnectedError: Server disconnected"
+"error": "주문 접수 여부를 확인하지 못했습니다(ServerDisconnectedError: Server disconnected) — 표식으로 취소를 보냈습니다"
 },
 "backstop": {
-"placed": false,
+"placed": true,
 "price": 2375.0,
-"algo_id": null,
-"error": "TimeoutError: "
+"algo_id": 42,
+"error": null
 },
 "placed": false
 }
@@ -6664,7 +7182,7 @@ false
 "results": [
 {
 "placed": false,
-"reason": "포지션 조회 실패: x"
+"reason": "포지션 조회 실패: EmptyResponse: HTTP 200 본문 'x'"
 }
 ],
 "ban": null,
@@ -7850,6 +8368,7680 @@ false
 ],
 "ban": null,
 "conns": 2,
+"post_only": [
+false
+]
+},
+{
+"name": "cancel_exit_orders 없음(조회 1번)",
+"calls": [
+{
+"fn": "cancel_exit_orders",
+"args": {
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"orderId": 5,
+"clientOrderId": "dbpgL1",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT"
+},
+{
+"orderId": 6,
+"clientOrderId": "dbtpL1",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT"
+},
+{
+"orderId": 8,
+"clientOrderId": "dbwtL1",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT"
+},
+{
+"orderId": 9,
+"clientOrderId": "aos_x",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT"
+}
+]
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+{
+"cancelled": 0,
+"errors": []
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "cancel_exit_orders 지우고 확인",
+"calls": [
+{
+"fn": "cancel_exit_orders",
+"args": {
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"orderId": 7,
+"clientOrderId": "dbpgL18",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT"
+},
+{
+"orderId": 5,
+"clientOrderId": "dbpgL1",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT"
+},
+{
+"orderId": 6,
+"clientOrderId": "dbtpL1",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT"
+},
+{
+"orderId": 8,
+"clientOrderId": "dbwtL1",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT"
+},
+{
+"orderId": 9,
+"clientOrderId": "aos_x",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT"
+}
+]
+},
+{
+"status": 400,
+"body": {
+"code": -2011,
+"msg": "Unknown order sent."
+}
+},
+{
+"status": 200,
+"body": [
+{
+"orderId": 5,
+"clientOrderId": "dbpgL1",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT"
+},
+{
+"orderId": 6,
+"clientOrderId": "dbtpL1",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT"
+},
+{
+"orderId": 8,
+"clientOrderId": "dbwtL1",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT"
+},
+{
+"orderId": 9,
+"clientOrderId": "aos_x",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT"
+}
+]
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=7&recvWindow=5000&timestamp=1800000000037&signature=009d114f38c63d6f39a028d216821cb7cc331fcae1b4bdcea7b7dcb9f6373d20",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+{
+"cancelled": 1,
+"errors": []
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "cancel_exit_orders 다시 읽어도 남음",
+"calls": [
+{
+"fn": "cancel_exit_orders",
+"args": {
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"orderId": 7,
+"clientOrderId": "dbpgL18",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT"
+}
+]
+},
+{
+"status": 200,
+"body": {}
+},
+{
+"status": 200,
+"body": [
+{
+"orderId": 7,
+"clientOrderId": "dbpgL18",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT"
+}
+]
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=7&recvWindow=5000&timestamp=1800000000037&signature=009d114f38c63d6f39a028d216821cb7cc331fcae1b4bdcea7b7dcb9f6373d20",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+{
+"cancelled": 1,
+"errors": [
+"앞선 청산 주문 [7] 이 아직 살아 있습니다"
+]
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "cancel_exit_orders 목록 실패 418",
+"calls": [
+{
+"fn": "cancel_exit_orders",
+"args": {
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 418,
+"body": {
+"code": -1003,
+"msg": "banned until 1800000999000"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+{
+"cancelled": 0,
+"errors": [
+"openOrders: 418 [-1003] banned until 1800000999000"
+]
+}
+],
+"ban": "1800000999.000\n",
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "cancel_exit_orders 숏",
+"calls": [
+{
+"fn": "cancel_exit_orders",
+"args": {
+"pside": "SHORT"
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"orderId": 3,
+"clientOrderId": "dbpgS1",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT"
+},
+{
+"orderId": 4,
+"clientOrderId": "dbpgS2",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT"
+}
+]
+},
+{
+"status": 200,
+"body": {}
+},
+{
+"status": 200,
+"body": [
+{
+"orderId": 4,
+"clientOrderId": "dbpgS2",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT"
+}
+]
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=3&recvWindow=5000&timestamp=1800000000037&signature=628e477d119635fb089c31393919fd20016d890735997024b1e3fcb5fc789a06",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+}
+],
+"results": [
+{
+"cancelled": 1,
+"errors": []
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "cancel_exit_orders 키 없음",
+"calls": [
+{
+"fn": "cancel_exit_orders",
+"args": {
+"pside": "LONG"
+},
+"advance": 0.0
+}
+],
+"responses": [],
+"keys": false,
+"requests": [],
+"results": [
+{
+"cancelled": 0,
+"errors": [
+"API 키가 없습니다"
+]
+}
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "집행 M1 따라가기 마감 → 시장가",
+"calls": [
+{
+"fn": "run_entry",
+"args": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": 2500.0,
+"quantity": 2.0,
+"target_leverage": 0
+}
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 9001,
+"status": "FILLED",
+"executedQty": "2"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.0&quantity=2.0&newClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=997398d5de72d8dc32e1e0f4a5981cad12880b3fcbc761efb53f9c180ced3912",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000006037&signature=ed3bc2e8062c2a39dd53e00cb8eec53afb53419aa4a3c0c8ff8bceaf89be0c04",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000012037&signature=6a5e5e9cee3d1f994671d49e2eb4fcff7e30f8d8a4483cca4487b900ac348ef1",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000015037&signature=c96801077f20ef3e58d67fda49d42a7689e975800868a93b3cebf7178a833034",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000018037&signature=a2e67c68c4d6d3bac3df258bb3c67dc5e1ae1973a3baaebbdad356b0bcc602fd",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000021037&signature=dba22d7beff5d0b28eedda1fc30b3bb2e14fddb7621a497c4a41ae4b1af8400e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000024037&signature=b1c48dc4452135345696773c0056c18aa200cff541c6d09eae4733524e9dd6c3",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000027037&signature=78646e27fbc13f2cda23d4659522df3405527d7f0270cabf9cf47bca93ed3e19",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000030037&signature=5113eb05e2a234f661fbfcb38cae2ee98da53bdc245e6c45462a410d05887998",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000033037&signature=1dfa20522ddbd99d5aa6868a0d4dfc009a330b60e30109cb953d916b02b25fe5",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000036037&signature=760f0de5d8bb2e80af44e32279c4f87d5c193af6f1613a4e90f28d59db5cb21d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000039037&signature=843246b32d30720824dacb825499f03e7072871f4f73d27568eab19cd6330e9e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000042037&signature=4b8b7f273aff3e8aa746094404a96994e3a66969a883ea382169592b342c7ade",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000045037&signature=8c6c6d4eacafdc1286bbc2f80d4f96789629e0a162ac576a68cc9ebd98f3135a",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000048037&signature=e2f8e9aaf26c5fbf1f1b08eeb31599a97963554d62a80ec153d90c21f3ee3b6d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000051037&signature=e1330b97f072884e73976ff120aaf980ee0acb84363ed2c245ac04800159d525",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000054037&signature=98b4ec9d09f4356f17c677953e7bc2587a9902759fa152cd13e20d68afd1707c",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000057037&signature=0cba2ad3c75008f59ceecec603263cf1ec2b65df2773c4bf9de29ff89672f124",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000060037&signature=faa2538021d529021826ad8e7d0cc567746f7043f321812d67a8a47930895825",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000063037&signature=f8682665c8504bcf4ec24ae9ee27282d7ce2b4e0dad91b10ff0eae950cd4630a",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000066037&signature=93d1a64c4a6d0a335cc5af290cd762e4d2bcd5f4f98f1d50ba755579f2f45399",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000069037&signature=b21437c03655e0572a66d083ba339bcef784ef8a0acd37fe14512c7db7ad92a1",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000072037&signature=ac86d1933a82069c814535bd893c69dd575b64836b77fd7ff6e5774e055b1c97",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000075037&signature=2d5e99d1c73770606a48a2f1633fd4475702d6d4559fdbdef384b19d7c059db0",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000078037&signature=46500b8827efa1e0da303f6dca2bb1b80c8ee8de39966272fe50bc28584ee178",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000081037&signature=d8f14f11f8973aae74658dda97d7fdd26e82f1c1a7fa874f843ccac47d5d4375",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000084037&signature=fc429f8a7313fe2d249e5d401dc02f84494ccbbd90ed9c1fe814fb67208148f3",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000087037&signature=b98d4a4bfbc47538a75f82a76b44da52bb95cc57bed8bc1b148f6305268e3d8e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000090037&signature=8cd9886daa4baaf6910904564ee0109997a6250d56d52ea70be5a3b79d6ca228",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000093037&signature=66e0fde5bd7589b18899a0baf0d676c52ec88bb5f6dd38b40a59005239ea3b0a",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000096037&signature=44ad38315fbebba26581dcc963865b333545d54bf872d65bfc48e2f2c5e41707",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000099037&signature=0c9a485217f9b275bc2e26c842baac47fd558abb82d0b033907baf81a9517c11",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000102037&signature=c43dbebb935e288664d9de8655b9638f3b77a81fa63016d881181491ce777bd1",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000105037&signature=0ee2c8e41dd5b8a32720c2bcebcd6faaa38f7e4f90f7e2c00cf6a1b250d9b880",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000108037&signature=8590f9d9feee0889b00ec78b28db942cdcad2567e14c2861511da6c4653642b6",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000111037&signature=450340023d1ceb185d55bd759bb481858da0077b143fea6d9c7215a164cc930c",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000114037&signature=273c8ff8459912e2374c35c83f77c6ad123b5a41f074b3421dd8b94a30f16de3",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000117037&signature=14a66d686460143c50e97275d12b3905ccd72c812be3ba0720f9c367a3787880",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000120037&signature=c70d5fcdfa04a0887700e657a00e3ee0f2ced551764b11e1eae41b126043b511",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000120037&signature=c70d5fcdfa04a0887700e657a00e3ee0f2ced551764b11e1eae41b126043b511",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000120037&signature=c70d5fcdfa04a0887700e657a00e3ee0f2ced551764b11e1eae41b126043b511",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=MARKET&quantity=2.0&recvWindow=5000&timestamp=1800000120037&signature=63ff017b591bee43f3c54a047c67e6a2ae5e493fabefdef4c21b5ea1d38b96a5",
+"key": "test_key"
+}
+],
+"results": [
+{
+"phase": "filled_taker",
+"filled": 2.0,
+"quantity": 2.0,
+"taker_qty": 2.0,
+"taker_order_id": 9001,
+"taker_reason": null,
+"error": null,
+"repegs": 0,
+"cancel_reason": null
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "집행 M1 부분 체결 뒤 시장가",
+"calls": [
+{
+"fn": "run_entry",
+"args": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": 2500.0,
+"quantity": 2.0,
+"target_leverage": 0
+}
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0.5"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 9001,
+"status": "FILLED",
+"executedQty": "1.5"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.0&quantity=2.0&newClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=997398d5de72d8dc32e1e0f4a5981cad12880b3fcbc761efb53f9c180ced3912",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000006037&signature=ed3bc2e8062c2a39dd53e00cb8eec53afb53419aa4a3c0c8ff8bceaf89be0c04",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000012037&signature=6a5e5e9cee3d1f994671d49e2eb4fcff7e30f8d8a4483cca4487b900ac348ef1",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000015037&signature=c96801077f20ef3e58d67fda49d42a7689e975800868a93b3cebf7178a833034",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000018037&signature=a2e67c68c4d6d3bac3df258bb3c67dc5e1ae1973a3baaebbdad356b0bcc602fd",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000021037&signature=dba22d7beff5d0b28eedda1fc30b3bb2e14fddb7621a497c4a41ae4b1af8400e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000024037&signature=b1c48dc4452135345696773c0056c18aa200cff541c6d09eae4733524e9dd6c3",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000027037&signature=78646e27fbc13f2cda23d4659522df3405527d7f0270cabf9cf47bca93ed3e19",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000030037&signature=5113eb05e2a234f661fbfcb38cae2ee98da53bdc245e6c45462a410d05887998",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000033037&signature=1dfa20522ddbd99d5aa6868a0d4dfc009a330b60e30109cb953d916b02b25fe5",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000036037&signature=760f0de5d8bb2e80af44e32279c4f87d5c193af6f1613a4e90f28d59db5cb21d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000039037&signature=843246b32d30720824dacb825499f03e7072871f4f73d27568eab19cd6330e9e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000042037&signature=4b8b7f273aff3e8aa746094404a96994e3a66969a883ea382169592b342c7ade",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000045037&signature=8c6c6d4eacafdc1286bbc2f80d4f96789629e0a162ac576a68cc9ebd98f3135a",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000048037&signature=e2f8e9aaf26c5fbf1f1b08eeb31599a97963554d62a80ec153d90c21f3ee3b6d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000051037&signature=e1330b97f072884e73976ff120aaf980ee0acb84363ed2c245ac04800159d525",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000054037&signature=98b4ec9d09f4356f17c677953e7bc2587a9902759fa152cd13e20d68afd1707c",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000057037&signature=0cba2ad3c75008f59ceecec603263cf1ec2b65df2773c4bf9de29ff89672f124",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000060037&signature=faa2538021d529021826ad8e7d0cc567746f7043f321812d67a8a47930895825",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000063037&signature=f8682665c8504bcf4ec24ae9ee27282d7ce2b4e0dad91b10ff0eae950cd4630a",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000066037&signature=93d1a64c4a6d0a335cc5af290cd762e4d2bcd5f4f98f1d50ba755579f2f45399",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000069037&signature=b21437c03655e0572a66d083ba339bcef784ef8a0acd37fe14512c7db7ad92a1",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000072037&signature=ac86d1933a82069c814535bd893c69dd575b64836b77fd7ff6e5774e055b1c97",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000075037&signature=2d5e99d1c73770606a48a2f1633fd4475702d6d4559fdbdef384b19d7c059db0",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000078037&signature=46500b8827efa1e0da303f6dca2bb1b80c8ee8de39966272fe50bc28584ee178",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000081037&signature=d8f14f11f8973aae74658dda97d7fdd26e82f1c1a7fa874f843ccac47d5d4375",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000084037&signature=fc429f8a7313fe2d249e5d401dc02f84494ccbbd90ed9c1fe814fb67208148f3",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000087037&signature=b98d4a4bfbc47538a75f82a76b44da52bb95cc57bed8bc1b148f6305268e3d8e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000090037&signature=8cd9886daa4baaf6910904564ee0109997a6250d56d52ea70be5a3b79d6ca228",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000093037&signature=66e0fde5bd7589b18899a0baf0d676c52ec88bb5f6dd38b40a59005239ea3b0a",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000096037&signature=44ad38315fbebba26581dcc963865b333545d54bf872d65bfc48e2f2c5e41707",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000099037&signature=0c9a485217f9b275bc2e26c842baac47fd558abb82d0b033907baf81a9517c11",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000102037&signature=c43dbebb935e288664d9de8655b9638f3b77a81fa63016d881181491ce777bd1",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000105037&signature=0ee2c8e41dd5b8a32720c2bcebcd6faaa38f7e4f90f7e2c00cf6a1b250d9b880",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000108037&signature=8590f9d9feee0889b00ec78b28db942cdcad2567e14c2861511da6c4653642b6",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000111037&signature=450340023d1ceb185d55bd759bb481858da0077b143fea6d9c7215a164cc930c",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000114037&signature=273c8ff8459912e2374c35c83f77c6ad123b5a41f074b3421dd8b94a30f16de3",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000117037&signature=14a66d686460143c50e97275d12b3905ccd72c812be3ba0720f9c367a3787880",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000120037&signature=c70d5fcdfa04a0887700e657a00e3ee0f2ced551764b11e1eae41b126043b511",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000120037&signature=c70d5fcdfa04a0887700e657a00e3ee0f2ced551764b11e1eae41b126043b511",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000120037&signature=c70d5fcdfa04a0887700e657a00e3ee0f2ced551764b11e1eae41b126043b511",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=MARKET&quantity=1.5&recvWindow=5000&timestamp=1800000120037&signature=3daaab8e547cb84baa77302085eddd935ae53ebb03a87cc107537c32e1bafe2c",
+"key": "test_key"
+}
+],
+"results": [
+{
+"phase": "filled_taker",
+"filled": 2.0,
+"quantity": 2.0,
+"taker_qty": 1.5,
+"taker_order_id": 9001,
+"taker_reason": null,
+"error": null,
+"repegs": 0,
+"cancel_reason": null
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "집행 M1 시장가 ACK(체결량 0)",
+"calls": [
+{
+"fn": "run_entry",
+"args": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": 2500.0,
+"quantity": 2.0,
+"target_leverage": 0
+}
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 9001,
+"status": "FILLED",
+"executedQty": "0"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.0&quantity=2.0&newClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=997398d5de72d8dc32e1e0f4a5981cad12880b3fcbc761efb53f9c180ced3912",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000006037&signature=ed3bc2e8062c2a39dd53e00cb8eec53afb53419aa4a3c0c8ff8bceaf89be0c04",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000012037&signature=6a5e5e9cee3d1f994671d49e2eb4fcff7e30f8d8a4483cca4487b900ac348ef1",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000015037&signature=c96801077f20ef3e58d67fda49d42a7689e975800868a93b3cebf7178a833034",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000018037&signature=a2e67c68c4d6d3bac3df258bb3c67dc5e1ae1973a3baaebbdad356b0bcc602fd",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000021037&signature=dba22d7beff5d0b28eedda1fc30b3bb2e14fddb7621a497c4a41ae4b1af8400e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000024037&signature=b1c48dc4452135345696773c0056c18aa200cff541c6d09eae4733524e9dd6c3",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000027037&signature=78646e27fbc13f2cda23d4659522df3405527d7f0270cabf9cf47bca93ed3e19",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000030037&signature=5113eb05e2a234f661fbfcb38cae2ee98da53bdc245e6c45462a410d05887998",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000033037&signature=1dfa20522ddbd99d5aa6868a0d4dfc009a330b60e30109cb953d916b02b25fe5",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000036037&signature=760f0de5d8bb2e80af44e32279c4f87d5c193af6f1613a4e90f28d59db5cb21d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000039037&signature=843246b32d30720824dacb825499f03e7072871f4f73d27568eab19cd6330e9e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000042037&signature=4b8b7f273aff3e8aa746094404a96994e3a66969a883ea382169592b342c7ade",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000045037&signature=8c6c6d4eacafdc1286bbc2f80d4f96789629e0a162ac576a68cc9ebd98f3135a",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000048037&signature=e2f8e9aaf26c5fbf1f1b08eeb31599a97963554d62a80ec153d90c21f3ee3b6d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000051037&signature=e1330b97f072884e73976ff120aaf980ee0acb84363ed2c245ac04800159d525",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000054037&signature=98b4ec9d09f4356f17c677953e7bc2587a9902759fa152cd13e20d68afd1707c",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000057037&signature=0cba2ad3c75008f59ceecec603263cf1ec2b65df2773c4bf9de29ff89672f124",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000060037&signature=faa2538021d529021826ad8e7d0cc567746f7043f321812d67a8a47930895825",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000063037&signature=f8682665c8504bcf4ec24ae9ee27282d7ce2b4e0dad91b10ff0eae950cd4630a",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000066037&signature=93d1a64c4a6d0a335cc5af290cd762e4d2bcd5f4f98f1d50ba755579f2f45399",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000069037&signature=b21437c03655e0572a66d083ba339bcef784ef8a0acd37fe14512c7db7ad92a1",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000072037&signature=ac86d1933a82069c814535bd893c69dd575b64836b77fd7ff6e5774e055b1c97",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000075037&signature=2d5e99d1c73770606a48a2f1633fd4475702d6d4559fdbdef384b19d7c059db0",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000078037&signature=46500b8827efa1e0da303f6dca2bb1b80c8ee8de39966272fe50bc28584ee178",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000081037&signature=d8f14f11f8973aae74658dda97d7fdd26e82f1c1a7fa874f843ccac47d5d4375",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000084037&signature=fc429f8a7313fe2d249e5d401dc02f84494ccbbd90ed9c1fe814fb67208148f3",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000087037&signature=b98d4a4bfbc47538a75f82a76b44da52bb95cc57bed8bc1b148f6305268e3d8e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000090037&signature=8cd9886daa4baaf6910904564ee0109997a6250d56d52ea70be5a3b79d6ca228",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000093037&signature=66e0fde5bd7589b18899a0baf0d676c52ec88bb5f6dd38b40a59005239ea3b0a",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000096037&signature=44ad38315fbebba26581dcc963865b333545d54bf872d65bfc48e2f2c5e41707",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000099037&signature=0c9a485217f9b275bc2e26c842baac47fd558abb82d0b033907baf81a9517c11",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000102037&signature=c43dbebb935e288664d9de8655b9638f3b77a81fa63016d881181491ce777bd1",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000105037&signature=0ee2c8e41dd5b8a32720c2bcebcd6faaa38f7e4f90f7e2c00cf6a1b250d9b880",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000108037&signature=8590f9d9feee0889b00ec78b28db942cdcad2567e14c2861511da6c4653642b6",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000111037&signature=450340023d1ceb185d55bd759bb481858da0077b143fea6d9c7215a164cc930c",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000114037&signature=273c8ff8459912e2374c35c83f77c6ad123b5a41f074b3421dd8b94a30f16de3",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000117037&signature=14a66d686460143c50e97275d12b3905ccd72c812be3ba0720f9c367a3787880",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000120037&signature=c70d5fcdfa04a0887700e657a00e3ee0f2ced551764b11e1eae41b126043b511",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000120037&signature=c70d5fcdfa04a0887700e657a00e3ee0f2ced551764b11e1eae41b126043b511",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000120037&signature=c70d5fcdfa04a0887700e657a00e3ee0f2ced551764b11e1eae41b126043b511",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=MARKET&quantity=2.0&recvWindow=5000&timestamp=1800000120037&signature=63ff017b591bee43f3c54a047c67e6a2ae5e493fabefdef4c21b5ea1d38b96a5",
+"key": "test_key"
+}
+],
+"results": [
+{
+"phase": "filled_taker",
+"filled": 2.0,
+"quantity": 2.0,
+"taker_qty": 2.0,
+"taker_order_id": 9001,
+"taker_reason": null,
+"error": null,
+"repegs": 0,
+"cancel_reason": null
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "집행 M1 시장가 거부",
+"calls": [
+{
+"fn": "run_entry",
+"args": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": 2500.0,
+"quantity": 2.0,
+"target_leverage": 0
+}
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0"
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2019,
+"msg": "Margin is insufficient."
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.0&quantity=2.0&newClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=997398d5de72d8dc32e1e0f4a5981cad12880b3fcbc761efb53f9c180ced3912",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000006037&signature=ed3bc2e8062c2a39dd53e00cb8eec53afb53419aa4a3c0c8ff8bceaf89be0c04",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000012037&signature=6a5e5e9cee3d1f994671d49e2eb4fcff7e30f8d8a4483cca4487b900ac348ef1",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000015037&signature=c96801077f20ef3e58d67fda49d42a7689e975800868a93b3cebf7178a833034",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000018037&signature=a2e67c68c4d6d3bac3df258bb3c67dc5e1ae1973a3baaebbdad356b0bcc602fd",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000021037&signature=dba22d7beff5d0b28eedda1fc30b3bb2e14fddb7621a497c4a41ae4b1af8400e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000024037&signature=b1c48dc4452135345696773c0056c18aa200cff541c6d09eae4733524e9dd6c3",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000027037&signature=78646e27fbc13f2cda23d4659522df3405527d7f0270cabf9cf47bca93ed3e19",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000030037&signature=5113eb05e2a234f661fbfcb38cae2ee98da53bdc245e6c45462a410d05887998",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000033037&signature=1dfa20522ddbd99d5aa6868a0d4dfc009a330b60e30109cb953d916b02b25fe5",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000036037&signature=760f0de5d8bb2e80af44e32279c4f87d5c193af6f1613a4e90f28d59db5cb21d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000039037&signature=843246b32d30720824dacb825499f03e7072871f4f73d27568eab19cd6330e9e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000042037&signature=4b8b7f273aff3e8aa746094404a96994e3a66969a883ea382169592b342c7ade",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000045037&signature=8c6c6d4eacafdc1286bbc2f80d4f96789629e0a162ac576a68cc9ebd98f3135a",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000048037&signature=e2f8e9aaf26c5fbf1f1b08eeb31599a97963554d62a80ec153d90c21f3ee3b6d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000051037&signature=e1330b97f072884e73976ff120aaf980ee0acb84363ed2c245ac04800159d525",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000054037&signature=98b4ec9d09f4356f17c677953e7bc2587a9902759fa152cd13e20d68afd1707c",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000057037&signature=0cba2ad3c75008f59ceecec603263cf1ec2b65df2773c4bf9de29ff89672f124",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000060037&signature=faa2538021d529021826ad8e7d0cc567746f7043f321812d67a8a47930895825",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000063037&signature=f8682665c8504bcf4ec24ae9ee27282d7ce2b4e0dad91b10ff0eae950cd4630a",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000066037&signature=93d1a64c4a6d0a335cc5af290cd762e4d2bcd5f4f98f1d50ba755579f2f45399",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000069037&signature=b21437c03655e0572a66d083ba339bcef784ef8a0acd37fe14512c7db7ad92a1",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000072037&signature=ac86d1933a82069c814535bd893c69dd575b64836b77fd7ff6e5774e055b1c97",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000075037&signature=2d5e99d1c73770606a48a2f1633fd4475702d6d4559fdbdef384b19d7c059db0",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000078037&signature=46500b8827efa1e0da303f6dca2bb1b80c8ee8de39966272fe50bc28584ee178",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000081037&signature=d8f14f11f8973aae74658dda97d7fdd26e82f1c1a7fa874f843ccac47d5d4375",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000084037&signature=fc429f8a7313fe2d249e5d401dc02f84494ccbbd90ed9c1fe814fb67208148f3",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000087037&signature=b98d4a4bfbc47538a75f82a76b44da52bb95cc57bed8bc1b148f6305268e3d8e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000090037&signature=8cd9886daa4baaf6910904564ee0109997a6250d56d52ea70be5a3b79d6ca228",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000093037&signature=66e0fde5bd7589b18899a0baf0d676c52ec88bb5f6dd38b40a59005239ea3b0a",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000096037&signature=44ad38315fbebba26581dcc963865b333545d54bf872d65bfc48e2f2c5e41707",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000099037&signature=0c9a485217f9b275bc2e26c842baac47fd558abb82d0b033907baf81a9517c11",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000102037&signature=c43dbebb935e288664d9de8655b9638f3b77a81fa63016d881181491ce777bd1",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000105037&signature=0ee2c8e41dd5b8a32720c2bcebcd6faaa38f7e4f90f7e2c00cf6a1b250d9b880",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000108037&signature=8590f9d9feee0889b00ec78b28db942cdcad2567e14c2861511da6c4653642b6",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000111037&signature=450340023d1ceb185d55bd759bb481858da0077b143fea6d9c7215a164cc930c",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000114037&signature=273c8ff8459912e2374c35c83f77c6ad123b5a41f074b3421dd8b94a30f16de3",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000117037&signature=14a66d686460143c50e97275d12b3905ccd72c812be3ba0720f9c367a3787880",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000120037&signature=c70d5fcdfa04a0887700e657a00e3ee0f2ced551764b11e1eae41b126043b511",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000120037&signature=c70d5fcdfa04a0887700e657a00e3ee0f2ced551764b11e1eae41b126043b511",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000120037&signature=c70d5fcdfa04a0887700e657a00e3ee0f2ced551764b11e1eae41b126043b511",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=MARKET&quantity=2.0&recvWindow=5000&timestamp=1800000120037&signature=63ff017b591bee43f3c54a047c67e6a2ae5e493fabefdef4c21b5ea1d38b96a5",
+"key": "test_key"
+}
+],
+"results": [
+{
+"phase": "taker_failed",
+"filled": 0.0,
+"quantity": 2.0,
+"taker_qty": 0.0,
+"taker_order_id": null,
+"taker_reason": null,
+"error": "400 [-2019] Margin is insufficient.",
+"repegs": 0,
+"cancel_reason": null
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "집행 M1 시장가 불명(끊김)",
+"calls": [
+{
+"fn": "run_entry",
+"args": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": 2500.0,
+"quantity": 2.0,
+"target_leverage": 0
+}
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0"
+}
+},
+{
+"act": "close"
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.0&quantity=2.0&newClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=997398d5de72d8dc32e1e0f4a5981cad12880b3fcbc761efb53f9c180ced3912",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000006037&signature=ed3bc2e8062c2a39dd53e00cb8eec53afb53419aa4a3c0c8ff8bceaf89be0c04",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000012037&signature=6a5e5e9cee3d1f994671d49e2eb4fcff7e30f8d8a4483cca4487b900ac348ef1",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000015037&signature=c96801077f20ef3e58d67fda49d42a7689e975800868a93b3cebf7178a833034",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000018037&signature=a2e67c68c4d6d3bac3df258bb3c67dc5e1ae1973a3baaebbdad356b0bcc602fd",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000021037&signature=dba22d7beff5d0b28eedda1fc30b3bb2e14fddb7621a497c4a41ae4b1af8400e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000024037&signature=b1c48dc4452135345696773c0056c18aa200cff541c6d09eae4733524e9dd6c3",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000027037&signature=78646e27fbc13f2cda23d4659522df3405527d7f0270cabf9cf47bca93ed3e19",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000030037&signature=5113eb05e2a234f661fbfcb38cae2ee98da53bdc245e6c45462a410d05887998",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000033037&signature=1dfa20522ddbd99d5aa6868a0d4dfc009a330b60e30109cb953d916b02b25fe5",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000036037&signature=760f0de5d8bb2e80af44e32279c4f87d5c193af6f1613a4e90f28d59db5cb21d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000039037&signature=843246b32d30720824dacb825499f03e7072871f4f73d27568eab19cd6330e9e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000042037&signature=4b8b7f273aff3e8aa746094404a96994e3a66969a883ea382169592b342c7ade",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000045037&signature=8c6c6d4eacafdc1286bbc2f80d4f96789629e0a162ac576a68cc9ebd98f3135a",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000048037&signature=e2f8e9aaf26c5fbf1f1b08eeb31599a97963554d62a80ec153d90c21f3ee3b6d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000051037&signature=e1330b97f072884e73976ff120aaf980ee0acb84363ed2c245ac04800159d525",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000054037&signature=98b4ec9d09f4356f17c677953e7bc2587a9902759fa152cd13e20d68afd1707c",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000057037&signature=0cba2ad3c75008f59ceecec603263cf1ec2b65df2773c4bf9de29ff89672f124",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000060037&signature=faa2538021d529021826ad8e7d0cc567746f7043f321812d67a8a47930895825",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000063037&signature=f8682665c8504bcf4ec24ae9ee27282d7ce2b4e0dad91b10ff0eae950cd4630a",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000066037&signature=93d1a64c4a6d0a335cc5af290cd762e4d2bcd5f4f98f1d50ba755579f2f45399",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000069037&signature=b21437c03655e0572a66d083ba339bcef784ef8a0acd37fe14512c7db7ad92a1",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000072037&signature=ac86d1933a82069c814535bd893c69dd575b64836b77fd7ff6e5774e055b1c97",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000075037&signature=2d5e99d1c73770606a48a2f1633fd4475702d6d4559fdbdef384b19d7c059db0",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000078037&signature=46500b8827efa1e0da303f6dca2bb1b80c8ee8de39966272fe50bc28584ee178",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000081037&signature=d8f14f11f8973aae74658dda97d7fdd26e82f1c1a7fa874f843ccac47d5d4375",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000084037&signature=fc429f8a7313fe2d249e5d401dc02f84494ccbbd90ed9c1fe814fb67208148f3",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000087037&signature=b98d4a4bfbc47538a75f82a76b44da52bb95cc57bed8bc1b148f6305268e3d8e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000090037&signature=8cd9886daa4baaf6910904564ee0109997a6250d56d52ea70be5a3b79d6ca228",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000093037&signature=66e0fde5bd7589b18899a0baf0d676c52ec88bb5f6dd38b40a59005239ea3b0a",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000096037&signature=44ad38315fbebba26581dcc963865b333545d54bf872d65bfc48e2f2c5e41707",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000099037&signature=0c9a485217f9b275bc2e26c842baac47fd558abb82d0b033907baf81a9517c11",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000102037&signature=c43dbebb935e288664d9de8655b9638f3b77a81fa63016d881181491ce777bd1",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000105037&signature=0ee2c8e41dd5b8a32720c2bcebcd6faaa38f7e4f90f7e2c00cf6a1b250d9b880",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000108037&signature=8590f9d9feee0889b00ec78b28db942cdcad2567e14c2861511da6c4653642b6",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000111037&signature=450340023d1ceb185d55bd759bb481858da0077b143fea6d9c7215a164cc930c",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000114037&signature=273c8ff8459912e2374c35c83f77c6ad123b5a41f074b3421dd8b94a30f16de3",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000117037&signature=14a66d686460143c50e97275d12b3905ccd72c812be3ba0720f9c367a3787880",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000120037&signature=c70d5fcdfa04a0887700e657a00e3ee0f2ced551764b11e1eae41b126043b511",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000120037&signature=c70d5fcdfa04a0887700e657a00e3ee0f2ced551764b11e1eae41b126043b511",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000120037&signature=c70d5fcdfa04a0887700e657a00e3ee0f2ced551764b11e1eae41b126043b511",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=MARKET&quantity=2.0&recvWindow=5000&timestamp=1800000120037&signature=63ff017b591bee43f3c54a047c67e6a2ae5e493fabefdef4c21b5ea1d38b96a5",
+"key": "test_key"
+}
+],
+"results": [
+{
+"phase": "taker_failed",
+"filled": 0.0,
+"quantity": 2.0,
+"taker_qty": 0.0,
+"taker_order_id": null,
+"taker_reason": null,
+"error": "ServerDisconnectedError: Server disconnected",
+"repegs": 0,
+"cancel_reason": null
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "집행 M2 시장가 계획",
+"calls": [
+{
+"fn": "run_entry",
+"args": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "MARKET",
+"price": 2500.0,
+"quantity": 2.0,
+"target_leverage": 0
+}
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 9001,
+"status": "FILLED",
+"executedQty": "2"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=MARKET&quantity=2.0&recvWindow=5000&timestamp=1800000000037&signature=411397f780d64bf7a3f15fee5e58ec4482fcb3077c5cff85b5b07ce8a13fc64a",
+"key": "test_key"
+}
+],
+"results": [
+{
+"phase": "filled_taker",
+"filled": 2.0,
+"quantity": 2.0,
+"taker_qty": 2.0,
+"taker_order_id": 9001,
+"taker_reason": null,
+"error": null,
+"repegs": 0,
+"cancel_reason": null
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "집행 M6 청산 시장가 계획",
+"calls": [
+{
+"fn": "run_exit",
+"args": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "MARKET",
+"quantity": 2.0,
+"fallback_after_sec": 30.0,
+"vol_bpm": 9.0,
+"market_reason": "변동성"
+}
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 9001,
+"status": "FILLED",
+"executedQty": "2"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=MARKET&quantity=2.0&recvWindow=5000&timestamp=1800000000037&signature=a0bf7ce0113b1daaaf0b4dfa1c726fd0fda274a2a5854f160f14eaef052a67a6",
+"key": "test_key"
+}
+],
+"results": [
+{
+"phase": "filled_taker",
+"filled": 2.0,
+"quantity": 2.0,
+"taker_qty": 2.0,
+"taker_order_id": 9001,
+"taker_reason": null,
+"error": null,
+"repegs": 0,
+"cancel_reason": null
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "집행 M6 청산 시장가 거부",
+"calls": [
+{
+"fn": "run_exit",
+"args": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "MARKET",
+"quantity": 2.0,
+"fallback_after_sec": 30.0,
+"vol_bpm": 9.0
+}
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 400,
+"body": {
+"code": -2022,
+"msg": "ReduceOnly Order is rejected."
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=MARKET&quantity=2.0&recvWindow=5000&timestamp=1800000000037&signature=a0bf7ce0113b1daaaf0b4dfa1c726fd0fda274a2a5854f160f14eaef052a67a6",
+"key": "test_key"
+}
+],
+"results": [
+{
+"phase": "taker_failed",
+"filled": 0.0,
+"quantity": 2.0,
+"taker_qty": 0.0,
+"taker_order_id": null,
+"taker_reason": null,
+"error": "400 [-2022] ReduceOnly Order is rejected.",
+"repegs": 0,
+"cancel_reason": null
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "집행 M9 청산 마감 잔량 시장가",
+"calls": [
+{
+"fn": "run_exit",
+"args": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": 2500.1,
+"quantity": 2.0,
+"fallback_after_sec": 30.0,
+"vol_bpm": 9.0
+}
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 9001,
+"status": "FILLED",
+"executedQty": "0"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.1&quantity=2.0&newClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=3451ce48b4f585454671041dfcd9107c81104feb1caea0289d4321d72ecdd140",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=588e2562aa6aa10e2adf7140da83b9b377867593c3185db8551397bb11728af5",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000006037&signature=0c43afb5fe59197ed79d5dd6a6c519251c4b7321b9d8639fd9359b06fad2f427",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=3ba8e6a5209e817d26050ea026ae2feea388877b2732011ed581302b1427d2ff",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000012037&signature=9ea1505b8597ad855817c879165b3fba6254bdc1cee33cd01174f8cf3fbde609",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000015037&signature=a9a17d8114050659a80e25615130ca4ad46d03b7207fa56f76d1f14b8ce76e01",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000018037&signature=dc5e9518def5c44a2df2dc7c7d49d065e3611b5f3428a33e62a6a9b456a3dfe9",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000021037&signature=9be75bd3eb25082bbbeb45f916634497f7b48b1cbbb1486b0166f5774bf39d1b",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000024037&signature=0beba6d41512fbd3ce6ceeed4e2cabbf764b78b07b20b9694fe60fa5dc11121b",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000027037&signature=cacace6bab1aed92dc57e6357b802c865ad305415ddc44e75e5ee35e15231dda",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000030037&signature=ddf4e690cdcbfcdedf36f8e3c610ab2150b88523a76a7fa49e12a7f6432d59c0",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000030037&signature=ddf4e690cdcbfcdedf36f8e3c610ab2150b88523a76a7fa49e12a7f6432d59c0",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000030037&signature=ddf4e690cdcbfcdedf36f8e3c610ab2150b88523a76a7fa49e12a7f6432d59c0",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=MARKET&quantity=2.0&recvWindow=5000&timestamp=1800000030037&signature=03c1364bd5b7de48317d85af5fe0d33c1c0a3be31adc30f26deb5809cde9f151",
+"key": "test_key"
+}
+],
+"results": [
+{
+"phase": "filled_taker",
+"filled": 2.0,
+"quantity": 2.0,
+"taker_qty": 2.0,
+"taker_order_id": 9001,
+"taker_reason": null,
+"error": null,
+"repegs": 0,
+"cancel_reason": null
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "집행 M9 부분 뒤 잔량 시장가",
+"calls": [
+{
+"fn": "run_exit",
+"args": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": 2500.1,
+"quantity": 2.0,
+"fallback_after_sec": 30.0,
+"vol_bpm": 9.0
+}
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.8"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.8"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.8"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.8"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.8"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.8"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.8"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.8"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.8"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "PARTIALLY_FILLED",
+"executedQty": "0.8"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0.8"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0.8"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 9001,
+"status": "FILLED",
+"executedQty": "1.2"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.1&quantity=2.0&newClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=3451ce48b4f585454671041dfcd9107c81104feb1caea0289d4321d72ecdd140",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=588e2562aa6aa10e2adf7140da83b9b377867593c3185db8551397bb11728af5",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000006037&signature=0c43afb5fe59197ed79d5dd6a6c519251c4b7321b9d8639fd9359b06fad2f427",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=3ba8e6a5209e817d26050ea026ae2feea388877b2732011ed581302b1427d2ff",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000012037&signature=9ea1505b8597ad855817c879165b3fba6254bdc1cee33cd01174f8cf3fbde609",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000015037&signature=a9a17d8114050659a80e25615130ca4ad46d03b7207fa56f76d1f14b8ce76e01",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000018037&signature=dc5e9518def5c44a2df2dc7c7d49d065e3611b5f3428a33e62a6a9b456a3dfe9",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000021037&signature=9be75bd3eb25082bbbeb45f916634497f7b48b1cbbb1486b0166f5774bf39d1b",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000024037&signature=0beba6d41512fbd3ce6ceeed4e2cabbf764b78b07b20b9694fe60fa5dc11121b",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000027037&signature=cacace6bab1aed92dc57e6357b802c865ad305415ddc44e75e5ee35e15231dda",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000030037&signature=ddf4e690cdcbfcdedf36f8e3c610ab2150b88523a76a7fa49e12a7f6432d59c0",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000030037&signature=ddf4e690cdcbfcdedf36f8e3c610ab2150b88523a76a7fa49e12a7f6432d59c0",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000030037&signature=ddf4e690cdcbfcdedf36f8e3c610ab2150b88523a76a7fa49e12a7f6432d59c0",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=MARKET&quantity=1.2&recvWindow=5000&timestamp=1800000030037&signature=bb489d3cb6b63dd0aa35ee5292ce2d0a2a25204fc167d1c5649f706da2b5c6e6",
+"key": "test_key"
+}
+],
+"results": [
+{
+"phase": "filled_taker",
+"filled": 2.0,
+"quantity": 2.0,
+"taker_qty": 1.2,
+"taker_order_id": 9001,
+"taker_reason": null,
+"error": null,
+"repegs": 0,
+"cancel_reason": null
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "집행 M3 기다리기 마감 시장가",
+"calls": [
+{
+"fn": "run_entry_wait",
+"args": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": 2500.0,
+"quantity": 2.0,
+"target_leverage": 0
+},
+"wait_sec": 60.0
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 9001,
+"status": "FILLED",
+"executedQty": "2"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.0&quantity=2.0&newClientOrderId=dbwtL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=11a901c79183ae507164c1605301b50596a22cceede7d5bde3f1614fdfd62082",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000006037&signature=ed3bc2e8062c2a39dd53e00cb8eec53afb53419aa4a3c0c8ff8bceaf89be0c04",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000012037&signature=6a5e5e9cee3d1f994671d49e2eb4fcff7e30f8d8a4483cca4487b900ac348ef1",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000015037&signature=c96801077f20ef3e58d67fda49d42a7689e975800868a93b3cebf7178a833034",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000018037&signature=a2e67c68c4d6d3bac3df258bb3c67dc5e1ae1973a3baaebbdad356b0bcc602fd",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000021037&signature=dba22d7beff5d0b28eedda1fc30b3bb2e14fddb7621a497c4a41ae4b1af8400e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000024037&signature=b1c48dc4452135345696773c0056c18aa200cff541c6d09eae4733524e9dd6c3",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000027037&signature=78646e27fbc13f2cda23d4659522df3405527d7f0270cabf9cf47bca93ed3e19",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000030037&signature=5113eb05e2a234f661fbfcb38cae2ee98da53bdc245e6c45462a410d05887998",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000033037&signature=1dfa20522ddbd99d5aa6868a0d4dfc009a330b60e30109cb953d916b02b25fe5",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000036037&signature=760f0de5d8bb2e80af44e32279c4f87d5c193af6f1613a4e90f28d59db5cb21d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000039037&signature=843246b32d30720824dacb825499f03e7072871f4f73d27568eab19cd6330e9e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000042037&signature=4b8b7f273aff3e8aa746094404a96994e3a66969a883ea382169592b342c7ade",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000045037&signature=8c6c6d4eacafdc1286bbc2f80d4f96789629e0a162ac576a68cc9ebd98f3135a",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000048037&signature=e2f8e9aaf26c5fbf1f1b08eeb31599a97963554d62a80ec153d90c21f3ee3b6d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000051037&signature=e1330b97f072884e73976ff120aaf980ee0acb84363ed2c245ac04800159d525",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000054037&signature=98b4ec9d09f4356f17c677953e7bc2587a9902759fa152cd13e20d68afd1707c",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000057037&signature=0cba2ad3c75008f59ceecec603263cf1ec2b65df2773c4bf9de29ff89672f124",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000060037&signature=faa2538021d529021826ad8e7d0cc567746f7043f321812d67a8a47930895825",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000060037&signature=faa2538021d529021826ad8e7d0cc567746f7043f321812d67a8a47930895825",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000060037&signature=faa2538021d529021826ad8e7d0cc567746f7043f321812d67a8a47930895825",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=MARKET&quantity=2.0&recvWindow=5000&timestamp=1800000060037&signature=c3fd45bad1a53f22458d9914d3147ad0f0cb527757886f052db9650a826d72bf",
+"key": "test_key"
+}
+],
+"results": [
+{
+"phase": "filled_taker",
+"filled": 2.0,
+"quantity": 2.0,
+"taker_qty": 2.0,
+"taker_order_id": 9001,
+"taker_reason": "대기 마감",
+"error": null,
+"repegs": 0,
+"cancel_reason": null
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "집행 M3 지금 시장가(사용자)",
+"calls": [
+{
+"fn": "run_entry_wait",
+"args": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": 2500.0,
+"quantity": 2.0,
+"target_leverage": 0
+},
+"wait_sec": 60.0,
+"state0": {
+"action": "market"
+}
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "NEW",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"status": "CANCELED",
+"executedQty": "0"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 9001,
+"status": "FILLED",
+"executedQty": "2"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.0&quantity=2.0&newClientOrderId=dbwtL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=11a901c79183ae507164c1605301b50596a22cceede7d5bde3f1614fdfd62082",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000000037&signature=9192f4871f1e6c91350f9318a2f2c7efaa8bfc91027c44f4703a42f00ab6a749",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000000037&signature=9192f4871f1e6c91350f9318a2f2c7efaa8bfc91027c44f4703a42f00ab6a749",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=MARKET&quantity=2.0&recvWindow=5000&timestamp=1800000000037&signature=411397f780d64bf7a3f15fee5e58ec4482fcb3077c5cff85b5b07ce8a13fc64a",
+"key": "test_key"
+}
+],
+"results": [
+{
+"phase": "filled_taker",
+"filled": 2.0,
+"quantity": 2.0,
+"taker_qty": 2.0,
+"taker_order_id": 9001,
+"taker_reason": "지금 시장가(사용자)",
+"error": null,
+"repegs": 0,
+"cancel_reason": null
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "집행 M5 감시 진입 지금 시장가",
+"calls": [
+{
+"fn": "run_entry_stop",
+"args": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": 2500.0,
+"quantity": 2.0,
+"target_leverage": 0,
+"limit": {
+"usdt": 2600.0
+}
+},
+"state0": {
+"action": "market"
+}
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 9001,
+"status": "FILLED",
+"executedQty": "2"
+}
+}
+],
+"keys": true,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=MARKET&quantity=2.0&recvWindow=5000&timestamp=1800000000037&signature=411397f780d64bf7a3f15fee5e58ec4482fcb3077c5cff85b5b07ce8a13fc64a",
+"key": "test_key"
+}
+],
+"results": [
+{
+"phase": "filled_taker",
+"filled": 2.0,
+"quantity": 2.0,
+"taker_qty": 2.0,
+"taker_order_id": 9001,
+"taker_reason": null,
+"error": null,
+"repegs": 0,
+"cancel_reason": null
+}
+],
+"ban": null,
+"conns": 1,
 "post_only": [
 false
 ]

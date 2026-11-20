@@ -27,7 +27,13 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
+# 2026-11-21 원본 파이썬 위치 -- 기본 = 이 저장소 · RTORDER_PY_ROOT = 결함 수정본 작업 폴더(읽기만 · 정답지는 이 저장소에 쓴다)
+PY_ROOT = Path(os.environ.get("RTORDER_PY_ROOT") or ROOT)
+sys.path.insert(0, str(PY_ROOT))
+# 감시가 망가진 칸을 알릴 때 텔레그램 모듈을 부른다(진짜는 서버 비밀 설정을 읽고 보낸다) -- 가짜를 먼저 넣는다
+_wd = types.ModuleType("scripts.ops_watchdog")
+_wd.send_telegram = lambda *_a, **_k: None
+sys.modules["scripts.ops_watchdog"] = _wd
 for _k in ("BINANCE_API_KEY", "BINANCE_SECRET_KEY", "DASHBOARD_MANUAL_EXEC_ENABLED"):
     os.environ.pop(_k, None)
 os.environ["DASHBOARD_MANUAL_EXEC_SYMBOL"] = "ETHUSDC"   # 서버 설정과 같게(코인 eth 의 주문 심볼)
@@ -189,6 +195,11 @@ async def f_orphans(_s, symbols):
     return respond("cancel_wait_orphans").get("ret")
 
 
+async def f_cxo(_s, symbol, pside):
+    note("cancel_exit_orders", symbol, pside)
+    return respond("cancel_exit_orders").get("ret")
+
+
 async def f_produce():
     note("produce_account")
     return respond("produce_account").get("ret")
@@ -246,7 +257,8 @@ async def run_scenario(sc: dict) -> dict:
         p.write_text(json.dumps(sc["file0"], ensure_ascii=False), "utf-8")
     for name, body in (sc.get("limit_files") or {}).items():
         (tmp / name).write_text(json.dumps(body, ensure_ascii=False), "utf-8")
-    with mock.patch.multiple(orders, LIVE_DIR=tmp, clear_bracket=f_clear, run_exit=f_run_exit, place_bracket=f_place_bracket,
+    extra = {"cancel_exit_orders": f_cxo} if hasattr(orders, "cancel_exit_orders") else {}   # 2026-11-21 결함 수정본만
+    with mock.patch.multiple(orders, **extra, LIVE_DIR=tmp, clear_bracket=f_clear, run_exit=f_run_exit, place_bracket=f_place_bracket,
                              place_tp_ladder=f_ladder, place_add_order=f_add, cancel_wait_orphans=f_orphans,
                              exec_enabled=lambda: Ctl.exec_on, nap=f_nap, datetime=FakeDT,
                              time=types.SimpleNamespace(time=lambda: Clock.t, monotonic=lambda: Clock.t, perf_counter=lambda: Clock.t),
@@ -410,7 +422,7 @@ add("lines_tp_touch_resting_holds", {K_L: LINES_L}, [tick(account=acct(POS_L), b
 add("lines_tp_cancel_fails_waits_10s", {K_L: LINES_L},
     [tick(account=acct(POS_L), bars=NOBARS, sec=SEC_L_HIT), tick(t=T0 + 5, sec=SEC_L_HIT), tick(t=T0 + 11, sec=SEC_L_HIT)],
     {"clear_bracket": [{"ret": {"cancelled": 0, "errors": ["400 [-2011] Unknown order sent."]}}, OK_CLEAR, OK_CLEAR],
-     "exit_plan": [{"plan": plan()}], "run_exit": [filled()]})
+     "exit_plan": [{"plan": plan()}], "run_exit": [filled()], "cancel_exit_orders": [{"ret": {"cancelled": 0, "errors": []}}]})
 add("lines_sl_off_tp_watch_fires_tp", {K_L: {**LINES_L, "sl_off": True, "tp_resting": False}}, [tick(account=acct(POS_L), bars=NOBARS, sec={"eth": [[T0, 2400.0], [T0, 2551.0]]})],
     {"clear_bracket": [OK_CLEAR, OK_CLEAR], "exit_plan": [{"plan": plan()}], "run_exit": [filled()]})
 add("lines_fired_true_sl_off_holds", {K_L: {**LINES_L, "sl_off": True, "fired": True, "tp_resting": False}}, [tick(account=acct(POS_L), bars=NOBARS, sec={"eth": [[T0, 2400.0]]})])
@@ -473,7 +485,8 @@ for ph, extra in (("rejected", {"error": "400 [-2019] Margin is insufficient."})
                   ("taker_failed", {"error": "500 x"})):
     add(f"exit_{ph}_retry_after_30s", {K_L: RULE_L},
         [tick(account=acct(POS_L), bars={"eth": bars(2300.0)}, sec={}), tick(t=T0 + 20), tick(t=T0 + 41)],
-        {"exit_plan": [{"plan": plan()}, {"plan": plan()}], "run_exit": [filled(dt=10, phase=ph, **extra), filled()], "clear_bracket": [OK_CLEAR]})
+        {"exit_plan": [{"plan": plan()}, {"plan": plan()}], "run_exit": [filled(dt=10, phase=ph, **extra), filled()], "clear_bracket": [OK_CLEAR],
+         "cancel_exit_orders": [{"ret": {"cancelled": 1, "errors": []}}]})   # 2026-11-21 재발동 전 앞선 청산 주문 정리
 add("exit_raises_settle_error", {K_L: RULE_L}, [tick(account=acct(POS_L), bars={"eth": bars(2300.0)}, sec={})],
     {"exit_plan": [{"plan": plan()}], "run_exit": [{"dt": 1.0, "raise": ["TypeError", "'NoneType' object is not subscriptable"]}]})
 add("exit_needs_market_python_taker", {K_L: RULE_L}, [tick(account=acct(POS_L), bars={"eth": bars(2300.0)}, sec={})],
@@ -538,6 +551,25 @@ add("legacy_and_new_key_collide", {K_L: RULE_L, "LONG": {**{k: v for k, v in RUL
     [tick(account=acct(POS_L), bars={"eth": bars(2500.0)}, sec={})],   # 같은 칸이면 파일 순서상 뒤의 것(옛 키 쪽 손절 2600)이 이긴다
     {"exit_plan": [{"plan": plan()}], "run_exit": [filled(phase="rejected", error="400 x")]})
 add("no_armed_state_nothing", {}, [tick(account=acct(POS_L), bars=NOBARS, sec={})])
+# 2026-11-21 결함 수정본: 재발동 전 앞선 청산 주문 정리(cancel_exit_orders) · 망가진 칸 건너뛰기 · 알림 한 번
+RETRY_L = {**RULE_L, "retry_after": T0 - 1.0, "last_error": "주문 1 취소를 확인하지 못했습니다"}
+add("refire_cleanup_ok_then_exit", {K_L: RETRY_L}, [tick(account=acct(POS_L), bars={"eth": bars(2300.0)}, sec={})],
+    {"cancel_exit_orders": [{"ret": {"cancelled": 1, "errors": []}}], "exit_plan": [{"plan": plan()}], "run_exit": [filled()], "clear_bracket": [OK_CLEAR]})
+add("refire_cleanup_fails_keeps_arm", {K_L: RETRY_L}, [tick(account=acct(POS_L), bars={"eth": bars(2300.0)}, sec={})],
+    {"cancel_exit_orders": [{"ret": {"cancelled": 1, "errors": ["앞선 청산 주문 [7] 이 아직 살아 있습니다"]}}]})
+add("refire_cleanup_list_fails", {K_L: RETRY_L}, [tick(account=acct(POS_L), bars={"eth": bars(2300.0)}, sec={})],
+    {"cancel_exit_orders": [{"ret": {"cancelled": 0, "errors": ["openOrders: 418 [-1003] banned"]}}]})
+add("refire_retry_not_yet", {K_L: {**RETRY_L, "retry_after": T0 + 5.0}}, [tick(account=acct(POS_L), bars={"eth": bars(2300.0)}, sec={})])
+add("refire_lines_after_tp_cancel", {K_L: {**LINES_L, "fired": True, "tp_resting": False, "retry_after": T0 - 1.0}}, [tick(account=acct(POS_L), bars=NOBARS, sec=SEC_L_HIT)],
+    {"cancel_exit_orders": [{"ret": {"cancelled": 0, "errors": []}}], "exit_plan": [{"plan": plan()}], "run_exit": [filled(phase="error", error="x")]})
+add("refire_sl_leg_cleanup_fails", {K_L: {**LINES_L, "retry_after": T0 - 1.0, "sl_legs": [{"level": 2480.0, "w": 1}, {"level": 2470.0, "w": 1}]}},
+    [tick(account=acct(POS_L), bars=NOBARS, sec=SEC_L_HIT)], {"cancel_exit_orders": [{"ret": {"cancelled": 0, "errors": ["boom"]}}]})
+add("first_fire_no_cleanup_query", {K_L: RULE_L}, [tick(account=acct(POS_L), bars={"eth": bars(2300.0)}, sec={})],
+    {"exit_plan": [{"plan": plan()}], "run_exit": [filled()], "clear_bracket": [OK_CLEAR]})
+add("corrupt_slot_alert_once_two_ticks", {"BAD:LONG": {"side": "LONG", "armed_at": T0 - 600.0, "lines": True}, "STR:LONG": "garbage", K_L: LINES_L},
+    [tick(account=acct(POS_L), bars=NOBARS, sec=SEC_L_MISS), tick(t=T0 + 2.0, account=acct(POS_L, gen=T0 + 3.0), bars=NOBARS, sec=SEC_L_MISS)])
+add("corrupt_bad_number_skips_only_that", {"ETHUSDC:SHORT": {**RULE_S, "armed_at": "x"}, K_L: RULE_L}, [tick(account=acct(POS_L, POS_S), bars={"eth": bars(2300.0)}, sec={})],
+    {"exit_plan": [{"plan": plan()}], "run_exit": [filled()], "clear_bracket": [OK_CLEAR]})
 add("unreadable_file_nothing", None, [tick(account=acct(POS_L), bars=NOBARS, sec={})], file0_raw="{not json")
 
 # 틱 사이 저장본 경쟁(bracket_merge)

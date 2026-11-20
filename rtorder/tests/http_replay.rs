@@ -48,6 +48,8 @@ impl Virt {
         let t = Arc::new(Mutex::new(0.0f64));
         let tc = t.clone();
         bx.clock = Arc::new(move || t0 + *tc.lock().unwrap());
+        let ts = t.clone();
+        bx.virtual_sleep = Some(Arc::new(move |sec| *ts.lock().unwrap() += sec)); // 불명 응답 조회 사이 1초(resolve_resting) -- 원본 가짜 잠과 같이 시계만
         Virt { bx, t }
     }
     fn adv(&self, s: f64) {
@@ -57,6 +59,9 @@ impl Virt {
 impl Exchange for Virt {
     async fn place_limit_gtx(&mut self, o: &LimitOrder) -> Reply {
         self.bx.place_limit_gtx(o).await
+    }
+    async fn place_market(&mut self, c: &Common<'_>, q: f64) -> Reply {
+        self.bx.place_market(c, q).await
     }
     async fn get_order(&mut self, c: &Common<'_>, r: &OrderRef) -> Reply {
         self.bx.get_order(c, r).await
@@ -163,7 +168,25 @@ async fn run(v: &mut Virt, fn_: &str, a: &Value) -> Value {
         "margin_type" => json!(bracket::margin_type(&mut v.bx, SYM).await),
         "commission_bp" => bracket::commission_bp(&mut v.bx, SYM).await,
         "place_add_order" => bracket::place_add_order(&mut v.bx, SYM, &s("pside"), f("price"), f("qty")).await,
-        "place_stop" => bracket::place_stop(&mut v.bx, SYM, &s("pside"), f("price")).await,
+        "cancel_exit_orders" => bracket::cancel_exit_orders(&mut v.bx, SYM, &s("pside")).await,
+        "run_entry" | "run_exit" | "run_entry_wait" | "run_entry_stop" => {
+            // 원본 run_* 는 시작에 _clock_offset(시계 요청 1)을 한다 -- Rust 는 호출부 몫이라 여기서(같은 요청 열)
+            let plan = rtorder::watch::exec_plan_of(&a["plan"]).unwrap();
+            let st: Shared = Arc::new(Mutex::new(ExecState::default()));
+            if a.get("state0").and_then(|s| s.get("action")) == Some(&json!("market")) {
+                st.lock().unwrap().action = Some(exec::Action::Market);
+            }
+            v.bx.sync_clock().await;
+            match fn_ {
+                "run_entry" => exec::run_entry(v, &plan, &st).await,
+                "run_exit" => exec::run_exit(v, &plan, &st).await,
+                "run_entry_wait" => exec::run_entry_wait(v, &plan, &st, f("wait_sec"), false).await,
+                _ => exec::run_entry_stop(v, &plan, &st, |_| false, a.get("max_sec").and_then(Value::as_f64).unwrap_or(60.0)).await,
+            }
+            let g = st.lock().unwrap().clone();
+            json!({"phase": rtorder::watch::phase_name(g.phase), "filled": g.filled, "quantity": g.quantity, "taker_qty": g.taker_qty, "taker_order_id": g.taker_order_id,
+                   "taker_reason": g.taker_reason, "error": g.error, "repegs": g.repegs, "cancel_reason": g.cancel_reason})
+        }
         "place_bracket" => bracket::place_bracket(&mut v.bx, &a["bracket"], SYM, &s("pside"), b("strict")).await,
         "place_tp_ladder" => bracket::place_tp_ladder(&mut v.bx, a["legs"].as_array().unwrap(), SYM, &s("pside")).await.unwrap_or_else(|e| json!({"__raise__": e})),
         "cancel_wait_orphans" => {
@@ -211,6 +234,76 @@ fn same(py: &Value, rs: &Value, path: &str, out: &mut Vec<String>) {
     }
 }
 
+fn is_stop_req(r: &Value) -> bool {
+    r["target"].as_str().unwrap().contains("lgoOrder") // openAlgoOrders · algoOrder
+}
+fn ok200(r: &Value) -> bool {
+    r.get("status").and_then(Value::as_u64) == Some(200)
+}
+/// cancel_bracket 결과에서 스탑 몫을 뺀다: 지운 수 −(성공한 스탑 DELETE) · 오류 끝에서 (스탑 목록 실패 1 + 실패한 스탑 DELETE) 개 -- 원본이 스탑 몫을 맨 뒤에 붙인다.
+fn strip_cancel(res: &mut Value, stop_pairs: &[(Value, Value)]) {
+    let mut ok_del = 0;
+    let mut bad = 0;
+    for (q, r) in stop_pairs {
+        let get = q["method"] == "GET";
+        if get {
+            if !(ok200(r) && r["body"].is_array()) {
+                bad += 1;
+            }
+        } else if ok200(r) {
+            ok_del += 1;
+        } else {
+            bad += 1;
+        }
+    }
+    res["cancelled"] = json!(res["cancelled"].as_i64().unwrap() - ok_del);
+    let e = res["errors"].as_array_mut().unwrap();
+    let keep = e.len() - bad;
+    e.truncate(keep);
+}
+/// 원본 시나리오 → 스탑이 없는 Rust 의 기대(사용자 결정 2026-11-21). None = 함수째 없음(place_stop).
+fn strip_stops(sc: &Value) -> Option<Value> {
+    if sc["calls"].as_array().unwrap().iter().any(|c| c["fn"] == "place_stop") {
+        return None;
+    }
+    let reqs = sc["requests"].as_array().unwrap();
+    if !reqs.iter().any(is_stop_req) {
+        return Some(sc.clone());
+    }
+    let resp = sc["responses"].as_array().unwrap();
+    assert_eq!(reqs.len(), resp.len(), "요청·응답 1:1");
+    let stop_pairs: Vec<(Value, Value)> = reqs.iter().zip(resp).filter(|(q, _)| is_stop_req(q)).map(|(q, r)| (q.clone(), r.clone())).collect();
+    let mut out = sc.clone();
+    out["requests"] = json!(reqs.iter().filter(|q| !is_stop_req(q)).cloned().collect::<Vec<_>>());
+    out["responses"] = json!(reqs.iter().zip(resp).filter(|(q, _)| !is_stop_req(q)).map(|(_, r)| r.clone()).collect::<Vec<_>>());
+    assert_eq!(sc["calls"].as_array().unwrap().len(), 1, "스탑 시나리오는 호출 하나");
+    let f = sc["calls"][0]["fn"].as_str().unwrap();
+    let res = &mut out["results"][0];
+    let only_sl = sc["calls"][0]["args"].get("only_sl").and_then(Value::as_bool).unwrap_or(false);
+    match f {
+        "cancel_bracket" | "clear_bracket" => {
+            strip_cancel(res, &stop_pairs);
+            if only_sl {
+                // 스탑만 지우는 호출 = 할 일이 없다(요청 0) -- clear_bracket 은 시계만 맞춘다
+                *res = json!({"cancelled": 0, "errors": []});
+            }
+        }
+        "place_bracket" => {
+            let m = res.as_object_mut().unwrap();
+            m.remove("backstop");
+            if let Some(cl) = m.get_mut("cleared") {
+                strip_cancel(cl, &stop_pairs.iter().filter(|(q, _)| q["method"] != "POST").cloned().collect::<Vec<_>>());
+            }
+            if m.get("reason").is_none() {
+                let p = m.get("tp").map_or(true, |t| t["placed"] == json!(true));
+                m.insert("placed".into(), json!(p));
+            }
+        }
+        x => panic!("스탑 요청이 나오는 모르는 함수 {x}"),
+    }
+    Some(out)
+}
+
 #[tokio::test]
 async fn http_fixture_replay_matches_python() {
     let doc: Value = serde_json::from_str(include_str!("fixtures/http_fixture.json")).unwrap();
@@ -224,7 +317,17 @@ async fn http_fixture_replay_matches_python() {
     let ban_dir = std::env::temp_dir().join(format!("rtorder_http_replay_{}", std::process::id()));
     let (mut bad, mut nreq, mut ncalls, mut nurl, mut nconn_eq) = (Vec::new(), 0, 0, 0, 0);
     let scns = doc["scenarios"].as_array().unwrap();
-    for sc in scns {
+    let (mut n_stripped, mut n_skipped, mut nexec) = (0, 0, 0);
+    for sc0 in scns {
+        // 2026-11-21 사용자 결정 «−5% 비상 스탑(M10) Rust 에서 제거»: 원본 요청 열에서 스탑 요청(openAlgoOrders·algoOrder)과 그 응답만 뺀 것 == Rust 요청 열.
+        //   place_stop 은 함수째 없다(건너뜀) · 결과는 스탑 몫(backstop 칸 · 스탑 취소 수·오류)을 뺀 값과 대조 -- 목록은 RULES.md «의도한 차이».
+        let Some(sc) = strip_stops(sc0) else {
+            n_skipped += 1;
+            continue;
+        };
+        let stripped = sc != *sc0;
+        n_stripped += stripped as usize;
+        let sc = &sc;
         let name = sc["name"].as_str().unwrap();
         *queue.lock().unwrap() = sc["responses"].as_array().unwrap().iter().cloned().collect();
         srv.log.lock().unwrap().clear();
@@ -252,6 +355,16 @@ async fn http_fixture_replay_matches_python() {
                         rs["state"].as_object_mut().unwrap().remove(&k);
                     }
                 }
+                f if f.starts_with("run_") => {
+                    let nulls: Vec<String> = py.as_object().unwrap().iter().filter(|(_, x)| x.is_null()).map(|(k, _)| k.clone()).collect();
+                    for k in nulls {
+                        if rs[&k].is_null() || rs[&k] == json!(0.0) || rs[&k] == json!(0) {
+                            py.as_object_mut().unwrap().remove(&k);
+                            rs.as_object_mut().unwrap().remove(&k);
+                        }
+                    }
+                    nexec += 1;
+                }
                 _ => {}
             }
             same(&py, &rs, &format!("결과[{i}]"), &mut d);
@@ -268,7 +381,7 @@ async fn http_fixture_replay_matches_python() {
         }
         // 연결 재사용(keep-alive): 시나리오 하나에서 연 TCP 연결 수가 aiohttp 와 같다(끊김·시간초과 뒤에만 새로 연다)
         let opened = srv.conns.load(Ordering::SeqCst) - c0;
-        if opened as u64 != sc["conns"].as_u64().unwrap() {
+        if !stripped && opened as u64 != sc["conns"].as_u64().unwrap() {
             d.push(format!("연결 수 py {} rs {opened}", sc["conns"]));
         }
         nconn_eq += 1;
@@ -303,6 +416,10 @@ async fn http_fixture_replay_matches_python() {
         }
     }
     let _ = std::fs::remove_dir_all(&ban_dir);
+    println!("스탑 요청을 뺀 시나리오 {n_stripped} · place_stop(제거)이라 건너뜀 {n_skipped}");
+    assert_eq!((n_stripped, n_skipped), (15, 6), "스탑이 닿는 시나리오 수");
+    println!("집행 시장가 다리 시나리오 {nexec}");
+    assert_eq!(nexec, 13, "집행 시나리오 수");
     println!("시나리오 {} · 호출 {ncalls} · 가짜 서버가 받은 요청 {nreq} · 글자까지 비교한 서명 URL {nurl} · 연결 {} · 연결 수 대조 시나리오 {nconn_eq}", scns.len(), srv.conns.load(Ordering::SeqCst));
     for b in &bad {
         println!("불일치 {b}");

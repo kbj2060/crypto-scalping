@@ -7,13 +7,8 @@
 //! 조립 뒤 칸 다시 보기(G7) · 주문 잠금 안/밖(G8 -- `LOCKED` 표, 잠금 자체는 `watch::busy_or`) · 대기 칸 규칙(G10–G12) · 대기 중 스위칭 409(G13) · 코인 표(G14) ·
 //! 조용히 고치지 않는 400(G15) · 스위칭은 전량+반대(G16).
 //!
-//! 🔴시장가 분기(사용자 결정: 지정가로만 설계)는 **접수에서 «미정»으로 거절**한다 -- 409 `market_undecided` + `branch`:
-//!   M8 청산 «즉시»(exec=market) · M11 스위칭 · M13 대기 «지금 시장가»(M3·M4·M5) · M6·M7 조립이 시장가 계획을 낸 청산(고변동성·먼지).
-//!   이유: 접수해 놓고 집행이 `needs_market_decision` 에서 멈추면 사용자는 «닫히는 중»으로 읽는데 실제로는 주문이 하나도 안 나간다(포지션이 그대로).
-//!   거절이면 화면이 바로 «안 나갔다»를 말한다. 미리보기는 원본 값 그대로(계획이 MARKET 인 것을 보여 준다).
-//!   감시(자동 손절)가 닿는 시장가 자리(M6·M7·M9)는 지금처럼 집행이 멈추고 무장에 market_wait(watch.rs) -- 감시는 접수를 지나지 않는다.
-//!   따라가기 진입 마감 잔량(M1)·기다리기 마감(M3)은 접수하고 집행이 멈춘다(안 찬 진입 잔량은 포지션 위험이 아니다).
-
+//! 시장가 분기(M8 «즉시» 청산 · M11 스위칭 · M13 대기 «지금 시장가» · M6·M7 조립이 낸 시장가 계획)는 원본과 같이 접수한다
+//! (2026-11-21 사용자 결정 «원본 동작 유지» -- 넷째 조각의 409 market_undecided 거절은 지웠다). 스위칭은 `Task::Switch`(exit_then_switch).
 use crate::assemble::{Desk, DeskIo, EntryArgs, Quotes, MANUAL_RULES_ENABLED};
 use crate::exec::{WAIT_CHOICES_MIN};
 use crate::plan::{self, bracket_key};
@@ -47,6 +42,8 @@ pub enum Task {
     Entry { key: String, slot: SlotRef, plan: Value, wait_sec: Option<f64>, limit: bool },
     /// settle(run_exit | exit_then_rearm(부분 청산))
     Exit { key: String, slot: SlotRef, plan: Value, rearm: bool },
+    /// exit_then_switch(plan, state, sw, asset) -- 스위칭(전량 청산이 다 닫힌 뒤 반대 진입 · 두 다리 다 시장가 M11)
+    Switch { key: String, plan: Value, sw: Value, asset: String },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -64,9 +61,6 @@ fn bad(status: u16, err: &str, detail: &str) -> Resp {
 }
 fn exec_off() -> Resp {
     bad(403, "exec_disabled", "DASHBOARD_MANUAL_EXEC_ENABLED 가 꺼져 있습니다")
-}
-fn undecided(branch: &str, detail: &str) -> Resp {
-    resp(409, json!({"ok": false, "error": "market_undecided", "branch": branch, "detail": format!("{detail} — 시장가 분기 {branch} 는 사용자 결정 전이라 막아 두었습니다(지정가로만 설계)")}))
 }
 /// 파이썬 int(float(x)) 가 OverflowError 로 새는 곳(lev=inf) -- aiohttp 는 500.
 fn server_error(e: &str) -> Resp {
@@ -162,14 +156,6 @@ fn err_resp(e: (Value, u16)) -> Resp {
     }
     resp(e.1, b)
 }
-/// 조립이 시장가 계획(M6 고변동성 · M7 먼지)을 냈나.
-fn market_branch_of(plan: &Value) -> Option<&'static str> {
-    if plan.get("type").and_then(Value::as_str) != Some("MARKET") {
-        return None;
-    }
-    Some(if plan.get("market_reason").and_then(Value::as_str).is_some_and(|r| r.starts_with("명목")) { "M7" } else { "M6" })
-}
-
 impl Desk {
     fn slot_obj(&mut self, s: &SlotRef) -> &mut Obj {
         match s {
@@ -356,43 +342,32 @@ impl Desk {
             return bad(400, "bad_exec", "exec 는 limit 또는 market");
         }
         let to = g(q, "switch_to").unwrap_or("").to_uppercase();
-        let mut sw = false;
+        let mut sw: Option<Value> = None;
         if !to.is_empty() {
             let (sw_frac, sw_rule) = (query_fraction(q, "sw_pct"), query_rule(q, "sw_rule"));
             if to != if side == "LONG" { "SHORT" } else { "LONG" } || frac != 1.0 || sw_frac.is_none() || sw_rule.as_deref() == Some("bad") {
                 return bad(400, "bad_switch", "스위칭은 전량(100%) 청산 + 반대 방향 진입만 됩니다");
             }
-            if let Err(e) = query_leverage(q, "sw_lev") {
-                return server_error(&e);
-            }
-            sw = true;
+            let lev = match query_leverage(q, "sw_lev") { Ok(v) => v, Err(e) => return server_error(&e) };
+            sw = Some(json!({"to": to, "frac": sw_frac, "lev": lev, "rule": sw_rule}));
         }
         if !io.exec_enabled() {
             return exec_off();
         }
         let st = self.w.exit_slot(&asset);
-        if st.is_none() || (sw && st != Some(SlotId::Entry)) {
+        if st.is_none() || (sw.is_some() && st != Some(SlotId::Entry)) {
             return resp(409, json!({"ok": false, "error": "already_working", "state": self.w.entry})); // 스위칭은 반대 진입이 따라오므로 위 칸만(C4)
         }
-        if sw && self.wait_pending(&asset) {
+        if sw.is_some() && self.wait_pending(&asset) {
             return bad(409, "wait_pending", "기다리는 진입 주문이 있어 스위칭을 막습니다 — 먼저 취소하세요(그냥 청산은 됩니다)"); // G13
         }
-        // 🔴시장가 분기 -- 원본은 여기서 두 다리 다 시장가(스위칭 M11, 2026-10-10)·즉시 청산(M8)
-        if sw {
-            return undecided("M11", "스위칭(전량 청산 + 반대 진입)은 원본에서 두 다리 다 시장가입니다");
-        }
-        if ex == "market" {
-            return undecided("M8", "«즉시» 청산은 시장가입니다 — 지정가 청산(exec=limit)으로 다시 누르세요");
-        }
-        let plan = match self.assemble_exit_plan(qs, io, &side, frac, true, &asset, false, true, None).await {
+        // 2026-10-10 사용자 결정: 스위칭은 즉시 체결(청산·반대 진입 둘 다 시장가 M11) · exec=market = «즉시»(M8) -- 2026-11-21 «원본 동작 유지»
+        let plan = match self.assemble_exit_plan(qs, io, &side, frac, true, &asset, sw.is_some() || ex == "market", true, None).await {
             Err(e) => return err_resp(e),
             Ok(p) => p,
         };
         if truthy(plan.get("blocked")) {
             return resp(400, json!({"ok": false, "error": "blocked", "detail": plan["blocked"]}));
-        }
-        if let Some(b) = market_branch_of(&plan) {
-            return undecided(b, if b == "M7" { "명목이 거래소 최소 미만(먼지)이라 원본은 시장가로 닫습니다" } else { "변동성이 문턱 이상이라 원본은 지정가 없이 시장가로 닫습니다" });
         }
         if self.w.exit_slot(&asset) != st {
             return resp(409, json!({"ok": false, "error": "already_working", "state": self.w.entry})); // 조립 사이 손절 청산이 칸을 잡았으면 두 번 내지 않는다(G7)
@@ -405,10 +380,17 @@ impl Desk {
         for (k, v) in [("phase", json!("submitting")), ("kind", json!("exit")), ("side", json!(side)), ("plan", plan.clone()), ("asset", json!(asset)), ("started_at", json!(iso_utc(now)))] {
             s.insert(k.into(), v);
         }
+        if let Some(sw) = &sw {
+            s.insert("switch".into(), json!({"from": side, "to": sw["to"], "phase": "exit"}));
+        }
         let body = json!({"ok": true, "plan": plan, "state": s});
         let key = if st == SlotId::Entry { "manual_entry".to_string() } else { format!("manual_exit_{asset}") };
         self.running.insert(key.clone());
-        Resp { status: 200, body, task: vec![Task::Exit { key, slot: sref, plan, rearm: frac < 1.0 }] }
+        let task = match sw {
+            Some(sw) => Task::Switch { key, plan, sw, asset },
+            None => Task::Exit { key, slot: sref, plan, rearm: frac < 1.0 },
+        };
+        Resp { status: 200, body, task: vec![task] }
     }
 
     /// 2026-10-22 «코인 여러 개를 한꺼번에 청산». ⚠화면 단추는 삭제된 것으로 조사됐다(docs/rtcore_port_scope -- «불확실»). 옮기되 보고에 표시.
@@ -422,9 +404,6 @@ impl Desk {
         }
         if !io.exec_enabled() {
             return exec_off();
-        }
-        if ex == "market" {
-            return undecided("M8", "전량 청산 «즉시»는 시장가입니다");
         }
         let account = match io.account(true).await {
             Ok(a) => a,
@@ -469,7 +448,7 @@ impl Desk {
                 results.push(r);
                 continue;
             };
-            let plan = match self.assemble_exit_plan(qs, io, &side, 1.0, true, asset, false, true, None).await {
+            let plan = match self.assemble_exit_plan(qs, io, &side, 1.0, true, asset, ex == "market", true, None).await {
                 Err(e) => {
                     for (k, v) in obj(&e.0) {
                         r[k] = v;
@@ -482,13 +461,6 @@ impl Desk {
             if truthy(plan.get("blocked")) {
                 r["error"] = json!("blocked");
                 r["detail"] = plan["blocked"].clone();
-                results.push(r);
-                continue;
-            }
-            if let Some(b) = market_branch_of(&plan) {
-                r["error"] = json!("market_undecided");
-                r["branch"] = json!(b);
-                r["detail"] = json!(format!("시장가 분기 {b} 는 사용자 결정 전이라 막아 두었습니다"));
                 results.push(r);
                 continue;
             }
@@ -600,11 +572,9 @@ impl Desk {
         if action == "peg" && mode != "limit" {
             return bad(400, "bad_action", "PEG 는 지정가 대기에서만 됩니다");
         }
-        if action == "market" {
-            let sub = if mode != "limit" { "M3" } else if truthy(st.get("stop")) { "M5" } else { "M4" };
-            return undecided(&format!("M13/{sub}"), "«지금 시장가»는 시장가 주문입니다 — 취소하거나 PEG(지정가 따라가기)로");
-        }
-        if action == "peg" {
+        // 지정가 대기의 «지금 시장가»(M13 → M4·M5 · 2026-11-21 «원본 동작 유지»)·«PEG»: 주문이 걸려 있고 따라가는 중이 아닐 때만 · 체결될 쪽 호가로 선 다시 검사(W7)
+        //   기다리기(mode=wait)의 market 은 검사 없이 접수 → 집행 루프가 잔량 시장가(M3)
+        if (action == "market" || action == "peg") && mode == "limit" {
             let t = |k: &str| truthy(st.get(k));
             if st.get("phase").and_then(Value::as_str) != Some("working") || !(t("order_id") || t("stop")) || (t("stop") && t("triggered")) || t("pegged") || t("action") {
                 self.w.log(format!("wait-action {action}: 거절 not_ready phase={} order_id={} pegged={} action={}",
@@ -621,7 +591,7 @@ impl Desk {
                 let basis = self.basis_for(qs, &book, asset).await;
                 let filters = qs.filters(&symbol).await.map_err(|e| (false, e))?;
                 let pside = plan.get("positionSide").map(py_str).ok_or((false, "KeyError: 'positionSide'".to_string()))?;
-                let k = if pside == "LONG" { "bidPrice" } else { "askPrice" }; // (LONG == market) 이 거짓 → 내 쪽
+                let k = if (pside == "LONG") == (action == "market") { "askPrice" } else { "bidPrice" }; // 시장가 = 반대편 · peg = 내 쪽
                 let r#ref = py_float(book.get(k).ok_or((false, format!("KeyError: '{k}'")))?).map_err(|e| (false, e))? / basis;
                 if !truthy(plan.get("add_keep")) {
                     let lv = |n: &str| br.get(n).ok_or((false, format!("KeyError: '{n}'"))).and_then(|v| py_float(v).map_err(|e| (e.starts_with("ValueError"), e)));
@@ -633,7 +603,7 @@ impl Desk {
                 Err((true, e)) => {
                     let msg = e.strip_prefix("ValueError: ").unwrap_or(&e).to_string();
                     self.w.log(format!("wait-action {action}: 거절 lines_off {msg}"));
-                    return bad(409, "lines_off", &format!("지금 호가 기준으로 익절·손절선이 맞지 않아 peg로 넣지 않습니다 — {msg}"));
+                    return bad(409, "lines_off", &format!("지금 호가 기준으로 익절·손절선이 맞지 않아 {}로 넣지 않습니다 — {msg}", if action == "market" { "시장가" } else { "peg" }));
                 }
                 Err((false, e)) => {
                     self.w.log(format!("wait-action {action}: 거절 quote_failed {e}"));
@@ -698,11 +668,8 @@ impl Desk {
         if truthy(b.get("sl_off")) {
             return resp(200, json!({"ok": true, "sl_off": b["sl_off"], "already": true}));
         }
-        let r = match io.clear_bracket(&symbol, &side, true, false).await { Ok(r) => r, Err(e) => return server_error(&e) };
-        if truthy(r.get("errors")) {
-            let es: Vec<String> = r["errors"].as_array().map(|a| a.iter().map(py_str).collect()).unwrap_or_default();
-            return bad(502, "cancel_failed", &format!("거래소 손절 취소 실패 — 손절은 그대로입니다: {}", es.join("; ")));
-        }
+        // 2026-11-21 사용자 결정 «−5% 비상 스탑(M10) Rust 에서 제거»: 지울 거래소 스탑이 없다 -- 원본의 clear_bracket(only_sl) 요청·취소 실패 502 는 없다(의도한 차이)
+        let r = json!({"cancelled": 0, "errors": []});
         let mut st = self.w.load();
         if !st.get(&key).is_some_and(|c| crate::watch::same_armed(c.get("armed_at"), b.get("armed_at"))) {
             return bad(409, "rearmed", "그 사이 새로 무장됐습니다 — 다시 확인하세요");
@@ -762,23 +729,18 @@ impl Desk {
         if !truthy(Some(&price)) {
             return bad(409, "no_price", "다시 걸 손절가가 기록에 없습니다");
         }
-        let r = match io.place_stop(&symbol, &side, fl(Some(&price))).await { Ok(r) => r, Err(e) => return server_error(&e) };
-        if !truthy(r.get("placed")) {
-            return bad(502, "place_failed", &format!("손절 다시 켜기 실패 — 손절은 꺼진 그대로입니다: {}", r.get("error").map_or("None".into(), py_str)));
-        }
+        // 2026-11-21 사용자 결정 «−5% 비상 스탑(M10) Rust 에서 제거»: 거래소 스탑을 다시 걸지 않는다 -- 5분봉 종가 감시만 다시 켠다(의도한 차이 · 원본 place_stop 실패 502 는 없다)
+        let r = Value::Null;
         let mut st = self.w.load();
         if !st.get(&key).is_some_and(|c| crate::watch::same_armed(c.get("armed_at"), b.get("armed_at"))) {
             return bad(409, "rearmed", "그 사이 새로 무장됐습니다 — 다시 확인하세요");
         }
         let cur = st.get_mut(&key).and_then(Value::as_object_mut).unwrap();
         cur.remove("sl_off");
-        let mut placed = obj(cur.get("placed").unwrap_or(&Value::Null));
-        placed.insert("backstop".into(), r.clone());
-        cur.insert("placed".into(), Value::Object(placed));
         if let Err(e) = self.w.save(&st) {
             return server_error(&e);
         }
-        self.w.log(format!("bracket {side}: 손절 다시 켬(사용자) 거래소 스탑 {} · 5분봉 감시 켬", py_str(&price)));
+        self.w.log(format!("bracket {side}: 손절 다시 켬(사용자) 거래소 스탑 없음(M10 제거) · 5분봉 감시 켬 {}", py_str(&price)));
         resp(200, json!({"ok": true, "backstop": r}))
     }
 

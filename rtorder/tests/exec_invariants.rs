@@ -24,7 +24,7 @@ fn inv02_drift_repegs_then_needs_market_decision() {
     // 재호가가 **실제로 돈다**(파이썬 시험이 가짜 시그니처 불일치로 재호가 0회인 채 통과하던 사고, 2026-11-20 f6aa1c14)
     // 마지막 앞지름은 리페그 수를 올린 뒤 마감에 걸려 새로 걸지 않는다(원본과 같다) -- 그래서 걸린 수 = 리페그 수 또는 +1
     assert!(st.repegs >= 30 && (fx.placed.len() as u32 == st.repegs || fx.placed.len() as u32 == st.repegs + 1), "repegs {} placed {}", st.repegs, fx.placed.len());
-    assert_eq!((st.phase, st.market_branch), (Phase::NeedsMarketDecision, Some("M9"))); // 파이썬 = 잔량 시장가(filled_taker)
+    assert_eq!(st.phase, Phase::FilledTaker); // 파이썬 = 잔량 시장가(filled_taker)
     assert!(fx.placed.windows(2).all(|w| w[1].price < w[0].price), "매도 재호가는 새 최우선 매도호가로 내려간다");
 }
 
@@ -38,7 +38,7 @@ fn fail_cases(name: &str, kind: &'static str, phase: Phase, entry: bool) {
         assert_eq!(st.repegs, n, "{label}: 재호가 수 -- 0 이면 주입이 재호가 경로를 안 지났다");
         assert_eq!(fx.placed.len() as u32, n + (kind != "place") as u32, "{label}: 실패 뒤에 또 걸었다");
         assert_eq!(fx.live().len(), (kind == "cancel") as usize, "{label}");
-        assert_eq!(st.market_branch, None, "{label}: 멈춰야 하는데 시장가 결정으로 갔다");
+        assert!(fx.markets.is_empty(), "{label}: 멈춰야 하는데 시장가로 갔다");
     }
 }
 
@@ -83,7 +83,7 @@ fn inv09_market_exit_plan_places_nothing() {
     let mut fx = Fake { fill_after: 1, ..Default::default() };
     let st = go(&mut fx, &ExecPlan { market: true, market_reason: Some("변동성".into()), ..exit_plan() }, Kind::Exit);
     check("시장가계획", &st, &fx, 2.0);
-    assert!(fx.placed.is_empty() && st.market_branch == Some("M6/M7/M8") && st.market_qty == 2.0);
+    assert!(fx.placed.is_empty() && st.phase == Phase::FilledTaker && fx.markets.len() == 1 && fx.markets[0].2 == 2.0 && st.filled == 2.0);
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn inv10_entry_repegs_and_books_match_exchange() {
     let mut fx = Fake { drift: true, ..Default::default() };
     let st = go(&mut fx, &entry_plan(), Kind::Entry);
     check("진입/리페그", &st, &fx, 2.0);
-    assert!(st.repegs >= 30 && st.market_branch == Some("M1"), "{st:?}");
+    assert!(st.repegs >= 30 && st.phase == Phase::FilledTaker && fx.markets.len() == 1, "{st:?}");
     assert!(fx.placed.windows(2).all(|w| w[1].price > w[0].price), "매수 재호가는 위로 따라간다");
 }
 
@@ -153,7 +153,7 @@ fn d2_unknown_outcome_same_on_all_paths() {
             assert_eq!(st.phase, *phase, "{label}: {:?}", st.error);
             assert_eq!((fx.lookups, fx.deletes.len(), fx.live().len()), (*lookups, *dels, *live_n), "{label}: (표식 조회, DELETE, 살아 있는 지정가)");
             assert!(fx.deletes.iter().all(|d| matches!(d, OrderRef::Client(c) if c.starts_with(tag))), "{label}: DELETE 는 이 경로 표식으로 {:?}", fx.deletes);
-            assert!(fx.placed.len() <= 1 && st.market_branch.is_none(), "{label}: 두 번 걸었거나 시장가 결정으로 갔다");
+            assert!(fx.placed.len() <= 1 && fx.markets.is_empty(), "{label}: 두 번 걸었거나 시장가로 갔다");
             if *phase == Phase::Error {
                 assert!(st.error.as_deref().unwrap().contains("접수 여부를 확인하지 못했습니다"), "{label}");
             }
@@ -238,7 +238,7 @@ fn e18_entry_cancel_paths() {
     let mut fx = Fake { fill_after: 1, partial: Some(0.3), ..Default::default() };
     let st = go(&mut fx, &plan("BUY", "LONG", 1.0), Kind::Entry);
     check("취소 없음", &st, &fx, 1.0);
-    assert!(st.phase == Phase::NeedsMarketDecision && (st.market_qty - 0.7).abs() < 1e-12);
+    assert!(st.phase == Phase::FilledTaker && (fx.markets[0].2 - 0.7).abs() < 1e-12);
 }
 
 #[test]
@@ -250,7 +250,7 @@ fn maker_only_and_market_entry_plans() {
     let mut fx = Fake::default();
     let st = go(&mut fx, &ExecPlan { market: true, ..entry_plan() }, Kind::Entry);
     check("시장가 진입 계획", &st, &fx, 2.0);
-    assert!(fx.placed.is_empty() && st.market_branch == Some("M2"));
+    assert!(fx.placed.is_empty() && st.phase == Phase::FilledTaker && fx.markets.len() == 1);
 }
 
 // ── 기다리기(wait 시험) ──────────────────────────────────────────────────────
@@ -260,7 +260,7 @@ fn wait_paths() {
     let mut fx = Fake { drift: true, ..Default::default() };
     let st = go(&mut fx, &entry_plan(), Kind::Wait(900.0, false));
     check("기다리기 마감", &st, &fx, 2.0);
-    assert!(st.phase == Phase::NeedsMarketDecision && st.market_branch == Some("M3") && fx.placed.len() == 1 && fx.book_times.is_empty(), "앞질러도 다시 걸지 않는다");
+    assert!(st.phase == Phase::FilledTaker && st.taker_reason == Some("대기 마감") && fx.placed.len() == 1 && fx.book_times.is_empty(), "앞질러도 다시 걸지 않는다");
     assert!(fx.placed[0].client_order_id.starts_with(WAIT_TAG));
     let mut fx = Fake { fill_after: 1, post_only_rejects: 2, ..Default::default() };
     let st = go(&mut fx, &entry_plan(), Kind::Wait(900.0, false));
@@ -273,7 +273,7 @@ fn wait_paths() {
     let mut fx = Fake { fill_after: 1, partial: Some(0.25), ..Default::default() };
     let st = go(&mut fx, &entry_plan(), Kind::Wait(60.0, true));
     check("첫 체결 on_fill", &st, &fx, 2.0);
-    assert_eq!((fx.on_fills, st.phase), (1, Phase::NeedsMarketDecision));
+    assert_eq!((fx.on_fills, st.phase), (1, Phase::FilledTaker));
     let mut fx = Fake { script: vec![(10.0, Cmd::Action(Action::Market))], ..Default::default() };
     let st = go(&mut fx, &entry_plan(), Kind::Wait(900.0, false));
     check("지금 시장가", &st, &fx, 2.0);
@@ -322,7 +322,7 @@ fn limit_paths() {
     let mut fx = Fake { fill_after: 1, partial: Some(0.2), script: vec![(8.0, Cmd::Action(Action::Market))], ..Default::default() };
     let st = go(&mut fx, &lp(), Kind::Limit(60.0, false, false));
     check("지금 시장가", &st, &fx, 2.0);
-    assert!(st.market_branch == Some("M4") && (st.market_qty - 1.6).abs() < 1e-12 && fx.deletes.len() == 1, "걸린 지정가를 취소 확인한 뒤");
+    assert!(st.phase == Phase::FilledTaker && (fx.markets[0].2 - 1.6).abs() < 1e-12 && fx.deletes.len() == 1, "걸린 지정가를 취소 확인한 뒤");
     let mut fx = Fake { kill_at: Some(2), script: vec![(4.0, Cmd::Action(Action::Market))], ..Default::default() };
     let st = go(&mut fx, &lp(), Kind::Limit(60.0, false, false));
     check("사람이 취소한 뒤 시장가", &st, &fx, 2.0);
@@ -346,7 +346,7 @@ fn limit_paths() {
     let mut fx = Fake { script: vec![(5.0, Cmd::Action(Action::Peg)), (5.0, Cmd::Drift(true))], ..Default::default() };
     let st = go(&mut fx, &lp(), Kind::Limit(600.0, false, false));
     check("PEG", &st, &fx, 2.0);
-    assert!(st.phase == Phase::Cancelled && st.pegged && st.repegs >= 30 && st.market_branch.is_none() && st.cancel_reason.unwrap().contains("시장가 없음"));
+    assert!(st.phase == Phase::Cancelled && st.pegged && st.repegs >= 30 && fx.markets.is_empty() && st.cancel_reason.unwrap().contains("시장가 없음"));
     let mut fx = Fake { script: vec![(5.0, Cmd::Action(Action::Peg)), (6.0, Cmd::FillAfter(1))], ..Default::default() };
     let st = go(&mut fx, &lp(), Kind::Limit(600.0, false, false));
     check("PEG 체결", &st, &fx, 2.0);
@@ -412,7 +412,7 @@ fn e25_stop_entry_paths() {
     let mut fx = Fake { fill_after: 1, partial: Some(0.5), ..Default::default() };
     let (st, _) = go_stop(&mut fx, &entry_plan(), 1, 3600.0);
     check("감시 마감 잔량", &st, &fx, 2.0);
-    assert!(st.phase == Phase::Cancelled && st.market_branch.is_none() && st.cancel_reason.unwrap().contains("시장가 없음"));
+    assert!(st.phase == Phase::Cancelled && fx.markets.is_empty() && st.cancel_reason.unwrap().contains("시장가 없음"));
     // 선 옮김 = 닿음 판정을 그 시각부터 다시 · 수량·가격 칸 갱신
     let mut fx = Fake { fill_after: 1, script: vec![(2.5, Cmd::Amend(2490.0, Some(1.5)))], ..Default::default() };
     let (st, sinces) = go_stop(&mut fx, &entry_plan(), 6, 3600.0);
@@ -435,7 +435,7 @@ fn e25_stop_entry_paths() {
     let mut fx = Fake { script: vec![(2.5, Cmd::Action(Action::Market))], ..Default::default() };
     let (st, _) = go_stop(&mut fx, &entry_plan(), 0, 3600.0);
     check("감시 TAKER", &st, &fx, 2.0);
-    assert!(st.phase == Phase::NeedsMarketDecision && st.market_branch == Some("M5") && st.market_qty == 2.0 && fx.placed.is_empty());
+    assert!(st.phase == Phase::FilledTaker && fx.markets.len() == 1 && fx.markets[0].2 == 2.0 && fx.placed.is_empty());
     // PEG = 지금 닿은 것으로 치고 따라가기
     let mut fx = Fake { fill_after: 1, script: vec![(2.5, Cmd::Action(Action::Peg))], ..Default::default() };
     let (st, _) = go_stop(&mut fx, &entry_plan(), 0, 3600.0);

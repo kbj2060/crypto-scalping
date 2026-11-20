@@ -81,8 +81,6 @@ pub trait DeskIo {
     fn vol_mult(&self, asset: &str) -> Value;
     /// 손절 해제(접수 문) -- bracket::clear_bracket.
     async fn clear_bracket(&mut self, symbol: &str, pside: &str, only_sl: bool, only_tp: bool) -> Result<Value, String>;
-    /// 손절 다시 켜기(규칙 무장) -- bracket::place_stop(시장가형 비상 스탑 = M10, 쓸지 사용자 결정).
-    async fn place_stop(&mut self, symbol: &str, pside: &str, price: f64) -> Result<Value, String>;
 }
 
 // ── (나) 받아 둔 값 ────────────────────────────────────────────────────────────
@@ -811,7 +809,7 @@ impl Desk {
     }
 
     /// 원본 `assemble_exit_plan`. 수량은 반드시 **방금 읽은 포지션**에서(헤지 모드 과청산 방어는 수량뿐), 심볼은 실제 열린 포지션에서(P14).
-    /// for_order=true(실주문) = 화면용 펀딩·수수료 조회를 건너뛴다(P28) · market = «즉시»(M8 -- 집행이 NeedsMarketDecision 으로 멈춘다).
+    /// for_order=true(실주문) = 화면용 펀딩·수수료 조회를 건너뛴다(P28) · market = «즉시»(M8 -- 집행이 시장가로 닫는다).
     #[allow(clippy::too_many_arguments)]
     pub async fn assemble_exit_plan<Q: Quotes, I: DeskIo>(&mut self, q: &mut Q, io: &mut I, position_side: &str, fraction: f64, fresh: bool, asset: &str,
                                                          market: bool, for_order: bool, only_symbol: Option<&str>) -> Result<Value, Fail> {

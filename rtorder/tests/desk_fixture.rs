@@ -10,6 +10,9 @@ use rtorder::assemble::{Cached, EntryArgs};
 use rtorder::plan::Filters;
 use serde_json::{json, Value};
 
+/// M10(비상 스탑) 제거로 원본과 일부러 달라지는 접수 사례(손절 해제의 스탑 취소 · 손절 다시 켜기의 스탑 걸기).
+const STOP_CASES: [&str; 5] = ["dis_cancel_fails", "dis_ok", "dis_rearmed_race", "re_rule_place_fails", "re_rule_ok"];
+
 fn fixture() -> Value {
     serde_json::from_str(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/desk_fixture.json")).unwrap()).unwrap()
 }
@@ -104,18 +107,24 @@ fn fill_cache(q: &mut Cached<FakeQuotes>, inp: &Value) {
 #[test]
 fn plans_and_intake_match_python() {
     let fx = fixture();
-    let (mut n_plan, mut n_api, mut n_undecided) = (0, 0, 0);
+    let (mut n_plan, mut n_api, mut n_stop) = (0, 0, 0);
     for c in fx["desk"].as_array().unwrap() {
         let name = c["name"].as_str().unwrap();
         let (o, calls) = run_case(c, false);
-        if let Some(branch) = c.get("rust_market_branch").and_then(Value::as_str) {
-            // 원본은 시장가로 접수했다 -- Rust 는 접수에서 «미정»(409 · 분기 번호) · 작업 0 · 거래소 주문 0
-            assert!(c["status"] == 200, "{name}: 원본은 접수했어야");
-            assert_eq!(o["status"], json!(409), "{name}");
-            assert_eq!(o["body"]["error"], json!("market_undecided"), "{name}");
-            assert_eq!(o["body"]["branch"], json!(branch), "{name}");
-            assert_eq!(o["started"], json!([]), "{name}: 시작된 작업이 없어야");
-            n_undecided += 1;
+        if STOP_CASES.contains(&name) {
+            // 2026-11-21 사용자 결정 «−5% 비상 스탑(M10) Rust 에서 제거» -- 의도한 차이(RULES.md): 거래소 스탑 요청 없음 · 늘 성공
+            assert_eq!(o["status"], json!(200), "{name}: {}", o["body"]);
+            assert!(calls.iter().all(|x| x[0] != "clear_bracket" && x[0] != "place_stop"), "{name}: 스탑 요청이 나갔다 {calls:?}");
+            let key = "ETHUSDC:LONG";
+            if name.starts_with("dis_") {
+                assert_eq!(o["body"]["sl_off"]["cancelled"], json!(0), "{name}");
+                assert_eq!(o["file"][key]["sl_off"]["cancelled"], json!(0), "{name}");
+            } else {
+                assert_eq!(o["body"], json!({"ok": true, "backstop": null}), "{name}");
+                assert!(o["file"][key].get("sl_off").is_none(), "{name}: 5분봉 감시가 다시 켜져야");
+                assert_same(&o["file"][key]["placed"], &c["in"]["file0"][key].get("placed").cloned().unwrap_or(Value::Null), &format!("{name}: placed 그대로"));
+            }
+            n_stop += 1;
             continue;
         }
         for k in ["plan", "cap", "err", "status", "body", "started"] {
@@ -135,7 +144,7 @@ fn plans_and_intake_match_python() {
         }
         assert_same(&sorted(calls), &sorted(c["calls"].as_array().unwrap().clone()), &format!("{name}: 나간 조회(순서 무시 -- 원본은 gather)"));
     }
-    assert_eq!((n_plan, n_api, n_undecided), (64, 85, 6), "사례 수");
+    assert_eq!((n_plan, n_api, n_stop), (64, 86, 5), "사례 수(접수 91 = 원본과 같음 86(시장가 6 포함) + 스탑 제거로 의도한 차이 5)");
 }
 
 #[test]
@@ -144,7 +153,7 @@ fn cached_quotes_give_identical_plans_without_quote_round_trips() {
     let fx = fixture();
     let (mut n, mut saved_py, mut saved_rs) = (0, 0usize, 0usize);
     for c in fx["desk"].as_array().unwrap() {
-        if c.get("rust_market_branch").is_some() {
+        if STOP_CASES.contains(&c["name"].as_str().unwrap()) {
             continue;
         }
         let name = c["name"].as_str().unwrap();

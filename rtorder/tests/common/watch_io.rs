@@ -191,6 +191,10 @@ impl WatchIo for ScriptIo {
         self.note(vec![json!("cancel_wait_orphans"), json!(symbols)]);
         Ok(self.respond("cancel_wait_orphans", None)?.get("ret").cloned().unwrap_or(Value::Null))
     }
+    async fn cancel_exit_orders(&mut self, symbol: &str, pside: &str) -> Result<Value, String> {
+        self.note(vec![json!("cancel_exit_orders"), json!(symbol), json!(pside)]);
+        Ok(self.respond("cancel_exit_orders", None)?.get("ret").cloned().unwrap_or(Value::Null))
+    }
 }
 
 /// 사례 하나를 준비한다(임시 폴더 · 첫 저장본 · 대기 복구 파일 · 상태 칸).

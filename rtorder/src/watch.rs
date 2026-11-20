@@ -5,9 +5,7 @@
 //! **어디에도 연결하지 않는다** -- 바깥(계좌·5분봉·1초 체결가·거래소 함수·청산 계획 조립·시계·잠금·스위치)은 `WatchIo` 뒤. 구현은 시험의 가짜뿐.
 //!
 //! 저장본·상태 칸은 파이썬 dict 를 그대로 `serde_json::Map`(순서 보존)으로 둔다 -- 같은 파일을 파이썬과 주고받고(그림자·전환), 정답지와 칸 단위로 대조한다.
-//! 🔴원본과 일부러 다른 곳 하나: 발동 청산이 시장가 분기(§9 M6·M7·M9)에 닿으면 파이썬은 시장가로 닫지만 Rust 집행(`exec::run_exit`)은
-//! `NeedsMarketDecision` 으로 멈춘다 -- 감시는 그 무장에 `market_wait` 를 적고 **다시 쏘지 않는다**(사용자 결정 대기). 30초 뒤 다시 따라가기로
-//! 돌게 하면 «조용히 지정가로 바꾸기»가 되기 때문. 결정이 나면 이 칸을 지우는 쪽(접수 조각)이 정한다.
+//! 발동 청산이 시장가 분기(§9 M6·M7·M9)에 닿으면 원본처럼 시장가로 닫는다(2026-11-21 사용자 결정 «원본 동작 유지» -- 넷째 조각까지의 market_wait 멈춤은 지웠다).
 //! D7·D8·D9(규칙 문서 «어긋나 보이는 곳»)는 파이썬 동작 그대로 -- 시험(tests/watch_fixture.rs)이 그 동작을 고정한다.
 
 use crate::exec::{self, Exchange, ExecPlan, ExecState, Phase, Shared};
@@ -59,6 +57,10 @@ pub trait WatchIo {
     async fn place_tp_ladder(&mut self, legs: &Value, symbol: &str, pside: &str) -> Result<Value, String>;
     async fn place_add_order(&mut self, symbol: &str, pside: &str, price: f64, qty: f64) -> Result<Value, String>;
     async fn cancel_wait_orphans(&mut self, symbols: &[String]) -> Result<Value, String>;
+    /// 2026-11-21 cancel_exit_orders(symbol, pside) -- 앞선 청산 따라가기(dbpg+측면 · 닫는 쪽) 지우고 목록 다시 읽어 확인. {"cancelled","errors"}.
+    async fn cancel_exit_orders(&mut self, symbol: &str, pside: &str) -> Result<Value, String>;
+    /// 망가진 칸 알림(텔레그램 -- 뒤에서 보내 감시를 막지 않는다). 기본 = 안 보냄.
+    fn alert(&mut self, _msg: &str) {}
 }
 
 // ── 파이썬 값 다루기 ──────────────────────────────────────────────────────────
@@ -294,7 +296,8 @@ pub fn phase_name(p: Phase) -> &'static str {
         Phase::Rejected => "rejected",
         Phase::Error => "error",
         Phase::Cancelled => "cancelled",
-        Phase::NeedsMarketDecision => "needs_market_decision",
+        Phase::FilledTaker => "filled_taker",
+        Phase::TakerFailed => "taker_failed",
     }
 }
 
@@ -316,7 +319,7 @@ pub fn exec_plan_of(plan: &Value) -> Result<ExecPlan, String> {
 }
 
 /// 실제 청산 = `exec::run_exit` 를 돌리고 결과를 상태 칸에 옮긴다(원본 run_exit 가 state 에 쓰는 칸 이름 그대로).
-/// 🔴시장가 분기(M6·M7·M8·M9)에 닿으면 phase="needs_market_decision" · market_branch · market_qty -- 파이썬은 여기서 시장가로 닫는다.
+/// 시장가 분기(M6·M7·M8·M9)는 원본처럼 시장가로 닫는다(2026-11-21 사용자 결정) -- filled_taker / taker_failed.
 /// ponytail: 칸은 끝난 뒤 한 번 옮긴다(도는 동안 화면 폴링은 "submitting" 을 본다) -- 화면이 진행 중 체결량을 읽게 되면 Shared 를 칸 대신 둔다.
 pub async fn run_exit_into<E: Exchange>(ex: &mut E, plan: &Value, slot: &mut Obj, done_at: impl Fn() -> String) -> Result<(), String> {
     let p = exec_plan_of(plan)?;
@@ -332,9 +335,10 @@ pub async fn run_exit_into<E: Exchange>(ex: &mut E, plan: &Value, slot: &mut Obj
     if let Some(err) = e.error {
         slot.insert("error".into(), json!(err));
     }
-    if let Some(b) = e.market_branch {
-        slot.insert("market_branch".into(), json!(b));
-        slot.insert("market_qty".into(), f(e.market_qty));
+    if let Some(id) = e.taker_order_id {
+        slot.insert("taker_order_id".into(), json!(id));
+    }
+    if e.market_reason.is_some() {
         slot.insert("market_reason".into(), json!(e.market_reason));
     }
     slot.insert("done_at".into(), json!(done_at()));
@@ -356,13 +360,15 @@ pub struct Watcher {
     pub exiting: BTreeSet<String>,
     /// 원본 print 줄(서버 로그).
     pub logs: Vec<String>,
+    /// 알린 (칸 키, 예외 종류) -- 프로세스 수명 동안 한 번(2026-11-21).
+    pub alerted: BTreeSet<(String, String)>,
 }
 
 impl Watcher {
     pub fn new(dir: impl Into<PathBuf>, eth_symbol: &str) -> Watcher {
         let mut entry = Obj::new();
         entry.insert("phase".into(), json!("idle"));
-        Watcher { dir: dir.into(), eth_symbol: eth_symbol.into(), entry, side_exits: Obj::new(), waits: Obj::new(), exiting: BTreeSet::new(), logs: vec![] }
+        Watcher { dir: dir.into(), eth_symbol: eth_symbol.into(), entry, side_exits: Obj::new(), waits: Obj::new(), exiting: BTreeSet::new(), logs: vec![], alerted: BTreeSet::new() }
     }
     pub(crate) fn log(&mut self, s: String) {
         self.logs.push(s);
@@ -436,12 +442,35 @@ impl Watcher {
         }
     }
 
-    /// 시장가 결정 대기를 무장에 적는다(Rust 만의 칸 -- 위 모듈 설명).
-    fn mark_market_wait(b: &mut Obj, slot: &Obj, now: f64) {
-        let mw = json!({"branch": val(slot, "market_branch"), "qty": val(slot, "market_qty"), "at": now,
-                        "note": "여기서 파이썬은 시장가로 닫는다 — Rust 는 멈추고 사용자 결정을 기다린다"});
-        b.insert("market_wait".into(), mw);
-        b.insert("last_error".into(), json!(format!("시장가 결정 대기 {} (남은 수량 {})", py_str(&val(slot, "market_branch")), py_str(&val(slot, "market_qty")))));
+    /// 2026-11-21 결함 수정(파이썬 exit_retry_clear): 청산이 실패(retry_after)한 뒤 다시 쏘기 전에 앞선 청산의 따라가기 GTX 를 지우고 없음을 확인한다.
+    /// false = 이번엔 쏘지 않는다(무장·fired 유지 · 실패면 30초 뒤 다시). 첫 발동(retry_after 없음)은 조회를 늘리지 않는다(손절 속도).
+    /// 같은 코인 청산 칸이 바쁘면(그 사이 수동 청산 시작) 그 따라가기 주문을 지우지 않게 쏘지 않고 넘어간다.
+    async fn exit_retry_clear<I: WatchIo>(&mut self, io: &mut I, b: &mut Obj, pside: &str, b_asset: &str, symbol: &str) -> Result<bool, String> {
+        if !t(b, "retry_after") {
+            return Ok(true);
+        }
+        if io.order_locked() || self.exit_slot(b_asset).is_none() {
+            return Ok(false);
+        }
+        let r = io.cancel_exit_orders(symbol, pside).await?;
+        if truthy(r.get("errors")) {
+            let es: Vec<String> = r["errors"].as_array().map(|a| a.iter().map(py_str).collect()).unwrap_or_else(|| vec![py_str(&r["errors"])]);
+            b.insert("retry_after".into(), f(io.now() + RETRY_SEC));
+            b.insert("last_error".into(), json!(format!("앞선 청산 주문 정리 실패: {}", es.join("; "))));
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    /// 2026-11-21 결함 수정(파이썬 bracket_tick_alert): 건너뛴 칸을 **칸·예외 종류마다 한 번** 로그·알림(보내기는 `WatchIo::alert` -- 감시를 막지 않게 뒤에서).
+    fn tick_alert<I: WatchIo>(&mut self, io: &mut I, key: &str, why: &str) {
+        let kind = why.split_once(": ").map_or(why, |x| x.0).to_string();
+        if !self.alerted.insert((key.to_string(), kind)) {
+            return;
+        }
+        let msg = format!("🔴 손절 감시: 무장 칸 {key} 을 판정하지 못해 건너뜁니다({why}) — 다른 코인은 계속 봅니다 · 칸은 지우지 않았습니다(manual_bracket_state.json 확인)");
+        self.log(format!("bracket watch: {msg}"));
+        io.alert(&msg);
     }
 
     /// 감시 한 틱. 무장된 측면마다: 포지션이 사라졌으면(TP·비상 스탑·수동 청산) 남은 우리 주문을 지우고 내린다.
@@ -466,15 +495,31 @@ impl Watcher {
             _ => vec![],
         };
         let mut changed = false;
-        let seen_at: Obj = st.iter().map(|(k, v)| (k.clone(), v.get("armed_at").cloned().unwrap_or(Value::Null))).collect();
+        // dict 아닌 칸 = 망가짐 -- 합치기(bracket_merge)가 건드리지 않아 파일에 그대로 남는다
+        let seen_at: Obj = st.iter().filter(|(_, v)| v.is_object()).map(|(k, v)| (k.clone(), v.get("armed_at").cloned().unwrap_or(Value::Null))).collect();
         for key in st.keys().cloned().collect::<Vec<_>>() {
-            let Some(Value::Object(mut b)) = st.get(&key).cloned() else { continue };
-            let (keep, ch) = self.tick_one(io, &key, &mut b, acct_ok, acct_ts, &positions).await?;
-            changed |= ch;
-            if keep {
-                st.insert(key, Value::Object(b));
-            } else {
-                st.remove(&key);
+            let mut b = match st.get(&key).cloned() {
+                Some(Value::Object(b)) => b,
+                Some(v) => {
+                    // 2026-11-21 결함 수정: 망가진 칸 하나가 틱을 매번 죽여 뒤 코인 손절 판정이 멈췄다 -- 그 칸만 건너뛴다(지우지 않는다)
+                    self.tick_alert(io, &key, &format!("AttributeError: '{}' object has no attribute 'get'", type_name(&v)));
+                    continue;
+                }
+                None => continue,
+            };
+            match self.tick_one(io, &key, &mut b, acct_ok, acct_ts, &positions).await {
+                Ok((keep, ch)) => {
+                    changed |= ch;
+                    if keep {
+                        st.insert(key, Value::Object(b));
+                    } else {
+                        st.remove(&key);
+                    }
+                }
+                Err(e) => {
+                    st.insert(key.clone(), Value::Object(b)); // 원본: 예외 전까지 고친 사본이 그대로 남는다(합치기는 changed 일 때만)
+                    self.tick_alert(io, &key, &e);
+                }
             }
         }
         if changed {
@@ -533,6 +578,9 @@ impl Watcher {
                 touch = Some((pts.iter().copied().reduce(pyfmt::min).unwrap(), pts.iter().copied().reduce(pyfmt::max).unwrap()));
             }
         }
+        // 원본 bracket_action·bracket_sl_hit 의 float(armed["armed_at"]) -- 망가진 값이면 예외(→ 그 칸만 건너뜀 · 2026-11-21)
+        // ponytail: 원본은 그 식에 닿는 갈래에서만 터진다(손절 해제된 규칙 무장 + 포지션 있음이면 안 닿는다) -- 여기는 늘 본다(arm_bracket 은 늘 숫자를 쓴다)
+        req_float(b, "armed_at")?;
         let armed = Armed::from_value(&Value::Object(b.clone()));
         let held = positions.iter().any(|p| Some(&json!(p.symbol)) == sym_v.as_ref() && p.side == pside && p.qty.unwrap_or(0.0).abs() > 0.0);
         if acct_ok && !held {
@@ -563,9 +611,6 @@ impl Watcher {
                 return Ok((true, true));
             }
             return Ok((false, true));
-        }
-        if b.contains_key("market_wait") && matches!(act, TickAction::Fire | TickAction::SlLeg) {
-            return Ok((true, false)); // Rust 만: 시장가 결정 대기 중에는 다시 쏘지 않는다(모듈 설명)
         }
         if act == TickAction::SlLeg {
             return self.fire_leg(io, key, b, &pside, &symbol, b_asset, &armed, touch, last_bar).await;
@@ -614,6 +659,9 @@ impl Watcher {
             }
             self.exiting.remove(key);
             changed = true;
+        }
+        if !self.exit_retry_clear(io, b, &pside, b_asset, &symbol).await? {
+            return Ok((true, true));
         }
         let pl = io.exit_plan(&pside, 1.0, b_asset, &symbol).await;
         // 🔴검사는 조립(await) **뒤**에 -- 그 사이 «손절 해제»나 사용자 청산이 들어오면 쏘지 않는다(남의 상태를 clear 하고 두 번 청산하지 않게, B16)
@@ -671,8 +719,6 @@ impl Watcher {
             };
             keep = truthy(cl.get("errors")); // 못 지웠으면 남겨 둔다 -- 다음 틱 «clear» 가 다시 지운다
             s.insert("bracket_cleanup".into(), cl);
-        } else if phase.as_str() == Some("needs_market_decision") {
-            Self::mark_market_wait(b, &s, io.now());
         } else {
             b.insert("retry_after".into(), f(io.now() + RETRY_SEC)); // 🔴불명(error) 뒤 30초에 다시 쏠 때 «살아 있을 수 있는 주문» 위에 새로 건다(원본 그대로 · 진행 기록 4)
             b.insert("last_error".into(), val(&s, "error"));
@@ -690,6 +736,9 @@ impl Watcher {
                                   touch: Option<(f64, f64)>, last_bar: Option<(f64, f64)>) -> Result<(bool, bool), String> {
         if self.exit_slot(b_asset).is_none() || io.order_locked() || io.now() < float_or0(b, "retry_after") {
             return Ok((true, false)); // D9
+        }
+        if !self.exit_retry_clear(io, b, pside, b_asset, symbol).await? {
+            return Ok((true, true));
         }
         let legs: Vec<Value> = b.get("sl_legs").and_then(Value::as_array).cloned().unwrap_or_default();
         let mut hit = sl_legs_hit(pside, armed, touch, last_bar);
@@ -756,8 +805,6 @@ impl Watcher {
                 }
             }
             self.partial_exit_rearm_tp(io, plan_v.as_object().cloned().unwrap_or_default(), &mut s).await?; // 익절 지정가(조각) 수량을 남은 포지션에 맞춘다
-        } else if phase.as_str() == Some("needs_market_decision") {
-            Self::mark_market_wait(b, &s, io.now());
         } else {
             b.insert("retry_after".into(), f(io.now() + RETRY_SEC));
             b.insert("last_error".into(), val(&s, "error"));

@@ -66,6 +66,9 @@ impl WatchIo for Ops {
     async fn cancel_wait_orphans(&mut self, _: &[String]) -> Result<Value, String> {
         unreachable!()
     }
+    async fn cancel_exit_orders(&mut self, _s: &str, _p: &str) -> Result<Value, String> {
+        Ok(serde_json::json!({"cancelled": 0, "errors": []}))
+    }
 }
 
 fn routes(risk_ok: bool, qty: &str) -> Value {
@@ -147,12 +150,14 @@ fn stream_down_falls_back_to_rest() {
 }
 
 #[test]
-fn high_vol_exit_plan_is_market_and_watcher_waits_with_no_order() {
+fn high_vol_exit_plan_is_market_and_closes_with_one_market_order() {
+    // M6(2026-11-21 사용자 결정 «원본 동작 유지»): 변동성 ≥30 → 계획부터 MARKET → 지정가 없이 시장가 한 번 → 다 닫힘 → 정리·무장 내림
     let (mut w, mut io, dir) = setup("m6", Some(35.0), true);
     block_on(w.bracket_tick(&mut io)).unwrap();
-    assert_eq!(w.entry["phase"], "needs_market_decision");
-    assert!(io.ex.placed.is_empty(), "시장가 계획(M6)이면 거래소에 아무것도 안 나간다");
-    assert!(bracket_load(&dir)["ETHUSDC:LONG"].get("market_wait").is_some());
+    assert_eq!(w.entry["phase"], "filled_taker");
+    assert!(io.ex.placed.is_empty());
+    assert_eq!(io.ex.markets, vec![("SELL".to_string(), "LONG".to_string(), 0.4)]);
+    assert!(bracket_load(&dir).is_empty());
 }
 
 #[test]

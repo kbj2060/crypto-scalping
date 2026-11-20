@@ -108,6 +108,8 @@ pub struct Binance {
     t0: Instant,
     /// 체결 알림이 오면 `notify_waiters()` -- 기다리던 `nap` 이 일찍 깬다(원본 wake_fills · 알림은 앞당기기만, A10).
     pub wake: Arc<tokio::sync::Notify>,
+    /// 시험용: 있으면 `Exchange::sleep` 이 실제로 자지 않고 이걸 부른다(가짜 시계를 앞으로 -- 정답지의 서명 시각이 같게). 운영은 None.
+    pub virtual_sleep: Option<Arc<dyn Fn(f64) + Send + Sync>>,
     ban_file: PathBuf,
     filters: HashMap<String, Filters>,
     pub(crate) fees: HashMap<String, (f64, f64, f64, &'static str)>,
@@ -123,7 +125,7 @@ impl Binance {
             .build()
             .into();
         Binance { base: base.trim_end_matches('/').into(), key: key.into(), secret: secret.into(), offset: 0, agent, clock: Arc::new(sys_time),
-                  t0: Instant::now(), wake: Arc::new(tokio::sync::Notify::new()), ban_file, filters: HashMap::new(), fees: HashMap::new() }
+                  t0: Instant::now(), wake: Arc::new(tokio::sync::Notify::new()), virtual_sleep: None, ban_file, filters: HashMap::new(), fees: HashMap::new() }
     }
 
     /// 운영용: 키를 환경(`BINANCE_API_KEY`·`BINANCE_SECRET_KEY`)에서 읽는다. 시험은 쓰지 않는다(키는 `new` 로 주입).
@@ -177,6 +179,10 @@ impl Binance {
             // ban_guard 는 프로세스 사이 공용 파일이라 **실제 시계**(time.time)로 적는다 -- 주입한 시계가 아니다
             sign::ban_note(&self.ban_file, r.status, &sign::py_str(&payload), r.retry_after.as_deref(), sys_time());
             return err_value(sign::http_error(r.status, &payload));
+        }
+        // 2026-11-21 결함 수정: 200 + 빈 본문(dict·list 아님) = «나갔는지 모름»(숫자로 안 시작 → resolve_unknown_post) -- 원본은 호출부가 TypeError 로 죽었다
+        if !(payload.is_object() || payload.is_array()) {
+            return err_value(format!("EmptyResponse: HTTP {} 본문 {}", r.status, sign::py_repr(&payload)));
         }
         payload
     }
@@ -266,6 +272,11 @@ impl Exchange for Binance {
                  ("timeInForce", P::s("GTX")), ("price", P::F(o.price)), ("quantity", P::F(o.quantity)), ("newClientOrderId", P::s(&o.client_order_id))];
         reply(self.signed("POST", "/fapi/v1/order", &p).await)
     }
+    /// 원본 `signed(POST /fapi/v1/order, {**common, "type": "MARKET", "quantity": q})` -- 시장가 다리(2026-11-21 «원본 동작 유지»).
+    async fn place_market(&mut self, c: &Common<'_>, quantity: f64) -> Reply {
+        let p = [("symbol", P::s(c.symbol)), ("side", P::s(c.side)), ("positionSide", P::s(c.position_side)), ("type", P::s("MARKET")), ("quantity", P::F(quantity))];
+        reply(self.signed("POST", "/fapi/v1/order", &p).await)
+    }
     async fn get_order(&mut self, c: &Common<'_>, r: &OrderRef) -> Reply {
         reply(self.signed("GET", "/fapi/v1/order", &ref_params(c, r)).await)
     }
@@ -291,6 +302,9 @@ impl Exchange for Binance {
         }
     }
     async fn sleep(&mut self, sec: f64) {
+        if let Some(f) = &self.virtual_sleep {
+            return f(sec);
+        }
         tokio::time::sleep(Duration::from_secs_f64(sec)).await
     }
 }

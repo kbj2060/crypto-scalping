@@ -64,6 +64,9 @@ struct Fake {
     reprice_calls: u32,
     get_fail_first: u32,              // 처음 n 번의 상태 조회 실패(E12)
     reject_at_placed: Option<usize>, // 지정가가 n 건 걸린 뒤 다음 접수 한 번을 -5022 로
+    markets: Vec<(String, String, f64)>, // 시장가 다리 (측면, 포지션 측면, 수량) -- 즉시 전량 체결
+    market_err: Option<String>,          // 시장가 접수 오류
+    market_exec: Option<f64>,            // 응답 executedQty(None = 보낸 수량 · Some(0) = ACK)
 }
 
 impl Fake {
@@ -102,7 +105,7 @@ impl Fake {
     }
     /// 거래소 쪽 사실: 체결된 양 + 아직 체결될 수 있는 양(살아 있는 지정가 잔량).
     fn exposure(&self) -> (f64, f64) {
-        let filled = self.orders.values().map(|o| o.filled).sum();
+        let filled = self.orders.values().map(|o| o.filled).sum::<f64>() + self.markets.iter().map(|m| self.market_exec.unwrap_or(m.2)).sum::<f64>();
         let resting = self.orders.values().filter(|o| !TERMINAL.contains(&o.status.as_str())).map(|o| o.qty - o.filled).sum();
         (filled, resting)
     }
@@ -118,6 +121,16 @@ impl Fake {
 }
 
 impl Exchange for Fake {
+    async fn place_market(&mut self, c: &Common<'_>, quantity: f64) -> Reply {
+        self.tick();
+        assert_eq!(c.symbol, "ETHUSDC", "주문 심볼이 계획과 다르다");
+        if let Some(e) = &self.market_err {
+            return Err(e.clone());
+        }
+        self.markets.push((c.side.into(), c.position_side.into(), quantity));
+        self.next_id += 1;
+        Ok(Order { order_id: Some(9_000_000 + self.next_id), status: "FILLED".into(), executed_qty: self.market_exec.unwrap_or(quantity) })
+    }
     async fn place_limit_gtx(&mut self, o: &LimitOrder) -> Reply {
         self.tick();
         assert_eq!(o.symbol, "ETHUSDC", "주문 심볼이 계획과 다르다");
@@ -296,8 +309,8 @@ fn check(name: &str, st: &ExecState, fx: &Fake, total: f64) {
     } else {
         assert!((st.filled - real).abs() < 1e-9, "{name}: 적힌 체결 {} != 거래소 체결 {real} -- 호출부가 손절을 잘못 건다", st.filled);
     }
-    if st.phase == Phase::NeedsMarketDecision {
-        assert!(live.is_empty() && (st.market_qty - (total - st.filled)).abs() < 1e-9 && st.market_branch.is_some(), "{name}: 시장가 결정 대기 칸 {st:?}");
+    if st.phase == Phase::FilledTaker {
+        assert!(live.is_empty() && !fx.markets.is_empty() && st.taker_order_id.is_some(), "{name}: 시장가 다리 전에 지정가를 다 지웠어야 {st:?}");
     }
 }
 

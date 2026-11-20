@@ -25,7 +25,13 @@ from unittest import mock
 from urllib.parse import parse_qsl, urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
+# 2026-11-21 원본 파이썬 위치 -- 기본 = 이 저장소 · RTORDER_PY_ROOT = 결함 수정본 작업 폴더(읽기만 · 정답지는 이 저장소에 쓴다)
+PY_ROOT = Path(os.environ.get("RTORDER_PY_ROOT") or ROOT)
+sys.path.insert(0, str(PY_ROOT))
+# 감시가 망가진 칸을 알릴 때 텔레그램 모듈을 부른다(진짜는 서버 비밀 설정을 읽고 보낸다) -- 가짜를 먼저 넣는다
+_wd = types.ModuleType("scripts.ops_watchdog")
+_wd.send_telegram = lambda *_a, **_k: None
+sys.modules["scripts.ops_watchdog"] = _wd
 for _k in ("BINANCE_API_KEY", "BINANCE_SECRET_KEY", "DASHBOARD_MANUAL_EXEC_ENABLED", "DASHBOARD_SIZING_CAP_EQUITY_X"):
     os.environ.pop(_k, None)
 os.environ["DASHBOARD_MANUAL_EXEC_SYMBOL"] = "ETHUSDC"
@@ -862,7 +868,7 @@ def main():
         c.setdefault("account", ACC())
         r = asyncio.run(run_desk_case(c))
         if len(item) > 2:
-            r["rust_market_branch"] = item[2]   # 원본은 시장가로 접수 -- Rust 는 접수에서 «미정» 거절(시험이 이 칸을 본다)
+            r["market_branch"] = item[2]   # 시장가 분기 번호(표시용 -- 2026-11-21 부터 Rust 도 원본과 같이 접수)
         desk.append(r)
     out["desk"] = desk
     OUT.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), "utf-8")
