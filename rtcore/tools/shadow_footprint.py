@@ -8,10 +8,14 @@ rtcore 쪽 화면 = 스냅숏 1회 + 밀기를 proto.rs `Footprint` 주석대로
      -- rtcore 는 재시작 복원이 없어 첫 봉은 중간부터 센 반쪽이고, 파이썬은 스냅샷·백필로 되살린 봉이다.
   닫힌 봉(엄격): 봉 끝 + SLACK 초 ≤ min(rtcore 마지막 메시지 시각, 파이썬 마지막 응답 시각) -- 두 쪽이 본 마지막 체결 시각이 달라
      봉 경계 직후 몇 초는 한쪽에만 늦은 체결이 있을 수 있다. 그보다 새 봉(형성 중)은 «참고» 로만 센다.
+  2026-11-21 `--restored`(코어 재시작 복원이 켜져 있을 때): 비교 첫 봉 = 대조기가 코어에서 처음 받은 메시지 시각이 든 봉의 **다음 봉**(복원 뒤 첫 온전한 봉).
+     코어가 테이프로 되살린 봉은 계속 돈 파이썬 라이브 봉과 경계 두 초·수집기가 버린 늦은 체결·주문 묶음 경계만큼 다를 수 있다(RESTORE.md §5) --
+     그 봉은 시험(tests/restore_parity.rs)이 원본 복원 함수와 대조한다. 대조기는 코어 재시작 뒤에 띄운다.
   칸: 가격 키 = round(가격 / 칸 폭) · 필드 6개(매수·매도·고래매수·고래매도·리테일매수·리테일매도) 상대 1e-9.
   dhl(tests/footprint_parity.rs 머리 주석의 가지): 둘 다 같음(없음 포함) → 같음 · 파이썬만 있음 → 몸통만(코어는 테이프가 없다)
      · 코어만 있음 → 코어가 먼저 냄(파이썬은 봉 끝 6분 뒤 테이프로 낸다) · 둘 다 있는데 다름 → 불일치.
     python3 rtcore/tools/shadow_footprint.py eth 900      # 코인 · 몇 초(5분봉이라 닫힌 봉을 보려면 600초 넘게)
+    python3 rtcore/tools/shadow_footprint.py eth 900 --restored   # 복원이 켜진 코어
     python3 rtcore/tools/shadow_footprint.py --selftest
 """
 from __future__ import annotations
@@ -46,6 +50,11 @@ def put(view: dict, fp: dict) -> None:
 
 def same(a: list, b: list) -> bool:
     return len(a) == len(b) and all(x == y or abs(x - y) <= 1e-9 * max(abs(x), abs(y)) for x, y in zip(a, b))
+
+
+def first_bar(rt: dict, first_msg_at: float, restored: bool) -> int:
+    """비교 첫 봉(머리 주석): 복원이 없으면 첫 스냅숏의 가장 이른 봉 다음 · 복원이 켜져 있으면 처음 받은 메시지 시각의 봉 다음."""
+    return int(first_msg_at) // BS * BS + BS if restored else min(rt) + BS
 
 
 def compare(rt: dict, py: dict, lo: int, seen_until: float) -> dict:
@@ -97,7 +106,7 @@ def line(name: str, t: dict) -> str:
             f"dhl {t['dhl']}" + (f" · 첫 불일치 {'; '.join(t['예'])}" if t["예"] else ""))
 
 
-async def main(coin: str, secs: float) -> None:
+async def main(coin: str, secs: float, restored: bool = False) -> None:
     import aiohttp
     sym = f"{coin.lower()}usdt"
     rt: dict = {}
@@ -145,7 +154,7 @@ async def main(coin: str, secs: float) -> None:
                     put(rt, fp)
                     st["rt_at"] = m["tx_us"] / 1e6 if m.get("tx_us") else time.time()
                     if st["lo"] is None and rt:
-                        st["lo"] = min(rt) + BS   # 첫 봉은 반쪽 -- 머리 주석
+                        st["lo"] = first_bar(rt, time.time(), restored)   # 첫 봉은 반쪽 · 복원 봉은 안 본다 -- 머리 주석
 
         await asyncio.gather(read_core(), poll_py())
         await poll_once()
@@ -210,6 +219,8 @@ def selftest() -> None:
     assert sorted(rt) == [300, 600, 900, 1200], "창(barsExpected) 넘친 오래된 봉 버리기"
     put(rt, {**head, "full": False, "bars": [], "drop": [900]})
     assert sorted(rt) == [300, 600, 1200], "drop"
+    # --restored: 복원으로 144봉을 받아도 처음 받은 시각(1000초 → 봉 900)의 다음 봉(1200)부터
+    assert first_bar({0: {}, 300: {}, 600: {}}, 1000.5, True) == 1200 and first_bar({0: {}, 300: {}}, 1000.5, False) == 300
     print(line("selftest 예시 줄", c))
     print("selftest ok")
 
@@ -218,4 +229,4 @@ if __name__ == "__main__":
     if sys.argv[1:] == ["--selftest"]:
         selftest()
     else:
-        asyncio.run(main(sys.argv[1], float(sys.argv[2])))
+        asyncio.run(main(sys.argv[1], float(sys.argv[2]), "--restored" in sys.argv[3:]))

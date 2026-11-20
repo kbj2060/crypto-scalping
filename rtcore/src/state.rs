@@ -32,8 +32,8 @@ pub struct State {
     pub tx: broadcast::Sender<Stamped>,
     /// 재시작 복원(restore.rs). None = 끔(시험·부분 가동).
     restore: Option<restore::Cfg>,
-    /// 첫 체결이 와서 메울 공백이 생긴 심볼을 복원 스레드에 알린다(lib.rs).
-    wake: Option<mpsc::UnboundedSender<String>>,
+    /// 첫 체결이 와서 메울 공백이 생긴 심볼(과 일감 종류)을 복원 스레드에 알린다(lib.rs).
+    wake: Option<mpsc::UnboundedSender<(String, restore::Wake)>>,
 }
 
 impl State {
@@ -54,7 +54,7 @@ impl State {
 
     /// 복원을 켠 상태: 심볼마다 스냅숏 파일을 읽어 되살린다(수신 전 · `now_us` = 지금 벽시계 -- 143봉보다 오래된 봉은 버린다).
     /// 받는 쪽(둘째 값)은 «메울 공백이 생긴 심볼»을 받아 `run_restore` 를 부른다(lib.rs). 시험은 버리고 `run_restore` 를 직접 부른다.
-    pub fn with_restore(symbols: &[String], ring_cap: usize, queue_cap: usize, cfg: restore::Cfg, now_us: i64) -> (Arc<Self>, mpsc::UnboundedReceiver<String>) {
+    pub fn with_restore(symbols: &[String], ring_cap: usize, queue_cap: usize, cfg: restore::Cfg, now_us: i64) -> (Arc<Self>, mpsc::UnboundedReceiver<(String, restore::Wake)>) {
         let mut st = Self::build(symbols, ring_cap, queue_cap);
         let (wake, rx) = mpsc::unbounded_channel();
         for (s, cell) in &mut st.syms {
@@ -72,6 +72,24 @@ impl State {
                 }
                 Err(e) => println!("rtcore 복원 {s}: {} {e} -- 첫 체결 때 테이프로 창(144봉)을 메운다", p.display()),
             }
+            // 나머지 원천(restore.rs 머리 주석): OKX 는 첫 체결·첫 OI 때, 청산 둘은 지금(수신 전 -- 파이썬 liq_events_load 도 수신 전 한 번).
+            let okx = crate::supply::okx_ct_val(&sup.okx_inst).is_some();
+            sup.rs.okx_await = okx;
+            sup.rs.oi_await = okx;
+            let bn = restore::read_bn_liq(&cfg.bn_ctx, s, now_us as f64 / 1000.0).unwrap_or_else(|e| {
+                println!("rtcore 복원 {s}: 🔴강제청산 못 읽음({e}) -- 재시작 뒤 660초 청산 레인이 빈다");
+                vec![]
+            });
+            let by = if crate::supply::BYBIT_SYMBOLS.contains(&s.as_str()) {
+                restore::read_bybit_liq(&cfg.bybit_liq, s, now_us.div_euclid(1000)).unwrap_or_else(|e| {
+                    println!("rtcore 복원 {s}: 🔴Bybit 청산 못 읽음({e}) -- 재시작 뒤 660초 Bybit 레인이 빈다");
+                    vec![]
+                })
+            } else {
+                vec![]
+            };
+            println!("rtcore 복원 {s}: 강제청산 {}건 · Bybit 청산 {}건(DB)", bn.len(), by.len());
+            sup.load_liqs(bn, by);
         }
         st.restore = Some(cfg);
         st.wake = Some(wake);
@@ -94,6 +112,59 @@ impl State {
         let mut g = cell.lock().unwrap();
         let now = crate::now_us();
         let (line, up) = g.supply.merge(t, now);
+        Self::queue(&mut g, up, now);
+        println!("rtcore 복원 {s}: {line}");
+        Some(line)
+    }
+
+    fn wake(&self, s: &str, w: restore::Wake) {
+        if let Some(tx) = &self.wake {
+            let _ = tx.send((s.to_string(), w));
+        }
+    }
+
+    /// OKX 1초 칸·청산을 메운다(run_restore 와 같은 방식 -- 읽기는 락 밖). 일감이 없으면 None.
+    pub fn run_restore_okx(&self, s: &str) -> Option<String> {
+        let cfg = self.restore.as_ref()?;
+        let cell = self.syms.get(s)?;
+        // 1초 칸 끝 초 = 첫 OKX 체결의 초(파이썬 t0 = min(okx_sec) 와는 늦은 체결이 있을 때만 다르다 -- restore.rs 머리 주석) · 청산도 그 시각
+        let (t0_ms, inst) = {
+            let g = cell.lock().unwrap();
+            (g.supply.rs.okx_job?, g.supply.okx_inst.clone())
+        };
+        let t0 = t0_ms.div_euclid(1000);
+        let secs = match restore::okx_tape_bucket(&inst) {
+            Some(tb) => restore::read_okx_secs(&cfg.okx_tape, &inst, t0, tb, cfg.tries, cfg.wait),
+            None => Err("OKX 테이프 칸 폭 표에 없는 종목".into()),
+        };
+        let liq = restore::read_okx_liq(&cfg.okx_ctx, &inst, t0_ms - crate::supply::SUPPLY_1S_SECONDS * 1000, t0_ms);
+        let now = crate::now_us();
+        let mut g = cell.lock().unwrap();
+        let (line, up) = g.supply.merge_okx(secs, liq, now);
+        Self::queue(&mut g, up, now);
+        println!("rtcore 복원 {s}: {line}");
+        Some(line)
+    }
+
+    /// OKX 미결제약정을 메운다.
+    pub fn run_restore_okx_oi(&self, s: &str) -> Option<String> {
+        let cfg = self.restore.as_ref()?;
+        let cell = self.syms.get(s)?;
+        let (t0, inst) = {
+            let g = cell.lock().unwrap();
+            (g.supply.rs.oi_job?, g.supply.okx_inst.clone())
+        };
+        let got = restore::read_okx_oi(&cfg.okx_ctx, &inst, t0);
+        let now = crate::now_us();
+        let mut g = cell.lock().unwrap();
+        let (line, up) = g.supply.merge_okx_oi(got, now);
+        Self::queue(&mut g, up, now);
+        println!("rtcore 복원 {s}: {line}");
+        Some(line)
+    }
+
+    /// 합친 몫을 다음 묶음 밀기에 싣는다.
+    fn queue(g: &mut Sym, up: Option<Supply1s>, now: i64) {
         if let Some(up) = up {
             g.first.get_or_insert((0, now));
             match &mut g.pending {
@@ -101,8 +172,11 @@ impl State {
                 None => g.pending = Some(up),
             }
         }
-        println!("rtcore 복원 {s}: {line}");
-        Some(line)
+    }
+
+    /// 시험용: 청산 링 -- (거래소 시각 ms, 롱 청산, 수량, USD).
+    pub fn liq_events(&self, s: &str, venue: Venue) -> Option<Vec<(i64, bool, f64, f64)>> {
+        Some(self.syms.get(s)?.lock().unwrap().supply.liq_events(venue))
     }
 
     /// 코어 스냅숏을 쓴다(lib.rs 가 SNAP_EVERY 마다 · 종료코드 70 직전 main.rs). 락 안에서는 값만 뜨고 직렬화·쓰기는 락 밖.
@@ -133,9 +207,7 @@ impl State {
             Event::Trade { id, px, qty, sell } => {
                 // 이 연결의 첫 체결 -- 그 앞 공백을 테이프로 메운다(쌓기 전에: last_ms 가 앞 연결의 값이어야 한다).
                 if g.supply.rs.await_first && g.supply.begin_restore(m.ex_ms) {
-                    if let Some(w) = &self.wake {
-                        let _ = w.send(m.s.clone());
-                    }
+                    self.wake(&m.s, restore::Wake::Bn);
                 }
                 if g.trades.len() == self.ring_cap {
                     g.trades.pop_front();
@@ -145,8 +217,19 @@ impl State {
                 supply = g.supply.trade(px, qty, m.ex_ms, sell, id as i64, m.rx_us);
             }
             Event::Liq { venue, long, qty, px } => supply = g.supply.liq(venue, long, qty, px, m.ex_ms, m.rx_us),
-            Event::Flow { venue, px, qty, sell } => supply = g.supply.flow(venue, px, qty, sell, m.ex_ms, m.rx_us),
-            Event::Oi { oi, .. } => supply = g.supply.oi(oi, m.ex_ms, m.rx_us),
+            Event::Flow { venue, px, qty, sell } => {
+                // 시작 뒤 첫 OKX 체결 -- 그 앞 660초(1초 칸·청산)를 테이프·맥락 DB 에서(쌓기 전에: t0 = 이 체결의 초)
+                if venue == Venue::Okx && g.supply.rs.okx_await && g.supply.begin_okx(m.ex_ms) {
+                    self.wake(&m.s, restore::Wake::Okx);
+                }
+                supply = g.supply.flow(venue, px, qty, sell, m.ex_ms, m.rx_us)
+            }
+            Event::Oi { oi, .. } => {
+                if g.supply.rs.oi_await && g.supply.begin_okx_oi(m.ex_ms) {
+                    self.wake(&m.s, restore::Wake::OkxOi);
+                }
+                supply = g.supply.oi(oi, m.ex_ms, m.rx_us)
+            }
             Event::Book { .. } => g.book = Some(m.clone()),
             Event::Mark { .. } => g.mark = Some(m.clone()),
             Event::Snapshot { .. } | Event::Supply1s(_) | Event::Footprint(_) => return,

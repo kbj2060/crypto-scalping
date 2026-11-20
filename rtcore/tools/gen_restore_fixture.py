@@ -75,22 +75,29 @@ RUNS = {
     "notape": (63000.6, 63120.4, "none", True),        # 테이프 없음(스냅숏만)
     "none": (None, 64800.4, "none", False),            # 둘 다 없음
     "nosnap_long": (None, 56400.4, "full", False),     # 판 번호 다름·깨짐의 정답(= 스냅숏 없음)
-    "behind": (66000.6, 66200.4, "behind", True),      # 테이프가 재시작 20초 앞에서 멈춤
+    # 테이프가 재시작 400초 앞에서 멈춤 -- 스냅숏 봉(66000)이 «테이프가 다 못 든 · 링이 다 든» 봉이 되게(dhl 링 가지 · 2026-11-21 양성 대조 보강)
+    "behind": (66000.6, 66650.4, "behind", True),
+    # 2026-11-21 양성 대조 보강: 공백(8초)에 체결이 하나도 없다 -- 합치기가 봉을 하나도 안 바꿔도 «메우는 중» 구멍이 풀린 밀기가 나가야 한다
+    "quiet": (46000.6, 46008.4, "full", True),
 }
+M_RUN = {"behind": 80, "quiet": 4}        # 합치기 전 라이브 메시지 수(기본 M) -- behind 는 링 바닥이 스냅숏 봉 시작을 넘을 만큼
+QUIET = {"quiet"}               # 촘촘한 체결 창 없음 · 공백 초에 체결 없음
+TAPE_ONLY_S = 48000             # 이 초의 작은 체결 하나는 테이프에만 있다(대시보드·코어 라이브가 놓침) -- dhl «테이프 값 ≠ 스냅숏 값» 대조
+LATE_LIVE_S = 56401             # long 재시작 직후 30초 늦게 온 체결(라이브 1초 칸이 first_s 앞 초를 가진다 -- «실시간 초는 안 덮는다» 대조)
 # 코어 사례 = (이름, 재시작 전 코어를 돌릴 S 의 정답 이름, 파이썬 정답, 코어 스냅숏 처리)
 CASES = [
     ("short", "short", "short", "ok"), ("bar", "bar", "bar", "ok"), ("long", "long", "long", "ok"), ("day", "day", "day", "ok"),
     ("gaps", "gaps", "gaps", "ok"), ("nosnap", None, "nosnap", "none"), ("notape", "notape", "notape", "ok"),
     ("none", None, "none", "none"), ("badver", "long", "nosnap_long", "badver"), ("corrupt", "long", "nosnap_long", "corrupt"),
-    ("behind", "behind", "behind", "ok"),
+    ("behind", "behind", "behind", "ok"), ("quiet", "quiet", "quiet", "ok"),
 ]
 GAP_T = (58700.0, 58900.0)      # gaps 테이프: 이 사이 체결을 수집기가 못 받음
-BEHIND_S = 20
+BEHIND_S = 400
 
 
 # ── 합성 체결 열 ─────────────────────────────────────────────────────────────
 # 한 줄 = [T(ms), 체결ID, p, q, m, 수신 벽시계(ms)] -- 연결 하나(재연결은 기존 정답지들이 본다).
-def gen() -> tuple[list[list], dict[str, int]]:
+def gen() -> tuple[list[list], dict[str, int], set[int]]:
     rng = random.Random(SEED)
     rows: list[list] = []
     marks: dict[str, int] = {}
@@ -98,7 +105,12 @@ def gen() -> tuple[list[list], dict[str, int]]:
     dense: list[tuple[float, float]] = []
     snaps = {int(v[0]): v[0] for v in RUNS.values() if v[0] is not None}
     rests = {int(v[1]): v[1] for v in RUNS.values()}
-    for S, R, _t, _u in RUNS.values():
+    tape_only: set[int] = set()
+    silent = set()
+    for name, (S, R, _t, _u) in RUNS.items():
+        if name in QUIET:
+            silent |= set(range(int(S) + 1, int(R)))
+            continue
         if S is not None:
             dense.append((S - 700, S + 60))
         dense.append((R - 700, R + 800))
@@ -155,6 +167,14 @@ def gen() -> tuple[list[list], dict[str, int]]:
             put(base + 600, pf(mid + 0.01), qf(5.0), False)
             put(base + 800, pf(mid - 0.01), qf(1.0), True)
             continue
+        if s in silent:
+            continue
+        if s == TAPE_ONLY_S:
+            tape_only.add(len(rows))
+            put(base + 400, pf(mid), qf(0.2), False)
+            continue
+        if s == LATE_LIVE_S:
+            put(base - 30_000 + 100, pf(mid), qf(1.3), True, late=True)
         if s in (20000, 30000, 40000):     # 늦게 온 체결(3초 · 700초 전) -- 수집기는 이미 쓴 초면 버린다(dropped_late)
             put(base + 500, pf(mid), qf(2.0), False)
             put(base - 3000 + 200, pf(mid + 0.03), qf(7.0), True, late=True)
@@ -168,7 +188,7 @@ def gen() -> tuple[list[list], dict[str, int]]:
                     break
         elif rng.random() < 1 / 25:
             order(base, rng.randint(0, 900), mid)
-    return rows, marks
+    return rows, marks, tape_only
 
 
 def text(r: list) -> str:
@@ -349,8 +369,10 @@ def checkpoint(fs: dict, tape: Path, now: float) -> dict:
             "dhl": [[b, kind, v] for b, (kind, v) in sorted(fp_dhl(fs, recent, tape, now).items())]}
 
 
-async def oracle(rows: list[list], marks: dict, name: str, tapes: dict, work: Path) -> dict:
+async def oracle(rows: list[list], marks: dict, name: str, tapes: dict, work: Path, tape_only: set) -> dict:
     S, R, tv, use_snap = RUNS[name]
+    M = M_RUN.get(name, globals()["M"])
+    live = lambda a, b: [rows[i] for i in range(a, b) if i not in tape_only]   # noqa: E731 -- 대시보드는 테이프에만 있는 체결을 못 본다
     s_idx = marks[f"S{S}"] if S is not None else None
     r_idx = marks[f"R{R}"]
     e_idx = next(i for i in range(r_idx, len(rows)) if rows[i][0] >= T0 + int((R + END_AFTER) * 1000))
@@ -415,7 +437,7 @@ async def oracle(rows: list[list], marks: dict, name: str, tapes: dict, work: Pa
     if s_idx is not None:
         # 재시작 전 판: REST 몫(asset=eth)이라 재연결 메우기가 테이프를 안 읽는다(바로 예외) = 코어의 메우기 없는 라이브
         ns1 = cf.make_coin_flow(dataclasses.replace(SPEC, asset="eth", snapshot_path=snap, **nowhere), no_rest, {})
-        t1 = await feed(ns1, rows[:s_idx], nohook)
+        t1 = await feed(ns1, live(0, s_idx), nohook)
         ns1.footprint_state["ready"] = True
         await ns1.stop(None)                       # footprint_save
         t1.cancel()
@@ -429,7 +451,7 @@ async def oracle(rows: list[list], marks: dict, name: str, tapes: dict, work: Pa
     out["restart_ms"] = rows[r_idx][5] - 500
     clock["now"] = out["restart_ms"] / 1000       # footprint_load 의 143봉 자르기 기준
     sup = asyncio.create_task(free(ns2.start)["supply_1s_restore"](None))
-    part = rows[r_idx:e_idx]
+    part = live(r_idx, e_idx)
 
     async def hook(k: int) -> None:
         if k == M:
@@ -473,7 +495,7 @@ async def oracle(rows: list[list], marks: dict, name: str, tapes: dict, work: Pa
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    rows, marks = gen()
+    rows, marks, tape_only = gen()
     tapes = {}
     for v, drop in (("full", None), ("gaps", (T0 + int(GAP_T[0] * 1000), T0 + int(GAP_T[1] * 1000)))):
         p = OUT / f"tape_{v}.sqlite"
@@ -501,7 +523,7 @@ def main() -> None:
         sys.stdout = open(os.devnull, "w")
         (work / name).mkdir()              # 판마다 따로 -- 재시작 뒤 판도 ready 가 되면 30초마다 제 스냅숏 경로에 쓴다(다음 판이 읽으면 안 된다)
         try:
-            runs[name] = asyncio.run(oracle(rows, marks, name, tapes, work / name))
+            runs[name] = asyncio.run(oracle(rows, marks, name, tapes, work / name, tape_only))
         finally:
             sys.stdout.close()
             sys.stdout = old
@@ -518,7 +540,7 @@ def main() -> None:
     fx = {"about": "합성 SOL @trade 열 · 원본 수집기가 만든 테이프 · 원본 coin_flow 복원 정답(rtcore/tools/gen_restore_fixture.py, 시드 %d)" % SEED,
           "symbol": SYML, "t0": T0, "tape_buckets": dict(tc.BUCKETS), "supply_1s_seconds": cf.SUPPLY_1S_SECONDS,
           "window_bars": WANT, "rows": [[T - T0, tid, p, q, m, w - T0] for T, tid, p, q, m, w in rows],
-          "tapes": {k: v.name for k, v in tapes.items()}, "cases": cases}
+          "tapes": {k: v.name for k, v in tapes.items()}, "tape_only": sorted(tape_only), "cases": cases}
     (OUT / "restore_sol.json").write_text(json.dumps(fx, separators=(",", ":"), ensure_ascii=False))
     print(f"{(OUT / 'restore_sol.json').relative_to(ROOT)}: 체결 {len(rows)} · 사례 {len(cases)} · "
           f"{(OUT / 'restore_sol.json').stat().st_size // 1024}KB · 테이프 {[(k, v.stat().st_size // 1024) for k, v in tapes.items()]}KB")

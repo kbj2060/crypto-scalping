@@ -62,7 +62,7 @@ const SIZE_BANDS_USD: &[(&str, f64, f64)] = &[
 /// server.py liq_events_by · coin_flow.py okx_liq_events 의 deque(maxlen=5000).
 pub const LIQ_RING: usize = 5000;
 /// server.py supply_1s_payload `_bnow = int(time.time()) - 3`(수집기가 2초마다 쓴다).
-const BYBIT_LAG_S: i64 = 3;
+pub(crate) const BYBIT_LAG_S: i64 = 3;
 /// OKX 계약 크기(1계약 = 기초자산 몇 개). scripts/live_okx_trade_tape_collector_20260923.py CT_VALS 사본.
 /// 🔴안 곱하면 레인이 10배(coin_flow.py 112~114). 표에 없는 종목은 OKX 레인을 켜지 않는다(collect_okx_flow 723~726).
 // ponytail: 파이썬 표 사본 + 정답지 대조 -- 파이썬은 기동 때 거래소 REST(ctVal)와도 대조하지만 코어는 REST 를 안 부른다(범위 밖).
@@ -120,7 +120,7 @@ fn age(now_us: i64, ms: i64) -> Option<f64> {
     (ms != 0).then(|| r1(f64::max(0.0, (now_us as f64 / 1000.0 - ms as f64) / 1000.0)))
 }
 
-fn newest(m: &BTreeMap<i64, [f64; 7]>) -> i64 {
+pub(crate) fn newest(m: &BTreeMap<i64, [f64; 7]>) -> i64 {
     m.keys().next_back().copied().unwrap_or(0)
 }
 
@@ -143,15 +143,15 @@ fn window_rows(m: &BTreeMap<i64, [f64; 7]>, top: i64) -> Vec<SecRow> {
     m.range(top - SUPPLY_1S_SECONDS + 1..top).filter_map(|(&s, _)| sec_row(m, s)).collect()
 }
 
-struct LiqEv {
-    ts_ms: i64,
-    long: bool,
-    qty: f64,
-    usd: f64,
+pub(crate) struct LiqEv {
+    pub(crate) ts_ms: i64,
+    pub(crate) long: bool,
+    pub(crate) qty: f64,
+    pub(crate) usd: f64,
 }
 
 /// 링 순서대로 초별로 더한다(파이썬 setdefault 루프와 같은 순서 -- 더하는 순서가 달라지면 끝자리가 갈린다).
-fn liq_rows(ev: &VecDeque<LiqEv>, keep: impl Fn(i64) -> bool) -> Vec<LiqRow> {
+pub(crate) fn liq_rows(ev: &VecDeque<LiqEv>, keep: impl Fn(i64) -> bool) -> Vec<LiqRow> {
     let mut by: BTreeMap<i64, [f64; 4]> = BTreeMap::new();
     for e in ev {
         let s = e.ts_ms.div_euclid(1000);
@@ -165,7 +165,7 @@ fn liq_rows(ev: &VecDeque<LiqEv>, keep: impl Fn(i64) -> bool) -> Vec<LiqRow> {
     by.into_iter().map(|(s, c)| (s, r3(c[0]), r3(c[1]), r0(c[2]), r0(c[3]))).collect()
 }
 
-fn push_capped(ring: &mut VecDeque<LiqEv>, e: LiqEv) {
+pub(crate) fn push_capped(ring: &mut VecDeque<LiqEv>, e: LiqEv) {
     if ring.len() == LIQ_RING {
         ring.pop_front();
     }
@@ -174,8 +174,8 @@ fn push_capped(ring: &mut VecDeque<LiqEv>, e: LiqEv) {
 
 /// 현물·OKX 한 레인: 초 칸 + 화면 meta(server.py okx_meta · spot_meta).
 #[derive(Default)]
-struct Lane {
-    sec: BTreeMap<i64, [f64; 7]>,
+pub(crate) struct Lane {
+    pub(crate) sec: BTreeMap<i64, [f64; 7]>,
     last_ms: i64,
     connected: bool,
     errors: u64,
@@ -202,14 +202,14 @@ pub struct Supply {
     /// 재시작·재연결 복원 상태(restore.rs).
     pub(crate) rs: crate::restore::Pending,
     open: Option<Order>,
-    liq: VecDeque<LiqEv>,
+    pub(crate) liq: VecDeque<LiqEv>,
     spot: Lane,
-    okx: Lane,
-    okx_inst: String,
-    okx_oi: BTreeMap<i64, f64>,
+    pub(crate) okx: Lane,
+    pub(crate) okx_inst: String,
+    pub(crate) okx_oi: BTreeMap<i64, f64>,
     okx_last_oi_ms: i64,
-    okx_liq: VecDeque<LiqEv>,
-    bybit: VecDeque<LiqEv>,
+    pub(crate) okx_liq: VecDeque<LiqEv>,
+    pub(crate) bybit: VecDeque<LiqEv>,
 }
 
 impl Supply {
@@ -252,6 +252,16 @@ impl Supply {
     /// 시험용: OKX OI 칸.
     pub fn okx_oi_cells(&self) -> &BTreeMap<i64, f64> {
         &self.okx_oi
+    }
+
+    /// 시험용: 청산 링(받은·되살린 순서) -- (거래소 시각 ms, 롱 청산, 수량, USD).
+    pub fn liq_events(&self, venue: Venue) -> Vec<(i64, bool, f64, f64)> {
+        let ring = match venue {
+            Venue::Okx => &self.okx_liq,
+            Venue::Bybit => &self.bybit,
+            _ => &self.liq,
+        };
+        ring.iter().map(|e| (e.ts_ms, e.long, e.qty, e.usd)).collect()
     }
 
     /// 수신 연결이 붙거나 끊김(feed). 파이썬 connected 와 errors(끊김마다 +1).
@@ -308,6 +318,11 @@ impl Supply {
                 let lo = now_us.div_euclid(1_000_000) - BYBIT_LAG_S - SUPPLY_1S_SECONDS;
                 while self.bybit.front().is_some_and(|f| f.ts_ms.div_euclid(1000) <= lo) {
                     self.bybit.pop_front();
+                }
+                // 복원(restore.rs)이 DB 에서 읽은 사건이 재시작 직후 실시간으로 한 번 더 오면 건너뛴다 -- 파이썬은 DB 만 읽어 한 번만 센다.
+                let dup = ts_ms <= self.rs.bybit_max_ms && self.bybit.iter().any(|f| f.ts_ms == ts_ms && f.long == e.long && f.qty == e.qty && f.usd == e.usd);
+                if dup {
+                    return None;
                 }
                 if s > lo {
                     let i = self.bybit.partition_point(|f| f.ts_ms <= ts_ms);

@@ -63,6 +63,12 @@ pub struct Cfg {
     /// 상대 경로는 실행 위치 기준 -- 감시자(scripts/ops/supervisor_rtcore.sh)가 저장소 루트에서 띄운다.
     pub snap_dir: String,
     pub tape_db: String,
+    /// 나머지 원천 복원(restore.rs «나머지 원천»): OKX 체결 테이프 · OKX 맥락(OI·청산) · 바이낸스 맥락(강제청산) · Bybit 청산.
+    /// 기본 = 파이썬 수집기 파일. Rust 수집기 그림자로 갈아 끼울 때 data/hot/rtcollect/<같은 이름> 으로(rtcollect/SHADOW.md).
+    pub okx_tape_db: String,
+    pub okx_ctx_db: String,
+    pub bn_ctx_db: String,
+    pub bybit_liq_db: String,
 }
 
 impl Cfg {
@@ -86,6 +92,10 @@ impl Cfg {
             snap_dir: env("RTCORE_SNAP_DIR", "data/live/rtcore"),
             // 파이썬 수집기 파일(live_trade_tape_collector HOT_TAPE_DB) -- Rust 수집기로 갈아 끼우면 그 파일로 바꾼다.
             tape_db: env("RTCORE_TAPE_DB", "data/hot/binance_tape.sqlite"),
+            okx_tape_db: env("RTCORE_OKX_TAPE_DB", "data/hot/okx_tape.sqlite"),
+            okx_ctx_db: env("RTCORE_OKX_CTX_DB", "data/hot/okx_ctx.sqlite"),
+            bn_ctx_db: env("RTCORE_BN_CTX_DB", "data/hot/binance_ctx.sqlite"),
+            bybit_liq_db: env("RTCORE_BYBIT_LIQ_DB", "data/hot/bybit_liq.sqlite"),
         }
     }
 }
@@ -97,13 +107,27 @@ pub fn start(cfg: &Cfg, listener: TcpListener) -> (Arc<state::State>, tokio::tas
         state::State::new(&cfg.symbols, RING_CAP, QUEUE_CAP)
     } else {
         // 순서: 스냅숏을 읽은 뒤(수신 전) 수신을 붙인다. 테이프 메우기는 각 연결의 첫 체결 뒤에 스레드에서(restore.rs 머리 주석 2).
-        let rc = restore::Cfg { snap_dir: cfg.snap_dir.clone().into(), tape: cfg.tape_db.clone().into(), tries: 12, wait: Duration::from_secs(5) };
+        let rc = restore::Cfg {
+            snap_dir: cfg.snap_dir.clone().into(),
+            tape: cfg.tape_db.clone().into(),
+            tries: 12,
+            wait: Duration::from_secs(5),
+            okx_tape: cfg.okx_tape_db.clone().into(),
+            okx_ctx: cfg.okx_ctx_db.clone().into(),
+            bn_ctx: cfg.bn_ctx_db.clone().into(),
+            bybit_liq: cfg.bybit_liq_db.clone().into(),
+        };
         let (st, mut wake) = state::State::with_restore(&cfg.symbols, RING_CAP, QUEUE_CAP, rc, now_us());
         let s2 = st.clone();
         tokio::spawn(async move {
-            while let Some(sym) = wake.recv().await {
+            while let Some((sym, w)) = wake.recv().await {
                 let s3 = s2.clone();
-                tokio::task::spawn_blocking(move || s3.run_restore(&sym)); // 심볼마다 따로(기다림 최대 60초가 서로 안 막게)
+                // 심볼·일감마다 따로(기다림 최대 60초가 서로 안 막게)
+                tokio::task::spawn_blocking(move || match w {
+                    restore::Wake::Bn => s3.run_restore(&sym),
+                    restore::Wake::Okx => s3.run_restore_okx(&sym),
+                    restore::Wake::OkxOi => s3.run_restore_okx_oi(&sym),
+                });
             }
         });
         let s2 = st.clone();

@@ -11,6 +11,8 @@ rtcore 는 구독 → 스냅숏 1회 → 밀기(바뀐 초만, 초 단위로 덮
   partial(진행 중인 초)도 app.js applySupply1s 처럼 칸에 넣는다. 🔴2026-11-20 서버 그림자에서 현물 4초·OKX 6초만 지어졌다 --
      현물·OKX 는 주문 단위라 닫힌 초를 목록으로 다시 보내지 않고 «마지막 partial = 그 초의 끝값»으로 끝난다(supply.rs flow).
      바이낸스 선물은 다음 초에 닫히는 주문이 앞 초를 목록에 다시 실어 가려져 있었다. 비교는 여전히 닫힌 초만.
+  2026-11-21 재시작 복원 뒤: 대조기 시작 뒤 첫 2초도 뺀다(범위 시작 = max(위 규칙, 대조기 시작 초 + 2)). 코어가 복원으로 되살린 초(테이프 값 --
+     가격이 칸 가중평균)는 계속 돈 파이썬 라이브 값과 가격 칸이 다르고, 붙은 첫 초는 반쪽이다 -- 대조기는 코어 재시작 뒤에 띄운다.
   안 보는 것: oi(코어가 안 옮김) · meta 는 끝에 나란히 찍기만.
     python3 rtcore/tools/shadow_supply.py eth 300        # 코인 · 몇 초
     python3 rtcore/tools/shadow_supply.py --selftest     # 네트워크 없이 비교 함수만
@@ -41,10 +43,10 @@ def same(a: list, b: list) -> bool:
     return len(a) == len(b) and all(x == y or abs(x - y) <= 1e-9 * max(abs(x), abs(y)) for x, y in zip(a, b))
 
 
-def compare(rt: dict, py: dict, rt_meta: dict, py_meta: dict, py_at: float) -> list[str]:
-    """rt/py: 칸 -> {초: 값}. *_meta: 마지막 now·spotNow·okxNow. py_at: 파이썬 마지막 응답 시각(초)."""
+def compare(rt: dict, py: dict, rt_meta: dict, py_meta: dict, py_at: float, start: float = 0.0) -> list[str]:
+    """rt/py: 칸 -> {초: 값}. *_meta: 마지막 now·spotNow·okxNow. py_at: 파이썬 마지막 응답 시각(초). start: 대조기 시작 시각(초)."""
     def first(lane):
-        return min(rt.get(lane) or {0: 0}) + 1   # 처음 본 초는 반쪽 -- 머리 주석
+        return max(min(rt.get(lane) or {0: 0}) + 1, int(start) + 2)   # 처음 본 초는 반쪽 · 대조기 시작 뒤 첫 2초는 뺀다 -- 머리 주석
     lo = {"bn": first("bn"), "liq": first("bn"), "bybitLiq": first("bn"), "spot": first("spot"),
           "okx": first("okx"), "okxLiq": first("okx"), "okxOi": first("okxOi")}
     m = lambda k: min(rt_meta.get(k) or 0, py_meta.get(k) or 0)  # noqa: E731
@@ -74,7 +76,8 @@ async def main(coin: str, secs: float) -> None:
     py_last: dict = {}
     py_at = 0.0
     n_push = 0
-    end = time.time() + secs
+    start = time.time()
+    end = start + secs
     async with aiohttp.ClientSession() as http:
         async def poll_py() -> None:
             nonlocal py_at
@@ -108,7 +111,7 @@ async def main(coin: str, secs: float) -> None:
         await poll_once(http, coin, py, py_last)
         py_at = time.time()
     print(f"그림자 대조 {coin} {secs:.0f}초 · rtcore 밀기 {n_push} · now rt {rt_last.get('now')} py {py_last.get('now')}")
-    for line in compare(rt, py, rt_last, py_last, py_at):
+    for line in compare(rt, py, rt_last, py_last, py_at, start):
         print(line)
     for k in ("spotMeta", "okxMeta"):
         print(f"{k}: rt {rt_last.get(k)} · py {py_last.get(k)}")
@@ -141,6 +144,13 @@ def selftest() -> None:
     put(py, {"spot": [[11, 2, 0, 0, 0, 2, 0, 5.0], [12, 1, 0, 0, 0, 1, 0, 5.0]], "partial": {"spot": [14, 1, 0, 0, 0, 1, 0, 5.0]}})
     out = dict(line.split(":", 1) for line in compare(rt, py, {"spotNow": 14}, {"spotNow": 14}, 100))
     assert "비교 초 2 · 불일치 0 · 파이썬만 0" in out["spot"], out["spot"]
+    # 대조기 시작(9.5초) 뒤 첫 2초(9·10)는 뺀다 -- 코어가 복원한 앞 초(테이프 값)가 어긋나도 안 센다
+    rt, py = {}, {}
+    put(rt, {"seconds": [[s, 0, 0, 0, 0, 1 if s >= 11 else 7, 0, 3.0] for s in range(5, 13)]})
+    put(py, {"seconds": [[s, 0, 0, 0, 0, 1, 0, 3.0] for s in range(5, 13)]})
+    out = dict(line.split(":", 1) for line in compare(rt, py, {"now": 13}, {"now": 13}, 100, start=9.5))
+    assert "비교 초 2 · 불일치 0" in out["bn"] and "범위 [11, 13)" in out["bn"], out["bn"]
+    assert "불일치 5" in dict(line.split(":", 1) for line in compare(rt, py, {"now": 13}, {"now": 13}, 100))["bn"], "음성 대조: 시작 규칙 없이는 앞 초가 어긋난다"
     print("selftest ok")
 
 

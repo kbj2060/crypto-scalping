@@ -15,6 +15,17 @@
 #   RTCORE_ALLOW_ORIGINS  브라우저 Origin 허용 목록(쉼표, https://<호스트>) -- 비면 Origin 없는 도구만 붙는다
 #   RTCORE_MAX_CONNS · RTCORE_MAX_SUBS · RTCORE_PING_SECS · RTCORE_SILENCE_SECS
 #   RTCORE_WS_BASE · RTCORE_MARKET_WS_BASE · RTCORE_FORCE_WS_URL · RTCORE_SPOT_WS_BASE · RTCORE_OKX_WS_URL · RTCORE_BYBIT_WS_URL (빈 값 = 그 원천 끔)
+#   재시작 복원(2026-11-21 · rtcore/RESTORE.md · rtcore/src/restore.rs) -- 상대 경로는 아래 `cd "$ROOT"` 기준(저장소 루트):
+#   RTCORE_SNAP_DIR       코어 스냅숏 폴더(기본 data/live/rtcore · 코어가 만든다 · 30초마다·SIGTERM 때 <심볼>.json 덮어쓰기) -- 빈 값 = 복원 전부 끔
+#   RTCORE_TAPE_DB        바이낸스 체결 테이프(기본 data/hot/binance_tape.sqlite · 읽기 전용) -- 풋프린트 봉·1초 칸·dhl 공백 메우기
+#   RTCORE_OKX_TAPE_DB    OKX 체결 테이프(기본 data/hot/okx_tape.sqlite) -- OKX 1초 칸
+#   RTCORE_OKX_CTX_DB     OKX 맥락(기본 data/hot/okx_ctx.sqlite) -- OKX 미결제약정·청산
+#   RTCORE_BN_CTX_DB      바이낸스 맥락(기본 data/hot/binance_ctx.sqlite) -- 강제청산
+#   RTCORE_BYBIT_LIQ_DB   Bybit 청산(기본 data/hot/bybit_liq.sqlite)
+#     Rust 수집기 그림자 파일로 바꿀 때는 data/hot/rtcollect/<같은 이름>(rtcollect/SHADOW.md). 파일이 없으면 로그 한 줄 «… 못 읽음 … 빈다» 를 남기고 그 원천만 빈 채로 돈다.
+#     테이프는 WAL 이라 읽기 전용 연결도 -shm 에 쓴다 -- 수집기와 같은 사용자로 띄운다.
+#   rtcore 에 SIGTERM(kill <rtcore pid>): 스냅숏을 한 번 쓰고 종료코드 0 으로 끝난다(메우는 중이면 안 쓴다) → _supervise.sh 가 15초 뒤 다시 띄운다
+#     (= 새 실행 파일로 바꾸는 재시작). 아주 내리려면 감시자(이 스크립트) pid 를 먼저 끝내고 rtcore 에 SIGTERM.
 #
 # crontab(서버 · 등록은 사람이 한다):
 #   @reboot sleep 60 && cd <저장소> && bash scripts/ops/supervisor_rtcore.sh >> logs/supervisor/rtcore_reboot.log 2>&1 &

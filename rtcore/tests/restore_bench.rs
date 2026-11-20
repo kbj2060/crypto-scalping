@@ -35,7 +35,7 @@ fn restore_bench() {
     let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("restore_bench_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let syms: Vec<String> = SYMS.iter().map(|s| s.to_string()).collect();
-    let cfg = || Cfg { snap_dir: dir.clone(), tape: tape.clone().into(), tries: 1, wait: Duration::ZERO };
+    let cfg = || Cfg { snap_dir: dir.clone(), tape: tape.clone().into(), tries: 1, wait: Duration::ZERO, ..nowhere() };
     // 찬 시작
     let (st, _) = State::with_restore(&syms, 16, 1 << 16, cfg(), END * 1000 * 1000);
     for s in &syms {
@@ -57,4 +57,10 @@ fn restore_bench() {
     let warm = round(&st2, &syms);
     println!("따뜻한 시작: 스냅숏 8개 읽기 {:.0}ms · 메우기 8코인 동시 {:.0}ms", load.as_secs_f64() * 1e3, warm.as_secs_f64() * 1e3);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 나머지 원천은 없는 파일(읽기 전용 열기가 실패해 그 원천만 빈다 -- 만들지 않는다).
+fn nowhere() -> Cfg {
+    let n = std::path::PathBuf::from("/rtcore_없는_경로/x.sqlite");
+    Cfg { snap_dir: n.clone(), tape: n.clone(), tries: 1, wait: Duration::ZERO, okx_tape: n.clone(), okx_ctx: n.clone(), bn_ctx: n.clone(), bybit_liq: n }
 }

@@ -16,8 +16,8 @@ import time
 from pathlib import Path
 
 R = Path(__file__).resolve().parents[1]
-FILES = ["src/restore.rs", "src/supply.rs", "src/footprint.rs", "src/state.rs"]
-RS, SU, FP, ST = FILES
+FILES = ["src/restore.rs", "src/supply.rs", "src/footprint.rs", "src/state.rs", "src/main.rs"]
+RS, SU, FP, ST, MN = FILES
 M = [
     # 경계
     ("lo 하나 늦게(끊기기 직전 초 다음 초를 빼먹음)", RS, "floor.max(self.last_ms.div_euclid(1000) + 1)", "floor.max(self.last_ms.div_euclid(1000) + 2)"),
@@ -54,9 +54,20 @@ M = [
     ("구멍: 메우는 중 표시 안 함", RS, "            self.fp.pending = Some((lo, hi));", "            let _ = (lo, hi);"),
     ("구멍: 밀기가 holes 바뀜을 안 실음", FP, "        if self.dirty.is_empty() && self.dropped.is_empty() && !self.holes_dirty {", "        if self.dirty.is_empty() && self.dropped.is_empty() {"),
     ("합친 1초 칸을 밀지 않음", ST, "        if let Some(up) = up {\n            g.first", "        if let Some(up) = up.filter(|_| false) {\n            g.first"),
+    # 2026-11-21 나머지 원천 · SIGTERM
+    ("OKX 청산을 링 뒤에 넣음", RS, "self.okx_liq.push_front(crate::supply::LiqEv", "self.okx_liq.push_back(crate::supply::LiqEv"),
+    ("OKX 청산 창 660 → 600초", ST, "t0_ms - crate::supply::SUPPLY_1S_SECONDS * 1000, t0_ms);", "t0_ms - 600 * 1000, t0_ms);"),
+    ("OKX 청산 쪽 뒤집힘(pos_side)", RS, "AND sz_base > 0 ORDER BY ts_ms\",\n        rusqlite::params![inst, lo_ms, hi_ms],\n        \"long\",", "AND sz_base > 0 ORDER BY ts_ms\",\n        rusqlite::params![inst, lo_ms, hi_ms],\n        \"short\","),
+    ("OKX 1초 칸 범위 660 → 600", RS, "rusqlite::params![tape_bucket, inst, t0_s - SUPPLY_1S_SECONDS, t0_s]", "rusqlite::params![tape_bucket, inst, t0_s - 600, t0_s]"),
+    ("OKX OI 범위 하나 어긋남(t0 초 포함)", RS, "(t0_s - SUPPLY_1S_SECONDS) * 1000, t0_s * 1000]", "(t0_s - SUPPLY_1S_SECONDS) * 1000, (t0_s + 1) * 1000]"),
+    ("강제청산 최근 5,000 → 50건", RS, "rusqlite::params![symbol.to_uppercase(), crate::supply::LIQ_RING as i64],", "rusqlite::params![symbol.to_uppercase(), 50i64],"),
+    ("강제청산 660초 자르기 없음", RS, "    Ok(rows.into_iter().rev().filter(|r| r.0 as f64 >= cut).collect())", "    let _ = cut;\n    Ok(rows.into_iter().rev().collect())"),
+    ("Bybit 쪽 뒤집힘(Buy = 숏)", RS, "        \"Buy\",", "        \"Sell\","),
+    ("Bybit 지금보다 늦은 행도 읽음", RS, "rusqlite::params![symbol.to_uppercase(), (lo + 1) * 1000, now_ms],", "rusqlite::params![symbol.to_uppercase(), (lo + 1) * 1000, i64::MAX],"),
+    ("SIGTERM 때 스냅숏 안 씀", MN, "let n = tokio::task::spawn_blocking(move || st.write_snapshots()).await.unwrap_or(0);", "let n = { let _ = st; 0 };"),
 ]
 ENV = dict(os.environ, PATH=os.path.expanduser("~/.cargo/bin") + ":" + os.environ["PATH"])
-TESTS = ["--offline", "--test", "restore_parity"]
+TESTS = ["--offline", "--test", "restore_parity", "--test", "restore_venues_parity", "--test", "sigterm_snapshot"]
 
 
 def main() -> None:

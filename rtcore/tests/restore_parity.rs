@@ -15,7 +15,10 @@ use std::time::Duration;
 
 const BS: i64 = 300;
 
+#[derive(Clone)]
 struct Row {
+    /// 테이프에만 있는 체결(대시보드·코어 라이브가 놓친 것 -- 정답지 tape_only) -- feed 가 건너뛴다.
+    tape: bool,
     t: i64,
     tid: u64,
     p: String,
@@ -48,7 +51,9 @@ fn fx() -> &'static Fx {
             .as_array()
             .unwrap()
             .iter()
-            .map(|r| Row {
+            .enumerate()
+            .map(|(i, r)| Row {
+                tape: v["tape_only"].as_array().unwrap().iter().any(|x| x.as_u64() == Some(i as u64)),
                 t: r[0].as_i64().unwrap() + t0,
                 tid: r[1].as_u64().unwrap(),
                 p: r[2].as_str().unwrap().into(),
@@ -82,7 +87,7 @@ fn tmp(name: &str) -> PathBuf {
 
 fn feed(st: &State, rows: &[Row]) {
     let s = fx().sym.to_uppercase();
-    for r in rows {
+    for r in rows.iter().filter(|r| !r.tape) {
         let text = json!({"e": "trade", "E": r.w, "T": r.t, "s": s, "t": r.tid, "p": r.p, "q": r.q, "X": "MARKET", "m": r.m}).to_string();
         if let Some(m) = rtcore::feed::parse(&text, r.w * 1000) {
             st.apply(m);
@@ -91,7 +96,7 @@ fn feed(st: &State, rows: &[Row]) {
 }
 
 fn cfg(snap_dir: &Path, tape: PathBuf) -> Cfg {
-    Cfg { snap_dir: snap_dir.into(), tape, tries: 2, wait: Duration::ZERO }
+    Cfg { snap_dir: snap_dir.into(), tape, tries: 2, wait: Duration::ZERO, ..nowhere() }
 }
 
 /// 재시작 전 코어(메우기 없는 라이브와 같게: 테이프가 없어 첫 체결 메우기는 «구멍»만 남긴다) -- 파이썬 재시작 전 판과 같은 상태.
@@ -186,6 +191,9 @@ struct Tally {
     /// 파이썬은 «없음», 코어는 스냅숏 값을 낸 봉(T0 부터 초 · 처음 본 것만).
     dhl_snapshot_at: BTreeSet<i64>,
     dhl_boundary: usize,
+    /// 파이썬 t0 = min(실시간 초) 가 늦은 체결로 당겨진 사례: 파이썬만 가진 앞 초 · 코어만 채운 (늦은 초, 첫 체결 초) 사이(restore.rs 머리 주석).
+    sec_py_shift: usize,
+    sec_core_fills_py_hole: usize,
     holey: usize,
 }
 
@@ -198,7 +206,9 @@ fn dhl_of(v: &Value) -> Option<[f64; 3]> {
 }
 
 /// 코어 상태 대 파이썬 대조 한 번.
-fn compare(what: &str, st: &State, cp: &Value, snap: Option<&restore::Snap>, boundary: Option<i64>, holes: &[(i64, i64)], t: &mut Tally) {
+/// `shift` = (파이썬 t0, 코어 t0 = 첫 체결 초) -- 늦은 체결이 파이썬 t0 를 당긴 사례만. `boundary` = dhl 이 달라도 되는 봉(머리 주석 (c) · 아래 호출부).
+#[allow(clippy::too_many_arguments)]
+fn compare(what: &str, st: &State, cp: &Value, snap: Option<&restore::Snap>, boundary: &[i64], holes: &[(i64, i64)], shift: Option<(i64, i64)>, t: &mut Tally) {
     let sym = &fx().sym;
     // 봉 칸(반올림 전)
     let raw = st.footprint_cells(sym).unwrap();
@@ -223,6 +233,10 @@ fn compare(what: &str, st: &State, cp: &Value, snap: Option<&restore::Snap>, bou
     let py = cp["sec"].as_object().unwrap();
     for (s, v) in py {
         let s: i64 = s.parse().unwrap();
+        if !sec.contains_key(&s) && shift.is_some_and(|(tp, fs)| tp - 660 <= s && s < fs - 660) {
+            t.sec_py_shift += 1; // 파이썬 범위 [t0py − 660, t0py) 의 앞쪽 -- 코어 범위 [첫 체결 − 660, …) 밖
+            continue;
+        }
         let c = sec.get(&s).unwrap_or_else(|| panic!("{what}: 1초 칸 {s} 이 코어에 없다"));
         for j in 0..7 {
             let w = v[j].as_f64().unwrap();
@@ -232,7 +246,9 @@ fn compare(what: &str, st: &State, cp: &Value, snap: Option<&restore::Snap>, bou
         t.secs += 1;
     }
     for (s, c) in &sec {
-        if !py.contains_key(&s.to_string()) {
+        if !py.contains_key(&s.to_string()) && shift.is_some_and(|(tp, fs)| tp < *s && *s < fs) {
+            t.sec_core_fills_py_hole += 1; // 파이썬이 영영 못 채우는 (늦은 초, 첫 체결 초) -- 코어는 테이프로 채운다
+        } else if !py.contains_key(&s.to_string()) {
             // 파이썬은 테이프가 없으면 1초 칸을 안 되살린다 -- 코어는 스냅숏 값(그대로)으로 메운다
             assert_eq!(ssec.get(s).map(|x| x.map(f64::to_bits)), Some(c.map(f64::to_bits)), "{what}: 코어에만 있는 1초 칸 {s} 이 스냅숏 값이 아니다");
             t.sec_snapshot_only += 1;
@@ -253,7 +269,7 @@ fn compare(what: &str, st: &State, cp: &Value, snap: Option<&restore::Snap>, bou
                 t.dhl_snapshot += 1;
                 t.dhl_snapshot_at.insert(b - fx().raw["t0"].as_i64().unwrap() / 1000);
             }
-            _ if boundary == Some(b) => t.dhl_boundary += 1,
+            _ if boundary.contains(&b) => t.dhl_boundary += 1,
             _ => panic!("{what} 봉 {b} dhl({kind}): rust {cv:?} != python {pv:?}"),
         }
     }
@@ -267,8 +283,20 @@ fn ranges(v: &Value) -> Vec<(i64, i64)> {
     v.as_array().unwrap().iter().map(|h| (h[0].as_i64().unwrap(), h[1].as_i64().unwrap())).collect()
 }
 
+/// r 에서 라이브 체결(테이프에만 있는 것 빼고) m 건 뒤의 행 번호(파이썬 정답지의 M 도 라이브 메시지로 센다).
+fn live_end(r: usize, m: usize) -> usize {
+    let rows = &fx().rows;
+    let mut n = 0;
+    (r..rows.len()).find(|&i| {
+        n += !rows[i].tape as usize;
+        n == m
+    })
+    .map_or(rows.len(), |i| i + 1)
+}
+
 /// 사례 하나를 재시작 뒤 `upto` 행까지 돌린다(b · c 공용). 돌려주는 것 = 되살린 코어 · 재시작 전 코어 스냅숏.
-fn restart(c: &Value, upto: usize, t: Option<&mut Tally>) -> (Arc<State>, Option<restore::Snap>) {
+/// `inject` = 스냅숏 바로 앞(마지막으로 처리한 체결)에 끼울 늦은 체결 -- (c) 의 last_ms 대조용(파이썬 스냅숏 대조는 건너뛴다).
+fn restart(c: &Value, upto: usize, t: Option<&mut Tally>, inject: Option<&Row>) -> (Arc<State>, Option<restore::Snap>) {
     let f = fx();
     let sym = &f.sym;
     let name = c["name"].as_str().unwrap();
@@ -277,7 +305,9 @@ fn restart(c: &Value, upto: usize, t: Option<&mut Tally>) -> (Arc<State>, Option
     std::fs::create_dir_all(&snap_dir).unwrap();
     let mut snap = None;
     if let Some(s_idx) = c["S_idx"].as_u64() {
-        let a = core_live(&f.rows[..s_idx as usize], &dir.join("a"));
+        let mut part1 = f.rows[..s_idx as usize].to_vec();
+        part1.extend(inject.cloned());
+        let a = core_live(&part1, &dir.join("a"));
         assert_eq!(a.write_snapshots(), 1, "{name}: 재시작 전 코어가 스냅숏을 써야 한다");
         let file = restore::snap_path(&dir.join("a"), sym);
         assert!(!file.with_extension("json.tmp").exists(), "임시 파일이 남았다");
@@ -285,10 +315,13 @@ fn restart(c: &Value, upto: usize, t: Option<&mut Tally>) -> (Arc<State>, Option
         let s: restore::Snap = serde_json::from_slice(&bytes).unwrap();
         // 재시작 전 코어 스냅숏 == 파이썬 footprint_save(같은 라이브 입력 -- 봉 144 · last_ms)
         let py = &c["py_snapshot"];
-        assert_eq!(s.last_ms, py["last_ms"].as_i64().unwrap(), "{name}: last_ms");
         let pb = py["bars"].as_object().unwrap();
+        assert!(inject.is_some() || s.last_ms == py["last_ms"].as_i64().unwrap(), "{name}: last_ms");
         assert_eq!(s.bars.len(), pb.len(), "{name}: 스냅숏 봉 수");
         for (b, cells, _) in &s.bars {
+            if inject.is_some() {
+                break;
+            }
             let want = parse_cells(&pb[&b.to_string()]);
             assert_eq!(cells.len(), want.len(), "{name}: 스냅숏 봉 {b} 칸 수");
             for (k, v) in cells {
@@ -312,7 +345,8 @@ fn restart(c: &Value, upto: usize, t: Option<&mut Tally>) -> (Arc<State>, Option
     let (b, _) = State::with_restore(std::slice::from_ref(sym), 16, 1 << 16, cfg(&snap_dir, tape), c["restart_ms"].as_i64().unwrap() * 1000);
     let mut rx = b.tx.subscribe();
     let (r, m, e) = (c["R_idx"].as_u64().unwrap() as usize, c["M"].as_u64().unwrap() as usize, c["E_idx"].as_u64().unwrap() as usize);
-    feed(&b, &f.rows[r..r + m]);
+    let rm = live_end(r, m);
+    feed(&b, &f.rows[r..rm]);
     let (lo, hi) = (c["lo"].as_i64().unwrap(), c["hi"].as_i64().unwrap());
     // 메우는 중: 공백 [lo, hi) 에 걸친 봉이 holes 로 보인다
     let (seq0, fp0, sup0) = snap_of(&b);
@@ -328,15 +362,23 @@ fn restart(c: &Value, upto: usize, t: Option<&mut Tally>) -> (Arc<State>, Option
     view.drain(&mut rx, seq0);
     let (_, fp1, sup1) = snap_of(&b);
     view.same_as(&format!("{name} 합친 뒤"), &fp1, &sup1);
-    let boundary = Some((f.rows[r].t.div_euclid(1000)).div_euclid(BS) * BS);
+    // 파이썬 t0 = 합치기 전 실시간 1초 칸의 가장 이른 초(늦은 체결이면 첫 체결 초보다 이르다)
+    let first_s = f.rows[r].t.div_euclid(1000);
+    let t0py = f.rows[r..rm].iter().filter(|x| !x.tape).map(|x| x.t.div_euclid(1000)).min().unwrap();
+    let shift = (t0py < first_s).then_some((t0py, first_s));
+    // 끝 대조에서 dhl 이 달라도 되는 봉: 첫 체결 봉(코어는 링으로 얼림 · 파이썬은 테이프 -- 첫 체결 앞 몫) · 늦은 체결 봉(그 초는 실시간 몫만 -- 둘 다 같은 규칙이나
+    // 파이썬은 봉 끝 6분 뒤 테이프로 다시 잰다)
+    let boundary: Vec<i64> = [first_s, t0py].iter().map(|s| s.div_euclid(BS) * BS).collect();
     let holes = ranges(&c["holes"]);
     if let Some(t) = t {
-        compare(&format!("{name} 합친 직후"), &b, &c["merge"], snap.as_ref(), None, &holes, t);
-        feed(&b, &f.rows[r + m..e]);
-        compare(&format!("{name} 재시작 + 420초"), &b, &c["end"], snap.as_ref(), boundary, &holes, t);
+        // 합친 직후: 늦은 체결 봉은 파이썬 링에 (늦은 초, 첫 체결 초) 구멍이 있어 파이썬만 «없음»일 수 있다
+        let early: Vec<i64> = shift.map(|(tp, _)| tp.div_euclid(BS) * BS).into_iter().collect();
+        compare(&format!("{name} 합친 직후"), &b, &c["merge"], snap.as_ref(), &early, &holes, shift, t);
+        feed(&b, &f.rows[rm..e]);
+        compare(&format!("{name} 재시작 + 420초"), &b, &c["end"], snap.as_ref(), &boundary, &holes, shift, t);
         feed(&b, &f.rows[e..upto]);
     } else {
-        feed(&b, &f.rows[r + m..upto]);
+        feed(&b, &f.rows[rm..upto]);
     }
     (b, snap)
 }
@@ -354,7 +396,7 @@ fn restore_matches_python() {
     for c in &f.cases {
         let mut t = Tally::default();
         let e = c["E_idx"].as_u64().unwrap() as usize;
-        restart(c, e, Some(&mut t));
+        restart(c, e, Some(&mut t), None);
         println!("{}: {t:?}", c["name"].as_str().unwrap());
         all.bars += t.bars;
         all.cells += t.cells;
@@ -366,6 +408,8 @@ fn restore_matches_python() {
         all.dhl_early += t.dhl_early;
         all.dhl_snapshot += t.dhl_snapshot;
         all.dhl_boundary += t.dhl_boundary;
+        all.sec_py_shift += t.sec_py_shift;
+        all.sec_core_fills_py_hole += t.sec_core_fills_py_hole;
         all.holey += t.holey;
     }
     println!("복원 일치 합계 사례 {} · {all:?}", f.cases.len());
@@ -472,17 +516,37 @@ fn snapshot_waits_for_merge() {
 fn restart_vs_continuous() {
     let f = fx();
     let sym = &f.sym;
+    // short 은 스냅숏 바로 앞에 200초 늦은 중형 체결(13.6k USD -- 고래·리테일 칸 없음)을 끼운다: «마지막으로 받은 체결»을 last_ms 로 쓰면
+    // 다음 판이 그 뒤 200초를 테이프로 또 더해 경계 밖 봉이 달라진다(파이썬 coin_flow.py 625 의 방식 -- 코어는 가장 늦은 시각).
     for name in ["short", "bar", "behind"] {
         let c = case(name);
         let r = c["R_idx"].as_u64().unwrap() as usize;
+        let s_idx = c["S_idx"].as_u64().unwrap() as usize;
         let z = f.rows.iter().position(|x| x.t >= f.rows[r].t + 780_000).unwrap();
-        let cont = core_live(&f.rows[..z], &tmp(&format!("cont_{name}")));
-        let (rest, snap) = restart(c, z, None);
+        let inject = (name == "short").then(|| {
+            let p = &f.rows[s_idx - 1];
+            Row { tape: false, t: p.t - 200_000, tid: 1, p: p.p.clone(), q: "100.00".into(), m: false, w: p.w + 1 }
+        });
+        let mut all = f.rows[..s_idx].to_vec();
+        all.extend(inject.clone());
+        all.extend_from_slice(&f.rows[s_idx..z]);
+        let cont = core_live(&all, &tmp(&format!("cont_{name}")));
+        let (rest, snap) = restart(c, z, None, inject.as_ref());
         let snap = snap.unwrap();
         let last_bar = snap.last_ms.div_euclid(1000).div_euclid(BS) * BS;
         let first_bar = f.rows[r].t.div_euclid(1000).div_euclid(BS) * BS;
         let holes = ranges(&c["holes"]);
         let mut allowed: BTreeSet<i64> = [last_bar, first_bar].into();
+        // 테이프에만 있는 체결이 든 봉: 되살린 판은 테이프 dhl(그 체결 포함), 계속 돈 판은 라이브 링 dhl -- dhl 만 다를 수 있다
+        // 끼운 늦은 체결 · 정답지의 늦은 체결(2초 넘게 늦음 -- 수집기가 이미 쓴 초면 버린다 dropped_late)처럼 라이브에만 있는 체결의 봉도 같다:
+        // 되살린 판은 테이프 dhl(그 체결 없음), 계속 돈 판은 라이브 링 dhl
+        let tape_bars: BTreeSet<i64> = f
+            .rows
+            .iter()
+            .filter(|x| x.tape || x.w - x.t > 2000)
+            .chain(inject.iter())
+            .map(|x| x.t.div_euclid(1000).div_euclid(BS) * BS)
+            .collect();
         for &(a, zz) in &holes {
             let mut b = a.div_euclid(BS) * BS;
             while b < zz {
@@ -523,9 +587,13 @@ fn restart_vs_continuous() {
         let (_, fr, _) = snap_of(&rest);
         let mut dd = vec![];
         for x in &fr.bars {
-            let y = fc.bars.iter().find(|y| y.time == x.time).unwrap();
+            let Some(y) = fc.bars.iter().find(|y| y.time == x.time) else {
+                // 되살린 판이 구멍 봉을 덜 가지면 창(144봉)이 한 봉 더 오래된 쪽으로 늘어난다 -- 계속 돈 판 창보다 오래된 봉만 허용
+                assert!(allowed.contains(&x.time) || x.time < fc.bars[0].time, "{name}: 계속 돈 판 창에 없는 봉 {}", x.time);
+                continue;
+            };
             if x.dhl != y.dhl {
-                assert!(allowed.contains(&x.time), "{name}: 경계 밖 봉 {} dhl {:?} != {:?}", x.time, x.dhl, y.dhl);
+                assert!(allowed.contains(&x.time) || tape_bars.contains(&x.time), "{name}: 경계 밖 봉 {} dhl {:?} != {:?}", x.time, x.dhl, y.dhl);
                 dd.push((x.time - first_bar, y.dhl, x.dhl));
             }
         }
@@ -536,4 +604,10 @@ fn restart_vs_continuous() {
             cont.supply_cells(sym).unwrap().len()
         );
     }
+}
+
+/// 나머지 원천은 없는 파일(읽기 전용 열기가 실패해 그 원천만 빈다 -- 만들지 않는다).
+fn nowhere() -> Cfg {
+    let n = std::path::PathBuf::from("/rtcore_없는_경로/x.sqlite");
+    Cfg { snap_dir: n.clone(), tape: n.clone(), tries: 1, wait: Duration::ZERO, okx_tape: n.clone(), okx_ctx: n.clone(), bn_ctx: n.clone(), bybit_liq: n }
 }

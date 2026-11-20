@@ -1,6 +1,17 @@
 //! 재시작·재연결 복원(2026-11-21). 설계 = rtcore/RESTORE.md 권고 (다)+(나): 코어가 자기 스냅숏을 30초마다 쓰고,
 //! 그 뒤 공백은 체결 테이프 hot SQLite(`trade_tape_1s`)에서 메운다. REST 는 쓰지 않는다(2026-09-26 418 밴 27분 -- IP 한도를 봇과 공유).
-//! 범위: 바이낸스 선물 몫(풋프린트 봉 144 + 1초 칸 660초 + dhl). 현물·OKX·청산은 RESTORE.md 표(코어에서 비는 구간).
+//! 범위: 바이낸스 선물 몫(풋프린트 봉 144 + 1초 칸 660초 + dhl) + 2026-11-21 둘째 조각(아래 «나머지 원천»).
+//!
+//! 나머지 원천(2026-11-21 · RESTORE.md §6 · 파이썬이 되살리는 것과 같은 원천·같은 식 -- 정답지 tools/gen_restore_venues_fixture.py):
+//! - OKX 1초 칸: 첫 OKX 체결 초 t0 에서 [t0 − 660, t0) 를 OKX 테이프 `trade_tape_1s`(tape_seconds 와 같은 SQL · 칸 폭 = OKX 테이프 칸)로,
+//!   실시간이 가진 초는 안 덮는다(supply_1s_restore fill · 테이프 끝이 t0 − 1 에 닿을 때까지 5초 × 12번).
+//! - OKX 미결제약정: 첫 OI 초 t0 에서 [t0 − 660, t0) 를 `okx_ctx` `okx_oi`(시각 순 · 같은 초는 마지막 값 · 한 번만 읽는다 -- 파이썬도 «DB 는 기다려도 안 는다»).
+//! - OKX 청산: 첫 OKX 체결 시각 t0_ms 앞 660초를 `okx_ctx` `okx_liquidations` 에서 링 **앞**에(남은 자리만 · 가장 새 것부터 -- okx_footprint_restore 958~964).
+//!   🔴파이썬은 이 청산 복원을 OKX 풋프린트 봉 복원에 얹어 «OKX 테이프가 1분봉 대조로 온전한 봉»까지만 한다 -- 코어에는 OKX 풋프린트가 없어 그 조건 없이 660초를 읽는다(RESTORE.md §5).
+//! - 바이낸스 강제청산: 시작 때 `binance_ctx` `liquidations` 최근 5,000건 중 지금 − 660초 이후(server.py liq_events_load 1785~1815 · usd 는 DB 값).
+//! - Bybit 청산: 파이썬은 요청마다 수집기 DB 를 읽어 재시작 영향이 없다(server.py bybit_liq_events) -- 코어는 시작 때 창((지금 − 3 − 660, …])을 DB 에서 채우고,
+//!   재시작 직후 실시간으로 다시 온 같은 사건은 건너뛴다(supply.rs liq).
+//! 읽을 DB 는 파이썬 수집기 파일이 기본이고 환경변수로 Rust 수집기 파일(data/hot/rtcollect/…, 표 모양 같음)로 바꾼다(lib.rs Cfg).
 //!
 //! 원본(파이썬): dashboard/coin_flow.py footprint_save 396~417 · footprint_load 419~440 · footprint_tape_restore 533~570 ·
 //!   okx_tape_footprint 129~203(봉 SQL·칸 키) · tape_seconds 204~216(1초 SQL) · supply_1s_restore 973~1018 ·
@@ -20,7 +31,9 @@
 //! - 봉: lo = max(창 바닥, last_ms 의 초 + 1), hi = first_ms 의 초(배타). 창 바닥 = first_ms 의 봉 − 143봉. last_ms 가 없으면 창 바닥부터.
 //!   끊기기 직전 초(last_ms 의 초)·붙은 첫 초(first_ms 의 초)는 테이프로 안 더한다 -- 앞 초는 스냅숏이, 뒤 초는 실시간이 일부 셌다.
 //!   그 두 초에서 «스냅숏 뒤 · 첫 체결 앞» 몫은 빠진다(5분봉의 1% 미만 · 파이썬과 같다 · 구멍으로 치지 않는다).
-//! - 1초 칸: [first_s − 660, first_s) 를 실시간 > 테이프(테이프 끝 초까지) > 코어 스냅숏 순으로. 실시간이 가진 초는 안 건드린다.
+//! - 1초 칸: [t0 − 660, t0) 를 실시간 > 테이프(테이프 끝 초까지) > 코어 스냅숏 순으로. 실시간이 가진 초는 안 건드린다.
+//!   t0 = 이 연결의 첫 체결의 초. 🔴파이썬은 `t0 = min(dst)`(supply_1s_restore 985) -- 붙은 뒤 늦게 온 체결이 더 이른 초를 만들면 t0 가 그 초로 당겨져
+//!   (그 초, 첫 체결 초) 사이가 영영 안 채워진다(늦은 체결이 1초 칸에 구멍을 낸다). 코어는 첫 체결 초를 쓴다 -- RESTORE.md §5.
 //!   테이프는 완결된 초만 5초마다 쓰므로 붙은 직후엔 first_s 앞 몇 초가 아직 없다 → 테이프 끝이 hi − 1 에 닿을 때까지 5초 간격 최대 12번 기다린다.
 //!   끝내 못 닿으면 있는 데까지 메우고 [테이프 끝 + 1, hi) 를 holes 로.
 //! - 칸 키 = int(round(round(price_bin × 테이프칸, 10) / 칸 폭)) -- SQL 반올림 금지(2026-10-20 SOL 동률 사고: SQLite 는 0 에서 먼 쪽, 라이브는 짝수 쪽).
@@ -61,6 +74,36 @@ pub fn tape_bucket(symbol: &str) -> Option<f64> {
     TAPE_BUCKETS.iter().find(|b| b.0 == symbol).map(|b| b.1)
 }
 
+/// OKX 체결 테이프 칸 폭(키 = inst) -- scripts/live_okx_trade_tape_collector_20260923.py BUCKETS 사본.
+// ponytail: 파이썬 표 사본 -- tools/gen_restore_venues_fixture.py 정답지의 okx_tape_buckets 대조가 갈라짐을 잡는다.
+const OKX_TAPE_BUCKETS: &[(&str, f64)] = &[
+    ("ETH-USDT-SWAP", 0.1),
+    ("BTC-USDT-SWAP", 1.0),
+    ("SOL-USDT-SWAP", 0.01),
+    ("XRP-USDT-SWAP", 0.0001),
+    ("HYPE-USDT-SWAP", 0.001),
+    ("ZEC-USDT-SWAP", 0.05),
+    ("SNDK-USDT-SWAP", 0.05),
+    ("SOXL-USDT-SWAP", 0.01),
+    ("SKHYNIX-USDT-SWAP", 0.1),
+    ("MU-USDT-SWAP", 0.05),
+];
+
+pub fn okx_tape_bucket(inst: &str) -> Option<f64> {
+    OKX_TAPE_BUCKETS.iter().find(|b| b.0 == inst).map(|b| b.1)
+}
+
+/// 복원 스레드에 알리는 일감 종류(state.rs apply → lib.rs).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Wake {
+    /// 바이낸스 선물 공백(봉·1초 칸·dhl) -- 연결마다.
+    Bn,
+    /// OKX 1초 칸 + OKX 청산 -- 시작 뒤 첫 OKX 체결 때 한 번.
+    Okx,
+    /// OKX 미결제약정 -- 시작 뒤 첫 OI 때 한 번.
+    OkxOi,
+}
+
 pub struct Cfg {
     /// 코어 스냅숏 폴더(`<심볼>.json`). 파이썬의 data/live/footprint_<코인>.json 과 다른 파일 -- 파이썬 파일은 안 건드린다.
     pub snap_dir: PathBuf,
@@ -69,6 +112,11 @@ pub struct Cfg {
     /// 테이프가 hi − 1 까지 따라올 때까지 기다리는 횟수·간격(파이썬 12번 × 5초 -- 테이프는 5초마다 쓴다).
     pub tries: u32,
     pub wait: Duration,
+    /// 나머지 원천(머리 주석 «나머지 원천»). 없는 파일이면 로그 한 줄을 남기고 그 원천만 빈 채로 간다.
+    pub okx_tape: PathBuf,
+    pub okx_ctx: PathBuf,
+    pub bn_ctx: PathBuf,
+    pub bybit_liq: PathBuf,
 }
 
 pub fn snap_path(dir: &Path, symbol: &str) -> PathBuf {
@@ -103,6 +151,14 @@ pub struct Pending {
     pub(crate) snap_sec: BTreeMap<i64, [f64; 7]>,
     /// 이번 판에서 합치기를 한 번 끝냈다(스냅숏 쓰기 조건).
     pub(crate) merged: bool,
+    /// 다음 OKX 체결·OI 가 시작 뒤 첫 것이다(OKX 계약 크기를 아는 종목만 켠다). 파이썬처럼 시작 때 한 번만 -- 재연결엔 안 메운다.
+    pub(crate) okx_await: bool,
+    pub(crate) oi_await: bool,
+    /// 메울 OKX 일감: 첫 체결 시각(ms) · 첫 OI 초.
+    pub(crate) okx_job: Option<i64>,
+    pub(crate) oi_job: Option<i64>,
+    /// DB 에서 되살린 Bybit 청산의 가장 늦은 시각(ms) -- 이 앞 시각으로 다시 온 같은 사건은 건너뛴다(supply.rs liq).
+    pub(crate) bybit_max_ms: i64,
 }
 
 /// 코어 스냅숏 파일. 실수는 반올림 전 값 그대로(serde_json float_roundtrip 으로 비트까지 되읽는다).
@@ -340,7 +396,7 @@ impl Supply {
             }
         }
         // ③ dhl: 링이 다 드는 봉은 밀기·스냅숏이 링으로 잰다. 그 밖 창 안 봉:
-        //    테이프가 봉을 다 들면 테이프(fp_dhl 테이프 가지) · 아니면 링이 그 봉의 초를 다 들고 있으면(방금 [first_s − 660, first_s) 를 채웠다) 링 ·
+        //    테이프가 봉을 다 들면 테이프(fp_dhl 테이프 가지) · 아니면 링이 그 봉의 초를 다 들고 있으면(방금 [t0 − 660, t0) 를 채웠다) 링 ·
         //    둘 다 아니면 스냅숏 값(테이프가 안 건드린 봉만 -- 건드린 봉은 칸이 바뀌었으니 옛 값이 틀리다).
         //    테이프 값이 어긋남 검사에 걸리고 테이프가 안 건드린 봉이면 스냅숏 값(파이썬은 «없음» -- 테이프 수집기 공백 등).
         let floor = ring_floor(&self.sec).unwrap_or(i64::MAX);
@@ -416,5 +472,187 @@ impl Supply {
         self.fp.holes = s.holes;
         self.last_ms = s.last_ms;
         self.rs.snap_sec = s.sec.into_iter().collect();
+    }
+}
+
+// ── 나머지 원천(머리 주석) ─────────────────────────────────────────────────
+fn open_ro(path: &Path) -> Result<Connection, String> {
+    let con = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX).map_err(|e| format!("{}: {e}", path.display()))?;
+    con.busy_timeout(Duration::from_secs(10)).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(con)
+}
+
+/// (거래소 시각 ms, 롱 청산, 수량, 세 번째 값) 행.
+type LiqRowDb = (i64, bool, f64, f64);
+
+fn liq_query(path: &Path, sql: &str, params: impl rusqlite::Params, long_is: &str) -> Result<Vec<LiqRowDb>, String> {
+    let con = open_ro(path)?;
+    let err = |e: rusqlite::Error| format!("{}: {e}", path.display());
+    let mut st = con.prepare(sql).map_err(err)?;
+    let rows = st
+        .query_map(params, |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?.as_deref() == Some(long_is), f(r, 2)?, f(r, 3)?)))
+        .map_err(err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(err)?;
+    Ok(rows)
+}
+
+/// 바이낸스 강제청산(server.py liq_events_load): 최근 5,000건(시각 내림차순 LIMIT) → 시각 순 → 지금 − 660초 이후만. (ts, 롱, 수량, usd).
+pub fn read_bn_liq(path: &Path, symbol: &str, now_ms: f64) -> Result<Vec<LiqRowDb>, String> {
+    let rows = liq_query(
+        path,
+        "SELECT ts_ms, side, qty, usd FROM liquidations WHERE symbol = ? ORDER BY ts_ms DESC LIMIT ?",
+        rusqlite::params![symbol.to_uppercase(), crate::supply::LIQ_RING as i64],
+        "long",
+    )?;
+    let cut = now_ms - (SUPPLY_1S_SECONDS * 1000) as f64;
+    Ok(rows.into_iter().rev().filter(|r| r.0 as f64 >= cut).collect())
+}
+
+/// Bybit 청산: 코어가 보일 창((지금 − 3 − 660, …])만 시각 순으로(server.py _bybit_liq_refresh 의 SQL · side Buy = 롱 청산). (ts, 롱, 수량, 가격).
+pub fn read_bybit_liq(path: &Path, symbol: &str, now_ms: i64) -> Result<Vec<LiqRowDb>, String> {
+    let lo = now_ms.div_euclid(1000) - crate::supply::BYBIT_LAG_S - SUPPLY_1S_SECONDS;
+    liq_query(
+        path,
+        // 지금보다 늦은 행은 없다(실서버) -- 시험 DB 는 미래 행을 들고 있어 막는다. 지금 − 3초 뒤 행도 읽어 둔다(창이 그쪽으로 자란다 · 다시 오면 supply.rs 가 건너뜀).
+        "SELECT ts_ms, side, qty, price FROM bybit_liquidations WHERE symbol = ? AND ts_ms >= ? AND ts_ms <= ? ORDER BY ts_ms",
+        rusqlite::params![symbol.to_uppercase(), (lo + 1) * 1000, now_ms],
+        "Buy",
+    )
+}
+
+/// OKX 청산 [lo_ms, hi_ms)(okx_tape_footprint 193~199 의 SQL · pos_side long = 롱 청산). (ts, 롱, 수량(기초자산), 파산가).
+pub fn read_okx_liq(path: &Path, inst: &str, lo_ms: i64, hi_ms: i64) -> Result<Vec<LiqRowDb>, String> {
+    liq_query(
+        path,
+        "SELECT ts_ms, pos_side, sz_base, bk_px FROM okx_liquidations WHERE inst_id = ? AND ts_ms >= ? AND ts_ms < ? AND sz_base > 0 ORDER BY ts_ms",
+        rusqlite::params![inst, lo_ms, hi_ms],
+        "long",
+    )
+}
+
+/// OKX 미결제약정 [t0 − 660, t0) 초(supply_1s_restore oi_rows · 시각 순이라 같은 초는 마지막 값).
+pub fn read_okx_oi(path: &Path, inst: &str, t0_s: i64) -> Result<BTreeMap<i64, f64>, String> {
+    let con = open_ro(path)?;
+    let err = |e: rusqlite::Error| format!("{}: {e}", path.display());
+    let mut st = con.prepare("SELECT ts_ms, oi_base FROM okx_oi WHERE inst = ? AND ts_ms >= ? AND ts_ms < ? ORDER BY ts_ms").map_err(err)?;
+    let mut out = BTreeMap::new();
+    let mut rows = st.query(rusqlite::params![inst, (t0_s - SUPPLY_1S_SECONDS) * 1000, t0_s * 1000]).map_err(err)?;
+    while let Some(r) = rows.next().map_err(err)? {
+        out.insert(r.get::<_, i64>(0).map_err(err)?.div_euclid(1000), f(r, 1).map_err(err)?);
+    }
+    Ok(out)
+}
+
+/// OKX 1초 칸 [t0 − 660, t0)(tape_seconds · 테이프 끝이 t0 − 1 에 닿을 때까지 기다린다). (칸, 테이프 끝 초).
+pub fn read_okx_secs(path: &Path, inst: &str, t0_s: i64, tape_bucket: f64, tries: u32, wait: Duration) -> Result<(BTreeMap<i64, [f64; 7]>, i64), String> {
+    let con = open_ro(path)?;
+    let err = |e: rusqlite::Error| format!("{}: {e}", path.display());
+    let mut top = 0;
+    for i in 0..tries.max(1) {
+        top = con.query_row(SQL_TOP, [inst], |r| r.get::<_, Option<i64>>(0)).map_err(err)?.unwrap_or(0);
+        if top >= t0_s - 1 || i + 1 >= tries {
+            break;
+        }
+        std::thread::sleep(wait);
+    }
+    let mut out = BTreeMap::new();
+    let mut st = con.prepare(SQL_SECS).map_err(err)?;
+    let mut rows = st.query(rusqlite::params![tape_bucket, inst, t0_s - SUPPLY_1S_SECONDS, t0_s]).map_err(err)?;
+    while let Some(r) = rows.next().map_err(err)? {
+        let mut c = [0.0; 7];
+        for (j, x) in c.iter_mut().enumerate() {
+            *x = f(r, 1 + j).map_err(err)?;
+        }
+        out.insert(r.get(0).map_err(err)?, c);
+    }
+    Ok((out, top))
+}
+
+impl Supply {
+    /// 시작 때(수신 전): 바이낸스 강제청산 · Bybit 청산을 DB 에서 링에 넣는다.
+    pub(crate) fn load_liqs(&mut self, bn: Vec<LiqRowDb>, bybit: Vec<LiqRowDb>) {
+        for (ts_ms, long, qty, usd) in bn {
+            crate::supply::push_capped(&mut self.liq, crate::supply::LiqEv { ts_ms, long, qty, usd });
+        }
+        for (ts_ms, long, qty, px) in bybit {
+            let i = self.bybit.partition_point(|e| e.ts_ms <= ts_ms);
+            self.bybit.insert(i, crate::supply::LiqEv { ts_ms, long, qty, usd: qty * px });
+            self.rs.bybit_max_ms = self.rs.bybit_max_ms.max(ts_ms);
+        }
+    }
+
+    /// 시작 뒤 첫 OKX 체결 앞(state.rs apply). 참 = 새 일감.
+    pub(crate) fn begin_okx(&mut self, ts_ms: i64) -> bool {
+        self.rs.okx_await = false;
+        self.rs.okx_job = Some(ts_ms);
+        true
+    }
+
+    pub(crate) fn begin_okx_oi(&mut self, ts_ms: i64) -> bool {
+        self.rs.oi_await = false;
+        self.rs.oi_job = Some(ts_ms.div_euclid(1000));
+        true
+    }
+
+    /// OKX 1초 칸 · OKX 청산 합치기(락 안). 돌려주는 것 = 로그 한 줄 · 밀기.
+    pub(crate) fn merge_okx(&mut self, secs: Result<(BTreeMap<i64, [f64; 7]>, i64), String>, liq: Result<Vec<LiqRowDb>, String>, now_us: i64) -> (String, Option<Supply1s>) {
+        let Some(t0_ms) = self.rs.okx_job.take() else { return ("메울 OKX 일감 없음".into(), None) };
+        let t0 = t0_ms.div_euclid(1000);
+        let mut restored = vec![];
+        let line_secs = match secs {
+            Ok((got, top)) => {
+                // setdefault(supply_1s_restore 1000) -- 실시간이 가진 초는 그대로
+                for (s, v) in got {
+                    if let std::collections::btree_map::Entry::Vacant(e) = self.okx.sec.entry(s) {
+                        e.insert(v);
+                        restored.push(s);
+                    }
+                }
+                format!("1초 칸 {} · 테이프 {}", restored.len(), if top >= t0 - 1 { "따라옴".to_string() } else { format!("끝이 {}초 모자람", t0 - 1 - top) })
+            }
+            Err(e) => format!("🔴1초 칸 테이프 못 읽음({e}) -- [{}, {t0}) 비어 있음", t0 - SUPPLY_1S_SECONDS),
+        };
+        let line_liq = match liq {
+            Ok(ev) => {
+                // 링 앞에 -- 남은 자리만, 가장 새 것부터(deque appendleft 가 차면 가장 최신이 밀려나는 것을 피한 원본 958~963)
+                let room = crate::supply::LIQ_RING.saturating_sub(self.okx_liq.len());
+                let n = ev.len().min(room);
+                for &(ts_ms, long, qty, px) in ev[ev.len() - n..].iter().rev() {
+                    self.okx_liq.push_front(crate::supply::LiqEv { ts_ms, long, qty, usd: qty * px });
+                }
+                format!("청산 {n}건")
+            }
+            Err(e) => format!("🔴청산 못 읽음({e})"),
+        };
+        let top = crate::supply::newest(&self.okx.sec);
+        let mut m = self.base(now_us);
+        m.okx = restored.into_iter().filter(|&s| top - SUPPLY_1S_SECONDS < s && s < top).filter_map(|s| sec_row(&self.okx.sec, s)).collect();
+        m.okx_liq = crate::supply::liq_rows(&self.okx_liq, |s| top - SUPPLY_1S_SECONDS < s && s < top);
+        let up = (!m.okx.is_empty() || !m.okx_liq.is_empty()).then_some(m);
+        (format!("OKX t0 {t0}: {line_secs} · {line_liq}"), up)
+    }
+
+    /// OKX 미결제약정 합치기(락 안).
+    pub(crate) fn merge_okx_oi(&mut self, got: Result<BTreeMap<i64, f64>, String>, now_us: i64) -> (String, Option<Supply1s>) {
+        let Some(t0) = self.rs.oi_job.take() else { return ("메울 OKX OI 일감 없음".into(), None) };
+        match got {
+            Ok(got) => {
+                let mut restored = vec![];
+                for (s, v) in got {
+                    if let std::collections::btree_map::Entry::Vacant(e) = self.okx_oi.entry(s) {
+                        e.insert(v);
+                        restored.push((s, v));
+                    }
+                }
+                let top = self.okx_oi.keys().next_back().copied().unwrap_or(0);
+                let n = restored.len();
+                let mut m = self.base(now_us);
+                m.okx_oi = restored.into_iter().filter(|r| r.0 > top - SUPPLY_1S_SECONDS).collect();
+                let up = (!m.okx_oi.is_empty()).then_some(m);
+                (format!("OKX OI t0 {t0}: {n}초"), up)
+            }
+            Err(e) => (format!("OKX OI t0 {t0}: 🔴못 읽음({e}) -- [{}, {t0}) 비어 있음", t0 - SUPPLY_1S_SECONDS), None),
+        }
     }
 }
