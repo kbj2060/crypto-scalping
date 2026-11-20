@@ -9,6 +9,7 @@ SRC = Path(__file__).resolve().parents[1]
 W = SRC / "target" / "mutwork"
 P, X, F = "src/plan.rs", "src/exec.rs", "src/pyfmt.rs"
 S, H, B = "src/sign.rs", "src/http.rs", "src/bracket.rs"
+W_ = "src/watch.rs"
 PLAN = [  # (이름, 파일, 원래, 바꾼 것) -- plan_fixture 로 잡혀야 한다
     ("내림 경계 +1e-9 → -1e-9", P, "Ok(int_trunc(value / grid + 1e-9)? * grid)", "Ok(int_trunc(value / grid - 1e-9)? * grid)"),
     ("올림 경계 -1e-9 → +1e-9", P, "Ok(py_ceil(value / grid - 1e-9)? * grid)", "Ok(py_ceil(value / grid + 1e-9)? * grid)"),
@@ -76,6 +77,40 @@ HTTP = [  # http_replay(원본 파이썬 + aiohttp 정답지)로 잡혀야 한�
     ("손절 다시 켜기 전 옛 스탑 안 지움", B, "let cl = cancel_bracket(bx, symbol, pside, true, false).await;", "let cl = json!({\"errors\": []});"),
 ]
 
+WATCH = [  # watch_fixture(원본 orders.py 감시 클로저 정답지)로 잡혀야 한다
+    ("스위치 꺼져도 감시 틱(G4)", W_, "if st.is_empty() || !io.exec_enabled() {", "if st.is_empty() {"),
+    ("선 발동 전 잠금 무시(D9·G9)", W_, "if io.order_locked() || (t(&obj_or_empty(self.load().get(key)), \"sl_off\") && !t(b, \"sl_off\")) {", "if (t(&obj_or_empty(self.load().get(key)), \"sl_off\") && !t(b, \"sl_off\")) {"),
+    ("익절 취소 실패 대기 10초 → 30초", W_, "f(io.now() + TP_CANCEL_RETRY_SEC)", "f(io.now() + RETRY_SEC)"),
+    ("fired 를 청산 전에 파일에 안 씀(B14)", W_, "c.insert(\"tp_resting\".into(), json!(false));\n                    self.save(&st2)?;", "c.insert(\"tp_resting\".into(), json!(false));"),
+    ("선 수정(mod.at) 비교 빼기(B15)", W_, "\n                || !py_eq(obj_or_empty(fresh.get(\"mod\")).get(\"at\"), obj_or_empty(b.get(\"mod\")).get(\"at\"))", ""),
+    ("조립 뒤 손절 해제 검사 빼기(B16)", W_, "if t(&obj_or_empty(self.load().get(key)), \"sl_off\") && !(t(b, \"lines\") && t(b, \"sl_off\")) {", "if false {"),
+    ("조회 실패도 «닫힘»으로 정리(B17)", W_, "Some(\"no_position\") => {", "Some(\"no_position\") || true => {"),
+    ("청산 실패 뒤 재시도 시각 안 둠(B18)", W_, "b.insert(\"retry_after\".into(), f(io.now() + RETRY_SEC)); // 🔴불명", "// 🔴불명"),
+    ("clear 정리 실패에도 무장 내림(B10)", W_, "b.insert(\"retry_after\".into(), f(io.now() + RETRY_SEC));\n                return Ok((true, true));", "return Ok((false, true));"),
+    ("merge 대신 통째로 저장(B19)", W_, "self.save(&bracket_merge(&self.load(), &st, &seen_at))?;", "self.save(&st)?;"),
+    ("같은 쪽 대기 진입 취소 빼기(W9)", W_, "ws.insert(\"action\".into(), json!(\"cancel\"));", ""),
+    ("분할 손절 쏜 조각 표시 안 함(B20)", W_, "m.insert(\"fired\".into(), json!(true)); Value::Object(m)", "Value::Object(m)"),
+    ("분할 손절 비율 분모 무시", W_, "let frac = num / if den != 0.0 { den } else { 1.0 };", "let frac = num;"),
+    ("부분 청산 뒤 익절 strict(D7 을 몰래 고침)", W_, "io.place_bracket(&Value::Object(spec), &symbol, &pside, false)", "io.place_bracket(&Value::Object(spec), &symbol, &pside, true)"),
+    ("일부 취소 실패를 서버 감시로 안 넘김(B29)", W_, "self.tp_watch_only(io, &key, &b)?;\n                return Ok(());", "return Ok(());"),
+    ("스탑 실패여도 물타기(B6)", W_, "if !truthy(obj_or_empty(obj_or_empty(state.get(\"bracket\")).get(\"backstop\")).get(\"placed\")) {", "if false {"),
+    ("고아 정리 실패여도 복구 파일 지움(W5)", W_, "if truthy(Some(orphan_errors)) {", "if false {"),
+    ("6시간 넘은 복구 파일도 복구", W_, "> LIMIT_REC_MAX_AGE", "> f64::INFINITY"),
+    ("같은 코인 칸이 바빠도 청산 칸 줌(G6)", W_, "if ea == json!(asset) { None } else { Some(SlotId::Side(asset.into())) }", "{ let _ = ea; Some(SlotId::Side(asset.into())) }"),
+    ("미마감 5분봉도 씀(B11)", W_, "if tm + BAR_SEC <= now_s {", "if tm <= now_s {"),
+    ("무장 전 1초 가격도 씀(B12)", W_, ".unwrap_or_default().into_iter().filter(|x| x.0 > since)", ".unwrap_or_default().into_iter().filter(|x| x.0 > 0.0)"),
+    ("발동 로그 문구", W_, "이탈 -> {}", "이탈 => {}"),
+]
+WATCH_EXEC = [  # watch_exec(실제 집행 + 가짜 거래소)로 잡혀야 한다
+    ("시장가 결정 대기를 체결로 봄", W_, "Phase::NeedsMarketDecision => \"needs_market_decision\",", "Phase::NeedsMarketDecision => \"filled_maker\","),
+    ("시장가 결정 대기 중 다시 쏨(조용히 지정가로)", W_, "if b.contains_key(\"market_wait\") && matches!(act, TickAction::Fire | TickAction::SlLeg) {", "if false {"),
+]
+WATCH_INV = [  # watch_invariants(퍼즈·루프·재시작)로 잡혀야 한다
+    ("조립 뒤 잠금 무시(D9·G9)", W_, "if io.order_locked() || slot.is_none() {\n            return Ok((true, changed)); // D9", "if slot.is_none() {\n            return Ok((true, changed)); // D9"),
+    ("감시 루프가 틱 실패에 멈춤(B8)", W_, "self.log(format!(\"bracket watch: {e}\"));", "self.log(format!(\"bracket watch: {e}\")); break;"),
+    ("주기 주입 무시(2초 고정)", W_, "while io.nap(period).await {", "while io.nap(WATCH_PERIOD_SEC + 0.0 * period).await {"),
+]
+
 
 def digest():
     return {p: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((SRC / "src").glob("*.rs"))}
@@ -85,8 +120,9 @@ def main() -> int:
     before = digest()
     env = dict(os.environ, CARGO_TARGET_DIR=str(SRC / "target" / "mut"), PATH=f"{Path.home()}/.cargo/bin:" + os.environ["PATH"])
     caught = total = 0
-    only = sys.argv[1] if len(sys.argv) > 1 else ""   # "plan" | "exec" | "http" | "" = 전부
-    for test, muts in (("plan_fixture", PLAN), ("exec_invariants", EXEC), ("http_replay", HTTP)):
+    only = sys.argv[1] if len(sys.argv) > 1 else ""   # "plan" | "exec" | "http" | "watch" | "" = 전부
+    for test, muts in (("plan_fixture", PLAN), ("exec_invariants", EXEC), ("http_replay", HTTP),
+                       ("watch_fixture", WATCH), ("watch_exec", WATCH_EXEC), ("watch_invariants", WATCH_INV)):
         if only and not test.startswith(only):
             continue
         for name, f, a, b in muts:

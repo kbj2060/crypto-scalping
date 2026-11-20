@@ -788,7 +788,7 @@ pub fn bracket_key(symbol: &str, position_side: &str) -> String {
 }
 
 /// 옛 키(«LONG»/«SHORT»)를 «심볼:측면»으로 옮긴다.
-/// ponytail: 옛 키와 새 키가 같은 칸을 가리키면 파이썬은 **파일 순서상 뒤의 것**, 여기는 키 이름 순(serde_json Map) -- 옛 키는 09-26 이전 파일에만 있어 겹칠 일이 없다. 겹치는 파일이 나오면 순서 보존 Map 으로.
+/// 옛 키와 새 키가 같은 칸을 가리키면 **파일 순서상 뒤의 것**(자리는 앞의 것) -- 파이썬 dict 와 같다(serde_json preserve_order · 시험 watch_fixture `legacy_and_new_key_collide`).
 pub fn bracket_rekey(state: &Map<String, Value>) -> Map<String, Value> {
     let mut out = Map::new();
     for (k, v) in state {
