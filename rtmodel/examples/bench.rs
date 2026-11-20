@@ -119,4 +119,21 @@ fn main() {
         ns.push(t.elapsed().as_nanos());
     }
     stats("15분·1시간 LightGBM 앙상블 한 줄(40)", ns);
+
+    // 위험 레이더: ETH 한 코인(31일 1분봉 + DVOL) -- 정답지 첫 벌
+    let rx: serde_json::Value = read_json(&d.join("radar_fixture.json")).unwrap();
+    let pp: risk_radar::Params = serde_json::from_str(&std::fs::read_to_string(d.join("../../../dashboard").join(rx["params"].as_str().unwrap())).unwrap()).unwrap();
+    let x = &rx["sets"][0]["inputs"]["ETH"];
+    let fl = |v: &serde_json::Value| v.as_array().unwrap().iter().map(|a| a.as_f64().unwrap()).collect::<Vec<f64>>();
+    let il = |v: &serde_json::Value| v.as_array().unwrap().iter().map(|a| a.as_i64().unwrap()).collect::<Vec<i64>>();
+    let b = risk_radar::Bars { t: il(&x["t"]), h: fl(&x["h"]), l: fl(&x["l"]), c: fl(&x["c"]), v: fl(&x["v"]) };
+    let dv = risk_radar::Dvol { ts: il(&x["dvol"]["ts"]), close: fl(&x["dvol"]["close"]), got: il(&x["dvol"]["got"]) };
+    let now = rx["sets"][0]["now_ms"].as_i64().unwrap();
+    let mut ns = vec![];
+    for _ in 0..30 {
+        let t = Instant::now();
+        std::hint::black_box(risk_radar::coin_out(&b, &pp.coins["ETH"], &pp, Some(&dv), now));
+        ns.push(t.elapsed().as_nanos());
+    }
+    stats("위험 레이더 ETH 한 코인(31일)", ns);
 }

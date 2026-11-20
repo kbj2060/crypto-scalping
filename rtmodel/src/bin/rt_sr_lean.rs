@@ -11,6 +11,7 @@
 //!   RT_SR_KL_GAP_S  60                           1분봉 요청 간격(시험만 줄인다)
 //! 종료코드: 2 = 설정 거부 · 1 = 원본이 잡지 않는 예외(깨진 메시지 등 -- 감시 스크립트가 다시 띄운다).
 use futures_util::{SinkExt, StreamExt};
+use rtmodel::ban::{ban_left, ban_note};
 use rtmodel::sr_live::Runner;
 use rtmodel::{read_json, SrLean};
 use serde_json::Value;
@@ -37,36 +38,6 @@ fn die(code: i32, msg: &str) -> ! {
 
 fn wall() -> f64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
-}
-
-/// binance_ban_guard.ban_remaining -- rtcollect/src/rest.rs ban_left 와 같은 식.
-fn ban_left(file: &Path, now: f64) -> f64 {
-    std::fs::read_to_string(file).ok().and_then(|s| s.trim().parse::<f64>().ok()).map_or(0.0, |u| (u - now).max(0.0))
-}
-
-/// binance_ban_guard.note -- rtcollect/src/rest.rs ban_note 와 같은 식: 418 = 본문 «banned until <13자리 ms>», 429 = Retry-After(없으면 30초 · 418 은 120초).
-fn ban_note(file: &Path, status: u16, body: &str, retry_after: Option<&str>, now: f64) {
-    if status != 418 && status != 429 {
-        return;
-    }
-    let banned = body.find("banned until ").and_then(|i| {
-        let d = &body[i + 13..];
-        (d.len() >= 13 && d[..13].bytes().all(|b| b.is_ascii_digit())).then(|| d[..13].parse::<f64>().unwrap() / 1000.0)
-    });
-    let until = banned.unwrap_or_else(|| match retry_after.filter(|r| !r.is_empty() && r.bytes().all(|b| b.is_ascii_digit())) {
-        Some(r) => now + r.parse::<f64>().unwrap(),
-        None => now + if status == 418 { 120.0 } else { 30.0 },
-    });
-    if until <= now + ban_left(file, now) {
-        return;
-    }
-    if let Some(d) = file.parent() {
-        let _ = std::fs::create_dir_all(d);
-    }
-    let tmp = file.with_extension(format!("{}.tmp", std::process::id()));
-    if std::fs::write(&tmp, format!("{until:.3}\n")).and_then(|_| std::fs::rename(&tmp, file)).is_err() {
-        eprintln!("⚠️밴 기록 실패: {}", file.display());
-    }
 }
 
 /// REST 한 번(동기 -- 원본도 그 호출을 기다리는 동안 수신을 안 한다). 밴 중이면 보내지 않고 실패.
