@@ -111,6 +111,44 @@ WATCH_INV = [  # watch_invariants(퍼즈·루프·재시작)로 잡혀야 한다
     ("주기 주입 무시(2초 고정)", W_, "while io.nap(period).await {", "while io.nap(WATCH_PERIOD_SEC + 0.0 * period).await {"),
 ]
 
+A_, AS, IN = "src/account.rs", "src/assemble.rs", "src/intake.rs"
+DESK = [  # desk_fixture(원본 파이썬 정답지 · (가)=(나) · 스트림 계좌 규칙)로 잡혀야 한다
+    ("다른 심볼 지정가의 reduce_only 무시(P4)", AS, 'if os != symbol && !truthy(o.get("reduce_only")) && quote_of(&os) == quote_of(symbol) {', 'if os != symbol && quote_of(&os) == quote_of(symbol) {'),
+    ("다른 코인 대기: 걸린 주문과 큰 쪽 → 합(P5)", AS, "Some(x) => x.1 = pyfmt::max(x.1, v),", "Some(x) => x.1 += v,"),
+    ("증거금 풀 가르기 없음(P3·P7)", AS, "ps.into_iter().filter(|p| quote_of(&p.get(\"symbol\").map(py_str).unwrap_or_default()) == quote_of(symbol)).collect()", "ps"),
+    ("지정가 진입 롱 내림 → 올림(P22)", AS, "if side == \"LONG\" { (lu * b_ / tick + 1e-9).floor() }", "if side == \"LONG\" { (lu * b_ / tick + 1e-9).ceil() }"),
+    ("시간대 없는 entry_at 을 UTC 로", AS, "let Some(t) = parse_iso(s).filter(|_| tz) else", "let Some(t) = parse_iso(s).filter(|_| tz || true) else"),
+    ("표시 수수료 왕복 차이 2× → 1×", AS, "(2.0 * (mk - MAKER_BP), (tk - TAKER_BP) - (mk - MAKER_BP))", "(1.0 * (mk - MAKER_BP), (tk - TAKER_BP) - (mk - MAKER_BP))"),
+    ("실주문 청산도 펀딩·수수료 조회(P28)", AS, "let (funding, fees) = if for_order { (None, Value::Null) }", "let (funding, fees) = if false { (None, Value::Null) }"),
+    ("«즉시» 청산이 지정가를 남김", AS, "            o.remove(\"price\");\n", ""),
+    ("basis 실패 → 1.0 대신 다른 값(P21)", AS, "let Ok(r) = q.book(ms).await else { return 1.0 };", "let Ok(r) = q.book(ms).await else { return 1.0001 };"),
+    ("권장 배수 신선도 15분 → 40분(G17)", AS, "pub const RULE_VOL_MAX_AGE: f64 = 15.0 * 60.0;", "pub const RULE_VOL_MAX_AGE: f64 = 40.0 * 60.0;"),
+    ("마진 방식 모름을 통과(G17)", AS, 'if mt.as_deref() != Some("cross") {', 'if mt.as_deref() == Some("isolated") {'),
+    ("받아 둔 호가 2초 → 3초", AS, "pub const MAX_AGE_BOOK: f64 = 2.0;", "pub const MAX_AGE_BOOK: f64 = 3.0;"),
+    ("받아 둔 값 나이 무시(조용히 낡은 값)", AS, "Some((v, at)) if self.now - at <= max_age && self.now >= *at => Some(v),", "Some((v, _at)) => Some(v),"),
+    ("진입 confirm 검사 빠짐(G2)", IN, 'if g(q, "confirm") != Some("1") {\n            return resp(400, json!({"ok": false, "error": "confirm=1 required"}));\n        }\n        let Some(asset) = query_asset(self, q) else { return bad(400, "bad_asset", "주문할 수 없는 코인입니다") };\n        let Some(frac) = query_fraction(q, "pct") else { return bad(400, "bad_pct", "진입 비율은 0 초과 100 이하여야 합니다") };\n        // 2026-10-10', 'let Some(asset) = query_asset(self, q) else { return bad(400, "bad_asset", "주문할 수 없는 코인입니다") };\n        let Some(frac) = query_fraction(q, "pct") else { return bad(400, "bad_pct", "진입 비율은 0 초과 100 이하여야 합니다") };\n        // 2026-10-10'),
+    ("같은 선 대기 중복 허용(G11)", IN, "- limit_px.unwrap_or(0.0)).abs() < 1e-9", "- limit_px.unwrap_or(0.0)).abs() < 0.0"),
+    ("도는 작업이 있는 칸 재사용(G12)", IN, 'if self.running.contains(&format!("manual_wait_{}", Watcher::wkey(&asset, n))) && !taken.contains(&n) {', 'if false {'),
+    ("같은 코인 청산 칸이 바빠도 진입(G5)", IN, '|| self.w.side_exits.get(&asset).and_then(Value::as_object).is_some_and(busy)', ''),
+    ("일부 체결 뒤에도 지정가 수정(W6)", IN, 'if fl(st.get("filled")) > 0.0 {\n            return bad(409, "partially_filled"', 'if false {\n            return bad(409, "partially_filled"'),
+    ("손절 해제 취소 실패에도 바꿈(B21)", IN, 'if truthy(r.get("errors")) {\n            let es', 'if false {\n            let es'),
+    ("손절 해제 그 사이 새 무장 무시", IN, 'if !st.get(&key).is_some_and(|c| crate::watch::same_armed(c.get("armed_at"), b.get("armed_at"))) {\n            return bad(409, "rearmed", "그 사이 새로 무장됐습니다 — 다시 확인하세요");\n        }\n        let off', 'let off'),
+    ("포지션 조회 실패를 ok·빈 목록으로(P2 · 09-26)", A_, "let Some(risk) = risk.as_array().cloned() else {", "let Some(risk) = risk.as_array().cloned().or(Some(vec![])) else {"),
+    ("뒤집기 체결 앞끝 QTY_EPS 빠짐", A_, "if QTY_EPS < closing && closing < fl.qty - QTY_EPS {", "if 0.0 < closing && closing < fl.qty {"),
+    ("멀티에셋 모드 무시", A_, 'if truthy(account.get("multiAssetsMargin")) {\n        return Ok((top()?', 'if false {\n        return Ok((top()?'),
+    ("재연결 대기 5분 붙으면 되돌림 → 50분(A7)", A_, "pub const RECONNECT_RESET_AFTER_S: f64 = 300.0;", "pub const RECONNECT_RESET_AFTER_S: f64 = 3000.0;"),
+    ("체결 알림에 계좌 다시 읽기 빠짐(A11)", A_, '                    if kind == "fill" {\n                        io.dirty();\n                    }', ''),
+    ("알림 묶음 0.3초 → 0(A11)", A_, "pub const PUSH_COALESCE_S: f64 = 0.3;", "pub const PUSH_COALESCE_S: f64 = 0.0;"),
+    ("밴 중 대기 남은 시간 + 1 → + 0", A_, "if !io.sleep(b + 1.0).await {", "if !io.sleep(b).await {"),
+    ("재연결 뒤 스트림 계좌를 그대로 믿음", A_, '        if self.base_epoch != us.epoch {\n            return Err("reconnected");', '        if false {\n            return Err("reconnected");'),
+    ("스트림 계좌 신뢰 60초 → 600초", A_, "pub const STREAM_TRUST_SEC: f64 = 60.0;", "pub const STREAM_TRUST_SEC: f64 = 600.0;"),
+    ("어긋남 뒤에도 스트림 계좌를 씀", A_, '        if self.suspect {\n            return Err("mismatch");', '        if false {\n            return Err("mismatch");'),
+]
+WIRE = [  # wire_e2e(감시 → 계좌 → 조립 → 집행)로 잡혀야 한다
+    ("스트림 계좌를 쓸 수 있어도 REST 로 읽음", A_, 'Ok(v) => Ok((v, "stream")),', 'Ok(_) => Ok((book.produce(rest).await?, "stream")),'),
+    ("감시 청산 조립이 for_order=True(원본은 화면 조회까지 함)", "src/wire.rs", "pside, fraction, true, asset, false, false, Some(only_symbol)", "pside, fraction, true, asset, false, true, Some(only_symbol)"),
+]
+
 
 def digest():
     return {p: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((SRC / "src").glob("*.rs"))}
@@ -122,10 +160,12 @@ def main() -> int:
     caught = total = 0
     only = sys.argv[1] if len(sys.argv) > 1 else ""   # "plan" | "exec" | "http" | "watch" | "" = 전부
     for test, muts in (("plan_fixture", PLAN), ("exec_invariants", EXEC), ("http_replay", HTTP),
-                       ("watch_fixture", WATCH), ("watch_exec", WATCH_EXEC), ("watch_invariants", WATCH_INV)):
+                       ("watch_fixture", WATCH), ("watch_exec", WATCH_EXEC), ("watch_invariants", WATCH_INV), ("desk_fixture", DESK), ("wire_e2e", WIRE)):
         if only and not test.startswith(only):
             continue
         for name, f, a, b in muts:
+            if len(sys.argv) > 2 and sys.argv[2] not in name:
+                continue
             shutil.rmtree(W, ignore_errors=True)
             shutil.copytree(SRC, W, ignore=shutil.ignore_patterns("target"))
             p = W / f

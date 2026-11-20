@@ -87,6 +87,10 @@ fn py_eq(a: Option<&Value>, b: Option<&Value>) -> bool {
         (x, y) => x == y,
     }
 }
+/// 무장이 그대로인가(`a.get("armed_at") == b.get("armed_at")` -- 파이썬 == 의미).
+pub fn same_armed(a: Option<&Value>, b: Option<&Value>) -> bool {
+    py_eq(a, b)
+}
 fn type_name(v: &Value) -> &'static str {
     match v {
         Value::Null => "NoneType",
@@ -360,7 +364,7 @@ impl Watcher {
         entry.insert("phase".into(), json!("idle"));
         Watcher { dir: dir.into(), eth_symbol: eth_symbol.into(), entry, side_exits: Obj::new(), waits: Obj::new(), exiting: BTreeSet::new(), logs: vec![] }
     }
-    fn log(&mut self, s: String) {
+    pub(crate) fn log(&mut self, s: String) {
         self.logs.push(s);
     }
     pub fn load(&self) -> Obj {
@@ -994,8 +998,12 @@ impl Watcher {
 
     /// 지정가 대기 접수·수정 때 계획을 파일에(W4) -- 못 남기면 복구만 못 한다(접수는 막지 않는다).
     pub fn limit_save<I: WatchIo>(&mut self, io: &I, plan: &Obj) -> Result<(), String> {
+        self.limit_save_at(io.now(), plan)
+    }
+    /// 접수 문(수정 API)이 시계만 넘겨 부른다.
+    pub fn limit_save_at(&mut self, now: f64, plan: &Obj) -> Result<(), String> {
         let path = limit_path(&self.dir, &req_str(plan, "symbol")?, int_or1(plan.get("wid")));
-        let body = json!({"saved_at": io.now(), "plan": Value::Object(plan.clone())});
+        let body = json!({"saved_at": now, "plan": Value::Object(plan.clone())});
         let tmp = path.with_extension("tmp");
         if let Err(e) = std::fs::write(&tmp, serde_json::to_string(&body).unwrap_or_default()).and_then(|_| std::fs::rename(&tmp, &path)) {
             self.log(format!("limit wait save: OSError: {e}"));

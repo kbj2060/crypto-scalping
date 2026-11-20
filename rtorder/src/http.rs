@@ -142,6 +142,11 @@ impl Binance {
         (self.clock)()
     }
 
+    /// 밴 남은 초(ban_guard.ban_remaining -- 공용 파일이라 실제 시계). 계좌 조회 `_get` 이 보내기 전에 본다.
+    pub fn ban_left(&self) -> f64 {
+        sign::ban_remaining(&self.ban_file, sys_time())
+    }
+
     async fn send(&self, method: &'static str, url: &str, signed: bool) -> Result<Resp, String> {
         let mut retry = IDEMPOTENT.contains(&method);
         loop {
@@ -177,7 +182,7 @@ impl Binance {
     }
 
     /// 서명 없는 GET(aiohttp `session.get(url, params=...)` -- 상태 코드를 안 보고 JSON 을 읽는다). 실패 = 파이썬 예외 문자열.
-    async fn public(&self, path: &str, query: &[(&str, P)]) -> Result<Value, String> {
+    pub(crate) async fn public(&self, path: &str, query: &[(&str, P)]) -> Result<Value, String> {
         let url = if query.is_empty() { format!("{}{path}", self.base) } else { format!("{}{path}?{}", self.base, sign::urlencode(query)) };
         let r = self.send("GET", &url, false).await?;
         json_of(&r, &url)
