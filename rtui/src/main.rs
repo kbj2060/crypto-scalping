@@ -19,7 +19,7 @@ fn main() {
         let first = bench_frame(&ctx, &ch, &now);
         let raw = eframe::egui::RawInput { screen_rect: Some(eframe::egui::Rect::from_min_size(eframe::egui::Pos2::ZERO, eframe::egui::vec2(1920.0, 1080.0))), ..Default::default() };
         let mut np = 0;
-        let out = ctx.run_ui(raw, |ui| { np = ch.ui(ui).map_or(0, |s| s.prims.len()); });
+        let out = ctx.run_ui(raw, |ui| { np = ch.ui(ui).map_or(0, |s| s.0.prims.len()); });
         let verts: usize = ctx.tessellate(out.shapes, 1.0).iter().map(|p| match &p.primitive { eframe::epaint::Primitive::Mesh(m) => m.vertices.len(), _ => 0 }).sum();
         println!("prims {np} · vertices {verts}");
         let (mut bu, mut te, mut to) = (vec![], vec![], vec![]);
@@ -39,7 +39,7 @@ fn main() {
         eframe::run_native("rtui", opts, Box::new(move |cc| {
             cc.egui_ctx.set_fonts(rtui::draw::fonts());
             rtui::draw::canvas_like(&cc.egui_ctx);
-            Ok(Box::new(App { chart: ch, last: None }))
+            Ok(Box::new(App { chart: ch, last: None, pos: None }))
         })).unwrap();
     }
 }

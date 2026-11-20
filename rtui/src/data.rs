@@ -10,8 +10,11 @@ pub struct Footprint {
 #[derive(Deserialize)]
 pub struct FpBar {
     pub time: i64,
-    /// [가격, 매수, 매도, 고래 매수, 고래 매도, 리테일 매수, 리테일 매도] -- 차트는 앞 셋만 읽는다
+    /// [가격, 매수, 매도, 고래 매수, 고래 매도, 리테일 매수, 리테일 매도] -- 차트는 앞 셋 · 레인·프로파일은 일곱 다
     pub levels: Vec<Vec<f64>>,
+    /// 봉 안 누적 델타 [최저, 최고, 마감](서버 1초 체결 순서 -- 레인 꼬리)
+    #[serde(default)]
+    pub dhl: Option<Vec<f64>>,
 }
 
 #[derive(Deserialize)]
@@ -26,6 +29,9 @@ pub struct Candle {
     pub high: f64,
     pub low: f64,
     pub close: f64,
+    /// 형성 중 봉(미완 경매가 건너뛴다)
+    #[serde(default)]
+    pub partial: bool,
 }
 
 /// JS Number.prototype.toFixed: 정확히 반인 값은 0 에서 먼 쪽으로(Rust `{:.N}` 은 짝수 쪽 -- 42.25 → "42.2" 대 JS "42.3")
@@ -37,6 +43,11 @@ pub fn to_fixed(v: f64, d: usize) -> String {
         return format!("{}{:.*}", if v < 0.0 { "-" } else { "" }, d, ((v.abs() * m).floor() + 1.0) / m);
     }
     format!("{v:.d$}")
+}
+
+/// `Number(l[i]) || 0` -- 칸 배열이 짧거나 NaN 이면 0
+pub fn lv(l: &[f64], i: usize) -> f64 {
+    l.get(i).copied().filter(|v| !v.is_nan()).unwrap_or(0.0)
 }
 
 /// app.js 6840 fmtFootprintQty

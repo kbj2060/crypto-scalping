@@ -15,6 +15,7 @@ if (q.get("mode") === "bench") {
   window.RESULT = { tInit, v: [...m.bench(fp, mh, N("w", 1751), N("h", 844), N("bars", 36), N("tz", -540), N("n", 300))] };
 } else {
   await m.start("c", fp, mh, N("x", 113), N("y", 126), N("w", 1751), N("h", 844), N("bars", 36), N("tz", -540), bg);
+  window.rtui_scene = () => m.scene();
   const poll = () => { const s = m.scene(); if (s) requestAnimationFrame(() => requestAnimationFrame(() => { window.RESULT = { tInit, ...JSON.parse(s) }; })); else setTimeout(poll, 50); };
   poll();
 }

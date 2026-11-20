@@ -7,19 +7,25 @@ use std::collections::BTreeMap;
 
 /// styles.css :root(다크) 의 색 이름
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Col { Good, Bad, Muted, Amber, Accent, Ink, Line, OnFill }
+pub enum Col { Good, Bad, Muted, Amber, Accent, Ink, Line, OnFill, ChartBg, Text, Turnover, SoftLine, HoverLine }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Anchor { Start, Middle, End }
 
-/// 그리기 한 개 = app.js 의 캔버스 붓(cvRect·cvStrokeRect·cvStroke·cvText)·svg 요소 하나. clip = 가격 플롯 클립(plotC).
+/// 자르기: Plot = 가격 플롯(app.js 8770 plotC) · Lane = 레인(8770 laneC: 레인 윗변 ~ 상자 바닥)
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Clip { No, Plot, Lane }
+
+/// 그리기 한 개 = app.js 의 캔버스 붓(cvRect·cvStrokeRect·cvStroke·cvText)·svg 요소 하나.
 #[derive(Debug)]
 pub enum Prim {
-    Rect { x: f64, y: f64, w: f64, h: f64, c: Col, a: f64, rx: f64, clip: bool },
-    StrokeRect { x: f64, y: f64, w: f64, h: f64, c: Col, a: f64, lw: f64, clip: bool },
-    Line { pts: Vec<[f64; 2]>, c: Col, a: f64, lw: f64, dash: Option<f64>, clip: bool },
-    /// y = 글자 바닥선(캔버스 fillText·svg <text> 와 같은 뜻)
-    Text { x: f64, y: f64, s: String, size: f64, c: Col, a: f64, anchor: Anchor, clip: bool },
+    /// rx = 둥근 모서리(캔버스 roundRect · svg rx -- 반지름은 min(rx, 폭/2, 높이/2))
+    Rect { x: f64, y: f64, w: f64, h: f64, c: Col, a: f64, rx: f64, clip: Clip },
+    StrokeRect { x: f64, y: f64, w: f64, h: f64, c: Col, a: f64, lw: f64, clip: Clip },
+    Line { pts: Vec<[f64; 2]>, c: Col, a: f64, lw: f64, dash: Option<f64>, clip: Clip },
+    /// y = 글자 바닥선(캔버스 fillText·svg <text> 와 같은 뜻) · halo = svg paint-order stroke 3px 차트 바탕색(기둥 머리 글자)
+    Text { x: f64, y: f64, s: String, size: f64, c: Col, a: f64, anchor: Anchor, halo: bool, clip: Clip },
+    Circle { x: f64, y: f64, r: f64, c: Col, a: f64, clip: Clip },
 }
 
 pub struct Cfg {
@@ -34,10 +40,44 @@ pub struct Cfg {
     pub tz_off_min: i64,
 }
 
+/// 한 장의 기하(svg viewBox 단위) -- 레인·프로파일·표식·호버가 같은 값을 읽는다
+pub struct Geo {
+    pub w: f64, pub h: f64, pub ml: f64, pub mr: f64, pub mt: f64, pub mb: f64, pub cw: f64, pub ch: f64, pub plot_bottom: f64,
+    pub quad_y: f64, pub lane_top: f64,
+    pub y_min: f64, pub y_max: f64, pub y_span: f64, pub slot: f64, pub x0b: f64, pub bw: f64,
+    pub row_size: f64, pub off: f64, pub row_px: f64, pub current: f64, pub draw_cells: bool,
+    /// 프로파일 칸(8584-8588): 캔들 플롯 오른쪽 끝 · 체결 칸 폭 · 델타·TPO 칸 폭 · TPO 왼쪽 끝 · 델타 왼쪽 끝 · 체결 바닥선
+    pub trade_x0: f64, pub trade_w: f64, pub dt_w: f64, pub c_tpo: f64, pub c_del: f64, pub t_anc: f64,
+    /// 현재가 알약·호버 가격 배지 오른쪽 끝(10354 xRR)
+    pub x_rr: f64,
+}
+
+impl Geo {
+    pub fn x_at(&self, i: usize) -> f64 { self.ml + (i as f64 + self.x0b) * self.slot }
+    pub fn y_at(&self, v: f64) -> f64 { self.mt + (self.y_max - v) * self.ch / self.y_span }
+    pub fn row_of(&self, p: f64) -> i64 { ((p + self.off) / self.row_size).floor() as i64 }
+    pub fn row_lo(&self, k: i64) -> f64 { k as f64 * self.row_size - self.off }
+}
+
 pub struct Scene {
     pub prims: Vec<Prim>,
-    pub w: f64, pub mr: f64, pub ml: f64, pub cw: f64, pub mt: f64, pub ch: f64, pub plot_bottom: f64, pub lane_top: f64,
-    pub y_min: f64, pub y_max: f64, pub slot: f64, pub bw: f64, pub row_px: f64, pub current: f64,
+    /// (이름, 시작, 끝) -- prims 안 요소 묶음(좌표 대조용)
+    pub groups: Vec<(&'static str, usize, usize)>,
+    pub g: Geo,
+    /// 보이는 봉 · 봉별 화면 행(행 → [매수, 매도]) · 봉별 POC 행 -- 호버가 읽는다
+    pub candles: Vec<Candle>,
+    pub bar_rows: Vec<BTreeMap<i64, [f64; 2]>>,
+    pub pocs: Vec<Option<i64>>,
+    pub lane: Vec<Option<crate::lane::Row>>,
+    pub dt: Option<crate::profile::Dt>,
+}
+
+impl Scene {
+    fn add(&mut self, name: &'static str, mut v: Vec<Prim>) {
+        let s = self.prims.len();
+        self.prims.append(&mut v);
+        self.groups.push((name, s, self.prims.len()));
+    }
 }
 
 /// app.js 2114-2130 niceStep + axisTicks (더하기를 되풀이하는 것까지 같게 -- 부동소수 끝자리)
@@ -125,12 +165,12 @@ pub fn prep(fp: &Footprint, full: &[Candle], cfg: &Cfg, measure: &dyn Fn(&str, f
     for v in axis_ticks(y_min, y_max, 6.0) {
         let y = y_at(v);
         if y >= mt && y <= plot_bottom {
-            bg.push(Prim::Rect { x: ml, y: y - 0.5, w: w - mr - ml, h: 1.0, c: Col::Line, a: 0.82, rx: 0.0, clip: false }); // cvHLine 8191
+            bg.push(Prim::Rect { x: ml, y: y - 0.5, w: w - mr - ml, h: 1.0, c: Col::Line, a: 0.82, rx: 0.0, clip: Clip::No }); // cvHLine 8191
         }
     }
     // ── 현재가 선(칸 뒤 = 격자 바로 위): 8933-8937 · 10452-10462 ──
     let real_y = y_at(current); // 범위에 현재가가 들어 있어 늘 화면 안(8649)
-    bg.push(Prim::Line { pts: vec![[ml, real_y], [w - mr, real_y]], c: Col::Accent, a: 0.85, lw: 1.0, dash: Some(4.0), clip: false });
+    bg.push(Prim::Line { pts: vec![[ml, real_y], [w - mr, real_y]], c: Col::Accent, a: 0.85, lw: 1.0, dash: Some(4.0), clip: Clip::No });
 
     // ── 시간축: 8993-9034 (svg 층) ──
     {
@@ -154,12 +194,12 @@ pub fn prep(fp: &Footprint, full: &[Candle], cfg: &Cfg, measure: &dyn Fn(&str, f
         }
         for i in idx {
             let x = x_at(i) + bw / 2.0;
-            svg.push(Prim::Line { pts: vec![[x, h - mb - 19.0], [x, h - mb - 16.0]], c: Col::Line, a: 1.0, lw: 1.0, dash: None, clip: false });
+            svg.push(Prim::Line { pts: vec![[x, h - mb - 19.0], [x, h - mb - 16.0]], c: Col::Line, a: 1.0, lw: 1.0, dash: None, clip: Clip::No });
             let t = candles[i].time - tz;
             let mut s = format!("{:02}:{:02}", t.rem_euclid(86_400) / 3600, t.rem_euclid(3600) / 60);
             if dated { let (m, d) = month_day(t.div_euclid(86_400)); s = format!("{m}/{d} {s}"); }
             let tw = measure(&s, 13.0);
-            svg.push(Prim::Text { x: x.max(2.0 + tw / 2.0), y: h - mb - 3.0, s, size: 13.0, c: Col::Muted, a: 1.0, anchor: Anchor::Middle, clip: false });
+            svg.push(Prim::Text { x: x.max(2.0 + tw / 2.0), y: h - mb - 3.0, s, size: 13.0, c: Col::Muted, a: 1.0, anchor: Anchor::Middle, halo: false, clip: Clip::No });
         }
     }
 
@@ -202,12 +242,12 @@ pub fn prep(fp: &Footprint, full: &[Candle], cfg: &Cfg, measure: &dyn Fn(&str, f
     let draw_cells = bw >= 14.0 && !mob; // 9424
     let mx_cell = max_sell.max(max_buy); // 9468
     let draw_cell = |out: &mut Vec<Prim>, cx: f64, y_top: f64, v: f64, other: f64, col: Col, edge_x: f64| { // 9437-9442
-        if half > 0.0 && row_px > 0.0 { out.push(Prim::Rect { x: cx, y: y_top, w: half, h: row_px, c: col, a: shade(v, mx_cell), rx: 0.0, clip: true }); }
+        if half > 0.0 && row_px > 0.0 { out.push(Prim::Rect { x: cx, y: y_top, w: half, h: row_px, c: col, a: shade(v, mx_cell), rx: 0.0, clip: Clip::Plot }); }
         if v > 0.0 && row_px >= 7.0 && show_qty {
-            out.push(Prim::Text { x: cx + half / 2.0, y: y_top + row_px / 2.0 + font_px * 0.36, s: fmt_qty(v), size: font_px, c: Col::Ink, a: 0.82, anchor: Anchor::Middle, clip: true });
+            out.push(Prim::Text { x: cx + half / 2.0, y: y_top + row_px / 2.0 + font_px * 0.36, s: fmt_qty(v), size: font_px, c: Col::Ink, a: 0.82, anchor: Anchor::Middle, halo: false, clip: Clip::Plot });
         }
         if v > 0.0 && v > other * 3.0 { // FOOTPRINT_IMBALANCE_RATIO(150)
-            out.push(Prim::Rect { x: edge_x, y: y_top + 0.5, w: 2.0, h: (row_px - 1.0).max(1.0), c: col, a: 1.0, rx: 0.0, clip: true });
+            out.push(Prim::Rect { x: edge_x, y: y_top + 0.5, w: 2.0, h: (row_px - 1.0).max(1.0), c: col, a: 1.0, rx: 0.0, clip: Clip::Plot });
         }
     };
     struct Info { poc: Option<i64>, buy: f64, sell: f64, low: Option<i64> }
@@ -221,8 +261,10 @@ pub fn prep(fp: &Footprint, full: &[Candle], cfg: &Cfg, measure: &dyn Fn(&str, f
     let mut deltas: Vec<Prim> = vec![];
     let mut bumped = 0usize;
     let mut poc_pts: Vec<[f64; 2]> = vec![];
+    let mut pocs: Vec<Option<i64>> = vec![];
     for (i, rows) in bar_rows.iter().enumerate() {
         let (c, x, inf) = (&candles[i], x_at(i), info(rows));
+        pocs.push(inf.poc);
         if let Some(k) = inf.poc { // 9531 pocPt
             let py = y_at(row_lo(k + 1));
             if !(py + row_px < mt || py > mt + ch) { poc_pts.push([x + bw / 2.0, py + row_px / 2.0]); }
@@ -237,7 +279,7 @@ pub fn prep(fp: &Footprint, full: &[Candle], cfg: &Cfg, measure: &dyn Fn(&str, f
                 let col = if cell[1] > cell[0] { Col::Bad } else if cell[0] > cell[1] { Col::Good } else { Col::Muted };
                 draw_cell(&mut fg, sx, y_top, cell[1], cell[0], col, sx - 2.0);
                 draw_cell(&mut fg, bx, y_top, cell[0], cell[1], col, bx + half + 2.0);
-                if Some(key) == inf.poc { fg.push(Prim::StrokeRect { x: sx, y: y_top, w: bx + half - sx, h: row_px, c: Col::Amber, a: 0.85, lw: 1.0, clip: true }); }
+                if Some(key) == inf.poc { fg.push(Prim::StrokeRect { x: sx, y: y_top, w: bx + half - sx, h: row_px, c: Col::Amber, a: 0.85, lw: 1.0, clip: Clip::Plot }); }
             }
         }
         let color = if c.close >= c.open { Col::Good } else { Col::Bad };
@@ -246,12 +288,12 @@ pub fn prep(fp: &Footprint, full: &[Candle], cfg: &Cfg, measure: &dyn Fn(&str, f
             let cx0 = if mob { x + (bw - fpc_w) / 2.0 } else { x + half + 1.0 + fpc_gap / 2.0 };
             let cxm = cx0 + fpc_w / 2.0;
             let (a, b) = (y_at(c.high), y_at(c.low));
-            fg.push(Prim::Rect { x: cxm - 0.5, y: a.min(b), w: 1.0, h: (b - a).abs(), c: color, a: 1.0, rx: 0.0, clip: true }); // cvVLine 8190
-            fg.push(Prim::Rect { x: cx0, y: y_t, w: fpc_w, h: (y_b - y_t).max(1.0), c: color, a: 1.0, rx: if fpc_w >= 5.0 { 1.0 } else { 0.0 }, clip: true });
+            fg.push(Prim::Rect { x: cxm - 0.5, y: a.min(b), w: 1.0, h: (b - a).abs(), c: color, a: 1.0, rx: 0.0, clip: Clip::Plot }); // cvVLine 8190
+            fg.push(Prim::Rect { x: cx0, y: y_t, w: fpc_w, h: (y_b - y_t).max(1.0), c: color, a: 1.0, rx: if fpc_w >= 5.0 { 1.0 } else { 0.0 }, clip: Clip::Plot });
         } else {
             let (a, b) = (y_at(c.high), y_at(c.low));
-            fg.push(Prim::Rect { x: x + bw / 2.0 - 0.5, y: a.min(b), w: 1.0, h: (b - a).abs(), c: color, a: 0.5, rx: 0.0, clip: true });
-            fg.push(Prim::StrokeRect { x, y: y_t, w: bw, h: (y_b - y_t).max(1.0), c: color, a: 0.6, lw: 1.0, clip: true });
+            fg.push(Prim::Rect { x: x + bw / 2.0 - 0.5, y: a.min(b), w: 1.0, h: (b - a).abs(), c: color, a: 0.5, rx: 0.0, clip: Clip::Plot });
+            fg.push(Prim::StrokeRect { x, y: y_t, w: bw, h: (y_b - y_t).max(1.0), c: color, a: 0.6, lw: 1.0, clip: Clip::Plot });
         }
         // 9496-9528 델타 글자 자리(겹치면 한 줄씩 내림 -- 사슬)
         if inf.buy + inf.sell > 0.0 && !dense {
@@ -272,14 +314,14 @@ pub fn prep(fp: &Footprint, full: &[Candle], cfg: &Cfg, measure: &dyn Fn(&str, f
             }
             delta_boxes.push((cxd - half_w, cxd + half_w, dy));
             if dy != dy0 { bumped += 1; }
-            deltas.push(Prim::Text { x: cxd, y: dy, s: label, size: delta_font, c: if delta >= 0.0 { Col::Good } else { Col::Bad }, a: 1.0, anchor: Anchor::Middle, clip: true });
+            deltas.push(Prim::Text { x: cxd, y: dy, s: label, size: delta_font, c: if delta >= 0.0 { Col::Good } else { Col::Bad }, a: 1.0, anchor: Anchor::Middle, halo: false, clip: Clip::Plot });
         }
     }
     // 9567 전부 아니면 전무(밀려난 글자가 30% 넘으면 안 그린다)
     if !deltas.is_empty() && bumped as f64 / deltas.len() as f64 <= 0.3 { fg.append(&mut deltas); }
     // 9578-9587 봉별 POC 선(한 봉 넘게 벌어지면 끊는다) · lineSt("poc") = 1.5 · 실선 · amber · 불투명 0.75 · 둥근 이음
     let mut seg: Vec<[f64; 2]> = vec![];
-    let poc_line = |pts: Vec<[f64; 2]>| Prim::Line { pts, c: Col::Amber, a: 0.75, lw: 1.5, dash: None, clip: true };
+    let poc_line = |pts: Vec<[f64; 2]>| Prim::Line { pts, c: Col::Amber, a: 0.75, lw: 1.5, dash: None, clip: Clip::Plot };
     for (i, p) in poc_pts.iter().enumerate() {
         if i > 0 && p[0] - poc_pts[i - 1][0] > bw * 1.8 {
             if seg.len() > 1 { fg.push(poc_line(std::mem::take(&mut seg))); }
@@ -289,21 +331,43 @@ pub fn prep(fp: &Footprint, full: &[Candle], cfg: &Cfg, measure: &dyn Fn(&str, f
     }
     if seg.len() > 1 { fg.push(poc_line(seg)); }
 
-    // ── 현재가 알약: 10476-10528 (데스크톱 풋프린트 = 프로파일 오른쪽 끝에 오른쪽 정렬 · 채운 알약 · 14px 800) ──
+    let g = Geo { w, h, ml, mr, mt, mb, cw, ch, plot_bottom, quad_y, lane_top, y_min, y_max, y_span, slot, x0b, bw, row_size, off, row_px, current, draw_cells,
+                  trade_x0: ml + cw, trade_w, dt_w, c_tpo: w - mr + 6.0 - dt_g - dt_w, c_del: w - mr + 6.0 - 2.0 * (dt_g + dt_w),
+                  t_anc: w - mr + 6.0 - 3.0 * dt_g - 2.0 * dt_w, x_rr: w - mr - 2.0 }; // 8587-8588 (cBook = w − mr − BOOK_W(0) + 6) · 10354
+
+    // ── 현재가 알약: 10476-10528 (데스크톱 풋프린트 = 프로파일 오른쪽 끝에 오른쪽 정렬 · 채운 알약 · 14px 800 · 고정폭 숫자) ──
+    let mut pill = vec![];
     {
         let label_y = (mt + 9.0).max((plot_bottom - 9.0).min(real_y.max(mt + 9.0).min(plot_bottom - 9.0))); // declutterTagY 10351 + 10408
-        let x_rr = w - mr - 2.0; // 10354
-        let s = to_fixed(current, 1); // fmtNum(v, pxDp()) -- ETH dp 1 (45)
+        let s = tnum(&to_fixed(current, 1)); // fmtNum(v, pxDp()) -- ETH dp 1 (45) · 10499 font-variant-numeric: tabular-nums
         let tw = measure(&s, 14.0);
         let bw0 = ((tw + 18.0) / 4.0).ceil() * 4.0; // pillW 4418
-        svg.push(Prim::Rect { x: x_rr - bw0, y: label_y - 9.0, w: bw0, h: 18.0, c: Col::Ink, a: 1.0, rx: 9.0, clip: false });
-        svg.push(Prim::Text { x: x_rr - 9.0, y: label_y + 4.5, s, size: 14.0, c: Col::OnFill, a: 1.0, anchor: Anchor::End, clip: false });
+        pill.push(Prim::Rect { x: g.x_rr - bw0, y: label_y - 9.0, w: bw0, h: 18.0, c: Col::Ink, a: 1.0, rx: 9.0, clip: Clip::No });
+        pill.push(Prim::Text { x: g.x_rr - 9.0, y: label_y + 4.5, s, size: 14.0, c: Col::OnFill, a: 1.0, anchor: Anchor::End, halo: false, clip: Clip::No });
     }
 
-    // 층 순서: bg 캔버스 → fg 캔버스 → svg(시간축·알약)
-    bg.append(&mut fg);
-    bg.append(&mut svg);
-    Some(Scene { prims: bg, w, mr, ml, cw, mt, ch, plot_bottom, lane_top, y_min, y_max, slot, bw, row_px, current })
+    // 층 순서(app.js 그대로): bg 캔버스 → fg 캔버스(칸·캔들·델타·POC 선 → 스택 9769 → 레인 11158 → 미완 경매 11332) → svg(시간축 → 프로파일 9299 → 레인 글자 → 알약 post)
+    let candles = candles.to_vec();
+    let lane_rows = crate::lane::rows(fp, &candles);
+    let dt = crate::profile::build(&g, &candles, &by_time);
+    let (lane_fg, lane_svg) = crate::lane::draw(&g, &lane_rows, measure);
+    let mut sc = Scene { prims: vec![], groups: vec![], g, candles: vec![], bar_rows: vec![], pocs, lane: vec![], dt: None };
+    sc.add("bg", bg);
+    sc.add("fg", fg);
+    sc.add("stack", if sc.g.draw_cells { crate::marks::stack(&sc.g, &bar_rows) } else { vec![] });
+    sc.add("lane", lane_fg);
+    sc.add("ua", crate::marks::unfinished(&sc.g, &candles, &by_time, q));
+    sc.add("svg", svg);
+    sc.add("profile", dt.as_ref().map_or(vec![], |d| crate::profile::draw(&sc.g, d)));
+    sc.add("lane_text", lane_svg);
+    sc.add("pill", pill);
+    (sc.candles, sc.bar_rows, sc.lane, sc.dt) = (candles, bar_rows, lane_rows, dt);
+    Some(sc)
+}
+
+/// font-variant-numeric: tabular-nums -- Pretendard 는 고정폭 숫자(tnum)를 U+E071~E07A 로도 싣는다(cmap 확인) · egui 는 오픈타입 기능을 못 켜서 글자를 바꾼다
+pub fn tnum(s: &str) -> String {
+    s.chars().map(|c| match c.to_digit(10) { Some(d) => char::from_u32(0xE071 + d).unwrap(), None => c }).collect()
 }
 
 #[cfg(test)]

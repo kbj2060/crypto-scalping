@@ -3,6 +3,8 @@ python -I make_fixture.py  →  fixture/footprint.json · fixture/market-history
 import json, math, pathlib, random
 
 R = random.Random(20261120)
+R2 = random.Random(20261121)   # 봉 안 델타 범위(dhl)만
+R3 = random.Random(20261122)   # 스택 불균형 줄만
 OUT = pathlib.Path(__file__).resolve().parent / "fixture"
 T_END = 1795156500          # 마지막(형성 중) 봉 시각 -- 하네스 시계(1795156790)가 이 봉 안이다
 N, BUCKET = 144, 0.5
@@ -27,8 +29,15 @@ for i in range(N):
         levels.append([k, round(buy, 3), round(sell, 3), round(wb, 3), round(ws, 3),
                        round(buy * R.random() * 0.3, 3), round(sell * R.random() * 0.3, 3)])
         k = round(k + BUCKET, 1)
+    # 스택 불균형(같은 쪽 3배 넘는 줄이 3줄 이상 이어짐)이 몇 봉에 생기게 -- 실응답엔 흔하다. 따로 뽑아 R 순서는 그대로
+    if len(levels) >= 10 and R3.random() < 0.4:
+        n = R3.choice((6, 7, 8)); j0, s = R3.randrange(max(1, len(levels) - n)), R3.choice((1, 2))
+        for l in levels[j0:j0 + n]:
+            l[s] = round(l[s] * 4.5, 3); l[3 - s] = round(l[3 - s] * 0.6, 3)
     d = sum(l[1] - l[2] for l in levels)
-    bars.append({"time": t, "agg": False, "levels": levels, "dhl": [round(d, 3), 0.0, round(d, 3)]})
+    # 봉 안 누적 델타 [최저, 최고, 마감](서버 1초 체결 순서) -- 마감을 품는 범위. 따로 뽑아 위 자료(R 순서)는 그대로
+    lo_x, hi_x = R2.random() * (abs(d) * 0.6 + 300), R2.random() * (abs(d) * 0.6 + 300)
+    bars.append({"time": t, "agg": False, "levels": levels, "dhl": [round(min(0, d) - lo_x, 3), round(max(0, d) + hi_x, 3), round(d, 3)]})
     cd = {"time": t, "open": o, "high": hi, "low": lo, "close": c, "volume": round(sum(l[1] + l[2] for l in levels), 3)}
     if i == N - 1:
         cd["partial"] = True
