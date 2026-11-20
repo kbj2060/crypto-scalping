@@ -1,13 +1,24 @@
-//! /api/footprint · /api/market-history 응답 모양(읽는 칸만) + 숫자 글자(app.js 와 같은 반올림).
+//! /api/footprint · /api/market-history · /api/footprint-week 응답 모양(읽는 칸만) + 숫자 글자(app.js 와 같은 반올림).
 use serde::Deserialize;
 
-#[derive(Deserialize)]
+/// /api/footprint 응답(app.js refreshFootprint 가 읽는 칸). 숫자 칸이 없으면 app.js 의 `Number(x) || 기본값` 과 같게 0.
+#[derive(Deserialize, Clone, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct Footprint {
+    #[serde(default)]
     pub bucket: f64,
     pub bars: Vec<FpBar>,
+    #[serde(default)]
+    pub bar_seconds: f64,
+    #[serde(default)]
+    pub whale_min_usd: f64,
+    #[serde(default)]
+    pub retail_max_usd: f64,
+    #[serde(default)]
+    pub full: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, PartialEq, Debug)]
 pub struct FpBar {
     pub time: i64,
     /// [가격, 매수, 매도, 고래 매수, 고래 매도, 리테일 매수, 리테일 매도] -- 차트는 앞 셋 · 레인·프로파일은 일곱 다
@@ -19,19 +30,38 @@ pub struct FpBar {
 
 #[derive(Deserialize)]
 pub struct MarketHistory {
+    #[serde(default)]
     pub candles: Vec<Candle>,
 }
 
-#[derive(Deserialize, Clone, Copy)]
+/// /api/footprint-week (app.js maybeFetchFpWeek 가 읽는 칸 중 이 카드가 쓰는 것 -- oi·liq·volPre 는 범위 밖 레인)
+#[derive(Deserialize)]
+pub struct Week {
+    #[serde(default)]
+    pub candles: Vec<Candle>,
+    #[serde(default)]
+    pub bars: Vec<FpBar>,
+}
+
+#[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct Candle {
     pub time: i64,
     pub open: f64,
     pub high: f64,
     pub low: f64,
     pub close: f64,
-    /// 형성 중 봉(미완 경매가 건너뛴다)
+    /// 형성 중 봉(미완 경매가 건너뛴다). None = 키 없음(app.js Object.assign 이 덮지 않는다 -- view::tf_candles)
     #[serde(default)]
-    pub partial: bool,
+    pub partial: Option<bool>,
+    #[serde(default)]
+    pub volume: f64,
+    /// 서버가 마감봉에 붙이는 SMA144(없으면 «아직 안 붙었다» -- feed::history_retry_due 의 증상)
+    #[serde(default)]
+    pub sma: Option<f64>,
+}
+
+impl Candle {
+    pub fn partial(&self) -> bool { self.partial == Some(true) }
 }
 
 /// JS Number.prototype.toFixed: 정확히 반인 값은 0 에서 먼 쪽으로(Rust `{:.N}` 은 짝수 쪽 -- 42.25 → "42.2" 대 JS "42.3")

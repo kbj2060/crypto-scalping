@@ -51,3 +51,28 @@ OUT.mkdir(exist_ok=True)
 (OUT / "market-history.json").write_text(json.dumps({"asset": "eth", "candles": candles}, separators=(",", ":")))
 print("bars", N, "levels/bar", min(len(b["levels"]) for b in bars), "~", max(len(b["levels"]) for b in bars),
       "bytes", (OUT / "footprint.json").stat().st_size)
+
+# 1주일(/api/footprint-week -- 휠로 넓히기·30m/1h·과거로 옮기기가 부른다): 라이브 첫 봉보다 앞 1,972봉 + 라이브와 겹치는 44봉(값이 달라
+# «같은 봉이면 라이브가 이긴다»가 보인다). 따로 뽑아 위 두 파일은 바이트 그대로.
+RW = random.Random(20261123)
+NW, W_END = 2016, T_END - 100 * 300
+wc, wb, px = [], [], 1742.0 - 60.0
+for i in range(NW):
+    t = W_END - (NW - 1 - i) * 300
+    rng = max(1.0, RW.lognormvariate(math.log(4.0), 0.4))
+    o = px; c = o + RW.gauss(0, rng * 0.45) + 0.03
+    hi = max(o, c) + 0.3 * rng; lo = min(o, c) - 0.3 * rng
+    o, c, hi, lo = (round(v, 2) for v in (o, c, hi, lo))
+    levels, k = [], q(lo)
+    while k <= q(hi) + 1e-9:
+        b, s = RW.lognormvariate(5.0, 0.9), RW.lognormvariate(5.0, 0.9)
+        levels.append([k, round(b, 3), round(s, 3), round(b * 0.2, 3), round(s * 0.1, 3), round(b * 0.1, 3), round(s * 0.2, 3)])
+        k = round(k + BUCKET, 1)
+    d = sum(l[1] - l[2] for l in levels)
+    bar = {"time": t, "levels": levels}
+    if i % 3: bar["dhl"] = [round(min(0, d) - 50, 3), round(max(0, d) + 50, 3), round(d, 3)]
+    wb.append(bar)
+    wc.append({"time": t, "open": o, "high": hi, "low": lo, "close": c, "volume": round(sum(l[1] + l[2] for l in levels), 3)})
+    px = c
+(OUT / "footprint-week.json").write_text(json.dumps({"asset": "eth", "candles": wc, "bars": wb, "oi": [], "liq": [], "volPre": []}, separators=(",", ":")))
+print("week bars", NW, "bytes", (OUT / "footprint-week.json").stat().st_size)

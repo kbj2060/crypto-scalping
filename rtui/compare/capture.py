@@ -15,63 +15,10 @@ BARS = int(sys.argv[3]) if len(sys.argv) > 3 else 36
 NOHINT = "nohint" in sys.argv[4:]
 HERE, LIVE, FX = WT / "rtui/compare", WT / "dashboard/live", WT / "rtui/compare/fixture"
 FONT = WT / "rtui/fonts/Pretendard-Bold.ttf"
-T_FX = 1795156790   # 하네스 시계(합성 마지막 봉 1795156500 안)
-TZ = "Asia/Seoul"
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))   # -I 는 스크립트 폴더를 안 넣는다
+from harness import T_FX, TZ, FONT_CSS, CT, INIT, LAUNCH as _L, make_route
 API = {"/api/footprint": FX / "footprint.json", "/api/market-history": FX / "market-history.json"}
-# 지금 화면이 웹 글꼴(jsdelivr Pretendard Variable)을 받는 자리에 같은 글꼴의 Bold 한 벌만 준다(오프라인 -- 굵기 400·800 도 Bold 로 그려진다)
-FONT_CSS = "@font-face{font-family:'Pretendard Variable';src:url(http://fx.invalid/font/p.ttf) format('truetype');font-weight:45 920;}"
-CT = {".js": "application/javascript", ".css": "text/css", ".html": "text/html", ".png": "image/png", ".wasm": "application/wasm", ".json": "application/json"}
-
-INIT = r"""(() => {
-  const OFF = %d * 1000 - Date.now(); const RD = Date;
-  class D extends RD { constructor(...a) { if (a.length) super(...a); else super(RD.now() + OFF); } static now() { return RD.now() + OFF; } }
-  window.Date = D;
-  window.WebSocket = class { constructor() { this.readyState = 3; } send() {} close() {} addEventListener() {} };
-  window.EventSource = class { constructor(u) { this.url = u; this.readyState = 1; } addEventListener() {} removeEventListener() {} close() { this.readyState = 2; } };
-  // 겹침 선(VWAP·SMA·스윙·OB 등)은 이번 범위 밖 -- 사용자 스위치(카드 «지표»)로 끈다. POC 선만 켠다.
-  try { localStorage.setItem('mcLine', JSON.stringify({ poc: true, vwap: false, veto: false, sma50: false, sw1h: false, sw30m: false, sw30mOn: 1, ob: false, fvg: false, orb: false, cci: false, rsi2: false, rdiv: false, srl: false, bb: false, wvwap: false })); } catch (e) {}
-  // 캔버스 그리기 기록(좌표 대조용) -- window.__rec 이 켜져 있을 때만. 경로 명령(moveTo·lineTo·roundRect·rect·arc)은 다음 fill·stroke 에 붙인다.
-  window.__rec = null; const P = CanvasRenderingContext2D.prototype;
-  const tag = (ctx) => ctx.canvas.classList.contains('fp-cv') ? (ctx.canvas === ctx.canvas.parentNode.querySelector('.fp-cv') ? 'bg' : 'fg') : null;
-  const r3 = (v) => typeof v === 'number' ? Math.round(v * 1000) / 1000 : (typeof v === 'string' ? v : null);
-  let path = [];
-  const ob = P.beginPath; P.beginPath = function () { if (window.__rec && tag(this)) path = []; return ob.apply(this, arguments); };
-  for (const k of ['moveTo', 'lineTo', 'roundRect', 'rect', 'arc', 'closePath']) { const o = P[k]; P[k] = function (...a) { if (window.__rec && tag(this)) path.push([k, ...a.map(r3)]); return o.apply(this, a); }; }
-  for (const k of ['fillRect', 'fillText', 'strokeRect', 'stroke', 'fill']) { const o = P[k]; P[k] = function (...a) {
-    const L = window.__rec && tag(this);
-    if (L) { const r = { k, L, a: a.map(r3), s: this.fillStyle, st: this.strokeStyle, al: this.globalAlpha, f: this.font, lw: this.lineWidth, ta: this.textAlign };
-             if (k === 'stroke' || k === 'fill') { r.p = path.slice(); r.dash = this.getLineDash(); r.join = this.lineJoin; }
-             window.__rec.push(r); }
-    return o.apply(this, a); }; }
-})();""" % T_FX
-
-
-def route(r):
-    u = urlparse(r.request.url)
-    if r.request.method != "GET":
-        return r.abort()
-    if u.hostname == "cdn.jsdelivr.net" and "pretendard" in u.path:
-        return r.fulfill(body=FONT_CSS, content_type="text/css", headers={"Access-Control-Allow-Origin": "*"})
-    if u.hostname == "fonts.googleapis.com":
-        return r.fulfill(body="", content_type="text/css")
-    if u.hostname != "fx.invalid":
-        return r.abort()
-    if u.path == "/font/p.ttf":
-        return r.fulfill(body=FONT.read_bytes(), content_type="font/ttf")
-    if u.path.startswith("/dashboard/live/"):
-        f = LIVE / (u.path[len("/dashboard/live/"):] or "index.html")
-        if f.is_file() and f.name != "sw.js":
-            return r.fulfill(body=f.read_bytes(), content_type=CT.get(f.suffix, "application/octet-stream"))
-        return r.fulfill(status=404, body="")
-    if u.path.startswith("/rtui/"):
-        f = WT / "rtui" / u.path[len("/rtui/"):]
-        if f.is_file():
-            return r.fulfill(body=f.read_bytes(), content_type=CT.get(f.suffix, "application/octet-stream"))
-        return r.fulfill(status=404, body="")
-    if u.path in API:
-        return r.fulfill(body=API[u.path].read_bytes(), content_type="application/json")
-    return r.fulfill(status=404, body="{}", content_type="application/json")
-
+route = make_route(WT, API, FONT)
 
 # 지금 화면: 창을 BARS 로 맞추고 한 번 다시 그리며 캔버스 명령·svg 요소·기하를 모은다
 JS_DUMP = r"""async (bars) => {
@@ -146,7 +93,7 @@ def hover_points(js, rg):
             (g["ml"] + slot * (len(c) - 1.5), g["mt"] + 20)]
 
 
-LAUNCH = ["--host-resolver-rules=MAP * ~NOTFOUND", "--proxy-server=127.0.0.1:9", "--disable-background-networking"] + (["--font-render-hinting=none"] if NOHINT else [])
+LAUNCH = _L + (["--font-render-hinting=none"] if NOHINT else [])
 full_js, full_rt = HERE / f"_js_full_{BARS}.png", HERE / f"_rtui_full_{BARS}.png"
 cj, cr, ch_ = HERE / f"_coords_js_{BARS}.json", HERE / f"_coords_rtui_{BARS}.json", HERE / f"_hover_{BARS}.json"
 
@@ -168,6 +115,7 @@ def open_rt(br, g):
     q = f"x={box['x']}&y={box['y']}&w={g['wAll']}&h={g['hAll']}&bars={BARS}&tz={g['tzOff']}&bg=none&plate=/rtui/compare/_plate_{BARS}.png"
     ctx = br.new_context(viewport={"width": 1920, "height": 1080}, device_scale_factor=1, timezone_id=TZ)
     ctx.route("**/*", route)
+    ctx.add_init_script(INIT)   # 같은 시계 · 가짜 WebSocket(rtui 도 이제 /api/* 와 @trade 를 스스로 부른다 -- 셋째 조각)
     pr = ctx.new_page()
     pr.on("console", lambda m: print("rtui console", m.type, m.text[:200]))
     pr.on("pageerror", lambda e: print("rtui pageerror", str(e)[:300]))

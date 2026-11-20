@@ -1,39 +1,146 @@
 //! rtui -- 웹 대시보드 화면을 egui(네이티브 + 웹어셈블리)로. 첫 카드: 데스크톱 1920 풋프린트 카드(지금 화면 그대로 옮김).
-//! data = 응답 모양 · fp = 차트 가공(기하·칸·캔들·델타·POC·축·알약) · lane = 아래 레인 · profile = 체결·델타·TPO 기둥 · marks = 스택·미완 경매
-//! · hover = 십자선·가격 배지·툴팁 · draw = egui 그리기. 끌기·확대·시간 단위는 아직 없다(붙일 자리: Chart::ui 의 응답 영역 · Cfg.window).
+//! data = 응답 모양 · feed = 자료가 들어오는 자리(묻기/밀기 · @trade 형성 봉 · 현재가) · view = 창 상태·마우스 조작·30m/1h 묶기
+//! · fp = 차트 가공(기하·칸·캔들·델타·POC·축·알약) · lane = 아래 레인 · profile = 체결·델타·TPO 기둥 · marks = 스택·미완 경매
+//! · hover = 십자선·가격 배지·툴팁 · draw = egui 그리기.
 pub mod data;
 pub mod draw;
+pub mod feed;
 pub mod fp;
 pub mod hover;
 pub mod lane;
 pub mod marks;
 pub mod profile;
+pub mod view;
 
-use eframe::egui::{self, Color32, Context, Pos2, Rect, vec2};
+use eframe::egui::{self, Color32, Context, Event, MouseWheelUnit, PointerButton, Pos2, Rect, vec2};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
+
+/// 마지막 그림의 자리(app.js chartGeo -- 끌기·휠이 화면 px → 봉으로 바꾼다)
+#[derive(Clone, Copy, Default)]
+pub struct LastGeo { pub ml: f64, pub cw: f64, pub n: f64, pub mt: f64, pub pb: f64, pub side_x: f64 }
 
 pub struct Chart {
-    pub fp: data::Footprint,
-    pub candles: Vec<data::Candle>,
+    pub feed: feed::Feed,
+    pub view: view::View,
     pub cfg: fp::Cfg,
     /// svg 상자 왼쪽 위(화면 px) -- 비교 캡처에서 지금 화면과 같은 자리
     pub origin: Pos2,
-    /// 바탕(카드 면은 이 카드 밖 -- 투명이면 칠하지 않는다: 비교 캡처는 지금 화면의 바탕을 뒤에 깐다)
+    /// 바탕(투명이면 칠하지 않는다: 비교 캡처는 지금 화면의 바탕을 뒤에 깐다)
     pub bg: Color32,
+    /// 창 크기에 맞춰 cfg.w_all·h_all 을 매 프레임 다시 잡는다(혼자 뜨는 페이지)
+    pub fill: bool,
+    pub geo: Option<LastGeo>,
+    /// 4417 pillWMax: 글자 수 → 본 가장 넓은 알약 폭
+    pill_max: RefCell<HashMap<usize, f64>>,
 }
 
 impl Chart {
-    pub fn from_json(fp_json: &str, mh_json: &str, cfg: fp::Cfg, origin: Pos2, bg: Color32) -> Result<Self, serde_json::Error> {
-        let fp: data::Footprint = serde_json::from_str(fp_json)?;
-        let mh: data::MarketHistory = serde_json::from_str(mh_json)?;
-        Ok(Self { fp, candles: mh.candles, cfg, origin, bg })
+    pub fn new(feed: feed::Feed, cfg: fp::Cfg, origin: Pos2, bg: Color32) -> Self {
+        Self { feed, view: view::View::default(), cfg, origin, bg, fill: false, geo: None, pill_max: Default::default() }
     }
-    /// 한 장: 가공(prep) + 그리기 + 호버(포인터가 svg 상자 안이면). 반환 = 그린 장면·호버(좌표 대조용)
-    pub fn ui(&self, ui: &mut egui::Ui) -> Option<(fp::Scene, Option<hover::Hover>)> {
+    /// 합성 자료로 바로(측정·네이티브 창): 풋프린트 응답 + 캔들 이력을 받은 것처럼
+    pub fn from_json(fp_json: &str, mh_json: &str, cfg: fp::Cfg, origin: Pos2, bg: Color32) -> Self {
+        let mut f = feed::Feed::new("eth", "ETHUSDT", feed::Source::Poll, feed::Urls::default(), false);
+        f.on_history(Some(mh_json), 0.0);
+        f.on_footprint(Some(fp_json));
+        let mut ch = Self::new(f, cfg, origin, bg);
+        ch.view.bars = ch.cfg.window;
+        ch
+    }
+
+    /// 5m·30m·1h 버튼(1985) -- now = Date.now()
+    pub fn tf(&mut self, k: i64, now: f64) {
+        if self.view.tf_button(k) { self.feed.kick_footprint(now, self.view.want_week()); }
+        self.feed.dirty = true; // 창이 바뀌었다 -- 다시 그린다(자료가 그대로여도)
+    }
+
+    /// 마우스 → 창 상태(app.js 7935-8016 · 지난 그림의 자리로 잰다). t = 이 프레임 시각(ms)
+    fn input(&mut self, ui: &egui::Ui, t: f64) {
+        let Some(g) = self.geo else { return };
+        let o = self.origin;
+        let sv = |p: Pos2| ((p.x - o.x) as f64, (p.y - o.y) as f64); // 화면 px → svg 좌표(데스크톱 배율 1)
+        let (wa, ha) = (self.cfg.w_all, self.cfg.h_all);
+        let inbox = |p: Pos2| { let (x, y) = sv(p); x >= 0.0 && y >= 0.0 && x <= wa && y <= ha }; // svg 상자 안에서만 이벤트를 받는다
+        let plot = |p: Pos2| { let (x, y) = sv(p); inbox(p) && y >= g.mt && y <= g.pb && x <= g.side_x }; // zoneY = "plot" · zoneX ≠ "side"
+        let px = g.cw / g.n; // chartSlotPx
+        let at = |p: Pos2| ((sv(p).0 - g.ml) / g.cw).clamp(0.0, 1.0);
+        let (events, hover, down, dbl) = ui.input(|i| (i.events.clone(), i.pointer.hover_pos(), i.pointer.primary_down(), i.pointer.button_double_clicked(PointerButton::Primary)));
+        let full = view::tf_candles(&self.feed.chart_full(), self.view.tf_k);
+        for ev in events {
+            match ev {
+                Event::MouseWheel { unit, delta, modifiers, .. } => {
+                    let Some(p) = hover else { continue };
+                    if modifiers.ctrl || !inbox(p) || sv(p).0 > g.side_x { continue; } // 7936-7937 (오른쪽 수급 칸은 풋프린트 줌을 안 건드린다)
+                    let k = match unit { MouseWheelUnit::Line => 40.0, MouseWheelUnit::Page => 800.0, _ => 1.0 };
+                    self.view.wheel(&full, -delta.x as f64 * k, -delta.y as f64 * k, px, at(p));
+                }
+                Event::PointerButton { pos, button, pressed: true, modifiers, .. } => {
+                    self.view.fling = None; // 7958 chartFlingStop(어느 단추든)
+                    if button == PointerButton::Primary && !modifiers.shift && plot(pos) { self.view.press(pos.x as f64, pos.y as f64, px); } // Shift = 측정 박스(안 옮김)
+                }
+                Event::PointerMoved(pos) if self.view.drag.is_some() => {
+                    if !down { self.view.drag = None; continue; } // 7993 !(ev.buttons & 1)
+                    self.view.drag_to(&full, pos.x as f64, pos.y as f64, t, px);
+                }
+                Event::PointerButton { button: PointerButton::Primary, pressed: false, .. } => self.view.release(&full, t),
+                _ => {}
+            }
+        }
+        // 8012 더블클릭 = 칸 숫자가 들어가는 가장 넓은 창 · 실시간 + 빈 칸 2
+        if dbl && hover.is_some_and(plot) { self.view.fit_qty(g.cw); }
+    }
+
+    /// 한 장: 입력 → 가공(prep) + 그리기 + 호버. now = Date.now() · 반환 = 그린 장면·호버(좌표 대조용)
+    pub fn ui(&mut self, ui: &mut egui::Ui, now: f64) -> Option<(fp::Scene, Option<hover::Hover>)> {
+        let t = ui.input(|i| i.time) * 1000.0;
+        if self.fill { // 혼자 뜨는 페이지: 창 = 화면 -- 가격 플롯 왼쪽 열(w)이 화면 폭을 채우는 viewBox 폭(8429-8430 을 거꾸로)
+            let r = ui.ctx().content_rect();
+            let target = r.width() as f64 - 2.0 * self.origin.x as f64;
+            let mut wa = target.ceil();
+            while wa - 20.0 - (((wa - 20.0) * 0.25).round() + 35.0) < target { wa += 1.0; }
+            (self.cfg.w_all, self.cfg.h_all) = (wa, (r.height() - 2.0 * self.origin.y) as f64);
+        }
+        self.input(ui, t);
+        if self.view.fling.is_some() {
+            let full = view::tf_candles(&self.feed.chart_full(), self.view.tf_k);
+            if self.view.fling_step(&full, t) { ui.ctx().request_repaint(); }
+        }
+        let want = self.view.want_week();
+        self.feed.maybe_week(now, want); // 7287·7339·7302 옮기기·넓히기·더블클릭이 1주일을 부른다
+        self.cfg.window = self.view.bars;
+
+        // ── renderSnapshotChart 8245-8258 의 입력 ──
+        let k = self.view.tf_k;
+        let full = view::tf_candles(&self.feed.chart_full(), k);
+        if full.is_empty() { return None; }
+        let (bucket, merged) = self.feed.for_chart(want)?; // ponytail: 풋프린트가 없으면(웜업·첫 응답 전) 그리지 않는다 -- 지금 화면은 채운 캔들로 그린다
+        let bars = self.feed.bars_now(want);
+        let mut by5: BTreeMap<i64, &Vec<Vec<f64>>> = bars.iter().filter(|b| !b.levels.is_empty()).map(|b| (b.time, &b.levels)).collect();
+        if let Some((tm, lv)) = &merged { by5.insert(*tm, lv); }
+        let tf_cells = if k > 1 { Some(view::tf_levels(&by5, bucket, k)) } else { None };
+        let by_time = match &tf_cells { Some(m) => m.iter().map(|(t, v)| (*t, v)).collect(), None => by5 };
+        // 8528 레인 = tfFpBars(fpBarsNow()) -- 서버 봉 그대로(형성 봉도 서버 값 · 30m/1h 면 dhl 없음)
+        let tf_lane = if k > 1 { Some(view::tf_levels(&bars.iter().map(|b| (b.time, &b.levels)).collect(), bucket, k)) } else { None };
+        let mut lane: HashMap<i64, (&Vec<Vec<f64>>, Option<[f64; 3]>)> = HashMap::new();
+        match &tf_lane {
+            Some(m) => for (t, v) in m { lane.entry(*t).or_insert((v, None)); },
+            None => for b in &bars { lane.entry(b.time).or_insert((&b.levels, b.dhl.as_ref().filter(|d| d.len() >= 3).map(|d| [d[0], d[1], d[2]]))); },
+        }
+        let win = fp::Win { edge: self.view.edge(&full), panned: self.view.panned(), pan_y: self.view.pan_y };
+        let last_close = { let n = full.len().min((win.edge - 1e-6).ceil().max(1.0) as usize); full[n - 1].close };
+        let or_close = |v: f64| if v > 0.0 { v } else { last_close };
+        let pill_w = |tw: f64, len: usize| { let w = ((tw + 18.0) / 4.0).ceil() * 4.0; let mut m = self.pill_max.borrow_mut(); let e = m.entry(len).or_insert(w); *e = e.max(w); *e };
+        let inp = fp::Input { full: &full, bucket, by_time, lane, current: or_close(self.feed.price), shown: or_close(self.feed.shown), pill_w: &pill_w };
+
         let p = ui.painter();
         if self.bg.a() > 0 { p.rect_filled(p.clip_rect(), 0.0, self.bg); }
         let measure = |s: &str, z: f64| draw::measure(p, s, z);
-        let sc = fp::prep(&self.fp, &self.candles, &self.cfg, &measure)?;
-        // svg.onmousemove(10727) -- 끌기·휠 확대는 다음 조각에서 이 응답 영역에 붙인다
+        let sc = fp::prep(&inp, &win, &self.cfg, &measure)?;
+        let g = &sc.g;
+        self.view.y_per_px = g.y_span / g.ch.max(1.0); // 8690 chartYPerPx
+        self.geo = Some(LastGeo { ml: g.ml, cw: g.cw, n: self.cfg.window.min(full.len() as f64), mt: g.mt, pb: g.plot_bottom, side_x: g.w - g.mr }); // 8589 fpProfileSpan[1]
+        // svg.onmousemove(10727) -- 끄는 중에도 호버는 그대로(지금 화면도 다시 그린 뒤 마지막 커서로 재생 8299)
         let mut hv = ui.input(|i| i.pointer.hover_pos()).and_then(|pos| {
             let (mx, my) = ((pos.x - self.origin.x) as f64, (pos.y - self.origin.y) as f64);
             if mx < 0.0 || my < 0.0 || mx > self.cfg.w_all || my > self.cfg.h_all { return None; }
@@ -49,12 +156,17 @@ impl Chart {
     }
     /// 형성 봉 칸에 체결이 들어온 것처럼 값을 바꾼다(측정용 -- rtui_proto/bench_js.py 의 자바스크립트 측정과 같은 식)
     pub fn nudge(&mut self, f: usize) {
-        if let Some(b) = self.fp.bars.last_mut() {
+        if let Some((_, b)) = self.feed.fp_bars.iter_mut().next_back() {
             for (j, l) in b.levels.iter_mut().enumerate() {
                 l[1] += 0.37 + ((f + j) % 5) as f64 * 0.11;
                 l[2] += 0.29 + ((f * 3 + j) % 7) as f64 * 0.07;
             }
         }
+    }
+    /// 창 상태(비교 하네스가 지금 화면의 전역 변수와 맞댄다)
+    pub fn state_json(&self) -> serde_json::Value {
+        let v = &self.view;
+        serde_json::json!({"bars": v.bars, "tfk": v.tf_k, "end": v.pan_end, "frac": v.pan_frac, "right": v.pan_right, "py": v.pan_y, "ypp": v.y_per_px})
     }
 }
 
@@ -66,10 +178,10 @@ pub fn new_ctx() -> Context {
 }
 
 /// 창 없이 egui 한 프레임: UI 구성(가공 포함) + 테셀레이션 -- 웹·네이티브가 같은 코드. 반환 (구성 ms, 테셀레이션 ms)
-pub fn bench_frame(ctx: &Context, ch: &Chart, now: &dyn Fn() -> f64) -> (f64, f64) {
+pub fn bench_frame(ctx: &Context, ch: &mut Chart, now: &dyn Fn() -> f64) -> (f64, f64) {
     let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1920.0, 1080.0))), ..Default::default() };
     let t0 = now();
-    let out = ctx.run_ui(raw, |ui| { ch.ui(ui); });
+    let out = ctx.run_ui(raw, |ui| { ch.ui(ui, 0.0); });
     let t1 = now();
     let _ = ctx.tessellate(out.shapes, out.pixels_per_point);
     (t1 - t0, now() - t1)
@@ -83,15 +195,14 @@ pub fn stats(v: &[f64]) -> String {
 }
 
 /// 좌표 대조용: 그린 목록을 JSON 으로(비교 하네스가 지금 화면의 캔버스 명령·svg 요소와 맞댄다) · g = 묶음 이름(fp.rs Scene::add)
-pub fn prims_json(sc: &fp::Scene, prims: &[fp::Prim], groups: &[(&str, usize, usize)]) -> Vec<serde_json::Value> {
+pub fn prims_json(prims: &[fp::Prim], groups: &[(&str, usize, usize)]) -> Vec<serde_json::Value> {
     use fp::Prim::*;
     let grp = |i: usize| groups.iter().find(|g| g.1 <= i && i < g.2).map_or("", |g| g.0);
-    let _ = sc;
     prims.iter().enumerate().map(|(i, p)| { let g = grp(i); match p {
         Rect { x, y, w, h, c, a, rx, clip } => serde_json::json!({"g": g, "k": "rect", "x": x, "y": y, "w": w, "h": h, "c": format!("{c:?}"), "a": a, "rx": rx, "clip": format!("{clip:?}")}),
         StrokeRect { x, y, w, h, c, a, lw, .. } => serde_json::json!({"g": g, "k": "srect", "x": x, "y": y, "w": w, "h": h, "c": format!("{c:?}"), "a": a, "lw": lw}),
         Line { pts, c, a, lw, dash, .. } => serde_json::json!({"g": g, "k": "line", "pts": pts, "c": format!("{c:?}"), "a": a, "lw": lw, "dash": dash}),
-        Text { x, y, s, size, c, anchor, halo, .. } => serde_json::json!({"g": g, "k": "text", "x": x, "y": y, "s": s, "size": size, "c": format!("{c:?}"), "anchor": format!("{anchor:?}"), "halo": halo}),
+        Text { x, y, s, size, c, a, anchor, halo, .. } => serde_json::json!({"g": g, "k": "text", "x": x, "y": y, "s": s, "size": size, "c": format!("{c:?}"), "a": a, "anchor": format!("{anchor:?}"), "halo": halo}),
         Circle { x, y, r, c, a, .. } => serde_json::json!({"g": g, "k": "circle", "x": x, "y": y, "r": r, "c": format!("{c:?}"), "a": a}),
     }}).collect()
 }
@@ -99,84 +210,34 @@ pub fn prims_json(sc: &fp::Scene, prims: &[fp::Prim], groups: &[(&str, usize, us
 pub fn scene_json(sc: &fp::Scene, hv: Option<&hover::Hover>) -> String {
     let g = &sc.g;
     serde_json::json!({"geo": {"w": g.w, "mr": g.mr, "ml": g.ml, "cw": g.cw, "mt": g.mt, "ch": g.ch, "pb": g.plot_bottom, "lane_top": g.lane_top, "quad_y": g.quad_y,
-        "ymin": g.y_min, "ymax": g.y_max, "slot": g.slot, "bw": g.bw, "row_px": g.row_px, "cp": g.current},
-        "prims": prims_json(sc, &sc.prims, &sc.groups),
-        "hover": hv.map(|h| serde_json::json!({"prims": prims_json(sc, &h.prims, &[]), "tip": h.tip.as_ref().map(|t| serde_json::json!({
+        "ymin": g.y_min, "ymax": g.y_max, "slot": g.slot, "bw": g.bw, "row_px": g.row_px, "cp": g.current, "off": g.x0b},
+        "t0": sc.candles.first().map(|c| c.time), "t1": sc.candles.last().map(|c| c.time), "nc": sc.candles.len(),
+        "prims": prims_json(&sc.prims, &sc.groups),
+        "hover": hv.map(|h| serde_json::json!({"prims": prims_json(&h.prims, &[]), "tip": h.tip.as_ref().map(|t| serde_json::json!({
             "x": t.x, "y": t.y, "w": t.w, "h": t.h, "lines": t.lines.iter().map(|l| l.runs.iter().map(|r| r.0.clone()).collect::<String>()).collect::<Vec<_>>()}))}))}).to_string()
 }
 
 /// 창 있는 앱(네이티브 glow · 웹 WebGL)
-/// last = 첫 프레임과 포인터가 움직인 프레임의 장면 JSON(비교 하네스가 읽는다)
-pub struct App { pub chart: Chart, pub last: Option<String>, pub pos: Option<Option<Pos2>> }
+/// last = 마지막으로 그린 장면 JSON(비교 하네스가 읽는다 -- 장면이 바뀐 프레임만 만든다)
+pub struct App { pub chart: Chart, pub last: Option<String>, pub now: fn() -> f64 }
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let pos = ui.input(|i| i.pointer.hover_pos());
-        if let Some((sc, hv)) = self.chart.ui(ui) { if self.pos != Some(pos) { self.pos = Some(pos); self.last = Some(scene_json(&sc, hv.as_ref())); } }
+        if let Some((sc, hv)) = self.chart.ui(ui, (self.now)()) { self.last = Some(scene_json(&sc, hv.as_ref())); }
     }
 }
 
 pub fn default_cfg(window: f64, w_all: f64, h_all: f64, tz_off_min: i64) -> fp::Cfg {
-    fp::Cfg { w_all, h_all, split: 0.25, window, tz_off_min }
+    fp::Cfg { w_all, h_all, split: 0.25, window, tz_off_min, dp: 1, unit: "ETH".into() }
+}
+
+/// app.js 44-53 ASSET_CONFIG(흐름 코인 FLOW_ASSETS 55 만) -- (심볼, dp, 이름)
+pub fn asset_cfg(a: &str) -> Option<(&'static str, usize, &'static str)> {
+    Some(match a {
+        "eth" => ("ETHUSDT", 1, "ETH"), "sol" => ("SOLUSDT", 2, "SOL"), "btc" => ("BTCUSDT", 0, "BTC"), "xrp" => ("XRPUSDT", 4, "XRP"),
+        "sndk" => ("SNDKUSDT", 2, "SNDK"), "soxl" => ("SOXLUSDT", 2, "SOXL"), "skhynix" => ("SKHYNIXUSDT", 2, "SKHYNIX"), "mu" => ("MUUSDT", 2, "MU"),
+        _ => return None,
+    })
 }
 
 #[cfg(target_arch = "wasm32")]
-mod web {
-    use super::*;
-    use eframe::egui::pos2;
-    use wasm_bindgen::prelude::*;
-
-    #[wasm_bindgen]
-    extern "C" {
-        #[wasm_bindgen(js_namespace = performance)]
-        fn now() -> f64;
-    }
-
-    fn chart(fp_json: &str, mh_json: &str, x: f32, y: f32, w: f64, h: f64, bars: f64, tz: i32, bg: u32) -> Result<Chart, JsValue> {
-        // bg = 0xRRGGBB · 0xFFFFFFFF = 투명
-        let bgc = if bg == u32::MAX { Color32::TRANSPARENT } else { Color32::from_rgb((bg >> 16) as u8, (bg >> 8) as u8, bg as u8) };
-        Chart::from_json(fp_json, mh_json, default_cfg(bars, w, h, tz as i64), pos2(x, y), bgc).map_err(|e| JsValue::from_str(&e.to_string()))
-    }
-
-    thread_local! { static LAST: std::cell::RefCell<Option<String>> = Default::default(); }
-    /// 마지막으로 그린 장면(JSON) -- 첫 프레임 뒤에 생긴다
-    #[wasm_bindgen]
-    pub fn scene() -> Option<String> { LAST.with(|l| l.borrow().clone()) }
-
-    struct WebApp(App);
-    impl eframe::App for WebApp {
-        fn clear_color(&self, _v: &egui::Visuals) -> [f32; 4] { self.0.chart.bg.to_normalized_gamma_f32() }
-        fn ui(&mut self, ui: &mut egui::Ui, f: &mut eframe::Frame) {
-            self.0.ui(ui, f);
-            if let Some(s) = self.0.last.take() { LAST.with(|l| *l.borrow_mut() = Some(s)); }
-        }
-    }
-
-    #[wasm_bindgen]
-    #[allow(clippy::too_many_arguments)]
-    pub async fn start(canvas_id: String, fp_json: String, mh_json: String, x: f32, y: f32, w: f64, h: f64, bars: f64, tz: i32, bg: u32) -> Result<(), JsValue> {
-        use eframe::wasm_bindgen::JsCast;
-        let ch = chart(&fp_json, &mh_json, x, y, w, h, bars, tz, bg)?;
-        let canvas = eframe::web_sys::window().unwrap().document().unwrap().get_element_by_id(&canvas_id).unwrap()
-            .dyn_into::<eframe::web_sys::HtmlCanvasElement>()?;
-        eframe::WebRunner::new().start(canvas, eframe::WebOptions::default(), Box::new(move |cc| {
-            cc.egui_ctx.set_fonts(draw::fonts());
-            draw::canvas_like(&cc.egui_ctx);
-            Ok(Box::new(WebApp(App { chart: ch, last: None, pos: None })))
-        })).await
-    }
-
-    /// 측정: 창 없이 n 프레임(앞 30 버림) -- [구성 ms, 테셀레이션 ms] × n 을 펼친 배열
-    #[wasm_bindgen]
-    #[allow(clippy::too_many_arguments)]
-    pub fn bench(fp_json: String, mh_json: String, w: f64, h: f64, bars: f64, tz: i32, n: usize) -> Result<Vec<f64>, JsValue> {
-        let mut ch = chart(&fp_json, &mh_json, 113.0, 126.0, w, h, bars, tz, 0x1e2229)?;
-        let ctx = new_ctx();
-        let mut out = vec![];
-        for f in 0..n + 30 {
-            ch.nudge(f);
-            let (a, b) = bench_frame(&ctx, &ch, &now);
-            if f >= 30 { out.push(a); out.push(b); }
-        }
-        Ok(out)
-    }
-}
+mod web;

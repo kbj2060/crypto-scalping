@@ -38,7 +38,7 @@ pub fn hover(sc: &Scene, mx: f64, my: f64, at: [f64; 2], tz_off_min: i64, measur
     if my >= g.mt && my <= g.plot_bottom {
         prims.push(dash(vec![[g.ml, my], [g.w - g.mr, my]]));
         let by = g.mt.max((g.plot_bottom - 18.0).min(my - 9.0));
-        let s = tnum(&to_fixed(price_at, 1));
+        let s = tnum(&to_fixed(price_at, sc.dp));
         let bw = measure(&s, 12.0) + 18.0;
         prims.push(Prim::Rect { x: g.x_rr - bw, y: by, w: bw, h: 18.0, c: Col::Accent, a: 1.0, rx: 9.0, clip: n });
         prims.push(Prim::Text { x: g.x_rr - 9.0, y: by + 13.0, s, size: 12.0, c: Col::OnFill, a: 1.0, anchor: Anchor::End, halo: false, clip: n });
@@ -58,9 +58,9 @@ pub fn hover(sc: &Scene, mx: f64, my: f64, at: [f64; 2], tz_off_min: i64, measur
             if a[1] == 1.0 { l4.push(w(" · 한 번만 지난 가격")); }
             tip = Some(vec![
                 line(vec![w(format!("{}–{}", to_fixed(k as f64 * g.row_size - g.off, dp), to_fixed((k + 1) as f64 * g.row_size - g.off, dp)))]),
-                line(vec![(format!("델타 {}{} ETH", if up { "+" } else { "−" }, fq(a[0].abs())), Tc::C(if up { Col::Good } else { Col::Bad }, 1.0)),
+                line(vec![(format!("델타 {}{} {}", if up { "+" } else { "−" }, fq(a[0].abs()), sc.unit), Tc::C(if up { Col::Good } else { Col::Bad }, 1.0)),
                           w(format!(" (오른쪽 막대 · {} 우위 · 테이커 기준)", if up { "매수" } else { "매도" }))]),
-                line(vec![(format!("체결 {} ETH", fq(a[2])), Tc::C(Col::Amber, 1.0)),
+                line(vec![(format!("체결 {} {}", fq(a[2]), sc.unit), Tc::C(Col::Amber, 1.0)),
                           w(format!(" (왼쪽 막대) · 고래 {} · 리테일 {}{}", pct(a[3]), pct(a[4]), if Some(k) == dt.tot_k { " · 최다 체결" } else { "" }))]),
                 line(l4),
                 line(vec![(format!("보이는 봉 {}개 합 · 30분 문자표 TPO 가 아니라 5분봉 수 · 참고, 신호 아님", dt.n_bars), Tc::C(Col::Muted, 0.7))]),
@@ -75,13 +75,13 @@ pub fn hover(sc: &Scene, mx: f64, my: f64, at: [f64; 2], tz_off_min: i64, measur
         prims.push(dash(vec![[tx, g.mt], [tx, g.h - g.mb]]));
         let t = c.time - tz_off_min * 60;
         let mut lines = vec![b(format!("{:02}:{:02}", t.rem_euclid(86_400) / 3600, t.rem_euclid(3600) / 60), Tc::Dim), line(vec![])];
-        for (nm, v) in [("시가", c.open), ("고가", c.high), ("저가", c.low), ("종가", c.close)] { lines.push(line(vec![w(format!("{nm}: {}", to_fixed(v, 2)))])); }
+        for (nm, v) in [("시가", c.open), ("고가", c.high), ("저가", c.low), ("종가", c.close)] { lines.push(line(vec![w(format!("{nm}: {}", to_fixed(v, sc.dp.max(2))))])); }
         // 9560-9565 cellTip -- 칸을 그리는 폭에서만
         if my >= g.mt && my <= g.plot_bottom && g.draw_cells {
             let k = g.row_of(price_at);
             if let Some(&[bq, sq]) = sc.bar_rows[idx].get(&k) {
                 let imb = |v: f64, o: f64| if v > 0.0 && v > o * 3.0 { format!(" · 불균형 {}", if o > 0.0 { to_fixed(v / o, 1) + "배" } else { "일방".into() }) } else { String::new() };
-                lines.push(line(vec![w(format!("칸 {} · 매수 {}{} · 매도 {}{}{}", to_fixed(g.row_lo(k) + g.row_size / 2.0, 1), to_fixed(bq, 1), imb(bq, sq), to_fixed(sq, 1), imb(sq, bq),
+                lines.push(line(vec![w(format!("칸 {} · 매수 {}{} · 매도 {}{}{}", to_fixed(g.row_lo(k) + g.row_size / 2.0, sc.dp), to_fixed(bq, 1), imb(bq, sq), to_fixed(sq, 1), imb(sq, bq),
                                                 if Some(k) == sc.pocs[idx] { " · POC(최다 체결)" } else { "" }))]));
             }
         }
@@ -92,9 +92,9 @@ pub fn hover(sc: &Scene, mx: f64, my: f64, at: [f64; 2], tz_off_min: i64, measur
                 let col = if r.delta >= 0.0 { Col::Good } else { Col::Bad };
                 lines.push(line(vec![]));
                 lines.push(b(qname(r.delta).into(), Tc::C(col, 1.0)));
-                lines.push(line(vec![w(format!("· 델타 {} · 신규계약 모름 ETH", sgn_q(r.delta)))]));
+                lines.push(line(vec![w(format!("· 델타 {} · 신규계약 모름 {}", sgn_q(r.delta), sc.unit))]));
                 lines.push(line(vec![(format!("거래대금 {}", usd(r.turn)), Tc::C(Col::Turnover, 1.0))]));
-                if let Some(d) = r.dhl { lines.push(line(vec![w(format!("봉 안 델타 최고 {} · 최저 {} · 마감 {} ETH", sgn_q(d[1]), sgn_q(d[0]), sgn_q(d[2])))])); }
+                if let Some(d) = r.dhl { lines.push(line(vec![w(format!("봉 안 델타 최고 {} · 최저 {} · 마감 {} {}", sgn_q(d[1]), sgn_q(d[0]), sgn_q(d[2]), sc.unit))])); }
             }
         }
         tip = Some(Tip { lines, wrap: None, at, x: 0.0, y: 0.0, w: 0.0, h: 0.0 });

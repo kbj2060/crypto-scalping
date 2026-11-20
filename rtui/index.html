@@ -1,22 +1,64 @@
 <!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><title>rtui</title>
-<style>html,body{margin:0;background:#1e2229;overflow:hidden}canvas{background:transparent}canvas{display:block;width:1920px;height:1080px}</style></head>
-<body><canvas id="c"></canvas>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>rtui 풋프린트</title>
+<style>
+html,body{margin:0;height:100%;background:#1e2229;overflow:hidden}
+canvas{display:block;width:100vw;height:100vh;background:transparent}
+#tf{position:fixed;left:8px;top:8px;display:flex;gap:4px;font:700 12px/1 'Pretendard Variable',system-ui,sans-serif}
+#tf button{background:#262b35;color:#a6acc1;border:1px solid rgba(203,209,227,.18);border-radius:6px;padding:5px 9px;cursor:pointer}
+#tf button[aria-pressed=true]{color:#f5f6fb;border-color:#dfe4ee}
+</style></head>
+<body><canvas id="c"></canvas><div id="tf" hidden><button data-k="1">5m</button><button data-k="6">30m</button><button data-k="12">1h</button></div>
 <script type="module">
-// ?mode=shot|bench&x=&y=&w=&h=&bars=&tz=&bg=(hex)&n= -- 결과는 window.RESULT (비교 하네스 compare/capture.py · compare/bench_web.py)
-const q = new URLSearchParams(location.search), t0 = performance.now();
-const m = await import("./dist/rtui.js");
+// 혼자 뜨는 풋프린트 카드: ?asset=eth (흐름 코인) · 같은 출처의 옛 서버(/api/footprint · /api/market-history · /api/footprint-week) + 바이낸스 @trade 직결.
+// 비교 하네스: ?mode=shot&x=&y=&w=&h=&bars=&tz=&bg=(hex|none)&plate=  · ?mode=bench&bars=&n=  (compare/*.py) -- 결과 window.RESULT
+// 접착(이 파일의 일): Rust(feed::Req)가 window.rtui_io 로 넘긴 할 일을 fetch · WebSocket 으로 하고 결과를 돌려준다 · 500ms tick(app.js POLL_MS) · 탭 숨김.
+const q = new URLSearchParams(location.search), t0 = performance.now(), N = (k, d) => (q.has(k) ? +q.get(k) : d);
+// 캐시: 묶음 파일 이름에 내용 해시(compare/build.sh) -- 이 페이지와 dist/VERSION 만 매번 새로 묻는다
+const ver = (await fetch("./dist/VERSION", { cache: "no-cache" }).then((r) => r.text())).trim();
+const m = await import(`./dist/rtui-${ver}.js`);
 await m.default();
-const [fp, mh] = await Promise.all(["footprint", "market-history"].map((f) => fetch(`./compare/fixture/${f}.json`).then((r) => r.text())));
-const tInit = performance.now() - t0, N = (k, d) => (q.has(k) ? +q.get(k) : d);
-const bg = q.get("bg") === "none" ? 0xffffffff : parseInt(q.get("bg") || "1e2229", 16);
-if (q.get("plate")) document.body.style.background = `url(${q.get("plate")}) no-repeat 0 0`;   // 비교 캡처: 지금 화면에서 차트 층만 숨긴 바탕
+const tInit = performance.now() - t0;
 if (q.get("mode") === "bench") {
+  const [fp, mh] = await Promise.all(["footprint", "market-history"].map((f) => fetch(`./compare/fixture/${f}.json`).then((r) => r.text())));
   window.RESULT = { tInit, v: [...m.bench(fp, mh, N("w", 1751), N("h", 844), N("bars", 36), N("tz", -540), N("n", 300))] };
 } else {
-  await m.start("c", fp, mh, N("x", 113), N("y", 126), N("w", 1751), N("h", 844), N("bars", 36), N("tz", -540), bg);
+  let ws = null;
+  window.rtui_io = (json) => {
+    for (const r of JSON.parse(json)) {
+      if (r === "WsClose") { if (ws) { const w = ws; ws = null; try { w.close(); } catch (e) {} } continue; }
+      if (r.WsOpen) {
+        try {
+          const w = new WebSocket(r.WsOpen); ws = w;
+          w.onmessage = (e) => m.on_ws(e.data);
+          w.onclose = () => { if (ws === w) { ws = null; m.on_ws_close(); } };
+          w.onerror = () => { try { w.close(); } catch (e) {} };
+        } catch (e) { ws = null; m.on_ws_close(); }
+        continue;
+      }
+      const { kind, url } = r.Get;
+      fetch(url, { cache: "no-cache" }).then((res) => (res.ok ? res.text() : null)).catch(() => null).then((t) => m.on_get(kind, t));
+    }
+  };
+  const shot = q.get("mode") === "shot";
+  const bg = q.get("bg") === "none" ? 0xffffffff : parseInt(q.get("bg") || "1e2229", 16);
+  if (q.get("plate")) document.body.style.background = `url(${q.get("plate")}) no-repeat 0 0`;   // 비교 캡처: 지금 화면에서 차트 층만 숨긴 바탕
+  // 혼자 뜰 때 = 창 전체(w=0 → Rust 가 창에 맞춘다) · 상자 왼쪽 위 8px · 1주일은 지표 스위치 기본값처럼 늘 받는다(wk=0 이면 끔 -- 하네스)
+  await m.start("c", q.get("asset") || "eth", N("x", 8), N("y", 8), N("w", 0), N("h", 0), N("tz", new Date().getTimezoneOffset()), bg,
+          N("wk", shot ? 0 : 1) === 1, q.get("api") || "", q.get("ws") || "");
+  const tick = () => m.tick(document.hidden);
+  tick(); setInterval(tick, 500);
+  document.addEventListener("visibilitychange", tick);
+  if (q.has("bars")) m.set_bars(N("bars", 36));
+  const tf = document.getElementById("tf");
+  if (!shot) {
+    tf.hidden = false;
+    const paint = (k) => tf.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.k === k)));
+    tf.addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { m.tf(+b.dataset.k); paint(+b.dataset.k); } });
+    paint(1);
+  }
+  window.rtui = m;
   window.rtui_scene = () => m.scene();
-  const poll = () => { const s = m.scene(); if (s) requestAnimationFrame(() => requestAnimationFrame(() => { window.RESULT = { tInit, ...JSON.parse(s) }; })); else setTimeout(poll, 50); };
+  const poll = () => { const s = m.scene(); if (s) requestAnimationFrame(() => requestAnimationFrame(() => { window.RESULT = { tInit, ...JSON.parse(m.scene()) }; })); else setTimeout(poll, 50); };
   poll();
 }
 </script></body></html>

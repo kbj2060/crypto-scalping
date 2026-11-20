@@ -37,7 +37,7 @@ pub fn unfinished(g: &Geo, candles: &[Candle], by_time: &BTreeMap<i64, &Vec<Vec<
     let cp = if g.current != 0.0 && !g.current.is_nan() { g.current } else { candles[candles.len() - 1].close };
     let hq = bucket / 2.0;
     for (i, c) in candles.iter().enumerate() {
-        if c.partial || i == candles.len() - 1 { continue; }
+        if c.partial() || i == candles.len() - 1 { continue; }
         let r: Vec<&Vec<f64>> = by_time.get(&c.time).map_or(vec![], |lv_| lv_.iter().filter(|l| lv(l, 1) + lv(l, 2) > 0.0).collect());
         if r.is_empty() { continue; }
         let later = &candles[i + 1..];
