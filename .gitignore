@@ -137,3 +137,9 @@ rtcore/target/
 rtui_proto/target/
 rtui_proto/dist/
 rtui_proto/fonts/*.ttf
+rtorder/target/
+rtui/target/
+rtui/dist/
+rtui/fonts/*.ttf
+rtcollect/target/
+rtmodel/target/
