@@ -1015,12 +1015,14 @@ def _self_check_rec_rule() -> None:
     assert lb["tp_price"] == 2548.76 and lb["sl_level"] == 2480.0 and lb["backstop_price"] is None and lb["lines"], lb
     ls = line_bracket(position_side="SHORT", ref_level=2500.0, tp_level=2450.0, sl_level=2520.0, basis=0.99951, filters=f3)
     assert ls["tp_price"] == 2448.79, ls
-    for bad in ({"tp_level": 2480.0, "sl_level": 2550.0}, {"tp_level": 2500.0, "sl_level": 2480.0}, {"tp_level": 3000.0, "sl_level": 2480.0}):
+    for bad in ({"tp_level": 2480.0, "sl_level": 2550.0}, {"tp_level": 2500.0, "sl_level": 2480.0}):
         try:
             line_bracket(position_side="LONG", ref_level=2500.0, basis=1.0, filters=f3, **bad)
-            raise AssertionError(bad)
         except ValueError:
-            pass
+            continue
+        raise AssertionError(bad)
+    far = line_bracket(position_side="LONG", ref_level=2500.0, tp_level=3000.0, sl_level=2370.0, basis=1.0, filters=f3)   # 2026-11-14 거리 제한 제거: 익절 +20%·손절 −5.2% 도 방향만 맞으면 받는다
+    assert (far["tp_price"], far["sl_level"]) == (3000.0, 2370.0), far
     near = line_bracket(position_side="LONG", ref_level=2500.0, tp_level=2500.01, sl_level=2499.99, basis=1.0, filters=f3)   # 2026-11-11 현재가에 붙인 선(0.0004%)도 받는다
     assert (near["tp_price"], near["sl_level"]) == (2500.01, 2499.99), near
     assert line_bracket(position_side="LONG", ref_level=2500.0, tp_level=2550.0, sl_level=2500.0, basis=1.0, filters=f3, sl_watch=True)["sl_up"] is False   # 들어간 포지션: 손절을 현재가에 = 다음 틱에 닿음
@@ -1066,11 +1068,6 @@ def _self_check_rec_rule() -> None:
     assert line_hit("LONG", to_, (2481.0, 2600.0)) is None and line_hit("LONG", to_, (2479.0, 2600.0)) == "sl"
     assert bracket_action({**to_, "sl_off": {"at": 1.0}}, "LONG", pos, True, 100.0, (100.0, 2470.0), (2470.0, 2600.0)) == "hold"
     assert bracket_action({**la, "fired": True}, "LONG", pos, True, 100.0, None, (2490.0, 2500.0)) == "fire"   # 익절을 지운 뒤 청산이 밀려도 닫힐 때까지
-    try:
-        line_bracket(position_side="LONG", ref_level=2500.0, tp_level=2550.0, sl_level=2370.0, basis=1.0, filters=f3)   # 손절 5.2% > 규칙 5%
-        raise AssertionError("손절 5% 초과가 통과")
-    except ValueError:
-        pass
     print("자동 규칙 통과 — 권장 B(12.4×권장배수·청산 안전 max(3σ,5%)·상한 2) · 청산가 손절선 바깥 · 손절 시 손실 ≤ L×5% · 첫 진입가 −5% 손절 · 첫 1/3 · 물타기 남은 여유 · 상한 막음 · 배수 검증 · 스탑 = 손절선 · 익절 없음 · 손절선 유지")
 
 
