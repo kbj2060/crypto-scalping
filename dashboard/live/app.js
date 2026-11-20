@@ -7367,7 +7367,17 @@ function fpTipOn(node, html) {   // 캔들 툴팁 대신 이 설명 -- 버블링
 }
 let dirFold = false, dirFoldFocus = false;   // 2026-11-19 펜 메모 «이 부분을 접을 수 있게» -- 판을 머리줄(지표 방향 개수)만 남기고 접는다 · 기억은 편의
 try { dirFold = localStorage.getItem("dirBoardFold") === "1"; } catch (err) { /* 기억은 편의 */ }
-const fpBoardBox = (G) => (fpBoard ? [G.ml + 6, G.mt + fpBoard.top, FPB_W, dirFold ? 48 : 210] : null);   // 판 자리 예약(줄 수를 아직 몰라 넉넉히) -- 꼬리표가 비킨다
+// 2026-11-20 «지금 읽기»(사용자 선택 시안 C): 지표 방향 판 아래 칸 -- 서버 flow_read 가 매초 읽는 줄(/api/situation·스트림의 read). 서버가 ETH 만 읽어 ETH 만.
+//   방향 줄 = 등급 근거·약함이고 dir ≠ 0(▲▼) · 크기 줄 = 등급 근거인데 dir 0(활동 양끝 -- 방향 아님, 네모 표식) · 나머지 = «설명 n» 한 줄(풀이는 툴팁).
+//   3분 넘게 안 갱신된 읽기는 안 보인다(옛 말을 지금 말처럼 두지 않는다). 휴대폰은 판 자체가 없다.
+function dirReadNow() {
+  const S = latestSituation, r = activeSnapshotAsset === "eth" && S ? S.read : null;
+  if (!r || !Array.isArray(r.lines) || !r.lines.length || Date.now() / 1000 - (Number(S.computed_at) || 0) > 180) return null;
+  const hot = r.lines.filter((l) => l.grade === "근거" || l.grade === "약함");
+  return { hot, desc: r.lines.filter((l) => !hot.includes(l)) };
+}
+const dirReadH = (R) => (R ? 30 + R.hot.length * 23 + (R.desc.length ? 22 : 0) + 4 : 0);
+const fpBoardBox = (G) => (fpBoard ? [G.ml + 6, G.mt + fpBoard.top, FPB_W, dirFold ? 48 : 210 + dirReadH(dirReadNow())] : null);   // 판 자리 예약(줄 수를 아직 몰라 넉넉히) -- 꼬리표가 비킨다
 function dirTri(g, cx, cy, d, c, r = 5) {   // 위 ▲ / 아래 ▼ 삼각형(그린 아이콘 -- 글자 화살표 대신)
   const e = document.createElementNS("http://www.w3.org/2000/svg", "path");
   e.setAttribute("d", d > 0 ? `M${cx - r} ${cy + r * 0.8}L${cx + r} ${cy + r * 0.8}L${cx} ${cy - r * 0.8}Z` : `M${cx - r} ${cy - r * 0.8}L${cx + r} ${cy - r * 0.8}L${cx} ${cy + r * 0.8}Z`);
@@ -7399,10 +7409,11 @@ function dirPill({ g, G, placed, x, y, d, name, sub = "", anchor = "start", tip,
 function renderDirBoard() {   // 왼쪽 위 «지표 방향» 판 -- 줄 = 지금 보이는 표식마다 하나(방향·이름·언제) · 바닥 = 큰 스윙 «넘으면 ▲ / 깨면 ▼» 가격
   const svg = el("candleSvgSnapshot"), G = chartGeo, B = fpBoard;
   svg?.querySelector("#dirBoard")?.remove();
-  if (!svg || !B || fpAltOn() || !G || !(B.rows.length || B.cond.length)) return;
+  const R = dirReadNow();
+  if (!svg || !B || fpAltOn() || !G || !(B.rows.length || B.cond.length || R)) return;
   const NSV = "http://www.w3.org/2000/svg", F = "var(--font-sans)", mk = (p, tag, a, txt) => { const e = document.createElementNS(NSV, tag); for (const k in a) e.setAttribute(k, a[k]); if (txt != null) e.textContent = txt; p.appendChild(e); return e; };
   const rows = B.rows, up = rows.filter((r) => r.d > 0).length, dn = rows.filter((r) => r.d < 0).length, ups = B.cond.filter((c) => c.d > 0), dns = B.cond.filter((c) => c.d < 0);
-  const fold = dirFold, L = G.ml + 6, T = G.mt + B.top, w = FPB_W, rh = 23, head = rows.length ? 44 : 30, foot = fold ? 0 : (ups.length ? 20 : 0) + (dns.length ? 20 : 0), h = fold ? head : head + rows.length * rh + (foot ? foot + 10 : 4);
+  const fold = dirFold, L = G.ml + 6, T = G.mt + B.top, w = FPB_W, rh = 23, head = rows.length ? 44 : 30, foot = fold ? 0 : (ups.length ? 20 : 0) + (dns.length ? 20 : 0), hb = head + rows.length * rh + (foot ? foot + 10 : 4), h = fold ? head : hb + dirReadH(R);
   const g = mk(svg, "g", { id: "dirBoard" });
   const bg = mk(g, "rect", { x: L, y: T, width: w, height: h, rx: 10, fill: "var(--panel-strong)", "fill-opacity": 0.95, stroke: "var(--line)" });
   bg.addEventListener("mousemove", (e) => { e.stopPropagation(); hideTooltip(); });   // 판 위에선 봉 툴팁 안 띄움
@@ -7453,6 +7464,37 @@ function renderDirBoard() {   // 왼쪽 위 «지표 방향» 판 -- 줄 = 지�
        arr.map((q) => `${q.tf} ${q.v}${q.wait ? " 마감 대기" : ""}`).join(" · "));
     fpTipOn(rg, `<b>큰 스윙 ${d > 0 ? "고점" : "저점"}(앞뒤 50봉 · 아직 안 깨짐)</b><br>그 봉(${arr.map((q) => q.tf).join("·")}) 종가로 ${word} 구조 돌파<br>돌파 뒤 깬 쪽 2 ATR 먼저 약 53% · 무작위 49%<br>추세 전환 신호 아님 · 참고`);
     yc += 20;
+  }
+  if (!R) return;
+  // ── 지금 읽기 ──
+  const ys = T + hb, FT = '"Pretendard Variable", Pretendard, sans-serif', short = (l) => (String(l.text).split(" — ")[1] || String(l.text)).split(":")[0];
+  const brk = (t) => escapeHtml(t).split(" — ").join("<br>— ");   // 툴팁은 줄을 안 접는다 -- 관찰 / 해석을 줄로 가른다
+  const fit = (txt, font, max) => { let t = txt; while (t.length > 1 && measureTextW(t === txt ? t : t + "…", font) > max) t = t.slice(0, -1); return t === txt ? t : t + "…"; };
+  const nu = R.hot.filter((l) => l.dir > 0).length, nd = R.hot.filter((l) => l.dir < 0).length;
+  if (rows.length || foot) mk(g, "line", { x1: L + 10, x2: L + w - 10, y1: ys, y2: ys, stroke: "var(--line)" });
+  const hg = mk(g, "g", {});
+  mk(hg, "rect", { x: L + 6, y: ys + 4, width: w - 12, height: 22, fill: "transparent" });
+  mk(hg, "text", { x: L + 12, y: ys + 19, fill: "var(--muted)", "font-size": 11, "font-weight": 700, "font-family": F }, "지금 읽기");
+  dirTri(hg, L + w - 64, ys + 15, 1, nu ? "var(--good)" : "var(--muted)", 4); mk(hg, "text", { x: L + w - 56, y: ys + 19, fill: nu ? "var(--good)" : "var(--muted)", "font-size": 11, "font-weight": 750, "font-family": F }, String(nu));
+  dirTri(hg, L + w - 32, ys + 15, -1, nd ? "var(--bad)" : "var(--muted)", 4); mk(hg, "text", { x: L + w - 24, y: ys + 19, fill: nd ? "var(--bad)" : "var(--muted)", "font-size": 11, "font-weight": 750, "font-family": F }, String(nd));
+  fpTipOn(hg, "<b>지금 읽기</b><br>실시간 데이터 쌍(체결·크기별 흐름·OI·청산·호가·베이시스 …)을 서버가 매초 읽은 것<br>▲▼ = 과거 검정에서 방향 근거가 있던 줄만 · 네모 = 움직임 크기 줄(방향 아님)<br>효과는 수 bp 수준 -- 메이커로만 비용을 넘는다 · 나머지 줄은 «설명»");
+  R.hot.forEach((l, i) => {
+    const y = ys + 28 + i * rh, big = l.g && l.g.v >= 80, c = l.dir > 0 ? "var(--good)" : l.dir < 0 ? "var(--bad)" : big ? "var(--warn)" : "var(--muted)", rg = mk(g, "g", {});
+    mk(rg, "rect", { x: L + 6, y, width: w - 12, height: rh - 2, rx: 5, fill: "var(--text)", "fill-opacity": i % 2 ? 0 : 0.035 });
+    if (l.dir) dirTri(rg, L + 19, y + (rh - 2) / 2, l.dir, c, 5); else mk(rg, "rect", { x: L + 15, y: y + 6.5, width: 8, height: 8, rx: 2, fill: c });
+    mk(rg, "text", { x: L + 32, y: y + 15, fill: "var(--text)", "font-size": 12, "font-weight": 700, "font-family": F }, l.topic);
+    const gw = measureTextW(l.grade, `700 10.5px ${FT}`), room = w - 12 - 32 - measureTextW(l.topic, `700 12px ${FT}`) - gw - 22;
+    mk(rg, "text", { x: L + w - 12, y: y + 15, fill: c, "font-size": 10.5, "font-weight": 700, "font-family": F, "text-anchor": "end" }, l.grade);
+    if (room > 24) mk(rg, "text", { x: L + w - 12 - gw - 7, y: y + 15, fill: "var(--muted)", "font-size": 11, "font-weight": 550, "font-family": F, "text-anchor": "end" }, fit(short(l), `550 11px ${FT}`, room));
+    fpTipOn(rg, `<b>${escapeHtml(l.topic)} · ${escapeHtml(l.grade)}${l.dir ? (l.dir > 0 ? " · 위쪽" : " · 아래쪽") : " · 크기(방향 아님)"}</b><br>${brk(l.text)}<br>${brk(l.note)}`);
+  });
+  if (R.desc.length) {
+    const y = ys + 28 + R.hot.length * rh, on = R.desc.filter((l) => l.g && l.g.on).map((l) => l.topic), dg = mk(g, "g", {}), lab = `설명 ${R.desc.length}`;
+    mk(dg, "rect", { x: L + 6, y, width: w - 12, height: 20, fill: "transparent" });
+    mk(dg, "text", { x: L + 12, y: y + 14, fill: "var(--muted)", "font-size": 11, "font-weight": 650, "font-family": F }, lab);
+    if (on.length) mk(dg, "text", { x: L + 12 + measureTextW(lab, `650 11px ${FT}`) + 8, y: y + 14, fill: "var(--muted)", "font-size": 11, "font-weight": 550, "font-family": F },
+                      fit(on.join(" · "), `550 11px ${FT}`, w - 24 - measureTextW(lab, `650 11px ${FT}`) - 8));
+    fpTipOn(dg, `<b>설명 줄 ${R.desc.length}개 -- 지금 일어난 일일 뿐, 다음 방향 근거 없음</b><br>${R.desc.map((l) => `${escapeHtml(l.topic)} · ${escapeHtml(short(l))}`).join("<br>")}`);
   }
 }
 const OB_ASSETS = new Set(["eth", "btc", "sol", "xrp"]);   // 검증한 코인만(주식은 미검증)
