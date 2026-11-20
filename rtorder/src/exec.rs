@@ -195,6 +195,29 @@ pub async fn ensure_closed<E: Exchange>(ex: &mut E, symbol: &str, oid: Option<i6
     None
 }
 
+/// 지정가 POST 응답이 «나갔는지 모름»이면 표식(cid)으로 찾아 본다. Ok = 찾은 주문 또는 확정 응답(접수·4xx 거부) 그대로 ·
+/// Err(사유) = 끝내 모름 -- 표식으로 DELETE 를 보낸 뒤(고아 방지, 검증 D3) 호출부가 Phase::Error 로 멈춘다.
+/// 2026-11-20 D2 해결: 따라가기(fill_maker = 진입·청산·손절 청산)·기다리기·지정가 대기가 **이 함수 하나**를 쓴다 -- 따로 두었더니 지정가 대기만 방어가 있었다(2026-09-13 교훈).
+pub async fn resolve_unknown_post<E: Exchange>(ex: &mut E, symbol: &str, cid: &str, order: Reply) -> Result<Reply, String> {
+    let Err(e0) = &order else { return Ok(order) };
+    // 5xx·-1007·-1006 = «체결 상태 불명»(검증 #1) -- 4xx 확정 거부와 다르다. 숫자로 시작 안 함 = 네트워크·시간초과
+    if !(!e0.starts_with(|ch: char| ch.is_ascii_digit()) || e0.starts_with('5') || e0.contains("-1007") || e0.contains("-1006")) {
+        return Ok(order);
+    }
+    for _ in 0..3 {
+        // 한 번 못 찾았다고 «없다»가 아니다(처리 전일 수 있다) -- 세 번 본다(E7)
+        if let Ok(f) = ex.get_order(symbol, &OrderRef::Client(cid.into())).await {
+            if truthy_id(&f) {
+                return Ok(Ok(f));
+            }
+        }
+        ex.sleep(1.0).await;
+    }
+    // 응답은 안 본다 -- «없음»이든 실패든 결과는 같다(멈춤)
+    let _ = ex.cancel_order(symbol, &OrderRef::Client(cid.into())).await;
+    Err(format!("주문 접수 여부를 확인하지 못했습니다({e0}) — 거래소에서 직접 확인하세요"))
+}
+
 pub struct Common<'a> {
     pub symbol: &'a str,
     pub side: &'a str,
@@ -212,18 +235,12 @@ pub async fn fill_maker<E: Exchange>(ex: &mut E, c: &Common<'_>, mut price: f64,
         let remaining = r8(total - done);
         let cid = format!("{PEG_TAG}{}{}", &c.position_side[..1], ex.wall_ms());
         let req = LimitOrder { symbol: c.symbol.into(), side: c.side.into(), position_side: c.position_side.into(), price: r8(price), quantity: remaining, client_order_id: cid.clone() };
-        let mut order = ex.place_limit_gtx(&req).await;
-        if let Err(e) = &order {
-            if !e.starts_with(|ch: char| ch.is_ascii_digit()) {
-                // 🔴네트워크·시간초과 = 나갔는지 모른다 -- 거부로 치면 살아 있는 GTX 가 손절 없이 체결된다. 표식으로 **한 번** 찾아 본다(E6).
-                // D2: 이 경로는 5xx·-1007·-1006(숫자로 시작)을 «확정 거부»로 보고, 못 찾아도 표식 DELETE 를 하지 않는다 -- run_entry_limit 과 다르다(원본 그대로).
-                if let Ok(f) = ex.get_order(c.symbol, &OrderRef::Client(cid.clone())).await {
-                    if truthy_id(&f) {
-                        order = Ok(f);
-                    }
-                }
-            }
-        }
+        let placed = ex.place_limit_gtx(&req).await;
+        // 🔴나갔는지 모르는 채로 «거부»로 치면 살아 있는 GTX 가 손절 없이 체결된다(E6·D2) -- 끝내 모르면 또 걸지 않고 멈춘다(청산·손절 청산도)
+        let order = match resolve_unknown_post(ex, c.symbol, &cid, placed).await {
+            Ok(r) => r,
+            Err(msg) => return (done, price, repegs, Some((Phase::Error, msg))),
+        };
         let order = match order {
             Ok(o) => o,
             Err(e) => {
@@ -389,11 +406,17 @@ pub async fn run_entry_wait<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Shared
     let (order, cid) = loop {
         let cid = format!("{WAIT_TAG}{}{}", &ps[..1], ex.wall_ms());
         let req = LimitOrder { symbol: plan.symbol.clone(), side: plan.side.clone(), position_side: ps.clone(), price: r8(price), quantity: total, client_order_id: cid.clone() };
-        match ex.place_limit_gtx(&req).await {
+        let placed = ex.place_limit_gtx(&req).await;
+        let placed = match resolve_unknown_post(ex, &plan.symbol, &cid, placed).await {
+            Ok(r) => r,
+            Err(msg) => {
+                st(s).error = Some(msg);
+                return finish(s, Phase::Error);
+            }
+        };
+        match placed {
             Ok(o) => break (o, cid),
             Err(e) => {
-                // D2: 이 경로는 «나갔는지 모름»을 따로 보지 않는다 -- 네트워크 오류도 바로 rejected(살아 있을 수 있는 dbwt GTX 를 두고 끝남;
-                //   재시작 고아 정리만 지운다). fill_maker·run_entry_limit 과 다르다(원본 그대로 -- 고치는 것은 사용자 결정).
                 let (repegs, acted) = { let g = st(s); (g.repegs, g.action.is_some()) };
                 if !(is_post_only_reject(&e) && repegs < REPEG_MAX && !acted) {
                     st(s).error = Some(e);
@@ -475,30 +498,16 @@ pub async fn run_entry_limit<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Share
         let remaining = r8(total - done);
         let cid = format!("{WAIT_TAG}{}{}", &ps[..1], ex.wall_ms());
         let req = LimitOrder { symbol: c.symbol.into(), side: c.side.into(), position_side: ps.clone(), price: r8(price), quantity: remaining, client_order_id: cid.clone() };
-        let mut order = ex.place_limit_gtx(&req).await;
-        if let Err(e0) = &order {
-            // 5xx·-1007·-1006 = «체결 상태 불명»(검증 #1) -- 4xx 확정 거부와 다르다. D2: fill_maker 는 숫자 시작 오류를 확정 거부로 본다(원본 그대로).
-            if !e0.starts_with(|ch: char| ch.is_ascii_digit()) || e0.starts_with('5') || e0.contains("-1007") || e0.contains("-1006") {
-                for _ in 0..3 {
-                    // 한 번 못 찾았다고 «없다»가 아니다(처리 전일 수 있다) -- 세 번 본다(E7)
-                    if let Ok(f) = ex.get_order(c.symbol, &OrderRef::Client(cid.clone())).await {
-                        if truthy_id(&f) {
-                            order = Ok(f);
-                            break;
-                        }
-                    }
-                    ex.sleep(1.0).await;
-                }
-                if let Err(e) = &order {
-                    // 끝내 모르면 늦게 도착할 수 있는 그 주문을 표식으로 지운 뒤 멈춘다(고아 방지, 검증 D3)
-                    let _ = ex.cancel_order(c.symbol, &OrderRef::Client(cid.clone())).await;
-                    let mut g = st(s);
-                    (g.filled, g.error) = (done, Some(format!("주문 접수 여부를 확인하지 못했습니다({e}) — 거래소에서 직접 확인하세요")));
-                    drop(g);
-                    return finish(s, Phase::Error);
-                }
+        let placed = ex.place_limit_gtx(&req).await;
+        let order = match resolve_unknown_post(ex, c.symbol, &cid, placed).await {
+            Ok(r) => r,
+            Err(msg) => {
+                let mut g = st(s);
+                (g.filled, g.error) = (done, Some(msg));
+                drop(g);
+                return finish(s, Phase::Error);
             }
-        }
+        };
         let order = match order {
             Ok(o) => o,
             Err(err) => {
