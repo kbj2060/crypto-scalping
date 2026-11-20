@@ -1,0 +1,11 @@
+[package]
+name = "rtcollect"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# bundled = 서버의 시스템 SQLite 버전과 무관하게 같은 SQLite 를 묶는다(파일·WAL 형식은 3.7.0 이래 그대로).
+rusqlite = { version = "0.37", features = ["bundled"] }
+# float_roundtrip: JSON 숫자 → f64 를 파이썬 float() 처럼 정확 반올림으로(기본 파서는 긴 가수에서 1ulp 틀릴 수 있다).
+serde_json = { version = "1", features = ["float_roundtrip"] }
