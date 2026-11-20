@@ -110,6 +110,8 @@ async def signed(session, method: str, path: str, params: dict, key: str, secret
                 code = payload.get("code")
                 tag = f"[{code}] " if code is not None else ""
                 return {"__error__": f"{response.status} {tag}{payload.get('msg', payload)}"}
+            if not isinstance(payload, (dict, list)):   # 2026-11-21 200 + 빈 본문(aiohttp = None) -- 호출부가 TypeError 로 죽었다. 숫자로 안 시작 = «나갔는지 모름»(resolve_unknown_post)
+                return {"__error__": f"EmptyResponse: HTTP {response.status} 본문 {payload!r}"}
             return payload
     except Exception as exc:  # noqa: BLE001 -- 네트워크/TLS/JSON 전부 같은 취급
         return {"__error__": f"{type(exc).__name__}: {exc}"}
@@ -254,12 +256,21 @@ async def place_add_order(session, symbol: str, pside: str, price: float, qty: f
     key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
     if not (key and secret):
         return {"placed": False, "reason": "API 키가 없습니다"}
+    cid, offset = f"{bracket_tag(ADD_TAG, pside)}{int(time.time() * 1000)}", await _clock_offset(session)
     r = await signed(session, "POST", "/fapi/v1/order",
                      {"symbol": symbol, "side": "BUY" if pside == "LONG" else "SELL", "positionSide": pside,
                       "type": "LIMIT", "timeInForce": "GTC", "price": price, "quantity": qty,
-                      "newClientOrderId": f"{bracket_tag(ADD_TAG, pside)}{int(time.time() * 1000)}"},
-                     key, secret, await _clock_offset(session))
+                      "newClientOrderId": cid},
+                     key, secret, offset)
+    r = await resolve_resting(session, symbol, cid, r, key, secret, offset)
     return {"placed": "__error__" not in r, "price": price, "qty": qty, "order_id": r.get("orderId"), "error": r.get("__error__")}
+
+
+async def resolve_resting(session, symbol: str, cid: str, r: dict, key: str, secret: str, offset: int) -> dict:
+    """2026-11-21 익절 GTX·분할 익절·물타기 POST 도 진입과 같은 «나갔는지 모름» 규칙(resolve_unknown_post) -- 확인 없이 실패로 치면
+    살아 있는 유령 주문이 남거나(물타기 = 손절 없이 크기만 늘어남) 걸린 익절을 «없음»으로 본다. 끝내 모르면 표식 DELETE 를 보냈으니 «안 걸림»."""
+    got = await resolve_unknown_post(session, symbol, cid, r, key, secret, offset)
+    return got if got is not None else {"__error__": f"주문 접수 여부를 확인하지 못했습니다({r['__error__']}) — 표식으로 취소를 보냈습니다"}
 
 
 async def _post_stop(session, symbol: str, pside: str, price: float, key: str, secret: str, offset: int, stamp: int) -> dict:
@@ -319,11 +330,13 @@ async def place_bracket(session, bracket: dict, symbol: str, pside: str, *, stri
     close_side = "SELL" if pside == "LONG" else "BUY"
     stamp = int(time.time() * 1000)
     if bracket.get("tp_price"):
+        cid = f"{bracket_tag(TP_TAG, pside)}{stamp}"
         r = await signed(session, "POST", "/fapi/v1/order",
                          {"symbol": symbol, "side": close_side, "positionSide": pside,
                           "type": "LIMIT", "timeInForce": "GTX", "price": bracket["tp_price"],
-                          "quantity": qty, "newClientOrderId": f"{bracket_tag(TP_TAG, pside)}{stamp}"},
+                          "quantity": qty, "newClientOrderId": cid},
                          key, secret, offset)
+        r = await resolve_resting(session, symbol, cid, r, key, secret, offset)
         out["tp"] = {"placed": "__error__" not in r, "price": bracket["tp_price"],
                      "order_id": r.get("orderId"), "error": r.get("__error__")}
     if bracket.get("backstop_price"):
@@ -371,6 +384,7 @@ async def place_tp_ladder(session, legs: list[dict], symbol: str, pside: str) ->
         r = await signed(session, "POST", "/fapi/v1/order",
                          {"symbol": symbol, "side": close_side, "positionSide": pside, "type": "LIMIT", "timeInForce": "GTX",
                           "price": l["price"], "quantity": q, "newClientOrderId": l["cid"]}, key, secret, offset)
+        r = await resolve_resting(session, symbol, l["cid"], r, key, secret, offset)
         l.update(resting="__error__" not in r, order_id=r.get("orderId"), error=r.get("__error__"))
     out["legs"] = live
     out["placed"] = all(l.get("resting") or l.get("merged") or l.get("filled") for l in live)
@@ -892,6 +906,33 @@ async def cancel_wait_orphans(session, symbols: list[str]) -> dict:
                  done.append({"symbol": symbol, "order_id": o.get("orderId"), "side": o.get("positionSide"),
                               "filled": executed_qty(o), "qty": float(o.get("origQty") or 0.0)}))
     return {"cancelled": done, "errors": errors}
+
+
+async def cancel_exit_orders(session, symbol: str, pside: str) -> dict:
+    """2026-11-21 손절 청산이 «오류»로 끝난 뒤 30초 재발동 전에: 앞선 청산 따라가기(fill_maker)가 남긴 GTX 를 지우고 **목록을 다시 읽어 없음을 확인**한다.
+    고르는 기준 = 표식 PEG_TAG+측면 글자(fill_maker 의 cid) · 닫는 쪽(롱 = SELL). reduceOnly 는 못 쓴다(헤지 모드라 안 보낸다 -- run_exit).
+    같은 표식의 진입 따라가기는 여는 쪽이라 빠지고, 익절(dbtp)·기다리기(dbwt)·물타기(dbad)·사람이 건 주문은 표식이 달라 빠진다.
+    errors 가 비어 있지 않으면 호출부는 새 청산을 시작하지 않는다(취소 확인 없이 다시 걸면 겹친다 -- 2026-09-13)."""
+    key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
+    if not (key and secret):
+        return {"cancelled": 0, "errors": ["API 키가 없습니다"]}
+    offset = await _clock_offset(session)
+    pre, close_side = f"{PEG_TAG}{pside[:1]}", "SELL" if pside == "LONG" else "BUY"
+    mine = lambda o: str(o.get("clientOrderId") or "").startswith(pre) and o.get("side") == close_side   # noqa: E731 -- 측면 글자가 표식에 있어 positionSide 는 따로 안 본다
+    n = 0
+    for attempt in range(2):   # 읽기 → 지우기 → 다시 읽기(응답이 아니라 목록을 믿는다: 지우기 직전 체결·이미 취소면 DELETE 는 실패해도 없다)
+        opens = await signed(session, "GET", "/fapi/v1/openOrders", {"symbol": symbol}, key, secret, offset)
+        if not isinstance(opens, list):
+            return {"cancelled": n, "errors": [f"openOrders: {opens.get('__error__') if isinstance(opens, dict) else opens}"]}
+        left = [o for o in opens if mine(o)]
+        if not left:
+            return {"cancelled": n, "errors": []}
+        if attempt:
+            return {"cancelled": n, "errors": [f"앞선 청산 주문 {[o.get('orderId') for o in left]} 이 아직 살아 있습니다"]}
+        for o in left:
+            await signed(session, "DELETE", "/fapi/v1/order", {"symbol": symbol, "orderId": o.get("orderId")}, key, secret, offset)
+            n += 1
+    return {"cancelled": n, "errors": []}   # 닿지 않는다(위 두 번째 읽기에서 끝남)
 
 
 async def run_exit(session, plan: dict, state: dict) -> dict:

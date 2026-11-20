@@ -38,7 +38,7 @@ from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position, sl_up_of,
     COMMIT_CAP_X, HOLD_CAP_X, RULE_STOP_PCT, TP_LEGS_MAX, commit_rule_l, line_bracket, rec_rule_add_order, rec_rule_bracket, rec_rule_size)   # 2026-10-09 자동 규칙 진입(재생 ×15.2 크기식) · 10-14 자동 물타기 지정가
 from live.execution.live_manual_peg_execute_20260912 import (  # noqa: E402
-    FALLBACK_SEC, WAIT_CHOICES_MIN, cancel_wait_orphans, clear_bracket, commission_bp, margin_type, nap, order_mark, place_add_order, place_bracket, place_stop, place_tp_ladder, run_entry, run_entry_limit, run_entry_stop, run_entry_wait, run_exit, wake_fills)
+    FALLBACK_SEC, WAIT_CHOICES_MIN, cancel_exit_orders, cancel_wait_orphans, clear_bracket, commission_bp, margin_type, nap, order_mark, place_add_order, place_bracket, place_stop, place_tp_ladder, run_entry, run_entry_limit, run_entry_stop, run_entry_wait, run_exit, wake_fills)
 import scripts.binance_ban_guard as ban_guard  # noqa: E402
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
 # 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).
@@ -1163,6 +1163,41 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             state.update(phase="error", error=f"스위칭 오류 {type(exc).__name__}: {exc}")
             (state.get("switch") or {}).update(phase="aborted", error=str(exc))
 
+    bracket_tick_alerted: set[tuple[str, str]] = set()   # (칸 키, 예외 종류)
+    alert_tasks: set = set()
+
+    def bracket_tick_alert(key: str, exc: Exception) -> None:
+        """감시가 건너뛴 칸을 로그·텔레그램(scripts.ops_watchdog.send_telegram · 서버의 지지·저항 알림과 같은 길)으로 **칸·예외 종류마다 한 번** 알린다(2초마다 되풀이하지 않게 --
+        메시지는 시각·숫자가 바뀔 수 있어 키에 넣지 않는다). 보내기는 뒤에서(최대 8초) -- 다른 코인 손절 판정을 기다리게 하지 않는다. ponytail: 기억은 프로세스 수명 -- 재시작하면 한 번 더 알린다."""
+        why = f"{type(exc).__name__}: {exc}"
+        if (key, type(exc).__name__) in bracket_tick_alerted:
+            return
+        bracket_tick_alerted.add((key, type(exc).__name__))
+        msg = f"🔴 손절 감시: 무장 칸 {key} 을 판정하지 못해 건너뜁니다({why}) — 다른 코인은 계속 봅니다 · 칸은 지우지 않았습니다(manual_bracket_state.json 확인)"
+        print(f"bracket watch: {msg}", flush=True)
+        try:
+            import html
+            from scripts.ops_watchdog import send_telegram
+            t = asyncio.create_task(asyncio.to_thread(send_telegram, html.escape(msg)))
+            alert_tasks.add(t)
+            t.add_done_callback(alert_tasks.discard)
+        except Exception as e:  # noqa: BLE001 -- 알림 실패가 감시를 멈추면 안 된다
+            print(f"bracket watch: 알림 실패 {type(e).__name__}: {e}", flush=True)
+
+    async def exit_retry_clear(b: dict, pside: str) -> bool:
+        """2026-11-21 손절·익절 청산이 실패(retry_after)한 뒤 다시 쏘기 전에 앞선 청산의 따라가기 GTX 를 지우고 없음을 확인한다(cancel_exit_orders).
+        False = 이번엔 쏘지 않는다(무장 그대로 · 실패면 30초 뒤 다시). 첫 발동(retry_after 없음)은 조회를 늘리지 않는다 -- 손절 속도."""
+        if not b.get("retry_after"):
+            return True
+        if manual_order_lock.locked() or exit_slot(exec_asset_of(b["symbol"]) or "eth") is None:   # 위 clear_bracket await 사이에 같은 코인 수동 청산이 시작됐으면 그 따라가기 주문을 지우지 않는다
+            return False
+        r = await cancel_exit_orders(binance_session(), b["symbol"], pside)
+        if r.get("errors"):
+            b["retry_after"] = time.time() + 30
+            b["last_error"] = f"앞선 청산 주문 정리 실패: {'; '.join(map(str, r['errors']))}"
+            return False
+        return True
+
     async def bracket_tick() -> None:
         """무장된 측면마다: 포지션이 사라졌으면(TP·비상 스탑·수동 청산) 남은 우리 주문을 지우고 내린다.
         SL 을 넘었으면 **메이커 추격 청산**(청산 버튼과 같은 run_exit)을 돌린다."""
@@ -1177,8 +1212,10 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         except ValueError:
             acct_ts = 0.0
         changed = False
-        seen_at = {k: v.get("armed_at") for k, v in st.items()}
-        for key, b in list(st.items()):
+        seen_at = {k: v.get("armed_at") for k, v in st.items() if isinstance(v, dict)}   # dict 아닌 칸 = 망가짐 -- 합치기(bracket_merge)가 건드리지 않아 그대로 남는다
+
+        async def tick_one(key: str, b: dict) -> None:   # 2026-11-21 무장 한 칸씩 -- 한 칸이 예외로 죽어도 다른 코인 판정은 계속(아래 루프)
+            nonlocal changed
             pside = b.get("side") or key.rsplit(":", 1)[-1]
             # 2026-09-27 SL = 마감된 USDT 5분봉 종가(사용자 지시). 차트가 쓰는 60초 캐시라 REST 가 늘지 않는다
             #   (옛 판은 측면마다 2초에 한 번 bookTicker). 못 읽으면 None -> hold -- «정리»는 계속 판단한다.
@@ -1204,7 +1241,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                     ws.update(action="cancel", action_reason="포지션이 닫힘(손절·청산) — 같은 쪽 대기 진입 취소")
             if act == "clear":
                 if time.time() < float(b.get("retry_after") or 0):
-                    continue
+                    return
                 r = await clear_bracket(binance_session(), b["symbol"], pside)
                 print(f"bracket {pside}: 포지션 없음 -> 정리 {r}", flush=True)
                 if r.get("errors"):   # 🔴못 지운 물타기 지정가(dbad)가 남으면 손절 없이 다시 열린다 -- 무장을 남겨 30초 뒤 다시 지운다
@@ -1212,28 +1249,31 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 else:
                     st.pop(key)
                 changed = True
-                continue
+                return
             b_asset = exec_asset_of(b["symbol"]) or "eth"
             if act == "sl_leg":   # 2026-11-11 분할 손절: 닿은 조각 몫만 peg 청산 -- 익절 지정가는 남기고, 끝나면 그 조각을 빼고 남은 수량으로 익절 조각을 다시 건다
                 if exit_slot(b_asset) is None or manual_order_lock.locked() or time.time() < float(b.get("retry_after") or 0):
-                    continue
+                    return
+                if not await exit_retry_clear(b, pside):
+                    changed = True
+                    return
                 legs = b.get("sl_legs") or []
                 hit = set(sl_legs_hit(pside, b, touch, last_bar))
                 frac = sum(float(x.get("w") or 1) for i, x in enumerate(legs) if i in hit) / (sum(float(x.get("w") or 1) for x in legs) or 1.0)
                 st2 = bracket_load()   # 쏜 조각을 곧바로 파일에 -- 청산(최대 2분) 동안 수정·다음 틱이 «안 쏜 조각»으로 보지 않게
                 if key not in st2 or st2[key].get("armed_at") != b.get("armed_at") or st2[key].get("sl_off") or len(st2[key].get("sl_legs") or []) != len(legs):
-                    continue
+                    return
                 st2[key]["sl_legs"] = [{**x, "fired": True} if i in hit else x for i, x in enumerate(st2[key]["sl_legs"])]
                 bracket_save(st2)
                 plan, err = await assemble_exit_plan(pside, min(1.0, frac), fresh=True, asset=b_asset, only_symbol=b["symbol"])
                 slot = exit_slot(b_asset)
                 if (bracket_load().get(key) or {}).get("sl_off") or manual_order_lock.locked() or slot is None:
-                    continue
+                    return
                 if err or (plan or {}).get("blocked"):   # 닫혔으면(no_position) 다음 틱 «clear» 가 정리 · 조회 실패는 30초 뒤 다시(쏜 표시는 남는다)
                     b["retry_after"] = time.time() + 30
                     b["last_error"] = (err[0] if err else {}).get("detail") or (err[0] if err else {}).get("error") or (plan or {}).get("blocked")
                     changed = True
-                    continue
+                    return
                 slot.clear()
                 slot.update(phase="submitting", kind="exit", trigger="bracket_sl_leg", side=pside, plan=plan, asset=b_asset,
                             started_at=datetime.now(timezone.utc).isoformat())
@@ -1249,18 +1289,18 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                     b["last_error"] = slot.get("error")
                 changed = True
                 print(f"bracket {pside}: 손절 조각 {sorted(hit)} 닿음 -> {round(100 * frac)}% 청산 {slot.get('phase')}", flush=True)
-                continue
+                return
             if act != "fire" or exit_slot(b_asset) is None or time.time() < float(b.get("retry_after") or 0):
-                continue
+                return
             if b.get("lines") and not b.get("fired"):
                 # 2026-10-28 검증: 걸린 익절 지정가를 **먼저** 지운다 -- 청산 수량을 그 뒤에 읽어야 겹쳐 넘기지 않고, 못 지우면 계좌 조회(무게 ~50)를
                 #   매 2초 반복하지 않게 10초 쉰다. 지웠으면 fired 로 굳혀 닫힐 때까지 쏜다(익절이 없는데 닿음 창이 지나 조용히 멈추지 않게).
                 # 2026-11-11 손절선만 지움(sl_off): 그 상태에서 내린 «fire» 는 익절 감시뿐이라 쏜다 · 판단 뒤 새로 지웠으면(b 엔 없음) 손절일 수 있어 다음 틱이 다시 판단
                 if manual_order_lock.locked() or ((bracket_load().get(key) or {}).get("sl_off") and not b.get("sl_off")):
-                    continue
+                    return
                 fresh = bracket_load().get(key) or {}
                 if fresh.get("armed_at") != b.get("armed_at") or (fresh.get("mod") or {}).get("at") != (b.get("mod") or {}).get("at"):
-                    continue   # 2026-10-29 그 사이 선이 수정됐다 -- 옛 사본(옛 레벨·watch_from)으로 쏘지 않는다, 다음 틱이 새 선으로 다시 판단(검토 S1)
+                    return   # 2026-10-29 그 사이 선이 수정됐다 -- 옛 사본(옛 레벨·watch_from)으로 쏘지 않는다, 다음 틱이 새 선으로 다시 판단(검토 S1)
                 bracket_exiting.add(key)   # 🔴첫 await 전에 -- 수정 요청이 잠금 검사 뒤 이 틈에 끼어들어 익절을 다시 걸지 못하게(검토 B1)
                 r = await clear_bracket(binance_session(), b["symbol"], pside)
                 if r.get("errors"):
@@ -1268,7 +1308,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                     b["retry_after"] = time.time() + 10
                     b["last_error"] = f"익절 지정가 취소 실패: {'; '.join(map(str, r['errors']))}"
                     changed = True
-                    continue
+                    return
                 fired = "tp" if b.get("sl_off") else True   # 2026-11-11 손절을 지운 뒤의 fire = 익절 -- 표시해야 «손절 해제로 멈춘 손절 청산»(True)과 구별된다
                 b.update(fired=fired, tp_resting=False)
                 st2 = bracket_load()   # 2026-10-29 fired 를 곧바로 파일에 -- run_exit(최대 2분) 동안 수정이 «안 쏜 무장»으로 보지 않게(검토 B1)
@@ -1277,24 +1317,27 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                     bracket_save(st2)
                 bracket_exiting.discard(key)
                 changed = True
+            if not await exit_retry_clear(b, pside):
+                changed = True
+                return
             plan, err = await assemble_exit_plan(pside, 1.0, fresh=True, asset=exec_asset_of(b["symbol"]) or "eth", only_symbol=b["symbol"])
             # 🔴검사는 조립(await) **뒤**에 -- 그 사이 «손절 해제»나 사용자 청산이 들어오면 쏘지 않는다(남의 상태를 clear 하고 두 번 청산하지 않게)
             if (bracket_load().get(key) or {}).get("sl_off") and not (b.get("lines") and b.get("sl_off")):   # 선 무장이 이미 손절 없이 판단한 fire = 익절(위와 같음)
-                continue
+                return
             slot = exit_slot(b_asset)   # 2026-10-20 다른 코인 주문이 도는 중이면 이 코인 칸으로 청산(옛 판: 그 주문이 끝날 때까지 손절을 미뤘다)
             if manual_order_lock.locked() or slot is None:
-                continue
+                return
             if err and err[0].get("error") == "no_position":     # 이미 닫혔다 -- 정리하고 내린다(못 지웠으면 다음 틱 «clear» 가 다시)
                 if not (await clear_bracket(binance_session(), b["symbol"], pside)).get("errors"):
                     st.pop(key)
                 changed = True
-                continue
+                return
             if err or (plan or {}).get("blocked"):
                 # 🔴조회 실패는 «닫혔다»가 아니다 -- 비상 스탑을 두고 30초 뒤 다시 본다.
                 b["retry_after"] = time.time() + 30
                 b["last_error"] = (err[0] if err else {}).get("detail") or (err[0] if err else {}).get("error") or (plan or {}).get("blocked")   # 2026-10-29 조립 예외는 plan None·detail 없음(검토 P1)
                 changed = True
-                continue
+                return
             slot.clear()
             slot.update(phase="submitting", kind="exit", trigger="bracket_sl",
                         side=pside, plan=plan, asset=b_asset,
@@ -1313,6 +1356,11 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             print(f"bracket {pside}: SL {b.get('sl_price')} (레벨 {b.get('sl_level')}) 5분봉 종가 {last_bar} · 1초 범위 {touch} 이탈 -> "
                   f"{slot.get('phase')}",
                   flush=True)
+        for key, b in list(st.items()):
+            try:
+                await tick_one(key, b)
+            except Exception as exc:  # noqa: BLE001 -- 2026-11-21 망가진 칸(형식·키·숫자) 하나가 틱을 매번 죽여 뒤 코인 손절 판정이 멈췄다 -- 그 칸만 건너뛴다(지우지 않는다)
+                bracket_tick_alert(key, exc)
         if changed:
             # 🔴다시 읽고 **내가 본 무장(armed_at)** 에만 적용한다 -- 위 await 동안 새 진입이 다른
             #   측면(또는 같은 측면 물타기)을 무장했으면 통째로 쓰면 그걸 지운다.
