@@ -400,7 +400,7 @@ impl Supply {
         //    둘 다 아니면 스냅숏 값(테이프가 안 건드린 봉만 -- 건드린 봉은 칸이 바뀌었으니 옛 값이 틀리다).
         //    테이프 값이 어긋남 검사에 걸리고 테이프가 안 건드린 봉이면 스냅숏 값(파이썬은 «없음» -- 테이프 수집기 공백 등).
         let floor = ring_floor(&self.sec).unwrap_or(i64::MAX);
-        let win_lo = self.fp.window_lo().unwrap_or(i64::MIN);
+        let win_lo = self.fp.window_lo_raw().unwrap_or(i64::MIN);
         let w_floor = bar_of(job.first_ms) - (WINDOW_BARS as i64 - 1) * BAR_SECONDS;
         let end = top.saturating_add(1).min(hi);
         let mut n_dhl = 0;
@@ -459,7 +459,7 @@ impl Supply {
             return None;
         }
         let (bucket, _) = self.fp.spec?;
-        let lo = self.fp.window_lo()?;
+        let lo = self.fp.window_lo_raw()?;
         let bars = self.fp.bars.range(lo..).map(|(&b, bar)| (b, bar.cells.iter().map(|(&k, c)| (k, *c)).collect(), self.fp.dhl_now(&self.sec, b, bar))).collect();
         let sec = ring_floor(&self.sec).map_or(vec![], |f| self.sec.range(f..).map(|(&s, c)| (s, *c)).collect());
         let holes = self.fp.holes.iter().filter(|h| h.1 > lo).copied().collect();
@@ -825,6 +825,8 @@ impl Supply {
         }
         self.okx_fr.liq_upto = Some(earliest * 1000);
         self.okx_first_bar = earliest - 300;
+        (self.fp.from, self.fp.full_dirty) = (self.okx_first_bar, true); // 봉을 교체했고 창도 넓어졌다 -- 다음 밀기는 전량
+        self.okx_sum_full = true;
         self.okx_liq5m_dirty = true;
         if earliest <= lo {
             self.okx_fr.done = true;

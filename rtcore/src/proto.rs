@@ -106,6 +106,14 @@ pub struct Micro {
     /// [봉, ΔOI, 봉 끝 OI] -- server.py api_oi_5m 의 okx_d(반올림 전 · 바이낸스 봉과 더하는 것은 받는 쪽).
     #[serde(default)]
     pub okx_oi5m: Vec<(i64, f64, f64)>,
+    /// 2026-11-21 더함 -- OKX 봉 합 [매수, 매도, 고래매수, 고래매도, 리테일매수, 리테일매도](봉 칸 전부의 합 · first_bar «뒤» 봉만 ·
+    /// 시장 맥락 okx30·거래소 합산 onet 의 재료 -- server.py _flow_read_ctx 2313~2318 · 2189~2190). 바뀐 봉만 · `okx_full` 이면 통째로 갈아 끼운다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub okx_from: Option<i64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub okx_bars: Vec<(i64, [f64; 6])>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub okx_full: bool,
 }
 
 /// 지난 60초 바이낸스 강제청산 USD 합(롱 = 롱 포지션 청산) · 건수.
@@ -336,6 +344,9 @@ pub struct FpBar {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Footprint {
+    /// 2026-11-21 더함 -- OKX first_bar: 칸에 OKX 가 더해졌고 이 봉 «뒤» 봉만 실린다(원본 /api/footprint venues = binance+okx). 없으면 바이낸스만.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub okx_from: Option<i64>,
     pub full: bool,
     pub bucket: f64,
     pub bar_seconds: i64,
