@@ -25,8 +25,8 @@ import live_risk_radar_20261115 as W  # noqa: E402
 
 OUT = ROOT / "rtmodel" / "tests" / "fixtures"
 MIN = 60_000
-PX = {"ETH": 3000.0, "BTC": 90000.0, "SOL": 150.0, "XRP": 1.3}
-TICK = {"ETH": 0.01, "BTC": 0.1, "SOL": 0.01, "XRP": 0.0001}
+PX = {"ETH": 3000.0, "BTC": 90000.0, "SOL": 150.0, "XRP": 1.3, "SOXL": 30.0}
+TICK = {"ETH": 0.01, "BTC": 0.1, "SOL": 0.01, "XRP": 0.0001, "SOXL": 0.01}
 
 
 def bars(rng, coin, end_ms, n, sig, gaps=0, zero_v=0, spikes=(), flat=0, gap_day=0):
@@ -96,6 +96,18 @@ def one(rng, name, P):
         res[coin] = out
         inp[coin] = {"t": d.t.tolist(), "h": d.h.tolist(), "l": d.l.tolist(), "c": d.c.tolist(), "v": d.v.tolist(),
                      "dvol": None if dv is None else {"ts": dv.ts.tolist(), "close": dv.close.tolist(), "got": dv.got.tolist()}}
+    # SOXL(주식 세션 HAR-S · 원본 main 은 계수 파일 두 개를 합쳐 4코인 뒤에 돈다)
+    ps = json.loads(W.PARAMS_SESS.read_text())["coins"]["SOXL"]
+    d = bars(rng, "SOXL", (now // MIN - (2 if name == "stale_edge" else 0)) * MIN, {"short": 6 * 1440}.get(name, 12 * 1440), 5e-4, gaps=300 if name == "gaps" else 0)
+    try:
+        out = W.compute_session(d, ps)
+        out["data_age_s"] = round((now - int(d.t.iloc[-1]) - MIN) / 1000, 1)
+        if out["data_age_s"] > W.STALE_DATA_S:
+            out.update(valid=False, error=f"데이터 지연 {out['data_age_s']:.0f}초")
+    except Exception as e:
+        out = dict(error=f"{type(e).__name__}: {str(e)[:200]}", valid=False)
+    res["SOXL"] = out
+    inp["SOXL"] = {"t": d.t.tolist(), "h": d.h.tolist(), "l": d.l.tolist(), "c": d.c.tolist(), "v": d.v.tolist(), "dvol": None}
     latest, log = assemble(now, res, W.PARAMS.name)
     return {"name": name, "now_ms": now, "inputs": inp, "latest": latest, "log": log}
 
@@ -109,7 +121,17 @@ def main():
     for nm in names:
         s = one(rng, nm, P); fx["sets"].append(s)
         c = json.loads(s["latest"])["coins"]
-        print(nm, {k: (o.get("error") or f"σ15 {o['sigma15_pct']} {o['state60']} valid={o['valid']} iv60={o['iv60']} 급변={o['alert']['active']}") for k, o in c.items()}, flush=True)
+        print(nm, {k: (o.get("error") or f"σ15 {o['sigma15_pct']} {o['state60']} valid={o['valid']} iv60={o.get('iv60')} {o.get('session') or ''} 급변={o['alert']['active']}") for k, o in c.items()}, flush=True)
+    # 세션 시계(연구 clock) 표: 서머타임 전환·휴장·개장/마감 경계 -- 2026-03 ~ 2027-12 무작위 + 경계 근처
+    S_ = W.S; taus = list(rng.integers(int(pd.Timestamp("2026-03-01", tz="UTC").timestamp()), int(pd.Timestamp("2027-12-31", tz="UTC").timestamp()), 3000) // 60 * 60)
+    for day in ("2026-03-08", "2026-11-01", "2026-11-26", "2026-12-24", "2027-03-14", "2027-11-07", "2026-11-23", "2026-11-27"):
+        for hh in range(0, 24):
+            for mm in (0, 29, 30, 31, 59):
+                taus.append(int(pd.Timestamp(f"{day} {hh:02d}:{mm:02d}", tz="UTC").timestamp()))
+    fx["clock"] = []
+    for H in (15, 60):
+        ck = S_.clock(np.array(taus), H)
+        fx["clock"] += [[int(t), H, int(r.sess), float(r.open_in), float(r.first60), float(r.last30)] for t, r in zip(taus, ck.itertuples())]
     p = OUT / "radar_fixture.json"; p.write_text(json.dumps(fx)); print(p.name, f"{p.stat().st_size:,} 바이트 · 벌 {len(fx['sets'])}")
 
 

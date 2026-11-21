@@ -33,19 +33,25 @@ fn diff(a: &Value, b: &Value, path: &str, out: &mut Vec<(String, f64)>) {
 fn radar_parity() {
     let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let fx: Value = rtmodel::read_json(&d.join("tests/fixtures/radar_fixture.json")).expect("정답지 없음 -- 머리말의 python 한 줄을 먼저");
-    assert_eq!(fx["npy_disable"], "X86_V4 AVX512_ICL");
+    assert!(fx["npy_disable"].as_str().is_some_and(|s| s.contains("AVX512")), "AVX-512 끈 numpy 로 만든 정답지(tools/server_env.sh)");
     let pname = fx["params"].as_str().unwrap();
     let pp: Params = serde_json::from_str(&std::fs::read_to_string(d.join("../dashboard").join(pname)).unwrap()).unwrap();
     let order = ["ETH", "BTC", "SOL", "XRP"];
+    // 세션 계수 파일(SOXL)엔 cols·문턱이 없다 -- 코인 칸만 읽는다
+    let sv: Value = serde_json::from_str(&std::fs::read_to_string(d.join("../dashboard/risk_radar_params_soxl_20261117.json")).unwrap()).unwrap();
+    let ps: std::collections::HashMap<String, CoinP> = serde_json::from_value(sv["coins"].clone()).unwrap();
     let (mut same, mut tot, mut worst, mut nlog, mut nlog_all) = (0, 0, Vec::<(String, f64)>::new(), 0, 0);
     for s in fx["sets"].as_array().unwrap() {
         let now = s["now_ms"].as_i64().unwrap();
-        let coins: Vec<(&'static str, J)> = order.iter().map(|&c| {
+        let mut coins: Vec<(&'static str, J)> = order.iter().map(|&c| {
             let x = &s["inputs"][c];
             let b = Bars { t: il(&x["t"]), h: fl(&x["h"]), l: fl(&x["l"]), c: fl(&x["c"]), v: fl(&x["v"]) };
             let dv = x["dvol"].as_object().map(|v| Dvol { ts: il(&v["ts"]), close: fl(&v["close"]), got: il(&v["got"]) });
             (c, coin_out(&b, &pp.coins[c], &pp, dv.as_ref(), now))
         }).collect();
+        let x = &s["inputs"]["SOXL"];
+        let b = Bars { t: il(&x["t"]), h: fl(&x["h"]), l: fl(&x["l"]), c: fl(&x["c"]), v: fl(&x["v"]) };
+        coins.push(("SOXL", session_out(&b, &ps["SOXL"], now)));
         let (latest, log) = assemble(now, pname, coins);
         tot += 1;
         if latest == s["latest"].as_str().unwrap() {
@@ -67,6 +73,20 @@ fn radar_parity() {
     }
     // 🔴글자까지는 못 맞춘다: σ̂ = c·exp(2·X@β) 의 X@β 가 numpy BLAS(개발기 MKL) 합 순서다(차례 합과 1~수 ulp). 서버 BLAS 는 미확인 -- 1e-12 상대로 본다.
     assert!(worst.iter().all(|w| w.1 <= 1e-12), "1e-12 넘는 차이");
+}
+
+#[test]
+fn session_clock() {
+    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let fx: Value = rtmodel::read_json(&d.join("tests/fixtures/radar_fixture.json")).unwrap();
+    let mut n = 0;
+    for r in fx["clock"].as_array().unwrap() {
+        let (tau, h) = (r[0].as_i64().unwrap(), r[1].as_f64().unwrap());
+        let (s, oi, f60, l30) = clock(tau, h);
+        assert_eq!((s as i64, oi, f60, l30), (r[2].as_i64().unwrap(), r[3].as_f64().unwrap(), r[4].as_f64().unwrap(), r[5].as_f64().unwrap()), "τ {} H {h}", iso(tau * 1000));
+        n += 1;
+    }
+    println!("세션 시계 {n}칸 같음(서머타임 전환·휴장·개장/마감 경계 포함)");
 }
 
 #[test]

@@ -42,7 +42,7 @@ def nodes(txt):
 
 
 def main():
-    assert lightgbm.__version__ == "4.7.0", lightgbm.__version__
+    print("lightgbm", lightgbm.__version__)   # 서버 4.6.0 · 개발기 4.7.0 -- 정답지에 판을 적는다(tests/lgb.rs 가 찍는다)
     rng = np.random.default_rng(20261121)
     for coin in ("eth", "btc", "xrp"):
         art = joblib.load(LIVE / f"{coin}_dirshort65_model.joblib")

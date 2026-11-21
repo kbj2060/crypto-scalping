@@ -55,3 +55,36 @@ python rtmodel/tools/shadow_sr_lean.py data/live/sr_lean data/live/rt_sr_lean --
 - REST: 원본과 같은 요청 열(대상 5분봉 9,000 + metrics 5종 30.5일 → 다음부터 꼬리 300·0.5일 · 19코인 340 · 1일봉 120)을 **파이썬 서버와 따로 한 벌 더** 보낸다. 공용 밴 파일을 지킨다.
 - 대조: 두 `pred_record/{코인}.jsonl` 의 같은 (k, t) 줄을 글자로 비교한다(시작 시각이 달라 처음 몇 줄은 한쪽에만 있다).
 - 🔴아직 못 하는 것: ETH 15분·1시간(75열판 · 호가 깊이 sqlite) · 상대 강도(xsec.jsonl) -- 이 둘은 파이썬 서버 기록만 있다.
+
+---
+
+# 위험 레이더 그림자 (rt_radar · 2026-11-21)
+
+원본 `scripts/live_risk_radar_20261115.py` 처럼 **cron 이 매분 한 번** 부르고 끝나는 실행 파일. 파이썬 cron 은 그대로 두고 한 줄을 더한다.
+
+- 빌드: `cd rtmodel && cargo build --release -j 2 --bin rt_radar` → `bin/rt_radar`(md5 대조).
+- crontab(사람이 등록): `* * * * * cd <저장소> && RT_RADAR_OUT=data/live/rt_risk_radar nice -n 10 bin/rt_radar >> logs/supervisor/rt_radar_$(date +\%Y\%m\%d).log 2>&1`
+- 쓰는 곳: `data/live/rt_risk_radar/`(risk_radar_latest.json · risk_radar_forward.jsonl · cache/ 의 1분봉·DVOL 이진 캐시). 🔴`RT_RADAR_OUT=data/live` 는 종료코드 2(전환 때만 `RT_RADAR_TAKEOVER=1`).
+  `/api/risk-radar` 는 파이썬 파일만 읽으므로 그림자는 화면에 안 나온다. 첫 회차는 31일 백필(코인마다 1분봉 45쪽 · 쪽 사이 0.5초)이라 1~2분 걸린다.
+- 계수: `RT_RADAR_PARAMS`(기본 dashboard/risk_radar_params_20261116.json) · `RT_RADAR_PARAMS_SESS`(SOXL, 기본 dashboard/risk_radar_params_soxl_20261117.json) -- 파이썬과 같은 파일.
+- REST: 바이낸스 1분봉(평소 코인마다 1회 · limit 99) + Deribit DVOL(ETH·BTC 시간에 한 번). 바이낸스만 공용 밴 파일을 지킨다(원본 가드와 같은 범위). 파이썬과 따로 한 벌 더 보낸다.
+- 대조: 두 latest.json 의 코인 칸을 비교한다 -- 문자열·참거짓·None 은 같아야 하고 숫자는 1e-12 상대 안(X@β 의 BLAS 합 순서 때문에 끝자리는 갈린다 · REMAINING.md «서버 판과의 차이»).
+  분이 어긋나 읽으면 다른 회차를 비교하게 되니 `updated` 가 같은 것끼리만.
+- 종료코드: 0 정상 · 1 한 코인이라도 오류(원본과 같음 -- cron 은 다음 분에 다시) · 2 설정 거부.
+
+---
+
+# 서버와 같은 파이썬 환경으로 정답지 만들기 (tools/server_env.sh)
+
+정답지(시험의 «원본 값»)는 서버와 같은 판으로 만들어야 서버에서 도는 파이썬과 비교한 것이 된다. 서버(2026-11-21 확인) = 파이썬 3.11 · numpy 2.2.5 · pandas 2.2.3 ·
+scikit-learn 1.8.0 · lightgbm 4.6.0 · numpy BLAS = scipy-openblas 0.3.28 · CPU Zen 3(AVX2 · AVX-512 없음).
+
+```
+bash rtmodel/tools/server_env.sh ~/venv_srv                       # 한 번(PyPI 에서 받는다 -- 거래소 접속 아님)
+source <(bash rtmodel/tools/server_env.sh ~/venv_srv --env)       # PY · numpy AVX-512 끄기(2.2 이름) · OPENBLAS_CORETYPE=ZEN · OPENBLAS_NUM_THREADS=1
+( ulimit -v 6000000; $PY rtmodel/tools/export_hgb.py && $PY rtmodel/tools/gen_sr_fixture.py )   # 다른 생성기도 같은 $PY 로(시험 머리말 순서)
+cd rtmodel && cargo test -j 2 --release
+```
+
+- 🔴numpy 2.2 는 AVX-512 를 끄는 이름이 2.4 와 다르다(`X86_V4` 없음 → 조용히 무시). `--env` 가 2.2 이름을 준다.
+- 서버 판이 바뀌면(재설치·업그레이드) server_env.sh 의 판 번호를 서버와 맞추고 정답지를 다시 만든다.

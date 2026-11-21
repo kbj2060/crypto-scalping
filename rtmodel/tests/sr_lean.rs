@@ -39,7 +39,7 @@ struct Err {
 fn sr_lean_parity() {
     let art: SrLean = read_json(&dir().join("sr_lean.json")).expect("모델 없음 -- 파일 머리말의 python 두 줄을 먼저 돌려라");
     let fx: Value = read_json(&dir().join("sr_fixture.json")).expect("정답지 없음 -- 파일 머리말의 python 두 줄을 먼저 돌려라");
-    assert_eq!(fx["npy_disable"], "X86_V4 AVX512_ICL", "정답지는 서버와 같은 계산(AVX-512 끈 numpy)으로 만든다");
+    assert!(fx["npy_disable"].as_str().is_some_and(|s| s.contains("AVX512")), "정답지는 서버와 같은 계산(AVX-512 끈 numpy · tools/server_env.sh)으로 만든다");
     let (mut fe, mut pe) = (BTreeMap::<String, Err>::new(), Err::default());
     let (mut bad_lines, mut tot) = (vec![], BTreeMap::<&str, usize>::new());
     let mut grp_diff = 0;

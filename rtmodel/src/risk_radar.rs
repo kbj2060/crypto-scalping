@@ -31,6 +31,11 @@ pub struct Params {
 
 #[derive(Deserialize)]
 pub struct CoinP {
+    /// "session" = 주식 세션 HAR-S(SOXL · risk_radar_params_soxl_*.json) -- 그 파일에만 있다
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub touch: Option<Vec<f64>>,
     pub beta15: Vec<f64>,
     pub c15: f64,
     pub beta60: Vec<f64>,
@@ -69,6 +74,7 @@ pub enum J {
     F(f64),
     S(String),
     O(Vec<(&'static str, J)>),
+    A(Vec<J>),
 }
 
 impl J {
@@ -99,6 +105,7 @@ impl J {
                 o + "\""
             }
             J::O(kv) => format!("{{{}}}", kv.iter().map(|(k, v)| format!("\"{k}\": {}", v.dump())).collect::<Vec<_>>().join(", ")),
+            J::A(v) => format!("[{}]", v.iter().map(J::dump).collect::<Vec<_>>().join(", ")),
         }
     }
     fn get(&self, k: &str) -> Option<&J> {
@@ -350,4 +357,154 @@ pub fn assemble(now_ms: i64, params_name: &str, coins: Vec<(&'static str, J)>) -
     }
     let latest = J::O(vec![("updated", J::S(iso(now_ms.div_euclid(1000) * 1000))), ("params", J::S(params_name.into())), ("coins", J::O(coins))]).dump();
     (latest, log)
+}
+
+// ── 주식 세션 HAR-S(SOXL) -- 원본 compute_session(:183-197) + 연구 research_soxl_session_vol_20261112 frame·clock·har_x ─────────────────
+/// NYSE 휴장일(연구 파일 HOLIDAYS 그대로 · 2027 까지). ponytail: 손으로 적은 표 -- 해가 바뀌면 원본과 같이 늘린다.
+const HOLIDAYS: [&str; 16] = ["2026-05-25", "2026-06-19", "2026-07-03", "2026-09-07", "2026-11-26", "2026-12-25",
+    "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26", "2027-05-31", "2027-06-18", "2027-07-05", "2027-09-06", "2027-11-25", "2027-12-24"];
+pub const SESS: [&str; 6] = ["정규장", "프리장", "애프터", "야간", "주말", "휴장"];
+const SWIN: [(&str, usize); 4] = [("lrv15", 15), ("lrv60", 60), ("lrv1d", 1440), ("lrv7d", 10080)];
+
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468
+}
+
+/// 미국 동부 시각의 UTC 오프셋(초): 2007 이후 규칙 -- 3월 둘째 일요일 02:00 ~ 11월 첫 일요일 02:00(현지) 서머타임.
+fn ny_offset(utc_s: i64) -> i64 {
+    let y = iso(utc_s * 1000)[..4].parse::<i64>().unwrap();
+    let sunday = |m: i64, nth: i64| {
+        let d1 = days_from_civil(y, m, 1);
+        let dow = (d1 + 4).rem_euclid(7); // 일=0
+        d1 + (7 - dow) % 7 + 7 * (nth - 1)
+    };
+    let start = sunday(3, 2) * 86400 + 7 * 3600; // 02:00 EST = 07:00 UTC
+    let end = sunday(11, 1) * 86400 + 6 * 3600; // 02:00 EDT = 06:00 UTC
+    if utc_s >= start && utc_s < end { -4 * 3600 } else { -5 * 3600 }
+}
+
+/// clock(τ, H) 한 칸: (세션, open_in, first60, last30).
+#[doc(hidden)]
+pub fn clock(tau: i64, h: f64) -> (usize, f64, f64, f64) {
+    let loc = tau + ny_offset(tau);
+    let (day, sod) = (loc.div_euclid(86400), loc.rem_euclid(86400));
+    let m = sod / 60;
+    let w = (day + 3).rem_euclid(7); // 월=0
+    let date = &iso(day * 86_400_000)[..10];
+    let hol = HOLIDAYS.contains(&date);
+    let sess = if w == 5 || (w == 4 && m >= 1200) || (w == 6 && m < 1200) {
+        4
+    } else if hol && (240..1200).contains(&m) {
+        5
+    } else if (570..960).contains(&m) {
+        0
+    } else if (240..570).contains(&m) {
+        1
+    } else if (960..1200).contains(&m) {
+        2
+    } else {
+        3
+    };
+    // 개장(동부 09:30)·마감(+390분) UTC 초: 현지 날짜 −5 ~ +5일의 평일·비휴장일
+    let mut opens = vec![];
+    for dd in day - 6..=day + 6 {
+        let (wd, ds) = ((dd + 3).rem_euclid(7), iso(dd * 86_400_000));
+        if wd < 5 && !HOLIDAYS.contains(&&ds[..10]) {
+            let local = dd * 86400 + 570 * 60;
+            let off = ny_offset(local + 5 * 3600); // 그 날 09:30 의 오프셋(전환은 02:00 이라 같은 날 안에서 안 바뀐다)
+            opens.push(local - off);
+        }
+    }
+    let clip = |x: f64| x.clamp(0.0, 1440.0);
+    let i = opens.partition_point(|&o| o <= tau) as i64 - 1;
+    let since_open = clip((tau - opens[i.max(0) as usize]) as f64 / 60.0);
+    let nx = opens.partition_point(|&o| o < tau).min(opens.len() - 1);
+    let to_open = clip((opens[nx] - tau) as f64 / 60.0);
+    let closes: Vec<i64> = opens.iter().map(|o| o + 390 * 60).collect();
+    let nc = closes.partition_point(|&c| c < tau).min(closes.len() - 1);
+    let to_close = clip((closes[nc] - tau) as f64 / 60.0);
+    (sess, (to_open < h) as u8 as f64, (sess == 0 && since_open < 60.0) as u8 as f64, (sess == 0 && to_close <= 30.0) as u8 as f64)
+}
+
+/// compute_session: 마지막 닫힌 봉 다음 분 τ 의 15분·1시간 σ̂(세션 HAR-S) + 세션 이름 + 꼬리표 표. «앞 1시간»·급변 경고는 없다(코인에서만 검정).
+pub fn session_out(b: &Bars, p: &CoinP, now_ms: i64) -> J {
+    // df.tail(9 × 1440) + 형성 중 봉 자리(빈 행) → 분 격자
+    let a = b.t.len().saturating_sub(9 * 1440);
+    let (t, c) = (&b.t[a..], &b.c[a..]);
+    let (m0, m1) = (t[0].div_euclid(MIN), t[t.len() - 1].div_euclid(MIN) + 1);
+    let n = (m1 - m0 + 1) as usize;
+    let mut cl = vec![NAN; n];
+    for (j, &tt) in t.iter().enumerate() {
+        cl[(tt.div_euclid(MIN) - m0) as usize] = c[j];
+    }
+    let lc: Vec<f64> = cl.iter().map(|x| x.ln()).collect();
+    let r2: Vec<f64> = (0..n).map(|i| if i == 0 { NAN } else { let r = lc[i] - lc[i - 1]; r * r }).collect();
+    let j = n - 1; // τ = 분 j 의 시작 · 피쳐 = 분 j−1
+    let mut f: HashMap<&str, f64> = HashMap::new();
+    for (nm, w) in SWIN {
+        let mean = crate::dir4h::roll_mean_pub(&r2, w, (w as f64 * 0.95) as usize);
+        let v = mean[j - 1].sqrt();
+        f.insert(nm, if v.is_nan() { NAN } else { v.max(1e-6) }.ln());
+    }
+    let tau = (j as i64 + m0) * 60;
+    let x = |h: f64| -> (Vec<f64>, usize) {
+        let (sess, oi, f60, l30) = clock(tau, h);
+        let mut v = vec![1.0, f["lrv15"], f["lrv60"], f["lrv1d"], f["lrv7d"]];
+        for k in 1..6 {
+            v.push((sess == k) as u8 as f64);
+        }
+        v.extend([oi, f60, l30]);
+        (v, sess)
+    };
+    // b0: 시간봉 종가(그 시의 59분 · NaN 은 뺌)의 로그수익 168개 std × √(H/60) → 분 격자로 앞 값 채움
+    let hidx: Vec<usize> = (0..n).filter(|&i| (i as i64 + m0 + 1) % 60 == 0 && !cl[i].is_nan()).collect();
+    let hl: Vec<f64> = hidx.iter().map(|&i| lc[i]).collect();
+    let hr: Vec<f64> = (0..hl.len()).map(|k| if k == 0 { NAN } else { hl[k] - hl[k - 1] }).collect();
+    let sd = roll_std(&hr, 168, 150);
+    let b0 = |h: f64| -> f64 {
+        let mut v = NAN;
+        for (k, &i) in hidx.iter().enumerate() {
+            if i > j - 1 {
+                break;
+            }
+            let y = sd[k] * (h / 60.0).sqrt();
+            if !y.is_nan() {
+                v = y; // reindex 뒤 ffill: NaN 은 앞 값으로
+            }
+        }
+        v
+    };
+    let dot = |x: &[f64], beta: &[f64]| x.iter().zip(beta).fold(0.0, |s, (a, b)| s + a * b); // ponytail: numpy 는 BLAS(1행 gemv) -- 끝자리
+    let (x15, sess) = x(15.0);
+    let (x60, _) = x(60.0);
+    let v15 = p.c15 * (2.0 * dot(&x15, &p.beta15)).exp();
+    let v60 = p.c60 * (2.0 * dot(&x60, &p.beta60)).exp();
+    let pc = |x: f64, m: f64| if x.is_finite() { J::F(x * m * 100.0) } else { J::Null };
+    let age = py_round((now_ms - b.t[b.t.len() - 1] - MIN) as f64 / 1000.0, 1);
+    let mut kv: Vec<(&'static str, J)> = vec![
+        ("ts", J::S(iso(tau * 1000))),
+        ("price", fin(b.c[b.c.len() - 1])),
+        ("sigma15_pct", pc(v15.sqrt(), 1.0)),
+        ("band80_pct", pc(v15.sqrt(), p.q80)),
+        ("band95_pct", pc(v15.sqrt(), p.q95)),
+        ("baseline7d_sigma15_pct", pc(b0(15.0) * p.cb0.sqrt(), 1.0)),
+        ("sigma60_pct", pc(v60.sqrt(), 1.0)),
+        ("usual60_pct", J::Null),
+        ("ratio60", J::Null),
+        ("state60", J::Null),
+        ("session", J::S(SESS[sess].into())),
+        ("alert", J::O(vec![("active", J::B(false)), ("minutes_ago", J::Null)])),
+        ("valid", J::B(v15.is_finite() && v60.is_finite())),
+        ("touch", J::A(p.touch.clone().unwrap_or_default().into_iter().map(J::F).collect())),
+        ("data_age_s", J::F(age)),
+    ];
+    if age > STALE_DATA_S {
+        kv.iter_mut().find(|x| x.0 == "valid").unwrap().1 = J::B(false);
+        kv.push(("error", J::S(format!("데이터 지연 {}초", format!("{age:.0}")))));
+    }
+    J::O(kv)
 }

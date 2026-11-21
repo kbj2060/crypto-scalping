@@ -155,6 +155,11 @@ fn roll_mean(x: &[f64], w: usize, minp: usize) -> Vec<f64> {
     out
 }
 
+#[doc(hidden)]
+pub fn roll_mean_pub(x: &[f64], w: usize, minp: usize) -> Vec<f64> {
+    roll_mean(x, w, minp)
+}
+
 /// rz(x, w, mp): (x − 중앙값) / ((q75 − q25)/1.349) · 창 = 한 칸 밀린 x · 폭 0 → NaN. 정렬된 창 하나로 셋을 같이 낸다.
 fn rz(x: &[f64], w: usize, mp: usize) -> Vec<f64> {
     let s = prep(&shift1(x));
