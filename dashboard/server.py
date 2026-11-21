@@ -1282,6 +1282,23 @@ def json_response(request: web.Request, payload: Any, etag: str) -> web.Response
 ASSET_FILES = ("app.js", "styles.css", "fp_daily.js", "liq_profile.js", "bubble_map.js")
 
 
+def asset_compress_ok(method: str, if_none_match: Any, if_modified_since: Any, path: Any) -> bool:
+    """2026-11-21 실서버: 본문이 없어야 하는 응답(304·HEAD)에 압축을 켜면 빈 zlib 흐름(deflate 8B·gzip 20B)이 길이 표시 없이
+    머리 뒤에 붙어 keep-alive 다음 응답 앞에 낀다. FileResponse 는 304 를 prepare 안에서 정해 미들웨어 시점 status 는 아직 200 --
+    aiohttp FileResponse._make_response 의 304 판정(ETag = mtime_ns-size 16진)을 그대로 미리 한다.
+    ponytail: 미들웨어 stat 과 prepare stat 사이에 파일이 바뀌면(배포 순간) 한 번 어긋날 수 있다 -- aiohttp 가 고치면 이 함수를 뺀다."""
+    if method == "HEAD":
+        return False
+    try:
+        st = os.stat(path)
+    except (OSError, TypeError):                 # FileResponse 가 아니면(path None) 예전처럼 켠다
+        return True
+    if if_none_match is not None:
+        etag = f"{st.st_mtime_ns:x}-{st.st_size:x}"
+        return not any(e.value in (etag, "*") for e in if_none_match)
+    return if_modified_since is None or st.st_mtime > if_modified_since.timestamp()
+
+
 def make_app() -> web.Application:
     @web.middleware
     async def static_asset_headers(
@@ -1298,7 +1315,9 @@ def make_app() -> web.Application:
             # no-cache 는 «캐시하지 마라»가 아니라 «쓰기 전에 물어봐라»다 -- 안 바뀌었으면
             # ETag 로 304(본문 0바이트)라 아끼는 건 조건부 요청 한 번뿐이고, 대가가 사고였다.
             response.headers["Cache-Control"] = "no-cache"
-            response.enable_compression()
+            if asset_compress_ok(request.method, request.if_none_match, request.if_modified_since,
+                                 getattr(response, "_path", None)):
+                response.enable_compression()
         elif asset_name.endswith(".ttf"):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         elif asset_name.endswith(".html"):
