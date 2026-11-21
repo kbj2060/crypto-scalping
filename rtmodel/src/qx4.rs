@@ -442,6 +442,50 @@ pub fn has_iv(coin: &str) -> bool {
     BETA_I.iter().any(|x| x.0 == coin)
 }
 
+/// 원본 DERIBIT_TRADES(연구 원천 history.deribit.com 과 같은 API · 키 없음).
+pub const DERIBIT_TRADES: &str = "https://www.deribit.com/api/v2/public/get_last_trades_by_currency_and_time";
+
+/// fetch_option_trades: [a, b) 옵션 체결 전부 -- 1000개씩 이어 받기 · 같은 trade_id 한 번 · 실패면 None.
+/// get(URL) = 원본 deribit_get(실패 None · 성공이면 json["result"]). URL 쿼리 = urlencode(dict 순서).
+pub fn option_trades(get: &mut dyn FnMut(&str) -> Option<Value>, a_ms: i64, b_ms: i64, coin: &str) -> Option<Vec<Value>> {
+    let (mut rows, mut seen, mut a) = (vec![], std::collections::HashSet::new(), a_ms);
+    while a < b_ms {
+        let res = get(&format!("{DERIBIT_TRADES}?currency={coin}&kind=option&start_timestamp={a}&end_timestamp={}&count=1000&sorting=asc", b_ms - 1))?;
+        let tr: Vec<Value> = res.get("trades").and_then(Value::as_array).cloned().unwrap_or_default();
+        for x in &tr {
+            if seen.insert(x["trade_id"].to_string()) {
+                rows.push(x.clone());
+            }
+        }
+        let more = res.get("has_more").is_some_and(|v| !(v.is_null() || v == &json!(false) || v == &json!(0)));
+        if !more || tr.is_empty() {
+            break;
+        }
+        let last = tr.last().unwrap()["timestamp"].as_i64()?;
+        a = if last > a { last } else { a + 1 };
+    }
+    Some(rows)
+}
+
+/// iv_now: 직전 정시 d(= 지금 − 60초를 시간 내림) 의 IV -- 칸이 비면 6시간 안 가장 최근 칸(연구 ffill(limit=6)).
+/// 시간 칸은 한 번 받으면 기억(iv_by_hour 제자리 갱신 · 찾으면 d−7h 보다 옛 칸을 지움). 반환 (iv, 그 칸 정시 ms) · 받기 실패면 (None, None).
+pub fn iv_now(iv_by_hour: &mut std::collections::BTreeMap<i64, Option<f64>>, now_ms: f64, get: &mut dyn FnMut(&str) -> Option<Value>, coin: &str) -> (Option<f64>, Option<i64>) {
+    const H1: i64 = 3_600_000;
+    let d = ((now_ms - 60_000.0) / H1 as f64).floor() as i64 * H1;
+    for k in 0..7 {
+        let h = d - k * H1;
+        if !iv_by_hour.contains_key(&h) {
+            let Some(tr) = option_trades(get, h - H1, h, coin) else { return (None, None) };
+            iv_by_hour.insert(h, atm_iv(&tr, h, coin));
+        }
+        if let Some(iv) = iv_by_hour[&h] {
+            iv_by_hour.retain(|x, _| *x >= d - 7 * H1);
+            return (Some(iv), Some(h));
+        }
+    }
+    (None, None)
+}
+
 #[doc(hidden)]
 pub fn debug_members(art: &Art, coin: &str, f: &HashMap<&'static str, Vec<f64>>, i: usize) -> [f64; 4] {
     let a = &art.coins[coin];

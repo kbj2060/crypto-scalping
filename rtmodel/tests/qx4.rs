@@ -127,3 +127,30 @@ fn qx4_refresh() {
     }
     println!("QX4 이어 받기 4회차 · 요청 {n} 개 원본 순서·쿼리 · 캐시 행 같음");
 }
+
+/// QX4I 옵션 ATM IV 받기(iv_now · fetch_option_trades) = 원본을 가짜 deribit_get 으로 부른 것과: 요청 URL 순서 · (iv, 정시) · 기억한 시간 칸. 정답지 = python rtmodel/tools/gen_qx4i_fixture.py
+#[test]
+fn qx4i_iv_now() {
+    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let fx: Value = rtmodel::read_json(&d.join("qx4i_fixture.json")).expect("python rtmodel/tools/gen_qx4i_fixture.py 먼저");
+    let mut state: HashMap<String, BTreeMap<i64, Option<f64>>> = HashMap::new();
+    let (mut n, mut nreq) = (0, 0);
+    for r in fx["runs"].as_array().unwrap() {
+        let (now, coin) = (r["now"].as_f64().unwrap(), r["coin"].as_str().unwrap());
+        let mut q: std::collections::VecDeque<&Value> = r["calls"].as_array().unwrap().iter().collect();
+        let mut get = |url: &str| -> Option<Value> {
+            let w = q.pop_front().expect("원본보다 요청이 많다");
+            assert_eq!(url, w[0].as_str().unwrap());
+            nreq += 1;
+            (!w[1].is_null()).then(|| w[1].clone())
+        };
+        let st = state.entry(coin.into()).or_default();
+        let (iv, hour) = iv_now(st, now, &mut get, coin);
+        assert!(q.is_empty(), "{now} {coin}: 원본 요청이 남았다");
+        assert_eq!(iv.map(f64::to_bits), r["iv"].as_f64().map(f64::to_bits), "{now} {coin} iv");
+        assert_eq!(hour, r["hour"].as_i64(), "{now} {coin} 정시");
+        assert_eq!(st.keys().copied().collect::<Vec<_>>(), r["keys"].as_array().unwrap().iter().map(|x| x.as_i64().unwrap()).collect::<Vec<_>>(), "{now} {coin} 기억 칸");
+        n += 1;
+    }
+    println!("QX4I iv_now: 회차 {n} · 요청 {nreq} · iv·정시·기억 칸 같음");
+}

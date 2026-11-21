@@ -134,7 +134,7 @@ stop_pids() {   # 감독 먼저, 그다음 워커 -- TERM 뒤 10초 안 죽으�
 
 check_ok_fresh() {
   [ -f "$SH/check.ok" ] || die "check.ok 없음 -- check 를 먼저(통과해야 go)" 1
-  local t; t=$(cut -d' ' -f1 "$SH/check.ok")
+  local t; t=$(head -n 1 "$SH/check.ok" | cut -d' ' -f1)   # 대조 줄이 여러 줄일 수 있다(깨진 줄 알림)
   [ $(( $(now_s) - t )) -le 7200 ] || die "check.ok 가 2시간 넘게 묵었다 -- check 다시" 1
 }
 record_check() {   # $1 = 대조기 종료코드 · 나머지 = 대조 한 줄
