@@ -177,6 +177,7 @@ pub struct CtxCollector {
     pub pending: Batch,
     flushed_at: f64,
     down_from: i64,
+    down_mono: f64,
     /// 붙어 있는가(구독을 보냈다). 🔧끊김이 «처음» 시작된 시각만 잡으려고.
     up: bool,
 }
@@ -200,7 +201,7 @@ impl CtxCollector {
             con.execute("INSERT INTO meta VALUES (?, ?)", params![k, v])?;
         }
         // down_from = 시작 시각(:273) · flushed_at = 수신 루프 시작(:282)
-        Ok(Some(Self { con, inst: inst.into(), pending: Batch::default(), flushed_at: now, down_from: ms(wall), up: false }))
+        Ok(Some(Self { con, inst: inst.into(), pending: Batch::default(), flushed_at: now, down_from: ms(wall), down_mono: now, up: false }))
     }
 
     /// 구독 글자(:268-271, json.dumps 기본 모양).
@@ -215,10 +216,11 @@ impl CtxCollector {
     }
 
     /// 구독을 보낸 직후(:288): 끊긴 구간(채널 "all"). 1.5초 미만은 안 적는다 · 실패해도 수집은 계속.
-    pub fn on_connect(&mut self, wall: f64) {
+    /// 🔧의도한 차이(SHADOW.md §11 #15): 1.5초 판단은 단조 시계(WSL 벽시계가 뒤로 뛰면 공백이 짧게 재여 빠졌다) · 적는 from/to 는 벽시계.
+    pub fn on_connect(&mut self, now: f64, wall: f64) {
         let to = ms(wall);
         self.up = true;
-        if to - self.down_from < 1500 {
+        if now - self.down_mono < 1.5 {
             return;
         }
         if let Err(e) = self.con.execute("INSERT INTO gaps VALUES (?,?,?,?)", params!["all", self.down_from, to, "reconnect"]) {
@@ -255,9 +257,10 @@ impl CtxCollector {
 
     /// 연결이 끝났다(시한·끊김·접속 실패·예외, :323-325): 보류분 쓰기 · 공백 시작은 **처음 끊긴 시각**.
     /// 🔧의도한 차이(SHADOW.md §11): 원본은 접속 실패마다 down_from 을 다시 잡아 공백이 «마지막 실패 ~ 붙은 시각»만 적힌다.
-    pub fn on_disconnect(&mut self, wall: f64) {
+    pub fn on_disconnect(&mut self, now: f64, wall: f64) {
         if self.up {
             self.down_from = ms(wall);
+            self.down_mono = now;
         }
         self.up = false;
         self.flush();
@@ -298,13 +301,13 @@ pub fn replay(runs: &[Value], path: &Path) -> rusqlite::Result<Vec<String>> {
         for e in run["events"].as_array().unwrap() {
             let (t, kind, body) = (e[0].as_f64().unwrap(), e[1].as_str().unwrap(), e[2].as_str().unwrap_or(""));
             match kind {
-                "o" => c.on_connect(t),
+                "o" => c.on_connect(t, t),
                 "t" => {
                     if c.on_text(t, t, body).is_err() {
-                        c.on_disconnect(t);
+                        c.on_disconnect(t, t);
                     }
                 }
-                _ => c.on_disconnect(t),
+                _ => c.on_disconnect(t, t),
             }
         }
     }

@@ -158,10 +158,10 @@ pub trait Okx {
     fn name(&self) -> String;
     fn subscribe(&self) -> String;
     /// 구독을 보낸 직후.
-    fn connected(&mut self, wall: f64);
+    fn connected(&mut self, now: f64, wall: f64);
     /// Err = 그 연결을 접는다.
     fn text(&mut self, now: f64, wall: f64, t: &str) -> Result<(), Reconnect>;
-    fn ended(&mut self, wall: f64);
+    fn ended(&mut self, now: f64, wall: f64);
 }
 
 impl Okx for okx::Collector {
@@ -172,13 +172,13 @@ impl Okx for okx::Collector {
     fn subscribe(&self) -> String {
         okx::Collector::subscribe(self)
     }
-    fn connected(&mut self, _wall: f64) {
+    fn connected(&mut self, _now: f64, _wall: f64) {
         self.on_connect()
     }
     fn text(&mut self, now: f64, _wall: f64, t: &str) -> Result<(), Reconnect> {
         self.on_text(now, t).map(drop)
     }
-    fn ended(&mut self, _wall: f64) {
+    fn ended(&mut self, _now: f64, _wall: f64) {
         self.on_disconnect(); // await asyncio.to_thread(store.write, buffer.take_closed()) (:391)
     }
 }
@@ -191,14 +191,14 @@ impl Okx for crate::okx_ctx::CtxCollector {
     fn subscribe(&self) -> String {
         crate::okx_ctx::CtxCollector::subscribe(self)
     }
-    fn connected(&mut self, wall: f64) {
-        self.on_connect(wall)
+    fn connected(&mut self, now: f64, wall: f64) {
+        self.on_connect(now, wall)
     }
     fn text(&mut self, now: f64, wall: f64, t: &str) -> Result<(), Reconnect> {
         self.on_text(now, wall, t)
     }
-    fn ended(&mut self, wall: f64) {
-        self.on_disconnect(wall)
+    fn ended(&mut self, now: f64, wall: f64) {
+        self.on_disconnect(now, wall)
     }
 }
 
@@ -215,7 +215,7 @@ pub async fn run_okx<C: Okx>(c: Rc<RefCell<C>>, url: String) {
                 if let Err(e) = tx.send(Message::text(sub)).await {
                     eprintln!("[{inst}] 연결 실패, 3초 뒤 재시도: 구독 {e}");
                 } else {
-                    c.borrow_mut().connected(crate::rest::wall_s());
+                    c.borrow_mut().connected(mono_s(), crate::rest::wall_s());
                     let mut last = tokio::time::Instant::now();
                     let mut pinged = false;
                     loop {
@@ -255,7 +255,7 @@ pub async fn run_okx<C: Okx>(c: Rc<RefCell<C>>, url: String) {
             Err(_) => eprintln!("[{inst}] 연결 실패, 3초 뒤 재시도: 접속 {}초 초과", CONNECT_TIMEOUT.as_secs()),
         }
         RECONNECTS.fetch_add(1, Relaxed);
-        c.borrow_mut().ended(crate::rest::wall_s());
+        c.borrow_mut().ended(mono_s(), crate::rest::wall_s());
         sleep(RECONNECT_WAIT).await;
     }
 }
@@ -417,7 +417,7 @@ pub async fn run_aio(url: String, name: String, mut s: crate::binance_ctx::Strea
         match timeout(CONNECT_TIMEOUT, connect_async(url.as_str())).await {
             Ok(Ok((ws, _))) => {
                 eprintln!("{name} ws connected");
-                s.connected(crate::rest::wall_s());
+                s.connected(mono_s(), crate::rest::wall_s());
                 let (mut tx, mut rx) = ws.split();
                 let mut last = tokio::time::Instant::now();
                 let mut pinged: Option<tokio::time::Instant> = None;
@@ -458,7 +458,7 @@ pub async fn run_aio(url: String, name: String, mut s: crate::binance_ctx::Strea
             Err(_) => eprintln!("{name} ws: 접속 {}초 초과", CONNECT_TIMEOUT.as_secs()),
         }
         RECONNECTS.fetch_add(1, Relaxed);
-        s.ended(crate::rest::wall_s());
+        s.ended(mono_s(), crate::rest::wall_s());
         sleep(RECONNECT_WAIT).await;
     }
 }

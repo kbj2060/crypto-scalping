@@ -322,17 +322,18 @@ pub struct Stream {
     /// gaps.symbol: 마크 = 소문자 종목 · 강제청산 = None(전 종목)
     pub sym: Option<String>,
     pub p: Shared,
-    down: Option<i64>,
+    down: Option<(i64, f64)>,
 }
 
 impl Stream {
     pub fn new(feed: Feed, sym: Option<String>, p: Shared) -> Self {
         Self { feed, sym, p, down: None }
     }
-    pub fn connected(&mut self, wall: f64) {
+    /// 🔧1.5초 판단은 단조 시계(SHADOW.md §11 #15) · 적는 시각은 벽시계.
+    pub fn connected(&mut self, mono: f64, wall: f64) {
         let now = ms(wall);
-        if let Some(d) = self.down.take() {
-            if now - d >= 1500 {
+        if let Some((d, dm)) = self.down.take() {
+            if mono - dm >= 1.5 {
                 self.p.lock().unwrap().gaps.push((self.sym.clone(), d, now, "reconnect"));
             }
         }
@@ -341,8 +342,8 @@ impl Stream {
         self.feed.on_text(&self.p, wall, t)
     }
     /// 끊김·접속 실패: 처음 끊긴 시각만 잡는다.
-    pub fn ended(&mut self, wall: f64) {
-        self.down.get_or_insert(ms(wall));
+    pub fn ended(&mut self, mono: f64, wall: f64) {
+        self.down.get_or_insert((ms(wall), mono));
     }
 }
 
@@ -364,21 +365,21 @@ pub fn replay_ws(feeds: &[Value], slow: &[String], p: &Shared) {
                 "o" => {
                     // 🔧고친 쪽은 원본이 끊었던 자리(깨진 JSON)에서 안 끊는다 -- 접속 사건이 연결 중에 오면 서버가 닫은 것으로(정답지도 같게)
                     if open {
-                        s.ended(prev);
+                        s.ended(prev, prev);
                     }
                     open = true;
-                    s.connected(t);
+                    s.connected(t, t);
                 }
                 "t" if open => {
                     if s.text(t, body).is_err() {
                         open = false;
-                        s.ended(t);
+                        s.ended(t, t);
                     }
                 }
                 "t" => {} // 원본이 끊은 뒤의 프레임(이 연결은 이미 접었다 -- 다음 'o' 까지 버린다)
                 _ => {
                     open = false;
-                    s.ended(t);
+                    s.ended(t, t);
                 }
             }
             prev = t;
