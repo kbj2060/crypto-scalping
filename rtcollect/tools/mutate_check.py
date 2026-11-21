@@ -243,9 +243,14 @@ M = [
     ("청산지도 유지증거금 더하기 → 빼기", "src/liqmap_scorer.rs", "1.0 - 1.0 / l + MMR", "1.0 - 1.0 / l - MMR", ["liqmap_parity"]),
     ("청산지도 적힌 기준도 다시", "src/liqmap_scorer.rs", "filter(|&i| !done.contains(&iso(k.t[i])))", "filter(|&i| i < usize::MAX)", ["liqmap_parity"]),
     ("청산지도 실측 창 끝 포함", "src/liqmap_scorer.rs", "x.ts >= t0 && x.ts < t1", "x.ts >= t0 && x.ts <= t1", ["liqmap_parity"]),
+    ("SOXL주말 펀딩 0건 = 0.0", "src/soxl_weekend.rs", "let mut sum = json!(0);", "let mut sum = json!(0.0);", ["soxl_weekend_parity"]),
+    ("SOXL주말 lag 안 적음", "src/soxl_weekend.rs", "            if lag != 0 {", "            if false {", ["soxl_weekend_parity"]),
+    ("SOXL주말 적힌 주말도 다시", "src/soxl_weekend.rs", "if done.contains(&iso_date(sat)) {", "if false {", ["soxl_weekend_parity"]),
+    ("SOXL주말 endTime 5분 전 → 그 시각", "src/soxl_weekend.rs", "interval=5m&endTime={}&limit=1\", t - 300_000))?;", "interval=5m&endTime={}&limit=1\", t))?;", ["soxl_weekend_parity"]),
+    ("SOXL주말 펀딩 시작 +1ms 안 함", "src/soxl_weekend.rs", "pt[0].1 + 1, pt[1].1))?;", "pt[0].1, pt[1].1))?;", ["soxl_weekend_parity"]),
     ("예약 cboe 요약기 실패도 저장으로", "src/cron.rs", "                    println!(\"{s} 실패 {e}\");\n                    saved.push(p);\n                    rc = 1;", "                    let _ = e;\n                    saved.push(p);", ["cron_parity"]),
 ]
-PARITY = ["tape_parity", "venue_parity", "rest_parity", "ctx_parity", "venue_rest_parity", "depth_parity", "raster_parity", "ob5m_parity", "iceberg_parity", "cron_parity", "cboe_summary_parity", "liqmap_parity"]
+PARITY = ["tape_parity", "venue_parity", "rest_parity", "ctx_parity", "venue_rest_parity", "depth_parity", "raster_parity", "ob5m_parity", "iceberg_parity", "cron_parity", "cboe_summary_parity", "liqmap_parity", "soxl_weekend_parity"]
 
 
 def digest() -> str:

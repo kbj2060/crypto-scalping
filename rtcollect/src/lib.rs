@@ -30,6 +30,7 @@ pub mod okx_ctx;
 pub mod raster;
 pub mod rest;
 pub mod rest_venue;
+pub mod soxl_weekend;
 pub mod store;
 pub mod tape;
 pub mod xyz;
@@ -192,12 +193,31 @@ pub(crate) fn py_dumps(v: &Value) -> String {
     dumps_sep(v, (",", ":"), true)
 }
 
+/// `py_dumps` 의 공개판(rtduck liq_tab -- `json.dumps(…, separators=(",", ":"))`).
+pub fn py_dumps_compact(v: &Value) -> String {
+    py_dumps(v)
+}
+
 /// 파이썬 `json.dumps(v)` 기본 모양(", " · ": ") -- 그 밖은 `py_dumps` 와 같다(rtduck 의 상태 JSON).
 pub fn py_dumps_default(v: &Value) -> String {
     dumps_sep(v, (", ", ": "), true)
 }
 
 /// 파이썬 `json.dumps(v, ensure_ascii=False)` -- 기본 모양 · 비 ASCII 글자는 그대로(제어 문자·따옴표·역빗금만 이스케이프).
+/// 파이썬 `gzip.open(dst, "wb", compresslevel=6)` + `shutil.copyfileobj` -- rtduck(래스터 보관 gzip 폴백)이 flate2 를 따로 두지 않으려고.
+pub fn gzip_file(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    let mut z = flate2::write::GzEncoder::new(std::fs::File::create(dst)?, flate2::Compression::new(6));
+    std::io::copy(&mut std::fs::File::open(src)?, &mut z)?;
+    z.finish()?.sync_all()
+}
+
+/// gzip 파일을 풀어 낸 바이트(여러 멤버면 이어서 -- 파이썬 gzip.open 과 같다).
+pub fn gunzip_file(p: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    let mut v = vec![];
+    std::io::Read::read_to_end(&mut flate2::read::MultiGzDecoder::new(std::fs::File::open(p)?), &mut v)?;
+    Ok(v)
+}
+
 pub fn py_dumps_default_utf8(v: &Value) -> String {
     dumps_sep(v, (", ", ": "), false)
 }

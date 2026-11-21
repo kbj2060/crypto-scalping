@@ -10,6 +10,11 @@
 //!               원본 파일 data/live/oi_lsratio.duckdb 는 RTDUCK_TAKEOVER=1 일 때만) · OI_ENABLE · OI_POLL_INTERVAL_SEC · OI_FETCH_LIMIT(원본과 같다)
 //!   🔴REST 는 RTDUCK_REST=1 일 때만 보낸다(기본 꺼짐 -- 꺼져 있으면 원천 다섯이 모두 실패한 것과 같아 아무것도 안 쓴다).
 //!   🔧밴 파일(RTCOLLECT_BAN_FILE 기본 data/live/binance_ban_until)을 지킨다: 밴 중이면 안 보내고 418·429 는 기록(원본은 모른다).
+//!   raster_archive 래스터 14일 보관(cron 매시 · 한 번 돌고 끝 -- 원본은 래스터 수집기 안에서 매시) · OF_ROOT(기본 data/live/rtcollect/orderflow/raster = Rust 래스터 그림자)
+//!               · OF_ARCHIVE_ROOT(기본 data/live/rtduck/orderflow/raster_archive) · OF_RETENTION_DAYS(14) · OF_ARCHIVE(1 -- 0 이면 지우기만) · OF_SYMBOLS(쉼표 · 기본 OF_ROOT 아래 폴더 전부)
+//!               🔴원본 폴더(data/live/orderflow/raster · …/raster_archive)는 RTDUCK_TAKEOVER=1 일 때만 -- 파이썬 래스터의 파일을 지운다
+//!   liq_tab     풋프린트 «청산» 탭(cron 매시 · 한 번) · LIQ_TAB_LIVE(기본 data/live/rtduck -- data/live 는 RTDUCK_TAKEOVER=1 일 때만) · LIQ_TAB_LAKE(data/lake 읽기만) ·
+//!               LIQ_TAB_HOT(data/hot 읽기만) · `--coin <코인>` · 🔴klines REST 는 RTDUCK_REST=1 일 때만(꺼지면 원본 LIQ_TAB_NO_REST 처럼 저장된 봉만)
 //!   RTDUCK_ONCE=1 = 기다리지 않고 한 바퀴만 돌고 끝(시험·손 확인용). RTDUCK_OI_BASE = REST 주소(시험 = 127.0.0.1 가짜 서버).
 use rtduck::oi;
 use std::path::PathBuf;
@@ -30,7 +35,9 @@ fn main() {
         "hl_trades" => run_hl_trades(),
         "hl_positions" => run_hl_positions(),
         "market_data" => run_market(),
-        k => die(2, &format!("모르는 종류 {k:?} -- oi_lsratio|hl_trades|hl_positions|market_data")),
+        "raster_archive" => run_raster_archive(),
+        "liq_tab" => run_liq_tab(),
+        k => die(2, &format!("모르는 종류 {k:?} -- oi_lsratio|hl_trades|hl_positions|market_data|raster_archive|liq_tab")),
     }
 }
 
@@ -297,4 +304,65 @@ fn run_market() {
         }
     });
     println!("종료 신호 -- 끝낸다");
+}
+
+fn run_raster_archive() {
+    let root = PathBuf::from(env_s("OF_ROOT", "data/live/rtcollect/orderflow/raster"));
+    let archive = PathBuf::from(env_s("OF_ARCHIVE_ROOT", "data/live/rtduck/orderflow/raster_archive"));
+    if (root.ends_with("data/live/orderflow/raster") || archive.ends_with("data/live/orderflow/raster_archive")) && env_s("RTDUCK_TAKEOVER", "") != "1" {
+        die(2, "🔴data/live/orderflow/raster(_archive) 는 파이썬 래스터의 폴더다 -- 전환 때만 RTDUCK_TAKEOVER=1");
+    }
+    let days: i64 = env_s("OF_RETENTION_DAYS", "14").parse().unwrap_or_else(|_| die(2, "OF_RETENTION_DAYS 는 정수"));
+    let do_archive = env_s("OF_ARCHIVE", "1") != "0";
+    std::fs::create_dir_all(&archive).unwrap_or_else(|e| die(1, &format!("{}: {e}", archive.display())));
+    let archive = archive.canonicalize().unwrap_or_else(|e| die(1, &format!("{}: {e}", archive.display()))); // 뷰 글롭은 절대 경로여야 다른 폴더에서 읽힌다(원본도 절대)
+    let syms: Vec<String> = match std::env::var("OF_SYMBOLS") {
+        Ok(v) => v.split(',').map(|s| s.trim().to_uppercase()).filter(|s| !s.is_empty()).collect(),
+        Err(_) => {
+            let mut v: Vec<String> = std::fs::read_dir(&root).map(|r| r.filter_map(|e| e.ok()).filter(|e| e.path().is_dir()).map(|e| e.file_name().to_string_lossy().to_string()).collect()).unwrap_or_default();
+            v.sort();
+            v
+        }
+    };
+    let now = rtcollect::rest::wall_s();
+    let mut view_done = false;
+    for s in &syms {
+        for l in rtduck::raster_archive::purge_old(&root, &archive, s, now, days, do_archive, &mut view_done) {
+            println!("{s}: {l}");
+        }
+    }
+}
+
+fn run_liq_tab() {
+    let live = PathBuf::from(env_s("LIQ_TAB_LIVE", "data/live/rtduck"));
+    if live.ends_with("data/live") && env_s("RTDUCK_TAKEOVER", "") != "1" {
+        die(2, "🔴data/live 의 liq_tab_* 는 파이썬 청산 탭의 파일이다 -- 전환 때만 RTDUCK_TAKEOVER=1");
+    }
+    std::fs::create_dir_all(&live).unwrap_or_else(|e| die(1, &format!("{}: {e}", live.display())));
+    let (lake, hot) = (PathBuf::from(env_s("LIQ_TAB_LAKE", "data/lake")), PathBuf::from(env_s("LIQ_TAB_HOT", "data/hot")));
+    let rest = env_s("RTDUCK_REST", "") == "1";
+    let no_rest = !rest || !env_s("LIQ_TAB_NO_REST", "").is_empty();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let coin = args.iter().position(|a| a == "--coin").and_then(|i| args.get(i + 1)).cloned();
+    let ban = PathBuf::from(env_s("RTCOLLECT_BAN_FILE", "data/live/binance_ban_until"));
+    let base = rtcollect::cron::base("RTDUCK_BINANCE_BASE", rtcollect::cboe_summary::BINANCE); // 시험(RTCOLLECT_TEST=1)이면 127.0.0.1 만
+    let agent = rtcollect::rest::agent(Duration::from_secs(20)); // urlopen(timeout=20)
+    let mut get = |u: &str| -> Result<Vec<u8>, String> {
+        let now = rtcollect::rest::wall_s();
+        if rtcollect::rest::ban_left(&ban, now) > 0.0 {
+            return Err("binance IP ban".into());
+        }
+        let u = u.replacen(rtcollect::cboe_summary::BINANCE, &base, 1);
+        let mut r = agent.get(&u).header("User-Agent", "liq-tab").call().map_err(|e| format!("URLError({e})"))?;
+        let st = r.status().as_u16();
+        let body = r.body_mut().read_to_string().map_err(|e| e.to_string())?;
+        rtcollect::rest::ban_note(&ban, st, &body, None, now);
+        if st >= 400 { Err(format!("HTTPError({st})")) } else { Ok(body.into_bytes()) }
+    };
+    let cx = rtduck::liq_tab::Ctx { lake: &lake, live: &live, hot: &hot, no_rest };
+    let now_ms = (rtcollect::rest::wall_s() * 1000.0) as i64;
+    match rtduck::liq_tab::run(&cx, coin.as_deref(), now_ms, &mut get, &mut |s| std::thread::sleep(Duration::from_secs_f64(s))) {
+        Ok(log) => log.iter().for_each(|l| println!("{l}")),
+        Err(e) => die(1, &e),
+    }
 }
