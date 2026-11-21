@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
+import time
 import sys
 import tempfile
 from collections import Counter
@@ -58,6 +59,7 @@ TABLES = {  # 표 → (시각 열, 시각 단위 ms 인가, 열쇠 열 또는 No
 # 🔧의도한 차이(rtcollect/SHADOW.md §11 -- 결함은 Rust 에서만 고쳤다): 이 표들의 «Rust에만» 행은 원본이 잃는 행일 수 있다 -- 불일치로 세지 않고 따로 적는다.
 #   «파이썬에만»·값 불일치는 그대로 실패다(고친 Rust 가 원본보다 적게 쓸 까닭은 없다).
 INTENDED_EXTRA = {
+    "bars": "Rust 는 기동 때 depthdiff 시 파일(최대 26시간)을 다시 읽어 파이썬이 재시작 틈으로 못 쓴 봉을 채운다",
     "bybit_liquidations": "원본은 바인딩 못 하는 행 하나로 재시작까지 쓰기가 멈춘다",
     "bybit_oi": "원본은 못 읽는 tickers 칸 뒤 OI 행을 잃는다",
     "bybit_mark": "원본은 못 읽는 tickers 칸이 그 종목 맥락을 재연결 반복으로 막는다",
@@ -98,11 +100,20 @@ def down_intervals(times, starts: list[int], margin: int) -> list[tuple[float, f
     """그림자 Rust 가 꺼져 있던 구간(초): 감독 로그의 «SUPERVISOR starting» 시각 T 마다 [T 전 Rust 마지막 자료, T 뒤 Rust 첫 자료] ± margin.
     times(T) = (T 전 마지막 초 또는 None, T 뒤 첫 초 또는 None). 첫 기동 전은 -inf 부터(그림자가 뜨기 전 자료는 견주지 않는다)."""
     out = []
-    for t in sorted(starts):
+    for i, t in enumerate(sorted(starts)):
         a, b = times(t)
-        out.append((a - margin if a is not None else float("-inf"), b + margin if b is not None else float("inf")))
+        if i == 0:   # 첫 기동: 그 앞은 전부 -- 구독 때 받는 «지난 사건»(OKX 청산 등)의 옛 ts 가 «T 전 마지막 자료»로 잡히지 않게
+            a = None
+        # ponytail: 꺼진 시간은 T 앞뒤 CAP 초 안으로 자른다(드문 종목 하나 때문에 몇 시간을 빼지 않게) -- 재기동이 CAP 보다 길면 늘린다
+        a = t - CAP if i and (a is None or a < t - CAP) else a
+        b = t + CAP if b is None or b > t + CAP else b
+        out.append((a - margin if a is not None else float("-inf"), b + margin))
+    return merge(out)
+
+
+def merge(out: list) -> list:
     merged: list = []
-    for a, b in out:
+    for a, b in sorted(out):
         if merged and a <= merged[-1][1]:
             merged[-1] = (merged[-1][0], max(merged[-1][1], b))
         else:
@@ -110,11 +121,34 @@ def down_intervals(times, starts: list[int], margin: int) -> list[tuple[float, f
     return merged
 
 
+CAP = 300
+
+
 def down_note(d: list, n: int) -> str:
     if not d:
         return ""
     fin = sum(b - a for a, b in d if a > float("-inf") and b < float("inf"))
     return f" · 그림자 꺼진 구간 {len(d)}개(첫 기동 전 포함 · 유한 합 {fin:.0f}초)에서 뺀 행 {n:,}"
+
+
+def sym_down(con, t: str, tcol: str, ms: bool, symcol, starts: list, margin: int) -> dict:
+    """표 하나의 꺼진 구간을 종목마다({종목: 구간}, 종목 열이 없으면 {None: …}). 종목마다 «Rust 첫 자료 전»(그 종목을 아직 안 뜨던 때)도 뺀다
+    -- 종목마다 다시 붙는 때가 다르다(Bybit tickers · HL 코인별 프로세스)."""
+    f = 1000 if ms else 1
+    g, sel = (f" GROUP BY {symcol}", f"{symcol}, ") if symcol else ("", "NULL, ")
+    first = dict(con.execute(f"SELECT {sel}min({tcol}) FROM {t}{g}").fetchall())
+    before, after = {}, {}
+    for T in starts:
+        before[T] = dict(con.execute(f"SELECT {sel}max({tcol}) FROM {t} WHERE {tcol} < ?{g}", [T * f]).fetchall())
+        after[T] = dict(con.execute(f"SELECT {sel}min({tcol}) FROM {t} WHERE {tcol} >= ?{g}", [T * f]).fetchall())
+    out = {}
+    for sym, f0 in first.items():
+        if f0 is None:
+            continue
+        d = down_intervals(lambda T: (None if before[T].get(sym) is None else before[T][sym] // f,
+                                      None if after[T].get(sym) is None else after[T][sym] // f), starts, margin) if starts else []
+        out[sym] = merge(d + [(float("-inf"), f0 // f + (margin if starts else 0))])   # 그 종목 Rust 첫 자료 전
+    return out
 
 
 def sql_times(con, starts_tables):
@@ -164,7 +198,7 @@ def span(con, t: str, tcol: str, ms: bool) -> tuple[int, int] | None:
     return (lo // 1000, hi // 1000) if ms else (lo, hi)
 
 
-def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, window: int, show: int, excl: dict, down: list = ()) -> str:
+def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, window: int, show: int, excl: dict, starts=()) -> str:
     tcol, ms, key, drop = TABLES[t]
     a, b = span(py, t, tcol, ms), span(rs, t, tcol, ms)
     if not a or not b:
@@ -181,18 +215,29 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
     allsym = excl.get(None, set())
     n_cmp = n_bad = only_py = only_rs = n_down = n_warm = 0
     skipped: set = set()
-    wi = names.index("warm") if "warm" in names else None   # 준비 구간 봉(warm=1)은 한쪽이라도 그러면 견주지 않는다(사슬 시작에 달렸다)
+    down = sym_down(rs, t, tcol, ms, SYM_COL.get(t), list(starts), margin)
+    wi = names.index("warm") if "warm" in names else None
+    knames = [names[i] for i in keepcols]
+    # 호가 깊이 10열 원값 = 원본이 BLAS 내적(서버 OpenBLAS) -- 끝자리가 기계·합 차례마다 다르다(ob5m_parity 930칸 1e-12 안) → 상대 1e-9 안이면 같음
+    rel = 1e-9 if "chain_age_s" in names else 0.0
+    worst = 0.0
+    po_min: Counter = Counter()
+
+    def same(x, y) -> bool:
+        if rel and isinstance(x, float) and isinstance(y, float):
+            return x == y or abs(x - y) <= rel * max(abs(x), abs(y))
+        return x == y   # 준비 구간 봉(warm=1)은 한쪽이라도 그러면 견주지 않는다(사슬 시작에 달렸다)
     first: list = []
     carry: tuple = (Counter(), Counter())
 
     def keep(r) -> bool:
         nonlocal n_down
         sec = r[ti] // 1000 if ms else r[ti]
-        if any(a <= sec < b for a, b in down):
+        sym = r[si] if si is not None else None
+        if any(a <= sec < b for a, b in down.get(sym, ())):
             n_down += 1
             return False
         m = sec // 60
-        sym = r[si] if si is not None else None
         if m in allsym or m in excl.get(sym, ()):
             skipped.add((sym, m))
             return False
@@ -211,15 +256,20 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
                 wp, wr = {tuple(r[i] for i in kidx) for r in rp if r[wi] == 1}, {tuple(r[i] for i in kidx) for r in rr if r[wi] == 1}
                 n_warm += len(wp | wr)
                 rp, rr = [r for r in rp if tuple(r[i] for i in kidx) not in wp | wr], [r for r in rr if tuple(r[i] for i in kidx) not in wp | wr]
+            tp_ = {tuple(r[i] for i in kidx): (r[ti] // 1000 if ms else r[ti]) for r in rp}
             dp = {tuple(r[i] for i in kidx): tuple(r[i] for i in keepcols) for r in rp}
             dr = {tuple(r[i] for i in kidx): tuple(r[i] for i in keepcols) for r in rr}
             for k in dp.keys() & dr.keys():
                 n_cmp += 1
-                if dp[k] != dr[k]:
+                diff = [(kn, x, y) for kn, x, y in zip(knames, dp[k], dr[k]) if not same(x, y)]
+                if diff:
                     n_bad += 1
                     if len(first) < show:
-                        first.append(f"다름 {k}: 파이썬 {dp[k]} · Rust {dr[k]}")
+                        first.append(f"다름 {k}: " + " · ".join(f"{kn} 파이썬 {x} / Rust {y}" for kn, x, y in diff[:4]) + (f" … 외 {len(diff) - 4}칸" if len(diff) > 4 else ""))
+                elif rel and dp[k] != dr[k]:
+                    worst = max(worst, max(abs(x - y) / max(abs(x), abs(y)) for x, y in zip(dp[k], dr[k]) if isinstance(x, float) and isinstance(y, float) and x != y))
             po, ro_ = dp.keys() - dr.keys(), dr.keys() - dp.keys()
+            po_min.update((tp_[k] // 60) * 60 for k in po)
         else:
             # 행 묶음: 못 맞춘 행은 다음 창으로 넘긴다(창 경계에 걸린 행 · 받은 시각이 한쪽만 늦은 행)
             cp, cr = Counter(rp) + carry[0], Counter(rr) + carry[1]
@@ -237,13 +287,16 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
             for k in sorted(extra, key=repr)[: max(0, show - len(first))]:
                 first.append(f"{tag} {k}")
     rs_note = f"(의도한 차이 후보 -- {INTENDED_EXTRA[t]})" if t in INTENDED_EXTRA and only_rs else ""
+    hot = (" · 파이썬에만 많은 분(서버 시각) " + ", ".join(f"{time.strftime('%F %R', time.localtime(m))}({c})" for m, c in po_min.most_common(3))) if po_min else ""
     bad = n_bad + only_py + (0 if t in INTENDED_EXTRA else only_rs)
     if t == "hl_xyz_ctx_1s" and only_py + only_rs <= 0.005 * n_cmp:   # 받은 초가 1칸 밀린 합침 -- §5 의 0.5% 기준
         bad = n_bad
     TALLY[0] += n_cmp
     TALLY[1] += bad
     line = (f"{t}: 비교 {n_cmp:,}행 · 불일치 {n_bad:,} · 파이썬에만 {only_py:,} · Rust에만 {only_rs:,}{rs_note} · 범위 [{s0}, {s1}) 초 · "
-            f"뺀 (종목,분) {len(skipped):,}{down_note(down, n_down)}{f' · 준비 구간(warm) 봉 {n_warm:,} 뺌' if n_warm else ''}")
+            f"뺀 (종목,분) {len(skipped):,}{down_note(max(down.values(), key=len, default=[]), n_down)}"
+            f"{f' · 끝자리 차(상대 1e-9 안) 최대 {worst:.1e}' if worst else ''}"
+            f"{hot}{f' · 준비 구간(warm) 봉 {n_warm:,} 뺌' if n_warm else ''}")
     return line + "".join(f"\n    {x}" for x in first)
 
 
@@ -252,8 +305,7 @@ def run(py_path: Path, rs_path: Path, lo=None, hi=None, margin=5, window=3600, s
     try:
         excl = excluded_minutes(py, rs, margin)
         common = sorted(tables(py) & tables(rs) & TABLES.keys())
-        down = down_intervals(sql_times(rs, [(t, TABLES[t][0], TABLES[t][1]) for t in common]), list(starts), margin) if starts else []
-        return [compare_table(py, rs, t, lo, hi, margin, window, show, excl, down) for t in common] or ["비교할 표가 없다"]
+        return [compare_table(py, rs, t, lo, hi, margin, window, show, excl, starts) for t in common] or ["비교할 표가 없다"]
     finally:
         py.close()
         rs.close()
@@ -313,8 +365,10 @@ def compare_depth(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", start
         sa, sb = sum(x.startswith('{"_snapshot":{') for x in a[h]), sum(x.startswith('{"_snapshot":{') for x in b[h])
         TALLY[0] += sum((fa & fb).values())
         TALLY[1] += sum((fa - fb).values()) + sum((fb - fa).values())
+        pt = sorted(t for x in (fa - fb) if (t := sec(x)) is not None)
+        when = f" · 파이썬에만 프레임 시각(서버) {time.strftime('%T', time.localtime(pt[0]))}~{time.strftime('%T', time.localtime(pt[-1]))}" if pt else ""
         res.append(f"depth {h}: 같은 프레임 {sum((fa & fb).values()):,} · 파이썬에만 {sum((fa - fb).values()):,} · Rust에만 {sum((fb - fa).values()):,} · "
-                   f"_gap 파이썬 {ga}·Rust {gb} · 스냅숏 있음 파이썬 {sa}·Rust {sb}")
+                   f"_gap 파이썬 {ga}·Rust {gb} · 스냅숏 있음 파이썬 {sa}·Rust {sb}{when}")
     return (res + [f"depth:{down_note(down, n_down)}"] if down else res) or ["depth: 두 쪽에 같은 시 파일이 없다"]
 
 
@@ -463,13 +517,13 @@ def selftest() -> None:
             con = sqlite3.connect(f)
             con.execute("CREATE TABLE bars(t INTEGER PRIMARY KEY, dimb1 REAL, chain_age_s REAL, warm REAL, written_ms INTEGER)")
             # 봉 0 = Rust 만 준비 구간(warm=1, 값 다름) → 뺀다 · 봉 2 값 다름 · chain_age_s 는 두 쪽이 늘 다르다(안 본다)
-            con.executemany("INSERT INTO bars VALUES (?,?,?,?,?)", [(1000 * (T + 300 * k), 0.5 if (f == r and k in (0, 2)) else 0.25,
+            con.executemany("INSERT INTO bars VALUES (?,?,?,?,?)", [(1000 * (T + 300 * k), 0.5 if (f == r and k in (0, 2)) else (0.25 + 1e-14 if (f == r and k == 3) else 0.25),
                                                                    300.0 * k + (99 if f == r else 7), 1.0 if (f == r and k == 0) else 0.0, w) for k in range(5)])
             con.commit()
             con.close()
         bars_line = next(x for x in run(p, r) if x.startswith("bars"))
         # 봉 1·2·3 견줌(봉 4 = 끝 10초 안) · 봉 0 = warm
-        assert "비교 3행 · 불일치 1 · 파이썬에만 0 · Rust에만 0" in bars_line and "준비 구간(warm) 봉 1 뺌" in bars_line, bars_line
+        assert "비교 3행 · 불일치 1 · 파이썬에만 0 · Rust에만 0" in bars_line and "준비 구간(warm) 봉 1 뺌" in bars_line and "끝자리 차" in bars_line, bars_line   # 봉 3 = 끝자리만 다름
         # 그림자 꺼진 구간: Rust 가 T+400~T+560 에 비었고(지움) 감독 로그 기동 T+500 → 그 사이 파이썬에만 행은 뺀다 · T+700 의 파이썬에만 행은 그대로 실패
         con = sqlite3.connect(r)
         con.execute("DELETE FROM trade_tape_1s WHERE ts_sec BETWEEN ? AND ?", [T + 400, T + 560])   # 꺼진 프로세스는 어느 표에도 안 쓴다
@@ -482,8 +536,8 @@ def selftest() -> None:
         con.commit()
         con.close()
         TALLY[:] = [0, 0]
-        dl = next(x for x in run(p, r, window=250, show=5, starts=[T + 500]) if x.startswith("trade_tape_1s"))
-        assert "그림자 꺼진 구간 1개" in dl and "Rust에만 2" in dl and "파이썬에만 0" in dl, dl   # T+700 은 Rust 에만(파이썬에서 지움) + 분 2 의 그것
+        dl = next(x for x in run(p, r, window=250, show=5, starts=[T - 100, T + 500]) if x.startswith("trade_tape_1s"))   # 첫 기동(자료 전) · 재기동
+        assert "그림자 꺼진 구간 2개" in dl and "유한 합 172초" in dl and "Rust에만 2" in dl and "파이썬에만 0" in dl, dl   # T+700 은 Rust 에만(파이썬에서 지움) + 분 2 의 그것
         dl0 = next(x for x in run(p, r, window=250, show=5) if x.startswith("trade_tape_1s"))
         assert "파이썬에만 " in dl0 and "파이썬에만 0" not in dl0, dl0   # 기동 시각을 안 주면 빈 구간이 «파이썬에만»
         # depth: Rust 가 T+100~T+130 초에 프레임이 없고 기동 T+120 → 그 사이 파이썬 프레임은 뺀다 · 바깥의 파이썬에만 프레임은 실패
@@ -493,8 +547,8 @@ def selftest() -> None:
             (Path(d) / side).mkdir()
             fr = [f'{{"e":"depthUpdate","E":{1000 * (T + i)},"u":{i}}}' for i in range(200) if not (side == "dr" and (100 <= i <= 130 or i == 170))]
             (Path(d) / side / "2026-11-21T07.jsonl.gz").write_bytes(gzip.compress(("\n".join(['{"_snapshot":null}'] + fr) + "\n").encode()))
-        dd = compare_depth(Path(d) / "dp", Path(d) / "dr", starts=[T + 120])
-        assert dd[0].startswith("depth 2026-11-21T07: 같은 프레임 157 · 파이썬에만 1 · Rust에만 0") and "뺀 행 53" in dd[1], dd   # 뺀 구간 = [99-5, 131+5) 초 · 파이썬 42 + Rust 11
+        dd = compare_depth(Path(d) / "dp", Path(d) / "dr", starts=[T - 50, T + 120])
+        assert dd[0].startswith("depth 2026-11-21T07: 같은 프레임 152 · 파이썬에만 1 · Rust에만 0") and "뺀 행 63" in dd[1], dd   # 뺀 구간 = 첫 기동 전(~T+5) + [99-5, 131+5) 초
         # raster: 머리 n 을 읽는다 · mid ±20칸만 같으면 통과 쪽
         def f32(path, vals):
             n = 60

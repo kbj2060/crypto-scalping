@@ -8,16 +8,20 @@
 #      (예약): liq_tab seal    · 안 다룸: hl_bt(서버 파이썬 전체 모드가 hl_ctx 와 한 파일 -- 묶음 넘기기 다음) · hl_positions(대조 방법 없음) · news·treasury_futures·macro_5m(그림자 없음) · liqmap_scorer·soxl_weekend·cboe_chain(전진 장부 -- 손으로)
 # 죽이는 것: 명령줄 인자가 그 종류의 러너 파일로 끝나고 environ 의 종목이 맞는 프로세스와 그 부모 _supervise.sh 뿐(PID 마다 /proc/<pid>/cmdline 다시 확인 · 이름으로 한꺼번에 안 죽인다).
 #   SIGTERM 뒤 기다렸다가 살아 있으면 보고만 하고 멈춘다(그때는 `back` 으로 되돌린다). 대시보드·감시·주문은 러너가 달라 걸리지 않는다(걸리면 멈춘다).
-# 바꿔 끼우기(시험용): CRONTAB_CMD(기본 crontab) · TAKEOVER_ROOT · WATCH_S(60) · TERM_WAIT_S(30) · CHECK_PY · RTCOLLECT_BIN · RTDUCK_BIN
+# 바꿔 끼우기(시험용): CRONTAB_CMD(기본 crontab) · TAKEOVER_ROOT · WATCH_S(60) · TERM_WAIT_S(120 -- 체결 테이프류는 SIGTERM 뒤 마지막 묶음을 쓰느라 30초를 넘긴다) · CHECK_PY · RTCOLLECT_BIN · RTDUCK_BIN
 set -uo pipefail
 TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="${TAKEOVER_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT" || exit 1
 MODE="${1:-}"; KIND="${2:-}"; ARG="${3:-}"
 CT="${CRONTAB_CMD:-crontab}"
-WATCH_S="${WATCH_S:-60}"; TERM_WAIT_S="${TERM_WAIT_S:-30}"
+WATCH_S="${WATCH_S:-60}"; TERM_WAIT_S="${TERM_WAIT_S:-120}"; STAGE=0
 PYC="${CHECK_PY:-$HOME/miniconda3/envs/quant_ai/bin/python}"; [ -x "$PYC" ] || PYC=python3
-die() { echo "🔴 $*" >&2; exit 1; }
+die() { # crontab 을 바꾼 뒤(STAGE 2)의 실패는 그 자리에서 되돌린다 -- 어떤 길로도 «쓰는 프로세스 0» 으로 끝나지 않게
+  echo "🔴 $*" >&2
+  [ "$STAGE" -ge 2 ] && rollback "$*"
+  exit 1
+}
 nrm() { echo "$1" | tr '[:lower:]' '[:upper:]' | tr -d ' '; }
 envof() { tr '\0' '\n' 2>/dev/null < "/proc/$1/environ" | grep "^$2=" | head -1 | cut -d= -f2-; }
 argv() { tr '\0' '\n' 2>/dev/null < "/proc/$1/cmdline"; }
@@ -170,17 +174,80 @@ rs_procs() { # shadow|takeover [any]
     echo "$pid"
   done
 }
-stop() { # stop <수집기 pid> <이름> -- 감독(_supervise.sh 부모) → 수집기 순 · 죽이기 직전 명령줄을 다시 본다
-  local c="$1" s; s="$(ppid_of "$c")"
+# 끈 프로세스를 그대로 다시 띄우려고 argv·environ·cwd 를 메모리에만 둔다(디스크에 안 적는다 -- environ 에 비밀 값이 있을 수 있다)
+SV_NAME=(); SV_CWD=(); SV_ARGV=(); SV_ENV=(); SV_SUP=(); SV_COLL=()
+save() { # save <다시 띄울 pid(감독 또는 수집기)> <수집기 pid> <이름>
+  SV_NAME+=("$3"); SV_CWD+=("$(readlink "/proc/$1/cwd")"); SV_ARGV+=("$(argv "$1")")
+  SV_ENV+=("$(tr '\0' '\n' 2>/dev/null < "/proc/$1/environ" | grep -E '^[A-Za-z_][A-Za-z0-9_]*=')"); SV_SUP+=("$1"); SV_COLL+=("$2")
+}
+relaunch() { # relaunch <번호> -- 끈 그대로(같은 argv·environ·cwd)
+  local i="$1" a e
+  mapfile -t a <<< "${SV_ARGV[$i]}"; mapfile -t e <<< "${SV_ENV[$i]}"
+  ( cd "${SV_CWD[$i]}" && exec env -i "${e[@]}" setsid nohup "${a[@]}" > /dev/null 2>&1 < /dev/null ) &
+  echo "  다시 띄움: ${SV_NAME[$i]} -- ${a[*]:0:4} …"
+}
+stop() { # stop <수집기 pid> <이름> [nosave] -- 감독(_supervise.sh 부모) → 수집기 순 · 죽이기 직전 명령줄을 다시 본다 · 실패면 1(감독)·2(수집기)
+  local c="$1" s m0 m1 k; s="$(ppid_of "$c")"
   argv "$c" | grep -qE 'server\.py|trading_bot|rtorder|ops_watchdog|rtserve' && die "pid $c 는 대시보드·주문·감시로 보인다 -- 멈춤"
   if [ -n "$s" ] && [ "$s" != 1 ] && is_sup "$s"; then
+    [ "${3:-}" = nosave ] || save "$s" "$c" "$2 감독"
     kill -TERM "$s" 2>/dev/null; for _ in $(seq 50); do gone "$s" && break; sleep 0.2; done
-    gone "$s" || die "$2 감독 pid $s 가 SIGTERM 10초 뒤에도 산다 -- 멈춤(되돌리기: back)"
+    gone "$s" || { echo "  🔴$2 감독 pid $s 가 SIGTERM 10초 뒤에도 산다"; return 1; }
     echo "  끔: $2 감독 pid $s"
-  else echo "  ⚠️ $2 pid $c 의 부모($s)가 _supervise.sh 가 아니다 -- 수집기만 끈다"; fi
-  kill -TERM "$c" 2>/dev/null; for _ in $(seq $((TERM_WAIT_S * 5))); do gone "$c" && break; sleep 0.2; done
-  gone "$c" || die "$2 수집기 pid $c 가 SIGTERM ${TERM_WAIT_S}초 뒤에도 산다 -- 멈춤(되돌리기: back)"
+  else
+    echo "  ⚠️ $2 pid $c 의 부모($s)가 _supervise.sh 가 아니다 -- 수집기만 끈다"
+    [ "${3:-}" = nosave ] || save "$c" "$c" "$2 수집기"
+  fi
+  kill -TERM "$c" 2>/dev/null
+  m0="$(mt)"
+  for k in $(seq $((TERM_WAIT_S * 5))); do
+    gone "$c" && break
+    sleep 0.2
+    if [ $((k % 50)) = 0 ]; then m1="$(mt)"; echo "  기다림 $((k / 5))초: $2 수집기 pid $c 살아 있음 · 파일 mtime $([ "${m1:-0}" -gt "${m0:-0}" ] && echo 전진 || echo 멈춤)(마지막 묶음 쓰는 중이면 전진)"; m0="$m1"; fi
+  done
+  gone "$c" || { echo "  🔴$2 수집기 pid $c 가 SIGTERM ${TERM_WAIT_S}초 뒤에도 산다(감독은 이미 꺼짐)"; return 2; }
   echo "  끔: $2 수집기 pid $c"
+}
+writers() { # 끝날 때마다 찍는다 -- 0 이면 종료코드 9
+  local np nr ns
+  np="$(py_procs | grep -c .)"; nr="$(rs_procs takeover | grep -c .)"; ns="$(rs_procs shadow | grep -c .)"
+  echo "지금 쓰는 프로세스($TAG): 파이썬 $np · Rust(진짜 경로) $nr · 그림자 $ns"
+  if [ "$CRON" = 0 ] && [ $((np + nr)) = 0 ]; then
+    echo "████████████████████████████████████████████████████████████"
+    echo "██  🔴🔴 $TAG 를 쓰는 프로세스가 0 개다 -- 지금 자료가 빈다  ██"
+    echo "██  손으로: bash rtcollect/tools/takeover.sh back $KIND         ██"
+    echo "████████████████████████████████████████████████████████████"
+    return 9
+  fi
+}
+cron_back() { # cron_back <태그> -- 그 표지가 바꾼 줄만 되돌린다(더한 Rust 줄 = 끝 표지 지움 · 주석 줄 = 앞 표지 풂)
+  local cur new nb na
+  cur="$($CT -l 2>/dev/null)"
+  new="$(printf '%s\n' "$cur" | grep -vE " #takeover:$1\$" | sed "s|^#takeover:$1 ||")"
+  nb="$(printf '%s\n' "$cur" | grep -cE "^#takeover:$1 ")"; na="$(printf '%s\n' "$cur" | grep -cE " #takeover:$1\$")"
+  cron_apply "$new" $(( $(printf '%s\n' "$cur" | wc -l) - na ))
+  echo "  crontab: 주석 푼 줄 $nb · 지운 Rust 줄 $na"
+  CRON_RESTORED="$cur"   # 되돌리기 전 내용(back 이 파이썬 줄을 다시 띄울 때 쓴다)
+}
+rollback() {
+  STAGE=0   # 되돌리는 동안의 실패는 다시 되돌리지 않는다
+  echo "🔴 중간 실패($1) -- 스스로 되돌린다"
+  local p i c
+  for p in $(rs_procs takeover); do stop "$p" "Rust($RK)" nosave; done
+  cron_back "$TAG"
+  manifest back
+  for i in "${!SV_NAME[@]}"; do
+    gone "${SV_SUP[$i]}" || { echo "  ${SV_NAME[$i]} pid ${SV_SUP[$i]} 는 아직 산다 -- 그대로 둔다"; continue; }
+    c="${SV_COLL[$i]}"
+    if ! gone "$c"; then   # 감독 없이 수집기만 혼자 쓰는 중 -- 같은 파일을 둘이 열지 않게 끝나는 즉시 감독을 다시 띄우는 지킴이
+      ( trap '' HUP; while ! gone "$c"; do sleep 1; done; relaunch "$i" >> logs/supervisor/takeover_rollback.log 2>&1 ) &
+      echo "  ${SV_NAME[$i]}: 수집기 pid $c 가 혼자 산다 -- 끝나는 즉시 감독을 다시 띄우는 지킴이를 남김(logs/supervisor/takeover_rollback.log)"
+    else relaunch "$i"; fi
+  done
+  sleep 3
+  writers; local w=$?
+  echo "되돌림 끝 -- 종료코드 $([ "$w" = 9 ] && echo 9 || echo 8)"
+  exit $([ "$w" = 9 ] && echo 9 || echo 8)
 }
 
 # ── crontab ──
@@ -277,23 +344,34 @@ TAG="$KIND"; [ -z "$SELV" ] || [ "$GROUP" = 1 ] || TAG="${KIND}_${SEL//[,:]/_}"
 CUR="$($CT -l 2>/dev/null)"; NCUR="$(printf '%s\n' "$CUR" | wc -l)"
 
 if [ "$MODE" = back ]; then
+  # 표지 = crontab 에 남은 «#takeover:<종류>…» 를 종류 접두사로(인자가 있으면 그 종목이 든 것) -- go 가 쓴 그대로
+  TAGS="$(printf '%s\n' "$CUR" | grep -oE "#takeover:${KIND}(_[^ ]*)?( |\$)" | sed 's/^#takeover://; s/ $//' | sort -u)"
+  if [ -n "$ARG" ]; then
+    TAGS="$(for t in $TAGS; do ok=1; for x in $(echo "${ARG//[,:]/ }" | tr '[:lower:]' '[:upper:]'); do [[ "_${t#"$KIND"}_" == *"_${x}_"* ]] || ok=0; done; [ "$ok" = 1 ] && echo "$t"; done)"
+  fi
+  case "$(echo "$TAGS" | grep -c .)" in
+    1) TAG="$TAGS" ;;
+    0) die "crontab 에 «#takeover:$KIND…» 표지가 없다 -- 되돌릴 것이 없다(진짜 경로 Rust: $(rs_procs takeover any | tr '\n' ' '))" ;;
+    *) die "표지가 여럿 -- 종목을 좁힌다: $(echo $TAGS)" ;;
+  esac
   echo "back $TAG"
-  for pid in $(rs_procs takeover); do stop "$pid" "Rust($RK)"; done
-  NEW="$(printf '%s\n' "$CUR" | grep -vE " #takeover:$TAG\$" | sed "s|^#takeover:$TAG ||")"   # 더한 Rust 줄 = 끝 표지 · 주석 줄 = 앞 표지
-  BACK="$(printf '%s\n' "$CUR" | grep -cE "^#takeover:$TAG ")"; ADDED="$(printf '%s\n' "$CUR" | grep -cE " #takeover:$TAG\$")"
-  cron_apply "$NEW" $((NCUR - ADDED))
-  echo "  crontab: 주석 푼 줄 $BACK · 지운 Rust 줄 $ADDED"
+  for pid in $(rs_procs takeover any); do   # 이 표지의 Rust 만(종목 목록으로 표지를 다시 만들어 맞춘다)
+    l="$(envof "$pid" "${RVAR:-$SELV}")"; t="$KIND"; [ -z "$SELV" ] || [ "$GROUP" = 1 ] || t="${KIND}_$(nrm "$l" | tr ',:' '__')"
+    [ "$t" = "$TAG" ] && stop "$pid" "Rust($RK)" nosave
+  done
+  cron_back "$TAG"; NEW="$($CT -l)"
   B="$(ls -t logs/supervisor/crontab_backup_*_takeover_"$TAG".txt 2>/dev/null | head -1)"
   [ -z "$B" ] || { [ "$(cat "$B")" = "$NEW" ] && echo "  crontab = 백업 $B 와 같다" || echo "  ⚠️ crontab 이 백업 $B 와 다르다(그 뒤 다른 변경이 있었다 -- 이 종류 줄만 되돌렸다)"; }
   manifest back
   [ "$CRON" = 1 ] && { echo "back $TAG: 끝(예약 종류 -- 다음 시각부터 파이썬)"; exit 0; }
-  printf '%s\n' "$CUR" | grep -E "^#takeover:$TAG @reboot" | sed "s|^#takeover:$TAG @reboot ||; s|^sleep [0-9]* && ||" | grep -F "$PYSUP" | while IFS= read -r cmd; do
+  printf '%s\n' "$CRON_RESTORED" | grep -E "^#takeover:$TAG @reboot" | sed "s|^#takeover:$TAG @reboot ||; s|^sleep [0-9]* && ||" | grep -F "$PYSUP" | while IFS= read -r cmd; do
     echo "  다시 띄움: $cmd"
     setsid nohup bash -c "$cmd" > /dev/null 2>&1 < /dev/null &
   done
   sleep 5
-  echo "back $TAG: 파이썬 수집기 $(py_procs | tr '\n' ' ')· Rust 진짜 경로 $(rs_procs takeover | wc -l)개 · 그림자는 다시 띄우지 않았다(shadow_start.sh)"
-  exit 0
+  echo "back $TAG: 그림자는 다시 띄우지 않았다(shadow_start.sh)"
+  SEL="${TAG#"$KIND"}"; SEL="${SEL#_}"; SEL="${SEL//_/,}"; [ -n "$SEL" ] || SEL="$(nrm "$SELD")"   # writers 가 이 목록으로 센다
+  writers; exit $?
 fi
 
 # go
@@ -332,6 +410,7 @@ NEW="$(printf '%s\n' "$CUR" | awk -v L=",$(echo $LN | tr ' ' ','),"  -v T="#take
 NL="$(echo $LN | wc -w)"
 [ "$(diff <(printf '%s\n' "$CUR") <(printf '%s\n' "$NEW" | sed '$d') | grep -c '^>')" = "$NL" ] || die "치환 검증 실패 -- 적용 안 함"
 cron_apply "$NEW" $((NCUR + 1))
+STAGE=2
 NPY="$(for i in $LN; do printf '%s\n' "$CUR" | sed -n "${i}p"; done | grep -cF "$PYSUP")"
 echo "  ① crontab 백업 $B ② 주석 $NL줄(파이썬 $NPY · 그림자 $((NL - NPY))) + Rust 줄 1 · $NCUR → $((NCUR + 1))줄"
 manifest take
@@ -341,10 +420,10 @@ if [ "$CRON" = 1 ]; then
   echo "go $TAG: 예약 줄 바꿈 -- 다음 «$SCHED» 부터 Rust · 그 시각 뒤 check 한 번 더"; exit 0
 fi
 # ③ 파이썬 → ④ 그림자
-for p in $PY; do stop "$p" "파이썬($PYRUN)"; done
+for p in $PY; do stop "$p" "파이썬($PYRUN)" || die "파이썬을 못 껐다"; done
 T_DOWN="$(date +%s)"
 [ -z "$(py_procs)" ] || die "파이썬 $PYRUN 이 다시 떴다(pid $(py_procs | tr '\n' ' ')) -- 멈춤(되돌리기: back)"
-for p in $(rs_procs shadow); do stop "$p" "그림자 Rust($RK)"; done
+for p in $(rs_procs shadow); do stop "$p" "그림자 Rust($RK)" || die "그림자를 못 껐다"; done
 # ⑤ 진짜 경로
 declare -A LOG0; for f in $(logs_glob); do LOG0[$f]="$(stat -c %s "$f")"; done
 echo "  ⑤ 띄움: $RENV $ENG $RK"
@@ -359,4 +438,7 @@ R="$(rs_procs takeover | tr '\n' ' ')"
 BAD=0; for f in $(logs_glob); do BAD=$((BAD + $(tail -c +$(( ${LOG0[$f]:-0} + 1 )) "$f" | grep -ciE 'panic|crash-looping|SUPERVISOR .* exited'))); done
 GAP="$([ -n "$T_UP" ] && echo "$((T_UP - T_DOWN))초" || echo "${WATCH_S}초 안 첫 쓰기 없음(쓰는 주기가 길면 정상 -- check 로)")"
 echo "go $TAG: Rust pid ${R:-없음}· 끊김 $GAP · 로그 이상 $BAD · 다음 스트림 넘기기 전 check 한 번 더"
-[ -n "$R" ] && [ "$BAD" = 0 ] || { echo "🔴 Rust 가 안 살았거나 로그에 이상 -- back 으로 되돌린다"; exit 1; }
+[ -n "$R" ] || die "Rust 가 ${WATCH_S}초 안에 안 살았다"
+STAGE=0
+writers || exit 9
+[ "$BAD" = 0 ] || { echo "🔴 Rust 는 돌지만 로그에 이상 $BAD 줄 -- 보고 판단(되돌리기: back $KIND)"; exit 1; }

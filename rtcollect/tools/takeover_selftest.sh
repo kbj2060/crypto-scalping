@@ -14,7 +14,7 @@ cp "$SRC"/rtcollect/tools/{takeover.sh,shadow_tape.py,shadow_duck.py} "$R/rtcoll
 # 가짜 파이썬 수집기: 감독(부모)이 먼저 죽었는지 SIGTERM 때 적는다 · 쓰는 파일 mtime 을 민다
 cat > "$R/scripts/live_trade_tape_collector_20260916.py" <<'X'
 P0=$PPID
-trap 'if kill -0 $P0 2>/dev/null; then echo "py_term $TAPE_MARKET parent_alive" >> $R/order.log; else echo "py_term $TAPE_MARKET parent_gone" >> $R/order.log; fi; exit 0' TERM
+trap 'if kill -0 $P0 2>/dev/null; then echo "py_term $TAPE_MARKET parent_alive" >> $R/order.log; else echo "py_term $TAPE_MARKET parent_gone" >> $R/order.log; fi; [ -e $R/slow ] && for i in $(seq 40); do touch "$f"; sleep 0.5; done; echo "py_exit $TAPE_MARKET" >> $R/order.log; exit 0' TERM   # slow 가 있으면 SIGTERM 뒤 20초 더 쓰다가 끝남(마지막 묶음 흉내)
 echo "py_start $TAPE_SYMBOL $TAPE_MARKET" >> $R/order.log
 f=$R/data/hot/binance_tape.sqlite; [ "$TAPE_MARKET" = futures ] || f=$R/data/hot/binance_spot_tape.sqlite
 while :; do touch "$f"; sleep 0.3 & wait $!; done
@@ -87,10 +87,10 @@ echo "== 0b. check: 그림자 재기동 구간은 빼고 · 그림자가 안 덮
 OUT="$(bash rtcollect/tools/takeover.sh check binance_tape)"; RC=$?; echo "$OUT"
 ok "재기동 구간을 빼면 통과(파이썬에만 0)" '[ "$RC" = 0 ] && echo "$OUT" | grep -q "그림자 꺼진 구간" && echo "$OUT" | grep -q "파이썬에만 0"'
 ok "목록: 파이썬 두 종목 전부 그림자가 뜬다" 'echo "$OUT" | grep -q "목록: 파이썬 TAPE_SYMBOL=ETHUSDT,BTCUSDT 전부"'
-mv "$R/logs/supervisor/rtcollect_binance_tape_ethusdt_btcusdt_20251121.log" "$R/st.log"
+mkdir -p "$R/hold"; mv "$R"/logs/supervisor/rtcollect_binance_tape_* "$R/hold/"   # 감독 로그를 전부 치운다(오늘 것 포함)
 OUT="$(bash rtcollect/tools/takeover.sh check binance_tape)"; RC=$?
 ok "재기동 시각을 모르면(로그 없음) 그 빈 구간이 «파이썬에만» → 불통과" '[ "$RC" != 0 ] && echo "$OUT" | grep -q "파이썬에만 [1-9]"'
-mv "$R/st.log" "$R/logs/supervisor/rtcollect_binance_tape_ethusdt_btcusdt_20251121.log"
+mv "$R"/hold/* "$R/logs/supervisor/"
 OUT="$(bash rtcollect/tools/takeover.sh check binance_spot)"; RC=$?
 ok "현물: 그림자 Rust 가 안 뜨면 목록 불통과" '[ "$RC" != 0 ] && echo "$OUT" | grep -q "그림자 Rust 가 안 뜨는 종목 ETHUSDT"'
 echo "== 1. check 가 불일치를 잡으면 go 는 아무것도 안 바꾼다"
@@ -130,4 +130,19 @@ sleep 2
 ok "파이썬 선물이 다시 떴다(새 pid)" 'p="$(pyp futures)"; [ -n "$p" ] && [ "$p" != "$FUT0" ]'
 ok "매니페스트 되돌림" 'python3 -c "import json; m=json.load(open(\"data/live/multicoin_collectors.json\")); assert sorted(m[\"collectors\"])==[\"bn_tape_all\",\"okx_tape_all\"] and not m.get(\"taken_over\")"'
 ok "파이썬 현물은 끝까지 그대로" '[ "$(pyp spot)" = "$SPOT0" ]'
+echo "== 4. 느리게 죽는 파이썬: 기다림을 넘기면 스스로 되돌린다(crontab·매니페스트·감독 다시 · 쓰는 프로세스 0 으로 안 끝남)"
+env RTCOLLECT_BIN="$R/tmp/rtbin/rtcollect" TAPE_SYMBOL=ethusdt,btcusdt setsid nohup bash scripts/ops/supervisor_rtcollect.sh binance_tape > /dev/null 2>&1 < /dev/null &
+sleep 3; touch "$R/slow"; : > order.log
+FUT1="$(pyp futures)"
+OUT="$(TERM_WAIT_S=12 bash rtcollect/tools/takeover.sh go binance_tape 2>&1)"; RC=$?; echo "$OUT" | grep -vE '^  (trade_tape|목록|그림자 감독)'
+ok "종료코드 8(되돌림)" '[ "$RC" = 8 ]'
+ok "기다리는 동안 «살아 있음 · mtime 전진» 을 찍음" 'echo "$OUT" | grep -q "기다림 10초: .*살아 있음 · 파일 mtime 전진"'
+ok "crontab = 원래 것" '[ "$(cat crontab.txt)" = "$ORIG" ]'
+ok "매니페스트 되돌림" 'python3 -c "import json; m=json.load(open(\"data/live/multicoin_collectors.json\")); assert sorted(m[\"collectors\"])==[\"bn_tape_all\",\"okx_tape_all\"] and not m.get(\"taken_over\")"'
+ok "Rust 진짜 경로는 안 띄움(수집기가 혼자 쓰는 동안 단일 writer)" '[ -z "$(rsp 1)" ] && ! grep -q "rs_start takeover=1" order.log'
+ok "끝에 «지금 쓰는 프로세스» 줄 · 파이썬 1(혼자 사는 수집기)" 'echo "$OUT" | grep -q "지금 쓰는 프로세스(binance_tape_ETHUSDT_BTCUSDT): 파이썬 1"'
+rm -f "$R/slow"
+for _ in $(seq 30); do p="$(pyp futures)"; [ -n "$p" ] && [ "$p" != "$FUT1" ] && break; sleep 1; done
+ok "수집기가 끝난 뒤 지킴이가 감독을 다시 띄움(새 파이썬 pid)" 'p="$(pyp futures)"; [ -n "$p" ] && [ "$p" != "$FUT1" ] && grep -q "py_exit futures" order.log'
+ok "그림자는 그대로(④ 전에 멈춤)" '[ -n "$(rsp "")" ]'
 [ "$FAIL" = 0 ] && echo "takeover selftest OK" || { echo "takeover selftest 실패"; exit 1; }
