@@ -15,6 +15,11 @@
 //!               🔴원본 폴더(data/live/orderflow/raster · …/raster_archive)는 RTDUCK_TAKEOVER=1 일 때만 -- 파이썬 래스터의 파일을 지운다
 //!   liq_tab     풋프린트 «청산» 탭(cron 매시 · 한 번) · LIQ_TAB_LIVE(기본 data/live/rtduck -- data/live 는 RTDUCK_TAKEOVER=1 일 때만) · LIQ_TAB_LAKE(data/lake 읽기만) ·
 //!               LIQ_TAB_HOT(data/hot 읽기만) · `--coin <코인>` · 🔴klines REST 는 RTDUCK_REST=1 일 때만(꺼지면 원본 LIQ_TAB_NO_REST 처럼 저장된 봉만)
+//!   seal        lake 봉인(seal_to_lake -- cron 매일 02:05 UTC · 한 번) · SEAL_ROOT(원천 기준 폴더 · 기본 .) · SEAL_LAKE(기본 data/rtduck/lake -- data/lake 는 RTDUCK_TAKEOVER=1 일 때만) ·
+//!               SEAL_STATUS(기본 data/live/rtduck/seal_status.json) · `--dry-run` · `--only venue/stream` · 🔴hot 정리(원천 행 지우기)는 RTDUCK_TAKEOVER=1 일 때만(그림자 lake 를 근거로 파이썬 hot 을 지우면 안 된다)
+//!   deribit     Deribit 옵션 체결·블록(상주 · 첫 단계 -- 체인·요약·대조는 아직) · DERIBIT_BT_DIR(기본 data/live/rtduck -- data/live 는 RTDUCK_TAKEOVER=1 일 때만):
+//!               deribit_options.duckdb(option_trades·gaps·…) · deribit_block_trades_state.json · 🔴재기동 틈 REST 백필은 RTDUCK_REST=1 일 때만 ·
+//!               RTDUCK_DERIBIT_WS · RTDUCK_DERIBIT_REST(시험 = 127.0.0.1) · RTDUCK_DERIBIT_FLUSH_S(시험만 -- 원본 20)
 //!   RTDUCK_ONCE=1 = 기다리지 않고 한 바퀴만 돌고 끝(시험·손 확인용). RTDUCK_OI_BASE = REST 주소(시험 = 127.0.0.1 가짜 서버).
 use rtduck::oi;
 use std::path::PathBuf;
@@ -37,7 +42,9 @@ fn main() {
         "market_data" => run_market(),
         "raster_archive" => run_raster_archive(),
         "liq_tab" => run_liq_tab(),
-        k => die(2, &format!("모르는 종류 {k:?} -- oi_lsratio|hl_trades|hl_positions|market_data|raster_archive|liq_tab")),
+        "seal" => run_seal(),
+        "deribit" => run_deribit(),
+        k => die(2, &format!("모르는 종류 {k:?} -- oi_lsratio|hl_trades|hl_positions|market_data|raster_archive|liq_tab|seal|deribit")),
     }
 }
 
@@ -364,5 +371,154 @@ fn run_liq_tab() {
     match rtduck::liq_tab::run(&cx, coin.as_deref(), now_ms, &mut get, &mut |s| std::thread::sleep(Duration::from_secs_f64(s))) {
         Ok(log) => log.iter().for_each(|l| println!("{l}")),
         Err(e) => die(1, &e),
+    }
+}
+
+fn run_seal() {
+    let lake = PathBuf::from(env_s("SEAL_LAKE", "data/rtduck/lake"));
+    let takeover = env_s("RTDUCK_TAKEOVER", "") == "1";
+    if lake.ends_with("data/lake") && !takeover {
+        die(2, "🔴data/lake 는 파이썬 봉인의 lake 다(전진 검정 자료) -- 전환 때만 RTDUCK_TAKEOVER=1");
+    }
+    let root = PathBuf::from(env_s("SEAL_ROOT", "."));
+    let status = PathBuf::from(env_s("SEAL_STATUS", "data/live/rtduck/seal_status.json"));
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let dry = args.iter().any(|a| a == "--dry-run");
+    let only = args.iter().position(|a| a == "--only").and_then(|i| args.get(i + 1)).cloned();
+    let t0 = rtcollect::rest::wall_s();
+    match rtduck::seal::main_once(&root, &lake, Some(&status), t0, dry, only.as_deref(), takeover) {
+        Ok((st, log, code)) => {
+            log.iter().for_each(|l| println!("{l}"));
+            println!("[seal] {}lake={} {} {:.0}s", if dry { "DRY-RUN " } else { "" }, lake.display(), serde_json::Value::Object(st), rtcollect::rest::wall_s() - t0);
+            std::process::exit(code)
+        }
+        Err(e) => die(1, &format!("[seal] {e}")),
+    }
+}
+
+fn run_deribit() {
+    let dir = PathBuf::from(env_s("DERIBIT_BT_DIR", "data/live/rtduck"));
+    if dir.ends_with("data/live") && env_s("RTDUCK_TAKEOVER", "") != "1" {
+        die(2, "🔴data/live 의 deribit_options.duckdb 는 파이썬 수집기의 파일이다(단일 writer -- 같이 열면 하나가 죽는다) -- 전환 때만 RTDUCK_TAKEOVER=1");
+    }
+    let (db, state) = (dir.join("deribit_options.duckdb"), dir.join("deribit_block_trades_state.json"));
+    let ws_url = env_s("RTDUCK_DERIBIT_WS", rtduck::deribit::WS);
+    let rest_base = env_s("RTDUCK_DERIBIT_REST", rtduck::deribit::REST);
+    let rest = env_s("RTDUCK_REST", "") == "1";
+    let flush_s: f64 = env_s("RTDUCK_DERIBIT_FLUSH_S", "20").parse().unwrap_or(rtduck::deribit::FLUSH_SEC);
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    rt.block_on(deribit_loop(db, state, ws_url, rest_base, rest, flush_s));
+}
+
+/// 원본 `run()`(WS 바퀴) -- 구독·하트비트 → 백필(REST 켬일 때) → 버퍼 20초마다 write · 끊기면 5초 뒤 다시(공백은 다음 접속의 write 에) ·
+/// SIGTERM 이면 버퍼를 쓰고 0(원본은 안 쓰고 죽는다 -- 의도한 차이 #22).
+async fn deribit_loop(db: PathBuf, state: PathBuf, ws_url: String, rest_base: String, rest: bool, flush_s: f64) {
+    use futures_util::{SinkExt, StreamExt};
+    use rtduck::deribit as d;
+    use tokio_tungstenite::tungstenite::Message;
+    let wall = rtcollect::rest::wall_s;
+    let agent = rtcollect::rest::agent(Duration::from_secs(20)); // requests.get(timeout=20)
+    let mut buf: Vec<Vec<duckdb::types::Value>> = vec![];
+    let mut down: Option<(i64, String)> = None;
+    let mut last = wall();
+    let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
+    let flush = |buf: &mut Vec<Vec<duckdb::types::Value>>, gaps: &[(i64, i64, String, Option<i64>)]| -> Result<(usize, usize), String> {
+        let now = wall();
+        let added = d::write(&db, &state, buf, gaps, now, &d::iso_utc(now))?;
+        let n = buf.len();
+        buf.clear();
+        Ok((n, added))
+    };
+    let chans = d::channels();
+    loop {
+        let r: Result<(), String> = async {
+            let (mut ws, _) = tokio_tungstenite::connect_async(ws_url.as_str()).await.map_err(|e| format!("OSError: {e}"))?;
+            let sub = serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "public/subscribe", "params": {"channels": chans}});
+            ws.send(Message::text(rtcollect::py_dumps_default(&sub))).await.map_err(|e| format!("ConnectionClosedError: {e}"))?;
+            ws.send(Message::text(r#"{"jsonrpc": "2.0", "id": 2, "method": "public/set_heartbeat", "params": {"interval": 30}}"#)).await.map_err(|e| format!("ConnectionClosedError: {e}"))?;
+            let now = (wall() * 1000.0) as i64;
+            let seen = d::last_ts(&db)?;
+            let since: Vec<i64> = seen.iter().map(|s| s.unwrap_or(0).max(now - d::BACKFILL_MAX_MS)).collect();
+            let mut bf = if rest {
+                d::backfill(&since, now, &mut |u: &str| {
+                    let u = u.replacen(d::REST, &rest_base, 1);
+                    let mut r = agent.get(&u).call().map_err(|e| format!("ConnectionError: {e}"))?;
+                    let st = r.status().as_u16();
+                    let mut b = vec![];
+                    std::io::Read::read_to_end(&mut r.body_mut().as_reader(), &mut b).map_err(|e| e.to_string())?;
+                    if st >= 400 { Err(format!("HTTPError: {st}")) } else { Ok(b) }
+                })?
+            } else {
+                vec![] // 🔴REST 꺼짐 -- 그림자 기본(틈은 안 메운다)
+            };
+            let nbf = bf.len();
+            let mut gaps: Vec<(i64, i64, String, Option<i64>)> = down.take().map(|(f, why)| (f, now, why, Some(nbf as i64))).into_iter().collect();
+            for (i, api) in d::API_CURRENCIES.iter().enumerate() {
+                if let Some(s) = seen[i].filter(|s| *s < since[i]) {
+                    gaps.push((s, since[i], format!("unrecoverable {api}"), Some(0)));
+                }
+            }
+            let (_, added) = flush(&mut bf, &gaps)?;
+            println!("구독 {} · 백필 {nbf}건(새 {added}) · {}", chans.join("·"), db.display());
+            loop {
+                let m = tokio::select! {
+                    _ = term.recv() => return Err("SIGTERM".into()),
+                    m = tokio::time::timeout(Duration::from_secs_f64(d::IDLE_SEC), ws.next()) => m,
+                };
+                let txt = match m {
+                    Err(_) => return Err("TimeoutError".into()),
+                    Ok(None) => return Err("ConnectionClosedOK".into()),
+                    Ok(Some(Err(e))) => return Err(format!("ConnectionClosedError: {e}")),
+                    Ok(Some(Ok(Message::Text(t)))) => t.to_string(),
+                    Ok(Some(Ok(Message::Close(_)))) => return Err("ConnectionClosedOK".into()),
+                    Ok(Some(Ok(_))) => String::new(),
+                };
+                if !txt.is_empty() {
+                    let v: serde_json::Value = serde_json::from_str(&txt).map_err(|e| format!("JSONDecodeError: {e}"))?;
+                    if v.get("error").is_some() {
+                        return Err(format!("RuntimeError: deribit error {}", v["error"]));
+                    }
+                    let p = &v["params"];
+                    if p["type"] == "test_request" {
+                        ws.send(Message::text(r#"{"jsonrpc": "2.0", "id": 3, "method": "public/test", "params": {}}"#)).await.map_err(|e| format!("ConnectionClosedError: {e}"))?;
+                    } else if p["channel"].as_str().is_some_and(|c| chans.iter().any(|x| x == c)) {
+                        for t in p["data"].as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
+                            if t["instrument_name"].as_str().and_then(d::coin_of).is_some() {
+                                buf.push(d::row(t)?);
+                            }
+                        }
+                    }
+                }
+                if wall() - last >= flush_s {
+                    match flush(&mut buf, &[]) {
+                        Ok((n, added)) => println!("  +{n}행(새 {added})"),
+                        Err(e) => println!("  기록 보류 {}행: {e}", buf.len()),
+                    }
+                    last = wall();
+                }
+            }
+        }.await;
+        let e = r.unwrap_err();
+        if e == "SIGTERM" {
+            if let Err(e) = flush(&mut buf, &[]) {
+                eprintln!("  잔여 {}행 기록 실패: {e}", buf.len());
+            }
+            println!("종료 신호 -- 버퍼를 쓰고 끝낸다");
+            std::process::exit(0);
+        }
+        println!("WS 끊김: {e} — 5초 후 재연결");
+        let name = e.split(':').next().unwrap_or("Exception").to_string();
+        down = down.or(Some(((wall() * 1000.0) as i64, name)));
+        if let Err(e2) = flush(&mut buf, &[]) {
+            println!("  잔여 {}행 기록 보류: {e2}", buf.len());
+            let n = buf.len();
+            if n > 200_000 {
+                buf.drain(..n - 200_000);
+            }
+        }
+        tokio::select! {
+            _ = term.recv() => std::process::exit(0),
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+        }
     }
 }

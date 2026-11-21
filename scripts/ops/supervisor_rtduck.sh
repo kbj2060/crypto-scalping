@@ -3,7 +3,7 @@
 # 🔴실행·등록하지 않았다(사용자 결정 전). 순서는 SHADOW.md 대로.
 #
 # 실행 파일: rtduck/target/release/rtduck 을 개발기에서 빌드해 옮긴 것(RTDUCK_BIN, 기본 $ROOT/bin/rtduck).
-#   bash scripts/ops/supervisor_rtduck.sh <oi_lsratio|hl_trades|hl_positions|market_data> [목록]
+#   bash scripts/ops/supervisor_rtduck.sh <oi_lsratio|hl_trades|hl_positions|market_data|deribit> [목록]
 #   oi_lsratio: BOT_SYMBOLS(기본 ETHUSDT,BTCUSDT,SOLUSDT,XRPUSDT -- 서버 supervisor_oi_lsratio_worker.sh 와 같은 목록) · 🔴RTDUCK_REST=1 없으면 아무것도 안 쓴다
 #               · 쓰는 곳 기본 data/live/rtduck/oi_lsratio.duckdb(파이썬 파일 data/live/oi_lsratio.duckdb 는 실행 파일이 거부 -- 전환 때만 RTDUCK_TAKEOVER=1)
 #   hl_trades:  HL_COINS(기본 ETH -- 원본처럼 코인마다 하나) · 쓰는 곳 기본 data/live/rtduck/orderflow/hyperliquid/<코인_코인>/<날짜>.duckdb
@@ -26,7 +26,8 @@ case "$KIND" in
   hl_trades)  VAR=HL_COINS;    DEF=ETH ;;
   hl_positions) VAR=HL_POS_COINS; DEF=ETH ;;
   market_data) VAR=TAIL_SYMBOLS; DEF=ETHUSDT ;;
-  *) echo "[$(date -Iseconds)] 모르는 종류 '$KIND' -- oi_lsratio|hl_trades|hl_positions|market_data" >&2; exit 2 ;;
+  deribit)    VAR=RTDUCK_TAG; DEF=OPTIONS ;;   # 2026-11-21 Deribit 체결(목록 없음 -- 표지만 · DERIBIT_BT_DIR 은 환경 그대로 · 단일 writer 라 종류만 같아도 막는다)
+  *) echo "[$(date -Iseconds)] 모르는 종류 '$KIND' -- oi_lsratio|hl_trades|hl_positions|market_data|deribit" >&2; exit 2 ;;
 esac
 if [ ! -x "$BIN" ]; then
   echo "[$(date -Iseconds)] 실행 파일이 없다: $BIN" >&2
@@ -37,7 +38,7 @@ envof() { tr '\0' '\n' < "/proc/$1/environ" 2>/dev/null | grep "^$2=" | head -1 
 for pid in $(pgrep -x rtduck); do
   [ "$(envof "$pid" RTDUCK_KIND)" = "$KIND" ] || continue
   cur="$(envof "$pid" "$VAR" | tr '[:lower:]' '[:upper:]' | tr -d ' ')"
-  [ "$KIND" = oi_lsratio ] || [ "$KIND" = market_data ] || [ "${cur:-$DEF}" = "$SYM" ] || continue   # 한 파일 종류는 종류만 같아도 막는다
+  [ "$KIND" = oi_lsratio ] || [ "$KIND" = market_data ] || [ "$KIND" = deribit ] || [ "${cur:-$DEF}" = "$SYM" ] || continue   # 한 파일 종류는 종류만 같아도 막는다
   echo "[$(date -Iseconds)] rtduck($KIND $(envof "$pid" "$VAR"))가 이미 실행 중(pid $pid) -- 켜지 않는다." >&2
   exit 1
 done

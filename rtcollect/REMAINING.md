@@ -43,7 +43,7 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | soxl_weekend_forward | 매일 | JSONL | 판정 | soxl_wknd1·2 | 안 옮김 | 바이낸스 REST + 규칙 계산 |
 | macro_bias_forward | 주말 | JSONL | 판정 | fwd_macro_regime | 안 옮김 | pandas 계산 |
 | risk_radar · regime_band · eth_direction_forward_recorder | 매분·매시·매일 | JSON·JSONL | 화면·판정 | regime: fwd_band · dir: dir4h_p2·dir3asset | **rtmodel** | 모델 예측 기록 |
-| seal_to_lake | 매일 | Parquet | 전진 다수 · 감시 | 여럿 | **반쯤** `rtduck::seal`(DuckDB 원천 · 첫 표 binance/oi_lsratio_5m) | 원본도 DuckDB COPY 로 쓴다 · 🔴SQLite 원천은 sqlite 확장 없음 · hot 정리·seal_status 남음 · 실행 종류 아직 없음 |
+| seal_to_lake | 매일 | Parquet | 전진 다수 · 감시 | 여럿 | **옮김** `rtduck seal`(30 스트림 · hot 정리 · seal_status) | 원본도 DuckDB COPY · SQLite 는 rusqlite → 임시 DuckDB(sqlite_scanner 형 규칙) · 스트림별 «원본 dry-run = 전부 건너뜀» · 🔴서버 1.5.1 sqlite 확장 확인 대기 |
 | 월간 학습(dir4h·vol4h·dir_short·box_hold Platt) | 월간 | joblib | 서빙 | 여럿 | 파이썬 유지(학습) | — |
 | raw_failover · data_quality_monitor · morning_audit · multicoin_collectors · gen_data_map · verdict_ledger_health · backup | 여러 | JSON·보고 | 감시·사용자 | — | 범위 밖(R7 운영) | — |
 
@@ -79,7 +79,7 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | 상주 | HL 포지션 `hl_positions` | 옮김 | rtduck | ×2 -- 🔴가중치 600/분 → 1,200 = HL 한도 100%(전환 때만 켬) |
 | 상주 | market_data_worker `market_data` | 옮김 | rtduck | ×2 -- 미시구조 36/분 → 72(기본 꺼짐) |
 | 상주 | 뉴스 RSS `news` | 옮김 | rtcollect(quick-xml · regex) | ×2 -- 바깥 8곳(429 본 피드 있음) · 그림자 등록 후보에서 뺌 |
-| 상주 | deribit 블록체결·GEX | 안 옮김(조사만 -- 아래) | — | (Deribit WS·REST · history API) |
+| 상주 | deribit 블록체결·GEX | **반쯤** `rtduck deribit` = 체결 WS·백필·블록 구조·상태 JSON(①) · 체인·요약(②)·대조(③) 남음 | rtduck | Deribit REST 백필 ×2(재접속 때만 · 기본 꺼짐) |
 | 상주 | SR lean | rtmodel | — | — |
 | 상주 | 푸시·SR 근접 알림 | 범위 밖(알림) | — | — |
 | 예약 | treasury_futures · macro_5m | 옮김 | rtcollect | ×2 -- 🔴Yahoo 429 위험 · 기본 안 켬 |
@@ -89,13 +89,13 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | 예약 | liq_tab | 옮김 `liq_tab` | rtduck | ×1(그림자 = REST 끄고 파이썬 1h 봉 캐시 복사) · 켜면 ×2(코인당 1회/시) |
 | 예약 | soxl_weekend_forward | 옮김 `soxl_weekend`(`--record`·`--status`) | rtcollect | ×2 -- 새 주말마다 9요청 → 18/주 |
 | 예약 | macro_bias_forward · macro_daily | 안 옮김(조정자 결정) | — | (FRED 키·Yahoo·재무부·DefiLlama) · 막는 것 = 위 조사 표 |
-| 예약 | seal_to_lake | **반쯤** -- `rtduck::seal` DuckDB 원천(첫 표 binance/oi_lsratio_5m 일치) · SQLite 원천 13 스트림 남음(sqlite 확장) · hot 정리·상태 JSON 남음 | rtduck | ×1(REST 없음) |
+| 예약 | seal_to_lake | **옮김** `rtduck seal` -- 30 스트림 · hot 정리(TAKEOVER 때만) · seal_status · 스트림별 지문 같음(SQLite 13 + 섞임 2 + DuckDB 1) -- 🔴1.5.1 sqlite 확장 형 대응은 서버 확인 대기 | rtduck | ×1(REST 없음) |
 | 예약 | risk_radar · regime_band · eth_direction_forward | rtmodel | — | — |
 | 예약 | 월간 학습 | 파이썬 유지 | — | — |
 | 예약 | raw_failover · dqm · morning_audit · multicoin · gen_data_map · verdict_ledger_health · backup | 범위 밖(R7 운영) | — | — |
 
-**요약**: 상주 옮김 19(rtcollect 15 · rtduck 4) · 안 옮김 1(deribit -- 조사 표 아래) · rtmodel 1 · 범위 밖 1 /
-예약 옮김 7(treasury · macro_5m · cboe+요약기 · liqmap_scorer · soxl_weekend · 래스터 보관 · liq_tab) · 안 옮김 2(macro_bias · macro_daily -- 조정자 결정) · 반쯤 1(seal_to_lake -- DuckDB 원천만) · rtmodel 3.
+**요약**: 상주 옮김 19(rtcollect 15 · rtduck 4) · 반쯤 1(deribit -- 체결·블록·상태 JSON 까지 · 체인·요약·대조 남음) · rtmodel 1 · 범위 밖 1 /
+예약 옮김 8(treasury · macro_5m · cboe+요약기 · liqmap_scorer · soxl_weekend · 래스터 보관 · liq_tab · seal_to_lake) · 안 옮김 2(macro_bias · macro_daily -- 조정자 결정) · seal_to_lake 옮김(예약 옮김 8) · rtmodel 3.
 옮기지 않은 «불확실»: 뉴스 판정·ollaya · prometheus · trend_core_forward · f4c altdata · llm_brief / «안 쓰임»: 돌파 워커 · 신호 워커 · maxpain 기록기 · maker_fill_shadow.
 
 ---
@@ -145,3 +145,6 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | 상태 JSON 둘 | deribit_block_trades_state.json · deribit_gex_state.json | — | 대시보드 «옵션» 카드의 원천 | 위 전부가 있어야 같은 글자 |
 
 순서 제안: ① 체결 WS + 블록 묶음 + 상태 JSON(블록 몫) → ② 체인·요약(pandas 450줄) → ③ 시간당 대조. 🔴단일 writer: 그림자는 다른 duckdb 파일에(원본과 같은 파일이면 하나가 죽는다).
+
+**deribit 진행(2026-11-21 열째 조각)**: ① 체결 WS + 블록 구조 13종(+single·other·future_only) + 상태 JSON = 옮김(원본 write() 세 번·backfill 과 글자 일치 · GEX 함수는 `_parse_instrument`·`_bs_delta` 만 값 보존으로) ·
+② 체인·GEX·옵션 요약(pandas 450줄 · deribit_gex_state.json) · ③ 시간당 history 대조 -- 남음.
