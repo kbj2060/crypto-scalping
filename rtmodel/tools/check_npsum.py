@@ -24,6 +24,18 @@ def pw(a):
 
 rng = np.random.default_rng(1)
 bad_pw = bad_first = 0
+def blk(a):                              # 2026-11-21: 8,192칸 넘으면 묶음마다 짝 합 → 묶음 합 차례로(rtcollect::ob5m::np_sum)
+    s = 0.0
+    for j in range(0, len(a), 8192):
+        s += pw(a[j:j + 8192])
+    return s
+
+
+bad_blk = 0
+for k in range(300):
+    n = int(rng.integers(8000, 40000)); a = rng.normal(0, 1, n) * 10 ** rng.uniform(-3, 3, n)
+    bad_blk += float(np.sum(a)) != blk(a.tolist())
+print("8192 묶음 규칙 다름", bad_blk, "/ 300 (n 8000~40000)")
 for k in range(3000):
     n = int(rng.integers(1, 3000)); a = rng.normal(0, 1, n) * 10 ** rng.uniform(-3, 3, n)
     s = float(np.sum(a))

@@ -1,7 +1,8 @@
 //! 4h·15분/1시간 방향 예측 루프 -- 서버 dashboard/server.py `pred_record_loop`(:2841)의 몫을 따로 돈다(그림자 · rtmodel/SHADOW.md).
 //! 5분 봉이 닫힌 뒤 +20초마다 코인(ETH·BTC·SOL·XRP · 사이 3초)마다 15분·1시간(dir_short) → 4h(dir4h) 예측을 내고
 //! 적중 기록(pred_record/{코인}.jsonl -- 전진 검정 fwd_dirshort 가 읽는 꼴)과 마지막 payload(dir4h_<코인>.json · dir_short_<코인>.json)를 쓴다.
-//! 🔴ETH 15분·1시간(75열판 · 호가 깊이 sqlite)은 아직 못 옮겼다 -- 건너뛴다. 상대 강도(xsec.jsonl)도 아직.
+//! 회차 끝에 9코인 상대 강도(pred_record/xsec.jsonl · 원본 xsec_record)와 최신 스냅숏(xsec_latest.json -- 원본은 프로세스 안 _xs_latest)을 쓴다.
+//! 🔴ETH 15분·1시간(75열판 · 호가 깊이 sqlite)은 아직 못 옮겼다 -- 건너뛴다.
 //!
 //! 환경변수(기본값):
 //!   RT_DIR_OUT      data/live/rt_dirpred     쓰는 곳. 🔴data/live(= 파이썬 서버의 data/live/pred_record)면 종료코드 2(전환 때만 RT_DIR_TAKEOVER=1)
@@ -10,7 +11,7 @@
 //!   RT_SR_BAN_FILE  data/live/binance_ban_until   (공용 밴 파일 -- 밴 중이면 보내지 않고 그 코인은 이번 회차 실패)
 //!   RT_DIR_NOW_MS   (시험만) 고정 시각으로 한 회차만 돌고 끝낸다
 use rtmodel::ban::{ban_left, ban_note};
-use rtmodel::dirrest::{closes, daily_closes, Record, Rest};
+use rtmodel::dirrest::{closes, daily_closes, xsec_px, Record, Rest};
 use rtmodel::{dir4h, dirshort, read_json};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -115,6 +116,13 @@ fn main() {
                     eprintln!("[pred_record_loop] {kind} {c}: {e}");
                 }
             }
+        }
+        // 상대 강도(server.py:2856-2862): 9코인 5분봉 60개 → pred_record/xsec.jsonl · 실패면 이번 회차만 건너뜀
+        let now = fixed.unwrap_or_else(|| (wall() * 1000.0) as i64);
+        match xsec_px(&mut g, now).and_then(|px| rec.xsec(&out.join("pred_record"), &px).map_err(|e| e.to_string())) {
+            Ok((_, Some(latest))) => write_atomic(&out.join("xsec_latest.json"), &latest),
+            Ok(_) => {}
+            Err(e) => eprintln!("[pred_record_loop] xsec: {e}"),
         }
         if fixed.is_some() {
             return;

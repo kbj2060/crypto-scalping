@@ -310,6 +310,41 @@ impl Record {
     }
 }
 
+/// 상대 강도 9코인(dashboard/pred_record.py X_COINS · 기록 px 칸 순서).
+pub const X_COINS: [&str; 9] = ["ETH", "BTC", "SOL", "XRP", "ADA", "AVAX", "BNB", "DOGE", "LINK"];
+
+/// 서버 tick(server.py:2857): 9코인 `_klines(c, 60, now)` 의 (봉 시작 ms, 종가). 한 코인이라도 실패하면 Err -- 원본도 tick 통째로 건너뛴다(뒤 코인은 안 부름).
+pub fn xsec_px(get: &mut Get, now_ms: i64) -> Result<Vec<Vec<(i64, f64)>>, String> {
+    X_COINS.iter().map(|c| klines(get, c, 60, now_ms).map(|f| f.ts.into_iter().zip(f.close).collect())).collect()
+}
+
+impl Record {
+    /// xsec_record: 9코인 모두 있는 봉만(dropna) · 49봉 이상 · 마지막과 49번째 앞이 정확히 240분 → 최신 스냅숏 글자
+    /// (원본은 프로세스 안 _xs_latest · 여기는 부르는 쪽이 파일로) + 4h 격자(UTC 시 %4==3 · 55분 봉) 행을 xsec.jsonl 에 덧붙임. 반환 (새 줄 수, 스냅숏).
+    pub fn xsec(&mut self, dir: &Path, px: &[Vec<(i64, f64)>]) -> std::io::Result<(usize, Option<String>)> {
+        if px.len() < X_COINS.len() || px.iter().any(|s| s.is_empty()) {
+            return Ok((0, None));
+        }
+        let maps: Vec<HashMap<i64, f64>> = px.iter().map(|s| s.iter().copied().collect()).collect();
+        let mut ts: Vec<i64> = px[0].iter().map(|x| x.0).filter(|t| maps.iter().all(|m| m.get(t).is_some_and(|v| !v.is_nan()))).collect();
+        ts.sort_unstable();
+        ts.dedup();
+        let n = ts.len();
+        if n < 49 || ts[n - 1] - ts[n - 49] != 240 * 60_000 {
+            return Ok((0, None)); // 결측 봉이 있으면 «49번째 앞»이 4h 앞이 아니다
+        }
+        let rel: Vec<f64> = maps.iter().map(|m| m[&ts[n - 1]] / m[&ts[n - 49]] - 1.0).collect();
+        let mean = crate::box_hold::npsum(&rel) / rel.len() as f64; // ponytail: Series.mean = numpy 짝 합 / n 가정 -- 서버에 bottleneck 이 있으면 차례 합(끝자리 · 0.1bp 반올림 뒤엔 거의 안 보임)
+        let bp: Vec<String> = X_COINS.iter().zip(&rel).map(|(c, v)| format!("\"{c}\": {}", crate::sr_lean::jf(crate::box_hold::py_round((v - mean) * 1e4, 1)))).collect();
+        let latest = format!("{{\"t\": {}, \"rel_bp\": {{{}}}}}", ts[n - 1] + BAR, bp.join(", "));
+        let rows = ts.iter().filter(|&&t| t.rem_euclid(DAY) / 3_600_000 % 4 == 3 && t.rem_euclid(3_600_000) / 60_000 == 55).map(|&t| {
+            let p: Vec<String> = X_COINS.iter().zip(&maps).map(|(c, m)| format!("\"{c}\":{}", crate::sr_lean::jf(m[&t]))).collect();
+            (t + BAR, format!("{{\"k\":\"x\",\"t\":{},\"px\":{{{}}}}}", t + BAR, p.join(",")))
+        }).collect();
+        Ok((self.append(&dir.join("xsec.jsonl"), "x", rows)?, Some(latest)))
+    }
+}
+
 /// JSON 숫자 → 파이썬 json.dumps 글자(정수면 정수, 실수면 repr).
 fn jnum(v: &Value) -> String {
     match v.as_i64() {

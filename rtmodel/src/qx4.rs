@@ -136,7 +136,7 @@ fn predict_log(art: &Art, coin: &str, f: &HashMap<&'static str, Vec<f64>>, i: us
 }
 
 /// pandas rolling(w, min_periods).sum(): Kahan(더하기·빼기 따로) · 같은 값 연속이면 값×개수.
-fn roll_sum(x: &[f64], w: usize, minp: usize) -> Vec<f64> {
+pub(crate) fn roll_sum(x: &[f64], w: usize, minp: usize) -> Vec<f64> {
     let x: Vec<f64> = x.iter().map(|v| if v.is_infinite() { NAN } else { *v }).collect();
     let (mut nobs, mut sx, mut ca, mut cr, mut same) = (0i64, 0.0f64, 0.0f64, 0.0f64, 0i64);
     let mut prev = x.first().copied().unwrap_or(NAN);

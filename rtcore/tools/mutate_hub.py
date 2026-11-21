@@ -13,7 +13,16 @@ mf.FILES = [H]
 mf.TESTS = ["--test", "hub_gate"]
 mf.M = [
     ("경로 안 봄", H, "if req.uri().path() != cfg.path {", "if false {"),
-    ("Origin 안 봄", H, "if !cfg.origins.iter().any(|a| a.as_bytes() == o.as_bytes()) {", "if false {"),
+    ("Origin 안 봄", H, "if !same && !cfg.origins.iter().any(|a| a.as_bytes() == o.as_bytes()) {", "if false {"),
+    # 2026-11-21 같은 호스트
+    ("같은 호스트 늘 참", H, "    matches!((hp(auth), hp(&h)), (Some(a), Some(b)) if a == b)", "    let _ = (hp(auth), hp(&h));\n    true"),
+    ("같은 호스트 안 봄(목록만)", H, "if !same && !cfg.origins", "if !cfg.origins"),
+    ("포트 안 비교", H, "(Some(a), Some(b)) if a == b)", "(Some(a), Some(b)) if a.0 == b.0)"),
+    ("대소문자 그대로", H, "    let o = origin.trim().to_ascii_lowercase();", "    let o = origin.trim().to_string();"),
+    ("기본 포트 채우지 않음", H, "                None => (a.to_string(), def),", "                None => (a.to_string(), \"\"),"),
+    ("http·https 아닌 것도 받음", H, '        _ => return false,\n    };', '        _ => "443",\n    };'),
+    ("사용자정보(@) 허용", H, "a.contains(['/', '@', '?', '#', ' '])", "a.contains(['/', '?', '#', ' '])"),
+    ("Host 없으면 Origin 만으로 통과", H, ".is_some_and(|(o, h)| same_host(o, h))", ".is_none_or(|(o, h)| same_host(o, h))"),
     ("Origin 앞부분만 맞으면 통과", H, "a.as_bytes() == o.as_bytes()", "o.as_bytes().starts_with(a.as_bytes())"),
     ("연결 상한 안 봄", H, "    if !has_slot {", "    if false {"),
     ("칸을 핸드셰이크 뒤 바로 돌려줌", H, "    let mut rx = state.tx.subscribe();", "    drop(slot);\n    let mut rx = state.tx.subscribe();"),

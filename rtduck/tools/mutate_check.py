@@ -66,6 +66,14 @@ M = [
     ("봉인 LAG 2시간 → 0", "src/seal.rs", "pub const LAG_HOURS: i64 = 2;", "pub const LAG_HOURS: i64 = 0;", ["seal_parity"]),
     ("봉인 날짜 하루 밀림", "src/seal.rs", "cast(floor(({ts_sql}) / 86400000.0) as integer)", "cast(floor(({ts_sql}) / 86400000.0) as integer) + 1", ["seal_parity"]),
     ("HL체결 가짜 시계 = 벽시계 + 차이", "src/hl_trades.rs", "        Some((i0, t)) => t + i0.elapsed().as_secs_f64(),", "        Some((_, t)) => *t + 0.0 * rtcollect::rest::wall_s(),", ["hl_trades_loop"]),
+    ("봉인 SQLite INT → DOUBLE", "src/seal.rs", "    Ok(if d.contains(\"int\") {\n        \"BIGINT\"", "    Ok(if d.contains(\"int\") {\n        \"DOUBLE\"", ["seal_full_parity"]),
+    ("봉인 정리 OKX 맥락 보존 8 → 7일", "src/seal.rs", "\"ts_ms / 1000\", \"inst\", \"okx\", t.into(), Okx, 8)", "\"ts_ms / 1000\", \"inst\", \"okx\", t.into(), Okx, 7)", ["seal_full_parity"]),
+    # (뺌) «봉인 SQLite REAL 에 정수 저장 = 오류»: 같은 변이 -- SQLite 는 REAL 친화 열(REAL·DOUBLE)에 넣은 정수를 REAL 로 바꿔 저장한다(정수로 되읽힐 일이 없다 · 2026-11-21 돌린 결과 «통과»).
+    ("deribit butterfly 가운데 = 양끝 합", "src/deribit.rs", "eq(q[1], q[0] + q[2])", "eq(q[1], q[0])", ["deribit_parity"]),
+    ("deribit 블록 아닌 베가도 vgb", "src/deribit.rs", "            if *blk {\n                b[6] += vg;", "            if true {\n                b[6] += vg;", ["deribit_parity"]),
+    ("deribit 창 24 → 25시간", "src/deribit.rs", "pub const STATE_WINDOW_MS: i64 = 24 * 3600 * 1000;", "pub const STATE_WINDOW_MS: i64 = 25 * 3600 * 1000;", ["deribit_parity"]),
+    ("deribit USDC 선형 헤지도 ÷가격", "src/deribit.rs", "let d = if f.instrument_name.contains(\"_USDC\") {", "let d = if false {", ["deribit_parity"]),
+    ("deribit 하트비트 답 안 함", "src/main.rs", "                    if p[\"type\"] == \"test_request\" {", "                    if false {", ["deribit_loop"]),
     ("청산탭 앞쪽 메움 안 함", "src/liq_tab.rs", "        if mn > need + DAY {", "        if false {", ["liq_tab_parity"]),
 ]
 

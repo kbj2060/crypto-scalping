@@ -2,7 +2,7 @@
 
 출처: `docs/rtcore_port_scope_20261120.md`(«쓰임» 판정 · 표 1·2·3) · `scripts/live_*.py`·`dashboard/*.py` 의 모델 읽기(grep `joblib.load`·`predict(`) ·
 화면 폴링(`dashboard/live/app.js`) · 개발기 파일(메인 체크아웃 `data/live/`·`tmp/`, 읽기만). 서버 crontab 사본은 저장소에 없다 — 주기는 범위 문서 표 2 와 스크립트 머리말.
-**개발기 모델** = 개발기 파일이 서버 배포본과 같은지는 해시를 대조해 본 적이 없다(서버 접속 금지).
+**개발기 모델** = 개발기 파일이 서버 배포본과 같은지는 해시를 대조해 본 적이 없다(서버 접속 금지). (예외: QX4 qx4_2026-10-23 · 띠 안·이탈 regime_band_h48 은 2026-11-21 서버와 md5 같음 확인)
 
 ## 옮긴 것
 
@@ -16,17 +16,17 @@
 | 15분·1시간 방향 payload(65열판 BTC·SOL·XRP) | `dirshort.rs` | 9벌 payload 비트 · 반올림 전 예측 비트 · np.quantile 1,500개 비트(분위 씨앗은 ETH 대역) |
 | 위험 레이더 SOXL(주식 세션 HAR-S · `compute_session`) | `risk_radar::session_out` (서머타임·NYSE 휴장 표 포함) | 18벌 문자열 같음·숫자 1e-12 상대 · 세션 시계 7,920칸 같음(서머타임 전환·휴장·개장/마감 경계) |
 | 위험 레이더 cron 한 회차(`update_cache`·`update_dvol`·`main`) | `bin/rt_radar` (캐시 = 자기 이진 형식 · 그림자 디렉터리) | 가짜 HTTP 5회차(백필→꼬리→DVOL 500→다시) 요청 253개 순서·쿼리 같음 · latest·forward 숫자 최대 1.9e-15 상대 |
-| 4h 변동성 QX4(+QX4I · `live_vol4h_qx4_20261025.py` · `/api/vol-forecast` 5분) | `qx4.rs` (피쳐 41열 · HGB 셋 · numpy f32 MLP · 4코인 평균 · payload · QX4I 덧붙이기 · atm_iv · REST 이어 받기) | 개발기 사본 qx4_2026-10-23 · 8벌 × 4코인 payload 비트 · 피쳐 41열 × 끝 40봉 비트 · HGB 구성원 비트 · 🔴MLP 구성원 1ulp(f32 · 상대 2.4e-7 -- OpenBLAS sgemm 가장자리 타일 순서) → log_rv 상대 6e-8 · atm_iv 40칸 · 이어 받기 4회차 요청 83개 순서 같음 · Deribit 옵션 체결 받기(iv_now·fetch_option_trades)는 아직 |
+| 4h 변동성 QX4(+QX4I · `live_vol4h_qx4_20261025.py` · `/api/vol-forecast` 5분) | `qx4.rs` (피쳐 41열 · HGB 셋 · numpy f32 MLP · 4코인 평균 · payload · QX4I 덧붙이기 · atm_iv · REST 이어 받기) | 개발기 사본 qx4_2026-10-23(서버 모델과 md5 같음 2fce43f5… · 11-21 확인) · 8벌 × 4코인 payload 비트 · 피쳐 41열 × 끝 40봉 비트 · HGB 구성원 비트 · 🔴MLP 구성원 1ulp(f32 · 상대 2.4e-7 -- OpenBLAS sgemm 가장자리 타일 순서) → log_rv 상대 6e-8 · atm_iv 40칸 · 이어 받기 4회차 요청 83개 순서 같음 · Deribit 옵션 체결 받기(iv_now·fetch_option_trades)는 아직 |
 | 4h·15분/1시간 REST 조립 + 적중 기록 + 5분 루프 | `dirrest.rs` · `bin/rt_dirpred` | 가짜 거래소 25단계 요청 1,330개 순서·쿼리 같음 · pred_record 410줄 글자 · 실행 파일 한 회차 요청 545개·기록 135줄 |
+| 띠 안·이탈(regime band · `live_regime_band_*_20261102.py` · cron 매시) | `regime_band.rs` (청산맵 레벨 compute_spliced_levels 계열 · 피쳐 27열 · HGB 분류 · 기록·채점·요약 · 크론 한 회차) · `bin/rt_regime` | 모델 = 개발기 사본(서버와 md5 같음 f62774c6) · 합성 4코인 11회차(빈 봉·같은 값 구간·3시간 건너뜀·자료 지연·묵은 자료 FAIL) 출력·기록·채점·요약 파일 글자 · 요청 순서 · 레벨 가격 14,389칸 · 청산 칸 번호·무게 30,454칸(넣은 순서까지) · 피쳐 29,916칸 · 확률 1,108개 비트 · 실행 파일 가짜 HTTP |
+| 상대 강도(xsec · `pred_record.xsec_record` · 서버 5분 루프 끝) | `dirrest::xsec_px`·`Record::xsec` · `bin/rt_dirpred` 회차 끝 | 12회차 요청 108개·기록 글자·스냅숏(rel_bp) 같음 · 실행 파일 한 회차 |
 
 ## 남은 것
 
 | # | 서빙 | 스크립트(줄) | 주기 | 모델 종류 | 입력 원천 | 출력 | 읽는 곳(화면 칸) | 개발기에 모델 | 전진 검정 |
 |---|---|---|---|---|---|---|---|---|---|
 | 3 | 30분 카드(card30) | `dashboard/server.py` `_card30_pred`(서버 안) | 5분봉이 바뀔 때 | HGB 3개 평균 + logit 섞기(식은 `rtmodel::card30` 에 있음) | 서버 메모리 5분봉 | 상황 카드 | `/api/situation`(1초)·SSE `situation` | **없음**(서버 `tmp/card30_direction_20260926/` 전용) | 없음 |
-| 5 | 띠 안·이탈(regime band) | `live_regime_band_cron_20261102.py`(66) + `_recorder`(91) + `live_regime_band_20261102.py`(71) + 연구 `research_regime_f/acc_20261102` | cron 매시 | `regime_band_h48_model.joblib`(분류) | 5분봉 패널(코인별 o h l c qv tbqv n) | `regime_band_forward*.jsonl` | `/api/regime-band`(app.js:5613 · 5분) · `pred_record.py` | 개발기 `tmp/session_xrp_regime_20261102/regime_acc/` 사본 md5 f62774c6 = 판정 달력이 적은 서버 모델 md5 · 피쳐에 청산맵 레벨(`live_liquidation_map` compute_spliced_levels · 약 300줄) 필요 | **fwd_band 2027-01-08** |
 | 6 | 15분·1시간 방향 ETH 75열판(호가 깊이) | `live_eth_dir_short_20261028.py` `book_row`(sqlite 읽기 -- 상태 판정 `dirshort::book_status` 만 옮김 · `book_feats`·`dataset` 은 학습 몫) | 5분(서버 루프) | (65열판은 옮김) | REST(4h 와 같은 `rest_frames`) + 호가 깊이 워커 sqlite 10열 | `/api/dir-short` | ⑤ 예측 줄 15분·1시간 | 65열판 eth·btc·xrp 있음 · **ETH 75열판 없음** · oos 씨앗은 ETH 만 | **fwd_dirshort 2027-01-08** |
-| 7 | 상대 강도(xsec) | `dashboard/pred_record.py` `xsec_record`(서버 5분 루프 끝) | 5분 | 규칙(9코인 4h 수익 − 평균) | REST 5분봉 60개 × 9코인 | `pred_record/xsec.jsonl` | ⑤ 예측 줄 «4h 상대 강도» | — | dashboard_candidates_forward |
 | 8 | 방향 전진 기록기 | `live_eth_direction_forward_recorder_20261010.py`(95) | 매일 00:31 UTC | (dir4h 예측을 적음) | `/api/dir4h` 꼴 | `eth_direction_forward.jsonl` | `dashboard/dir_signals.py` · 판정 건강 | — | **dir4h_p2 2027-03-14 · dir3asset 2027-04-08** |
 | 9 | 4h 변동성(화면 «지평 사다리») | `dashboard/dir_signals.py`(199) → `live_eth_sizing_vol_model_20260912.py`(358) | 요청 때 | GBM 22피쳐 8시드 + sigmoid 확대 확률 | 5분봉 | `/api/dir-signals` | 풋프린트 머리 «지평 사다리»(10분) | ETH `data/live/eth_sizing_vol_model.joblib` 있음 · BTC·XRP 는 서버(server.py 가 btc 경로를 씀) | 없음(참고용) |
 | 10 | 사이징 변동성·MAE 분위 | `live_eth_sizing_vol_model_20260912.py` · `live_eth_mae_quantile_model_20260913.py` | — | — | — | — | — | — | **안 옮김(꺼짐)** -- 서버 `SIZING_RISK_MODEL_ENABLED=False` · 주문 범위가 sltp 만(2026-11-21) |
@@ -36,7 +36,7 @@
 `live_eth_breakout_detector_*`(화면 0) · `live_eth_maxpain_oos_ledger`(판정 닫힘).
 
 **주기 순(«실시간 값을 빨리»)**: 위험 레이더(매분 · 화면 30초) → card30(5분 · 모델 없음) → dir4h·dir_short·QX4(요청 때 · 화면 2~5분) → regime band(매시) → 기록기(매일).
-개발기에서 대조 가능한 것 중 가장 짧은 = 위험 레이더(4코인 + SOXL + cron 한 회차) — 2026-11-21 에 옮겼다. 다음 = #10 사이징·MAE(주문 지연) → #4 QX4(개발기 사본으로 식 대조) → #5 → #7.
+개발기에서 대조 가능한 것 중 가장 짧은 = 위험 레이더(4코인 + SOXL + cron 한 회차) — 2026-11-21 에 옮겼다. 다음 = #10 사이징·MAE(주문 지연) → #4 QX4 → #5 → #7 -- 셋 다 옮김(11-21) · 남은 = #3 card30(서버 안) · #6 ETH 75열판 · #8 · #9.
 
 ## 서버 판과의 차이 (2026-11-21 · 서버 읽기 전용 확인)
 

@@ -197,6 +197,8 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
 | 18 | 아이스버그 | 시 파일 스냅숏 한쪽이 비면 `np.flatnonzero(...)[0]` IndexError 로 죽는다(ob5m #16 과 같은 자리) | 그 시를 «스냅샷 없음» 처럼 건너뛴다 | 파이썬은 죽고 Rust 는 다음 시부터 | — | 코드(iceberg.rs) |
 | 19 | 예약 수집기 polls.status | 실패 글자 = 파이썬 예외 repr | HTTP 오류는 `<HTTPError 429: 'Too Many Requests'>` 그대로 · 그 밖(연결·JSON·모양)은 이름+글 근사 | 오류 행의 status 글자 | — | 코드(cron.rs) |
 | 20 | 래스터 14일 보관(rtduck raster_archive) | parquet·gzip 쓰기가 성공하면 바로 원본 .f32 를 지운다 | 새로 쓴 보관본을 다시 읽어 행 수(0 아닌 칸·mid 행 / 푼 바이트)가 맞을 때만 지운다 · 안 맞으면 보관본을 지우고 원본 유지 | 정상일 땐 차이 없음 · 보관본이 깨진 경우에만 Rust 쪽에 원본이 남는다 | — (정답지에선 늘 맞다) | 코드(raster_archive.rs `archive_then_unlink`) |
+| 21 | lake 봉인 hot 정리(rtduck seal) | 지울 날짜의 lake 파일이 **있는지만** 보고 hot 행을 지운다 | 지우기 전 그 (코인, 날짜) lake 파일을 다시 읽어 행 수 ≥ hot 행 수 일 때만 · 아니면 그 표는 안 지움 | 정상일 땐 차이 없음 | — | 코드(seal.rs prune_hot) |
+| 22 | Deribit 체결(rtduck deribit) | SIGTERM 이면 버퍼(최대 20초분)를 버리고 죽는다 | 버퍼를 쓰고 0 | Rust 에만 끝 직전 체결 | — | deribit_loop |
 
 `shadow_tape.py` 는 1·3·8·9·12 의 표에서 «Rust에만» 을 `(의도한 차이 후보 -- 이유)` 로 따로 적는다(«파이썬에만»·값 불일치는 그대로 실패).
 원본 그대로 둔 것(고치지 않음 -- 범위 밖이거나 값이 원본 정의다): depth 의 재접속 사이 구멍이 `_gap` 으로 안 남는 것 · 재시작이 시 경계를 넘으면 지난 시
@@ -302,3 +304,21 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
   원인 = 시험용 가짜 시계(`RTDUCK_FAKE_START`)가 «벽시계 + 차이»라 WSL 벽시계가 1.5~2.4초 뒤로 뛰면 자정 넘기가 밀려, 다시 붙은 뒤 공백 줄이 전날 파일에 들어갔다(`gaps` 0줄).
   고침: 가짜 시계만 «시작 + 단조 경과»(실제 실행은 원본처럼 벽시계 그대로 -- 실행 파일 쪽 시험 전용 길) · 시험의 시간 창을 부하 여유로 넓힘.
   market_loop 는 20/20 통과했지만 같은 가짜 서버를 두 실행이 같이 써서, 밴 중 실행이 끝나기 직전의 요격기 재접속이 다음 실행 기록·각본 번호에 섞일 수 있는 경쟁이 있었다 → 실행마다 새 포트 서버 · 첫 실행은 «웹소켓 셋이 붙은 뒤»로 조건 대기.
+
+## 17. lake 봉인 전부 · Deribit 첫 단계 (2026-11-21 열째 조각)
+
+- `seal`(rtduck · 예약 매일 02:05 UTC · 한 번): SPECS 30 스트림 전부(글자 = 원본 SPECS · 시험이 대조) · hot 정리(HOT_PRUNE 23 줄 · 원본 순서) · seal_status.json.
+  `SEAL_LAKE`(기본 `data/rtduck/lake` -- `data/lake` 는 TAKEOVER 때만) · `SEAL_STATUS`(기본 `data/live/rtduck/seal_status.json`) · `SEAL_ROOT` · `--dry-run` · `--only`.
+  🔴hot 정리는 `RTDUCK_TAKEOVER=1` 일 때만 -- 그림자 lake 를 근거로 파이썬 수집기의 hot 행을 지우면 안 된다(그림자 = 봉인만).
+  SQLite 원천은 rusqlite 로 읽어 임시 DuckDB(디스크, lake 아래 .snap_*)에 싣는다 -- 열 형 = sqlite_scanner 규칙(INT → BIGINT · TEXT/VARCHAR → VARCHAR · REAL/DOUBLE → DOUBLE).
+  **스트림별 지문(원본 seal 을 Rust lake 위에서 dry-run → 전부 «건너뜀»)**: SQLite 13(binance tape·spot_tape·oi_1s·mark_1s·liquidations · okx tape·oi·mark·funding·liquidations · hl asset_ctx · bybit tape·oi·mark·funding · cme treasury · hl xyz_1m·xyz_ctx_1s · yahoo macro_5m)
+  + 섞임 2(hl positions·liquidations = SQLite 셋 + DuckDB 하나) 모두 같음 · DuckDB 원천은 oi_lsratio 로 같음(아홉째 조각) · micro_1m·tail_risk_1m·deribit 6 은 같은 DuckDB 길이나 표 자료로는 아직 안 봄.
+  🔴정답지의 sqlite 확장은 **개발기 duckdb 1.5.5 의 것**이다(서버 판 1.5.1 확장은 개발기에 없고, 설치 = 바깥 접속이라 하지 않았다). hash(row) 는 1.5.1 과 1.5.5 가 같음을 확인했지만,
+  **1.5.1 sqlite 확장의 형 대응이 같은지는 서버에서 한 번 확인해야 한다**: 서버에서 `SEAL_ROOT=. SEAL_LAKE=/tmp/seal_check/lake bin/rtduck --only <스트림>`(RTDUCK_KIND=seal) 로 그림자 lake 를 뜬 뒤
+  `python -c "import scripts.seal_to_lake as S, pathlib; print(S.seal(lake=pathlib.Path('/tmp/seal_check/lake'), dry_run=True, only='<스트림>'))"` 가 written 0·resealed 0 이면 같다(읽기 전용 · hot 안 지움).
+  등록 후보: `5 2 * * * cd <저장소> && RTDUCK_KIND=seal bin/rtduck >> logs/supervisor/rt_seal.log 2>&1`(REST 없음 · ×1 · 원본 02:05 와 겹치면 원천 사본이 둘 -- 03:05 로 미룰 것).
+- `deribit`(rtduck · 상주): 체결 WS(구독·하트비트·test_request 답·90초 무음 = 끊김·20초마다 write) · 재기동 틈 REST 백필(`RTDUCK_REST=1` 일 때만 -- 그림자 기본 꺼짐) · gaps · 상태 JSON(블록 구조·헤지·흐름).
+  `DERIBIT_BT_DIR`(기본 `data/live/rtduck` -- 원본 파일 `data/live/deribit_options.duckdb` 는 단일 writer 라 같이 열면 하나가 죽는다 · TAKEOVER 때만).
+  🔴아직 없는 것: 10분 체인·GEX·옵션 요약(deribit_gex_state.json) · 시간당 history 대조(block_rfq_trades·block_future_legs 채움 -- 그래서 그림자는 헤지 다리가 비고 «hedge: false») · 옛 파일 옮기기.
+  hourly_doi 는 체인 표가 없으면 {}(원본과 같음) -- 체인 표가 있는 원본 DB 를 가리키면 원본은 ΔOI 를 내고 Rust 는 None.
+  REST 배수: 켜면 재접속마다 목록 셋 × 쪽 수(×2) · WS 는 Deribit 이라 바이낸스 한도와 무관 · 등록 후보: `@reboot sleep 90 && cd <저장소> && RTDUCK_KIND=deribit bash scripts/ops/supervisor_rtduck.sh deribit …`(감독 스크립트의 종류 목록에 deribit 를 더해야 한다).

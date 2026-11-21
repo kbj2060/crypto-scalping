@@ -151,3 +151,53 @@ async fn g6_ping_drops_silent_peer() {
     }
     assert!(got.iter().any(|m| matches!(m, Message::Ping(_))), "ping 이 갔어야 한다");
 }
+
+// 6. 같은 호스트(2026-11-21): Origin 호스트·포트 == Host 머리면 목록 밖이어도 받는다 · 다른 호스트는 403 · Origin 없음은 받음.
+#[tokio::test]
+async fn g6_same_host_origin() {
+    let a = hub(HubCfg { origins: vec![], ..cfg() }).await; // 목록이 비어도
+    assert_eq!(status(open(&a, "/rt", Some(&format!("http://{a}"))).await), 101, "같은 호스트(Host = 접속 주소)");
+    assert_eq!(status(open(&a, "/rt", Some(&format!("HTTP://{}", a.to_uppercase()))).await), 101, "대소문자");
+    assert_eq!(status(open(&a, "/rt", Some("https://evil.example")).await), 403, "다른 호스트(CSWSH)");
+    assert_eq!(status(open(&a, "/rt", Some(&format!("https://{a}"))).await), 101, "포트가 적혀 있으면 스킴과 무관하게 포트로 비교");
+    let port: u16 = a.rsplit(':').next().unwrap().parse().unwrap();
+    assert_eq!(status(open(&a, "/rt", Some(&format!("http://127.0.0.1:{}", port + 1))).await), 403, "포트 다름");
+    assert_eq!(status(open(&a, "/rt", None).await), 101, "Origin 없음(도구)");
+    // Host 없는 업그레이드(클라이언트 라이브러리는 늘 Host 를 싣는다 -- 손으로 쓴 요청)
+    let raw = |origin: &'static str| {
+        let a = a.clone();
+        async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut t = TcpStream::connect(&a).await.unwrap();
+            let req = format!("GET /rt HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n{origin}\r\n");
+            t.write_all(req.as_bytes()).await.unwrap();
+            let mut buf = [0u8; 64];
+            let n = timeout(Duration::from_secs(5), t.read(&mut buf)).await.unwrap().unwrap();
+            String::from_utf8_lossy(&buf[..n]).split(' ').nth(1).unwrap_or("").to_string()
+        }
+    };
+    assert_eq!(raw("Origin: http://127.0.0.1\r\n").await, "403", "Host 없음 + Origin 있음");
+    assert_eq!(raw("").await, "101", "Host·Origin 둘 다 없음(도구)");
+}
+
+#[test]
+fn same_host_rules() {
+    use rtcore::hub::same_host;
+    assert!(same_host("https://dash.example", "dash.example"));
+    assert!(same_host("https://Dash.Example", "dash.EXAMPLE"), "대소문자");
+    assert!(same_host("https://dash.example:443", "dash.example"), "기본 포트 표기 차이(Origin 쪽)");
+    assert!(same_host("https://dash.example", "dash.example:443"), "기본 포트 표기 차이(Host 쪽)");
+    assert!(same_host("http://dash.example", "dash.example:80"));
+    assert!(!same_host("https://dash.example", "dash.example:80"), "https 기본 포트는 443");
+    assert!(!same_host("https://evil.example", "dash.example"));
+    assert!(!same_host("https://dash.example.evil", "dash.example"), "접미사 흉내");
+    assert!(!same_host("https://dash.example", ""), "Host 없음 + Origin 있음 = 거절");
+    assert!(!same_host("null", "dash.example"), "sandbox·file 의 Origin null");
+    assert!(!same_host("https://dash.example/x", "dash.example"), "Origin 에 경로");
+    assert!(!same_host("https://u@dash.example", "dash.example"), "사용자 정보");
+    assert!(!same_host("https://u@dash.example", "u@dash.example"), "사용자 정보(양쪽 같아도 거절)");
+    assert!(!same_host("ws://dash.example", "dash.example"), "http(s) 만");
+    assert!(same_host("https://[::1]:8788", "[::1]:8788"));
+    assert!(same_host("https://[::1]", "[::1]:443"));
+    assert!(!same_host("https://[::1]x", "[::1]"));
+}
