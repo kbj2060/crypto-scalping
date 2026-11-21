@@ -106,6 +106,15 @@ pub struct Micro {
     /// [봉, ΔOI, 봉 끝 OI] -- server.py api_oi_5m 의 okx_d(반올림 전 · 바이낸스 봉과 더하는 것은 받는 쪽).
     #[serde(default)]
     pub okx_oi5m: Vec<(i64, f64, f64)>,
+    /// 2026-11-22 더함 -- OKX 봉 칸 합 [매수, 매도, 고래매수, 고래매도, 리테일매수, 리테일매도](first_bar «뒤» 봉만). 시장 맥락의 재료:
+    /// server.py _flow_read_ctx onet(2332~2339 · 거래소 합산 60분·30분·테이커 비율)·okx30(2374~2376). 풋프린트 그림에는 안 들어간다(원본 11-02 «바이낸스만»).
+    /// 바뀐 봉만 · `okx_full` 이면 통째로 갈아 끼운다(first_bar 가 바뀜).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub okx_from: Option<i64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub okx_bars: Vec<(i64, [f64; 6])>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub okx_full: bool,
 }
 
 /// 지난 60초 바이낸스 강제청산 USD 합(롱 = 롱 포지션 청산) · 건수.
@@ -192,7 +201,7 @@ pub type Liq5mRow = (i64, f64, f64, i64, Option<f64>, Option<f64>);
 pub struct Liq5m {
     pub from_s: f64,
     pub bars: Vec<Liq5mRow>,
-    /// 2026-11-21 더함 -- OKX·Bybit 몫(server.py api_liquidation_5m_history 의 OKX 더하기 · merge_bybit_liq). 실리면 **통째로 갈아 끼운다**
+    /// 2026-11-21 더함 -- OKX·Bybit 몫(server.py api_liquidation_5m_history 4413~4455 · merge_okx_liq 의 메모리 갈래 · merge_bybit_liq). 🔴OKX first_bar «앞» 봉(원본 = hot okx_liq_hot_bars)은 안 싣는다 -- 받는 쪽이 hot 에서. 실리면 **통째로 갈아 끼운다**
     /// (없으면 그대로). `okx_from` = OKX first_bar(이 봉 «뒤» 봉만 OKX 를 안다 · 0 = 모름) · `bybit_from` = Bybit 수집 시작이 걸친 봉(그 «뒤»만).
     /// 바이낸스 봉과 더하기·round 는 받는 쪽(원본 응답의 long_usd 합·okx_detail·bybit 칸). HL 은 코어 밖.
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -825,6 +825,7 @@ impl Supply {
         }
         self.okx_fr.liq_upto = Some(earliest * 1000);
         self.okx_first_bar = earliest - 300;
+        self.okx_sum_full = true;
         self.okx_liq5m_dirty = true;
         if earliest <= lo {
             self.okx_fr.done = true;

@@ -73,7 +73,24 @@
 - HL(Hyperliquid, `_with_hl_liq`): 코어가 받지 않는 원천이다 → rtcollect/rtserve 몫.
 - 결론: rtserve 가 코어 `Liq5m`(바이낸스)에 OKX·Bybit 5분 누적을 코어에서 받고, HL 은 자기가 읽어 합치는 구조가 맞다.
 - 2026-11-21 셋째 조각: OKX·Bybit 5분 누적 · «첫 봉» · 재시작 복원을 원본과 같게 옮겼다 → `Liq5m.okx`·`Liq5m.bybit`(RESTORE.md §10). 재시작 직후 OKX OI 5분봉도 같다.
-- OKX 풋프린트를 그리는 자리:
-  - 화면(app.js)은 2026-11-02 부터 진행 봉에 OKX 를 안 더한다.
-  - 원본 `/api/footprint` 는 닫힌 봉에 OKX 칸을 더해 내보낸다(`bar > first_bar` 봉만). 시장 맥락 `okx30` 도 OKX 봉을 쓴다.
-  - 코어 풋프린트 메시지는 아직 바이낸스만이다(RESTORE.md §10 🔴).
+- 🔴2026-11-22 정정(실제 파일 Read): 원본 merge_okx_liq(878~904)는 first_bar «앞» 봉을 hot `okx_liquidations` 봉 합(okx_liq_hot_bars 856~875 · 2026-11-07 판)으로 채운다. 코어 `Liq5m.okx` 는 메모리 몫(first_bar «뒤»)만이다 → 앞 봉은 rtserve 가 hot SQLite 에서(REMAINING.md).
+- OKX 풋프린트 봉을 쓰는 자리(2026-11-22 정정 — 11-21 판의 «원본 /api/footprint 가 OKX 를 더한다»는 graft 색인의 옛 코드를 본 틀린 말이었다):
+  - 원본 `/api/footprint`(3990~4056)는 바이낸스 선물만이다(4000~4005 «11-02 바이낸스만» · venues [binance-perp]). 코어 풋프린트 메시지도 바이낸스만이다 — 같다.
+  - OKX 봉(coin_flow okx_bars)은 그림 밖에서 쓰인다: 시장 맥락 onet·okx30(§4) · 재시작 때 okx_footprint_restore 가 OI 5분봉·OKX 청산 링·first_bar 를 되살리는 경계.
+
+## 4. 시장 맥락 okx30·onet 재료 — 코어가 낸다(2026-11-22 실제 파일로 다시 확인)
+- 원본 server.py(Read 로 확인한 줄) `_flow_read_ctx`:
+  - onet = OKX 봉마다 (순, 고래 순, 리테일 순, 매수, 매도) — 2332~2339 · `b > okx_fp["first_bar"] and b in okx_bars`. 마지막 두 봉 밖은 처음 센 값을 둔다.
+  - okx30 = 마지막 6 완결봉이 모두 first_bar «뒤»이고 OKX 봉이 있을 때 (매수 − 매도) 합 — 2374~2376.
+  - 둘 다 11-02(풋프린트 «바이낸스만») 뒤에도 남아 있다. 풋프린트 그림에는 OKX 가 안 들어가지만, 수급 합산·시장 맥락에는 OKX 봉이 들어간다.
+- 코어는 `Micro.okx_bars`(OKX 봉 칸 합 6칸 · first_bar «뒤») · `okx_from` · `okx_full` 을 민다. okx30·onet 의 식·캐시는 rtserve 가 원본대로 센다.
+- 대조: okx_fp_restore — 원본 okx_footprint_restore 를 돌린 걸음마다의 okx_bars 칸 합과 비교. 두 변형에서 2,724 + 2,742칸이 1e-9 안이다(칸 합 차례만 다름).
+
+## 5. Micro 를 호가 전에도 미나 — 안 민다(2026-11-22 실제 파일로 다시 확인)
+- 원본 collect_micro_ref(1912~2022): 매 틱 REST bookTicker 를 먼저 받는다(1955 근처 fetch).
+  - 실패하면 except(2011~2012)가 payload 를 `{"available": False, "error": …}` 로 바꾼다. 앞 값을 유지하지 않는다 — 11-21 판 문서의 «앞 값 유지»는 틀렸다.
+  - 그 틱에도 compute_situation 은 돈다(2014 · SITUATION_EVERY_TICKS = 1). mid 는 None 이라 classify 가 종가로 물러선다.
+- 코어: `@bookTicker` 를 한 번 받기 전에는 Micro 를 안 민다(스냅숏 micro 도 없음).
+  - 받은 뒤에는 마지막 호가로 계속 센다. 웹소켓이라 «실패한 틱»이 없다.
+  - 원본이 REST 실패로 available false 인 순간에도 코어는 값을 낸다 → 의도한 차이.
+- 시험: micro_parity 의 «호가 전 틱» 4개 — 그동안 Micro 0건.
