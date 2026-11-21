@@ -86,5 +86,6 @@ source <(bash rtmodel/tools/server_env.sh ~/venv_srv --env)       # PY · numpy 
 cd rtmodel && cargo test -j 2 --release
 ```
 
-- 🔴numpy 2.2 는 AVX-512 를 끄는 이름이 2.4 와 다르다(`X86_V4` 없음 → 조용히 무시). `--env` 가 2.2 이름을 준다.
+- 🔴AVX-512 를 끄는 이름이 numpy 판마다 다르다: 2.4 = `X86_V4`(옛 `AVX512F` 등은 조용히 무시) · 2.2 = `AVX512F`·`AVX512_SKX` 등(`X86_V4` 없음 → 조용히 무시).
+  `--env`·시험 머리말 명령은 둘을 함께 준다(모르는 이름은 오류 없이 무시 · 함께 주면 두 판 모두 np.log 가 libm 과 같음 -- 2026-11-21 실측).
 - 서버 판이 바뀌면(재설치·업그레이드) server_env.sh 의 판 번호를 서버와 맞추고 정답지를 다시 만든다.

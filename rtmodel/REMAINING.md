@@ -45,7 +45,8 @@
 
 - **pandas 2.2.3 대 2.3.3 — 차이 없음**: rolling var/std 62,265칸 · mean 12만 · median 6만 · quantile 12만 · ewm 6만 칸이 두 판 모두 옮긴 식과 비트 같다(tools/check_rollvar.py · check_pandas_ops.py).
 - **lightgbm 4.6.0 대 4.7.0 — 차이 없음**: 4.6.0 predict 로 만든 정답지에서 모델 하나 80만 칸 · 앙상블 4만 칸 비트 같음.
-- **numpy 2.2 의 AVX-512 끄기 이름**: 2.4 의 `X86_V4` 묶음이 없다 -- 2.4 이름을 주면 조용히 무시돼 AVX-512 np.log 가 돈다. `AVX512F AVX512CD AVX512_SKX …`(server_env.sh)로 끈다. 서버 CPU 엔 AVX-512 가 없어 원래 상관없다.
+- **AVX-512 끄기 이름은 numpy 판마다 다르다**: 2.4 = `X86_V4`(옛 `AVX512F` 등은 무시) · 2.2 = `AVX512F AVX512CD AVX512_SKX …`(`X86_V4` 없음 → 무시). 모르는 이름은 두 판 모두 오류 없이 무시하므로
+  모든 명령이 둘을 함께 준다(함께 주면 두 판 모두 np.log 가 libm 과 20만 개 중 0개 다름 · 안 끄면 19개). 서버 CPU 엔 AVX-512 가 없어 원래 상관없다.
 - **BLAS 를 타는 자리 셋**(numpy 가 BLAS 로 곱한다 · Rust 는 차례 합):
   1. 위험 레이더 σ̂ = c·exp(2·X@β)(gemv · 60·62·13열) → 서버 BLAS(OpenBLAS · `OPENBLAS_CORETYPE=ZEN` = Haswell 커널) 기준 숫자 최대 3.5e-15 상대 · latest 글자 같은 벌 3/18 · forward 줄 40/88 · 상태·참거짓·None 전부 같음.
   2. 4h 방향 P_ac144(np.corrcoef 내적) → 169/720칸 비트 같음 · 최대 3.6e-14 상대 · 예측·payload 는 같음.

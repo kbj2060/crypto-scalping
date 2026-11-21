@@ -6,7 +6,7 @@
 여기서는 update_cache·update_dvol·main 을 부르지 않는다. main() 의 «코인 결과 → 파일 두 개» 조립(:221-240)만 아래 assemble() 에 같은 식으로 적었다.
 입력 = 워커 캐시 꼴(1분봉 t·h·l·c·v, DVOL ts·close·got) 합성. 계수 = 저장소 dashboard/risk_radar_params_20261116.json. SOXL(세션 식)은 아직 안 옮겨 뺐다.
 
-    NPY_DISABLE_CPU_FEATURES="X86_V4 AVX512_ICL" python rtmodel/tools/gen_radar_fixture.py     # → tests/fixtures/radar_fixture.json (커밋 안 함)
+    NPY_DISABLE_CPU_FEATURES="X86_V4 AVX512F AVX512CD AVX512_KNL AVX512_KNM AVX512_SKX AVX512_CLX AVX512_CNL AVX512_ICL AVX512_SPR" python rtmodel/tools/gen_radar_fixture.py     # → tests/fixtures/radar_fixture.json (커밋 안 함)
 """
 import datetime as dt
 import json

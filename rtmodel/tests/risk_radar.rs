@@ -1,5 +1,5 @@
 //! 위험 레이더(risk_radar.rs)를 원본 워커(scripts/live_risk_radar_20261115.py compute + main 조립)와 대조 -- latest.json·forward.jsonl 글자.
-//! 정답지는 커밋하지 않는다(약 120MB):  NPY_DISABLE_CPU_FEATURES="X86_V4 AVX512_ICL" python rtmodel/tools/gen_radar_fixture.py
+//! 정답지는 커밋하지 않는다(약 120MB):  NPY_DISABLE_CPU_FEATURES="X86_V4 AVX512F AVX512CD AVX512_KNL AVX512_KNM AVX512_SKX AVX512_CLX AVX512_CNL AVX512_ICL AVX512_SPR" python rtmodel/tools/gen_radar_fixture.py
 //!     cargo test -j 2 --release --test risk_radar -- --nocapture
 use rtmodel::risk_radar::*;
 use serde_json::Value;

@@ -1,5 +1,5 @@
 //! 4시간 방향 «REST 꼴 5분봉·metrics → 피쳐 65 → HGB 회귀 → payload» 를 원본(scripts/live_eth_dir4h_20261015.py)과 대조. 정답지는 커밋하지 않는다(약 60MB):
-//!     python rtmodel/tools/export_dir4h.py && NPY_DISABLE_CPU_FEATURES="X86_V4 AVX512_ICL" python rtmodel/tools/gen_dir4h_fixture.py
+//!     python rtmodel/tools/export_dir4h.py && NPY_DISABLE_CPU_FEATURES="X86_V4 AVX512F AVX512CD AVX512_KNL AVX512_KNM AVX512_SKX AVX512_CLX AVX512_CNL AVX512_ICL AVX512_SPR" python rtmodel/tools/gen_dir4h_fixture.py
 //!     cargo test -j 2 --release --test dir4h -- --nocapture
 use rtmodel::dir4h::*;
 use serde_json::Value;

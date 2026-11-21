@@ -1,6 +1,6 @@
 //! 레벨 5분 «체결·1분봉 → 사건 → 피쳐 → 확률 → 기록 줄» 을 원본 워커(scripts/live_sr_lean_20261118.py Live)와 대조.
 //! 정답지는 커밋하지 않는다(약 40MB · 시험 전에 도구로 다시 만든다):
-//!     python rtmodel/tools/export_hgb.py && NPY_DISABLE_CPU_FEATURES="X86_V4 AVX512_ICL" python rtmodel/tools/gen_sr_fixture.py
+//!     python rtmodel/tools/export_hgb.py && NPY_DISABLE_CPU_FEATURES="X86_V4 AVX512F AVX512CD AVX512_KNL AVX512_KNM AVX512_SKX AVX512_CLX AVX512_CNL AVX512_ICL AVX512_SPR" python rtmodel/tools/gen_sr_fixture.py
 //!     cargo test -j 2 --release --test sr_lean -- --nocapture
 use rtmodel::sr_lean::*;
 use rtmodel::*;

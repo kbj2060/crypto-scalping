@@ -4,11 +4,12 @@
 #   bash rtmodel/tools/server_env.sh <venv 디렉터리>        # 한 번 만들기
 #   source <(bash rtmodel/tools/server_env.sh <venv 디렉터리> --env)   # 정답지 만들 때 환경변수
 # 🔴서버 CPU = Ryzen 5 5600X(Zen 3 · AVX2 · AVX-512 없음) → numpy SIMD 는 AVX-512 를 끄고, OpenBLAS 커널은 ZEN(= Haswell 커널)으로 고른다.
-#   numpy 2.2 의 기능 이름은 2.4 와 다르다(X86_V4 묶음이 없다 -- 2.4 이름을 주면 조용히 무시돼 AVX-512 np.log 가 그대로 돈다. 2026-11-21 실측).
+#   numpy 판마다 이름이 다르다: 2.4 는 X86_V4 묶음(옛 AVX512F 등은 무시) · 2.2 는 AVX512F·AVX512_SKX 등(X86_V4 없음) -- 둘 다 준다.
+#   모르는 이름은 두 판 모두 오류 없이 무시하고, 함께 주면 두 판 모두 np.log 가 libm 과 20만 개 중 0개 다르다(끄지 않으면 19개 · 2026-11-21 실측).
 set -euo pipefail
 V="${1:?venv 디렉터리}"
 if [ "${2:-}" = "--env" ]; then
-  echo "export PY=$V/bin/python NPY_DISABLE_CPU_FEATURES='AVX512F AVX512CD AVX512_KNL AVX512_KNM AVX512_SKX AVX512_CLX AVX512_CNL AVX512_ICL AVX512_SPR' OPENBLAS_CORETYPE=ZEN OPENBLAS_NUM_THREADS=1"
+  echo "export PY=$V/bin/python NPY_DISABLE_CPU_FEATURES='X86_V4 AVX512F AVX512CD AVX512_KNL AVX512_KNM AVX512_SKX AVX512_CLX AVX512_CNL AVX512_ICL AVX512_SPR' OPENBLAS_CORETYPE=ZEN OPENBLAS_NUM_THREADS=1"
   exit 0
 fi
 python3 -m venv "$V"

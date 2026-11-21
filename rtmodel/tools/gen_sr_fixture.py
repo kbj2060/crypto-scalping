@@ -8,7 +8,7 @@
 입력은 합성: 고정 시드로 초마다 체결(시각 ms·가격 0.01 단위·수량 0.001 단위·묶음 번호·매수자 메이커 여부)을 만들고, 앞 1,500분 이상은
 1분봉(REST klines 꼴 문자열)으로만, 그 뒤는 체결 메시지로 흘린다. 기록 줄은 run() 의 sink 와 같은 json.dumps(dict(k=kind, **row), ensure_ascii=False).
 
-    NPY_DISABLE_CPU_FEATURES="X86_V4 AVX512_ICL" python rtmodel/tools/gen_sr_fixture.py            # 서버(AVX-512 없음)와 같은 계산 → tests/fixtures/sr_fixture.json
+    NPY_DISABLE_CPU_FEATURES="X86_V4 AVX512F AVX512CD AVX512_KNL AVX512_KNM AVX512_SKX AVX512_CLX AVX512_CNL AVX512_ICL AVX512_SPR" python rtmodel/tools/gen_sr_fixture.py            # 서버(AVX-512 없음)와 같은 계산 → tests/fixtures/sr_fixture.json
     python rtmodel/tools/gen_sr_fixture.py sr_fixture_avx512.json                                       # 참고: 개발기 AVX-512 numpy
     python rtmodel/tools/gen_sr_fixture.py --only normal                                                # 한 벌만(시간 재기)
 """
