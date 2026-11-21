@@ -210,6 +210,38 @@ pub struct Supply {
     okx_last_oi_ms: i64,
     pub(crate) okx_liq: VecDeque<LiqEv>,
     pub(crate) bybit: VecDeque<LiqEv>,
+    /// 5분봉 강제청산 원(바이낸스 · server.py liq_5m_add 517~535): 봉 시작 초 → ([롱USD, 숏USD], 건수, 롱 최저가, 숏 최고가).
+    pub(crate) liq5m: BTreeMap<i64, ([f64; 2], i64, Option<f64>, Option<f64>)>,
+    /// 기록 시작(초) -- 그 봉과 앞은 «모름»(liq_5m_payload). 원본은 시작 시각, DB 에서 되살리면 되살린 첫 사건 시각(liq_events_load 1796~1811).
+    pub(crate) liq5m_from: f64,
+    /// 마지막 밀기 뒤 바뀐 봉.
+    pub(crate) liq5m_dirty: std::collections::BTreeSet<i64>,
+}
+
+const LIQ5M_BAR_S: i64 = 300;
+const LIQ5M_KEEP_BARS: i64 = 288;
+
+/// server.py liq_5m_add 그대로(봉 = ts//1000//300*300 · 극값 = 롱 청산의 가장 낮은 체결가·숏 청산의 가장 높은 체결가 · 가격 0 은 극값에 안 넣음 ·
+/// 이 사건 봉 − 288봉보다 오래된 봉은 지운다).
+pub(crate) fn liq5m_add(store: &mut BTreeMap<i64, ([f64; 2], i64, Option<f64>, Option<f64>)>, ts_ms: i64, long: bool, usd: f64, px: f64) -> i64 {
+    let bar = ts_ms.div_euclid(1000).div_euclid(LIQ5M_BAR_S) * LIQ5M_BAR_S;
+    let a = store.entry(bar).or_insert(([0.0; 2], 0, None, None));
+    a.0[(!long) as usize] += usd;
+    a.1 += 1;
+    if px > 0.0 {
+        if long {
+            a.2 = Some(a.2.map_or(px, |x: f64| if px < x { px } else { x })); // 파이썬 min(a, px): 같으면 앞의 것
+        } else {
+            a.3 = Some(a.3.map_or(px, |x: f64| if px > x { px } else { x }));
+        }
+    }
+    let cut = bar - LIQ5M_KEEP_BARS * LIQ5M_BAR_S;
+    *store = store.split_off(&cut);
+    bar
+}
+
+fn r2(x: f64) -> f64 {
+    format!("{x:.2}").parse().unwrap_or(x)
 }
 
 impl Supply {
@@ -231,6 +263,9 @@ impl Supply {
             okx_last_oi_ms: 0,
             okx_liq: VecDeque::new(),
             bybit: VecDeque::new(),
+            liq5m: BTreeMap::new(),
+            liq5m_from: crate::now_us() as f64 / 1e6, // 복원이 없으면 «지금부터 기록»(원본 liq_events_load 의 now_ms / 1000)
+            liq5m_dirty: Default::default(),
         }
     }
 
@@ -306,6 +341,8 @@ impl Supply {
         // 창 왼쪽 끝. 링(5000건)은 창 밖 사건도 넣어야 파이썬 deque 와 같은 때 같은 것이 밀려난다.
         let lo = match venue {
             Venue::Bn => {
+                let b = liq5m_add(&mut self.liq5m, ts_ms, long, e.usd, px); // 청산 원도 같은 사건으로(collect_force_orders 1842)
+                self.liq5m_dirty.insert(b);
                 push_capped(&mut self.liq, e);
                 newest(&self.sec) - SUPPLY_1S_SECONDS
             }
@@ -408,6 +445,26 @@ impl Supply {
         let b = now_us.div_euclid(1_000_000) - BYBIT_LAG_S;
         m.bybit_liq = liq_rows(&self.bybit, |s| b - SUPPLY_1S_SECONDS < s && s <= b);
         m
+    }
+
+    /// 5분봉 강제청산 원 전부(스냅숏). 기록 시작 봉과 그 앞은 싣지 않는다(liq_5m_payload 의 b <= from_bar).
+    pub fn liq5m_all(&self) -> Option<crate::proto::Liq5m> {
+        self.fp.spec?;
+        Some(self.liq5m_rows(self.liq5m.keys().copied()))
+    }
+
+    /// 마지막 밀기 뒤 바뀐 봉만(없으면 None).
+    pub fn liq5m_delta(&mut self) -> Option<crate::proto::Liq5m> {
+        self.fp.spec?;
+        let keys = std::mem::take(&mut self.liq5m_dirty);
+        let m = self.liq5m_rows(keys.into_iter());
+        (!m.bars.is_empty()).then_some(m)
+    }
+
+    fn liq5m_rows(&self, keys: impl Iterator<Item = i64>) -> crate::proto::Liq5m {
+        let from_bar = (self.liq5m_from as i64).div_euclid(LIQ5M_BAR_S) * LIQ5M_BAR_S;
+        let bars = keys.filter(|b| *b > from_bar).filter_map(|b| self.liq5m.get(&b).map(|a| (b, r2(a.0[0]), r2(a.0[1]), a.1, a.2, a.3))).collect();
+        crate::proto::Liq5m { from_s: self.liq5m_from, bars }
     }
 
     /// 풋프린트 스냅숏(파이썬 /api/footprint since=0 의 봉·칸). 표에 없는 종목은 None.

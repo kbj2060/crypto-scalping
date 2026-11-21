@@ -497,16 +497,20 @@ fn liq_query(path: &Path, sql: &str, params: impl rusqlite::Params, long_is: &st
     Ok(rows)
 }
 
-/// 바이낸스 강제청산(server.py liq_events_load): 최근 5,000건(시각 내림차순 LIMIT) → 시각 순 → 지금 − 660초 이후만. (ts, 롱, 수량, usd).
-pub fn read_bn_liq(path: &Path, symbol: &str, now_ms: f64) -> Result<Vec<LiqRowDb>, String> {
-    let rows = liq_query(
-        path,
-        "SELECT ts_ms, side, qty, usd FROM liquidations WHERE symbol = ? ORDER BY ts_ms DESC LIMIT ?",
-        rusqlite::params![symbol.to_uppercase(), crate::supply::LIQ_RING as i64],
-        "long",
-    )?;
-    let cut = now_ms - (SUPPLY_1S_SECONDS * 1000) as f64;
-    Ok(rows.into_iter().rev().filter(|r| r.0 as f64 >= cut).collect())
+/// 바이낸스 강제청산(server.py liq_events_load 1785~1815): 최근 5,000건(시각 내림차순 LIMIT) → 시각 순. (ts, 롱, 수량, usd, 가격).
+/// 1초 수급 링은 지금 − 660초 이후만, 5분봉 청산 원은 지금 − 288봉 이후(load_liqs).
+pub fn read_bn_liq(path: &Path, symbol: &str) -> Result<Vec<(i64, bool, f64, f64, f64)>, String> {
+    let con = open_ro(path)?;
+    let err = |e: rusqlite::Error| format!("{}: {e}", path.display());
+    let mut st = con.prepare("SELECT ts_ms, side, qty, usd, price FROM liquidations WHERE symbol = ? ORDER BY ts_ms DESC LIMIT ?").map_err(err)?;
+    let rows = st
+        .query_map(rusqlite::params![symbol.to_uppercase(), crate::supply::LIQ_RING as i64], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?.as_deref() == Some("long"), f(r, 2)?, f(r, 3)?, f(r, 4)?))
+        })
+        .map_err(err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(err)?;
+    Ok(rows.into_iter().rev().collect())
 }
 
 /// Bybit 청산: 코어가 보일 창((지금 − 3 − 660, …])만 시각 순으로(server.py _bybit_liq_refresh 의 SQL · side Buy = 롱 청산). (ts, 롱, 수량, 가격).
@@ -570,11 +574,23 @@ pub fn read_okx_secs(path: &Path, inst: &str, t0_s: i64, tape_bucket: f64, tries
 }
 
 impl Supply {
-    /// 시작 때(수신 전): 바이낸스 강제청산 · Bybit 청산을 DB 에서 링에 넣는다.
-    pub(crate) fn load_liqs(&mut self, bn: Vec<LiqRowDb>, bybit: Vec<LiqRowDb>) {
-        for (ts_ms, long, qty, usd) in bn {
-            crate::supply::push_capped(&mut self.liq, crate::supply::LiqEv { ts_ms, long, qty, usd });
+    /// 시작 때(수신 전): 바이낸스 강제청산 · Bybit 청산을 DB 에서 링에 넣는다. `now_ms` = 지금(파이썬 time.time() * 1000).
+    pub(crate) fn load_liqs(&mut self, bn: Vec<(i64, bool, f64, f64, f64)>, bybit: Vec<LiqRowDb>, now_ms: f64) {
+        let cut = now_ms - (SUPPLY_1S_SECONDS * 1000) as f64;
+        let cut_5m = now_ms - (288 * 300 * 1000) as f64; // FOOTPRINT_KEEP_BARS × FOOTPRINT_BAR_SECONDS
+        self.liq5m_from = now_ms / 1000.0; // 비면 «지금부터»(기록 시작점 -- 그 앞 봉을 0 으로 내보내면 «청산 없음»이라는 거짓)
+        if let Some(first) = bn.first() {
+            self.liq5m_from = first.0 as f64 / 1000.0; // 읽은 꼬리의 첫 사건
         }
+        for (ts_ms, long, qty, usd, px) in bn {
+            if ts_ms as f64 >= cut {
+                crate::supply::push_capped(&mut self.liq, crate::supply::LiqEv { ts_ms, long, qty, usd });
+            }
+            if ts_ms as f64 >= cut_5m {
+                crate::supply::liq5m_add(&mut self.liq5m, ts_ms, long, usd, px);
+            }
+        }
+        self.liq5m_dirty.clear();
         for (ts_ms, long, qty, px) in bybit {
             let i = self.bybit.partition_point(|e| e.ts_ms <= ts_ms);
             self.bybit.insert(i, crate::supply::LiqEv { ts_ms, long, qty, usd: qty * px });

@@ -611,3 +611,37 @@ fn nowhere() -> Cfg {
     let n = std::path::PathBuf::from("/rtcore_없는_경로/x.sqlite");
     Cfg { snap_dir: n.clone(), tape: n.clone(), tries: 1, wait: Duration::ZERO, okx_tape: n.clone(), okx_ctx: n.clone(), bn_ctx: n.clone(), bybit_liq: n }
 }
+
+/// «holes 가 바뀌면 밀기»(footprint.rs holes_dirty): 합치기가 봉도 dhl 도 안 바꾸고 «메우는 중» 구멍만 풀 때 -- 밀기가 안 나가면 붙어 있던 화면은
+/// 반쪽 봉 표시를 영영 못 지운다. 정답지 사례들은 합치기가 링 안 봉 dhl 을 늘 바꿔 밀기가 따로 나가 이 규칙을 가린다(2026-11-21 확인) --
+/// 체결 드문 종목(주식 선물 주말)처럼 «테이프는 따라왔는데 공백·660초 안에 체결이 없는» 판을 직접 만든다.
+#[test]
+fn holes_cleared_push_without_bar_change() {
+    let dir = tmp("holes_push");
+    let tape = dir.join("tape.sqlite");
+    let con = rusqlite::Connection::open(&tape).unwrap();
+    con.execute_batch(
+        "CREATE TABLE trade_tape_1s(symbol TEXT, ts_sec INTEGER, price_bin INTEGER, buy_qty REAL, sell_qty REAL, whale_buy_qty REAL, whale_sell_qty REAL, retail_buy_qty REAL, retail_sell_qty REAL);
+         CREATE TABLE gaps(symbol TEXT, from_ms INTEGER, to_ms INTEGER, reason TEXT);
+         CREATE TABLE verify_1m(symbol TEXT, ts_min INTEGER, tape_qty REAL, kline_qty REAL, rel_err REAL, checked_at TEXT);",
+    )
+    .unwrap();
+    let first_ms: i64 = 1_763_700_150_000; // 봉 1763700000 가운데
+    // 테이프 끝은 붙은 첫 초보다 뒤(따라옴) -- 공백·1초 창 안에는 행이 없다
+    con.execute("INSERT INTO trade_tape_1s VALUES ('solusdt', ?, 14000, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0)", [first_ms / 1000 + 30]).unwrap();
+    drop(con);
+    let (st, _) = State::with_restore(&["solusdt".to_string()], 16, 1 << 16, Cfg { tape, ..cfg(&dir, dir.join("x")) }, first_ms * 1000);
+    let mut rx = st.tx.subscribe();
+    let trade = |t: i64, id: u64| json!({"e": "trade", "E": t, "T": t, "s": "SOLUSDT", "t": id, "p": "140.00", "q": "1.00", "X": "MARKET", "m": false}).to_string();
+    st.apply(rtcore::feed::parse(&trade(first_ms, 1), first_ms * 1000).unwrap());
+    let (seq0, fp0, _) = snap_of(&st);
+    assert_eq!(fp0.holes, vec![1_763_700_000], "메우는 중 -- 첫 봉(첫 체결 앞 몫이 빔)");
+    st.flush();
+    st.run_restore("solusdt").unwrap();
+    st.flush();
+    let mut view = View::default();
+    view.put_fp(&fp0);
+    view.drain(&mut rx, seq0);
+    assert!(snap_of(&st).1.holes.is_empty(), "테이프가 따라왔고 공백에 체결이 없다 = 구멍 없음");
+    assert!(view.holes.is_empty(), "구멍이 풀린 것이 밀기로 가야 한다(봉은 안 바뀌었다)");
+}

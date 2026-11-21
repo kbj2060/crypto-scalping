@@ -92,6 +92,7 @@ fn is(p: &str, tail: &str) -> bool {
 async fn core(addr: &str, silence_ms: u64) -> String {
     let cfg = Cfg {
         symbols: vec!["ethusdt".into()],
+        quote_symbols: vec![],
         ws_base: format!("ws://{addr}/ws/"),
         market_ws_base: format!("ws://{addr}/market/ws/"),
         force_url: String::new(),
@@ -165,8 +166,8 @@ async fn t1_events_in_order_with_three_stamps() {
     let mut got = vec![];
     while got.len() < 5 {
         let m = next(&mut ws).await;
-        if !matches!(m.ev, Event::Supply1s(_) | Event::Footprint(_)) {
-            got.push(m); // 1초 수급·풋프린트는 supply1s_parity.rs·footprint_parity.rs 가 본다
+        if !matches!(m.ev, Event::Supply1s(_) | Event::Footprint(_) | Event::Prices { .. }) {
+            got.push(m); // 1초 수급·풋프린트는 supply1s_parity.rs·footprint_parity.rs 가 본다 · 모든 종목 가격(Prices, s="*")은 quote_parity.rs
         }
     }
     let mut last_seq = snap.seq;

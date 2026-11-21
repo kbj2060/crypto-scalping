@@ -19,6 +19,8 @@ struct Sym {
     /// 마지막 flush 뒤 모은 1초 수급(Supply1s::merge)과 그 묶음 첫 사건의 시각(ex_ms, rx_us).
     pending: Option<Supply1s>,
     first: Option<(i64, i64)>,
+    /// 주문 경로가 쓰는 받아 둔 시세(quote.rs).
+    quote: crate::quote::Quote,
 }
 
 /// 1초 수급·풋프린트 밀기 묶음 간격(ms). 화면은 한 프레임(60Hz ≈ 16.7ms)에 한 번 칠한다 -- 더 잘게 보내도 안 보이고
@@ -34,6 +36,8 @@ pub struct State {
     restore: Option<restore::Cfg>,
     /// 첫 체결이 와서 메울 공백이 생긴 심볼(과 일감 종류)을 복원 스레드에 알린다(lib.rs).
     wake: Option<mpsc::UnboundedSender<(String, restore::Wake)>>,
+    /// «모든 종목» 메시지(`s = "*"` · Prices)의 번호. 보내기도 이 락 안에서 -- 번호와 보내는 순서가 같다.
+    prices_seq: Mutex<u64>,
 }
 
 impl State {
@@ -45,11 +49,11 @@ impl State {
         let syms = symbols
             .iter()
             .map(|s| {
-                let sym = Sym { seq: 0, book: None, mark: None, trades: VecDeque::new(), supply: Supply::new(s), pending: None, first: None };
+                let sym = Sym { seq: 0, book: None, mark: None, trades: VecDeque::new(), supply: Supply::new(s), pending: None, first: None, quote: Default::default() };
                 (s.clone(), Mutex::new(sym))
             })
             .collect();
-        State { syms, ring_cap, tx: broadcast::channel(queue_cap).0, restore: None, wake: None }
+        State { syms, ring_cap, tx: broadcast::channel(queue_cap).0, restore: None, wake: None, prices_seq: Mutex::new(0) }
     }
 
     /// 복원을 켠 상태: 심볼마다 스냅숏 파일을 읽어 되살린다(수신 전 · `now_us` = 지금 벽시계 -- 143봉보다 오래된 봉은 버린다).
@@ -76,7 +80,7 @@ impl State {
             let okx = crate::supply::okx_ct_val(&sup.okx_inst).is_some();
             sup.rs.okx_await = okx;
             sup.rs.oi_await = okx;
-            let bn = restore::read_bn_liq(&cfg.bn_ctx, s, now_us as f64 / 1000.0).unwrap_or_else(|e| {
+            let bn = restore::read_bn_liq(&cfg.bn_ctx, s).unwrap_or_else(|e| {
                 println!("rtcore 복원 {s}: 🔴강제청산 못 읽음({e}) -- 재시작 뒤 660초 청산 레인이 빈다");
                 vec![]
             });
@@ -89,7 +93,7 @@ impl State {
                 vec![]
             };
             println!("rtcore 복원 {s}: 강제청산 {}건 · Bybit 청산 {}건(DB)", bn.len(), by.len());
-            sup.load_liqs(bn, by);
+            sup.load_liqs(bn, by, now_us as f64 / 1000.0);
         }
         st.restore = Some(cfg);
         st.wake = Some(wake);
@@ -213,6 +217,8 @@ impl State {
                     g.trades.pop_front();
                 }
                 g.trades.push_back(m.clone());
+                g.quote.last = Some((px, m.ex_ms, m.rx_us));
+                g.quote.price_dirty = true;
                 // 24시간 봉 창은 «수신 시각» 기준(파이썬 time.time()) -- rx_us 가 그 벽시계다.
                 supply = g.supply.trade(px, qty, m.ex_ms, sell, id as i64, m.rx_us);
             }
@@ -230,9 +236,15 @@ impl State {
                 }
                 supply = g.supply.oi(oi, m.ex_ms, m.rx_us)
             }
-            Event::Book { .. } => g.book = Some(m.clone()),
+            Event::Book { bid, ask, ref bid_s, ref ask_s, .. } => {
+                g.quote.book = Some(crate::quote::Book { bid_s: bid_s.clone(), ask_s: ask_s.clone(), bid, ask, ex_ms: m.ex_ms, rx_us: m.rx_us });
+                g.book = Some(m.clone())
+            }
+            Event::Kline { open_ms, close, ref mut vol_bpm, ref mut bar5m, .. } => {
+                (*vol_bpm, *bar5m) = g.quote.kline(open_ms, close, m.rx_us); // 실어 보내는 메시지에 이 봉까지의 변동성·5분봉 종가를 채운다
+            }
             Event::Mark { .. } => g.mark = Some(m.clone()),
-            Event::Snapshot { .. } | Event::Supply1s(_) | Event::Footprint(_) => return,
+            Event::Snapshot { .. } | Event::Supply1s(_) | Event::Footprint(_) | Event::Prices { .. } | Event::Liq5m(_) => return,
         }
         if let Some(up) = supply {
             g.first.get_or_insert((m.ex_ms, m.rx_us));
@@ -251,11 +263,12 @@ impl State {
             let mut g = cell.lock().unwrap();
             let fp = g.supply.footprint_delta();
             let sup = g.pending.take();
-            if fp.is_none() && sup.is_none() {
+            let l5 = g.supply.liq5m_delta();
+            if fp.is_none() && sup.is_none() && l5.is_none() {
                 continue;
             }
             let (ex_ms, rx_us) = g.first.take().unwrap_or_else(|| (0, crate::now_us()));
-            for ev in [sup.map(Event::Supply1s), fp.map(Event::Footprint)].into_iter().flatten() {
+            for ev in [sup.map(Event::Supply1s), fp.map(Event::Footprint), l5.map(Event::Liq5m)].into_iter().flatten() {
                 g.seq += 1;
                 let _ = self.tx.send(Stamped { s: s.clone(), seq: g.seq, ex_ms, rx_us, tx_us: 0, ev });
             }
@@ -311,7 +324,73 @@ impl State {
                 trades: g.trades.iter().cloned().collect(),
                 supply: g.supply.snapshot(rx_us),
                 footprint: g.supply.footprint(),
+                quote: Some(g.quote.msg()),
+                liq5m: g.supply.liq5m_all(),
             },
         })
+    }
+
+    /// 바뀐 종목의 마지막 체결가를 «모든 종목» 메시지(`s = "*"`)로 민다(lib.rs 가 PRICES_MS 마다). 바뀐 것이 없으면 안 보낸다.
+    pub fn flush_prices(&self) {
+        let mut rows = vec![];
+        for (s, cell) in &self.syms {
+            let mut g = cell.lock().unwrap();
+            if std::mem::take(&mut g.quote.price_dirty) {
+                if let Some((px, ex_ms, _)) = g.quote.last {
+                    rows.push((s.clone(), px, ex_ms));
+                }
+            }
+        }
+        if !rows.is_empty() {
+            self.send_prices(rows);
+        }
+    }
+
+    fn send_prices(&self, mut rows: Vec<(String, f64, i64)>) -> u64 {
+        rows.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut seq = self.prices_seq.lock().unwrap();
+        *seq += 1;
+        let ex_ms = rows.iter().map(|r| r.2).max().unwrap_or(0);
+        let _ = self.tx.send(Stamped { s: "*".into(), seq: *seq, ex_ms, rx_us: crate::now_us(), tx_us: 0, ev: Event::Prices { rows } });
+        *seq
+    }
+
+    /// 붙은 구독자에게 처음 한 번: 모든 종목의 마지막 체결가(번호 = 지금 번호 -- 그 뒤 번호만 받으면 빠짐·겹침이 없다).
+    pub fn prices_snapshot(&self) -> Stamped {
+        let seq = self.prices_seq.lock().unwrap();
+        let mut rows: Vec<(String, f64, i64)> =
+            self.syms.iter().filter_map(|(s, c)| c.lock().unwrap().quote.last.map(|(px, ex_ms, _)| (s.clone(), px, ex_ms))).collect();
+        rows.sort_by(|a, b| a.0.cmp(&b.0));
+        Stamped { s: "*".into(), seq: *seq, ex_ms: 0, rx_us: crate::now_us(), tx_us: 0, ev: Event::Prices { rows } }
+    }
+
+    /// 1분봉 연결 재연결(feed): 빠진 분을 모르니 모은 종가를 버린다(quote.rs reset).
+    pub fn kline_reset(&self, s: &str) {
+        if let Some(cell) = self.syms.get(s) {
+            cell.lock().unwrap().quote.reset();
+        }
+    }
+
+    /// 읽기 API(같은 프로세스의 rtorder): REST bookTicker 꼴 dict + 받은 시각(µs). 받은 적 없으면 None.
+    pub fn book_ticker(&self, s: &str) -> Option<(serde_json::Value, i64)> {
+        self.syms.get(s)?.lock().unwrap().quote.book_ticker(s)
+    }
+
+    /// 읽기 API: 마감 1분봉 31개의 변동성(bp/√분) + 마지막 마감 1분봉을 받은 시각(µs). 31개가 안 모였으면 (None, 시각).
+    pub fn vol_bpm(&self, s: &str) -> Option<(Option<f64>, i64)> {
+        let g = self.syms.get(s)?.lock().unwrap();
+        Some((g.quote.vol_bpm, g.quote.kline_rx_us))
+    }
+
+    /// 읽기 API: 받아 둔 시세 전부(스냅숏 칸과 같은 것).
+    pub fn quote(&self, s: &str) -> Option<crate::proto::Quote> {
+        Some(self.syms.get(s)?.lock().unwrap().quote.msg())
+    }
+
+    /// 읽기 API(손절 감시 · orders.py sec_prices): 1초 마지막 체결가 [(초, 가격)] -- 가격 0(그 초 체결 없음·크기 칸만 있는 초)은 뺀다
+    /// (server.py 4951 `[(t, float(c[6])) for t, c in sec.items() if c[6]]`). 오래된 초부터.
+    pub fn sec_prices(&self, s: &str) -> Option<Vec<(i64, f64)>> {
+        let g = self.syms.get(s)?.lock().unwrap();
+        Some(g.supply.cells_of(Venue::Bn).iter().filter(|(_, c)| c[6] != 0.0).map(|(&t, c)| (t, c[6])).collect())
     }
 }

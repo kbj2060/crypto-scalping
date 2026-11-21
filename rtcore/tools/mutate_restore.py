@@ -16,8 +16,8 @@ import time
 from pathlib import Path
 
 R = Path(__file__).resolve().parents[1]
-FILES = ["src/restore.rs", "src/supply.rs", "src/footprint.rs", "src/state.rs", "src/main.rs"]
-RS, SU, FP, ST, MN = FILES
+FILES = ["src/restore.rs", "src/supply.rs", "src/footprint.rs", "src/state.rs", "src/main.rs", "src/quote.rs"]
+RS, SU, FP, ST, MN, QU = FILES
 M = [
     # 경계
     ("lo 하나 늦게(끊기기 직전 초 다음 초를 빼먹음)", RS, "floor.max(self.last_ms.div_euclid(1000) + 1)", "floor.max(self.last_ms.div_euclid(1000) + 2)"),
@@ -61,13 +61,25 @@ M = [
     ("OKX 1초 칸 범위 660 → 600", RS, "rusqlite::params![tape_bucket, inst, t0_s - SUPPLY_1S_SECONDS, t0_s]", "rusqlite::params![tape_bucket, inst, t0_s - 600, t0_s]"),
     ("OKX OI 범위 하나 어긋남(t0 초 포함)", RS, "(t0_s - SUPPLY_1S_SECONDS) * 1000, t0_s * 1000]", "(t0_s - SUPPLY_1S_SECONDS) * 1000, (t0_s + 1) * 1000]"),
     ("강제청산 최근 5,000 → 50건", RS, "rusqlite::params![symbol.to_uppercase(), crate::supply::LIQ_RING as i64],", "rusqlite::params![symbol.to_uppercase(), 50i64],"),
-    ("강제청산 660초 자르기 없음", RS, "    Ok(rows.into_iter().rev().filter(|r| r.0 as f64 >= cut).collect())", "    let _ = cut;\n    Ok(rows.into_iter().rev().collect())"),
+    ("강제청산 660초 자르기 없음", RS, "            if ts_ms as f64 >= cut {\n                crate::supply::push_capped", "            if ts_ms as f64 >= cut - 1e12 {\n                crate::supply::push_capped"),
     ("Bybit 쪽 뒤집힘(Buy = 숏)", RS, "        \"Buy\",", "        \"Sell\","),
     ("Bybit 지금보다 늦은 행도 읽음", RS, "rusqlite::params![symbol.to_uppercase(), (lo + 1) * 1000, now_ms],", "rusqlite::params![symbol.to_uppercase(), (lo + 1) * 1000, i64::MAX],"),
+    # 2026-11-21 주문 경로 시세 · 마지막 체결가 · 5분봉 청산 원(tests/quote_parity.rs)
+    ("변동성 표본분산 n − 1 → n", QU, "/ (n - 1.0);", "/ n;"),
+    ("변동성 종가 31 → 30개", QU, "pub const VOL_CLOSES: usize = 31;", "pub const VOL_CLOSES: usize = 30;"),
+    ("빈 분을 직전 종가로 안 채움", QU, "                    self.closes.push_back((m, last_close)); // 같은 연결 안의 빈 분", "                    let _ = last_close; // 같은 연결 안의 빈 분"),
+    ("5분봉 끝 판정 한 분 어긋남", QU, "let bar5 = ((open_ms + MIN_MS).rem_euclid(BAR5_MS) == 0)", "let bar5 = (open_ms.rem_euclid(BAR5_MS) == 0)"),
+    ("재연결에도 종가를 안 버림", QU, "        self.closes.clear();\n        self.vol_bpm = None;", "        self.vol_bpm = None;"),
+    ("호가를 글자 대신 숫자로", QU, '"bidPrice": b.bid_s, "askPrice": b.ask_s', '"bidPrice": b.bid, "askPrice": b.ask'),
+    ("마지막 체결가 바뀜 표시 안 함", ST, "                g.quote.price_dirty = true;", "                g.quote.price_dirty = false;"),
+    ("청산 원 극값: 롱 최저 → 최고", SU, "a.2 = Some(a.2.map_or(px, |x: f64| if px < x { px } else { x }));", "a.2 = Some(a.2.map_or(px, |x: f64| if px > x { px } else { x }));"),
+    ("청산 원 기록 시작 = 지금(DB 첫 사건 무시)", RS, "            self.liq5m_from = first.0 as f64 / 1000.0; // 읽은 꼬리의 첫 사건", "            let _ = first;"),
+    ("청산 원 24시간 자르기 없음", RS, "            if ts_ms as f64 >= cut_5m {\n                crate::supply::liq5m_add", "            if ts_ms as f64 >= cut_5m - 1e12 {\n                crate::supply::liq5m_add"),
+    ("1초 가격에 0 도 넣음", ST, ".filter(|(_, c)| c[6] != 0.0).map(|(&t, c)| (t, c[6]))", ".map(|(&t, c)| (t, c[6]))"),
     ("SIGTERM 때 스냅숏 안 씀", MN, "let n = tokio::task::spawn_blocking(move || st.write_snapshots()).await.unwrap_or(0);", "let n = { let _ = st; 0 };"),
 ]
 ENV = dict(os.environ, PATH=os.path.expanduser("~/.cargo/bin") + ":" + os.environ["PATH"])
-TESTS = ["--offline", "--test", "restore_parity", "--test", "restore_venues_parity", "--test", "sigterm_snapshot"]
+TESTS = ["--offline", "--test", "restore_parity", "--test", "restore_venues_parity", "--test", "sigterm_snapshot", "--test", "quote_parity"]
 
 
 def main() -> None:

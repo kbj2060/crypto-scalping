@@ -10,6 +10,8 @@
 # 환경변수(비우면 rtcore 기본값 -- rtcore/src/lib.rs Cfg · hub.rs HubCfg):
 #   RTCORE_BIN            실행 파일(기본 rtcore/target/release/rtcore)
 #   RTCORE_SYMBOLS        심볼 쉼표 목록(기본 아래 -- 대시보드가 1초 수급·풋프린트를 내는 코인과 같게)
+#   RTCORE_QUOTE_SYMBOLS  호가·1분봉만 받는 주문 심볼(기본 ethusdc,solusdc,xrpusdc,btcusdc -- rtorder 주문 계획이 쓰는 USDC 선물 · 2026-11-21).
+#                         RTCORE_SYMBOLS 마다 @trade·@bookTicker·@markPrice@1s·@kline_1m 4개 + 이것마다 @bookTicker·@kline_1m 2개 → 기본 8코인 47개 연결(나머지 원천 포함)
 #   RTCORE_LISTEN         듣는 주소(rtcore 기본 127.0.0.1:8788 -- 0.0.0.0 금지: 2026-09-12 LAN 경로 사고와 같은 이유)
 #   RTCORE_PATH           웹소켓 경로(기본 /rt -- Cloudflare 규칙 ^/rt$ 와 같게)
 #   RTCORE_ALLOW_ORIGINS  브라우저 Origin 허용 목록(쉼표, https://<호스트>) -- 비면 Origin 없는 도구만 붙는다

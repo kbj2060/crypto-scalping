@@ -87,6 +87,9 @@ enum Raw {
     /// 파이썬은 `o` 만 본다(json.loads(..).get("o")) -- 필드 해석은 parse 의 py_* 로.
     #[serde(rename = "forceOrder")]
     Force { o: Value },
+    /// 2026-11-21 `@kline_1m`(마감 1분봉만 쓴다 -- 종가 = 거래소 1분봉 그대로). 필드명은 바이낸스 문서 기억(t·c·x) -- 실서버 녹화본 대조 전.
+    #[serde(rename = "kline")]
+    Kline { s: String, k: RawKline },
     #[serde(rename = "markPriceUpdate")]
     Mark {
         #[serde(rename = "E")]
@@ -98,6 +101,13 @@ enum Raw {
         #[serde(rename = "T", default)]
         next: i64,
     },
+}
+
+#[derive(Deserialize)]
+struct RawKline {
+    t: i64,
+    c: String,
+    x: bool,
 }
 
 fn num(x: &str) -> Option<f64> {
@@ -309,7 +319,7 @@ pub fn parse(text: &str, rx_us: i64) -> Option<Stamped> {
             (s, t_ms, Event::Trade { id: t, px, qty, sell: m })
         }
         Raw::Book { t_ms, e_ms, s, u, b, bq, a, aq } => {
-            let ev = Event::Book { u, bid: num(&b)?, bid_qty: num(&bq)?, ask: num(&a)?, ask_qty: num(&aq)? };
+            let ev = Event::Book { u, bid: num(&b)?, bid_qty: num(&bq)?, ask: num(&a)?, ask_qty: num(&aq)?, bid_s: b, ask_s: a };
             (s, if t_ms > 0 { t_ms } else { e_ms }, ev)
         }
         Raw::Force { o } => {
@@ -323,6 +333,12 @@ pub fn parse(text: &str, rx_us: i64) -> Option<Stamped> {
             };
             let long = o.get("S").and_then(Value::as_str) == Some("SELL"); // 롱 청산 = 시장에 SELL
             (s, ts, Event::Liq { venue: Venue::Bn, long, qty, px })
+        }
+        Raw::Kline { s, k } => {
+            if !k.x {
+                return None; // 형성 중 갱신(250ms) -- 마감 봉만 쓴다(건너뜀 수에 안 센다: 정상 메시지다)
+            }
+            (s, k.t, Event::Kline { open_ms: k.t, close: num(&k.c)?, close_s: k.c, vol_bpm: None, bar5m: None })
         }
         Raw::Mark { e_ms, s, p, i, r, next } => {
             (s, e_ms, Event::Mark { mark: num(&p)?, index: num(&i)?, funding: num(&r)?, next_funding_ms: next })
@@ -382,6 +398,9 @@ pub async fn run_src(src: Src, state: Arc<State>, silence: Duration) {
                 let _live = Live::up(); // 패닉으로 풀려도 Drop 이 센다
                 if let Some(sym) = url.rsplit('/').next().and_then(|t| t.strip_suffix("@trade")) {
                     state.reset_orders(sym); // 끊김 전 열린 주문 묶음은 버린다(coin_flow.py 613)
+                }
+                if let Some(sym) = url.rsplit('/').next().and_then(|t| t.strip_suffix("@kline_1m")) {
+                    state.kline_reset(sym); // 끊긴 사이 마감 봉을 모른다 -- 1분 변동성은 다시 31개를 모은다(quote.rs)
                 }
                 let subscribed = match &src.sub {
                     Some(sub) => ws.send(Message::text(sub.clone())).await.map_err(|e| println!("rtcore feed {url}: 구독 전송 실패 {e}")).is_ok(),

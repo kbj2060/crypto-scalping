@@ -21,13 +21,36 @@ pub struct Stamped {
 pub enum Event {
     /// `sell` = 공격자가 매도(바이낸스 `m` = 매수자가 메이커).
     Trade { id: u64, px: f64, qty: f64, sell: bool },
-    Book { u: u64, bid: f64, bid_qty: f64, ask: f64, ask_qty: f64 },
+    /// 2026-11-21 더함: `bid_s`·`ask_s` = 거래소가 보낸 가격 글자 그대로(`b`·`a`) -- 주문 계획이 REST `/fapi/v1/ticker/bookTicker` 의
+    /// `bidPrice`·`askPrice` 와 같은 글자 꼴로 쓰게(quote.rs book_ticker). 옛 받는 쪽은 모르는 칸이라 건너뛴다.
+    Book {
+        u: u64,
+        bid: f64,
+        bid_qty: f64,
+        ask: f64,
+        ask_qty: f64,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        bid_s: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        ask_s: String,
+    },
     Mark { mark: f64, index: f64, funding: f64, next_funding_ms: i64 },
     /// 구독 직후 1회. 안의 메시지는 따로 송신된 적이 없어 `tx_us` = 0 이다.
     /// 이후 밀기는 `seq` > 이 스냅숏의 `seq` 인 것만 온다(빠짐·겹침 없음).
     /// `supply` = 1초 수급 전체(파이썬 `/api/supply-1s?since=0` 의 바이낸스 선물 몫과 같은 행).
     /// `footprint` = 풋프린트 전체(파이썬 `/api/footprint?bars=144&since=0` 의 봉·칸). 흐름 엔진이 없는 종목은 null.
-    Snapshot { book: Option<Box<Stamped>>, mark: Option<Box<Stamped>>, trades: Vec<Stamped>, supply: Supply1s, footprint: Option<Footprint> },
+    /// 2026-11-21 더함: `quote` = 주문 경로가 쓰는 받아 둔 시세(quote.rs) · `liq5m` = 5분봉 강제청산 원(바이낸스 몫 · 흐름 엔진 종목만).
+    Snapshot {
+        book: Option<Box<Stamped>>,
+        mark: Option<Box<Stamped>>,
+        trades: Vec<Stamped>,
+        supply: Supply1s,
+        footprint: Option<Footprint>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        quote: Option<Quote>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        liq5m: Option<Liq5m>,
+    },
     /// 1초 수급 바뀐 몫: 묶음(state.rs FLUSH_MS)마다 1건. 목록 칸 = 그 사이 바뀐 초만(받은 쪽은 초 단위로 덮어쓴다),
     /// `partial` = 원천별 진행 중인 초. 빈 목록은 «바뀐 것 없음»이지 «지워라»가 아니다.
     Supply1s(Supply1s),
@@ -39,6 +62,46 @@ pub enum Event {
     Flow { venue: Venue, px: f64, qty: f64, sell: bool },
     /// 미결제약정(기초자산 수량). OKX open-interest 만.
     Oi { venue: Venue, oi: f64 },
+    /// 2026-11-21 더함 -- 마감된 1분봉(`@kline_1m` 의 x=true). `ex_ms` = 봉 시작(t). `close_s` = 종가 글자 그대로.
+    /// `vol_bpm` = 이 봉까지 마감 1분봉 31개 종가의 실현변동성(bp/√분 · live_manual_peg_entry realized_vol_bpm 과 같은 식) -- 31개가 안 모였으면 null.
+    /// `bar5m` = 이 봉이 5분봉의 마지막 분이면 [5분봉 끝 초, 종가](손절 감시가 쓰는 «마감된 5분봉 종가») -- 아니면 null.
+    Kline {
+        open_ms: i64,
+        close: f64,
+        close_s: String,
+        vol_bpm: Option<f64>,
+        bar5m: Option<(i64, f64)>,
+    },
+    /// 2026-11-21 더함 -- 종목마다 마지막 체결가(구독 안 한 종목도 · 화면 전광판·다른 포지션 칩 · 원본 `/api/events` 의 `tickers`).
+    /// `s` = "*"(모든 구독자에게 간다 · hub.rs). 행 = [종목, 가격, 그 체결의 거래소 시각 ms]. 바뀐 종목만 0.1초마다 · 붙을 때 전부 한 번.
+    Prices { rows: Vec<(String, f64, i64)> },
+    /// 2026-11-21 더함 -- 5분봉 강제청산 원의 바뀐 봉(바이낸스 · server.py liq_5m_add 와 같은 칸). 받는 쪽은 봉마다 덮어쓴다.
+    Liq5m(Liq5m),
+}
+
+/// 주문 경로가 쓰는 받아 둔 시세(스냅숏 칸 · quote.rs). 값마다 코어가 받은 시각(rx_us)을 같이 싣는다 -- rtorder 가 나이를 잰다.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Quote {
+    /// 마감 1분봉 [봉 시작 ms, 종가] 최근 것부터 최대 32개(오래된 것 먼저).
+    pub closes_1m: Vec<(i64, f64)>,
+    pub vol_bpm: Option<f64>,
+    /// 마지막 마감 1분봉을 받은 시각(µs) -- vol_bpm·bar5m 의 나이.
+    pub kline_rx_us: i64,
+    /// [5분봉 끝 초, 종가] -- 마지막으로 마감된 5분봉.
+    pub bar5m: Option<(i64, f64)>,
+    /// [가격, 거래소 시각 ms, 받은 시각 µs] -- 마지막 체결.
+    pub last: Option<(f64, i64, i64)>,
+}
+
+/// `[봉 시작 초, 롱USD, 숏USD, 건수, 롱 최저가, 숏 최고가]` -- server.py liq_5m_payload 한 봉(USD 는 round(x, 2) · 가격은 그대로, 없으면 null).
+pub type Liq5mRow = (i64, f64, f64, i64, Option<f64>, Option<f64>);
+
+/// 2026-11-21 -- `from_s` = 기록 시작(그 초가 든 봉과 그 앞은 «모름» -- liq_5m_payload 의 b <= from_bar 는 안 싣는 규칙).
+/// 스냅숏은 가진 봉 전부(이벤트 없는 봉은 행이 없다 = 0 -- 파이썬은 0 을 채워 싣는다), 밀기는 바뀐 봉만.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Liq5m {
+    pub from_s: f64,
+    pub bars: Vec<Liq5mRow>,
 }
 
 /// `bn` = 바이낸스 선물. 현물은 `spot`.

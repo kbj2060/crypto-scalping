@@ -130,6 +130,11 @@ async fn client(tcp: TcpStream, state: Arc<State>, cfg: Arc<HubCfg>, slot: Optio
             out.send(text(&snap)).await?;
         }
     }
+    // 2026-11-21 «모든 종목» 메시지(`s = "*"` · 마지막 체결가 Prices)는 구독과 상관없이 모두에게 -- 붙을 때 전부 한 번, 그 뒤 번호가 큰 것만.
+    let mut prices = state.prices_snapshot();
+    seen.insert("*".into(), prices.seq);
+    prices.tx_us = now_us();
+    out.send(text(&prices)).await?;
     let mut ping = interval_at(Instant::now() + cfg.ping, cfg.ping);
     let mut heard = true; // 지난 ping 뒤로 무엇이든 받았나(브라우저는 ping 에 pong 을 스스로 낸다)
     loop {

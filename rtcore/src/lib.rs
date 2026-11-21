@@ -4,6 +4,7 @@ pub mod feed;
 pub mod footprint;
 pub mod hub;
 pub mod proto;
+pub mod quote;
 pub mod restore;
 pub mod state;
 pub mod supply;
@@ -49,6 +50,8 @@ pub fn take_latency() -> Option<(usize, u32, u32, u32)> {
 
 pub struct Cfg {
     pub symbols: Vec<String>,
+    /// 2026-11-21 호가·1분봉만 받는 종목(주문 심볼 USDC -- rtorder Desk::exec_symbol 중 USDT 가 아닌 것). 체결·마크·풋프린트는 안 받는다.
+    pub quote_symbols: Vec<String>,
     pub ws_base: String,
     pub market_ws_base: String,
     /// 나머지 원천(1초 수급). 빈 문자열 = 그 원천을 켜지 않는다(시험·부분 가동).
@@ -80,6 +83,11 @@ impl Cfg {
                 .map(|s| s.trim().to_lowercase())
                 .filter(|s| !s.is_empty())
                 .collect(),
+            quote_symbols: env("RTCORE_QUOTE_SYMBOLS", "ethusdc,solusdc,xrpusdc,btcusdc")
+                .split(',')
+                .map(|s| s.trim().to_lowercase())
+                .filter(|s| !s.is_empty())
+                .collect(),
             ws_base: env("RTCORE_WS_BASE", "wss://fstream.binance.com/ws/"),
             market_ws_base: env("RTCORE_MARKET_WS_BASE", "wss://fstream.binance.com/market/ws/"),
             // 주소는 파이썬과 같다: server.py FORCE_ORDER_WS_URL · coin_flow.py _flow_spec spot_url · OKX_WS_URL · Bybit 청산 수집기 WS
@@ -102,9 +110,14 @@ impl Cfg {
 
 /// 수신 연결들과 화면 서버를 띄운다(tokio 런타임 안에서 부른다).
 /// 둘째 값은 수신 태스크 하나라도 끝나면(feed::run 은 영원히 돌므로 끝 = 패닉) 그 사유를 내는 핸들이다.
+/// 마지막 체결가(«모든 종목» Prices) 밀기 간격(ms). 원본 `/api/events` 는 1초 -- 화면 전광판이 1초마다 다시 그리므로 0.1초면 충분하다.
+pub const PRICES_MS: u64 = 100;
+
 pub fn start(cfg: &Cfg, listener: TcpListener) -> (Arc<state::State>, tokio::task::JoinHandle<String>) {
+    let mut all = cfg.symbols.clone();
+    all.extend(cfg.quote_symbols.iter().filter(|q| !cfg.symbols.contains(q)).cloned());
     let state = if cfg.snap_dir.is_empty() {
-        state::State::new(&cfg.symbols, RING_CAP, QUEUE_CAP)
+        state::State::new(&all, RING_CAP, QUEUE_CAP)
     } else {
         // 순서: 스냅숏을 읽은 뒤(수신 전) 수신을 붙인다. 테이프 메우기는 각 연결의 첫 체결 뒤에 스레드에서(restore.rs 머리 주석 2).
         let rc = restore::Cfg {
@@ -117,7 +130,7 @@ pub fn start(cfg: &Cfg, listener: TcpListener) -> (Arc<state::State>, tokio::tas
             bn_ctx: cfg.bn_ctx_db.clone().into(),
             bybit_liq: cfg.bybit_liq_db.clone().into(),
         };
-        let (st, mut wake) = state::State::with_restore(&cfg.symbols, RING_CAP, QUEUE_CAP, rc, now_us());
+        let (st, mut wake) = state::State::with_restore(&all, RING_CAP, QUEUE_CAP, rc, now_us());
         let s2 = st.clone();
         tokio::spawn(async move {
             while let Some((sym, w)) = wake.recv().await {
@@ -149,10 +162,27 @@ pub fn start(cfg: &Cfg, listener: TcpListener) -> (Arc<state::State>, tokio::tas
             format!("{}{s}@trade", cfg.ws_base),
             format!("{}{s}@bookTicker", cfg.ws_base),
             format!("{}{s}@markPrice@1s", cfg.market_ws_base),
+            // 2026-11-21 마감 1분봉(1분 변동성·5분봉 종가 -- quote.rs). kline 은 market 경로(markPrice 와 같은 곳 -- 바이낸스 경로 분리 규칙, 실서버 대조 전)
+            format!("{}{s}@kline_1m", cfg.market_ws_base),
         ] {
             feeds.push((url.clone(), tokio::spawn(feed::run(url, state.clone(), cfg.silence))));
         }
     }
+    // 주문 심볼(USDC): 호가·1분봉만
+    for s in cfg.quote_symbols.iter().filter(|q| !cfg.symbols.contains(q)) {
+        for url in [format!("{}{s}@bookTicker", cfg.ws_base), format!("{}{s}@kline_1m", cfg.market_ws_base)] {
+            feeds.push((url.clone(), tokio::spawn(feed::run(url, state.clone(), cfg.silence))));
+        }
+    }
+    let st = state.clone();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_millis(PRICES_MS));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            st.flush_prices();
+        }
+    });
     for src in sources(cfg) {
         feeds.push((src.url.clone(), tokio::spawn(feed::run_src(src, state.clone(), cfg.silence))));
     }
