@@ -17,6 +17,9 @@ pub struct Got {
     pub method: String,
     pub target: String,
     pub key: Option<String>,
+    /// Content-Type 머리 · 본문 바이트(텔레그램 시험이 원본과 바이트 대조).
+    pub ctype: Option<String>,
+    pub body: Vec<u8>,
 }
 
 pub type Handler = Arc<dyn Fn(&Got) -> Act + Send + Sync>;
@@ -58,7 +61,7 @@ fn conn(s: TcpStream, h: Handler, log: Arc<Mutex<Vec<Got>>>) {
         }
         let mut it = line.split_whitespace();
         let (method, target) = (it.next().unwrap_or("").to_string(), it.next().unwrap_or("").to_string());
-        let (mut key, mut len) = (None, 0usize);
+        let (mut key, mut ctype, mut len) = (None, None, 0usize);
         loop {
             let mut hl = String::new();
             if r.read_line(&mut hl).unwrap_or(0) == 0 {
@@ -71,6 +74,7 @@ fn conn(s: TcpStream, h: Handler, log: Arc<Mutex<Vec<Got>>>) {
             if let Some((k, v)) = hl.split_once(':') {
                 match k.trim().to_ascii_lowercase().as_str() {
                     "x-mbx-apikey" => key = Some(v.trim().to_string()),
+                    "content-type" => ctype = Some(v.trim().to_string()),
                     "content-length" => len = v.trim().parse().unwrap_or(0),
                     _ => {}
                 }
@@ -78,7 +82,7 @@ fn conn(s: TcpStream, h: Handler, log: Arc<Mutex<Vec<Got>>>) {
         }
         let mut body = vec![0u8; len];
         let _ = r.read_exact(&mut body);
-        let got = Got { method, target, key };
+        let got = Got { method, target, key, ctype, body };
         log.lock().unwrap().push(got.clone());
         let mut act = h(&got);
         loop {

@@ -32,7 +32,7 @@ fn main() {
             tokio::select! { _ = term.recv() => {}, _ = int.recv() => {} }
             sig.stop();
         });
-        app::run(&cfg, &mk, s2).await
+        app::run(&cfg, &mk, s2, Default::default()).await
     });
     for l in &s.logs {
         println!("{l}");

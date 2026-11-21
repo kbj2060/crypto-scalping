@@ -232,6 +232,40 @@ fn stream_account_rules() {
 }
 
 #[test]
+fn stream_account_matches_python_rest_after_same_events() {
+    // 원본 fetch_account(사건 전 계좌) 위에 같은 알림 열을 반영한 스트림 계좌 == 원본 fetch_account(사건 뒤 계좌)
+    let fx = fixture();
+    let cases = fx["stream_rest"].as_array().unwrap();
+    assert_eq!(cases.len(), 6);
+    let pos = |v: &Value| {
+        let mut x: Vec<String> = v["positions"].as_array().unwrap().iter()
+            .map(|p| format!("{}|{}|{:.8}|{:.8}|{:.8}", p["symbol"], p["side"], p["qty"].as_f64().unwrap(), p["entry_price"].as_f64().unwrap(), p["unrealized_pnl"].as_f64().unwrap())).collect();
+        x.sort();
+        x
+    };
+    let ords = |v: &Value| {
+        let mut x: Vec<String> = v["open_orders"].as_array().unwrap().iter()
+            .map(|o| format!("{}|{}|{:.8}|{:.8}|{}|{}", o["symbol"], o["side"], o["price"].as_f64().unwrap(), o["qty"].as_f64().unwrap(), o["reduce_only"], o["cid"])).collect();
+        x.sort();
+        x
+    };
+    for c in cases {
+        let name = c["name"].as_str().unwrap();
+        let us = UserStream { connected: true, epoch: 1, ..Default::default() };
+        let mut sa = StreamAccount::default();
+        assert!(sa.reconcile(&c["acct0"], 100.0, 1));
+        for e in c["events"].as_array().unwrap() {
+            sa.apply(e);
+        }
+        let v = sa.usable(&us, 101.0).unwrap();
+        assert_eq!(pos(&v), pos(&c["acct1"]), "{name} 포지션");
+        assert_eq!(ords(&v), ords(&c["acct1"]), "{name} 미체결");
+        assert!(sa.reconcile(&c["acct1"], 102.0, 1), "{name} 대조는 깨끗해야 한다");
+        assert_eq!(sa.mismatches, 0, "{name}");
+    }
+}
+
+#[test]
 fn stream_account_exit_plan_equals_rest_exit_plan_and_skips_account_read() {
     // 청산 조립이 스트림 계좌를 쓰면 REST 계좌와 같은 값일 때 같은 계획 -- 계좌 REST 왕복(심볼 13개 · 무게 ~50)이 사라진다
     let fx = fixture();

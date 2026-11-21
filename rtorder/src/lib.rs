@@ -20,6 +20,7 @@ pub mod pyfmt;
 pub mod runner;
 pub mod shadow;
 pub mod sign;
+pub mod telegram;
 pub mod userstream;
 pub mod watch;
 pub mod wire;

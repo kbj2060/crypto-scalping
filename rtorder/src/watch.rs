@@ -492,7 +492,7 @@ impl Watcher {
     }
 
     /// 2026-11-21 결함 수정(파이썬 bracket_tick_alert): 건너뛴 칸을 **칸·예외 종류마다 한 번** 로그·알림(보내기는 `WatchIo::alert` -- 감시를 막지 않게 뒤에서).
-    fn tick_alert<I: WatchIo>(&mut self, io: &mut I, key: &str, why: &str) {
+    pub fn tick_alert<I: WatchIo>(&mut self, io: &mut I, key: &str, why: &str) {
         let kind = why.split_once(": ").map_or(why, |x| x.0).to_string();
         if !self.alerted.insert((key.to_string(), kind)) {
             return;

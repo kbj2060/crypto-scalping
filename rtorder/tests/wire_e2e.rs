@@ -7,7 +7,8 @@ include!("common/fake.rs");
 mod desk_io;
 
 use desk_io::{FakeQuotes, FakeRest};
-use rtorder::account::{StreamAccount, UserStream};
+use rtorder::account::UserStream;
+use rtorder::userstream::Hub;
 use rtorder::watch::*;
 use rtorder::wire::Wired;
 use serde_json::{json, Map, Value};
@@ -125,10 +126,12 @@ fn rule_stop_fires_assembles_from_fresh_rest_account_and_exits_with_maker() {
 #[test]
 fn stream_account_skips_the_fresh_rest_read_and_uses_stream_quantity() {
     let (mut w, mut io, _dir) = setup("stream", Some(5.0), true);
-    io.stream = Some((StreamAccount::default(), UserStream { connected: true, epoch: 3, ..Default::default() }));
+    let hub = Arc::new(Hub::default());
+    *hub.us.lock().unwrap() = UserStream { connected: true, epoch: 3, ..Default::default() };
+    io.stream = Some(hub.clone());
     // 틱 시작 전에 캐시를 한 번 채워 둔다(대조 = 기준 스냅숏) · 그 뒤 스트림 사건: 부분 청산으로 0.4 → 0.25
     block_on(io.account()).unwrap();
-    io.stream.as_mut().unwrap().0.apply(&json!({"e": "ACCOUNT_UPDATE", "a": {"P": [{"s": "ETHUSDC", "ps": "LONG", "pa": "0.25", "ep": "2400", "up": "12"}]}}));
+    hub.stream_account.lock().unwrap().apply(&json!({"e": "ACCOUNT_UPDATE", "a": {"P": [{"s": "ETHUSDC", "ps": "LONG", "pa": "0.25", "ep": "2400", "up": "12"}]}}));
     block_on(w.bracket_tick(&mut io)).unwrap();
     assert_eq!(io.fresh_source, ["stream"]);
     assert_eq!(count(&io.rest, "/fapi/v2/account"), 1, "청산 조립이 REST 계좌를 안 읽는다(왕복 13 요청 · 무게 ~50 이 빠진다)");
@@ -139,7 +142,9 @@ fn stream_account_skips_the_fresh_rest_read_and_uses_stream_quantity() {
 #[test]
 fn stream_down_falls_back_to_rest() {
     let (mut w, mut io, _dir) = setup("down", Some(5.0), true);
-    io.stream = Some((StreamAccount::default(), UserStream { connected: false, epoch: 3, ..Default::default() }));
+    let hub = Arc::new(Hub::default());
+    *hub.us.lock().unwrap() = UserStream { connected: false, epoch: 3, ..Default::default() };
+    io.stream = Some(hub);
     block_on(w.bracket_tick(&mut io)).unwrap();
     assert_eq!(io.fresh_source, ["stream_down"]);
     assert_eq!(count(&io.rest, "/fapi/v2/account"), 2);
@@ -161,7 +166,7 @@ fn high_vol_exit_plan_is_market_and_closes_with_one_market_order() {
 fn account_read_failure_in_exit_plan_keeps_stop_and_retries() {
     let (mut w, mut io, dir) = setup("503", Some(5.0), false);
     // 틱의 계좌는 캐시(정상) -- 청산 조립의 새로 읽기에서 positionRisk 418 → 503 «못 읽음 = 모름»(P2·B17)
-    io.cache = Some((T0, json!({"ok": true, "generated_at": iso_utc(T0), "positions": [{"symbol": "ETHUSDC", "side": "LONG", "qty": 0.4}]})));
+    *io.cache.lock().unwrap() = Some((T0, json!({"ok": true, "generated_at": iso_utc(T0), "positions": [{"symbol": "ETHUSDC", "side": "LONG", "qty": 0.4}]})));
     block_on(w.bracket_tick(&mut io)).unwrap();
     let b = &bracket_load(&dir)["ETHUSDC:LONG"];
     assert!(b["last_error"].as_str().unwrap().contains("계좌 조회 실패"), "{b}");
