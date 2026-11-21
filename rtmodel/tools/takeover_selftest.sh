@@ -114,5 +114,10 @@ ok "가격 같은 코인(BTC)의 칸이 다르면 불통과 · 예 출력" '[ "$
 sed -i 's/"price": 9.0, "band80_pct": 0.51/"price": 9.1, "band80_pct": 0.51/' "$F/pb.json"
 out=$(python3 "$R/rtmodel/tools/takeover_cmp.py" radar "$F/pa.json" "$F/pb.json" --skip updated --rtol 1e-12); rc=$?
 ok "모든 코인 가격이 다르면 불통과" '[ "$rc" = 1 ] && [[ "$out" == *"모든 코인 가격이 다름"* ]]'
+echo "8. NUL 바이트가 낀 기록(서버 pred_record 실측) -- 대조기는 깨진 줄을 원본 _tail 처럼 건너뛴다"
+mkdir -p "$F/nul"; printf '{"k":"4","t":5,"px":1.0}\n\0\0\0{"k":"4","t":9,"px":1.0}\n{"k":"s","t":7,"a":1}\n' > "$F/nul/BTC.jsonl"; printf '{"k":"4","t":6}\n' > "$F/nul/ETH.jsonl"
+printf '{"k":"4","t":5,"px":1.0}\n' > "$F/nul/rs.jsonl"
+mt=$(python3 "$R/rtmodel/tools/takeover_cmp.py" maxt "$F/nul" 4); out=$(python3 "$R/rtmodel/tools/takeover_cmp.py" lines "$F/nul/BTC.jsonl" "$F/nul/rs.jsonl" --key k,t --text); rc=$?; echo "$out"
+ok "maxt = NUL 줄을 건너뛴 가장 큰 4h t(6) · lines 통과 + 깨진 줄 수를 찍음" '[ "$mt" = 6 ] && [ "$rc" = 0 ] && [[ "$out" == *"깨진 줄"*"파이썬 1"* ]]'
 echo "== 통과 $PASS · 실패 $FAIL"
 [ "$FAIL" = 0 ]

@@ -10,7 +10,7 @@
 //!   RT_SR_BAN_FILE        data/live/binance_ban_until  (바이낸스만 -- 원본 binance_ban_guard 도 바이낸스 주소만 막는다)
 //!   RT_RADAR_NOW_MS       (시험만) 고정 시각 · 백필 쪽 사이 0.5초 쉼을 건너뜀
 //! 종료코드: 0 = 모든 코인 정상 · 1 = 한 코인이라도 오류(원본과 같음) · 2 = 설정 거부.
-use rtmodel::ban::{ban_left, ban_note};
+use rtmodel::gate::{Fail, Gate};
 use rtmodel::risk_radar::{coin_out, iso, session_out, Bars, CoinP, Dvol, Params, J, STALE_DATA_S};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -35,25 +35,18 @@ fn wall_ms() -> i64 {
 }
 
 struct Http {
-    agent: ureq::Agent,
-    ban: PathBuf,
+    gate: std::cell::RefCell<Gate>, // 모든 바깥 요청의 한 문(rtmodel::gate · Deribit 은 간격만)
 }
 
 impl Http {
     /// requests.get(url, params, timeout=20).raise_for_status().json(). 바이낸스면 밴 파일을 먼저 본다.
     fn get(&self, url: &str, q: &[(&str, String)], binance: bool) -> Result<Value, String> {
-        let now = wall_ms() as f64 / 1000.0;
-        if binance && ban_left(&self.ban, now) > 0.0 {
-            return Err(format!("BinanceBanned: {:.0}s left -- request not sent", ban_left(&self.ban, now)));
-        }
         let qs: Vec<String> = q.iter().map(|(k, v)| format!("{k}={v}")).collect();
-        let mut r = self.agent.get(&format!("{url}?{}", qs.join("&"))).call().map_err(|e| format!("ConnectionError: {e}"))?;
-        let h = |n: &str| r.headers().get(n).and_then(|v| v.to_str().ok()).map(str::to_string);
-        let (status, retry) = (r.status().as_u16(), h("retry-after"));
-        let body = r.body_mut().read_to_string().map_err(|e| format!("ChunkedEncodingError: {e}"))?;
-        if binance {
-            ban_note(&self.ban, status, &body, retry.as_deref(), wall_ms() as f64 / 1000.0);
-        }
+        let (status, body) = self.gate.borrow_mut().send(&format!("{url}?{}", qs.join("&")), binance).map_err(|e| match e {
+            Fail::Banned(left) => format!("BinanceBanned: {left:.0}s left -- request not sent"),
+            Fail::Conn(e) => format!("ConnectionError: {e}"),
+            Fail::Body(e) => format!("ChunkedEncodingError: {e}"),
+        })?;
         if status >= 400 {
             return Err(format!("HTTPError: {status}"));
         }
@@ -192,8 +185,7 @@ fn main() {
     let fixed: Option<i64> = std::env::var("RT_RADAR_NOW_MS").ok().map(|v| v.parse().unwrap_or_else(|_| die(2, "RT_RADAR_NOW_MS")));
     let now = fixed.unwrap_or_else(wall_ms);
     let (fapi, deribit) = (env("RT_RADAR_FAPI", "https://fapi.binance.com"), env("RT_RADAR_DERIBIT", "https://www.deribit.com"));
-    let http = Http { agent: ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(20))).http_status_as_error(false).proxy(None).build().into(),
-                      ban: PathBuf::from(env("RT_SR_BAN_FILE", "data/live/binance_ban_until")) };
+    let http = Http { gate: std::cell::RefCell::new(Gate::new(Duration::from_secs(20), PathBuf::from(env("RT_SR_BAN_FILE", "data/live/binance_ban_until")))) };
     let cache = out.join("cache");
     let mut res: Vec<(&'static str, J)> = vec![];
     let mut all_ok = true;

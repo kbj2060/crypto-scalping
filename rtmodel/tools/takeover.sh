@@ -183,12 +183,12 @@ check_regime() {
   [ $(( $(now_s) - TS )) -le 3300 ] || die "파이썬 마지막 결정($T UTC)이 55분 넘게 지났다 -- 다음 정시 기록 뒤 바로 다시(REST 최근 3,000봉 창이 그 결정을 덮어야 한다)" 1
   ban_check
   rm -rf "$SH/run"; mkdir -p "$SH/run"
-  grep -vF "\"ts\": \"$T\"" "$L" > "$SH/run/regime_band_forward.jsonl"                       # 그 결정 줄만 빼고 이어 쓰기 상태를 그대로
+  grep -avF "\"ts\": \"$T\"" "$L" > "$SH/run/regime_band_forward.jsonl"                       # 그 결정 줄만 빼고 이어 쓰기 상태를 그대로
   cp "$LIVE/regime_band_forward_scored.jsonl" "$SH/run/" 2>/dev/null || true
   NOW=$(( (TS + 127) * 1000 ))
   say "Rust 한 회차(결정 $T · REST 8회 = 4코인 × 1500봉 두 쪽)"
   RT_REGIME_OUT="$SH/run" RT_REGIME_MODEL="$MODELS/regime_band.json" RT_REGIME_SRC_DIR="$LIVE" RT_REGIME_NOW_MS=$NOW "$BIN/rt_regime" > "$SH/run/out.txt" 2>&1 || { cat "$SH/run/out.txt"; record_check 1 "실행 실패"; return 1; }
-  grep -F "\"ts\": \"$T\"" "$L" > "$SH/run/py_T.jsonl"; grep -F "\"ts\": \"$T\"" "$SH/run/regime_band_forward.jsonl" > "$SH/run/rs_T.jsonl"
+  grep -aF "\"ts\": \"$T\"" "$L" > "$SH/run/py_T.jsonl"; grep -aF "\"ts\": \"$T\"" "$SH/run/regime_band_forward.jsonl" > "$SH/run/rs_T.jsonl"
   out=$("$PY" "$CMP" lines "$SH/run/py_T.jsonl" "$SH/run/rs_T.jsonl" --key ts,coin --text); local rc=$?
   local o2 rc2=0
   if [ -f "$LIVE/regime_band_forward_summary.json" ]; then o2=$("$PY" "$CMP" text "$LIVE/regime_band_forward_summary.json" "$SH/run/regime_band_forward_summary.json"); rc2=$?; o2="요약 $o2"; fi
@@ -223,12 +223,16 @@ check_radar() {
 check_dirpred() {
   local D="$LIVE/pred_record" T out o2
   [ -d "$D" ] || die "파이썬 기록 없음: $D" 1
-  T=$(cat "$D"/*.jsonl 2>/dev/null | grep '"k":"4"' | sed 's/.*"t":\([0-9]*\).*/\1/' | sort -n | tail -1)
+  T=$("$PY" "$CMP" maxt "$D" 4)   # 11-22: 서버 기록에 NUL 바이트가 끼어 grep 이 «binary file matches» 로 줄을 못 냈다 -- 깨진 줄은 원본 _tail 처럼 건너뛴다
   [ -n "$T" ] || die "4h 기록 줄이 없다" 1
   [ $(( $(now_s) * 1000 - T )) -le 3600000 ] || die "파이썬 마지막 결정이 1시간 넘게 지났다 -- 서버 5분 루프가 도는지" 1
   ban_check
   rm -rf "$SH/run"; mkdir -p "$SH/run"
-  say "Rust 한 회차(결정 $T · 처음이라 REST 약 880회 = 코인·모듈마다 5분봉 9쪽 + metrics 91쪽 + 19코인 + 일봉 · xsec 9회)"
+  # 원본(서버 pred_record_loop → d4.rest_frames · 쉼 없이 연달아 · 코인 사이 3초)과 같은 첫 회차: 15분·1시간 4코인 + 4h 3코인(ETH·SOL·XRP) = 7묶음
+  #   묶음 첫 코인 120회(5분봉 1000×9쪽 + metrics 5종 91쪽 + 19코인 341봉 + 일봉) · 나머지 102회 → 426 + 324 + xsec 9 = 759회
+  #   klines 가중치(1000봉 5 · 341봉 2 · 일봉 120 2 · 61봉 1) ≈ 424 + metrics 637회(/futures/data -- 1분 가중치 몫은 확인 못 함 · 최악 1씩이면 +637)
+  #   Rust 는 rtmodel::gate 를 지난다: 요청 사이 200ms(≥ 150초) · 응답 가중치 > RT_REST_WEIGHT_LIMIT(1,200) 면 다음 분까지 쉼 · 418/429 면 멈춤
+  say "Rust 한 회차(결정 $T · 처음이라 REST 약 760회 · klines 가중치 약 424(+ metrics 637회) · 요청 사이 200ms + 가중치 1,200 넘으면 다음 분까지 쉼 → 3분 남짓)"
   RT_DIR_OUT="$SH/run" RT_DIR_MODELS="$MODELS" RT_DIR_SRC_DIR="$LIVE" RT_DIR_NOW_MS=$(( T + 20000 )) "$BIN/rt_dirpred" > "$SH/run/out.txt" 2>&1 || { cat "$SH/run/out.txt"; record_check 1 "실행 실패"; return 1; }
   local f rc=0 all=""
   for f in "$SH/run/pred_record"/*.jsonl; do
@@ -236,7 +240,7 @@ check_dirpred() {
     out=$("$PY" "$CMP" lines "$D/$(basename "$f")" "$f" --key k,t --text) || rc=1
     all="$all $(basename "$f" .jsonl): $out ·"
   done
-  record_check "$rc" "$all REST ~890"
+  record_check "$rc" "$all REST ~760"
 }
 check_sr_lean() {
   local start

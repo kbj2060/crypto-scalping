@@ -11,7 +11,7 @@
 //!   RT_SR_KL_GAP_S  60                           1분봉 요청 간격(시험만 줄인다)
 //! 종료코드: 2 = 설정 거부 · 1 = 원본이 잡지 않는 예외(깨진 메시지 등 -- 감시 스크립트가 다시 띄운다).
 use futures_util::{SinkExt, StreamExt};
-use rtmodel::ban::{ban_left, ban_note};
+use rtmodel::gate::{Fail, Gate};
 use rtmodel::sr_live::Runner;
 use rtmodel::{read_json, SrLean};
 use serde_json::Value;
@@ -41,16 +41,12 @@ fn wall() -> f64 {
 }
 
 /// REST 한 번(동기 -- 원본도 그 호출을 기다리는 동안 수신을 안 한다). 밴 중이면 보내지 않고 실패.
-fn rest_get(agent: &ureq::Agent, base: &str, ban: &Path, pq: &str) -> Result<Value, String> {
-    let left = ban_left(ban, wall());
-    if left > 0.0 {
-        return Err(format!("binance IP ban: {left:.0}s left -- request not sent"));
-    }
-    let mut r = agent.get(&format!("{base}{pq}")).call().map_err(|e| format!("ClientError: {e}"))?;
-    let h = |n: &str| r.headers().get(n).and_then(|v| v.to_str().ok()).map(str::to_string);
-    let (status, retry) = (r.status().as_u16(), h("retry-after"));
-    let body = r.body_mut().read_to_string().map_err(|e| format!("ClientPayloadError: {e}"))?;
-    ban_note(ban, status, &body, retry.as_deref(), wall());
+fn rest_get(gate: &mut Gate, base: &str, pq: &str) -> Result<Value, String> {
+    let (status, body) = gate.send(&format!("{base}{pq}"), true).map_err(|e| match e {
+        Fail::Banned(left) => format!("binance IP ban: {left:.0}s left -- request not sent"),
+        Fail::Conn(e) => format!("ClientError: {e}"),
+        Fail::Body(e) => format!("ClientPayloadError: {e}"),
+    })?;
     if status >= 400 {
         return Err(format!("ClientResponseError: {status}")); // raise_for_status
     }
@@ -79,11 +75,11 @@ fn main() {
                                PathBuf::from(env("RT_SR_BAN_FILE", "data/live/binance_ban_until")));
     std::fs::create_dir_all(&out).unwrap_or_else(|e| die(2, &format!("{}: {e}", out.display())));
     let (f_main, f_feat, f_state) = (out.join("ethusdt.jsonl"), out.join("ethusdt_feat.jsonl"), out.join("ethusdt_state.json"));
-    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(REST_TIMEOUT)).http_status_as_error(false).proxy(None).build().into();
+    let mut gate = Gate::new(REST_TIMEOUT, ban.clone()); // 모든 바깥 요청의 한 문(rtmodel::gate)
     let mut run = Runner::new(&art);
     run.kl_gap = env("RT_SR_KL_GAP_S", "60").parse().unwrap_or_else(|_| die(2, "RT_SR_KL_GAP_S"));
     println!("시작 · 모델 {} · 문턱 {:?} · 재료 {}개 · 기록 {}", model.display(), art.thr, art.cols.len(), out.display());
-    let mut rest = |pq: &str| rest_get(&agent, &base, &ban, pq);
+    let mut rest = |pq: &str| rest_get(&mut gate, &base, pq);
     let mut clock = wall;
     let mut nap = |s: f64| std::thread::sleep(Duration::from_secs_f64(s));
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();

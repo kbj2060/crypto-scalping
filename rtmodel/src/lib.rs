@@ -17,6 +17,7 @@ pub mod card30;
 pub mod dir4h;
 pub mod dirrest;
 pub mod dirshort;
+pub mod gate;
 pub mod handlers;
 pub mod lgb;
 pub mod qx4;

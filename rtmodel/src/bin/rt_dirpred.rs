@@ -12,7 +12,7 @@
 //!   RT_DIR_REST     https://fapi.binance.com
 //!   RT_SR_BAN_FILE  data/live/binance_ban_until   (공용 밴 파일 -- 밴 중이면 보내지 않고 그 코인은 이번 회차 실패)
 //!   RT_DIR_NOW_MS   (시험만) 고정 시각으로 한 회차만 돌고 끝낸다
-use rtmodel::ban::{ban_left, ban_note};
+use rtmodel::gate::{Fail, Gate};
 use rtmodel::dirrest::{closes, daily_closes, xsec_px, Record, Rest};
 use rtmodel::{dir4h, dirshort, read_json};
 use serde_json::Value;
@@ -33,17 +33,12 @@ fn wall() -> f64 {
 }
 
 /// 원본 _get: requests.get(FAPI + path, params, timeout=20) · raise_for_status · json. 밴 중이면 보내지 않는다.
-fn get(agent: &ureq::Agent, base: &str, ban: &Path, path: &str, params: &[(&'static str, String)]) -> Result<Value, String> {
-    let left = ban_left(ban, wall());
-    if left > 0.0 {
-        return Err(format!("binance IP ban: {left:.0}s left -- request not sent"));
-    }
+fn get(gate: &mut Gate, base: &str, path: &str, params: &[(&'static str, String)]) -> Result<Value, String> {
     let q: Vec<String> = params.iter().map(|(k, v)| format!("{k}={v}")).collect();
-    let mut r = agent.get(&format!("{base}{path}?{}", q.join("&"))).call().map_err(|e| format!("{e}"))?;
-    let h = |n: &str| r.headers().get(n).and_then(|v| v.to_str().ok()).map(str::to_string);
-    let (status, retry) = (r.status().as_u16(), h("retry-after"));
-    let body = r.body_mut().read_to_string().map_err(|e| format!("{e}"))?;
-    ban_note(ban, status, &body, retry.as_deref(), wall());
+    let (status, body) = gate.send(&format!("{base}{path}?{}", q.join("&")), true).map_err(|e| match e {
+        Fail::Banned(left) => format!("binance IP ban: {left:.0}s left -- request not sent"),
+        Fail::Conn(e) | Fail::Body(e) => e,
+    })?;
     if status >= 400 {
         return Err(format!("HTTPError {status}"));
     }
@@ -81,8 +76,8 @@ fn main() {
     if a4.is_empty() && ass.is_empty() {
         die(2, &format!("모델이 하나도 없다: {}", models.display()));
     }
-    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(20))).http_status_as_error(false).proxy(None).build().into();
-    let mut g = |path: &str, params: &[(&'static str, String)]| get(&agent, &base, &ban, path, params);
+    let mut gate = Gate::new(Duration::from_secs(20), ban); // 모든 바깥 요청의 한 문(가중치 문턱·간격·밴 파일 -- rtmodel::gate)
+    let mut g = |path: &str, params: &[(&'static str, String)]| get(&mut gate, &base, path, params);
     let (mut r4, mut rs, mut rec) = (Rest::default(), Rest::default(), Record::default()); // 서버의 두 모듈 캐시
     loop {
         if fixed.is_none() {
