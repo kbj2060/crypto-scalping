@@ -70,3 +70,38 @@ fn ob5m_and_bookdepth_match_python_workers() {
     eprintln!("ob5m 비트 일치 칸 {n_cells} · bookdepth 칸 비트 {exact} · 1e-12 안 {tol}(BLAS 내적 몫, 최대 {worst:.1e})");
     let _ = std::fs::remove_dir_all(&out);
 }
+
+/// 빈 북(2026-11-21 그림자 SNDKUSDT 패닉): 한쪽·양쪽이 diff 로 비는 사슬 · 스냅숏 한쪽이 빈 사슬 · 그 뒤 온전한 스냅숏에서 다시 -- 원본 `replay` 와
+/// 상태 글자·매 초 sec_row·사건이 비트까지 같다. 원본이 IndexError 로 죽는 사슬(스냅숏 한쪽 빔)만 Rust 는 «empty_book»(의도한 차이 #16).
+#[test]
+fn ob5m_replay_empty_book_matches_python() {
+    let fix = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ob5m_empty.json");
+    let cases: Value = serde_json::from_str(&std::fs::read_to_string(fix).unwrap()).unwrap();
+    let (tick, _, ks, idx_max) = rtcollect::ob5m::coin("ETHUSDT").unwrap();
+    let v = |x: &Value| x.as_str().map_or_else(|| x.as_i64().unwrap().to_string(), str::to_string);
+    let (mut n_sec, mut n_ev, mut n_ch) = (0, 0, 0);
+    for c in cases.as_array().unwrap() {
+        for (k, ch) in c["chains"].as_array().unwrap().iter().enumerate() {
+            let name = format!("{} 사슬 {k}", c["name"].as_str().unwrap());
+            let mut lines = ch["lines"].as_array().unwrap().iter().map(|l| l.as_str().unwrap().as_bytes().to_vec());
+            let (mut secs, mut evs) = (vec![], vec![]);
+            let st = rtcollect::ob5m::replay(&mut lines, tick, ks, idx_max,
+                &mut |t, b, a, bb, ba| {
+                    let r = rtcollect::ob5m::sec_row(t, b, a, bb, ba);
+                    let f = rtcollect::py_float_repr;
+                    secs.push(vec![r.0.to_string(), r.1.to_string(), r.2.to_string(), f(r.3), f(r.4), f(r.5), f(r.6), r.7.to_string(), f(r.8), r.9.to_string(), f(r.10)]);
+                },
+                &mut |e| evs.push(vec![e.t.to_string(), e.side.to_string(), rtcollect::py_float_repr(e.px), rtcollect::py_float_repr(e.qref),
+                                       rtcollect::py_float_repr(e.q), rtcollect::py_float_repr(e.share), rtcollect::py_float_repr(e.dist_bp), e.age20.to_string()]));
+            let want = ch["status"].as_str().unwrap();
+            assert_eq!(st, if want == "IndexError" { "empty_book" } else { want }, "{name} 상태");
+            let ws: Vec<Vec<String>> = ch["secs"].as_array().unwrap().iter().map(|r| r.as_array().unwrap().iter().map(v).collect()).collect();
+            let we: Vec<Vec<String>> = ch["events"].as_array().unwrap().iter().map(|r| r.as_array().unwrap().iter().map(v).collect()).collect();
+            assert_eq!(secs, ws, "{name} sec_row");
+            assert_eq!(evs, we, "{name} 사건");
+            (n_sec, n_ev, n_ch) = (n_sec + secs.len(), n_ev + evs.len(), n_ch + 1);
+        }
+    }
+    assert!(n_ev >= 1 && n_sec >= 60, "사례가 비었다: 초 {n_sec} · 사건 {n_ev}");
+    eprintln!("빈 북 사례 사슬 {n_ch} · sec_row {n_sec} · 사건 {n_ev} 글자 일치");
+}

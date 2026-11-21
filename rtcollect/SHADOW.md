@@ -24,7 +24,7 @@ Rust 수집기(`rtcollect`)를 서버에서 **파이썬 수집기 옆에 나란�
 | `binance_ctx` | `BN_CTX_MARK_SYMBOLS` · `BN_CTX_OI_SYMBOLS` · `BN_CTX_OI_SLOW_SYMBOLS` | `data/hot/rtcollect/binance_ctx.sqlite` | `data/hot/binance_ctx.sqlite` |
 | `xyz` | `HL_XYZ_COINS`(글자 그대로) | `data/hot/rtcollect/hl_xyz.sqlite` | `data/hot/hl_xyz.sqlite` |
 | `hl_ctx` | `HL_BT_COIN`(쉼표 -- 원본은 코인마다 프로세스·`HL_BT_CTX_ONLY=1`) | `data/hot/rtcollect/hl_ctx.sqlite` | `data/hot/hl_ctx.sqlite` |
-| `raster` | `OF_SYMBOL`(한 종목) · 🔴`RTCOLLECT_REST=1` 필수(스냅숏 없이는 북을 못 세운다) | 폴더 `data/live/rtcollect/orderflow/raster/<SYM>/` | `data/live/orderflow/raster/<SYM>/`(폴더를 가리키면 종료코드 2) |
+| `raster` | `OF_SYMBOL`(한 종목) · `OF_BIN_SIZE`·`OF_N_BINS`(원본과 같은 이름 · 기본 0.5·240 -- 종목마다 crontab 줄 값 그대로, `tools/shadow_start.sh` 가 읽는다) · 🔴`RTCOLLECT_REST=1` 필수(스냅숏 없이는 북을 못 세운다) | 폴더 `data/live/rtcollect/orderflow/raster/<SYM>/` | `data/live/orderflow/raster/<SYM>/`(폴더를 가리키면 종료코드 2) |
 | `ob5m` · `bookdepth` | `OB_SYMBOL`(ETHUSDT) · `DD_ROOT`(depthdiff 폴더 · 읽기만) · ob5m 은 `TAPE_DB_PATH`(hot 테이프 · 읽기만) | `data/live/rtcollect/<종류>/<SYM>.sqlite` | `data/live/ob5m/`·`data/live/bookdepth/` 파일(`RTCOLLECT_TAKEOVER=1` 없으면 종료) -- 대조는 같은 시각의 닫힌 봉 행을 두 DB 에서 비교(bookdepth dm·dp 계열은 1e-12 · BLAS 내적 차) |
 | `depth` | `DD_SYMBOL`(한 종목 -- 원본과 같다) | 폴더 `data/live/rtcollect/orderflow/depthdiff/<SYM>/` | `data/live/orderflow/depthdiff/<SYM>/`(폴더를 가리키면 종료코드 2) |
 
@@ -189,6 +189,7 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
 | 13 | depth_diff | 시각이 바뀐 뒤 지난 시의 늦은 프레임이 오면 압축 중인 그 파일을 다시 열어 이어 쓰고, 압축 스레드가 끝나며 원본을 지워 **그 줄이 사라진다**(경쟁) -- 압축이 이미 끝났으면 새 `.jsonl`(스냅숏부터)을 만들어 읽는 쪽(`.jsonl` 먼저)이 그 시의 `.gz` 를 못 본다 · 늦은 프레임 하나에 **지금 시** 파일까지 압축해 곧 다시 연다 | 그 시 압축을 기다린 뒤 `.gz` 뒤에 gzip 멤버로 붙인다(파이썬 gzip.open 도 이어 읽는다) · 앞으로 넘어갈 때만 압축한다 | Rust 는 늦은 줄이 그 시 `.gz` 에 남고 지금 시 파일은 `.jsonl` 그대로 | 정답지엔 넣지 않았다(원본 결과가 돌릴 때마다 달라 정답지가 안 된다) | depth_parity `depth_late_frame_during_compress_is_kept`(2만 줄 압축 중 늦은 셋 → 2만+3 줄 · 지금 시 그대로) |
 | 14 | 호가 래스터 | 스냅숏 REST 가 공용 밴 파일을 모른다 | 밴 중이면 안 보내고 418·429 를 밴 파일에 | 밴 중엔 Rust 는 동기 못 함(행 무효) | — | 코드(main.rs) |
 | 15 | OKX 맥락 · 바이낸스 맥락(gaps) | 재연결 공백 «1.5초 미만은 안 적음» 을 벽시계로 쟀다 -- WSL 벽시계가 뒤로 뛰면(실측 −1.5~−2.4초) 3초 공백이 짧게 재여 gaps 행이 빠졌다 | 판단만 단조 시계 · 적는 from/to 는 벽시계 그대로 | 벽시계가 뛴 재연결에서 Rust 에만 gaps 행 | — | 코드(okx_ctx.rs·binance_ctx.rs·net.rs) |
+| 16 | ob5m · bookdepth(북 재구성 `replay`) | 시 파일 스냅숏의 한쪽(또는 양쪽)이 비면 `np.flatnonzero(bid)[-1]` IndexError 로 프로세스가 죽는다(얇은 주식 선물 -- 2026-11-21 그림자 SNDKUSDT 에서 Rust 가 같은 자리에서 패닉) | 그 사슬을 «empty_book» 으로 끝내고 restart 규칙대로 다음 시 파일 스냅숏에서 다시 | 파이썬은 죽고(감독이 다시 띄움) Rust 는 다음 시부터 봉을 잇는다 | — | 코드(ob5m.rs `replay`) |
 
 `shadow_tape.py` 는 1·3·8·9·12 의 표에서 «Rust에만» 을 `(의도한 차이 후보 -- 이유)` 로 따로 적는다(«파이썬에만»·값 불일치는 그대로 실패).
 원본 그대로 둔 것(고치지 않음 -- 범위 밖이거나 값이 원본 정의다): depth 의 재접속 사이 구멍이 `_gap` 으로 안 남는 것 · 재시작이 시 경계를 넘으면 지난 시

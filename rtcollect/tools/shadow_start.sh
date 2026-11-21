@@ -49,8 +49,11 @@ echo "$CT" | grep -q 'supervisor_hyperliquid_book_ticker.sh' && up hl_ctx
 while IFS= read -r l; do [ -n "$l" ] || continue
   s="$(val "$l" DD_SYMBOL)"; up depth "DD_SYMBOL=${s:-ethusdt}" RTCOLLECT_REST=1
 done <<< "$(echo "$CT" | grep 'supervisor_depth_diff.sh')"
-# ponytail: 호가 래스터는 Rust 가 칸 크기 0.5 고정(ETH) -- 다른 종목은 OF_BIN_SIZE 를 받게 된 뒤 추가
-up raster OF_SYMBOL=ethusdt RTCOLLECT_REST=1
+# 호가 래스터: 종목·칸 크기·칸 수를 crontab 줄 그대로(OF_SYMBOL 없으면 ethusdt · OF_BIN_SIZE·OF_N_BINS 없으면 원본 기본 0.5·240) · 스냅숏 REST 필수
+while IFS= read -r l; do [ -n "$l" ] || continue
+  s="$(val "$l" OF_SYMBOL)"; b="$(val "$l" OF_BIN_SIZE)"; n="$(val "$l" OF_N_BINS)"
+  up raster "OF_SYMBOL=${s:-ethusdt}" ${b:+"OF_BIN_SIZE=$b"} ${n:+"OF_N_BINS=$n"} RTCOLLECT_REST=1
+done <<< "$(echo "$CT" | grep 'supervisor_orderflow_raster.sh')"
 # 5분 호가 요약·호가 깊이 10열: 위 depth 파일을 읽는다
 while IFS= read -r l; do [ -n "$l" ] || continue
   s="$(echo "$l" | grep -oE 'supervisor_ob5m\.sh [A-Z0-9]+' | awk '{print $2}')"; up ob5m "OB_SYMBOL=${s:-ETHUSDT}"

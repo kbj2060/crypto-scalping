@@ -154,7 +154,7 @@ pub(crate) fn py_iter<'a>(o: &'a Map<String, Value>, k: &str) -> Result<&'a [Val
 }
 
 /// 파이썬 float.__repr__(json.dumps 가 쓰는 것): 가장 짧은 왕복 숫자 · 지수가 -4 이상 16 미만이면 고정 소수(`.0` 붙음) · 아니면 `1e-05`·`1.5e+16`.
-pub(crate) fn py_float_repr(x: f64) -> String {
+pub fn py_float_repr(x: f64) -> String {
     if !x.is_finite() {
         return if x.is_nan() { "NaN".into() } else if x > 0.0 { "Infinity".into() } else { "-Infinity".into() }; // json.dumps 낱말
     }
