@@ -2,7 +2,7 @@
 # rtcollect 그림자 일괄 기동 (2026-11-21 · 사용자 결정 «전 종목 7일 병행 · /mnt/data2 에 기록»). 서버 전용.
 # 파이썬 수집기의 crontab 등록에서 종목을 그대로 읽어 같은 목록으로 띄운다. 파이썬 수집기·그 파일은 건드리지 않는다.
 #   bash shadow_start.sh        띄운다(종류마다 8초 간격 -- 거래소 연결을 한꺼번에 열지 않게)
-#   bash shadow_start.sh cron   띄우지 않고 재부팅용 crontab 줄만 출력한다
+#   bash shadow_start.sh cron   띄우지 않고 crontab 줄만 출력한다 -- 상주(@reboot) 묶음 뒤에 예약 종류(raster_archive·liq_tab·seal) 묶음을 따로
 set -uo pipefail
 ROOT=/home/llewyn/crypto-scalping
 cd "$ROOT" || exit 1
@@ -17,6 +17,7 @@ if [ "$MODE" = up ]; then
   [ "$(readlink -f data/hot/rtcollect)" = "$SH/hot" ] && [ "$(readlink -f data/live/rtcollect)" = "$SH/live" ] || { echo "출력 폴더가 $SH 를 가리키지 않음 -- 중단"; exit 1; }
 fi
 N=0
+[ "$MODE" = cron ] && echo "# ── 상주 종류(@reboot) ──"
 up() { # up <종류> [VAR=VAL ...]
   local kind="$1"; shift
   N=$((N + 1))
@@ -90,10 +91,11 @@ upd() { # upd <종류> [VAR=VAL ...]
 }
 if [ -x "$DBIN" ]; then
   if [ "$MODE" = up ]; then
-    mkdir -p "$SH/duck_hot" "$SH/duck_live"
+    mkdir -p "$SH/duck_hot" "$SH/duck_live" "$SH/duck_lake" data/rtduck
     [ -e data/hot/rtduck ] || ln -s "$SH/duck_hot" data/hot/rtduck
     [ -e data/live/rtduck ] || ln -s "$SH/duck_live" data/live/rtduck
-    [ "$(readlink -f data/hot/rtduck)" = "$SH/duck_hot" ] && [ "$(readlink -f data/live/rtduck)" = "$SH/duck_live" ] || { echo "rtduck 출력 폴더가 $SH 를 가리키지 않음 -- rtduck 은 안 띄운다"; DBIN=""; }
+    [ -e data/rtduck/lake ] || ln -s "$SH/duck_lake" data/rtduck/lake   # seal 그림자 lake(+ 원천 사본 .snap_*) -- C: 에 쓰지 않게
+    [ "$(readlink -f data/hot/rtduck)" = "$SH/duck_hot" ] && [ "$(readlink -f data/live/rtduck)" = "$SH/duck_live" ] && [ "$(readlink -f data/rtduck/lake)" = "$SH/duck_lake" ] || { echo "rtduck 출력 폴더가 $SH 를 가리키지 않음 -- rtduck 은 안 띄운다"; DBIN=""; }
   fi
   if [ -n "$DBIN" ]; then
     while IFS= read -r l; do [ -n "$l" ] || continue
@@ -111,14 +113,39 @@ if [ -x "$DBIN" ]; then
         c="$(val "$l" HL_POS_COINS)"; upd hl_positions "HL_POS_COINS=${c:-ETH}" RTDUCK_REST=1 HL_ROOT="$ROOT/data/live/rtduck/orderflow/hyperliquid"
       done <<< "$(echo "$CT" | grep 'supervisor_hyperliquid_positions.sh')"
     else
-      echo "rtduck REST 종류(oi_lsratio · hl_positions) 안 띄움 -- RTDUCK_SHADOW_REST=1 이면 띄운다(호출 두 배)"
+      echo "# rtduck REST 종류(oi_lsratio · hl_positions) 안 띄움 -- RTDUCK_SHADOW_REST=1 이면 띄운다(호출 두 배)"
     fi
+    # Deribit 옵션 체결: 체결 WS 만(Deribit 연결 -- 바이낸스 한도와 무관) · REST(백필·10분 체인·매시 대조)는 RTDUCK_REST 를 안 넘겨 꺼짐
+    if echo "$CT" | grep -q 'deribit_block_trade'; then upd deribit
+    else echo "# deribit: 파이썬 수집기 @reboot 줄(deribit_block_trade)을 못 찾음 -- 안 띄움(다른 방식으로 뜨면 손으로: RTDUCK_BIN=$DBIN bash scripts/ops/supervisor_rtduck.sh deribit)"; fi
   fi
 else
-  echo "rtduck 실행 파일 없음($DBIN) -- rtduck 종류는 건너뜀"
+  echo "# rtduck 실행 파일 없음($DBIN) -- rtduck 종류는 건너뜀"
 fi
 
-[ "$MODE" = cron ] && exit 0
+if [ "$MODE" = cron ]; then
+  # ── 예약 종류(한 번 돌고 끝 · REST 없음 = 거래소 호출 ×1) -- 위 @reboot 줄과 따로 등록한다(조정자가 확인 뒤).
+  #   줄마다 출력 폴더가 6TB 링크인지 먼저 본다(아니면 아무것도 안 하고 끝 -- C: 에 쓰지 않게). 시각은 파이썬 줄에서 읽는다.
+  ALL="$(crontab -l 2>/dev/null | grep -vE '^[[:space:]]*(#|$)')"
+  echo "# ── rtduck 예약 종류(crontab 에 따로) ──"
+  if [ -n "${DBIN:-}" ] && [ -x "$DBIN" ]; then
+    GL="[ \"\$(readlink -f data/live/rtduck)\" = $SH/duck_live ]"
+    echo "$CT" | grep -q 'supervisor_orderflow_raster.sh' \
+      && echo "40 * * * * cd $ROOT && $GL && RTDUCK_KIND=raster_archive $DBIN >> logs/supervisor/rt_raster_archive.log 2>&1" \
+      || echo "# raster_archive: 래스터 줄이 없어 안 냄"
+    m="$(echo "$ALL" | grep 'live_liq_tab' | head -1 | awk '{print $1}')"
+    if [[ "$m" =~ ^[0-9]+$ ]]; then
+      echo "# liq_tab: 파이썬 줄 $m 분 + 5 · 파이썬 1h 봉 캐시를 복사한 뒤 REST 끄고(=저장된 봉만) 계산"
+      echo "$(( (m + 5) % 60 )) * * * * cd $ROOT && $GL && cp -p data/live/liq_tab_k1h_*.parquet data/live/rtduck/ && RTDUCK_KIND=liq_tab $DBIN >> logs/supervisor/rt_liq_tab.log 2>&1"
+    else echo "# liq_tab: 파이썬 줄(live_liq_tab · 분이 숫자)을 못 찾음 -- 안 냄"; fi
+    read -r m h _ <<< "$(echo "$ALL" | grep 'seal_to_lake' | head -1)"
+    if [[ "${m:-}" =~ ^[0-9]+$ && "${h:-}" =~ ^[0-9]+$ ]]; then
+      echo "# seal: 파이썬 줄 $h시 $m분 + 1시간(원본과 겹치면 원천 사본이 둘) · lake = data/rtduck/lake → $SH/duck_lake · hot 정리 없음(TAKEOVER 아님)"
+      echo "$m $(( (h + 1) % 24 )) * * * cd $ROOT && [ \"\$(readlink -f data/rtduck/lake)\" = $SH/duck_lake ] && $GL && RTDUCK_KIND=seal $DBIN >> logs/supervisor/rt_seal.log 2>&1"
+    else echo "# seal: 파이썬 줄(seal_to_lake · 분·시가 숫자)을 못 찾음 -- 안 냄"; fi
+  else echo "# rtduck 실행 파일이 없어 안 냄"; fi
+  exit 0
+fi
 sleep 45
 echo "띄운 수 $N · 실행 중 rtcollect $(pgrep -x rtcollect | wc -l)개"
 echo "--- 기동 로그 꼬리"; tail -n 12 logs/supervisor/rtcollect_boot.log 2>/dev/null | cut -c1-220

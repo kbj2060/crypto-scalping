@@ -2,7 +2,7 @@
 //! 5분 봉이 닫힌 뒤 +20초마다 코인(ETH·BTC·SOL·XRP · 사이 3초)마다 15분·1시간(dir_short) → 4h(dir4h) 예측을 내고
 //! 적중 기록(pred_record/{코인}.jsonl -- 전진 검정 fwd_dirshort 가 읽는 꼴)과 마지막 payload(dir4h_<코인>.json · dir_short_<코인>.json)를 쓴다.
 //! 회차 끝에 9코인 상대 강도(pred_record/xsec.jsonl · 원본 xsec_record)와 최신 스냅숏(xsec_latest.json -- 원본은 프로세스 안 _xs_latest)을 쓴다.
-//! 🔴ETH 15분·1시간(75열판 · 호가 깊이 sqlite)은 아직 못 옮겼다 -- 건너뛴다.
+//! 🔴ETH 15분·1시간(75열판)은 계산(dirshort::payload_book)은 옮겼으나 호가 깊이 sqlite 읽기가 없어 이 루프는 건너뛴다.
 //!
 //! 환경변수(기본값):
 //!   RT_DIR_OUT      data/live/rt_dirpred     쓰는 곳. 🔴data/live(= 파이썬 서버의 data/live/pred_record)면 종료코드 2(전환 때만 RT_DIR_TAKEOVER=1)
@@ -68,6 +68,9 @@ fn main() {
     let a4: Vec<(String, dir4h::Art)> = COINS.iter().filter_map(|c| dir4h::Art::load(&models.join(format!("dir4h_{}.json", c.to_lowercase()))).ok().map(|a| (c.to_string(), a))).collect();
     let mut ass: Vec<(String, dirshort::Art, Vec<(&str, Vec<f64>)>)> = vec![];
     for c in COINS {
+        if c == "ETH" {
+            continue; // ponytail: ETH 75열판(dirshort::payload_book)은 호가 깊이 sqlite 읽기가 필요 -- rtmodel 에 sqlite 의존성이 없어 아직 안 붙임(rtcollect 쪽 읽기 함수가 생기면 넘긴다)
+        }
         let (Ok(m), Ok(o)) = (read_json::<Value>(&models.join(format!("ds_{}.json", c.to_lowercase()))), read_json::<Value>(&models.join(format!("oos_{}.json", c.to_lowercase())))) else { continue };
         let art = dirshort::Art::from_json(&m).unwrap_or_else(|e| die(2, &format!("ds_{c}: {e}")));
         let oos = dirshort::NAMES.iter().map(|(_, nm)| (*nm, o[*nm].as_array().map_or(vec![], |a| a.iter().map(|b| f64::from_bits(b.as_u64().unwrap_or(0))).collect()))).collect();

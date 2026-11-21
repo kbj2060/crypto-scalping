@@ -10,6 +10,9 @@
   mark_price_1s · oi_1s(바이낸스 맥락)   열쇠 (ts_ms, symbol) · liquidations   행 묶음
   hl_asset_ctx(HL 자산 맥락)   행 묶음 -- recv_ms 는 뺀다(받은 시각)
   hl_xyz_1m(xyz100)   열쇠 (coin, ts_sec) · hl_xyz_ctx_1s   행 묶음 -- recv_sec 는 뺀다(받은 초 = 벽시계, 두 프로세스가 원래 다르다)
+  bars(ob5m 5분 봉 · 호가 깊이 10열)   열쇠 t(초) -- written_ms 는 뺀다 · marks(ob5m 표식)   열쇠 (t, side, px)
+     두 쪽 다 파이썬 depthdiff·hot 테이프를 읽으니(그림자 기본 DD_ROOT) «불일치 0» 이어야 한다 · 파일이 종목마다라 종목 열이 없다
+  --events: 아이스버그 사건 JSONL 두 파일 -- 줄 글자 집합(t_end 가 --from/--to 안인 줄만 · 같은 원천을 읽으니 같아야 한다)
   🔴바이낸스 맥락에는 gaps 표가 없다(원본에 없다) -- 재연결 언저리의 «한쪽에만»은 로그(`ws:`)의 끊긴 시각과 맞춰 본다.
      xyz100 의 ctx 는 받은 초가 1칸 밀리면 같은 초로 합쳐지는 행 수가 갈린다 -- 불일치 0 이 아니라 «비율»로 본다(SHADOW.md §5).
 빼는 분(뺀 분 수를 같이 찍는다):
@@ -48,6 +51,8 @@ TABLES = {  # 표 → (시각 열, 시각 단위 ms 인가, 열쇠 열 또는 No
     "hl_xyz_1m": ("ts_sec", False, ("coin", "ts_sec"), ()),
     "hl_xyz_ctx_1s": ("recv_sec", False, None, ("recv_sec",)),
     "hl_asset_ctx": ("recv_ms", True, None, ("recv_ms",)),
+    "bars": ("t", False, ("t",), ("written_ms",)),
+    "marks": ("t", False, ("t", "side", "px"), ()),
 }
 # 🔧의도한 차이(rtcollect/SHADOW.md §11 -- 결함은 Rust 에서만 고쳤다): 이 표들의 «Rust에만» 행은 원본이 잃는 행일 수 있다 -- 불일치로 세지 않고 따로 적는다.
 #   «파이썬에만»·값 불일치는 그대로 실패다(고친 Rust 가 원본보다 적게 쓸 까닭은 없다).
@@ -119,7 +124,7 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
     names = cols(py, t)
     assert names == cols(rs, t), f"{t} 열이 다르다"
     sel = ", ".join(names)
-    si, ti = names.index(SYM_COL[t]), names.index(tcol)
+    si, ti = names.index(SYM_COL[t]) if t in SYM_COL else None, names.index(tcol)
     kidx = [names.index(k) for k in key] if key else None
     keepcols = [i for i, c in enumerate(names) if c not in drop]   # 비교에서 빼는 열(받은 시각) -- 창·종목 거르기에는 쓴다
     allsym = excl.get(None, set())
@@ -131,8 +136,9 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
     def keep(r) -> bool:
         sec = r[ti] // 1000 if ms else r[ti]
         m = sec // 60
-        if m in allsym or m in excl.get(r[si], ()):
-            skipped.add((r[si], m))
+        sym = r[si] if si is not None else None
+        if m in allsym or m in excl.get(sym, ()):
+            skipped.add((sym, m))
             return False
         return True
 
@@ -145,8 +151,8 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
         if not kidx:
             rp, rr = [tuple(r[i] for i in keepcols) for r in rp], [tuple(r[i] for i in keepcols) for r in rr]
         if kidx:
-            dp = {tuple(r[i] for i in kidx): r for r in rp}
-            dr = {tuple(r[i] for i in kidx): r for r in rr}
+            dp = {tuple(r[i] for i in kidx): tuple(r[i] for i in keepcols) for r in rp}
+            dr = {tuple(r[i] for i in kidx): tuple(r[i] for i in keepcols) for r in rr}
             for k in dp.keys() & dr.keys():
                 n_cmp += 1
                 if dp[k] != dr[k]:
@@ -243,6 +249,21 @@ def compare_raster(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~") -> l
     return res or ["raster: 두 쪽에 같은 시 파일이 없다"]
 
 
+def compare_events(py: Path, rs: Path, lo=None, hi=None, show: int = 3) -> list[str]:
+    import json
+
+    def read(p: Path) -> Counter:
+        c: Counter = Counter()
+        for ln in p.read_text(encoding="utf-8").splitlines():
+            if ln.strip() and (lo is None or json.loads(ln)["t_end"] >= lo) and (hi is None or json.loads(ln)["t_end"] < hi):
+                c[ln] += 1
+        return c
+    a, b = read(py), read(rs)
+    first = [f"파이썬에만 {x}" for x in sorted(a - b)[:show]] + [f"Rust에만 {x}" for x in sorted(b - a)[:show]]
+    return [f"events: 같은 줄 {sum((a & b).values()):,} · 파이썬에만 {sum((a - b).values()):,} · Rust에만 {sum((b - a).values()):,}"
+            + "".join(f"\n    {x}" for x in first)]
+
+
 def selftest() -> None:
     tape = ("CREATE TABLE trade_tape_1s(symbol TEXT, ts_sec INTEGER, price_bin INTEGER, buy_qty REAL, sell_qty REAL, "
             "PRIMARY KEY (symbol, ts_sec, price_bin)) WITHOUT ROWID")
@@ -300,6 +321,18 @@ def selftest() -> None:
         xyz_line = next(x for x in out if x.startswith("hl_xyz_ctx_1s"))
         # recv_sec 는 빼고 비교 · 창 경계를 넘어 맞춘다. 남는 1행 = 범위 첫 초(파이썬 T 는 범위 밖, Rust 의 같은 행은 T+1 이라 안) -- 벽시계 열의 한계
         assert "불일치 0 · 파이썬에만 0 · Rust에만 1(의도한 차이 후보" in xyz_line and "비교 107행" in xyz_line, xyz_line
+        for f, w in ((p, 1), (r, 2)):
+            con = sqlite3.connect(f)
+            con.execute("CREATE TABLE bars(t INTEGER PRIMARY KEY, dimb1 REAL, written_ms INTEGER)")
+            con.executemany("INSERT INTO bars VALUES (?,?,?)", [(T + 300 * k, 0.5 if (f == r and k == 2) else 0.25, w) for k in range(4)])
+            con.commit()
+            con.close()
+        bars_line = next(x for x in run(p, r) if x.startswith("bars"))
+        assert "비교 3행 · 불일치 1 · 파이썬에만 0 · Rust에만 0" in bars_line, bars_line   # 마지막 봉 = 끝 10초 안이라 뺀다 · written_ms 는 안 본다
+        (Path(d) / "a.jsonl").write_text('{"t_end":60,"side":1}\n{"t_end":90,"side":-1}\n{"t_end":120,"side":1}\n')
+        (Path(d) / "b.jsonl").write_text('{"t_end":60,"side":1}\n{"t_end":120,"side":1}\n')
+        ev = compare_events(Path(d) / "a.jsonl", Path(d) / "b.jsonl", lo=60, hi=120)[0]
+        assert ev.startswith("events: 같은 줄 1 · 파이썬에만 1 · Rust에만 0"), ev   # t_end 120 = 창 밖
         # 읽기 전용: 두 파일은 그대로
         try:
             ro(p).execute("DELETE FROM gaps")
@@ -322,11 +355,14 @@ def main() -> None:
     ap.add_argument("--depth", action="store_true", help="두 경로 = depth_diff 종목 폴더(<root>/<SYM>) · --from/--to 대신 --hours 시작,끝(YYYY-MM-DDTHH)")
     ap.add_argument("--hours", default="")
     ap.add_argument("--raster", action="store_true", help="두 경로 = 호가 래스터 종목 폴더(<root>/<SYM>) · --hours 시작,끝")
+    ap.add_argument("--events", action="store_true", help="두 경로 = 아이스버그 <sym>_events.jsonl · --from/--to = t_end 초")
     a = ap.parse_args()
     if a.selftest:
         return selftest()
     if not (a.py and a.rs):
         ap.error("파이썬 DB 와 Rust DB 경로가 필요하다")
+    if a.events:
+        return print("\n".join(compare_events(a.py, a.rs, a.lo, a.hi, a.show)))
     if a.raster:
         lo, _, hi = a.hours.partition(",")
         return print("\n".join(compare_raster(a.py, a.rs, lo, hi or "~")))

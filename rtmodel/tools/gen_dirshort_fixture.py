@@ -5,7 +5,7 @@
 안전(소스 확인): 원본은 import 때 sqlite3·numpy·pandas 와 4h 모듈만 -- live_payload·rest_frames(REST)는 부르지 않는다. 65열판은 sqlite 를 안 연다.
 🔴대역 두 가지(개발기에 없음): ① 모델 경로 ART65 를 메인 체크아웃 data/live/ 로(읽기만) ② 표본 밖 분위 씨앗은 ETH 것(eth_dirshort_oos_seed.parquet)만
    개발기에 있어 SOL·BTC·XRP 모두 그것을 쓴다(ds._OOS 캐시에 미리 넣음) -- 분위·문턱 «식» 대조이지 그 코인의 실제 문턱이 아니다.
-ETH 75열판(호가 깊이 10열 · sqlite)은 모델이 개발기에 없어 못 한다.
+ETH 75열판(호가 깊이 10열 · sqlite)은 서버 모델 사본(tmp/rtmodel_models_20261121 · md5 같음)과 임시 sqlite 로 4벌(2026-11-21 추가).
 
     python rtmodel/tools/gen_dirshort_fixture.py      # → tests/fixtures/dirshort_fixture.json · ds_{sol,btc,xrp}.json (커밋 안 함)
 """
@@ -54,6 +54,42 @@ def main():
             fx["sets"].append({"coin": coin, "name": name, "frames": {s: {"ts": (f.timestamp.astype("int64") // 10**6).tolist(), **{c: G.bits(f[c]) for c in G.COLS + ds.d4.MCOLS}} for s, f in frames.items()},
                                "dc": [[int(t.value // 10**6) for t in dc.index], G.bits(dc.to_numpy())], "payload": enc(pay), "raw": {ds.NAMES[h]: G.bits(v) for h, v in raw.items()}})
             print(coin, name, "pred", pay["pred"], "thr", pay["thr"], flush=True)
+    # ── ETH 75열판(서버 모델 사본 · 호가 깊이 sqlite 10열 -- 임시 sqlite 로 warm·빈 칸·없는 봉·지금 봉 warm·전부 없음)
+    import sqlite3, tempfile, joblib
+    ds.ARTIFACT = Path("/home/kbj20/crypto-scalping/tmp/rtmodel_models_20261121/eth_dirshort_model.joblib")   # 서버와 md5 같음 · data/live 로 옮기지 않는다
+    art = joblib.load(ds.ARTIFACT)
+    ds._OOS["ETH"] = Q
+    mj = {"coin": "ETH", "month": art["month"], "src": art.get("src"),
+          "models": {str(h): [[{"txt": m.booster_.model_to_string(), "scale": G.bits([s])[0]} for m, s in ms] for ms in seeds] for h, seeds in art["models"].items()}}
+    (OUT / "ds_eth.json").write_text(json.dumps(mj))
+    for name, end, kind in (("normal", "2026-11-20 13:35", "ok"), ("gaps", "2026-11-21 00:20", "holes"), ("zero_vol", "2026-11-22 07:40", "now_warm"), ("normal", "2026-11-23 01:05", "none")):
+        frames, dc = G.case(rng, "SOL", name, end)
+        frames["ETH"], frames["SOL"] = frames["SOL"], frames["ETH"]                 # 합성기 대상(9,000봉·metrics)을 ETH 자리로
+        F = ds.d4.build_features(ds.d4.frames_for(frames, "ETH"), dc).tail(13)
+        bars = [int(pd.Timestamp(x).value // 10**6) for x in F.ts]
+        db = Path(tempfile.mkdtemp()) / "ethusdt.sqlite"
+        con = sqlite3.connect(db)
+        con.execute(f"CREATE TABLE bars (t INTEGER PRIMARY KEY, warm INTEGER, {', '.join(f'{c!r} REAL' for c in ds.BOOKF)})".replace("'", '"'))
+        book = {}
+        for j, b in enumerate(bars):
+            if kind == "none" or (kind == "holes" and j == 4):
+                continue                                                           # 없는 봉
+            v = [float(x) for x in rng.normal(0, 1, len(ds.BOOKF))]
+            warm = int((kind == "holes" and j == 7) or (kind == "now_warm" and j == len(bars) - 1))
+            if kind == "holes" and j == 9:
+                v[3] = None                                                        # 빈 칸
+            con.execute(f"INSERT INTO bars VALUES ({', '.join('?' * (2 + len(v)))})", [b, warm, *v])
+            book[str(b)] = [warm, *v]
+        con.commit(); con.close()
+        ds.BOOK_DB = db
+        pay = ds.payload_from_features(art, F)
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        rows = [ds.book_row(con, b) for b in bars]; con.close()
+        ok = [i for i, (bk, _) in enumerate(rows) if bk is not None]
+        raw = ds.predict(art, np.hstack([F.iloc[ok][ds.d4.FEATS].to_numpy(np.float32), np.vstack([rows[i][0] for i in ok])])) if ok else {}
+        fx["sets"].append({"ok_rows": ok, "coin": "ETH", "name": f"{name}/{kind}", "book": book, "frames": {s: {"ts": (f.timestamp.astype("int64") // 10**6).tolist(), **{c: G.bits(f[c]) for c in G.COLS + ds.d4.MCOLS}} for s, f in frames.items()},
+                           "dc": [[int(t.value // 10**6) for t in dc.index], G.bits(dc.to_numpy())], "payload": enc(pay), "raw": {ds.NAMES[h]: G.bits(v) for h, v in raw.items()}})
+        print("ETH", name, kind, "pred", pay["pred"], "book", pay["book"], "hist", len(pay["hist"]), flush=True)
     qr = np.random.default_rng(5)                                    # np.quantile 식 자체(반올림 전) -- 길이·분위 여러 개
     fx["quant"] = [[G.bits(np.sort(x)), G.bits([q]), G.bits([np.quantile(x, q)])] for x in (qr.normal(0, 3, int(n)) for n in qr.integers(2, 500, 300)) for q in (.2, .8, .5, .1, .9)]
     p = OUT / "dirshort_fixture.json"; p.write_text(json.dumps(fx)); print(p.name, f"{p.stat().st_size:,} 바이트 · 벌 {len(fx['sets'])}")

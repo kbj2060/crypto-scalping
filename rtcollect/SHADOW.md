@@ -86,6 +86,32 @@ depth 는 시 파일을 풀어 **거래소 프레임 줄을 글자 그대로** �
 표준 라이브러리만 · 두 파일 다 읽기 전용(`mode=ro`) · 한 시간 창씩 읽는다(큰 표를 통째로 안 올린다).
 빼는 분: 두 쪽 gaps ±5초 · 두 쪽 backfill_1m ok 분 · 두 쪽 verify_1m 불일치 분 · 범위 끝 10초. 뺀 (종목, 분) 수를 같이 찍는다.
 
+**스트림별 대조 도구(2026-11-21 열두째 조각 · 전부 읽기 전용 · 한 스트림씩 · 창은 인자 · 서버에서 `nice -n 10` 으로)**:
+
+| 그림자 종류 | 파이썬 쪽 ↔ Rust 쪽 | 도구 | 무엇을 어떻게 |
+|---|---|---|---|
+| binance_tape(선물·현물) · okx_tape · bybit_tape | `data/hot/<파일>.sqlite` ↔ `data/hot/rtcollect/<같은 이름>` | `shadow_tape.py` | trade_tape_1s 열쇠 (symbol, ts_sec, price_bin) 값 비트 · gaps·backfill·verify 분 뺌 |
+| okx_ctx · binance_ctx · bybit(ctx·liq) · xyz · hl_ctx | 같은 꼴 | `shadow_tape.py` | 표마다 열쇠 또는 행 묶음(받은 시각 열 뺌) · 위 «맥락 셋의 예외» |
+| depth | `data/live/orderflow/depthdiff/<SYM>` ↔ `…/rtcollect/…` | `shadow_tape.py --depth --hours` | 시 파일 프레임 줄 글자 집합 |
+| raster | `…/orderflow/raster/<SYM>` ↔ `…/rtcollect/…` | `shadow_tape.py --raster --hours` | 같은 초 bin_lo·mid·칸 같음 비율 |
+| ob5m · bookdepth | `data/live/{ob5m,bookdepth}/<파일>.sqlite` ↔ `data/live/rtcollect/{ob5m,bookdepth}/<같은 이름>` | `shadow_tape.py`(**새로**) | bars 열쇠 t(초 · written_ms 뺌) · marks 열쇠 (t, side, px) · 그림자 기본이 파이썬 depthdiff·hot 테이프를 읽으니(DD_ROOT) «불일치 0» 이어야 |
+| hl_trades | `data/live/orderflow/hyperliquid/<코인>/<날짜>.duckdb` ↔ `data/live/rtduck/orderflow/hyperliquid/…` | `shadow_duck.py`(**새로**) | 열쇠 (coin, tid) 값 비트 · gaps ±5초 분 뺌 |
+| deribit | `data/live/deribit_options.duckdb` ↔ `data/live/rtduck/deribit_options.duckdb` | `shadow_duck.py`(**새로**) | option_trades 열쇠 trade_id · 블록 두 표 · REST 를 끈 그림자라 체인·요약·OI 표는 Rust 쪽이 비어 있다(행 수만) |
+| market_data | `data/live/{microstructure,tail_risk}.duckdb` ↔ `data/live/rtduck/…` | `shadow_duck.py`(**새로** · 행 수만) | 각자 벽시계로 1초·1분마다 찍는 줄이라 열쇠가 안 맞는다 -- 창 안 행 수만 · 🔴미시구조 REST 를 끈 그림자는 poll 칸이 비어 값 비교가 뜻이 없다 |
+| oi_lsratio · hl_positions | — | `shadow_duck.py` · `shadow_tape.py` 가 읽을 수는 있음 | 그림자에서 기본 안 띄움(REST ×2) -- 켰을 때만 |
+| seal(예약) | `data/lake` ↔ `data/rtduck/lake` | `shadow_duck.py --lake`(**새로**) · §17 의 원본 `seal(dry_run=True)` | 파일마다 행 수·hash(row) XOR 지문 · 그림자는 파이썬 hot 을 원천으로 한 시간 뒤 봉인 -- 같은 날 파일이 «같음»이어야 |
+| liq_tab(예약) | `data/live/liq_tab_<코인>.json` ↔ `data/live/rtduck/…` | 없음(한 줄) | `python3 -c "import json,sys; a,b=(json.load(open(p)) for p in sys.argv[1:]); [d.pop('generated_ms',None) for d in (a,b)]; print(a==b)" <두 파일>` -- 같은 시각 실행 뒤 |
+| raster_archive(예약) | `…/orderflow/raster_archive` ↔ `…/rtduck/…` | 없음 | §15 «같은 시각 파일을 두 쪽 duckdb 로 읽은 행» -- Rust 쪽 원천이 Rust 래스터라 값은 래스터 대조를 따른다 |
+| iceberg | `data/live/iceberg/<sym>_events.jsonl` ↔ `data/live/rtcollect/iceberg/…` | `shadow_tape.py --events`(**새로**) | 사건 줄 글자 집합(t_end 창) · 두 쪽 다 파이썬 depthdiff·hot 테이프를 읽으니 같아야 · state.json 은 2초 벽시계라 비교 안 함 |
+| hl_bt | `…/hyperliquid_bookticker/<COIN>/<시>.bt` | 없음 | 원본 전체 모드는 Pi 에서 돈다 -- 서버에 파이썬 짝이 없다 |
+
+`shadow_duck.py` 는 쓰는 프로세스가 파일을 잡고 있어 두 파일을 사본으로 떠서 읽는다 -- 사본 자리 기본 = Rust 파일 옆(6TB 그림자 폴더) · 크기 = 원본 크기(미시구조 파일이 크면 `--tmp` 로 6TB 의 다른 곳).
+```
+nice -n 10 python3 rtcollect/tools/shadow_tape.py data/live/bookdepth/ethusdt.sqlite data/live/rtcollect/bookdepth/ethusdt.sqlite --from … --to …
+nice -n 10 python3 rtcollect/tools/shadow_duck.py data/live/deribit_options.duckdb data/live/rtduck/deribit_options.duckdb --from $(date -d '1 day ago' +%s) --to $(date +%s)
+nice -n 10 python3 rtcollect/tools/shadow_duck.py --lake data/lake data/rtduck/lake --only binance/tape --days 2026-11-22,2026-11-28
+```
+
 **통과 기준(7일 연속, 날마다)**: 표마다 «비교 N행 · 불일치 0 · 파이썬에만 0 · Rust에만 0», 그리고 «뺀 (종목,분)» 을 같이 적는다(분모).
 뺀 분이 하루 1% 를 넘으면 그날은 통과로 세지 않는다(재연결이 잦다는 뜻 -- 원인을 먼저 본다).
 청산(`bybit_liquidations`)은 사건이 드물어 비교 행이 0 인 날이 있다 -- 7일 합으로 0 이 아니어야 한다.
@@ -288,6 +314,9 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
 | liq_tab | klines(코인당 1회/시 · 첫 실행만 몇 쪽) | **×1**(REST 끔) | 파이썬 1h 봉 캐시를 복사해 같은 봉으로 계산 → 두 쪽 liq_tab_<코인>.json 을 글자로 대조. 복사는 파이썬 줄이 끝난 뒤(분 + 5) |
 | treasury_futures · macro_5m | Yahoo 매분·매시 / 5분 | ×2 | 후보에서 뺌(429) |
 
+🔧`bash rtcollect/tools/shadow_start.sh cron` 이 rtduck 예약 셋(raster_archive 40분 · liq_tab 파이썬 분 + 5 · seal 파이썬 시각 + 1시간)의 줄을 상주 @reboot 묶음과 **따로** 낸다(2026-11-21 열두째 조각).
+  시각은 서버 crontab 의 파이썬 줄에서 읽고, 줄마다 출력 폴더가 6TB 링크(`data/live/rtduck` → `/mnt/data2/rtcollect_shadow/duck_live` · seal 은 `data/rtduck/lake` → `…/duck_lake`)인지 먼저 본다 -- 아니면 아무것도 안 하고 끝(C: 에 안 쓴다).
+  링크는 `shadow_start.sh`(띄우기)가 만든다 · seal 의 원천 사본(`.snap_*`)도 lake 아래라 6TB 다. 로그만 `logs/supervisor/`(지금 그림자와 같다).
 대조: liqmap = 같은 origin 줄 글자 · soxl = 같은 weekend 줄(recorded_at 빼고) · cboe = cboe_option_state.json 의 종목 칸(generated 시각 빼고) · liq_tab = generated_ms 빼고 글자 · 래스터 보관 = 같은 시각 파일을 두 쪽 duckdb 로 읽은 행.
 
 ## 16. 뉴스 RSS · lake 봉인 첫 표 · 간헐 실패 (2026-11-21 아홉째 조각)
@@ -296,10 +325,9 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
   피드 8개·주기·조건부 GET·429 4배 쉼·BWE 거르기·polls 7일 정리 = 원본 그대로. 🔴그림자로 켜면 바깥 사이트 8곳 호출이 **두 배**(tree 15초·financialjuice 30초에서 429 를 본 적 있다 -- 원본 주석) → 등록 후보에서 뺀다(전환 때만).
   감독 줄 후보: `@reboot sleep 90 && cd <저장소> && RTCOLLECT_KIND=news bash scripts/ops/supervisor_rtcollect.sh >> logs/supervisor/rtcollect_reboot.log 2>&1 &`(전환 때 NEWS_RSS_DB=data/hot/news_rss.sqlite RTCOLLECT_TAKEOVER=1).
   원본과 다를 수 있는 곳(정답지 밖): XML 인코딩은 UTF-8 만 · DOCTYPE 안 개체 선언 안 풂 · 잘못된 XML 의 오류 판정은 quick-xml 기준(expat 보다 너그러운 곳이 있을 수 있다 -- 그 경우 원본은 그 폴링 «실패», Rust 는 읽음) · int() 의 유니코드 숫자.
-  HTML 개체 표는 `rtcollect/src/html.rs` 한 곳(rtserve 의 `src/html_entities.rs`·`text::unescape` 는 이쪽을 쓰도록 옮길 것 -- rtserve 에이전트 몫).
-- `rtduck::seal`(봉인 · 실행 종류는 아직 없음): 원본 seal_to_lake 도 DuckDB `COPY … (format parquet, compression zstd)` 로 쓴다(pyarrow 아님). DuckDB 파일 원천만 됨 --
-  binance/oi_lsratio_5m 으로 원본과 두 번(봉인 → 재봉인·거부·건너뜀) stats·파일·열·형·값 일치 · 서버 판 파이썬이 Rust lake 를 같은 값으로 읽고, 원본 seal() 을 그 위에 다시 돌리면 46파일 모두 «건너뜀»(지문 = hash(row) XOR 같음).
-  🔴SQLite 원천(hot 테이프·맥락 13 스트림)은 `attach … (TYPE sqlite)` = sqlite 확장이 묶음에 없다 → 다음 조각(rusqlite 로 읽어 DuckDB 임시 표로 -- 형 대응을 sqlite_scanner 와 같게 해야 지문이 같다). 날짜 식은 ICU 없이 정수 ms 산수(같은 날짜).
+  HTML 개체 표는 `rtcollect/src/html.rs` 한 곳(rtserve 의 `src/html_entities.rs`·`text::unescape`·`api2::np_sum` 사본을 이쪽으로 -- 조정자가 rtserve 에이전트에 전함).
+- `rtduck seal`(봉인): 원본 seal_to_lake 도 DuckDB `COPY … (format parquet, compression zstd)` 로 쓴다(pyarrow 아님) -- 같은 판·같은 SQL. DuckDB 원천·SQLite 원천(rusqlite → 임시 DuckDB · sqlite_scanner 형 규칙)·hot 정리·seal_status·실행 종류는 §17.
+  지문 = hash(row) XOR -- Rust lake 위에서 원본 seal() 을 다시 돌리면 «건너뜀»이 같다는 증거(첫 표 oi_lsratio 46파일 · 날짜 식은 ICU 없이 정수 ms 산수).
 - 간헐 실패(조정자 재실행 5회 중 1회): 부하(바쁜 고리 6개) 아래 rtduck 시험 9개 × 20회 → **hl_trades_loop 2/20**, 나머지 0/20.
   원인 = 시험용 가짜 시계(`RTDUCK_FAKE_START`)가 «벽시계 + 차이»라 WSL 벽시계가 1.5~2.4초 뒤로 뛰면 자정 넘기가 밀려, 다시 붙은 뒤 공백 줄이 전날 파일에 들어갔다(`gaps` 0줄).
   고침: 가짜 시계만 «시작 + 단조 경과»(실제 실행은 원본처럼 벽시계 그대로 -- 실행 파일 쪽 시험 전용 길) · 시험의 시간 창을 부하 여유로 넓힘.
@@ -325,6 +353,6 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
   · 매시 history 대조 → 빠진 체결·강제청산 표시·block_future_legs·block_rfq_trades(원본 reconcile → write 와 요청·결과·표·상태 글자 일치 · ΔOI 46칸) -- 둘 다 `RTDUCK_REST=1` 일 때만(`RTDUCK_DERIBIT_CHAIN=0` 이면 끔).
   원본과 다른 곳: write_state 의 vov24·atm_oi_pct 는 SQL(ICU·json 확장) 대신 같은 행을 Rust 로 · recorded_at_utc 글자의 지역 오프셋 = libc localtime(서버 KST) · 체인 폴링 직전에 체결 버퍼를 비우지 않는다(지금 요약은 체결을 안 읽는다) ·
   헤지 다리 조회 순서 = 원본 GROUP BY 해시 순서(두 쪽 다 정해지지 않음 -- 결과 표는 같다) · 한 프로세스 DB 잠금(DB_LOCK) · 🔴연결마다 DuckDB 확장 자동 불러오기를 끈다(개발기 ~/.duckdb 의 ICU 가 TIMESTAMP→TIMESTAMPTZ 를 지역 시각으로 바꾸는 것을 막는다).
-  남은 것: 옛 파일 옮기기(migrate_once -- 서버는 이미 옮겼을 것 · 확인 필요).
+  옮기지 않은 것: 옛 파일 옮기기(migrate_once) -- 조정자가 서버에서 이미 했는지 확인 중.
   hourly_doi 는 체인 표가 없으면 {}(원본과 같음) -- 체인 표가 있는 원본 DB 를 가리키면 원본은 ΔOI 를 내고 Rust 는 None.
   REST 배수: 켜면 재접속마다 목록 셋 × 쪽 수(×2) · WS 는 Deribit 이라 바이낸스 한도와 무관 · 등록 후보: `@reboot sleep 90 && cd <저장소> && RTDUCK_KIND=deribit bash scripts/ops/supervisor_rtduck.sh deribit …`(감독 스크립트의 종류 목록에 deribit 를 더해야 한다).

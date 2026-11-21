@@ -25,7 +25,8 @@ from export_svm import export  # noqa: E402
 import sklearn  # noqa: E402
 
 BAR, DAY = 300_000, 86_400_000
-SVM = Path("/home/kbj20/crypto-scalping/data/live/eth_sizing_vol_model.joblib")
+MODELS = Path("/home/kbj20/crypto-scalping/tmp/rtmodel_models_20261121")   # 서버 사본(md5 같음 · data/live 로 옮기지 않는다 -- 로컬 핸들러 REST 함정)
+SVM = {"eth": MODELS / "eth_sizing_vol_model.joblib", "xrp": MODELS / "xrp_sizing_vol_model.joblib"}
 D0 = 1_795_000_000_000 // DAY * DAY            # 기준 날
 T0 = D0 - 100 * DAY
 
@@ -39,7 +40,7 @@ class Ex:
         if sym not in self.s:
             rng = np.random.default_rng(sum(map(ord, sym)))
             n = (D0 + 3 * DAY - T0) // BAR
-            c = {"ETHUSDT": 3000.0, "BTCUSDT": 90000.0, "SOLUSDT": 150.0}[sym] * np.exp(np.cumsum(rng.normal(0, 2e-3, n)))
+            c = {"ETHUSDT": 3000.0, "BTCUSDT": 90000.0, "SOLUSDT": 150.0, "XRPUSDT": 2.2}[sym] * np.exp(np.cumsum(rng.normal(0, 2e-3, n)))
             v = np.exp(rng.normal(8, 1, n))
             self.s[sym] = (c, v, rng.uniform(0.3, 0.7, n), rng.integers(100, 9000, n))
         return self.s[sym]
@@ -49,7 +50,8 @@ class Ex:
         i = (t - T0) // BAR
         x = c[i] * (1.0005 if t + BAR - 1 >= now else 1.0)
         vv = 0.0 if (sym == "BTCUSDT" and D0 + DAY <= t < D0 + DAY + 1_800_000) else v[i]   # 거래 0 인 첫 30분(imb = 0 길)
-        return [t, f"{c[i - 1]:.2f}", f"{max(x, c[i - 1]) * 1.0007:.2f}", f"{min(x, c[i - 1]) * 0.9993:.2f}", f"{x:.2f}", f"{vv:.3f}", t + BAR - 1,
+        f = (lambda y: f"{y:.4f}") if sym == "XRPUSDT" else (lambda y: f"{y:.2f}")
+        return [t, f(c[i - 1]), f(max(x, c[i - 1]) * 1.0007), f(min(x, c[i - 1]) * 0.9993), f(x), f"{vv:.3f}", t + BAR - 1,
                 f"{vv * x:.4f}", int(nt[i]), f"{vv * tb[i]:.3f}", f"{vv * tb[i] * x:.4f}", "0"]
 
     def klines(self, sym, interval, limit, now, drop=()):
@@ -102,15 +104,19 @@ def main():
     for now in (D0 + 1_200_000, D0 + 1_860_000, D0 + 5 * 3_600_000, D0 + DAY - 60_000, D0 + 5 * 3_600_000 + 0.5):   # 끝 = 서버 시계(time.time()*1000 실수)
         daily, m5 = ex.klines("ETHUSDT", "1d", 93, int(now)), ex.klines("ETHUSDT", "5m", 600, int(now))
         orv.append({"now": now, "daily": daily, "m5": m5, "out": json.dumps(DS.open_rev_from_klines(daily, m5, now))})
-    # ── 3. 4h 변동성 HGB(개발기 ETH 모델 · QX4 실패 때 대체 길)
-    art = joblib.load(SVM)
-    export(SVM, fx / "svm_eth.json")
+    # ── 3. 4h 변동성 HGB(서버 사본 eth·xrp · QX4 실패 때 대체 길)
+    arts = {a: joblib.load(p) for a, p in SVM.items()}
+    for a, p in SVM.items():
+        export(p, fx / f"svm_{a}.json")
     vol = []
-    for k, now in enumerate((D0 + 7 * 3_600_000 + 30_000, D0 + 2 * DAY + 61_000)):
-        rows = ex.klines("ETHUSDT", "5m", 10_000 if k == 0 else 3000, now)
-        a = dict(art) if k == 0 else {**art, "expand_logit": [-1.2, 4.9]}
-        vol.append({"now": now, "rows": rows, "expand_logit": a.get("expand_logit"), "out": json.dumps(DS.vol4h_from_klines(rows, a, now))})
-    short = DS.vol4h_from_klines(ex.klines("ETHUSDT", "5m", 600, D0), art, D0)
+    for asset, sym in (("eth", "ETHUSDT"), ("xrp", "XRPUSDT")):
+        art = arts[asset]
+        for k, now in enumerate((D0 + 7 * 3_600_000 + 30_000, D0 + 2 * DAY + 61_000)):
+            rows = ex.klines(sym, "5m", 10_000 if k == 0 else 3000, now)
+            a = dict(art) if k == 0 else {**art, "expand_logit": None}                 # 둘째 = 아티팩트에 expand_logit 없음 → 기본 상수
+            vol.append({"asset": asset, "now": now, "rows": rows, "expand_logit": a.get("expand_logit"), "out": json.dumps(DS.vol4h_from_klines(rows, a, now))})
+        print("4h 변동성", asset, art.get("expand_logit"), art.get("train_end"), vol[-2]["out"][:160])
+    short = DS.vol4h_from_klines(ex.klines("ETHUSDT", "5m", 600, D0), arts["eth"], D0)
     # ── 4. 7일·4~13주 신호(코인베이스·바이낸스 현물·FRED)
     rng = np.random.default_rng(5)
     days = pd.date_range("2015-01-01", pd.Timestamp(D0 + 2 * DAY, unit="ms"))
