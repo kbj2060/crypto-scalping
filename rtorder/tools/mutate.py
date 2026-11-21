@@ -212,6 +212,13 @@ ELEVEN = [  # 계좌 알림 → Wired · 번호(acct_seq) · 텔레그램 -- des
     ("telegram", "HTTP 오류를 보냄으로 셈", TG, ".and_then(|mut r| r.body_mut().read_to_vec()).is_ok()", ".map(|_| ()).is_ok() || true"),
 ]
 DR = "src/door.rs"
+FOURTEEN = [  # 감시 틱 칸 잠금 밖 청산 · R5·R6 · 파이썬 그림자 기록 재생
+    ("wire_e2e", "감시 청산이 원본 칸에 submitting 을 안 올림", "src/wire.rs", "            *d.w.slot_mut(at) = slot.clone();\n        }\n        self.touched", "        }\n        self.touched"),
+    ("app_run", "멈춤 뒤 답 중인 요청을 안 기다림(R6)", DR, "pub const SHUTDOWN_WAIT_SEC: u64 = 2;", "pub const SHUTDOWN_WAIT_SEC: u64 = 0;"),
+    ("shadow_replay", "작업 아닌 chain(접수 요청 자체)도 재생", "src/shadow.rs", ".filter(|c| !c.start.is_null()).collect())", ".collect())"),
+    ("shadow_replay", "실기록 벽시계 칸도 비교", "src/shadow.rs", "let tm = |v: &Value| if exact { v.clone() } else { drop_times(v) };", "let tm = |v: &Value| v.clone();"),
+    ("shadow_replay", "첫 어긋남 줄이 요청 열을 안 고름", "src/shadow.rs", 'let first = b.diffs.iter().find(|d| d.starts_with("요청 열")).unwrap_or(&b.diffs[0]);', "let first = &b.diffs[b.diffs.len() - 1];"),
+]
 THIRTEEN = [  # 루프백 문 · 감시와 접수가 같은 DeskCell · 계좌 한 곳 -- door_bin(진짜 실행 파일) · app_run(문으로 들어온 작업) 로 잡혀야 한다
     ("door_bin", "ip 머리 우선순위 뒤집음(XFF 먼저)", DR, 'header(h, "cf-connecting-ip").or_else(|| header(h, "x-forwarded-for"))', 'header(h, "x-forwarded-for").or_else(|| header(h, "cf-connecting-ip"))'),
     ("door_bin", "기록 시각을 UTC 로", DR, "    let k = t + 9.0 * 3600.0;", "    let k = t;"),
@@ -273,7 +280,7 @@ def main() -> int:
             ok = r.returncode != 0
             caught, total = caught + ok, total + 1
             print(f"{'잡음' if ok else '🔴못 잡음'} | {test} | {name} | {', '.join(failed)[:110]}", flush=True)
-    for grp, lst in (("six", SIX), ("seven", SEVEN), ("eight", EIGHT), ("nine", NINE), ("ten", TEN), ("eleven", ELEVEN), ("twelve", TWELVE), ("thirteen", THIRTEEN)):
+    for grp, lst in (("six", SIX), ("seven", SEVEN), ("eight", EIGHT), ("nine", NINE), ("ten", TEN), ("eleven", ELEVEN), ("twelve", TWELVE), ("thirteen", THIRTEEN), ("fourteen", FOURTEEN)):
       if not only or only == grp:
         for test, name, f, a, b in lst:
             shutil.rmtree(W, ignore_errors=True)

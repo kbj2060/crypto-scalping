@@ -7,9 +7,10 @@
 
 pub mod api;
 pub mod api2;
-pub mod html_entities;
+pub mod api3;
 pub mod hub;
 pub mod py;
+pub mod swr;
 pub mod text;
 
 use std::convert::Infallible;
@@ -61,6 +62,8 @@ pub struct Config {
     pub live: Arc<hub::Live>,
     /// /api/events 발행기
     pub events: Arc<hub::Events>,
+    /// 원본 swr_cached(묵은 값 먼저·뒤에서 갱신) -- 키마다 원본과 같은 ttl·max_stale
+    pub swr: Arc<swr::Swr>,
 }
 
 impl Config {
@@ -76,6 +79,7 @@ impl Config {
             timing_at: Arc::new(Mutex::new(None)),
             live: Arc::new(hub::Live::default()),
             events: Arc::new(hub::Events { clients: Mutex::new(Vec::new()), latest: Mutex::new((serde_json::Value::Null, serde_json::json!({}))) }),
+            swr: Arc::new(swr::Swr::default()),
         }
     }
     /// 켜진 흐름 엔진 코인(원본 `flows` 의 열쇠 · FLOW_SPECS 순서)
@@ -219,6 +223,7 @@ fn routes(p: &str) -> Vec<(&'static str, Handler)> {
         _ => {}
     }
     v.extend(api2::routes(p));
+    v.extend(api3::routes(p));
     v
 }
 

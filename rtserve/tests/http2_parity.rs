@@ -120,3 +120,19 @@ fn stdev_exact() {
         assert_eq!(rtserve::py::stdev(&xs).unwrap().to_bits(), r[1].as_f64().unwrap().to_bits(), "n={}", xs.len());
     }
 }
+
+
+/// rt_* 칸(9칸 main · rt_draw_s·rt_back_n 은 머지 대기 -- 정답지에 없다): 받아서 이름 순으로 한 줄에 싣는다
+#[test]
+fn rt_timing_keys() {
+    let logs: Arc<Mutex<Vec<String>>> = Default::default();
+    let lg = logs.clone();
+    let (addr, root) = start_with(&Default::default(), 1_700_000_000_000_000_000, 1.7e9, "eth", "rtkeys", move |c| {
+        c.log = Arc::new(move |l| lg.lock().unwrap().push(l.to_string()));
+    });
+    let body = br#"{"sym": "eth", "rt_draw_s": 3.5, "rt_back_n": 1, "rt_lat_n": 40, "rt_lat_med_ms": 12.5, "rt_lat_p99_ms": 31.7, "rt_lead_n": 3, "rt_lead_med_ms": -2.5, "rt_cmp_n": 9, "rt_bad_n": 0, "rt_fail_n": 1, "rt_reconn_n": 2}"#;
+    let g = request_body(addr, "POST", "/api/client-timing", &[("Content-Type".into(), "application/json".into())], body);
+    assert_eq!(g.status, 200, "{}", String::from_utf8_lossy(&g.body));
+    assert_eq!(logs.lock().unwrap().as_slice(), ["client_timing sym=eth rt_back_n=1 rt_bad_n=0 rt_cmp_n=9 rt_draw_s=4 rt_fail_n=1 rt_lat_med_ms=12 rt_lat_n=40 rt_lat_p99_ms=32 rt_lead_med_ms=-2 rt_lead_n=3 rt_reconn_n=2"]);
+    let _ = std::fs::remove_dir_all(root);
+}

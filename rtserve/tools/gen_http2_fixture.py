@@ -441,7 +441,9 @@ def make_app(R: Path, log: list) -> web.Application:
         rows.sort(key=lambda r: r.get("subscribed_utc") or "")
         return web.json_response({"devices": rows}, headers=NOCACHE)
 
-    CT_NUM = {"order_rtt_ms", "order_srv_ms", "order_net_ms", "fp_n", "fp_med_ms", "fp_max_ms", "longtask_n", "px_n", "px_med_ms", "px_max_ms"}
+    CT_NUM = {"order_rtt_ms", "order_srv_ms", "order_net_ms", "fp_n", "fp_med_ms", "fp_max_ms", "longtask_n", "px_n", "px_med_ms", "px_max_ms",
+              # main 4ff90f88(화면 그림자 구독)이 더한 9칸
+              "rt_lat_n", "rt_lat_med_ms", "rt_lat_p99_ms", "rt_lead_n", "rt_lead_med_ms", "rt_cmp_n", "rt_bad_n", "rt_fail_n", "rt_reconn_n"}
     _ct_at = [0.0]
 
     async def api_client_timing(request):                                    # 5102
@@ -656,6 +658,7 @@ REQ_WRITES = [
     ("GET", "/api/push/devices", {}, None),
     ("POST", "/api/client-timing", JS, {"sym": "eth", "kind": "exit", "order_rtt_ms": 41.5, "fp_n": 230, "px_med_ms": 2.5}),
     ("POST", "/api/client-timing", JS, {"sym": "eth", "fp_n": 1}),
+    ("POST", "/api/client-timing", JS, {"sym": "sol", "rt_lat_n": 7, "rt_lat_p99_ms": 31.5}),   # main 의 rt_* 칸 = 검사 통과 → 0.2초 상한(429) · 머지 대기 2칸은 넣지 않는다
     ("POST", "/api/client-timing", JS, {"sym": "doge", "fp_n": 1}),
     ("POST", "/api/client-timing", JS, {"sym": "eth", "fp_n": True}),
     ("POST", "/api/client-timing", JS, {"sym": "eth", "fp_n": 1e8}),

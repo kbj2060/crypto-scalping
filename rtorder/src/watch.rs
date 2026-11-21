@@ -52,6 +52,11 @@ pub trait WatchIo {
     async fn exit_plan(&mut self, pside: &str, fraction: f64, asset: &str, only_symbol: &str) -> Result<Value, Value>;
     /// run_exit(session, plan, state) -- 상태 칸을 고친다. 실제 구현 = `run_exit_into`(exec::run_exit + 칸 옮기기).
     async fn run_exit(&mut self, plan: &Value, slot: &mut Obj) -> Result<(), String>;
+    /// 감시 발동 청산(칸 `at` 에서). 기본 = run_exit. 실행 파일(app)은 여기서 칸 잠금을 **놓고** 청산을 돈다 -- 원본처럼 기다리는 사이 다른 접수가 돈다:
+    /// 시작 때 접수 원본 칸에 «submitting» 을 올리고(이미 바쁘면 쏘지 않는다) · 끝나면 결과를 올린다.
+    async fn run_exit_at(&mut self, _at: &SlotId, plan: &Value, slot: &mut Obj) -> Result<(), String> {
+        self.run_exit(plan, slot).await
+    }
     async fn place_bracket(&mut self, spec: &Value, symbol: &str, pside: &str, strict: bool) -> Result<Value, String>;
     async fn place_tp_ladder(&mut self, legs: &Value, symbol: &str, pside: &str) -> Result<Value, String>;
     async fn cancel_wait_orphans(&mut self, symbols: &[String]) -> Result<Value, String>;
@@ -344,6 +349,25 @@ pub async fn run_exit_into<E: Exchange>(ex: &mut E, plan: &Value, slot: &mut Obj
     Ok(())
 }
 
+/// 감시 사본과 접수 원본이 같이 보는 키 모음(clone = 같은 것).
+#[derive(Debug, Clone, Default)]
+pub struct SharedSet(pub Arc<Mutex<BTreeSet<String>>>);
+impl SharedSet {
+    pub fn contains(&self, k: &str) -> bool {
+        self.0.lock().unwrap().contains(k)
+    }
+    pub fn insert(&self, k: String) -> bool {
+        self.0.lock().unwrap().insert(k)
+    }
+    pub fn remove(&self, k: &str) -> bool {
+        self.0.lock().unwrap().remove(k)
+    }
+    /// 지금 들어 있는 키(사본).
+    pub fn iter(&self) -> std::vec::IntoIter<String> {
+        self.0.lock().unwrap().iter().cloned().collect::<Vec<_>>().into_iter()
+    }
+}
+
 /// 감시·상태 칸의 주인. 원본 register() 의 지역 변수들(진행 중 상태는 **메모리** -- 재시작하면 사라진다, R9).
 #[derive(Debug, Clone)]
 pub struct Watcher {
@@ -356,7 +380,8 @@ pub struct Watcher {
     /// 대기 칸(코인별·칸별 `<코인>` / `<코인>#n`, W1).
     pub waits: Obj,
     /// 2026-10-29 선 무장을 감시 틱이 쏘기 시작한 키 -- «선 끌어 수정»이 이걸 보고 거절한다(검토 B1).
-    pub exiting: BTreeSet<String>,
+    /// 2026-11-21 Arc 로 나눠 쥔다: 감시 틱은 칸 사본(clone)에서 돌고 접수는 DeskCell 의 원본을 보는데, 이 표시는 둘이 **같은 것**을 봐야 한다(B1).
+    pub exiting: SharedSet,
     /// 원본 print 줄(서버 로그).
     pub logs: Vec<String>,
     /// 알린 (칸 키, 예외 종류) -- 프로세스 수명 동안 한 번(2026-11-21).
@@ -367,7 +392,7 @@ impl Watcher {
     pub fn new(dir: impl Into<PathBuf>, eth_symbol: &str) -> Watcher {
         let mut entry = Obj::new();
         entry.insert("phase".into(), json!("idle"));
-        Watcher { dir: dir.into(), eth_symbol: eth_symbol.into(), entry, side_exits: Obj::new(), waits: Obj::new(), exiting: BTreeSet::new(), logs: vec![], alerted: BTreeSet::new() }
+        Watcher { dir: dir.into(), eth_symbol: eth_symbol.into(), entry, side_exits: Obj::new(), waits: Obj::new(), exiting: SharedSet::default(), logs: vec![], alerted: BTreeSet::new() }
     }
     pub(crate) fn log(&mut self, s: String) {
         self.logs.push(s);
@@ -732,7 +757,7 @@ impl Watcher {
         }
         // D8: 청산(최대 ~120초)을 감시 루프 안에서 기다린다 -- 그동안 다른 코인·측면 판정이 멈춘다(원본 그대로)
         let mut s = std::mem::take(self.slot_mut(&slot));
-        let r = io.run_exit(&plan_v, &mut s).await;
+        let r = io.run_exit_at(&slot, &plan_v, &mut s).await;
         self.settle(r, &mut s, io.now());
         let phase = val(&s, "phase");
         let mut keep = true;
@@ -821,7 +846,7 @@ impl Watcher {
             }
         }
         let mut s = std::mem::take(self.slot_mut(&slot));
-        let r = io.run_exit(&plan_v, &mut s).await;
+        let r = io.run_exit_at(&slot, &plan_v, &mut s).await;
         self.settle(r, &mut s, io.now());
         let phase = val(&s, "phase");
         if matches!(phase.as_str(), Some("filled_maker" | "filled_taker")) {

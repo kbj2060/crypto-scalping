@@ -266,7 +266,7 @@ pub fn api_footprint(cfg: &Config, live: &Live, req: &Req) -> Resp {
     let bucket = head.map_or_else(|| fp_bucket(&sym), |h| h.bucket);
     let v = json!({"symbol": sym, "bucket": f(bucket), "barSeconds": BAR_S, "barsExpected": want, "ready": ready, "full": full,
                    "retailMaxUsd": f(head.map_or(sm, |h| h.retail_max_usd)), "whaleMinUsd": f(head.map_or(sw, |h| h.whale_min_usd)),
-                   "venues": ["binance-perp"], "bars": bars});
+                   "venues": ["binance-perp"], "bars": bars}); // 원본은 바이낸스 선물만(11-02 사용자 결정 · server.py 3981~3984)
     Resp::json(&v)
 }
 

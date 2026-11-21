@@ -171,22 +171,26 @@ impl Door<'_> {
         (resp(r.status, r.content_type, &headers, r.body), r.task)
     }
 
-    /// 받기 → 연결마다 http1 · 접수 작업은 같은 줄에서 끝까지. `stop` 이 오면 받기를 멈추고 돌아간다(도는 작업도 버린다 -- 원본 종료 훅처럼 취소).
+    /// 받기 → 연결마다 http1 · 접수 작업은 같은 줄에서 끝까지. `stop` 이 오면 원본 aiohttp 종료 순서대로:
+    /// ① 받기를 멈추고 ② 도는 접수 작업을 취소(원본 on_shutdown 의 refresh_tasks 취소 -- R5 · 대기 복구 파일은 남아 다음 기동이 이어 받는다)
+    /// ③ 답을 만드는 중인 요청은 최대 2초 기다린다(원본 shutdown_timeout=2 -- R6) · 쉬는 keep-alive 연결은 기다리지 않는다.
     pub async fn serve(&self, l: tokio::net::TcpListener, stop: &crate::app::Stop) {
+        let inflight = std::cell::Cell::new(0usize);
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Task>();
         let mut conns: FuturesUnordered<Pin<Box<dyn Future<Output = ()> + '_>>> = FuturesUnordered::new();
         let mut tasks: FuturesUnordered<Pin<Box<dyn Future<Output = ()> + '_>>> = FuturesUnordered::new();
         loop {
             if stop.flag.load(std::sync::atomic::Ordering::SeqCst) {
-                return;
+                break;
             }
             tokio::select! {
                 a = l.accept() => {
                     let Ok((s, peer)) = a else { continue };
-                    let tx = tx.clone();
+                    let (tx, inflight) = (tx.clone(), &inflight);
                     let svc = service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
                         let tx = tx.clone();
                         async move {
+                            let _busy = Busy::new(inflight);
                             let (m, path, q) = (req.method().as_str().to_string(), req.uri().path().to_string(), req.uri().query().unwrap_or("").to_string());
                             let (resp, task) = self.answer(&m, &path, &q, req.headers(), peer).await;
                             for t in task {
@@ -205,9 +209,35 @@ impl Door<'_> {
                 }
                 Some(_) = conns.next(), if !conns.is_empty() => {}
                 Some(_) = tasks.next(), if !tasks.is_empty() => {}
-                _ = stop.notify.notified() => return,
+                _ = stop.notify.notified() => break,
             }
         }
+        drop(l);
+        tasks.clear(); // R5
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(SHUTDOWN_WAIT_SEC);
+        while inflight.get() > 0 && std::time::Instant::now() < until {
+            tokio::select! {
+                Some(_) = conns.next(), if !conns.is_empty() => {}
+                _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {}
+            }
+        }
+    }
+}
+
+/// 원본 web.run_app(shutdown_timeout=2).
+pub const SHUTDOWN_WAIT_SEC: u64 = 2;
+
+/// 답을 만드는 중인 요청 수(끊겨 버려져도 줄어든다).
+struct Busy<'a>(&'a std::cell::Cell<usize>);
+impl<'a> Busy<'a> {
+    fn new(c: &'a std::cell::Cell<usize>) -> Self {
+        c.set(c.get() + 1);
+        Busy(c)
+    }
+}
+impl Drop for Busy<'_> {
+    fn drop(&mut self) {
+        self.0.set(self.0.get() - 1);
     }
 }
 

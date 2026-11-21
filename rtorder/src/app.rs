@@ -315,6 +315,7 @@ impl Stop {
 /// `hub` = 스트림 상태(`hub.acct_seq()` · `hub.us` -- 문의 /internal/acct 가 낸다) · `listener` = bin 이 묶어 둔 루프백 문(None = 문 없음 · 시험).
 /// 감시·접수·작업이 **같은 `DeskCell`**(무장·대기 칸이 메모리에서도 하나 -- 원본 같은 dict) 과 **같은 계좌 한 곳**(`SharedAccount`)을 쓴다.
 pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop, hub: Arc<Hub>, listener: Option<tokio::net::TcpListener>) -> Summary {
+    let _ = std::fs::write(cfg.dir.join(DIR_MARK), "rtorder 상태 폴더\n"); // 이 폴더의 접수 기록(order_requests.jsonl)은 rtorder 것 -- 재기동 때 파이썬 폴더로 보지 않게
     let would: Would = Arc::new(Mutex::new(vec![]));
     let feed = Arc::new(Mutex::new(Feed::default()));
     let shadow = mk().is_shadow();
@@ -335,6 +336,7 @@ pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop, hub: Arc<Hu
         w
     };
     let mut io = wired();
+    io.desk = Some(desk.clone());
     let mut logs: Vec<String> = vec![];
     let echo = |logs: &mut Vec<String>, more: Vec<String>| {
         if cfg.echo {
@@ -367,15 +369,40 @@ pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop, hub: Arc<Hu
             io.quotes.now = io.ops.bx.time();
             coreval::sync_cached(&feed.lock().unwrap(), &mut io.quotes); // 받아 둔 호가·변동성(허브) -- 낡으면 Cached 가 REST 로
             {
-                // 🔴틱 하나 동안 칸을 쥔다 -- 손절 청산(최대 ~2분)이면 그동안 접수는 기다리다 5초 뒤 409(route::DESK_WAIT_SEC · 의도한 차이)
+                // 틱은 칸 **사본**에서 돈다(칸 잠금을 쥐지 않는다 -- 원본처럼 기다리는 사이 접수가 돈다). 사본과 원본을 잇는 것:
+                // ① exiting 표시 = 같은 Arc(B1) ② 발동 청산의 칸 = `Wired::run_exit_at` 이 원본에 «submitting»·결과를 올린다
+                // ③ 틱 끝에 원본으로: 올린 칸의 마지막 값 · 대기 칸에 쓴 취소(action) -- 도는 대기 집행에 바로(push_live) · 로그·알림 표시
+                let mut w2 = desk.lock().await.w.clone();
+                let waits0 = w2.waits.clone();
+                if let Err(e) = w2.drain_tp_fills(&hub.tp_fills) {
+                    w2.log(format!("tp_leg_filled: {e}"));
+                }
+                io.touched.clear();
+                // R5: 멈춤 신호면 도는 틱(손절 청산 따라가기 포함)도 그 자리에서 취소한다(원본 stop_bracket_watcher 가 감시 작업을 cancel)
+                let r = tokio::select! { r = w2.bracket_tick(&mut io) => Some(r), _ = stop.notify.notified() => None };
+                let Some(r) = r else { break };
+                if let Err(e) = r {
+                    w2.log(format!("bracket watch: {e}"));
+                }
                 let mut d = desk.lock().await;
-                if let Err(e) = d.w.drain_tp_fills(&hub.tp_fills) {
-                    d.w.log(format!("tp_leg_filled: {e}"));
+                for at in io.touched.drain(..) {
+                    *d.w.slot_mut(&at) = w2.slot_mut(&at).clone();
                 }
-                if let Err(e) = d.w.bracket_tick(&mut io).await {
-                    d.w.log(format!("bracket watch: {e}"));
+                for (k, v) in w2.waits.iter() {
+                    if waits0.get(k) == Some(v) {
+                        continue;
+                    }
+                    if let (Some(cur), Some(nv)) = (d.w.waits.get_mut(k).and_then(Value::as_object_mut), v.as_object()) {
+                        for f in ["action", "action_reason"] {
+                            if let Some(x) = nv.get(f) {
+                                cur.insert(f.into(), x.clone());
+                            }
+                        }
+                        d.push_live(&crate::intake::SlotRef::Wait(k.clone()));
+                    }
                 }
-                let mut l = std::mem::take(&mut d.w.logs);
+                d.w.alerted.extend(w2.alerted.iter().cloned());
+                let mut l = std::mem::take(&mut w2.logs);
                 l.extend(hub.logs.lock().unwrap().drain(..));
                 l.extend(io.ops.alerts.drain(..));
                 echo(&mut logs, l);

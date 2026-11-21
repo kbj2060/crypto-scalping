@@ -4,6 +4,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use rusqlite::types::Value as Sql;
 use serde_json::{json, Map, Value};
@@ -148,7 +149,8 @@ fn risk_radar_payload(root: &Path, now: f64) -> R<V> {
 
 /// GET /api/risk-radar (server.py:2799 → risk_radar.risk_radar_payload)
 fn risk_radar(cfg: &Config, _: &Req) -> Resp {
-    guarded(risk_radar_payload(&cfg.root, (cfg.now)()))
+    let c = cfg.clone();
+    guarded(cfg.swr.get("risk_radar", 10.0, 120.0, Arc::new(move || risk_radar_payload(&c.root, (c.now)()))))
 }
 
 // ───────────────────────── 레벨 5분 (dashboard/sr_lean.py) ─────────────────────────
@@ -272,7 +274,8 @@ fn sr_lean_payload(d: &Path, now: f64) -> R<V> {
 
 /// GET /api/sr-lean (server.py:2792 → sr_lean.sr_lean_payload)
 fn sr_lean(cfg: &Config, _: &Req) -> Resp {
-    guarded(sr_lean_payload(&cfg.live_dir().join("sr_lean"), (cfg.now)()))
+    let c = cfg.clone();
+    guarded(cfg.swr.get("sr_lean", 1.0, 30.0, Arc::new(move || sr_lean_payload(&c.live_dir().join("sr_lean"), (c.now)()))))
 }
 
 // ───────────────────────── 횡보·추세 띠 (dashboard/regime_band.py) ─────────────────────────
@@ -347,13 +350,14 @@ fn regime_band_payload(log: &Path) -> R<V> {
 
 /// GET /api/regime-band (server.py:2785 → regime_band.regime_band_payload)
 fn regime_band(cfg: &Config, _: &Req) -> Resp {
-    guarded(regime_band_payload(&cfg.live_dir().join("regime_band_forward.jsonl")))
+    let c = cfg.clone();
+    guarded(cfg.swr.get("regime_band", 60.0, 7200.0, Arc::new(move || regime_band_payload(&c.live_dir().join("regime_band_forward.jsonl")))))
 }
 
 // ───────────────────────── 청산 탭 (server.py:2808) ─────────────────────────
 
 /// 원본 _query_coin_asset(server.py:4742): 소문자로 · COIN_CONFIG 밖이면 400 unsupported_asset
-fn coin_asset(req: &Req) -> Result<String, Resp> {
+pub(crate) fn coin_asset(req: &Req) -> Result<String, Resp> {
     let a = req.q("asset").unwrap_or("eth").to_lowercase();
     if COIN_CONFIG.contains(&a.as_str()) { Ok(a) } else { Err(http_exc(400, Some("unsupported_asset"), &[])) }
 }
@@ -481,7 +485,11 @@ fn treasury_payload(db: &Path, hours: f64, show_h: f64) -> R<V> {
 /// GET /api/treasury-futures (server.py:2110) -- ?h=24 면 24시간 창·24시간 표시
 fn treasury_futures(cfg: &Config, req: &Req) -> Resp {
     let db = hot(cfg, "treasury_futures.sqlite");
-    or500(if req.q("h") == Some("24") { treasury_payload(&db, 24.0, 24.0) } else { treasury_payload(&db, 12.0, 1.0) })
+    or500(if req.q("h") == Some("24") {
+        cfg.swr.get("treasury24", 300.0, 1800.0, Arc::new(move || treasury_payload(&db, 24.0, 24.0)))
+    } else {
+        cfg.swr.get("treasury", 60.0, 600.0, Arc::new(move || treasury_payload(&db, 12.0, 1.0)))
+    })
 }
 
 const XYZ_COIN: &str = "xyz:XYZ100";
@@ -528,7 +536,11 @@ pub(crate) fn py_int_str(s: &str) -> Option<i128> {
 fn xyz100(cfg: &Config, req: &Req) -> Resp {
     let raw = req.q("since").filter(|s| !s.is_empty()).unwrap_or("0");
     let since = py_int_str(raw).unwrap_or(0).clamp(0, 1 << 40) as i64;
-    or500(xyz100_payload(&hot(cfg, "hl_xyz.sqlite"), since, (cfg.now)()))
+    if since != 0 {
+        return or500(xyz100_payload(&hot(cfg, "hl_xyz.sqlite"), since, (cfg.now)())); // 꼬리 = 캐시 없이
+    }
+    let c = cfg.clone();
+    or500(cfg.swr.get("xyz100", 5.0, 60.0, Arc::new(move || xyz100_payload(&hot(&c, "hl_xyz.sqlite"), 0, (c.now)()))))
 }
 
 /// 원본 macro_today_payload(server.py:646)
@@ -563,7 +575,8 @@ fn macro_today_payload(xyz: &Path, m5: &Path, now: f64) -> R<V> {
 
 /// GET /api/macro-today (server.py:2117)
 fn macro_today(cfg: &Config, _: &Req) -> Resp {
-    or500(macro_today_payload(&hot(cfg, "hl_xyz.sqlite"), &hot(cfg, "macro_5m.sqlite"), (cfg.now)()))
+    let c = cfg.clone();
+    or500(cfg.swr.get("macro_today", 30.0, 600.0, Arc::new(move || macro_today_payload(&hot(&c, "hl_xyz.sqlite"), &hot(&c, "macro_5m.sqlite"), (c.now)()))))
 }
 
 // ───────────────────────── 5분 호가 요약 (server.py:2982) ─────────────────────────
@@ -656,7 +669,9 @@ fn ob5m(cfg: &Config, req: &Req) -> Resp {
     if !COIN_CONFIG.contains(&asset) {
         return Resp::json(&json!({"bars": [], "walls": [], "marks": []}));
     }
-    or500(ob5m_payload(&cfg.live_dir().join("ob5m").join(format!("{asset}usdt.sqlite")), (cfg.now)()))
+    let c = cfg.clone();
+    let db = cfg.live_dir().join("ob5m").join(format!("{asset}usdt.sqlite"));
+    or500(cfg.swr.get(&format!("ob5m_{asset}"), 4.0, 600.0, Arc::new(move || ob5m_payload(&db, (c.now)()))))
 }
 
 // ───────────────────────── 거시 달력 (worker_state.worker_payload) ─────────────────────────
@@ -664,6 +679,11 @@ fn ob5m(cfg: &Config, req: &Req) -> Resp {
 /// `datetime.fromisoformat(str(ts).replace(" ", "T"))`(파이썬 3.11) → UTC 마이크로초. 시간대 없으면 UTC.
 /// ponytail: 3.11 이 받는 꼴 중 확장형(`YYYY-MM-DD[THH[:MM[:SS[.f]]]][Z|±HH[:MM]]`)만 -- 기본형(`20261118T1038`)·주 날짜(`2026-W47`)는 None.
 pub(crate) fn iso_us(s: &str) -> Option<i64> {
+    iso_parse(s).map(|x| x.0)
+}
+
+/// `datetime.fromisoformat` → (UTC 마이크로초 · 시간대가 붙었나). 시간대가 없으면 UTC 로 센 값과 false.
+pub(crate) fn iso_parse(s: &str) -> Option<(i64, bool)> {
     let s = s.replace(' ', "T");
     let (date, rest) = s.split_once('T').unwrap_or((&s, ""));
     let num = |t: &str| (!t.is_empty() && t.bytes().all(|c| c.is_ascii_digit())).then(|| t.parse::<i64>().ok()).flatten();
@@ -676,8 +696,10 @@ pub(crate) fn iso_us(s: &str) -> Option<i64> {
         return None;
     }
     let (mut hh, mut mm, mut ss, mut us, mut off) = (0, 0, 0, 0, 0i64);
+    let mut aware = false;
     if !rest.is_empty() {
         let k = rest.find(['Z', '+', '-']).unwrap_or(rest.len());
+        aware = k < rest.len();
         let (t, tz) = rest.split_at(k);
         let (hms, frac) = t.split_once('.').map_or((t, None), |(a, b)| (a, Some(b)));
         let tp: Vec<&str> = hms.split(':').collect();
@@ -710,7 +732,7 @@ pub(crate) fn iso_us(s: &str) -> Option<i64> {
             off = sign * (zh * 3600 + zm * 60);
         }
     }
-    Some((days_from_civil(y, m, d) * 86400 + hh * 3600 + mm * 60 + ss - off) * 1_000_000 + us)
+    Some(((days_from_civil(y, m, d) * 86400 + hh * 3600 + mm * 60 + ss - off) * 1_000_000 + us, aware))
 }
 
 /// `datetime.fromtimestamp(now)` 의 마이크로초(짝수 반올림)
@@ -720,13 +742,13 @@ pub(crate) fn now_us(now: f64) -> i64 {
 }
 
 /// 원본 macro_calendar_payload(server.py:1150) = worker_payload(path, 90.0, ts_field="generated_at", extra_missing={"events": []})
-fn macro_calendar_payload(path: &Path, now: f64) -> R<V> {
+pub(crate) fn macro_calendar_payload(path: &Path, now: f64) -> R<V> {
     crate::api2::worker_payload(path, 90.0, "generated_at", crate::api2::Wp { extra: vec![("events", json!([]))], ..Default::default() }, now)
 }
 
 /// GET /api/macro-calendar (server.py:4836 → load_macro_calendar → macro_calendar_payload) -- 원본은 예외를 안 잡는다(500)
 fn macro_calendar(cfg: &Config, _: &Req) -> Resp {
-    or500(macro_calendar_payload(&cfg.live_dir().join("macro_calendar_state.json"), (cfg.now)()))
+    or500(crate::api3::macro_calendar_cached(cfg))
 }
 
 #[cfg(test)]
