@@ -4,6 +4,7 @@
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use rusqlite::types::Value as Sql;
 use serde_json::{json, Map, Value};
@@ -127,8 +128,12 @@ fn breakout_detector(cfg: &Config, req: &Req) -> Resp {
         return http_exc(404, Some("breakout_off"), &[]);
     }
     let p = cfg.live_dir().join(format!("{asset}_breakout_detector_state.json"));
-    let o = Wp { require_ok: true, stamp_available: true, extra: vec![("history", json!([])), ("times", json!([]))], ..Default::default() };
-    or500(worker_payload(&p, 15.0, "updated_utc", o, (cfg.now)()).and_then(|v| match v {
+    let c = cfg.clone();
+    let wp = cfg.swr.get(&format!("breakout_detector_{asset}"), 60.0, 600.0, Arc::new(move || {
+        let o = Wp { require_ok: true, stamp_available: true, extra: vec![("history", json!([])), ("times", json!([]))], ..Default::default() };
+        worker_payload(&p, 15.0, "updated_utc", o, (c.now)())
+    }));
+    or500(wp.and_then(|v| match v {
         Value::Object(m) => Ok(Value::Object(merge(m, &[("asset", json!(asset))]))),
         _ => unreachable!(),
     }))
@@ -200,7 +205,8 @@ fn gex_payload(cfg: &Config) -> R<V> {
 }
 
 fn gex(cfg: &Config, _: &Req) -> Resp {
-    or500(gex_payload(cfg))
+    let c = cfg.clone();
+    or500(cfg.swr.get("gex", 60.0, 600.0, Arc::new(move || gex_payload(&c))))
 }
 
 // ───────────────────────── /api/state (server.py:3647 · 1544) ─────────────────────────
@@ -299,7 +305,8 @@ fn chip_score(cfg: &Config, req: &Req) -> Resp {
     if !cfg.flows().contains(&asset.as_str()) {
         return http_exc(404, Some("flow_off"), &[]);
     }
-    or500(chip_score_payload(&cfg.live_dir(), (cfg.now)(), &asset))
+    let c = cfg.clone();
+    or500(cfg.swr.get(&format!("chip_score_{asset}"), 60.0, 600.0, Arc::new(move || chip_score_payload(&c.live_dir(), (c.now)(), &asset))))
 }
 
 // ───────────────────────── 알림 센터 (server.py:336) ─────────────────────────
@@ -439,7 +446,8 @@ fn news_payload(db: &Path, now: f64) -> R<V> {
 }
 
 fn news(cfg: &Config, _: &Req) -> Resp {
-    or500(news_payload(&hot(cfg, "news_rss.sqlite"), (cfg.now)()))
+    let c = cfg.clone();
+    or500(cfg.swr.get("news", 15.0, 300.0, Arc::new(move || news_payload(&hot(&c, "news_rss.sqlite"), (c.now)()))))
 }
 
 // ───────────────────────── 급변 칩 (server.py:675~726) ─────────────────────────
@@ -517,7 +525,8 @@ fn macro_spikes_payload(cfg: &Config) -> R<V> {
 }
 
 fn macro_spikes(cfg: &Config, _: &Req) -> Resp {
-    or500(macro_spikes_payload(cfg))
+    let c = cfg.clone();
+    or500(cfg.swr.get("macro_spikes", 30.0, 120.0, Arc::new(move || macro_spikes_payload(&c))))
 }
 
 // ───────────────────────── 체결 버블 (server.py:1071 · 1107) ─────────────────────────
@@ -590,7 +599,16 @@ fn bubble_tape(cfg: &Config, req: &Req) -> Resp {
     if !TAPE_BUCKETS.iter().any(|x| x.0 == symbol) || !(10..=1800).contains(&sec) {
         return http_exc(400, Some("unsupported_asset_or_window"), &[]);
     }
-    match bubble_payload(cfg, &symbol, sec, since) {
+    // 원본: since 가 있으면 캐시 없이 · 없으면 1초 캐시(_bubble_cache · 읽기 실패는 안 남김)
+    let got = match since {
+        Some(_) => bubble_payload(cfg, &symbol, sec, since),
+        None => {
+            let (c, s2) = (cfg.clone(), symbol.clone());
+            cfg.swr.get(&format!("bubble:{symbol}|{sec}"), 1.0, 0.0, Arc::new(move || bubble_payload(&c, &s2, sec, None).map_err(|e| PyErr(e.into()))))
+                .map_err(|PyErr(m)| if m == "DatabaseError" { "DatabaseError" } else if m == "TypeError" { "TypeError" } else if m == "ValueError" { "ValueError" } else { "OperationalError" })
+        }
+    };
+    match got {
         Ok(v) => Resp::json(&v),
         Err(name) => {
             let mut r = Resp::json(&json!({"error": name, "rows": []}));
@@ -758,32 +776,12 @@ fn ranks(v: &[f64]) -> Vec<f64> {
     out
 }
 
-/// numpy 의 add.reduce(짝 합): 8개 미만은 차례 합 · 128개까지는 8갈래 펼침(r0..r7 → ((r0+r1)+(r2+r3))+((r4+r5)+(r6+r7)) + 나머지)
-fn np_sum(a: &[f64]) -> f64 {
-    if a.len() < 8 {
-        return a.iter().fold(0.0, |s, x| s + x);
-    }
-    let mut r = [0.0; 8];
-    r.copy_from_slice(&a[..8]);
-    let mut k = 8;
-    while k + 8 <= a.len() {
-        for j in 0..8 {
-            r[j] += a[k + j];
-        }
-        k += 8;
-    }
-    let mut s = ((r[0] + r[1]) + (r[2] + r[3])) + ((r[4] + r[5]) + (r[6] + r[7]));
-    for x in &a[k..] {
-        s += x;
-    }
-    s
-}
 
 /// np.corrcoef(a, b)[0, 1] -- cov 는 평균을 빼고 내적 · 1/(n−1) 곱 · 대각 제곱근으로 나눔 · [-1, 1] 자름.
 /// ponytail: 내적은 차례 합(numpy 는 BLAS dgemm) -- 9개짜리라 BLAS 묶음 순서가 끝자리를 바꿀 수 있다(서버 OpenBLAS 미대조).
 fn corrcoef(a: &[f64], b: &[f64]) -> f64 {
     let n = a.len() as f64;
-    let (ma, mb) = (np_sum(a) / n, np_sum(b) / n);
+    let (ma, mb) = (rtcollect::ob5m::np_sum(a) / n, rtcollect::ob5m::np_sum(b) / n); // numpy add.reduce 규칙(공유 함수)
     let xa: Vec<f64> = a.iter().map(|x| x - ma).collect();
     let xb: Vec<f64> = b.iter().map(|x| x - mb).collect();
     let dot = |p: &[f64], q: &[f64]| p.iter().zip(q).fold(0.0, |s, (x, y)| s + x * y);
@@ -880,7 +878,8 @@ fn pred_record_payload(cfg: &Config) -> R<V> {
 
 /// GET /api/pred-record -- 예외 = {"ok": false, "reason": 200자}
 fn pred_record(cfg: &Config, _: &Req) -> Resp {
-    match pred_record_payload(cfg) {
+    let c = cfg.clone();
+    match cfg.swr.get("pred_record", 30.0, 600.0, Arc::new(move || pred_record_payload(&c))) {
         Ok(v) => Resp::json(&v),
         Err(PyErr(m)) => guarded(Err(PyErr(m.chars().take(200).collect()))),
     }
@@ -1137,7 +1136,11 @@ fn push_devices(cfg: &Config, _: &Req) -> Resp {
 
 // ───────────────────────── M0 client_timing (server.py:5097~5120) ─────────────────────────
 
-const CT_NUM: [&str; 10] = ["order_rtt_ms", "order_srv_ms", "order_net_ms", "fp_n", "fp_med_ms", "fp_max_ms", "longtask_n", "px_n", "px_med_ms", "px_max_ms"];
+/// 원본 CLIENT_TIMING_NUM(server.py:5097) 10칸 + rt_* 9칸(main 4ff90f88 · 화면 그림자 구독) + 🔴머지 대기 2칸(rt_draw_s · rt_back_n -- 원본 PR 전).
+///   정답지(gen_http2_fixture.py)는 10칸 + 9칸을 옮겨 적었다 · 머지 대기 2칸은 대조 밖(Rust 만 시험: rt_timing_keys).
+const CT_NUM: [&str; 21] = ["order_rtt_ms", "order_srv_ms", "order_net_ms", "fp_n", "fp_med_ms", "fp_max_ms", "longtask_n", "px_n", "px_med_ms", "px_max_ms",
+    "rt_lat_n", "rt_lat_med_ms", "rt_lat_p99_ms", "rt_lead_n", "rt_lead_med_ms", "rt_cmp_n", "rt_bad_n", "rt_fail_n", "rt_reconn_n",
+    "rt_draw_s", "rt_back_n"];
 
 /// POST /api/client-timing -- 본문 1KB·아는 키·숫자만 · 0.2초에 한 줄 · 저장 없음(로그 한 줄)
 fn client_timing(cfg: &Config, req: &Req) -> Resp {

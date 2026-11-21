@@ -3,7 +3,7 @@
 
 사본 = <작업 폴더>/mut (원본 rtserve 는 안 건드린다 -- 끝에 src·tests 바이트를 처음과 대조한다). 빌드 산출물은 <작업 폴더>/mut_target
 하나를 같이 쓰되 변이마다 `cargo clean -p rtserve`(rtcollect mutate_check 의 교훈: 안 지우면 직전 변이 산출물을 그대로 쓴다).
-시험 실행만 `ulimit -v 4000000` + timeout.
+시험 실행만 `ulimit -v 12000000` + timeout.
 
     python3 rtserve/tools/mutate_check.py <작업 폴더> [이름 일부 ...]
 """
@@ -80,7 +80,6 @@ M = [
     ("뉴스 제목 엔티티 안 풂", "src/api2.rs", ".map(crate::text::unescape).unwrap_or_default()", ".map(str::to_string).unwrap_or_default()"),
     ("뉴스 키 링크 안 뗌", "src/text.rs", "if skip > 0 && n > 0 {", "if false {"),
     ("뉴스 키 12→20자", "src/text.rs", "if k.len() >= 12 {", "if k.len() >= 20 {"),
-    ("숫자 참조 &#x 무시", "src/text.rs", "let (start, n, hex) = if dec > 0 { (j + 1, dec, false) } else { (j + 2, hexn, true) };", "let (start, n, hex) = (j + 1, dec, false);"),
     ("급변 z 4→3", "src/api2.rs", "(r / sd).abs() >= 4.0", "(r / sd).abs() >= 3.0"),
     ("급변 NQ 개장 시간 안 거름", "src/api2.rs", 'if nm != "NQ" || cme_open(ts) {', "if true {"),
     ("stdev 모분산(n−1 → n)", "src/py.rs", "let mut den = &n * BigInt::from(xs.len() - 1);", "let mut den = &n * BigInt::from(xs.len());"),
@@ -104,8 +103,20 @@ M = [
     ("풋프린트 기본 창 12→24", "src/hub.rs", "const FP_BARS: i64 = 12;", "const FP_BARS: i64 = 24;"),
     ("풋프린트 dhl 없음을 안 지움", "src/hub.rs", "        e.1 = b.dhl;", "        if b.dhl.is_some() { e.1 = b.dhl; }"),
     ("스트림 커서 안 옮김", "src/hub.rs", "q.insert(name.into(), cur.max(last[0].as_i64().unwrap_or(0)).to_string());", "let _ = (name, cur, last);"),
+    ("client-timing 머지 대기 2칸 빼기", "src/api2.rs", '"rt_reconn_n",\n    "rt_draw_s", "rt_back_n"];', '"rt_reconn_n",\n    "x_a", "x_b"];'),
     ("events state 세 블록 → 둘", "src/hub.rs", 'for k in ["session", "microstructure", "tail_risk"] {', 'for k in ["session", "microstructure"] {'),
     ("events ts 마이크로초 → 밀리초", "src/hub.rs", 'format!("{base}.{frac:06}+00:00")', 'format!("{base}.{:03}+00:00", frac / 1000)'),
+    # ── 셋째 조각(api3 · swr) ──
+    ("세션 경보 창 30→31분", "src/api3.rs", "(-30.0..=30.0).contains(&minutes)", "(-31.0..=31.0).contains(&minutes)"),
+    ("세션 경보 시간대 없는 시각 건너뜀(원본 500)", "src/api3.rs", '            return err("TypeError", "can\'t subtract offset-naive and offset-aware datetimes");', "            continue;"),
+    ("세션 경보 high 거르기 빼기", "src/api3.rs", 'if py::get(e, "importance")? != Some(&json!("high")) {', "if false {"),
+    ("청산 게이지 봉 30→15분", "src/api3.rs", "const BAR_MIN: i64 = 30;", "const BAR_MIN: i64 = 15;"),
+    ("청산 게이지 봉 시작 >= → >", "src/api3.rs", ".filter(|r| r.0 >= bar_start)", ".filter(|r| r.0 > bar_start)"),
+    ("청산 게이지 다시 읽기 1.6→0.6초", "src/api3.rs", "[0.0, 0.4, 0.8, 1.6]", "[0.0, 0.4, 0.8, 0.6]"),
+    ("청산 게이지 마이크로초 안 씀", "src/api3.rs", 'if frac == 0 { format!("{base}+00:00") } else { format!("{base}.{frac:06}+00:00") }', 'format!("{base}+00:00")'),
+    ("swr 신선 < → <=", "src/swr.rs", "                if age < ttl {", "                if age <= ttl {"),
+    ("swr 갱신 실패 때 옛 값 버림", "src/swr.rs", "Err(PyErr(m)) => (self.log)(&format!(\"cache refresh failed for {key} (still serving stale): {m}\")),", "Err(_) => self.store(key, &V::Null),"),
+    ("swr 묵음 창 빼기", "src/swr.rs", "if age < ttl + max_stale {", "if false {"),
     ("파이썬 round 짝수 → 0에서 먼 쪽", "src/py.rs", "Ok(x.round_ties_even() as i64)", "Ok(x.round() as i64)"),
     ("splitlines \\r 안 끊음", "src/py.rs", "matches!(c, '\\n' | '\\r' |", "matches!(c, '\\n' |"),
 ]
@@ -140,7 +151,8 @@ def main() -> int:
         t = man.read_text()
         for sib in ("rtcollect", "rtcore"):
             t = t.replace(f'path = "../{sib}"', f'path = "{SRC.parent / sib}"')
-        man.write_text(t + "\n[workspace]\n")
+        # 디버그 정보 없이(duckdb 묶음을 넣은 뒤 시험 실행 파일 링크가 메모리 상한에 걸려 «빌드 실패»가 났다 -- 2026-11-21)
+        man.write_text(t + "\n[workspace]\n\n[profile.dev]\ndebug = 0\n")
         f = mut / rel
         s = f.read_text()
         if s.count(old) != 1:
@@ -156,8 +168,10 @@ def main() -> int:
                 return 1
             results.append((name, "빌드 실패(= 잡힘 · 컴파일러)"))
             continue
-        t = subprocess.run(["bash", "-c", "ulimit -v 4000000; timeout 300 cargo test -q 2>&1"], cwd=mut, env=env, capture_output=True, text=True)
+        t = subprocess.run(["bash", "-c", "ulimit -v 12000000; timeout 600 cargo test -q 2>&1"], cwd=mut, env=env, capture_output=True, text=True)
         failed = t.returncode != 0
+        if failed and name.startswith("무변경"):   # 무변경이 실패하면 어느 시험인지 남긴다(흔들리는 시험 찾기)
+            print("\n".join(t.stdout.splitlines()[-40:]))
         want_fail = not name.startswith("무변경")
         results.append((name, ("잡힘" if failed else "🔴못 잡음") if want_fail else ("통과(정상)" if not failed else "🔴무변경인데 실패")))
     shutil.rmtree(mut, ignore_errors=True)

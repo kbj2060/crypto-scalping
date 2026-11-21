@@ -48,7 +48,7 @@ fn rig(sym: &str, rt: &tokio::runtime::Runtime) -> (Arc<State>, std::net::Socket
 
 fn connect(rt: &tokio::runtime::Runtime, hub: std::net::SocketAddr, sym: &str, live: &Arc<rtserve::hub::Live>) {
     rt.spawn(rtserve::hub::subscribe(format!("ws://{hub}/rt"), vec![sym.to_string()], live.clone()));
-    for _ in 0..200 {
+    for _ in 0..3000 { // 30초(다른 빌드가 돌 때 느리다)
         if live.syms.lock().unwrap().contains_key(sym) {
             return;
         }
@@ -99,7 +99,7 @@ fn supply_1s_from_hub_matches_python_rows() {
     let fin = &fx["final"];
     let now = fin["now"].as_i64().unwrap();
     let mut got = Value::Null;
-    for _ in 0..300 {
+    for _ in 0..3000 {
         got = get_json(addr, "/api/supply-1s?asset=eth");
         if got["now"] == now && same_num(&got["partial"]["bn"], &fin["partial"]["bn"]) {
             break;
@@ -145,7 +145,7 @@ fn supply_1s_from_hub_matches_python_rows() {
 pub fn sse_frames(addr: std::net::SocketAddr, path: &str, n: usize) -> Vec<String> {
     use std::io::{Read, Write};
     let mut s = std::net::TcpStream::connect(addr).unwrap();
-    s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
     s.write_all(format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").as_bytes()).unwrap();
     let mut buf = Vec::new();
     let mut chunk = [0u8; 65536];
@@ -214,13 +214,14 @@ fn footprint_from_hub_matches_python_bars() {
     let snap = footprint.unwrap();
     let fin = &fx["final"];
     let mut got = Value::Null;
-    for _ in 0..300 {
+    for _ in 0..3000 {
         got = get_json(addr, "/api/footprint?asset=eth&bars=144");
-        if got["bars"].as_array().is_some_and(|b| b.len() == snap.bars.len() && b.last().unwrap()["time"] == snap.bars.last().unwrap().time) {
-            // 마지막 봉 칸까지 닿았는지
-            if got["bars"].as_array().unwrap().last().unwrap()["levels"].as_array().unwrap().len() == snap.bars.last().unwrap().levels.len() {
-                break;
-            }
+        // 밀기가 다 닿을 때까지(봉마다 칸이 코어 스냅숏과 같아질 때까지) -- 앞 판은 «마지막 봉 칸 수»만 봐서 부하가 있을 때 덜 닿은 채로 비교했다
+        let caught = got["bars"].as_array().is_some_and(|b| {
+            b.len() == snap.bars.len() && b.iter().zip(&snap.bars).all(|(g, s)| g["time"] == s.time && same_num(&g["levels"], &json!(s.levels)))
+        });
+        if caught {
+            break;
         }
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -300,3 +301,4 @@ fn b64e(b: &[u8]) -> String {
     }
     out
 }
+
