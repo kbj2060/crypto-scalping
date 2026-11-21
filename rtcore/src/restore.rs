@@ -468,7 +468,7 @@ impl Supply {
 
     /// 스냅숏 되살리기(시작 때 · 수신 전). 봉은 통째로, 1초 칸은 옆에 둔다(merge 가 테이프 없는 초에만 쓴다).
     pub(crate) fn load_snap(&mut self, s: Snap) {
-        self.fp.bars = s.bars.into_iter().map(|(b, cells, dhl)| (b, Bar { cells: cells.into_iter().collect(), dhl })).collect();
+        self.fp.bars = s.bars.into_iter().map(|(b, cells, dhl)| (b, Bar { cells: cells.into_iter().collect(), dhl, order: vec![] })).collect();
         self.fp.holes = s.holes;
         self.last_ms = s.last_ms;
         self.rs.snap_sec = s.sec.into_iter().collect();
@@ -802,7 +802,7 @@ impl Supply {
         while b >= lo && covered(b, b + 300) {
             if self.okx_fr.restored.insert(b) {
                 let cells = got.bars.get(&b).cloned().unwrap_or_default();
-                self.okx_fp.bars.insert(b, crate::footprint::Bar { cells, dhl: None });
+                self.okx_fp.bars.insert(b, crate::footprint::Bar { cells, dhl: None, order: vec![] });
             }
             earliest = b;
             b -= 300;

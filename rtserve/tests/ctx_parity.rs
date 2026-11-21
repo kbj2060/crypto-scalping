@@ -6,6 +6,7 @@
 #[allow(dead_code)]
 mod ctx;
 
+use rtserve::py; // ctx.rs 가 crate::py 로 부른다(lib 에 붙으면 그대로)
 use rtserve::py::dumps;
 use serde_json::{json, Value};
 use std::path::PathBuf;

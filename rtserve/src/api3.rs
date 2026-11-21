@@ -14,6 +14,7 @@ pub fn routes(p: &str) -> Vec<(&'static str, Handler)> {
     match p {
         "/api/session-alerts" => vec![("GET", session_alerts)],
         "/api/liquidation-5m-signal" => vec![("GET", liquidation_5m_signal)],
+        "/api/flow/heatmap" => vec![("GET", flow_heatmap)],
         "/api/footprint-daily" => vec![("GET", fp_daily)],
         "/api/footprint-daily/cells" => vec![("GET", fp_daily_cells)],
         "/api/footprint-4h" => vec![("GET", fp_4h)],
@@ -254,4 +255,63 @@ fn fp_4h_cells(cfg: &Config, req: &Req) -> Resp {
         Ok(v) => Resp::json(&v),
         Err(_) => crate::server_error(),
     }
+}
+
+// ───────────────── /api/flow/heatmap(server.py api_flow_heatmap 4692~4732 · 계산 heatmap.rs · 읽기 raster_read.rs) ─────────────────
+
+const HEATMAP_SYMBOLS: [&str; 8] = ["ethusdt", "btcusdt", "solusdt", "xrpusdt", "sndkusdt", "soxlusdt", "skhynixusdt", "muusdt"]; // server.py:396
+const HEATMAP_MAX_COLS: i128 = 900; // server.py:397
+
+/// 체결 대조 원천: 그 심볼의 흐름 엔진 풋프린트(허브 칸 · 가격 = round(키 × 칸 폭, dp) · 매수·매도 = round(x, 3) -- 원본은 반올림 전 칸 · 문서 §7-2 실측)
+fn heatmap_fp(cfg: &Config, symbol: &str) -> Option<crate::heatmap::Fp> {
+    if !cfg.flows().iter().any(|a| format!("{a}usdt") == symbol) {
+        return None; // 원본 LookupError → fill_source None
+    }
+    let g = cfg.live.syms.lock().unwrap();
+    Some(g.get(symbol).map_or_else(Vec::new, |s| s.fp_bars.iter().map(|(t, (cells, _))| (*t, cells.values().map(|l| (l.0, l.1, l.2)).collect())).collect()))
+}
+
+fn flow_heatmap(cfg: &Config, req: &Req) -> Resp {
+    let symbol = req.q("symbol").filter(|v| !v.is_empty()).unwrap_or("ethusdt").to_lowercase();
+    if !HEATMAP_SYMBOLS.contains(&symbol.as_str()) {
+        return crate::http_exc(400, Some("unsupported_symbol"), &[]);
+    }
+    let (Some(cols), Some(agg)) = (crate::api::py_int_str(req.q("cols").unwrap_or("300")), crate::api::py_int_str(req.q("agg").unwrap_or("3"))) else {
+        return crate::http_exc(400, Some("bad_cols_or_agg"), &[]);
+    };
+    let (cols, agg) = (cols.clamp(10, HEATMAP_MAX_COLS) as usize, agg.clamp(1, 60) as usize);
+    let rows_only = req.q("mode") == Some("rows");
+    let root = crate::raster_read::default_root(&cfg.root);
+    let now_ms = || ((cfg.now)() * 1000.0) as i64;
+    let (c, r2, s2) = (cfg.clone(), root.clone(), symbol.clone());
+    let mut payload = match cfg.swr.get(&format!("heatmap_{symbol}_{cols}_{agg}_{}", rows_only as i32), 1.0, 0.0, Arc::new(move || {
+        crate::heatmap::heatmap_read(&r2, &s2, ((c.now)() * 1000.0) as i64, cols, agg, rows_only, heatmap_fp(&c, &s2).as_ref()).map_err(PyErr)
+    })) {
+        Ok(v) => v,
+        Err(_) => return crate::server_error(),
+    };
+    // 접근행동(4시간 · 120초 캐시) → rows 에 · 변동 신호 자(300초) · 지금 값(1초) → summary 에. 실패는 삼킨다(원본 try/except pass)
+    if rows_only && payload["rows"].as_object().is_some_and(|m| !m.is_empty()) {
+        let (r2, s2, t) = (root.clone(), symbol.clone(), now_ms());
+        if let Ok(Value::Object(ap)) = cfg.swr.get(&format!("approach_{symbol}"), 120.0, 600.0, Arc::new(move || Ok(Value::Object(crate::heatmap::approach_read(&r2, &s2, t))))) {
+            payload["rows"].as_object_mut().unwrap().extend(ap);
+            let (r2, s2) = (root.clone(), symbol.clone());
+            let rf = cfg.swr.get(&format!("volsig_ref_{symbol}"), 300.0, 600.0, Arc::new(move || {
+                Ok(crate::heatmap::volsig_ref(&r2, &s2, t).map_or(json!({}), |(p, r, s)| json!({"past": p, "refill": r, "score": s})))
+            }));
+            if let (Ok(rf), true) = (rf, payload["summary"].as_object().is_some_and(|m| !m.is_empty())) {
+                let (r2, s2) = (root.clone(), symbol.clone());
+                if let Ok(Value::Object(vs)) = cfg.swr.get(&format!("volsig_{symbol}"), 1.0, 0.0, Arc::new(move || {
+                    let fv = |k: &str| rf[k].as_array().map(|a| a.iter().filter_map(Value::as_f64).collect::<Vec<f64>>());
+                    Ok(Value::Object(match (fv("past"), fv("refill"), fv("score")) {
+                        (Some(p), Some(r), Some(s)) => crate::heatmap::volsig_read(&r2, &s2, t, &(p.iter().map(|x| *x as f32).collect(), r.iter().map(|x| *x as f32).collect(), s)),
+                        _ => Map::new(), // 원본 _volsig_read: ref 가 {} 면 {}
+                    }))
+                })) {
+                    payload["summary"].as_object_mut().unwrap().extend(vs);
+                }
+            }
+        }
+    }
+    Resp::json(&payload)
 }

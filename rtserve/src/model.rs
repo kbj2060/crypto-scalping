@@ -43,6 +43,8 @@ pub struct State {
     svm: Mutex<HashMap<String, (Vec<SystemTime>, Arc<(Svm, V)>)>>,
     qx4: Mutex<Option<(Vec<SystemTime>, Arc<(qx4::Art, V)>)>>,
     qrows: Mutex<HashMap<String, Vec<Value>>>,
+    /// QX4I: 코인별 Deribit ATM IV 시간 칸 기억(원본 qx4_state["iv"][coin])
+    qiv: Mutex<HashMap<String, std::collections::BTreeMap<i64, Option<f64>>>>,
 }
 
 fn e(kind: &str, msg: impl AsRef<str>) -> PyErr {
@@ -253,7 +255,10 @@ fn qx4_try(cfg: &Config, asset: &str) -> R<Option<V>> {
         fetch_binance(cfg, &format!("{base}?{}", query(q)), None).ok().flatten().and_then(|v| v.as_array().cloned()).unwrap_or_default()
     };
     let mut rows = cfg.models_state.qrows.lock().unwrap();
-    Ok(rtmodel::handlers::vol_forecast_qx4(&mut fetch, &mut rows, &art.0, (cfg.now)() * 1000.0, asset))
+    let mut ivs = cfg.models_state.qiv.lock().unwrap();
+    let st = ivs.entry(asset.to_uppercase()).or_default();
+    let mut get = |u: &str| ext_get(cfg, u).ok(); // 원본 iv_now 의 Deribit 받기 -- 실패 = 그 칸만 빠짐
+    Ok(rtmodel::handlers::vol_forecast_qx4i(&mut fetch, &mut rows, &art.0, (cfg.now)() * 1000.0, asset, Some((st, &mut get))))
 }
 
 fn vol_produce(cfg: &Config, asset: &str) -> R<V> {
@@ -297,7 +302,7 @@ fn api_open_rev(cfg: &Config, _: &Req) -> Resp {
 fn ext_get(cfg: &Config, url: &str) -> Result<Value, String> {
     rest_on(cfg)?;
     let u = match &cfg.ext {
-        Some(b) => ["https://api.exchange.coinbase.com", "https://api.binance.com", "https://api.stlouisfed.org"].iter()
+        Some(b) => ["https://api.exchange.coinbase.com", "https://api.binance.com", "https://api.stlouisfed.org", "https://www.deribit.com"].iter()
             .find_map(|h| url.strip_prefix(h).map(|r| format!("{b}{r}"))).unwrap_or_else(|| url.into()),
         None => url.into(),
     };

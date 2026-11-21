@@ -47,6 +47,39 @@
 - **flow_scales**: 파일 아님 -- 서버가 hot 테이프(binance_tape.sqlite 등)를 SQL 로 5분봉 합 → numpy MAD(micro_ref 186~259). 옮김 완료(위).
 - **imb40·agree·trigger·sweep·sr·vol60_pct**: collect_micro_ref 1912~2022 -- 래스터 `read_window(sym, now_ms, 12, 1)`(scripts/live_orderflow_raster_collector_20260914.py) → micro_ref.raster_flow · ofi 분위(ofi_hist 600) · agree_state · mctx.sweep_depth · sr_context(load_liquidation_map) · baseline_from_tape(1분 거래량 분위). 🔴원본은 이 틱마다 REST bookTicker(MICRO_BOOK_URL)도 부른다(코어 호가로 대체 가능한지 판단 필요). 다음 조각.
 
+## 붙이는 쪽(hub.rs) 사용법 -- `ctx_x::situation_tick` (2026-11-22)
+1. lib.rs 에 `pub mod ctx; pub mod ctx_x; pub mod ctx_micro;` (ctx.rs 는 `crate::py` 를 부른다).
+2. 코인마다 상태 하나: `FlowState`(flow_all_hold) · `rtcore::situation::FlowNets`(받은 값) · `ctx_micro::MicroRef`(미시 링·기준선) · ETH 는 `ctx::FusedLog::new(<FUSED_LOG_PATH>)`.
+3. 코어 구독에서: Situation → 마지막 값 보관 · Micro → `ctx_x::apply_flow(&mut nets, mc.flow)`(snapshot 의 micro.flow 는 full) · `mc.streams` 보관 · 코어 호가(book)·vol60·liq60 보관.
+4. 1초마다(원본 micro 틱): `w = ctx_micro::read_window(래스터 뿌리, "ethusdt", now_ms, 12)` → `micro.tick(now, 코어 호가, &w, vol60, &청산맵 레벨, &liq60)` 가 미시 payload 를 만든다.
+5. 기준선: `micro.baseline_due(now)` 이면 스레드에서 `baseline_from_tape`·`tape_flow_rows→flow_hour_scales_from_bars`·`flow_hour_scales_combos` 를 읽고 `micro.baseline_set(now, 결과)` (flow_scales 는 «빈 결과면 있던 값», combos 는 칸마다 같은 규칙 -- 원본 1942~1954).
+6. `XIn { now, nets, bybit(bybit_bars · 20초 캐시), flow_scales, flow_scales_all, bars(코어 상황 입력 봉의 close·oi_delta), day5(candles_day), card30, micro: &micro.payload, imb40_ring }`.
+7. `let (payload, sse, x) = ctx_x::situation_tick(core_sit.as_ref(), veto, obi, persist, &streams, &xin, &mut flow_state, &vol_mult_by, Some((&mut fused_log, &card_p, &feat_bar)))` -- ETH 만.
+8. `/api/situation` = `payload` 를 json_response 와 같이(기본 구분자 · NOCACHE) · SSE 는 매 틱 `sse` 를 그대로(원본은 computed_at 이 바뀔 때만 = 매 틱 바뀐다).
+9. 다른 코인은 `flow_read_ctx(&xin, &mut st)` 만(시장 맥락 재료) · read 는 ETH 만(2489~2490).
+10. 🔴`RTSERVE_READONLY` 가 "0" 이 아니면 장부를 안 쓴다(병행 중) · REST 원천(candles_day·veto·card30)은 `RTSERVE_REST` 있을 때만(다음 조각).
+
+## 코어 원값 합(Micro.flow · 2026-11-22)
+- rtcore situation.rs `flow_nets_tick`: 원본 2295~2303(fr_bar_net: 닫힌 봉 처음 볼 때·최근 두 봉만 다시 · 사라진 봉 지움) · 2332~2339(onet: 닫힌 봉 12개 이상일 때 격자 안 first_bar «뒤» · 사라진 봉 지움) · 2374~2376(okx30: 여섯 봉 칸 한 줄 합) · 2368~2369(테이커 비율 재료 = 마지막 닫힌 봉 Σ매수·Σ매도 **그 회차 값** -- 굳은 봉이면 fr_bar_net 과 다르다 → `bn_last` 로 따로).
+- 칸 합 차례 = 원본 dict 차례: footprint.rs `Bar.order`(체결로 생긴 칸 차례) · `in_order`. **알려진 차이**: 복원(테이프·스냅숏)으로 생긴 칸은 키 차례로 뒤에 붙인다(원본도 재기동 뒤 자기 복원 차례) → 그 봉은 마지막 비트가 갈릴 수 있다.
+- 화면 풋프린트 메시지 모양은 그대로(Micro 에 칸 `flow`·`streams` 만 더함 · 비면 직렬화에서 빠짐). app.js `rtMeasure`(4751~4755)는 `ex_ms > 0` 인 메시지만 지연에 넣고 대조는 supply 초만 본다 → Micro(ex_ms 0)는 세지 않는다.
+
+## 미시 payload(ctx_micro.rs) · bookTicker 결정안
+- 옮김: read_window(agg 1) · raster_flow(f32 합 = numpy float32 짝 합) · agree_state·qi_side_hyst · pct_rank · act_label · sr_context(동률이면 이름 글자 차례 = 파이썬 튜플 min) · sweep_depth · baseline_from_tape · 한 틱(1956~2008) · 기준선 주기(1926~1941). 268틱 글자 일치.
+- **알려진 차이**: baseline_from_tape 의 초 합계는 원본에서 SQLite 글자 → pandas 읽기를 거친다(판마다 자릿수가 다르고 pandas precise_xstrtod 도 정확한 반올림이 아님) → 분 합 상대차 ≤ 4.3e-16(정답지). vol60_pct 는 60초 거래량이 분 합과 1ulp 안으로 붙을 때만 갈린다.
+- 청산맵 레벨(load_liquidation_map)은 인자 -- REST klines 90일 계산이라 다른 조각.
+- **bookTicker(원본 1955 · REST 1/초 · 가중치 1) → 코어 @bookTicker 최신값으로 대신 = REST 0 (권장)**. 정의는 같다(둘 다 최우선 호가·수량) -- 다른 것은 «언제 찍은 값인가»뿐:
+
+| 칸 | 원본(REST) | 코어 호가로 | 차이 |
+|---|---|---|---|
+| mid · spread · mid_ring | REST 응답이 만들어진 순간(왕복 지연만큼 옛 값) | 마지막 WS 갱신(더 새것) | 같은 순간이면 0 · 평소 수 ms~수백 ms 의 시세 차 |
+| qi → agree(QI 쪽) | 같은 REST 값 | 같은 WS 값 | 위와 같음 · 히스테리시스 경계에서 라벨이 한 틱 일찍/늦게 |
+| sweep 의 top 보정 · depth25 | 래스터 초(1초 늦음)와 REST 최우선의 조합 | 래스터 초 + WS 최우선 | 상계 칸 판정만 -- 수량 몇 ETH 수준 |
+| sr(sup_bp·res_bp·near) | REST mid 기준 | WS mid 기준 | bp 몇 소수점 · near 경계에서만 |
+| 실패 동작 | REST 실패 = 그 틱 예외 → payload {available: false} | 코어 호가가 없으면(첫 수신 전) 틱을 건너뛰어 같은 결과 | 없음 |
+
+  → 값이 «다른 정의»가 되는 칸은 없다. 대조 때 mid·spread·qi 파생 칸은 «시점 차이»로 빼고, 래스터·기준선·청산 파생 칸만 글자 대조한다.
+
 ## 3. /api/market-context (market_context_payload 2601~2708 · api_market_context 2717~2732) -- 전부 ❌(그다음 조각)
 
 응답: 3초 안 못 끝나면 shield 로 뒤에서 마저 · 마지막 성공 120초 안이면 `{**last, "stale": True, "stale_age_s", "error"}` · 넘으면 `{"available": False, "error"}`.

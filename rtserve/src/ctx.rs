@@ -576,7 +576,7 @@ pub fn situation_payload(now: &V, computed_at: &V, fo: &V, mp: &V, read: &V, vol
 
 /// SSE `event: situation` 한 건(api_stream 3175~3179): `json.dumps(…, ensure_ascii=False, separators=(',', ':'))`.
 pub fn sse_situation(payload: &V) -> String {
-    format!("event: situation\ndata: {}\n\n", rtserve::py::dumps(payload, (",", ":"), false, None))
+    format!("event: situation\ndata: {}\n\n", crate::py::dumps(payload, (",", ":"), false, None))
 }
 
 /// 코어 수신 상태 → 원본 fo_state(1801)·mp_state(1774) dict 모양(키 차례 그대로). mp 의 next_funding_ms 는 첫 마크 뒤에야 키가 생긴다(1893~1894).
@@ -610,7 +610,7 @@ pub fn fused_log_line(now: f64, read: &V, mid: &V, card_p: &V, feat_bar: &V) -> 
         "reach_p": if o3.get("reach_src").and_then(V::as_str) == Some("model") { card_p.get("reach").cloned().unwrap_or(V::Null) } else { V::Null },
         "feat_bar": feat_bar, "dir_src": o3.get("dir_src").cloned().unwrap_or(V::Null), "up_share": o3.get("up_share").cloned().unwrap_or(V::Null),
         "up": cols[0].get("target").cloned().unwrap_or(V::Null), "dn": cols[1].get("target").cloned().unwrap_or(V::Null)});
-    Some(rtserve::py::dumps(&line, (", ", ": "), false, None) + "\n")
+    Some(crate::py::dumps(&line, (", ", ": "), false, None) + "\n")
 }
 
 /// server.py _last_logged_bar(2408~2416): 꼬리 16KB 의 마지막 줄 bar. 못 읽으면 None.

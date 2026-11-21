@@ -8,7 +8,11 @@ mod ctx;
 #[allow(dead_code)]
 mod ctx_x;
 
-use ctx_x::{Candle, Cells, FlowState, Scales, XIn};
+use ctx_x::{Candle, FlowState, Scales, XIn};
+use rtcore::situation::{flow_delta, flow_nets_tick, FlowNets};
+
+type Cells = Vec<[f64; 6]>;
+use rtserve::py; // ctx.rs 가 crate::py 로 부른다(lib 에 붙으면 그대로)
 use rtserve::py::dumps;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
@@ -44,6 +48,8 @@ fn flow_read_ctx_matches_python_step_by_step() {
     for run in ["okx_late", "okx_mid", "no_okx", "short", "twelve", "grow"] {
         let steps = load(&format!("x_{run}.json"));
         let mut st = FlowState::default();
+        // 코어 쪽(풋프린트 칸 → 봉 순합)과 받는 쪽(Micro.flow 를 쌓은 값)을 따로 든다 -- 받는 쪽으로 x 를 센다
+        let (mut core, mut sent, mut recv): (FlowNets, Option<FlowNets>, FlowNets) = Default::default();
         for (k, s) in steps.as_array().unwrap().iter().enumerate() {
             let fbars = bars_of(&s["fbars"]);
             let okx_bars = bars_of(&s["okx_bars"]);
@@ -53,11 +59,16 @@ fn flow_read_ctx_matches_python_step_by_step() {
             let bars: Vec<(Option<f64>, Option<f64>)> = s["bars"].as_array().unwrap().iter().map(|b| (opt(&b[0]), opt(&b[1]))).collect();
             let day5: Vec<Candle> = s["day5"].as_array().unwrap().iter().map(|c| Candle { time: c[0].as_i64().unwrap(), high: f(&c[1]), low: f(&c[2]), close: f(&c[3]) }).collect();
             let ring: Vec<f64> = s["ring"].as_array().unwrap().iter().map(f).collect();
+            let now = f(&s["now"]);
+            flow_nets_tick(&mut core, now, &fbars, s["okx_first_bar"].as_i64().unwrap(), &okx_bars, |c: &Cells| c.clone());
+            let d = flow_delta(&core, sent.as_ref());
+            let d: rtcore::proto::FlowSums = serde_json::from_str(&serde_json::to_string(&d).unwrap()).unwrap(); // 선 위를 지난 값
+            ctx_x::apply_flow(&mut recv, &d);
+            sent = Some(core.clone());
+            assert_eq!(recv, core, "{run} #{k} 받은 값 = 코어 값");
             let i = XIn {
-                now: f(&s["now"]),
-                fbars: &fbars,
-                okx_first_bar: s["okx_first_bar"].as_i64().unwrap(),
-                okx_bars: &okx_bars,
+                now,
+                nets: &recv,
                 bybit: &bybit,
                 flow_scales: &fs,
                 flow_scales_all: &fsa,
@@ -144,4 +155,29 @@ fn streams_payload_has_python_shape() {
     let s = Streams { fo: StreamStat::default(), mp: StreamStat { connected: true, since: Some(1763699000.5), last_ms: Some(1763700000000), events: 3, errors: 1, last_error: Some("x".into()), next_funding_ms: None } };
     let (_, mp) = ctx::streams_payload(&s);
     assert_eq!(dumps(&mp, D, true, None), r#"{"connected": true, "since": 1763699000.5, "last_ms": 1763700000000, "events": 3, "errors": 1, "last_error": "x", "next_funding_ms": null}"#);
+}
+
+/// 붙이는 쪽 함수 하나(situation_tick): 계산 전 · 코어 값 있음 두 경우의 본문 모양.
+#[test]
+fn situation_tick_assembles_payload() {
+    let nets = FlowNets::default();
+    let (bybit, fs, fsa) = (BTreeMap::new(), Scales::new(), HashMap::new());
+    let micro = json!({"available": true, "mid": 3000.5});
+    let i = XIn { now: 1763700123.25, nets: &nets, bybit: &bybit, flow_scales: &fs, flow_scales_all: &fsa, bars: &[], day5: &[], card30: (None, None), micro: &micro, imb40_ring: &[] };
+    let streams = rtcore::proto::Streams::default();
+    let by = vec![("eth".to_string(), json!({"mult": 1.0})), ("xrp".to_string(), Value::Null)];
+    let (p, sse, _) = ctx_x::situation_tick(None, 0, None, None, &streams, &i, &mut FlowState::default(), &by, None);
+    assert_eq!(dumps(&p["now"], D, true, None), r#"{"ok": false, "reason": "계산 전"}"#.replace("계산 전", "\\uacc4\\uc0b0 \\uc804"));
+    assert_eq!((p["computed_at"].clone(), p["read"].clone(), p["vol_mult"].clone()), (json!(0.0), Value::Null, json!({"mult": 1.0})));
+    assert!(sse.starts_with("event: situation\ndata: {\"now\":{\"ok\":false,\"reason\":\"계산 전\"}") && sse.ends_with("\n\n"));
+    let core = json!({"ok": true, "dir": 1, "labels": ["상승 +12bp"], "evidence": {"mid": 3000.0, "move_bp": 12.0, "range_bp": 20.0, "dir": 1, "move_ratio": 0.6, "cvd": 10,
+        "reject": false, "liq_long": 0, "liq_short": 0, "veto": 0, "obi": null, "persist": null, "funding": null, "basis_bp": null, "basis_d_bp": null,
+        "basis_thr_bp": null, "crowd": 0, "lead": 0, "btc_move_bp": null, "btc_rel": null}, "regime": {"ratio": 0.6, "thr": 0.25, "margin": 0.35, "enter": 0.45, "exit": 0.25},
+        "computed_at": 1763700120.0, "missing": ["veto", "book"]});
+    let (p, _, x) = ctx_x::situation_tick(Some(&core), 1, Some(0.25), None, &streams, &i, &mut FlowState::default(), &by, None);
+    assert_eq!(p["now"]["computed_at"], json!(1763700123.25));
+    assert_eq!(p["computed_at"], json!(1763700123.25));
+    assert!(p["now"].get("missing").is_none() && p["now"]["evidence"]["veto"] == json!(1) && p["now"]["evidence"]["obi"] == json!(0.25));
+    assert_eq!(p["read"], ctx::read(&p["now"]["evidence"], &Value::Object(x)));
+    assert_eq!(p["streams"]["fo"]["events"], json!(0));
 }

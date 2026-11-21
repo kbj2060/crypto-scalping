@@ -144,6 +144,15 @@ M = [
     ("④dir-short 코인 표에서 BTC 빼기", "src/model.rs", 'const DS: [&str; 4] = ["ETH", "BTC", "SOL", "XRP"];', 'const DS: [&str; 4] = ["ETH", "DOGE", "SOL", "XRP"];', "model_parity"),
     ("④vol HGB 바이낸스 밴 문구 None", "src/model.rs", 'reason.map_or(Ok(None), |_| Err("HTTPServiceUnavailable: binance_ip_ban".into()))', "Ok(None)", "model_parity"),
     ("④vol 쪽 대체를 QX4 실패에도 안 함", "src/model.rs", "        Ok(None) => {}", "        Ok(None) => return Ok(json!({\"ok\": false, \"reason\": \"artifact_missing\"})),", "model_parity"),
+    # ── 여섯째 조각(래스터 읽기 · 히트맵 · supply oi) -- 이름 «⑥» ──
+    ('⑥무변경(대조: 통과해야 함)', 'src/heatmap.rs', 'pub fn np_sum_f32', 'pub fn np_sum_f32', 'heatmap_parity'),
+    ('⑥백분위 q 를 f64 로', 'src/heatmap.rs', 'let vi = (n as f32 - 1.0) * (pct / 100f32);', 'let vi = ((n as f64 - 1.0) * (pct as f64 / 100.0)) as f32;', 'heatmap_parity'),
+    ('⑥재깔림 합 행 우선', 'src/heatmap.rs', '        for &j in &sel {\n            for r in i - lb..i {', '        for r in i - lb..i {\n            for &j in &sel {', 'heatmap_parity'),
+    ('⑥블록 문턱 절반 → 0.6', 'src/heatmap.rs', 'let thr = csum[csum.len() - 1] * 0.5;', 'let thr = csum[csum.len() - 1] * 0.6;', 'heatmap_parity'),
+    ('⑥접근 near 0.35 → 0.36', 'src/heatmap.rs', 'let near = x < 0.35f32;', 'let near = x < 0.36f32;', 'heatmap_parity'),
+    ('⑥read_window 구멍(ts 0) 통과', 'src/raster_read.rs', 'mid[i].is_finite() && ts[i] > 0', 'mid[i].is_finite()', 'heatmap_parity'),
+    ('⑥agg 묶음 첫 최대 → 끝 최대', 'src/raster_read.rs', 'if v > best {', 'if v >= best {', 'heatmap_parity'),
+    ('⑥supply oi 660초 자르기 빼기', 'src/hub.rs', '    ring.retain(|k, _| *k >= cut);\n', '', 'http4_parity'),
     # ── 다섯째 조각(병행 고정 · 풋프린트 라우팅) -- 이름 «⑤» ──
     ('⑤무변경(대조: 통과해야 함)', 'src/api3.rs', 'fn fpd_of', 'fn fpd_of', 'fpd_http'),
     ('⑤읽기 전용 스위치 무시', 'src/lib.rs', 'if cfg.readonly && req.method == "POST"', 'if false && req.method == "POST"', 'model_parity'),

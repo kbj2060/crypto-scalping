@@ -9,10 +9,12 @@ pub mod api;
 pub mod api2;
 pub mod api3;
 pub mod fpd;
+pub mod heatmap;
 pub mod hub;
 pub mod model;
 pub mod order;
 pub mod py;
+pub mod raster_read;
 pub mod swr;
 pub mod text;
 

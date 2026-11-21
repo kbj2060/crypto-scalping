@@ -28,6 +28,7 @@ from collections import Counter, defaultdict
 IGNORE = {
     "generated_at", "updated_at", "computed_at", "fetched_at", "now", "now_sec", "now_ms", "server_time",
     "age", "age_s", "age_sec", "age_ms", "tradeAge", "oiAge", "elapsed_ms",
+    "asof_ms", "bar_elapsed_sec",   # 2026-11-22 서버 대조: pred-record asof_ms = 요청 순간 ms · liquidation-5m-signal bar_elapsed_sec = 지금 − 봉 시작
 }
 
 ROUTES = [  # (주소, 코인별로 ?asset= 붙임?)
@@ -39,6 +40,7 @@ ROUTES = [  # (주소, 코인별로 ?asset= 붙임?)
     ("/api/push/config", False), ("/api/push/devices", False), ("/api/session-alerts", False), ("/api/liquidation-5m-signal", True),
     ("/api/supply-1s", True), ("/api/footprint", True), ("/api/footprint?bars=48", True), ("/api/oi-5m", True), ("/api/oi-5m?bars=12", True),
     ("/api/liquidation-5m-history", True), ("/api/liquidation-5m-history?bars=144", True),
+    ("/api/footprint-daily", True), ("/api/footprint-4h", True), ("/api/flow/heatmap?mode=rows", False), ("/api/flow/heatmap?mode=rows&symbol=solusdt", False),
 ]
 MODEL_ROUTES = [("/api/dir4h", True), ("/api/dir-short", True), ("/api/vol-forecast", True), ("/api/open-rev", False), ("/api/dir-signals", False)]
 
