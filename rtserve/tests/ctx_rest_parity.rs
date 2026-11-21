@@ -58,3 +58,23 @@ fn card30_cache_and_stale_rules() {
     assert_eq!(ctx_rest::card30_bars(&day, 1000.0).iter().map(|b| b.time).collect::<Vec<_>>(), vec![0, 300], "지금 봉(900) 앞 · taker 있는 것만");
     assert!(ctx_rest::day5_stale(&day, 1500, 2.5) && !ctx_rest::day5_stale(&day, 1200, 2.5) && !ctx_rest::day5_stale(&day, 1500, 1.5));
 }
+
+#[test]
+fn card30_file_reloads_on_mtime() {
+    let d = std::env::temp_dir().join(format!("rtserve_card30_{}", std::process::id()));
+    std::fs::create_dir_all(d.join("data/live/rtmodel")).unwrap();
+    let p = ctx_rest::card30_path(&d);
+    let mut f = ctx_rest::Card30File::default();
+    assert!(f.get(&p).is_none(), "없음 = 모델 없음");
+    std::fs::write(&p, "not json").unwrap();
+    assert!(f.get(&p).is_none(), "못 읽음 = 모델 없음");
+    let good = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../rtmodel/tests/fixtures/card30.json");
+    if good.exists() {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::copy(&good, &p).unwrap();
+        let t = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        std::fs::File::options().write(true).open(&p).unwrap().set_modified(t).unwrap();
+        assert!(f.get(&p).is_some(), "mtime 이 바뀌면 다시 읽는다");
+    }
+    let _ = std::fs::remove_dir_all(&d);
+}

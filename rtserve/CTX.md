@@ -109,13 +109,43 @@
 
 검증: tools/gen_ctx_rest_fixture.py(옮겨 적은 trend_veto_rows·kline_candles·프레임 정리·행 조립·load_5m_day 거름 + 서버 판 pandas) → tests/ctx_rest_parity.rs: 24사례(ETH·BTC·SOL · 1500~144봉 · 형성 봉·중복·글자 자릿수) 캔들·veto·day5 · rolling/ewm 60급수 비트 일치.
 
-### 🔴결정 필요 -- 상황 입력 봉의 고·저·종
-원본은 REST 캔들(tail 200)의 high·low·close 를 쓰고(_situation_inputs 2189~2206), 코어 classify 는 체결로 센 5분봉을 쓴다(rtcore situation.rs inputs 의 `candles`).
-- (a) 코어 그대로(권장): 바이낸스 klines 의 고·저·종은 같은 @trade 체결로 만들어진다 -- 코어가 체결을 다 받은 봉이면 값이 같다(다른 경우 = 재연결로 체결을 놓친 봉 · 그 봉은 풋프린트 holes 로 이미 표시된다). REST 는 veto 와 candles_day 에만.
-- (b) rtserve 가 classify 를 다시 센다: rtcore::situation::{Inputs, Bar, classify} 에 REST 캔들 + delta(Micro.flow bn[0]) + 청산(Liq5m) + deriv(마크 링 -- 코어만 가짐 → 코어가 deriv 를 실어야 함). 손이 크다.
-- (c) rtserve 가 REST 캔들을 코어로 보낸다(허브에 들어오는 메시지 추가) -- 코어에 쓰기 길이 생긴다.
+### 상황 입력 봉의 고·저·종 -- 결정(2026-11-22): (a) 코어 그대로
+원본은 REST 캔들(tail 200)의 high·low·close 를 쓰고(_situation_inputs 2189~2206), 코어 classify 는 체결로 센 5분봉을 쓴다. 바이낸스 klines 의 고·저·종은 같은 @trade 체결로 만들어진다.
+**알려진 차이: 재연결로 체결을 놓친 봉(풋프린트 holes)에서만 원본 REST 캔들과 고·저·종이 다를 수 있다 -- 서버 병행 대조에서 holes 없는 봉은 같아야 한다.** REST 는 veto·candles_day 에만.
 
-## 3. /api/market-context (market_context_payload 2601~2708 · api_market_context 2717~2732) -- 전부 ❌(그다음 조각)
+### card30 모델 -- 결정(2026-11-22)
+`<저장소>/data/live/rtmodel/card30.json`(`ctx_rest::card30_path` · 내보내기 = rtmodel/tools/takeover.sh export-if-stale) · `ctx_rest::Card30File::get` 이 mtime 이 바뀌면 다시 읽는다 · 없거나 못 읽으면 원본 «모델 없음»(dir_p·reach_p = None → 카드는 표로). 원본과 다른 곳: 원본은 읽기 실패 뒤 다시 안 읽는다(card30["err"] 2255~2257).
+
+## D. /api/market-context -- ctx_mc.rs (2026-11-22)
+- 옮김: market_context_payload 2601~2708 전부 · api_market_context 묵은 값 갈래(2717~2732 → `mc_response`) · _mc_collectors(SQLite 여섯 + 롱숏비 duckdb) · _mc_history · _mc_liq_profile · tape_levels 931~969 · market_ctx 함수 11개(profile_nodes 의 np.exp·convolve "same" 세 갈래 포함) · LIQ_BURST_60S_USD 369.
+- 검증: tools/gen_ctx_mc_fixture.py(market_ctx·micro_ref·situation import + 서버 함수 옮겨 적음 · 합성 파일 7개) → tests/ctx_mc_parity.rs: 본문 80사례(ETH·XRP · 마크 링 0~4000초 · depth25 599/700 · oi_1s 유무 · DVOL 150/366 · 펀딩 이력 0/10/540) · 수집기·이력·청산 프로파일·테이프 레벨 · 함수 360건 글자 일치. 양성 대조는 사본(scratchpad/mutproj mut_mc.py).
+- **알려진 차이**:
+  - `errors` 의 글자(원본 repr(exc)[:100] · Rust 오류 글자) -- 대조는 열쇠만.
+  - 롱숏비 SQL: 원본 `ts >= now() - INTERVAL 25 HOUR`(ts = TIMESTAMPTZ · oi_lsratio_collector.py 78) -- 이 크레이트의 duckdb 는 ICU 가 없어 TIMESTAMPTZ 빼기를 못 한다 → `epoch(ts) >= 지금 − 90,000초`(같은 뜻 · 지금 = 벽시계).
+  - tape_levels SQL 의 `floor()` = SQLite 수학 함수(파이썬 sqlite3 는 켜져 있음 · 이 크레이트의 묶음 SQLite 에는 없음) → 같은 값을 CAST 로(음수면 한 칸 아래).
+- 붙이는 쪽 재료: 미시 payload(ctx_micro `MicroRef.payload`) · x(situation_tick 이 낸 것 -- 원본 situation_state["ctx"]) · evidence(코어 Situation) · 마크 링(코어 Mark 를 초 → (마크, 지수, 펀딩) · 7200초) · 미드 링(`MicroRef.mid_ring`) · depth25(`MicroRef.depth25_ring`) · oi_1s(hub oi_rows 의 링) · next_funding_ms(코어 Micro.streams.mp) · 캐시 `TTL` 표(2617~2629) · REST 몫 = `funding_hist_url`/`funding_hist`(바이낸스 · gate)·`dvol_url`/`dvol_year`(Deribit · gate.send(url, false) · ETH 만) -- 실패·RTSERVE_REST 없음 = 빈 목록(원본 2622~2627).
+
+### 붙이는 쪽 사용법 -- `/api/market-context?asset=`
+1. lib.rs 에 `pub mod ctx_mc;` · 코인 표에 없는 asset 은 404 `flow_off`(2719~2720).
+2. 코인마다 상태: `mc_last_good: Map`(수집기 마지막 성공값) · `mc_last: Option<(V, f64)>`(마지막 성공 본문 · 시각).
+3. 파일 몫은 swr 로(`ctx_mc::TTL` 의 ttl·max_stale 그대로): `mc_collectors(&paths, asset, okx_inst, symbol, &mut mc_last_good)` · `mc_history(&paths, now_ms, sym_lower, okx_inst, COIN, SYMBOL)` · `mc_liq_profile(&paths, SYMBOL, now, px_scale)` · `tape_levels(tape, sym_lower, 테이프 칸 폭, now)`(Err → `{"available": false, "error": …}`).
+4. REST 몫(`RTSERVE_REST` 있을 때만 · gate): `funding_hist(gate_fetch(funding_hist_url(..)))` · ETH 만 `dvol_year(gate.send(dvol_url(now_ms), false))` -- 실패·꺼짐 = `[]`.
+5. 메모리 몫으로 `McIn { asset, now, bands_usd(풋프린트 메시지의 retail_max_usd·whale_min_usd), micro: &MicroRef.payload, x(situation_tick 이 낸 x), ev(코어 evidence), mark_ring, mid_ring, depth25, oi_1s, next_funding_ms, px_scale(코인 풋프린트 칸 ÷ ETH 칸) }`.
+6. `let r = market_context_payload(&i, &col, &hist, &prof, &fh, &dvy, &vprof)` -- 원본은 3초 안에 못 끝나면 실패 갈래(뒤에서 마저 돌려 캐시를 채움 · 2710~2715) → `mc_response(Ok(r) 또는 Err("TimeoutError: …"), &mut mc_last, now)` 를 json_response(NOCACHE)로.
+
+## 3. 청산맵 레벨(load_liquidation_map 3461~3508) -- 표(옮기기 전)
+| 항목 | 원본 | 값 |
+|---|---|---|
+| 캐시 | swr `liquidation_map:{asset}` 3505~3508 | ttl LIQUIDATION_MAP_CACHE_SECONDS(graft 213 = 60 -- 정의 줄 Read 미확인) · max_stale STALE_GRACE 600 |
+| 부르는 곳 | collect_micro_ref 1991(매 틱 · 코인마다) · /api/liquidation-map | 틱은 1초지만 swr 60초라 실제 계산은 코인마다 분당 1번 |
+| REST(회차마다) | liq_klines_df 3314~3337 ×2 | 1시간봉 LIQUIDATION_MAP_FETCH_LIMIT(쪽마다 1500 · 더 많으면 endTime 으로 앞쪽) + 5분봉 LIQUIDATION_MAP_5M_FETCH_LIMIT · 형성 봉 버림(keep_forming 거짓) |
+| 그 밖 계산 | 3482~3501 | heatmap_history(compute_spliced_heatmap_history_5m) · tier_profile(+ liq_oi_usd = hot oi_1s·OKX·Bybit) -- 미시 payload(sr)는 **levels 만** 쓴다 |
+| 미시가 읽는 칸 | 1991~1995 · micro_ref.sr_context 120~142 | warmed_up · support_levels·resistance_levels 의 price·weight_pct(가까운 순) |
+| 레벨 계산 | scripts/live_liquidation_map_20260824.py compute_spliced_levels 303~362 · levels_from_bins 238~265 · _prepare_common 138~ · _bins_from_common 177~ · _own_bar_alive 107~ | 닫힌 1시간봉 tail(24) · 지지 = (고+저)/2 패스 · 저항 = 종가 패스 · 5분봉으로 자기 봉 안 쓸림 판정 |
+
+재사용 판단: rtmodel::regime_band 에 같은 원본(_prepare_common·_bins_from_common·_own_bar_alive·levels_from_bins 한쪽)을 옮긴 것이 있다(regime_band.rs 116~170). 다만 ① 함수가 비공개(`prepare`·`bins`·`side`) ② 입력이 «5분봉 패널을 1시간으로 접은 것 + 이번 시간 부분봉»(_window_at) -- load_liquidation_map 은 REST 닫힌 1시간봉 tail(24) 그대로 ③ `side` 가 가격만 낸다(weight_pct·distance_pct 없음). → **rtmodel 의 그 셋을 pub 으로 열고 `side` 가 (가격, 무게%)를 내게 넓히는 것**이 가장 짧다(같은 원본을 둘로 옮기지 않게). rtmodel 은 내 쓰기 범위 밖이라 결정이 필요하다.
+
+## 3-옛. /api/market-context (market_context_payload 2601~2708 · api_market_context 2717~2732) -- 전부 ❌(그다음 조각)
 
 응답: 3초 안 못 끝나면 shield 로 뒤에서 마저 · 마지막 성공 120초 안이면 `{**last, "stale": True, "stale_age_s", "error"}` · 넘으면 `{"available": False, "error"}`.
 

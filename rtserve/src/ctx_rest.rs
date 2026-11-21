@@ -279,3 +279,37 @@ pub fn gate_fetch(gate: &mut rtmodel::gate::Gate, url: &str, reason: &str) -> Re
         Err(rtmodel::gate::Fail::Conn(m) | rtmodel::gate::Fail::Body(m)) => Err(format!("ClientError: {m}")),
     }
 }
+
+/// card30 모델 파일(결정 2026-11-22: `<저장소>/data/live/rtmodel/card30.json` -- 내보내기는 rtmodel/tools/takeover.sh export-if-stale 몫).
+/// mtime 이 바뀌면 다시 읽는다(model.rs `cached` 와 같은 규칙). 없거나 못 읽으면 None = 원본 «모델 없음» 갈래(_card30_load 2255~2257 → `{}` → 카드는 표로).
+/// 원본과 다른 곳: 원본은 읽기 실패를 한 번 알리고 다시 안 읽는다(card30["err"]) -- 여기는 파일이 바뀌면 다시 시도한다.
+#[derive(Default)]
+pub struct Card30File {
+    mt: Option<std::time::SystemTime>,
+    m: Option<std::sync::Arc<rtmodel::card30::Card30>>,
+}
+
+pub fn card30_path(repo: &std::path::Path) -> std::path::PathBuf {
+    repo.join("data/live/rtmodel/card30.json")
+}
+
+impl Card30File {
+    pub fn get(&mut self, path: &std::path::Path) -> Option<std::sync::Arc<rtmodel::card30::Card30>> {
+        let mt = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+        if mt.is_none() {
+            (self.mt, self.m) = (None, None);
+            return None;
+        }
+        if mt != self.mt {
+            self.mt = mt;
+            self.m = std::fs::read_to_string(path)
+                .map_err(|e| e.to_string())
+                .and_then(|t| serde_json::from_str::<V>(&t).map_err(|e| e.to_string()))
+                .and_then(|v| rtmodel::card30::Card30::from_json(&v))
+                .map(std::sync::Arc::new)
+                .map_err(|e| println!("card30 model: {e}"))
+                .ok();
+        }
+        self.m.clone()
+    }
+}
