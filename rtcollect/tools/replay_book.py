@@ -49,6 +49,34 @@ except Stop:
 '''
 
 
+def stage(name: str, cmd: list, deadline: float, **kw) -> tuple:
+    """하위 프로세스 하나 -- 줄이 나오는 대로 바로 찍는다(파일로 보내도 버퍼에 갇히지 않게 flush) · 전체 상한(deadline)을 넘으면 죽이고 «시간 초과».
+    11-22 서버: check 가 이 도구를 파일로 돌리자 40분 동안 0바이트였다 -- 출력이 블록 버퍼에 갇혀 어디까지 갔는지 남지 않았다."""
+    import threading
+    t0 = time.time()
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, **kw)
+    tail: list = []
+
+    def pump():
+        for ln in p.stdout:
+            tail.append(ln.rstrip("\n"))
+            del tail[:-40]
+            print(f"    [{name} {time.time() - t0:.0f}초] {ln.rstrip()[:200]}", flush=True)
+    th = threading.Thread(target=pump, daemon=True)
+    th.start()
+    try:
+        p.wait(timeout=max(1.0, deadline - time.time()))
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.wait()
+        th.join(5)
+        print(f"🔴시간 초과({name} 단계 · 그 단계 {time.time() - t0:.0f}초 · 전체 상한을 넘었다)", flush=True)
+        return None, tail
+    th.join(5)
+    print(f"  {name} {time.time() - t0:.0f}초 · 종료 {p.returncode}", flush=True)
+    return p.returncode, tail
+
+
 def hour_name(h: int) -> str:
     return time.strftime("%Y-%m-%dT%H", time.gmtime(h * 3600))
 
@@ -62,7 +90,11 @@ def main() -> int:
     ap.add_argument("--tmp", type=Path, default=ROOT / "data/live/rtcollect", help="복사본·임시 DB 자리(6TB 쪽)")
     ap.add_argument("--bin", type=Path, default=ROOT / "tmp/rtbin/rtcollect")
     ap.add_argument("--keep", action="store_true")
+    ap.add_argument("--limit", type=int, default=int(os.environ.get("REPLAY_LIMIT_S", "1800")), help="전체 상한(초) -- 넘으면 «시간 초과(단계)» 로 종료코드 2")
     a = ap.parse_args()
+    sys.stdout.reconfigure(line_buffering=True)   # 파일로 보내도 줄마다 바로
+    T0 = time.time()
+    deadline = T0 + a.limit
     sym = a.symbol.upper()
     if a.kind == "bookdepth" and sym != "ETHUSDT":
         ap.error("bookdepth 는 ETHUSDT 만")
@@ -75,6 +107,7 @@ def main() -> int:
     try:
         (d / "dd" / sym).mkdir(parents=True)
         n = 0
+        tc = time.time()
         for h in range(h0, h_end + 1):
             for ext in (".jsonl", ".jsonl.gz"):    # 원본 hour_path 와 같은 차례(.jsonl 먼저) -- 있는 것을 그대로
                 p = src / f"{hour_name(h)}{ext}"
@@ -82,32 +115,34 @@ def main() -> int:
                     shutil.copy2(p, d / "dd" / sym / p.name)
                     n += 1
                     break
-        print(f"{a.kind} {sym}: 시 파일 {n}개 복사({hour_name(h0)} ~ {hour_name(h_end)}) · 지금 = {time.strftime('%F %T', time.gmtime(now))}Z")
+        print(f"{a.kind} {sym}: 시 파일 {n}개 복사({hour_name(h0)} ~ {hour_name(h_end)}) {time.time() - tc:.0f}초 · 지금 = {time.strftime('%F %T', time.gmtime(now))}Z · 상한 {a.limit}초")
         if n == 0:
             print("🔴시 파일이 없다")
             return 1
-        t0 = time.time()
-        r = subprocess.run([sys.executable, "-c", PY_RUNNER, str(ROOT), a.kind, sym, str(d / "dd" / sym), str(d / "py.sqlite"), str(now)],
-                           cwd=ROOT, capture_output=True, text=True)
-        print(f"  파이썬 {time.time() - t0:.0f}초 · 종료 {r.returncode} · {(r.stdout.strip().splitlines() or [''])[-1][:160]}")
-        if r.returncode:
-            print(r.stderr[-2000:])
+        runner = PY_RUNNER if not os.environ.get("REPLAY_FAKE_PY_SLEEP") else (   # 자체 시험: 느린 가짜 파이썬
+            "import sys, time\nfor i in range(int(sys.argv[7])):\n    print('봉', i, flush=True); time.sleep(1)\n")
+        rc, tail = stage("파이썬", [sys.executable, "-u", "-c", runner, str(ROOT), a.kind, sym, str(d / "dd" / sym), str(d / "py.sqlite"), str(now),
+                                    os.environ.get("REPLAY_FAKE_PY_SLEEP", "0")], deadline, cwd=ROOT)
+        if rc is None:
+            return 2
+        if rc:
+            print("\n".join(tail[-20:]))
             return 1
-        t0 = time.time()
         env = {k: v for k, v in os.environ.items() if not k.startswith("RTCOLLECT_")}
         env.update(RTCOLLECT_KIND=a.kind, OB_SYMBOL=sym, DD_ROOT=str(d / "dd"), OB_DB=str(d / "rs.sqlite"), RTCOLLECT_FAKE_NOW=repr(now),
                    TAPE_DB_PATH=str(ROOT / "data/hot/binance_tape.sqlite"))
-        r = subprocess.run([str(a.bin)], cwd=ROOT, env=env, capture_output=True, text=True)
-        print(f"  Rust {time.time() - t0:.0f}초 · 종료 {r.returncode}")
-        if r.returncode:
-            print(r.stderr[-2000:])
+        rc, tail = stage("Rust", [str(a.bin)], deadline, cwd=ROOT, env=env)
+        if rc is None:
+            return 2
+        if rc:
+            print("\n".join(tail[-20:]))
             return 1
         import shadow_tape as S
         S.TALLY[:] = [0, 0]
         S.INTENDED_EXTRA.pop("bars", None)   # 같은 시작점이면 «Rust 에만 봉»도 설명이 안 된다
         out = S.run(d / "py.sqlite", d / "rs.sqlite", show=5)
         print("\n".join("  " + x for x in out))
-        print(f"요약: 견준 {S.TALLY[0]:,} · 설명 못 함 {S.TALLY[1]:,}")
+        print(f"요약: 견준 {S.TALLY[0]:,} · 설명 못 함 {S.TALLY[1]:,} · 전체 {time.time() - T0:.0f}초")
         return 1 if S.TALLY[1] or not S.TALLY[0] else 0
     finally:
         if a.keep:

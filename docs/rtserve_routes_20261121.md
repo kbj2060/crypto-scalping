@@ -477,3 +477,26 @@ flow_scales_all(`flow_hour_scales_combos` · binance·okx(okx_tape · ETH-USDT-S
 
 ### 9-3. `/dashboard/live/` 버스터 메모
 `asset_buster` = 파일마다 (수정 시각 ns · 크기)가 그대로면 지난 값(ponytail 주석). http_parity 113 그대로 통과.
+
+### 서버 병행 대조 2회차 원인 가르기(2026-11-22 02:5x KST · 새 코어 · 같음 163/213 · 주소 71) -- 여덟째 조각
+
+**대조 도구 시점 맞춤**(`tools/shadow_http.py`): 두 요청을 `threading.Barrier` 로 같은 순간에 떠나게 · 원천 시각 칸(`STAMP_KEYS` = updated·updated_utc·updated_at·generated_at·asof·computed_at·last_update_ms·file_ts --
+맨 위와 한 단계 안 dict · 뉴스는 항목 `seen_ms` 최대)이 두 쪽 다르면 본문을 견주지 않고 «시점 다름 n»으로 따로 센다(같음 분모에서 뺀다) · `--selftest` 에 stamp 3건.
+
+| 주소 | 다른 칸 | 원인(코드로 확인) | 고칠 곳 |
+|---|---|---|---|
+| macro-calendar | updated_utc 16:08 대 17:38 | 원천 시각: 둘 다 swr `macro_calendar` 6시간/600(rtserve api3 `macro_calendar_cached` = 원본 load_macro_calendar 키·시간) -- 파이썬은 16:20 에 읽어 둔 판을 6시간 낸다 · rtserve 는 17:52 기동이라 17:38 판 | 없음(도구가 «시점 다름»으로) |
+| news | items 한 칸 밀림 | 원천 시각: rtserve 쪽에 새 항목 1건(seen_ms 1795283542 대 …173) -- 둘 다 swr 15/300 · 같은 정렬·중복 제거(첫 조각 정답지 통과) | 없음(seen_ms 로 «시점 다름») |
+| ob5m eth(1/3) | events_known · tilt_pct · walls 길이 | 시점: 진행 봉(live 줄 · 워커 5초마다 갈아 끼움)을 두 쪽이 다른 회차에 읽음 · swr 4/600 같음 | 없음 |
+| supply-1s sol | `.oi[][]` 창 시작 7초 · 길이 161 대 160 | 시점(구조적): 원본 링은 **행이 도착할 때만** «지금−660» 앞을 지운다(collect_oi_1s 656~659 · 수집기 flush 10초) -- 지움이 최대 flush 만큼 늦어 앞 몇 초를 더 낸다. rtserve 는 부를 때의 벽시계로 지운다 · 같은 순간이어도 flush 지연만큼 창 앞끝이 다를 수 있다 | 맞추려면 «마지막으로 새 행을 본 시각 − 660» 을 들고 있어야 한다(ponytail -- 화면은 누적선이라 앞 몇 초 차이는 안 보임) |
+| pred-record | recent[][] 한 칸 밀림 | 원천 교대: rt_dirpred 가 막 넘어간 회차 | 없음 |
+| footprint ×6 | `.bars[].levels[][]` 값 · `.agg` · `.dhl` 키·값 | **코어(rtcore) 값** -- 아래 | rtcore |
+
+**footprint 차이 -- rtcore 가 원본 어느 줄과 다른가**(dashboard/coin_flow.py · Read 로 본 줄):
+1. **재시작 뒤 빈 구간 채우기**: 원본 `footprint_backfill`(442~) 이 REST **aggTrades** 로 봉을 메우고(요청당 가중치 20 · 최신 봉부터 · 예산 1200), 그 체결을 `footprint_add(…, agg=True)` 로 넣는다 →
+   ① 그 봉은 `agg_bars` 에 들어가 응답 `agg: true`(footprint_add 381~382) ② aggTrade 한 줄 = 주문 하나로 **총량과 크기 구간(고래·리테일)을 같이** 센다(373~380 `if order or agg`).
+   rtcore 는 REST 없이 자기 복원(테이프·스냅숏)으로 채운다 → 같은 봉의 칸 값(특히 고래·리테일 열)·agg 표시가 다르다. 코어를 막 다시 띄운 직후 봉에서 몰려 나는 것이 이것.
+2. **실시간 체결의 크기 구간**: 원본은 `@trade` 를 총량으로 바로 넣고(369~372) 주문이 닫힐 때 구간을 따로 넣는다(같은 규칙: 가격·방향·ms 로 되묶기 · 343~353) -- rtcore 가 같은 되묶기를 하는지(복원 봉 밖에서도 값이 다르면 여기).
+3. **dhl**(봉 안 누적 델타 저·고·마감): 원본 api_footprint 의 fp_dhl(서버 · 테이프 hot 에서) vs 코어 판(rtcore footprint.rs 머리 주석 «테이프 가지가 파이썬과 다른 봉») -- sol 은 dhl 키가 파이썬에만(코어가 그 봉 dhl 을 안 셈).
+→ 전환 전에 정하려면: rtcore 가 재시작 공백을 aggTrades 로 메울지(REST 가중치 · 밴 가드) 아니면 «복원 봉은 다르다»를 받아들일지(사용자 결정).
+- (여덟째 조각 뒤) 결정: rtcore 는 재시작 공백을 REST aggTrades 로 메우지 않고 복원 봉에 `agg: true` 를 싣는다(코어 몫) → `shadow_http.py` 는 /api/footprint 에서 **한쪽이라도 agg 인 봉 시각을 두 쪽에서 빼고** 나머지만 글자 대조 · 뺀 수는 «복원 봉 n»(불일치 아님) · 자체 시험 2(한쪽만 agg 도 뺌 · agg 아닌 봉 차이는 그대로 잡힘).

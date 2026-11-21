@@ -10,7 +10,7 @@ trap cleanup EXIT
 FAIL=0; ok() { if eval "$2"; then echo "  ✓ $1"; else echo "  ✗ $1"; FAIL=1; fi; }
 mkdir -p "$R"/{scripts/ops,rtcollect/tools,data/hot/rtcollect,data/live,logs/supervisor,tmp/rtbin}
 cp "$SRC"/scripts/ops/{_supervise.sh,supervisor_trade_tape.sh,supervisor_rtcollect.sh} "$R/scripts/ops/"
-cp "$SRC"/rtcollect/tools/{takeover.sh,shadow_tape.py,shadow_duck.py} "$R/rtcollect/tools/"
+cp "$SRC"/rtcollect/tools/{takeover.sh,shadow_tape.py,shadow_duck.py,replay_book.py} "$R/rtcollect/tools/"
 # 가짜 파이썬 수집기: 감독(부모)이 먼저 죽었는지 SIGTERM 때 적는다 · 쓰는 파일 mtime 을 민다
 cat > "$R/scripts/live_trade_tape_collector_20260916.py" <<'X'
 P0=$PPID
@@ -22,6 +22,8 @@ X
 # 가짜 rtcollect(이름이 rtcollect 라 pgrep -x 에 잡힌다)
 cat > "$R/tmp/rtbin/rtcollect" <<'X'
 #!/bin/bash
+# 한 회차 종류(국채선물): 그림자 DB 를 파이썬 것과 같게 만들고 끝(진짜 Rust 한 회차 흉내) · 받은 인자를 적는다
+if [ "$RTCOLLECT_KIND" = treasury_futures ]; then echo "once $*" >> $R/order.log; cp "$R/data/hot/treasury_futures.sqlite" "$R/data/hot/rtcollect/treasury_futures.sqlite"; exit 0; fi
 trap 'echo "rs_term takeover=${RTCOLLECT_TAKEOVER:-0}" >> $R/order.log; exit 0' TERM
 echo "rs_start takeover=${RTCOLLECT_TAKEOVER:-0} db=${TAPE_DB_PATH:-shadow} rest=${RTCOLLECT_REST:-0} sym=$TAPE_SYMBOL" >> $R/order.log
 f="${TAPE_DB_PATH:-data/hot/rtcollect/binance_tape.sqlite}"
@@ -191,5 +193,34 @@ ok "넘긴 래스터 없으면 불통과" '[ "$RC" != 0 ]'
 cp crontab.txt crontab.keep; echo "@reboot sleep 100 && cd $R && x #takeover:raster_ETHUSDT" >> crontab.txt
 OUT="$(bash rtcollect/tools/takeover.sh check raster_archive 2>&1)"; RC=$?
 ok "넘긴 래스터 ETHUSDT 가 보이면 통과" '[ "$RC" = 0 ] && echo "$OUT" | grep -q "넘긴 래스터 종목 ETHUSDT"'
+mv crontab.keep crontab.txt
+echo "== 8. 재생 대조 상한: 느린 가짜 파이썬(20초)·상한 4초 → «시간 초과(파이썬 단계)» · 진행 줄이 파일에 바로"
+H="$(date -u -d '1 hour ago' +%Y-%m-%dT%H)"; mkdir -p data/live/orderflow/depthdiff/XRPUSDT; echo '{"_snapshot":null}' > "data/live/orderflow/depthdiff/XRPUSDT/$H.jsonl"
+G0=$SECONDS; OUT="$(REPLAY_LIMIT_S=4 REPLAY_FAKE_PY_SLEEP=20 CHECK_PY=python3 bash rtcollect/tools/takeover.sh check ob5m XRPUSDT 2>&1)"; RC=$?; GW=$((SECONDS - G0))
+echo "$OUT" | tail -4
+ok "상한 4초에서 끝남(${GW}초) · 불통과" '[ "$RC" != 0 ] && [ "$GW" -lt 15 ]'
+ok "«시간 초과(파이썬 단계»가 결과 파일에" 'grep -q "시간 초과(파이썬 단계" logs/supervisor/replay_book_ob5m_XRPUSDT.txt'
+ok "진행 줄이 그때그때 파일에(«[파이썬 N초] 봉 2»)" 'grep -qE "\[파이썬 [0-9]+초\] 봉 2" logs/supervisor/replay_book_ob5m_XRPUSDT.txt'
+ok "임시 폴더를 안 남김" '[ -z "$(ls -A data/live/rtcollect 2>/dev/null | grep replay_book)" ]'
+echo "== 9. 한 회차 종류(국채선물): check = Rust 한 번 → 파이썬과 대조 · go = 파이썬 예약 줄마다 같은 시각·인자의 Rust 줄"
+python3 - <<'PY'
+import os, sqlite3, time
+c = sqlite3.connect(f"{os.environ['R']}/data/hot/treasury_futures.sqlite")
+c.execute("CREATE TABLE treasury_fut_1m(ts_sec INTEGER NOT NULL, symbol TEXT NOT NULL, open REAL, high REAL, low REAL, close REAL, volume INTEGER, contract TEXT, PRIMARY KEY(symbol, ts_sec))")
+t = int(time.time()) // 60 * 60
+c.executemany("INSERT INTO treasury_fut_1m VALUES (?,?,1,1,1,1,1,'ZN')", [(t - 60 * k, "ZN=F") for k in range(100)])
+c.commit()
+PY
+cp crontab.txt crontab.keep
+M=$(( ( $((10#$(date +%M))) + 30 ) % 60 ))
+echo "* * * * * cd $R && python scripts/live_treasury_futures_collector_20261006.py --range 1d >> logs/t.log 2>&1" >> crontab.txt
+echo "$M * * * * cd $R && python scripts/live_treasury_futures_collector_20261006.py --range 5d >> logs/t.log 2>&1" >> crontab.txt
+C0="$(cat crontab.txt)"; N0="$(wc -l < crontab.txt)"
+OUT="$(bash rtcollect/tools/takeover.sh go treasury_futures 2>&1)"; RC=$?; echo "$OUT" | grep -E "바깥 요청|한 회차|check treasury|①|go treasury"
+ok "go 종료코드 0 · check 가 Rust 를 «--range 5d» 로 한 번 돌림" '[ "$RC" = 0 ] && grep -qx "once --range 5d" order.log'
+ok "바깥 요청 수를 찍음" 'echo "$OUT" | grep -q "바깥 요청(이 check 한 번): Yahoo"'
+ok "파이썬 두 줄 주석 · Rust 두 줄(같은 시각·같은 인자) · 줄 수 +2" '[ "$(wc -l < crontab.txt)" = $((N0 + 2)) ] && [ "$(grep -c "^#takeover:treasury_futures " crontab.txt)" = 2 ] && grep -q "^\* \* \* \* \* .*RTCOLLECT_TAKEOVER=1 .*TREASURY_FUTURES_DB=data/hot/treasury_futures.sqlite .*rtcollect --range 1d >> .* #takeover:treasury_futures$" crontab.txt && grep -q "^$M \* \* \* \* .*rtcollect --range 5d >> .* #takeover:treasury_futures$" crontab.txt'
+bash rtcollect/tools/takeover.sh back treasury_futures > /dev/null 2>&1
+ok "back 뒤 crontab 원래대로" '[ "$(cat crontab.txt)" = "$C0" ]'
 mv crontab.keep crontab.txt
 [ "$FAIL" = 0 ] && echo "takeover selftest OK" || { echo "takeover selftest 실패"; exit 1; }

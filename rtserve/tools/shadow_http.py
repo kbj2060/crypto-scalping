@@ -62,6 +62,35 @@ def get(base: str, path: str, timeout: float = 20.0):
     return st, ct.split(";")[0].strip(), body, time.perf_counter() - t0
 
 
+# 원천(파일·캐시)이 «언제 것»인지 나타내는 칸 -- 두 쪽 값이 다르면 서로 다른 순간의 원천을 읽은 것이라 본문을 견주지 않는다(«시점 다름»으로 따로 센다)
+STAMP_KEYS = ("updated", "updated_utc", "updated_at", "generated_at", "asof", "computed_at", "last_update_ms", "file_ts")
+
+
+def stamp(path: str, obj) -> tuple:
+    """주소의 원천 시각 묶음. 뉴스 = 항목 seen_ms 최대(목록 원천이 새 항목을 받은 순간) · 그 밖 = 맨 위와 한 단계 안 dict 의 STAMP_KEYS 값."""
+    if not isinstance(obj, dict):
+        return ()
+    if path.startswith("/api/news"):
+        return (max((it.get("seen_ms") or 0 for it in obj.get("items") or [] if isinstance(it, dict)), default=0),)
+    out = []
+    for k, v in obj.items():
+        if k in STAMP_KEYS and not isinstance(v, (dict, list)):
+            out.append((k, v))
+        elif isinstance(v, dict):
+            out += [(f"{k}.{k2}", v2) for k2, v2 in v.items() if k2 in STAMP_KEYS and not isinstance(v2, (dict, list))]
+    return tuple(sorted(out, key=lambda x: x[0]))
+
+
+def footprint_split(jp, jr) -> tuple:
+    """/api/footprint: 두 쪽 다 agg 가 아닌 봉만 남긴다(2026-11-22 결정 -- 코어 복원 봉 = agg true · 크기 열이 근사).
+    한쪽이라도 agg 인 봉 시각은 두 쪽에서 다 빼고 그 수를 돌려준다(«복원 봉 n» -- 불일치로 안 침)."""
+    if not (isinstance(jp, dict) and isinstance(jr, dict) and isinstance(jp.get("bars"), list) and isinstance(jr.get("bars"), list)):
+        return jp, jr, 0
+    agg = {b.get("time") for x in (jp, jr) for b in x["bars"] if isinstance(b, dict) and b.get("agg")}
+    keep = lambda x: {**x, "bars": [b for b in x["bars"] if not (isinstance(b, dict) and b.get("time") in agg)]}  # noqa: E731
+    return keep(jp), keep(jr), len(agg)
+
+
 def diff(a, b, path: str = "", out: list | None = None) -> list:
     """(칸 경로, 파이썬 값, rtserve 값) 목록 · IGNORE 이름은 뺀다 · 목록은 길이가 다르면 그 자체를 한 칸으로."""
     out = [] if out is None else out
@@ -123,14 +152,19 @@ def main() -> int:
     for p, per_coin in ROUTES + (MODEL_ROUTES if a.models else []):
         paths += [with_asset(p, c) for c in coins] if per_coin else [p]
     paths = [p for p in paths if a.only in p]
-    stats = defaultdict(lambda: {"n": 0, "same": 0, "fields": Counter(), "ex": {}, "tp": [], "tr": []})
+    stats = defaultdict(lambda: {"n": 0, "same": 0, "when": 0, "agg": 0, "fields": Counter(), "ex": {}, "tp": [], "tr": []})
     gap = 1.0 / a.rate
     print(f"대조: {len(paths)} 주소 × {a.rounds} 회 · 쪽마다 {a.rate}/초 · 파이썬 {py} · rtserve {rs}", flush=True)
     for _ in range(a.rounds):
         for p in paths:
             t0 = time.monotonic()
             res = {}
-            th = [threading.Thread(target=lambda k, b: res.__setitem__(k, get(b, p)), args=(k, b)) for k, b in (("py", py), ("rs", rs))]
+            gate = threading.Barrier(2)   # 두 요청이 같은 순간에 떠나게
+
+            def one(k, b):
+                gate.wait()
+                res[k] = get(b, p)
+            th = [threading.Thread(target=one, args=(k, b)) for k, b in (("py", py), ("rs", rs))]
             for t in th:
                 t.start()
             for t in th:
@@ -147,9 +181,19 @@ def main() -> int:
                 d.append(("(Content-Type)", cp, cr))
             if cp == "application/json" and cr == "application/json":
                 try:
-                    d += diff(json.loads(bp), json.loads(br))
+                    jp, jr = json.loads(bp), json.loads(br)
                 except ValueError as e:
                     d.append(("(JSON 깨짐)", str(e), ""))
+                else:
+                    if sp == sr and stamp(p, jp) != stamp(p, jr):
+                        s["when"] += 1
+                        s["ex"].setdefault("(원천 시각)", (stamp(p, jp), stamp(p, jr)))
+                        time.sleep(max(0.0, gap - (time.monotonic() - t0)))
+                        continue
+                    if p.startswith("/api/footprint?") or p == "/api/footprint":
+                        jp, jr, na = footprint_split(jp, jr)
+                        s["agg"] += na
+                    d += diff(jp, jr)
             elif bp != br:
                 d.append(("(바이트)", f"{len(bp)}B", f"{len(br)}B"))
             if not d:
@@ -158,17 +202,20 @@ def main() -> int:
                 s["fields"][f] += 1
                 s["ex"].setdefault(f, (x, y))
             time.sleep(max(0.0, gap - (time.monotonic() - t0)))
-    tot_same = tot_n = 0
+    tot_same = tot_n = tot_when = 0
     for p, s in stats.items():
         tot_same += s["same"]
-        tot_n += s["n"]
+        tot_n += s["n"] - s["when"]
+        tot_when += s["when"]
         ms = lambda xs, q: f"{pct(xs, q) * 1000:.1f}"  # noqa: E731
-        print(f"\n{p}\n  같음 {s['same']}/{s['n']} · 시간 ms 파이썬 중앙 {statistics.median(s['tp']) * 1000:.1f}·상위1% {ms(s['tp'], .99)}"
+        when = f" · 시점 다름 {s['when']}(원천 시각 예 {short(list(s['ex']['(원천 시각)']))})" if s["when"] else ""
+        when += f" · 복원 봉(agg · 견주지 않음) {s['agg']}" if s["agg"] else ""
+        print(f"\n{p}\n  같음 {s['same']}/{s['n'] - s['when']}{when} · 시간 ms 파이썬 중앙 {statistics.median(s['tp']) * 1000:.1f}·상위1% {ms(s['tp'], .99)}"
               f" · rtserve 중앙 {statistics.median(s['tr']) * 1000:.1f}·상위1% {ms(s['tr'], .99)}")
         for f, k in s["fields"].most_common(6):
             x, y = s["ex"][f]
             print(f"  다른 칸 {f} ×{k} · 파이썬 {short(x)} · rtserve {short(y)}")
-    print(f"\n합계: 같음 {tot_same}/{tot_n} (주소 {len(stats)})")
+    print(f"\n합계: 같음 {tot_same}/{tot_n} · 시점 다름(견주지 않음) {tot_when} (주소 {len(stats)})")
     return 0
 
 
@@ -184,6 +231,14 @@ def selftest() -> int:
         raise AssertionError("루프백 아님을 받았다")
     except SystemExit:
         pass
+    assert stamp("/api/risk-radar", {"updated": "a", "coins": {"eth": {"ts": 1}}, "x": {"generated_at": 5}}) == (("updated", "a"), ("x.generated_at", 5))
+    assert stamp("/api/news", {"items": [{"seen_ms": 3}, {"seen_ms": 9}]}) == (9,)
+    assert stamp("/api/state", [1]) == ()
+    a, b, n = footprint_split({"bars": [{"time": 1, "agg": True, "levels": [1]}, {"time": 2, "agg": False, "levels": [2]}]},
+                              {"bars": [{"time": 1, "agg": False, "levels": [9]}, {"time": 2, "agg": False, "levels": [2]}]})
+    assert n == 1 and diff(a, b) == [] and a["bars"] == [{"time": 2, "agg": False, "levels": [2]}], "한쪽만 agg 인 봉도 뺀다"
+    a, b, n = footprint_split({"bars": [{"time": 2, "agg": False, "levels": [2]}]}, {"bars": [{"time": 2, "agg": False, "levels": [3]}]})
+    assert n == 0 and diff(a, b) == [(".bars[].levels[]", 2, 3)], "agg 아닌 봉은 그대로 견준다(양성 대조)"
     print("selftest ok")
     return 0
 
