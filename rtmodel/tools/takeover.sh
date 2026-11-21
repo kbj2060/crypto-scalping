@@ -44,7 +44,8 @@ case "$NAME" in
               RUST="cd $ROOT && RT_RADAR_OUT=data/live RT_RADAR_TAKEOVER=1 bash scripts/ops/supervisor_rt_radar.sh" ;;
   rt_sr_lean) PYPAT="scripts/ops/supervisor_sr_lean.sh"
               RUST="cd $ROOT && RT_SR_OUT=data/live/sr_lean RT_SR_TAKEOVER=1 RT_SR_MODEL=data/live/rtmodel/sr_lean.json bash scripts/ops/supervisor_rt_sr_lean.sh >> logs/supervisor/rt_sr_lean_reboot.log 2>&1 &" ;;
-  rt_dirpred) PYPAT=""; RUST="" ;;
+  rt_dirpred) PYPAT=""   # 파이썬 몫 = 대시보드 서버 안(pred_record_loop) -- 표식 파일로 끈다(아래 MARK)
+              RUST="cd $ROOT && RT_DIR_OUT=data/live RT_DIR_TAKEOVER=1 RT_DIR_MODELS=data/live/rtmodel RT_DIR_SRC_DIR=data/live bash scripts/ops/supervisor_rt_dirpred.sh >> logs/supervisor/rt_dirpred_reboot.log 2>&1 &" ;;
   all)        ;;
   *) die "모르는 이름: $NAME" 2 ;;
 esac
@@ -141,6 +142,36 @@ record_check() {   # $1 = 대조기 종료코드 · 나머지 = 대조 한 줄
   mkdir -p "$SH"
   if [ "$rc" = 0 ]; then echo "$(now_s) $*" > "$SH/check.ok"; say "통과 · $*"; else rm -f "$SH/check.ok"; say "🔴불통과 · $*"; fi
   return "$rc"
+}
+
+# ── rt_dirpred: 대시보드 서버의 적중 기록·상대 강도를 끄는 표식 파일(dashboard/pred_record.py rust_on · 서버 재시작 없이 다음 회차부터)
+MARK="$MODELS/pred_record_rust.on"
+go_dirpred() {
+  check_ok_fresh
+  grep -qF "pred_record_rust.on" dashboard/pred_record.py 2>/dev/null || die "대시보드에 표식 파일 스위치가 아직 없다(dashboard/pred_record.py rust_on) -- 배포 먼저" 1
+  local ph=$(( $(now_s) % 300 ))
+  { [ "$ph" -ge 60 ] && [ "$ph" -le 240 ]; } || die "5분 회차 경계 근처(지금 ${ph}초) -- 파이썬 이번 회차(+20초)가 끝나고 다음 회차 전(60~240초)에" 1
+  [ -n "$(pids_env rt_dirpred RT_DIR_OUT data/live)" ] && die "rt_dirpred(data/live)가 이미 돈다" 1
+  grep -qF "$TAG" <<< "$(cron_get)" && die "이미 넘긴 상태($TAG 줄 있음) -- back 먼저" 1
+  # 순서: 표식(파이썬이 이번 순간부터 안 씀) → Rust 시작(첫 덧붙이기 때 파일 꼬리를 읽어 파이썬이 쓴 줄은 다시 안 씀) · 다음 회차가 Rust 첫 회차 = 끊김·중복 없음
+  mkdir -p "$MODELS"; date -u +%FT%TZ > "$MARK"; say "표식 $MARK 만듦(파이썬 pred_record_loop·pred_record_safe 쓰기 멈춤 · _xsec 는 xsec_latest.json 을 읽음)"
+  setsid nohup bash -c "${RUST%&}" > /dev/null 2>&1 < /dev/null &
+  local old bak; old=$(cron_get); bak="$SH/crontab.bak.$(date +%Y%m%d%H%M%S)"; mkdir -p "$SH"; printf '%s\n' "$old" > "$bak"
+  printf '%s\n@reboot sleep 120 && %s # %s\n' "$old" "$RUST" "$TAG" | $CRONTAB_CMD - || die "crontab 설치 실패(백업 $bak)" 1
+  [ "$(wc -l <<< "$(cron_get)")" -eq $(( $(wc -l <<< "$old") + 1 )) ] || die "crontab 줄 수가 안 맞는다(백업 $bak)" 1
+  say "crontab: @reboot Rust 1줄 추가(파이썬 몫은 cron 이 아니라 표식으로 끔) · 백업 $bak"
+  local i r=""; for i in $(seq 1 30); do r=$(pids_env rt_dirpred RT_DIR_OUT data/live); [ -n "$r" ] && break; sleep 1; done
+  [ -n "$r" ] || die "Rust 워커가 안 떴다 -- back 을 검토(표식이 있어 지금은 아무도 안 쓴다)" 1
+  local x="$LIVE/xsec_latest.json" before; before=$(stat -c %Y "$x" 2>/dev/null || echo 0)
+  say "Rust 워커 pid $r · 다음 5분 회차(최대 ${DIRPRED_WATCH_S:-360}초)에 xsec_latest.json(Rust 만 씀) 갱신을 지켜봄"
+  WATCH_S="${DIRPRED_WATCH_S:-360}" watch_file "$x" "$before" && say "✅Rust 회차가 xsec_latest.json·pred_record 를 갱신 -- 화면 «4h 상대 강도»는 이 파일을 읽는다" || die "다음 회차에 갱신이 없다 -- back 을 검토" 1
+}
+back_dirpred() {
+  local r
+  r=$(pids_argv "_supervise.sh" "$LIVE/.supervisor_rt_dirpred.lock"); [ -n "$r" ] && stop_pids $r
+  r=$(pids_env rt_dirpred RT_DIR_OUT data/live); [ -n "$r" ] && stop_pids $r
+  rm -f "$MARK"; say "표식 지움(파이썬이 다음 회차부터 다시 씀 -- 처음 쓸 때 파일 꼬리를 읽어 Rust 가 쓴 줄은 다시 안 씀)"
+  cron_back
 }
 
 # ── 이름별 check
@@ -281,8 +312,8 @@ case "$NAME:$CMD" in
   rt_regime:back|rt_dirfwd:back|rt_radar:back) cron_back ;;
   rt_sr_lean:go)    go_sr_lean ;;
   rt_sr_lean:back)  back_sr_lean ;;
-  rt_dirpred:go|rt_dirpred:back)
-    die "파이썬 몫이 대시보드 서버 프로세스 안(server.py pred_record_loop)이라 서버를 끄지 않고는 못 넘긴다 -- server.py 에 루프를 끄는 스위치가 생기면 그때(check 는 된다)" 3 ;;
+  rt_dirpred:go)    go_dirpred ;;
+  rt_dirpred:back)  back_dirpred ;;
   *:status) say "crontab 태그 줄: $(cron_get | grep -cF "$TAG") · check.ok: $(cat "$SH/check.ok" 2>/dev/null || echo 없음)"
             case "$NAME" in rt_dirfwd) tail -n 3 "$LIVE/eth_direction_forward.jsonl" 2>/dev/null | cut -c1-120; tail -n 2 "logs/supervisor/rt_dirfwd_$(date +%Y%m%d).log" 2>/dev/null ;; esac ;;
   *) die "모르는 명령: $CMD" 2 ;;

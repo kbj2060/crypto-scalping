@@ -47,6 +47,7 @@ fn dirshort_payload_parity() {
     let oos: Vec<(&str, Vec<f64>)> = NAMES.iter().map(|(_, nm)| (*nm, col(&fx["oos"][*nm]))).collect();
     let mut arts: HashMap<String, Art> = HashMap::new();
     let mut bad = vec![];
+    let mut sqlite_n = 0;
     for s in fx["sets"].as_array().unwrap() {
         let coin = s["coin"].as_str().unwrap();
         let art = arts.entry(coin.into()).or_insert_with(|| Art::from_json(&rtmodel::read_json::<Value>(&d.join(format!("ds_{}.json", coin.to_lowercase()))).unwrap()).unwrap());
@@ -65,6 +66,27 @@ fn dirshort_payload_parity() {
         };
         let pay = if coin == "ETH" { payload_book(art, &f, 13, &oos, &book) } else { payload(art, &f, 13, &oos) };
         same(&pay, &s["payload"], &format!("{coin}/{}", s["name"].as_str().unwrap()), &mut bad);
+        if coin == "ETH" {
+            // 같은 행을 진짜 sqlite 파일(원본 정답지 생성기와 같은 표 꼴)에 넣고 book_sqlite 로 읽어도 같은 payload
+            let db = std::env::temp_dir().join(format!("rt_book_{}_{}.sqlite", std::process::id(), sqlite_n));
+            sqlite_n += 1;
+            let _ = std::fs::remove_file(&db);
+            let con = rusqlite::Connection::open(&db).unwrap();
+            con.execute(&format!("CREATE TABLE bars (t INTEGER PRIMARY KEY, warm INTEGER, {})", BOOKF.iter().map(|c| format!("\"{c}\" REAL")).collect::<Vec<_>>().join(", ")), []).unwrap();
+            for (t, r) in s["book"].as_object().unwrap() {
+                let vals: Vec<rusqlite::types::Value> = std::iter::once(rusqlite::types::Value::Integer(t.parse().unwrap()))
+                    .chain(std::iter::once(rusqlite::types::Value::Integer(r[0].as_i64().unwrap())))
+                    .chain(r.as_array().unwrap()[1..].iter().map(|x| x.as_f64().map_or(rusqlite::types::Value::Null, rusqlite::types::Value::Real))).collect();
+                con.execute(&format!("INSERT INTO bars VALUES ({})", vec!["?"; vals.len()].join(", ")), rusqlite::params_from_iter(vals)).unwrap();
+            }
+            drop(con);
+            let rd = book_sqlite(&db).unwrap();
+            same(&payload_book(art, &f, 13, &oos, &rd), &s["payload"], &format!("{coin}/{} sqlite", s["name"].as_str().unwrap()), &mut bad);
+            let _ = std::fs::remove_file(&db);
+            rusqlite::Connection::open(&db).unwrap().execute("CREATE TABLE other (x INTEGER)", []).unwrap();   // bars 표 없음 → 원본처럼 실패
+            assert!(book_sqlite(&db).is_err(), "bars 표 없으면 Err");
+            let _ = std::fs::remove_file(&db);
+        }
         let n = f.ts.len();
         let rows: Vec<usize> = s.get("ok_rows").and_then(Value::as_array).map_or((0..13).collect(), |a| a.iter().map(|x| x.as_u64().unwrap() as usize).collect());
         for (h, seeds) in &art.models {

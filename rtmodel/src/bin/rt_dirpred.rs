@@ -2,10 +2,11 @@
 //! 5분 봉이 닫힌 뒤 +20초마다 코인(ETH·BTC·SOL·XRP · 사이 3초)마다 15분·1시간(dir_short) → 4h(dir4h) 예측을 내고
 //! 적중 기록(pred_record/{코인}.jsonl -- 전진 검정 fwd_dirshort 가 읽는 꼴)과 마지막 payload(dir4h_<코인>.json · dir_short_<코인>.json)를 쓴다.
 //! 회차 끝에 9코인 상대 강도(pred_record/xsec.jsonl · 원본 xsec_record)와 최신 스냅숏(xsec_latest.json -- 원본은 프로세스 안 _xs_latest)을 쓴다.
-//! 🔴ETH 15분·1시간(75열판)은 계산(dirshort::payload_book)은 옮겼으나 호가 깊이 sqlite 읽기가 없어 이 루프는 건너뛴다.
+//! ETH 15분·1시간 = 75열판(65 + 호가 깊이 워커 sqlite 10열 · dirshort::payload_book + book_sqlite · 원본처럼 회차마다 읽기 전용으로 연다).
 //!
 //! 환경변수(기본값):
 //!   RT_DIR_OUT      data/live/rt_dirpred     쓰는 곳. 🔴data/live(= 파이썬 서버의 data/live/pred_record)면 종료코드 2(전환 때만 RT_DIR_TAKEOVER=1)
+//!   RT_DIR_BOOK_DB  data/live/bookdepth/ethusdt.sqlite   (ETH 15분·1시간의 호가 깊이 -- 원본 BOOK_DB)
 //!   RT_DIR_MODELS   <RT_DIR_OUT>             dir4h_<코인>.json(tools/export_dir4h.py) · ds_<코인>.json·oos_<코인>.json(tools/export_dirshort.py)
 //!   RT_DIR_SRC_DIR  (있으면) 원본 joblib 디렉터리 -- 회차마다 모델 JSON 보다 새 joblib 이 있으면 그 모델은 건너뛴다(옛 JSON 값을 내지 않음 · 로그 한 줄)
 //!   RT_DIR_REST     https://fapi.binance.com
@@ -63,6 +64,7 @@ fn main() {
         die(2, &format!("🔴{} 는 파이썬 서버의 기록 자리다(pred_record) -- 그림자는 다른 경로에(기본 data/live/rt_dirpred). 전환이면 RT_DIR_TAKEOVER=1", out.display()));
     }
     let models = PathBuf::from(env("RT_DIR_MODELS", &out.to_string_lossy()));
+    let book_db = PathBuf::from(env("RT_DIR_BOOK_DB", "data/live/bookdepth/ethusdt.sqlite"));
     let src_dir: Option<PathBuf> = std::env::var("RT_DIR_SRC_DIR").ok().map(PathBuf::from);
     let (base, ban) = (env("RT_DIR_REST", "https://fapi.binance.com"), PathBuf::from(env("RT_SR_BAN_FILE", "data/live/binance_ban_until")));
     let fixed: Option<i64> = std::env::var("RT_DIR_NOW_MS").ok().map(|v| v.parse().unwrap_or_else(|_| die(2, "RT_DIR_NOW_MS")));
@@ -70,9 +72,6 @@ fn main() {
     let a4: Vec<(String, dir4h::Art)> = COINS.iter().filter_map(|c| dir4h::Art::load(&models.join(format!("dir4h_{}.json", c.to_lowercase()))).ok().map(|a| (c.to_string(), a))).collect();
     let mut ass: Vec<(String, dirshort::Art, Vec<(&str, Vec<f64>)>)> = vec![];
     for c in COINS {
-        if c == "ETH" {
-            continue; // ponytail: ETH 75열판(dirshort::payload_book)은 호가 깊이 sqlite 읽기가 필요 -- rtmodel 에 sqlite 의존성이 없어 아직 안 붙임(rtcollect 쪽 읽기 함수가 생기면 넘긴다)
-        }
         let (Ok(m), Ok(o)) = (read_json::<Value>(&models.join(format!("ds_{}.json", c.to_lowercase()))), read_json::<Value>(&models.join(format!("oos_{}.json", c.to_lowercase())))) else { continue };
         let art = dirshort::Art::from_json(&m).unwrap_or_else(|e| die(2, &format!("ds_{c}: {e}")));
         let oos = dirshort::NAMES.iter().map(|(_, nm)| (*nm, o[*nm].as_array().map_or(vec![], |a| a.iter().map(|b| f64::from_bits(b.as_u64().unwrap_or(0))).collect()))).collect();
@@ -106,7 +105,8 @@ fn main() {
                         let Some((_, art, oos)) = ass.iter().find(|x| x.0 == c) else { return Ok(()) };
                         let fr = rs.frames(&mut g, now, now as f64, c)?;
                         let dc = daily_closes(&mut g, now, c)?;
-                        (&rs, dirshort::payload(art, &dir4h::build_features(&dir4h::frames_for(&fr, c), &dc)?, 13, oos))
+                        let f = dir4h::build_features(&dir4h::frames_for(&fr, c), &dc)?;
+                        (&rs, if c == "ETH" { dirshort::payload_book(art, &f, 13, oos, &dirshort::book_sqlite(&book_db)?) } else { dirshort::payload(art, &f, 13, oos) })
                     } else {
                         let Some((_, art)) = a4.iter().find(|x| x.0 == c) else { return Ok(()) };
                         let fr = r4.frames(&mut g, now, now as f64, c)?;
