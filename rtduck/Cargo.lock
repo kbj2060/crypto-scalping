@@ -1484,6 +1484,7 @@ version = "0.1.0"
 dependencies = [
  "duckdb",
  "rtcollect",
+ "rusqlite",
  "serde_json",
  "tokio",
 ]

@@ -44,7 +44,16 @@ echo "$CT" | grep -q 'supervisor_bybit_tape.sh' && up bybit_tape
 echo "$CT" | grep -q 'supervisor_bybit_liq.sh' && up bybit_liq
 echo "$CT" | grep -q 'supervisor_binance_ctx.sh' && up binance_ctx
 echo "$CT" | grep -q 'supervisor_xyz100.sh' && up xyz
-echo "$CT" | grep -q 'supervisor_hyperliquid_book_ticker.sh' && up hl_ctx
+# 하이퍼리퀴드 호가: 줄마다 코인 하나. HL_BT_CTX_ONLY=1 줄 = 맥락만(hl_ctx) · 아니면 전체(hl_bt = 호가 .bt + 맥락).
+#   🔴hl_bt 를 하나라도 띄우면 hl_ctx 는 안 띄운다(둘 다 data/hot/rtcollect/hl_ctx.sqlite 에 쓴다 -- 쓰는 프로세스는 하나로). 그때 맥락만 줄의 코인은 그림자에서 빠진다(출력에 적는다).
+HLB=0; HLC=""
+while IFS= read -r l; do [ -n "$l" ] || continue
+  c="$(val "$l" HL_BT_COIN)"; c="${c:-ETH}"
+  if [ "$(val "$l" HL_BT_CTX_ONLY)" = 1 ]; then HLC="${HLC:+$HLC,}$c"; else up hl_bt "HL_BT_COIN=$c"; HLB=$((HLB + 1)); fi
+done <<< "$(echo "$CT" | grep 'supervisor_hyperliquid_book_ticker.sh')"
+if [ -n "$HLC" ]; then
+  if [ "$HLB" -eq 0 ]; then up hl_ctx "HL_BT_COIN=$HLC"; else echo "hl_ctx($HLC) 생략 -- hl_bt 가 같은 hl_ctx.sqlite 에 쓴다"; fi
+fi
 # 호가 변화: 스냅숏 REST 필수(없으면 첫 줄이 null 이라 ob5m 이 북을 못 세운다)
 while IFS= read -r l; do [ -n "$l" ] || continue
   s="$(val "$l" DD_SYMBOL)"; up depth "DD_SYMBOL=${s:-ethusdt}" RTCOLLECT_REST=1
@@ -59,6 +68,44 @@ while IFS= read -r l; do [ -n "$l" ] || continue
   s="$(echo "$l" | grep -oE 'supervisor_ob5m\.sh [A-Z0-9]+' | awk '{print $2}')"; up ob5m "OB_SYMBOL=${s:-ETHUSDT}"
 done <<< "$(echo "$CT" | grep 'supervisor_ob5m.sh')"
 echo "$CT" | grep -q 'supervisor_bookdepth.sh' && up bookdepth OB_SYMBOL=ETHUSDT
+
+# ── rtduck(DuckDB 로 쓰는 수집기 · 따로 된 실행 파일) ──
+# 웹소켓만 쓰는 종류(hl_trades)는 띄운다. 🔴REST 종류(oi_lsratio · hl_positions)는 기본 꺼짐 -- 파이썬과 합쳐 호출이 두 배다(SHADOW.md §12).
+#   켜려면 RTDUCK_SHADOW_REST=1 bash shadow_start.sh (그때 실행 파일에도 RTDUCK_REST=1 을 넘긴다).
+DBIN="$ROOT/tmp/rtbin/rtduck"
+upd() { # upd <종류> [VAR=VAL ...]
+  local kind="$1"; shift
+  N=$((N + 1))
+  if [ "$MODE" = cron ]; then
+    echo "@reboot sleep $((100 + N * 5)) && cd $ROOT && RTDUCK_BIN=$DBIN $* bash scripts/ops/supervisor_rtduck.sh $kind >> logs/supervisor/rtduck_reboot.log 2>&1 &"
+  else
+    env RTDUCK_BIN="$DBIN" "$@" nohup setsid bash scripts/ops/supervisor_rtduck.sh "$kind" >> logs/supervisor/rtduck_boot.log 2>&1 < /dev/null &
+    sleep "${GAP:-8}"
+  fi
+}
+if [ -x "$DBIN" ]; then
+  if [ "$MODE" = up ]; then
+    mkdir -p "$SH/duck_hot" "$SH/duck_live"
+    [ -e data/hot/rtduck ] || ln -s "$SH/duck_hot" data/hot/rtduck
+    [ -e data/live/rtduck ] || ln -s "$SH/duck_live" data/live/rtduck
+    [ "$(readlink -f data/hot/rtduck)" = "$SH/duck_hot" ] && [ "$(readlink -f data/live/rtduck)" = "$SH/duck_live" ] || { echo "rtduck 출력 폴더가 $SH 를 가리키지 않음 -- rtduck 은 안 띄운다"; DBIN=""; }
+  fi
+  if [ -n "$DBIN" ]; then
+    while IFS= read -r l; do [ -n "$l" ] || continue
+      c="$(val "$l" HL_COINS)"; upd hl_trades "HL_COINS=${c:-ETH}"
+    done <<< "$(echo "$CT" | grep 'supervisor_hyperliquid_trades.sh')"
+    if [ "${RTDUCK_SHADOW_REST:-}" = 1 ]; then
+      echo "$CT" | grep -q 'supervisor_oi_lsratio_worker.sh' && upd oi_lsratio RTDUCK_REST=1 BOT_SYMBOLS=ETHUSDT,BTCUSDT,SOLUSDT,XRPUSDT
+      while IFS= read -r l; do [ -n "$l" ] || continue
+        c="$(val "$l" HL_POS_COINS)"; upd hl_positions "HL_POS_COINS=${c:-ETH}" RTDUCK_REST=1 HL_ROOT="$ROOT/data/live/rtduck/orderflow/hyperliquid"
+      done <<< "$(echo "$CT" | grep 'supervisor_hyperliquid_positions.sh')"
+    else
+      echo "rtduck REST 종류(oi_lsratio · hl_positions) 안 띄움 -- RTDUCK_SHADOW_REST=1 이면 띄운다(호출 두 배)"
+    fi
+  fi
+else
+  echo "rtduck 실행 파일 없음($DBIN) -- rtduck 종류는 건너뜀"
+fi
 
 [ "$MODE" = cron ] && exit 0
 sleep 45

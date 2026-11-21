@@ -12,6 +12,13 @@ pub const FLUSH_N: usize = 500;
 pub const FLUSH_SEC: f64 = 20.0;
 pub const KEEP_ON_FAIL: usize = 200_000;
 
+/// 수집기 벽시계. 시험 전용 `RTDUCK_FAKE_START`(epoch 초)가 있으면 «그 시각에 시작한 것처럼» 민다(자정 넘기 시험) -- 운영에서는 비워 둔다.
+pub fn wall() -> f64 {
+    static OFF: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    let now = rtcollect::rest::wall_s();
+    now + *OFF.get_or_init(|| std::env::var("RTDUCK_FAKE_START").ok().and_then(|v| v.parse::<f64>().ok()).map_or(0.0, |t| t - now))
+}
+
 /// (coin, ts_ms, tid, hash, side, px, sz, buyer, seller)
 pub type Trade = (String, i64, i64, String, String, f64, f64, String, String);
 
@@ -240,16 +247,16 @@ pub fn replay(inp: &Value, root: &Path) -> Vec<String> {
 impl rtcollect::net::Hl for HlTrades {
     const CONNECT: std::time::Duration = std::time::Duration::from_secs(10);
     fn open(&mut self, _now: f64) -> Vec<String> {
-        self.on_open(rtcollect::rest::wall_s())
+        self.on_open(wall())
     }
-    fn text(&mut self, _now: f64, wall: f64, t: &str) -> Result<(), Reconnect> {
-        self.on_text(wall, t)
+    fn text(&mut self, _now: f64, _wall: f64, t: &str) -> Result<(), Reconnect> {
+        self.on_text(wall(), t)
     }
     fn idle(&mut self) -> Result<(), Reconnect> {
         Ok(())
     }
     fn fail(&mut self) -> f64 {
         // 서버가 닫음·접속 실패의 이름은 뼈대가 넘겨주지 않는다 -- ConnectionClosedError 로 적는다(글자 처리 예외면 그 이름)
-        self.on_fail(rtcollect::rest::wall_s(), "ConnectionClosedError")
+        self.on_fail(wall(), "ConnectionClosedError")
     }
 }

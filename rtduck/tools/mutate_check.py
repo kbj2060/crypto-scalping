@@ -18,6 +18,12 @@ M = [
     ("HL체결 2일 전 파일 압축", "src/hl_trades.rs", "wall - 3.0 * 86400.0", "wall - 2.0 * 86400.0"),
     ("HL체결 20초 → 10초 플러시", "src/hl_trades.rs", "pub const FLUSH_SEC: f64 = 20.0;", "pub const FLUSH_SEC: f64 = 10.0;"),
     ("HL체결 공백 = 마지막 끊김 시각", "src/hl_trades.rs", "        if self.down.is_none() {\n            self.down", "        if true {\n            self.down"),
+    ("HL포지션 429 뒤에도 간격 잠", "src/hl_positions.rs", "                    continue; // 원본: 간격 잠 없이 다음 주소", "                    env.sleep(REQ_GAP_S);\n                    continue;"),
+    ("HL포지션 청산가 여유 0.5% → 0", "src/hl_positions.rs", "pub const LIQ_TOL: f64 = 0.005;", "pub const LIQ_TOL: f64 = 0.0;"),
+    ("HL포지션 본 tid 다시 적음", "src/hl_positions.rs", ".filter(|r| !self.seen_tids.contains(&r.1))", ".filter(|_| true)"),
+    ("HL포지션 청산 주소 대소문자 가림", "src/hl_positions.rs", ".to_lowercase() != user.to_lowercase()", " != user"),
+    ("HL포지션 순위 거꾸로", "src/hl_positions.rs", "agg.sort_by(|a, b| b.1.partial_cmp(&a.1)", "agg.sort_by(|a, b| a.1.partial_cmp(&b.1)"),
+    ("HL포지션 파싱 실패 주소는 응답 수에서 뺌", "src/hl_positions.rs", "                    ok += 1;\n                    let ts", "                    let ts"),
     ("HL체결 주소 소문자 안 함", "src/hl_trades.rs", "py_str(&users[0]).to_lowercase()", "py_str(&users[0])"),
 ]
 
