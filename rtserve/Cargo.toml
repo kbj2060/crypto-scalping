@@ -33,5 +33,12 @@ tokio-tungstenite = "0.26"
 # 셋째 조각: /api/liquidation-5m-signal 이 tail_risk DuckDB(rtduck market_data 가 씀)를 읽는다 · 일봉 풋프린트는 lake·소급본 parquet.
 #   rtduck 와 같은 판·같은 기능(=1.10501.0 = DuckDB 1.5.1 · bundled · parquet) -- C++ 묶음 빌드가 무겁다(처음 한 번).
 duckdb = { version = "=1.10501.0", features = ["bundled", "parquet"] }
+# 넷째 조각: 요청 때 계산하는 모델 핸들러(src/model.rs)의 계산은 rtmodel::handlers · REST 는 rtmodel 실행 파일들과 같은 ureq(rustls · 새 크레이트 없음)
+rtmodel = { path = "../rtmodel" }
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+# tests/order_proxy.rs: route 정답지 중 «바깥을 안 부르는» 사례 고르기(rtorder/tests/door_bin.rs 의 pure_cases 와 같은 판정 · 그 시험 도우미를 그대로 쓴다)
+rtorder = { path = "../rtorder" }
 
 # 시험은 dev 판 그대로(전에는 opt-level 1 -- duckdb 를 넣은 뒤로 C++ 묶음을 판마다 한 번 더 빌드하게 돼 뺐다)
