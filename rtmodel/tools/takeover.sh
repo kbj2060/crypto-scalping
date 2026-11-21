@@ -187,7 +187,7 @@ check_radar() {
   RT_RADAR_OUT="$SH/run" RT_RADAR_NOW_MS=$(( US * 1000 )) "$BIN/rt_radar" > "$SH/run/out.txt" 2>&1
   [ -f "$SH/run/risk_radar_latest.json" ] || { cat "$SH/run/out.txt"; record_check 1 "실행 실패"; return 1; }
   # data_age_s = 벽시계 몫(달라도 됨) · 실수 끝자리는 X@β BLAS 합 순서로 1e-12 상대까지(REMAINING.md «서버 판과의 차이»)
-  out=$("$PY" "$CMP" json "$J" "$SH/run/risk_radar_latest.json" --skip data_age_s,updated --rtol 1e-12); record_check $? "latest $out · 1분봉 캐시 $(ls "$SH/run/cache" | wc -l)파일"
+  out=$("$PY" "$CMP" radar "$J" "$SH/run/risk_radar_latest.json" --skip data_age_s,updated --rtol 1e-12); record_check $? "latest $out · 1분봉 캐시 $(ls "$SH/run/cache" | wc -l)파일"
 }
 check_dirpred() {
   local D="$LIVE/pred_record" T out o2

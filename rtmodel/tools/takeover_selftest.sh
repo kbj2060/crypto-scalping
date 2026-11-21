@@ -91,5 +91,16 @@ ok "종료코드 3 · crontab 그대로" '[ "$rc" = 3 ] && cmp -s "$F/crontab.tx
 echo "6. export-if-stale: joblib 이 JSON 보다 새것이면 내보내기 시도"
 sleep 1; touch "$L/regime_band_h48_model.joblib"; out=$(PY=/bin/false $TK all export-if-stale 2>&1); echo "$out"
 ok "낡음 감지 → 내보내기 시도 → 실패 문구(옛 값을 내지 않음)" '[[ "$out" == *"[rt_regime] 모델 JSON 낡음"* ]] && [[ "$out" == *"[rt_regime] 🔴내보내기 실패"* ]]'
+echo "7. rt_radar 대조: 가격 다른 코인은 마지막 봉 칸만 빼고, 가격 같은 코인은 전부"
+printf '%s' '{"updated": "a", "params": "p", "coins": {"ETH": {"ts": "t", "price": 1686.55, "band80_pct": 0.9077, "iv60": true}, "BTC": {"ts": "t", "price": 9.0, "band80_pct": 0.5}}}' > "$F/pa.json"
+printf '%s' '{"updated": "b", "params": "p", "coins": {"ETH": {"ts": "t", "price": 1686.59, "band80_pct": 0.9074, "iv60": true}, "BTC": {"ts": "t", "price": 9.0, "band80_pct": 0.5}}}' > "$F/pb.json"
+out=$(python3 "$R/rtmodel/tools/takeover_cmp.py" radar "$F/pa.json" "$F/pb.json" --skip updated --rtol 1e-12); rc=$?; echo "$out"
+ok "ETH 가격만 다름 → 통과 · 뺀 칸·이유 출력" '[ "$rc" = 0 ] && [[ "$out" == *"가격 다른 코인 ETH(파이썬 1686.55 대 Rust 1686.59)"*"뺌"* ]]'
+sed -i 's/"band80_pct": 0.5}}}/"band80_pct": 0.51}}}/' "$F/pb.json"
+out=$(python3 "$R/rtmodel/tools/takeover_cmp.py" radar "$F/pa.json" "$F/pb.json" --skip updated --rtol 1e-12); rc=$?
+ok "가격 같은 코인(BTC)의 칸이 다르면 불통과 · 예 출력" '[ "$rc" = 1 ] && [[ "$out" == *"BTC.band80_pct: 파이썬 0.5 대 Rust 0.51"* ]]'
+sed -i 's/"price": 9.0, "band80_pct": 0.51/"price": 9.1, "band80_pct": 0.51/' "$F/pb.json"
+out=$(python3 "$R/rtmodel/tools/takeover_cmp.py" radar "$F/pa.json" "$F/pb.json" --skip updated --rtol 1e-12); rc=$?
+ok "모든 코인 가격이 다르면 불통과" '[ "$rc" = 1 ] && [[ "$out" == *"모든 코인 가격이 다름"* ]]'
 echo "== 통과 $PASS · 실패 $FAIL"
 [ "$FAIL" = 0 ]
