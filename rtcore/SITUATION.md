@@ -53,15 +53,13 @@
 
 `compute_situation` 의 나머지(카드30 모델·`_flow_read_ctx`·`fr.read` 융합·장부 쓰기·`vol_mult`)는 REST 5분봉 하루치·모델 파일·Bybit DB 가 필요하다 → 남음(rtmodel·rtserve 쪽).
 
-### veto — 결정이 필요하다(2026-11-21 · 안 옮김)
-- 지시는 «restore.rs 가 기동 때 이미 REST 복원을 하니 같은 길로 5분봉 720개를 받자»였다. 그런데 restore.rs 는 **REST 를 쓰지 않는다.** 머리 주석과 RESTORE.md §2(라)에 적혀 있다: 2026-09-26 418 밴 27분 — IP 한도를 봇과 공유한다. 원천은 테이프·맥락 SQLite 뿐이다.
-- REST 길을 열 때:
-  - 비용: 기동 때 흐름 엔진 종목 8개 × klines(limit 1000, 가중치 5) 1회 = 8회 · 가중치 40.
-  - 원본과 값이 같다. 원본도 같은 klines 다.
-  - 대신 «코어는 REST 안 씀» 원칙이 깨진다. 개발기에서 코어를 띄우면 서버와 같은 IP 로 REST 를 부른다(메모 «로컬 바이낸스 REST = IP 밴») → rtcollect 처럼 `RTCORE_REST=1` 일 때만 부르게 해야 한다.
-- REST 없이 갈 때: 테이프 `trade_tape_1s` 의 price_bin(ETH 0.1)으로는 klines 고가·저가·종가를 비트까지 못 만든다. hot 보관이 60시간(720봉)을 덮는지도 모른다.
-- 어느 길이든 원본 식은 pandas `rolling(144).mean()` · `ewm(alpha=1/144, adjust=False)` 이다. 비트 대조하려면 pandas rolling 합의 갱신 규칙(더하고 빼기 · 보정 합)을 그대로 옮겨야 한다.
-- → 어느 길로 갈지 사용자 결정을 기다린다.
+### veto — 응답 서버 몫(결정 2026-11-21)
+- 코어에 두지 않는다. 코어는 REST 를 쓰지 않는 원칙을 지킨다(2026-09-26 418 밴 · restore.rs 머리 주석).
+- veto(`trend_veto_rows` · 5분봉 720개 SMA144·ATR ewm)는 응답 서버(rtserve)의 «요청 때 REST» 묶음에서 klines 를 받는 쪽이 센다. 그 값을 코어의 `situation` 과 합친다(코어 `missing` 의 "veto" 를 채움).
+
+### 의도한 차이 — vol60 마지막 비트(2026-11-21 결정)
+- 원본은 1초 dict 를 넣은 차례로 더한다. 늦은 체결이 새 초를 만들면 그 초가 끝에 온다. 코어는 초 순서로 더한다.
+- 정답지에서 25 / 5,411틱이 마지막 비트만 다르다. 시험은 1e-9 상대 허용으로 대조하고, 다른 틱 수에 상한(틱 수의 1/20)을 건다.
 
 ## 3. rtserve 두 엔드포인트의 코어 몫 — 결론
 
@@ -74,9 +72,8 @@
 - Bybit: 원본은 Bybit 청산 DB(`bybit_liq_events` · 수집 시작 bstart 뒤 온전한 봉만)를 읽는다. 코어도 Bybit 청산 사건을 받는다(BYBIT_SYMBOLS 만). 그러나 경계가 «코어가 받기 시작한 뒤»라 재시작 직후 봉이 원본과 다르다. 재시작 복원(restore.rs read_bybit_liq)이 660초만 메우기 때문이다. 같게 하려면 복원 창을 144봉으로 늘려야 한다.
 - HL(Hyperliquid, `_with_hl_liq`): 코어가 받지 않는 원천이다 → rtcollect/rtserve 몫.
 - 결론: rtserve 가 코어 `Liq5m`(바이낸스)에 OKX·Bybit 5분 누적을 코어에서 받고, HL 은 자기가 읽어 합치는 구조가 맞다.
-- 🔴남음(2026-11-21 · 안 함): OKX·Bybit 5분 누적·«첫 봉» 경계·복원 144봉. 재시작 직후까지 원본과 같으려면 OKX 는 `okx_footprint_restore`(coin_flow.py 910~971)를 옮겨야 한다.
-  - 테이프를 15초 뒤부터 5분마다 8번(35분) 다시 읽는다.
-  - `verify_1m` 로 온전한 분만 이어 붙여 `first_bar` 를 앞으로 당긴다. 청산은 덮은 구간만 앞에 넣는다(deque 5,000 자리만큼).
-  - 같은 함수가 `okx_oi_5m` 복원도 한다.
-  - 코어에는 OKX 풋프린트 봉이 없다. 이 «온전한 봉» 판정을 OKX 테이프 `okx_tape_footprint`(129~203)째로 옮겨야 같은 경계가 나온다.
-  - Bybit 은 원본이 요청마다 DB(`bybit_liq_events` · bstart)를 읽는다. 코어 복원 창을 144봉으로 늘리고 bstart 를 «DB 첫 사건»으로 같게 잡으면 된다.
+- 2026-11-21 셋째 조각: OKX·Bybit 5분 누적 · «첫 봉» · 재시작 복원을 원본과 같게 옮겼다 → `Liq5m.okx`·`Liq5m.bybit`(RESTORE.md §10). 재시작 직후 OKX OI 5분봉도 같다.
+- OKX 풋프린트를 그리는 자리:
+  - 화면(app.js)은 2026-11-02 부터 진행 봉에 OKX 를 안 더한다.
+  - 원본 `/api/footprint` 는 닫힌 봉에 OKX 칸을 더해 내보낸다(`bar > first_bar` 봉만). 시장 맥락 `okx30` 도 OKX 봉을 쓴다.
+  - 코어 풋프린트 메시지는 아직 바이낸스만이다(RESTORE.md §10 🔴).

@@ -166,8 +166,9 @@ async fn t1_events_in_order_with_three_stamps() {
     let mut got = vec![];
     while got.len() < 5 {
         let m = next(&mut ws).await;
-        if !matches!(m.ev, Event::Supply1s(_) | Event::Footprint(_) | Event::Prices { .. }) {
+        if !matches!(m.ev, Event::Supply1s(_) | Event::Footprint(_) | Event::Prices { .. } | Event::Situation(_) | Event::Micro(_)) {
             got.push(m); // 1초 수급·풋프린트는 supply1s_parity.rs·footprint_parity.rs 가 본다 · 모든 종목 가격(Prices, s="*")은 quote_parity.rs
+                         // 1초 박자로 세는 상황·미시 값(ex_ms 0)은 situation_parity.rs·micro_parity.rs -- 안 거르면 박자가 걸릴 때만 실패한다(2026-11-21 15회 중 5회)
         }
     }
     let mut last_seq = snap.seq;

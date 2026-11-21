@@ -210,6 +210,17 @@ pub struct Supply {
     /// OKX OI 5분봉 [처음, 끝](coin_flow.py okx_oi_5m · 288봉) · 마지막 밀기 뒤 바뀐 봉.
     pub(crate) okx_oi5m: BTreeMap<i64, [f64; 2]>,
     pub(crate) okx_oi5m_dirty: std::collections::BTreeSet<i64>,
+    /// OKX 풋프린트 봉(coin_flow.py okx_bars · 2026-11-21) -- 칸은 바이낸스 봉과 같은 [매수, 매도, 고래매수, 고래매도, 리테일매수, 리테일매도].
+    pub(crate) okx_fp: crate::footprint::Bars,
+    /// okx_fp["first_bar"](이 봉 «뒤»만 OKX 를 더한다 · 0 = 아직 OKX 체결 없음) · okx_fp["t0_ms"](시작 뒤 첫 OKX 체결).
+    pub(crate) okx_first_bar: i64,
+    pub(crate) okx_t0_ms: i64,
+    pub(crate) okx_fr: crate::restore::OkxFpRestore,
+    /// OKX·Bybit 5분봉 청산(liquidation-5m-history 몫)이 바뀌었다 -- 다음 밀기에 통째로 싣는다.
+    pub(crate) okx_liq5m_dirty: bool,
+    /// Bybit 5분봉 청산 [롱USD, 숏USD, 건수](server.py bybit_liq_events 보관 288봉) · 수집 시작 ms(표 전체 첫 청산 · 없으면 첫 실시간 사건).
+    pub(crate) bybit5m: BTreeMap<i64, [f64; 3]>,
+    pub(crate) bybit_start_ms: Option<i64>,
     okx_last_oi_ms: i64,
     pub(crate) okx_liq: VecDeque<LiqEv>,
     pub(crate) bybit: VecDeque<LiqEv>,
@@ -265,6 +276,13 @@ impl Supply {
             okx_oi: BTreeMap::new(),
             okx_oi5m: BTreeMap::new(),
             okx_oi5m_dirty: Default::default(),
+            okx_fp: crate::footprint::Bars::new(symbol),
+            okx_first_bar: 0,
+            okx_t0_ms: 0,
+            okx_fr: Default::default(),
+            okx_liq5m_dirty: false,
+            bybit5m: BTreeMap::new(),
+            bybit_start_ms: None,
             okx_last_oi_ms: 0,
             okx_liq: VecDeque::new(),
             bybit: VecDeque::new(),
@@ -353,6 +371,7 @@ impl Supply {
             }
             Venue::Okx => {
                 push_capped(&mut self.okx_liq, e);
+                self.okx_liq5m_dirty = true;
                 newest(&self.okx.sec) - SUPPLY_1S_SECONDS
             }
             Venue::Bybit => {
@@ -366,6 +385,9 @@ impl Supply {
                 if dup {
                     return None;
                 }
+                bybit5m_add(&mut self.bybit5m, ts_ms, long, e.usd, now_us);
+                self.bybit_start_ms.get_or_insert(ts_ms);
+                self.okx_liq5m_dirty = true;
                 if s > lo {
                     let i = self.bybit.partition_point(|f| f.ts_ms <= ts_ms);
                     self.bybit.insert(i, e);
@@ -395,6 +417,18 @@ impl Supply {
     /// 현물·OKX 테이커 주문 하나(가격·수량 0 이하는 feed 가 걸렀다). coin_flow.py collect_spot_flow 887~898 · collect_okx_flow 767~777.
     pub fn flow(&mut self, venue: Venue, px: f64, qty: f64, sell: bool, ts_ms: i64, now_us: i64) -> Option<Supply1s> {
         let (whale_min, retail_max) = (self.whale_min, self.retail_max);
+        if venue == Venue::Okx {
+            // coin_flow.py 778~796: 봉 칸(라이브) · 첫 체결이 first_bar·t0
+            let bar = crate::footprint::bar_of(ts_ms);
+            if self.okx_first_bar == 0 {
+                (self.okx_first_bar, self.okx_t0_ms) = (bar, ts_ms);
+                self.okx_liq5m_dirty = true;
+            }
+            if self.okx_fp.keep(bar, now_us.div_euclid(1000)) {
+                self.okx_fp.add(bar, px, qty, sell, false, whale_min, retail_max);
+                self.okx_fp.add(bar, px, qty, sell, true, whale_min, retail_max);
+            }
+        }
         let lane = match venue {
             Venue::Spot => &mut self.spot,
             Venue::Okx => &mut self.okx,
@@ -467,21 +501,26 @@ impl Supply {
     /// 5분봉 강제청산 원 전부(스냅숏). 기록 시작 봉과 그 앞은 싣지 않는다(liq_5m_payload 의 b <= from_bar).
     pub fn liq5m_all(&self) -> Option<crate::proto::Liq5m> {
         self.fp.spec?;
-        Some(self.liq5m_rows(self.liq5m.keys().copied()))
+        let mut m = self.liq5m_rows(self.liq5m.keys().copied());
+        self.put_venues(&mut m);
+        Some(m)
     }
 
     /// 마지막 밀기 뒤 바뀐 봉만(없으면 None).
     pub fn liq5m_delta(&mut self) -> Option<crate::proto::Liq5m> {
         self.fp.spec?;
         let keys = std::mem::take(&mut self.liq5m_dirty);
-        let m = self.liq5m_rows(keys.into_iter());
-        (!m.bars.is_empty()).then_some(m)
+        let mut m = self.liq5m_rows(keys.into_iter());
+        if std::mem::take(&mut self.okx_liq5m_dirty) {
+            self.put_venues(&mut m);
+        }
+        (!m.bars.is_empty() || m.okx.is_some()).then_some(m)
     }
 
     fn liq5m_rows(&self, keys: impl Iterator<Item = i64>) -> crate::proto::Liq5m {
         let from_bar = (self.liq5m_from as i64).div_euclid(LIQ5M_BAR_S) * LIQ5M_BAR_S;
         let bars = keys.filter(|b| *b > from_bar).filter_map(|b| self.liq5m.get(&b).map(|a| (b, r2(a.0[0]), r2(a.0[1]), a.1, a.2, a.3))).collect();
-        crate::proto::Liq5m { from_s: self.liq5m_from, bars }
+        crate::proto::Liq5m { from_s: self.liq5m_from, bars, okx: None, bybit: None }
     }
 
     /// 풋프린트 스냅숏(파이썬 /api/footprint since=0 의 봉·칸). 표에 없는 종목은 None.
@@ -577,5 +616,43 @@ impl Supply {
             }
         }
         touched.push(s);
+    }
+}
+
+/// Bybit 5분봉에 사건 하나(merge_bybit_liq 의 add) · 288봉 보관(bybit_liq_events since = 지금 − 288봉).
+pub(crate) fn bybit5m_add(store: &mut BTreeMap<i64, [f64; 3]>, ts_ms: i64, long: bool, usd: f64, now_us: i64) {
+    let b = ts_ms.div_euclid(1000).div_euclid(300) * 300;
+    let a = store.entry(b).or_insert([0.0; 3]);
+    a[if long { 0 } else { 1 }] += usd;
+    a[2] += 1.0;
+    let since = now_us.div_euclid(1_000_000) - 288 * 300;
+    store.retain(|&k, _| k + 300 > since);
+}
+
+impl Supply {
+    /// liquidation-5m-history 의 OKX·Bybit 몫(server.py api_liquidation_5m_history 3963~3998 · merge_bybit_liq):
+    /// OKX = 링(okx_liq_events) 사건을 봉마다 더한 것 중 first_bar «뒤» 봉 · Bybit = 수집 시작이 걸친 봉 «뒤» 봉. 행 = [봉, 롱USD, 숏USD, 건수].
+    fn put_venues(&self, m: &mut crate::proto::Liq5m) {
+        let (of, okx, bf, bybit) = self.venue_liq5m();
+        m.okx = Some(crate::proto::VenueLiq { from: (of != 0).then_some(of), bars: okx });
+        m.bybit = Some(crate::proto::VenueLiq { from: bf, bars: bybit });
+    }
+
+    pub fn venue_liq5m(&self) -> (i64, Vec<crate::proto::VenueLiqRow>, Option<i64>, Vec<crate::proto::VenueLiqRow>) {
+        let mut okx: BTreeMap<i64, [f64; 3]> = BTreeMap::new();
+        if self.okx_first_bar != 0 {
+            for e in &self.okx_liq {
+                let b = e.ts_ms.div_euclid(1000).div_euclid(300) * 300;
+                if b > self.okx_first_bar {
+                    let a = okx.entry(b).or_insert([0.0; 3]);
+                    a[if e.long { 0 } else { 1 }] += e.usd;
+                    a[2] += 1.0;
+                }
+            }
+        }
+        let row = |(&b, a): (&i64, &[f64; 3])| (b, a[0], a[1], a[2] as i64);
+        let bfirst = self.bybit_start_ms.map(|s| s.div_euclid(1000).div_euclid(300) * 300);
+        let bybit = bfirst.map_or_else(Vec::new, |f| self.bybit5m.range(f + 1..).map(row).collect());
+        (self.okx_first_bar, okx.iter().map(row).collect(), bfirst, bybit)
     }
 }
