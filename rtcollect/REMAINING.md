@@ -75,14 +75,15 @@
 - 뉴스: 동기 루프라 한 피드 시간초과(20초)가 나머지를 민다(:126) · 저장 실패해도 polls 에 status 200·n 이 남는다(:127·146-150) · sec.gov 는 연락처 UA 를 요구하는데 브라우저 UA(:50).
 
 
-## 5. 서버에서 옮겨 켤 때 순서 (초안 · 2026-11-21 열한째 조각 · 실행하지 않음 -- 사용자 승인 뒤 하나씩)
+## 5. 서버에서 옮겨 켤 때 순서 (2026-11-21 열셋째 조각 · 실행 = `rtcollect/tools/takeover.sh` · 사용자 «기다리지 말고 바로바로 반영 배포»)
 
-**원칙**: 한 번에 하나 · 전환 뒤 최소 24시간 지켜보고 다음 · 위(원천)부터 아래(읽는 것)로 · 전진 검정이 읽는 것은 맨 끝에 따로 승인.
+**원칙**: 한 번에 하나 · 대기 기간은 두지 않는다(7일 병행·24시간 관찰 없음) -- 대신 «넘기기 직전 check 통과 → go → 60초 확인 → 다음 스트림 넘기기 전 check 한 번 더» ·
+값 보존을 보인 뒤에만 옛 것을 끈다(줄이는 것은 기다리는 시간이지 대조가 아니다) · 위(원천)부터 아래(읽는 것)로.
 쓰는 쪽은 경로를 안 바꾼다(읽는 쪽 server.py·감시·seal 은 그대로) -- Rust 가 원래 파일을 이어 쓴다(이어 써도 같은 행 · 각 조각에서 확인).
 
 **한 스트림의 걸음**(그림자 → 대조 → 전환 → 되돌리기)
 1. 그림자: Rust 를 그림자 경로(기본값)로 띄운다(상주 = `supervisor_rtcollect.sh`·`supervisor_rtduck.sh` · 예약 = SHADOW.md §15 줄). REST 는 원칙적으로 끈다(SHADOW.md 배수 표).
-2. 대조 통과 기준: 그림자 N 일(상주 3일 · 예약 = 그 주기 셋 이상) 동안 매일 두 파일을 사본으로 떠서 대조 -- **설명 못 하는 차이 0** 이 연속 2일.
+2. 대조 통과 기준: `takeover.sh check <종류> [<종목>]` -- 그림자가 떠 있던 창 전체에서 **설명 못 하는 차이 0** · 견준 것 > 0(N 일을 기다리지 않는다).
    설명되는 차이 = SHADOW.md §11 의도한 차이 #1~#22 · 재연결 공백(gaps 끼리 빼고) · REST 를 끈 그림자에서만 빈 몫. 도구: `shadow_tape.py`(테이프·맥락) · 표 덤프 비교(나머지) · seal 은 `seal(dry_run=True)` 전부 건너뜀.
 3. 전환: (가) 그 Rust 그림자 감독 → 프로세스 끄기 (나) 파이썬 감독 bash → 파이썬 수집기 끄기 · crontab 줄 주석 (다) Rust 를 `RTCOLLECT_TAKEOVER=1`/`RTDUCK_TAKEOVER=1` + 원래 경로 변수로 띄움(REST 쓰는 종류는 `*_REST=1`) ·
    crontab 줄 바꿈 (라) 첫 쓰기·신선도(감시 `ops_watchdog`)·대시보드 카드 눈 확인 · 매니페스트 `multicoin_collectors.json` 의 runner 를 rtcollect/rtduck 로(SHADOW.md §9 «감시에 넣을 때»).
@@ -108,3 +109,34 @@
 | 13 | rtduck `seal` | 🔴lake = 전진 검정 다수의 원천 · hot 정리 | 맨 끝 · 원천이 모두 안정된 뒤 · `SEAL_LAKE=data/lake SEAL_STATUS=data/live/ops_watchdog/seal_status.json RTDUCK_TAKEOVER=1`(hot 정리가 켜진다) · 첫 날은 `--dry-run` 으로 «전부 건너뜀» 확인 뒤 |
 
 남는 파이썬(옮기지 않음): macro_bias_forward · macro_daily(키 자리 결정 대기) · 월간 학습 · 감시 묶음(R7) · 모델 서빙(rtmodel 몫).
+
+## 6. 넘겨도 되는가 (2026-11-21 열셋째 조각 · `takeover.sh` 종류별)
+
+`bash rtcollect/tools/takeover.sh check|go|back <종류> [<종목>]` -- 걸음은 §5. go 는 check 를 다시 돌려 통과일 때만 바꾼다. 끊긴 초는 go 가 «파이썬 수집기 종료 → 출력 파일 mtime 첫 전진»으로 잰다.
+«그림자» 칸 = `shadow_start.sh` 기본으로 뜨는가(예약 셋은 `shadow_start.sh cron` 줄을 조정자가 등록했을 때만). 뜨지 않은 종류는 check 가 «그림자 출력 없음»으로 불통과 → go 안 됨.
+
+| 차례 | 종류 | 대조(check) | 끊김 예상 | 전진 검정 · 끊긴 구간이 남는 곳 | REST(넘긴 뒤) | 그림자 |
+|---|---|---|---|---|---|---|
+| 1 | `xyz` | shadow_tape 표 셋 · ctx 0.5% 기준 | 수 초 | — · 재접속 때 candleSnapshot 이 1분봉을 메움 | 켬(재접속 때만) | 뜸 |
+| 1 | `hl_ctx` | shadow_tape hl_asset_ctx(그림자 파일 = hl_ctx_only 가 있으면 그것) | 수 초 | — · 그 초가 빔(gaps 없음) | 없음 | 뜸(CTX_ONLY 줄 전부를 한 번에 넘김 · 전체 모드 호가 수집기가 서버에 있으면 거부) |
+| 2 | `depth <SYM>` | shadow_tape --depth(첫·끝 시 빼고 프레임 글자) | 수 초 | fwd_dirshort(간접) · 시 파일의 `_gap` 줄 · ob5m·bookdepth·iceberg 는 끊긴 자리를 끊김으로 읽음 | 켬(스냅숏 · 시간당 1) | 뜸 |
+| 3 | `ob5m <SYM>` · `bookdepth` · `iceberg <SYM>` | shadow_tape bars·marks / --events | 0(depthdiff 파일을 이어 읽는다 -- 다시 뜨면 따라잡음) | bookdepth = fwd_dirshort 피쳐 · 봉 값이 이어진다 | 없음 | 뜸 |
+| 4 | `raster <SYM>` | shadow_tape --raster(§5 SHADOW 99%·0.95 기준) | 수 초 + 스냅숏 | — · 그 초 행이 무효 | 켬(스냅숏) | 뜸 · 🔴넘긴 종목은 파이썬 `_purge_old` 가 멈춘다 -- 전 종목을 넘긴 뒤 `raster_archive` 예약 줄을 TAKEOVER 로(스크립트 밖 · 손으로) |
+| 5 | `hl_trades <코인>` | shadow_duck 날짜 파일마다 열쇠 (coin, tid) | 수 초 | — · gaps 표 | 없음 | 뜸 |
+| 6 | `market_data` | shadow_duck 행 수(1% 안) | 수 초 | — · 미시구조 그 초 행 없음 · dashboard_state 몇 초 묵음 | 켬(OI·premium 10초) | 뜸(REST 끔 -- 행 수만 견줄 수 있다) |
+| 6 | `oi_lsratio` | shadow_duck 열쇠 (ts, symbol) | 0(5분 봉을 REST 로 다시 받는다) | — | 켬 | 🔴안 뜸(REST ×2) -- 넘기려면 잠깐 `RTDUCK_SHADOW_REST=1` 로 그림자를 띄워 봉 몇 개를 쌓은 뒤 |
+| 7 | `bybit_tape` · `okx_tape` · `binance_tape` · `binance_spot` | shadow_tape trade_tape_1s 등(gaps·backfill·verify 분 뺌) | 수 초 | 🔴whale_duel1(바이낸스+OKX) · gaps 표 `ws_reconnect` · 바이낸스·OKX 는 REST 복구가 메움(backfill_1m) | 켬 | 뜸 · 같은 파일에 쓰는 다른 파이썬이 있으면 거부 |
+| 8 | `bybit_liq` · `okx_ctx` · `binance_ctx` | shadow_tape 표마다 | 수 초 | 🔴liqmap_fwd · 청산·마크 그 초 빔(바이낸스 맥락은 gaps 표 없음 -- 로그 시각으로) | okx_ctx 켬(ctVal) · binance_ctx 켬(OI 540/분 -- 파이썬이 꺼져 두 배 아님) · bybit_liq 없음 | 뜸(binance_ctx 의 oi_1s 는 그림자에서 비어 «한쪽이 비었다» -- 견주지 않음) |
+| 9 | `liqmap_scorer` · `soxl_weekend` · `cboe_chain` | — | — | 🔴전진 장부(liqmap_fwd·soxl_wknd·soxl_own_iv) | — | 스크립트 밖 -- 장부 이중 줄 위험이라 손으로(§5 9) |
+| 10 | `liq_tab`(예약) | shadow_tape --json(generated_ms 빼고 글자) | 0(다음 시각부터 Rust) | — | 켬(klines 코인당 1/시) | 예약 줄 등록 때만 |
+| 10 | `treasury_futures` · `macro_5m` | — | — | — | — | 스크립트 밖 -- 그림자 없음(Yahoo ×2) |
+| 11 | `news` | — | — | — | — | 스크립트 밖 -- 그림자 없음(바깥 8곳 ×2) |
+| 12 | `deribit` | shadow_duck option_trades·블록(체인·요약 표는 그림자에서 비어 행 수만) | 수 초 + 20초 플러시 | — · 재기동 REST 백필이 메움(gaps.backfilled) | 켬(백필·10분 체인·매시 대조) | 뜸(체결 WS 만) |
+| 13 | `seal`(예약) | shadow_duck --lake(그림자 lake 의 날짜 범위 · 파일마다 지문) | 0(다음 날 시각부터 Rust) | 🔴lake = 전진 검정 다수 · hot 정리가 켜진다(TAKEOVER) -- 첫 실행은 `--dry-run` 으로 «전부 건너뜀» 확인 권함 | 없음 | 예약 줄 등록 때만 |
+| — | `hl_bt` · `hl_positions` | — | — | — | — | 안 다룸: hl_bt = 파이썬 짝이 Pi · hl_positions = 조회 순간마다 값이 달라 견줄 방법 없음(REST ×2) |
+
+go 가 하는 일(상주): ① crontab 백업 `logs/supervisor/crontab_backup_<날짜시각>_takeover_<태그>.txt` ② 파이썬 @reboot 줄과 그림자 줄 앞에 `#takeover:<태그> ` · 끝에 Rust 줄(` #takeover:<태그>` 로 끝남) · 줄 수 +1·바뀐 줄 수 검증 뒤 적용 ·
+multicoin 매니페스트의 그 항목을 `taken_over` 로(백업 `logs/supervisor/multicoin_backup_*` -- `resume` 이 파이썬을 다시 띄우지 않게) ③ 파이썬 `_supervise.sh` 부모 → 수집기 SIGTERM(10초·30초 안에 안 죽으면 멈춤) · 다시 떴는지 확인
+④ 그림자 감독 → Rust ⑤ `*_TAKEOVER=1` + 진짜 경로 + (REST 종류) `*_REST=1` + 파이썬 environ 의 종목 값 그대로 ⑥ 60초: 프로세스 · mtime · 새 로그의 panic·crash-looping·exited 수.
+back 은 이 태그가 바꾼 줄만 되돌린다(그 뒤 다른 종류를 넘겼어도 그 줄은 그대로) · 백업과 같은지 찍는다 · 파이썬은 주석 풀린 @reboot 줄의 명령으로 다시 띄운다 · 그림자는 다시 안 띄운다.
+시험: `bash rtcollect/tools/takeover_selftest.sh`(가짜 crontab·가짜 프로세스 · 진짜 crontab 은 안 건드림).

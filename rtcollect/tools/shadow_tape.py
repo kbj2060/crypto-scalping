@@ -35,6 +35,7 @@ from collections import Counter
 from pathlib import Path
 
 TOL = 1e-4
+TALLY = [0, 0]   # --summary: [견준 수, 설명 못 하는 차이 수] -- 모든 비교 함수가 더한다
 TABLES = {  # 표 → (시각 열, 시각 단위 ms 인가, 열쇠 열 또는 None(행 묶음), 빼는 열)
     "trade_tape_1s": ("ts_sec", False, ("symbol", "ts_sec", "price_bin"), ()),
     "bybit_liquidations": ("ts_ms", True, None, ("recv_ms",)),
@@ -177,6 +178,11 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
             for k in sorted(extra, key=repr)[: max(0, show - len(first))]:
                 first.append(f"{tag} {k}")
     rs_note = f"(의도한 차이 후보 -- {INTENDED_EXTRA[t]})" if t in INTENDED_EXTRA and only_rs else ""
+    bad = n_bad + only_py + (0 if t in INTENDED_EXTRA else only_rs)
+    if t == "hl_xyz_ctx_1s" and only_py + only_rs <= 0.005 * n_cmp:   # 받은 초가 1칸 밀린 합침 -- §5 의 0.5% 기준
+        bad = n_bad
+    TALLY[0] += n_cmp
+    TALLY[1] += bad
     line = (f"{t}: 비교 {n_cmp:,}행 · 불일치 {n_bad:,} · 파이썬에만 {only_py:,} · Rust에만 {only_rs:,}{rs_note} · 범위 [{s0}, {s1}) 초 · "
             f"뺀 (종목,분) {len(skipped):,}")
     return line + "".join(f"\n    {x}" for x in first)
@@ -214,6 +220,8 @@ def compare_depth(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~") -> li
         fa, fb = Counter(x for x in a[h] if not x.startswith('{"_')), Counter(x for x in b[h] if not x.startswith('{"_'))
         ga, gb = sum(x.startswith('{"_gap"') for x in a[h]), sum(x.startswith('{"_gap"') for x in b[h])
         sa, sb = sum(x.startswith('{"_snapshot":{') for x in a[h]), sum(x.startswith('{"_snapshot":{') for x in b[h])
+        TALLY[0] += sum((fa & fb).values())
+        TALLY[1] += sum((fa - fb).values()) + sum((fb - fa).values())
         res.append(f"depth {h}: 같은 프레임 {sum((fa & fb).values()):,} · 파이썬에만 {sum((fa - fb).values()):,} · Rust에만 {sum((fb - fa).values()):,} · "
                    f"_gap 파이썬 {ga}·Rust {gb} · 스냅숏 있음 파이썬 {sa}·Rust {sb}")
     return res or ["depth: 두 쪽에 같은 시 파일이 없다"]
@@ -245,12 +253,17 @@ def compare_raster(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~") -> l
         same_hdr = sum(a[t][:2] == b[t][:2] for t in both)
         fr = sorted(sum(x == y for x, y in zip(struct.iter_unpack("<f", a[t][2]), struct.iter_unpack("<f", b[t][2]))) / 240 for t in both if a[t][:2] == b[t][:2])
         med = fr[len(fr) // 2] if fr else None
+        TALLY[0] += len(both)
+        TALLY[1] += int(bool(both) and (same_hdr < 0.99 * len(both) or med is None or med < 0.95))   # §5 제안 기준을 못 넘은 시 하나 = 1
         res.append(f"raster {h}: 두 쪽 유효 초 {len(both):,} · bin_lo·mid 같음 {same_hdr:,} · 칸 같음 비율 중앙 {med} · 파이썬만 유효 {len(a.keys() - b.keys()):,} · Rust만 유효 {len(b.keys() - a.keys()):,}")
     return res or ["raster: 두 쪽에 같은 시 파일이 없다"]
 
 
 def compare_events(py: Path, rs: Path, lo=None, hi=None, show: int = 3) -> list[str]:
     import json
+
+    if lo is None:   # 기본 = Rust 첫 사건부터(그림자가 뜨기 전 파이썬 사건은 견주지 않는다)
+        lo = min((json.loads(ln)["t_end"] for ln in rs.read_text(encoding="utf-8").splitlines() if ln.strip()), default=None)
 
     def read(p: Path) -> Counter:
         c: Counter = Counter()
@@ -259,9 +272,33 @@ def compare_events(py: Path, rs: Path, lo=None, hi=None, show: int = 3) -> list[
                 c[ln] += 1
         return c
     a, b = read(py), read(rs)
+    TALLY[0] += sum((a & b).values())
+    TALLY[1] += sum((a - b).values()) + sum((b - a).values())
     first = [f"파이썬에만 {x}" for x in sorted(a - b)[:show]] + [f"Rust에만 {x}" for x in sorted(b - a)[:show]]
     return [f"events: 같은 줄 {sum((a & b).values()):,} · 파이썬에만 {sum((a - b).values()):,} · Rust에만 {sum((b - a).values()):,}"
             + "".join(f"\n    {x}" for x in first)]
+
+
+def compare_json(py_dir: Path, rs_dir: Path, glob: str, drop: str) -> list[str]:
+    """두 폴더의 같은 이름 JSON(glob) -- drop 이름의 열쇠를 어느 깊이에서든 빼고 같은지(청산 탭 = generated_ms)."""
+    import json
+
+    def strip(v):
+        if isinstance(v, dict):
+            return {k: strip(x) for k, x in v.items() if k != drop}
+        return [strip(x) for x in v] if isinstance(v, list) else v
+    res = []
+    for rp in sorted(rs_dir.glob(glob)):
+        pp = py_dir / rp.name
+        if not pp.exists():
+            TALLY[1] += 1
+            res.append(f"{rp.name}: 파이썬 쪽 없음")
+            continue
+        same = strip(json.loads(pp.read_text())) == strip(json.loads(rp.read_text()))
+        TALLY[0] += 1
+        TALLY[1] += 0 if same else 1
+        res.append(f"{rp.name}: {'같음' if same else '다름'}")
+    return res or [f"json: Rust 쪽에 {glob} 가 없다"]
 
 
 def selftest() -> None:
@@ -333,6 +370,17 @@ def selftest() -> None:
         (Path(d) / "b.jsonl").write_text('{"t_end":60,"side":1}\n{"t_end":120,"side":1}\n')
         ev = compare_events(Path(d) / "a.jsonl", Path(d) / "b.jsonl", lo=60, hi=120)[0]
         assert ev.startswith("events: 같은 줄 1 · 파이썬에만 1 · Rust에만 0"), ev   # t_end 120 = 창 밖
+        (Path(d) / "jp").mkdir()
+        (Path(d) / "jr").mkdir()
+        (Path(d) / "jp/liq_tab_eth.json").write_text('{"generated_ms":1,"x":[{"generated_ms":5,"y":2}]}')
+        (Path(d) / "jr/liq_tab_eth.json").write_text('{"generated_ms":2,"x":[{"generated_ms":6,"y":2}]}')
+        (Path(d) / "jr/liq_tab_btc.json").write_text('{"y":1}')
+        TALLY[:] = [0, 0]
+        js = compare_json(Path(d) / "jp", Path(d) / "jr", "liq_tab_*.json", "generated_ms")
+        assert js == ["liq_tab_btc.json: 파이썬 쪽 없음", "liq_tab_eth.json: 같음"] and TALLY == [1, 1], (js, TALLY)
+        TALLY[:] = [0, 0]
+        run(p, r)
+        assert TALLY[1] > 0, TALLY   # 위 표들의 불일치가 요약에 잡힌다
         # 읽기 전용: 두 파일은 그대로
         try:
             ro(p).execute("DELETE FROM gaps")
@@ -355,21 +403,30 @@ def main() -> None:
     ap.add_argument("--depth", action="store_true", help="두 경로 = depth_diff 종목 폴더(<root>/<SYM>) · --from/--to 대신 --hours 시작,끝(YYYY-MM-DDTHH)")
     ap.add_argument("--hours", default="")
     ap.add_argument("--raster", action="store_true", help="두 경로 = 호가 래스터 종목 폴더(<root>/<SYM>) · --hours 시작,끝")
+    ap.add_argument("--json", default="", help="두 경로 = 폴더 · 값 = glob(예: 'liq_tab_*.json') · --drop 열쇠를 빼고 비교")
+    ap.add_argument("--drop", default="generated_ms")
+    ap.add_argument("--summary", action="store_true", help="끝에 «요약: 견준 N · 설명 못 함 M» · M>0 이거나 N=0 이면 종료코드 1(takeover.sh check)")
     ap.add_argument("--events", action="store_true", help="두 경로 = 아이스버그 <sym>_events.jsonl · --from/--to = t_end 초")
     a = ap.parse_args()
     if a.selftest:
         return selftest()
     if not (a.py and a.rs):
         ap.error("파이썬 DB 와 Rust DB 경로가 필요하다")
-    if a.events:
-        return print("\n".join(compare_events(a.py, a.rs, a.lo, a.hi, a.show)))
-    if a.raster:
-        lo, _, hi = a.hours.partition(",")
-        return print("\n".join(compare_raster(a.py, a.rs, lo, hi or "~")))
-    if a.depth:
-        lo, _, hi = a.hours.partition(",")
-        return print("\n".join(compare_depth(a.py, a.rs, lo, hi or "~")))
-    print("\n".join(run(a.py, a.rs, a.lo, a.hi, a.margin, a.window, a.show)))
+    lo, _, hi = a.hours.partition(",")
+    if a.json:
+        out = compare_json(a.py, a.rs, a.json, a.drop)
+    elif a.events:
+        out = compare_events(a.py, a.rs, a.lo, a.hi, a.show)
+    elif a.raster:
+        out = compare_raster(a.py, a.rs, lo, hi or "~")
+    elif a.depth:
+        out = compare_depth(a.py, a.rs, lo, hi or "~")
+    else:
+        out = run(a.py, a.rs, a.lo, a.hi, a.margin, a.window, a.show)
+    print("\n".join(out))
+    if a.summary:
+        print(f"요약: 견준 {TALLY[0]:,} · 설명 못 함 {TALLY[1]:,}")
+        return 1 if TALLY[1] or not TALLY[0] else 0
 
 
 if __name__ == "__main__":
