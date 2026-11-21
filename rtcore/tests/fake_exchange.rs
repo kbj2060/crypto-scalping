@@ -92,6 +92,7 @@ fn is(p: &str, tail: &str) -> bool {
 async fn core(addr: &str, silence_ms: u64) -> String {
     let cfg = Cfg {
         symbols: vec!["ethusdt".into()],
+        quote_symbols: vec![],
         ws_base: format!("ws://{addr}/ws/"),
         market_ws_base: format!("ws://{addr}/market/ws/"),
         force_url: String::new(),
@@ -99,6 +100,13 @@ async fn core(addr: &str, silence_ms: u64) -> String {
         okx_url: String::new(),
         bybit_url: String::new(),
         silence: Duration::from_millis(silence_ms),
+        hub: rtcore::hub::HubCfg::from_env(),
+        snap_dir: String::new(),
+        tape_db: String::new(),
+        okx_tape_db: String::new(),
+        okx_ctx_db: String::new(),
+        bn_ctx_db: String::new(),
+        bybit_liq_db: String::new(),
     };
     let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let hub = l.local_addr().unwrap().to_string();
@@ -109,7 +117,7 @@ async fn core(addr: &str, silence_ms: u64) -> String {
 type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 async fn subscribe(hub: &str) -> Ws {
-    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{hub}")).await.unwrap();
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{hub}/rt")).await.unwrap();
     let req = Subscribe { subscribe: vec!["ETHUSDT".into()] };
     ws.send(Message::text(serde_json::to_string(&req).unwrap())).await.unwrap();
     ws
@@ -158,8 +166,8 @@ async fn t1_events_in_order_with_three_stamps() {
     let mut got = vec![];
     while got.len() < 5 {
         let m = next(&mut ws).await;
-        if !matches!(m.ev, Event::Supply1s(_)) {
-            got.push(m); // 1초 수급은 supply1s_parity.rs 가 본다
+        if !matches!(m.ev, Event::Supply1s(_) | Event::Footprint(_) | Event::Prices { .. }) {
+            got.push(m); // 1초 수급·풋프린트는 supply1s_parity.rs·footprint_parity.rs 가 본다 · 모든 종목 가격(Prices, s="*")은 quote_parity.rs
         }
     }
     let mut last_seq = snap.seq;
@@ -312,8 +320,9 @@ fn t6_trade_ring_is_bounded() {
         st.apply(rtcore::feed::parse(&trade(i), 1).unwrap());
     }
     st.apply(rtcore::feed::parse(&book(5), 1).unwrap());
+    st.flush();
     let snap = st.snapshot("ethusdt", 0).unwrap();
-    assert_eq!(snap.seq, 201); // 체결 100 + 체결마다 1초 수급 1건 + 호가 1
+    assert_eq!(snap.seq, 103); // 체결 100 + 호가 1 + 묶음 1번(1초 수급 1 · 풋프린트 1) -- 사건마다 밀지 않는다(state.rs FLUSH_MS)
     let Event::Snapshot { trades, book, .. } = snap.ev else { panic!() };
     assert_eq!(trades.len(), 16);
     assert!(matches!(trades.first().map(|t| &t.ev), Some(Event::Trade { id: 85, .. })));

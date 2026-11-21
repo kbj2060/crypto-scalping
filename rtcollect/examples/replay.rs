@@ -1,7 +1,8 @@
 //! 정답지 입력(또는 부하 입력)을 Rust 수집기에 먹여 SQLite 를 만든다. tools/gen_tape_fixture.py 가 부른다.
 //!   cargo run --release --example replay -- <input.json> <out_dir> [--runs A:B] [--bench]
 //! --bench: 한 판(첫 실행)만, 메시지 처리·쓰기 시간과 «수신 → 디스크» 지연(5초 플러시 정책 + 커밋 시간)을 잰다.
-use rtcollect::{open_db, replay, Collector};
+use rtcollect::binance::{replay, Collector};
+use rtcollect::store::open_db;
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::path::Path;

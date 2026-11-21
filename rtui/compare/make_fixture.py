@@ -3,6 +3,8 @@ python -I make_fixture.py  →  fixture/footprint.json · fixture/market-history
 import json, math, pathlib, random
 
 R = random.Random(20261120)
+R2 = random.Random(20261121)   # 봉 안 델타 범위(dhl)만
+R3 = random.Random(20261122)   # 스택 불균형 줄만
 OUT = pathlib.Path(__file__).resolve().parent / "fixture"
 T_END = 1795156500          # 마지막(형성 중) 봉 시각 -- 하네스 시계(1795156790)가 이 봉 안이다
 N, BUCKET = 144, 0.5
@@ -27,8 +29,15 @@ for i in range(N):
         levels.append([k, round(buy, 3), round(sell, 3), round(wb, 3), round(ws, 3),
                        round(buy * R.random() * 0.3, 3), round(sell * R.random() * 0.3, 3)])
         k = round(k + BUCKET, 1)
+    # 스택 불균형(같은 쪽 3배 넘는 줄이 3줄 이상 이어짐)이 몇 봉에 생기게 -- 실응답엔 흔하다. 따로 뽑아 R 순서는 그대로
+    if len(levels) >= 10 and R3.random() < 0.4:
+        n = R3.choice((6, 7, 8)); j0, s = R3.randrange(max(1, len(levels) - n)), R3.choice((1, 2))
+        for l in levels[j0:j0 + n]:
+            l[s] = round(l[s] * 4.5, 3); l[3 - s] = round(l[3 - s] * 0.6, 3)
     d = sum(l[1] - l[2] for l in levels)
-    bars.append({"time": t, "agg": False, "levels": levels, "dhl": [round(d, 3), 0.0, round(d, 3)]})
+    # 봉 안 누적 델타 [최저, 최고, 마감](서버 1초 체결 순서) -- 마감을 품는 범위. 따로 뽑아 위 자료(R 순서)는 그대로
+    lo_x, hi_x = R2.random() * (abs(d) * 0.6 + 300), R2.random() * (abs(d) * 0.6 + 300)
+    bars.append({"time": t, "agg": False, "levels": levels, "dhl": [round(min(0, d) - lo_x, 3), round(max(0, d) + hi_x, 3), round(d, 3)]})
     cd = {"time": t, "open": o, "high": hi, "low": lo, "close": c, "volume": round(sum(l[1] + l[2] for l in levels), 3)}
     if i == N - 1:
         cd["partial"] = True
@@ -42,3 +51,50 @@ OUT.mkdir(exist_ok=True)
 (OUT / "market-history.json").write_text(json.dumps({"asset": "eth", "candles": candles}, separators=(",", ":")))
 print("bars", N, "levels/bar", min(len(b["levels"]) for b in bars), "~", max(len(b["levels"]) for b in bars),
       "bytes", (OUT / "footprint.json").stat().st_size)
+
+# 1주일(/api/footprint-week -- 휠로 넓히기·30m/1h·과거로 옮기기가 부른다): 라이브 첫 봉보다 앞 1,972봉 + 라이브와 겹치는 44봉(값이 달라
+# «같은 봉이면 라이브가 이긴다»가 보인다). 따로 뽑아 위 두 파일은 바이트 그대로.
+RW = random.Random(20261123)
+NW, W_END = 2016, T_END - 100 * 300
+wc, wb, px = [], [], 1742.0 - 60.0
+for i in range(NW):
+    t = W_END - (NW - 1 - i) * 300
+    rng = max(1.0, RW.lognormvariate(math.log(4.0), 0.4))
+    o = px; c = o + RW.gauss(0, rng * 0.45) + 0.03
+    hi = max(o, c) + 0.3 * rng; lo = min(o, c) - 0.3 * rng
+    o, c, hi, lo = (round(v, 2) for v in (o, c, hi, lo))
+    levels, k = [], q(lo)
+    while k <= q(hi) + 1e-9:
+        b, s = RW.lognormvariate(5.0, 0.9), RW.lognormvariate(5.0, 0.9)
+        levels.append([k, round(b, 3), round(s, 3), round(b * 0.2, 3), round(s * 0.1, 3), round(b * 0.1, 3), round(s * 0.2, 3)])
+        k = round(k + BUCKET, 1)
+    d = sum(l[1] - l[2] for l in levels)
+    bar = {"time": t, "levels": levels}
+    if i % 3: bar["dhl"] = [round(min(0, d) - 50, 3), round(max(0, d) + 50, 3), round(d, 3)]
+    wb.append(bar)
+    wc.append({"time": t, "open": o, "high": hi, "low": lo, "close": c, "volume": round(sum(l[1] + l[2] for l in levels), 3)})
+    px = c
+(OUT / "footprint-week.json").write_text(json.dumps({"asset": "eth", "candles": wc, "bars": wb, "oi": [], "liq": [], "volPre": []}, separators=(",", ":")))
+print("week bars", NW, "bytes", (OUT / "footprint-week.json").stat().st_size)
+
+# 청산 5분봉(/api/liquidation-5m-history · 신호 /api/liquidation-5m-signal 은 내용 없이 200): 라이브 144봉 중 약 40% 봉에 청산 · 거래소 몫 몇 봉 · 마지막 봉 진행 중.
+# 1주일(footprint-week liq)도 같은 모양으로 앞 봉들. 따로 뽑아 위 파일들의 다른 칸은 바이트 그대로.
+from datetime import datetime, timezone
+RL = random.Random(20261124)
+iso = lambda t: datetime.fromtimestamp(t, timezone.utc).isoformat()
+def liq_bar(t, rl, last=False):
+    lo = round(rl.lognormvariate(math.log(4000), 1.6)) if rl.random() < 0.7 else 0
+    sh = round(rl.lognormvariate(math.log(4000), 1.6)) if rl.random() < 0.7 else 0
+    b = {"ts": iso(t), "long_usd": lo, "short_usd": sh, "events": rl.randint(1, 40), "okx": rl.random() < 0.5}
+    if b["okx"] and rl.random() < 0.6: b["okx_detail"] = {"long_usd": round(lo * 0.2), "short_usd": round(sh * 0.3), "n": rl.randint(0, 5)}
+    if rl.random() < 0.3: b["bybit"] = {"long_usd": round(lo * 0.1), "short_usd": round(sh * 0.1), "n": rl.randint(0, 3)}
+    if rl.random() < 0.1: b["hl"] = {"long_usd": round(lo * 0.05), "short_usd": 0, "n": 1}
+    if last: b["partial"] = True
+    return b
+lq = [liq_bar(T_END - (N - 1 - i) * 300, RL, i == N - 1) for i in range(N) if RL.random() < 0.4 or i == N - 1]
+(OUT / "liquidation-5m-history.json").write_text(json.dumps({"asset": "eth", "warmed_up": True, "bars": lq}, separators=(",", ":")))
+(OUT / "liquidation-5m-signal.json").write_text("{}")
+wk = json.loads((OUT / "footprint-week.json").read_text())
+wk["liq"] = [liq_bar(t, RL) for t in (b["time"] for b in wk["bars"]) if RL.random() < 0.3]
+(OUT / "footprint-week.json").write_text(json.dumps(wk, separators=(",", ":")))
+print("liq bars", len(lq), "week liq", len(wk["liq"]))

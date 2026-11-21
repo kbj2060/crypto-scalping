@@ -36,10 +36,14 @@ def b1(x) -> int:
 
 
 def hgb(m) -> dict:
-    assert type(m).__name__ == "HistGradientBoostingClassifier", type(m)
+    reg = type(m).__name__ == "HistGradientBoostingRegressor"     # 2026-11-21 4시간 방향(dir4h): 제곱 오차 · 항등 연결 → predict = raw
+    assert reg or type(m).__name__ == "HistGradientBoostingClassifier", type(m)
     assert m.is_categorical_ is None and m._preprocessor is None, "범주형·전처리기 있는 HGB 는 아직 안 옮김"
-    assert type(m._loss).__name__ == "HalfBinomialLoss" and type(m._loss.link).__name__ == "LogitLink", m._loss
-    assert m.n_trees_per_iteration_ == 1 and list(m.classes_) == [0, 1], m.classes_
+    if reg:
+        assert type(m._loss).__name__ == "HalfSquaredError" and type(m._loss.link).__name__ == "IdentityLink", m._loss
+    else:
+        assert type(m._loss).__name__ == "HalfBinomialLoss" and type(m._loss.link).__name__ == "LogitLink", m._loss
+    assert m.n_trees_per_iteration_ == 1 and (reg or list(m.classes_) == [0, 1])
     assert m._baseline_prediction.shape == (1, 1)
     trees = []
     for it in m._predictors:
@@ -50,7 +54,7 @@ def hgb(m) -> dict:
         assert n["value"].dtype == np.float64 and n["num_threshold"].dtype == np.float64
         trees.append({"feat": n["feature_idx"].tolist(), "thr": bits(n["num_threshold"]), "mgl": n["missing_go_to_left"].astype(bool).tolist(),
                       "left": n["left"].tolist(), "right": n["right"].tolist(), "leaf": n["is_leaf"].astype(bool).tolist(), "value": bits(n["value"])})
-    return {"type": "hgb", "n_features": int(m.n_features_in_), "baseline": b1(m._baseline_prediction[0, 0]), "trees": trees}
+    return {"type": "hgb", "n_features": int(m.n_features_in_), "baseline": b1(m._baseline_prediction[0, 0]), "trees": trees, **({"regress": True} if reg else {})}
 
 
 def step(name: str, s) -> dict:
@@ -74,7 +78,7 @@ def step(name: str, s) -> dict:
     if t == "LogisticRegression":
         assert s.coef_.shape[0] == 1 and list(s.classes_) == [0, 1], s.coef_.shape
         return {"type": "lr", "coef": bits(s.coef_[0]), "intercept": b1(s.intercept_[0])}
-    if t == "HistGradientBoostingClassifier":
+    if t in ("HistGradientBoostingClassifier", "HistGradientBoostingRegressor"):
         return hgb(s)
     raise SystemExit(f"모르는 단계 {name}:{t}")
 
@@ -100,15 +104,17 @@ def main(out: Path) -> None:
             if "model" not in cf:
                 continue                                  # SOXL 30m·4h = 모델 없음(deployable False)
             scales[name] = {"deployable": bool(cf.get("deployable", True)), "cols": list(cf["cols"]), "train_base": b1(cf["train_base"]),
-                            "model": model(cf["model"])}
+                            "q20": b1(cf["q20"]), "q80": b1(cf["q80"]), "model": model(cf["model"])}   # q20·q80 = 화면 «깨질 쪽·머물 쪽» 문턱
             assert list(cf["model"].feature_names_in_) == list(cf["cols"])
-        (out / f"box_{asset}.json").write_text(json.dumps({**meta, "source": p.name, "sha256": sha(p), "scales": scales}))
+        prof = np.asarray(b["prof"], float)   # 요일×시각 168칸(box_hold.payload 가 np.asarray(bb["prof"], float) 로 쓴다)
+        assert prof.shape == (168,), prof.shape
+        (out / f"box_{asset}.json").write_text(json.dumps({**meta, "source": p.name, "sha256": sha(p), "prof": bits(prof), "scales": scales}))
     p = DASH / f"{SR}.joblib"
     a = joblib.load(p)
     for m in a["models"]:
         assert list(m.feature_names_in_) == list(a["cols"])
     (out / "sr_lean.json").write_text(json.dumps({**meta, "source": p.name, "sha256": sha(p), "cols": list(a["cols"]), "thr": bits(a["thr"]),
-                                                  "models": [model(m) for m in a["models"]]}))
+                                                  "rate": a["rate"], "models": [model(m) for m in a["models"]]}))
     p = DASH / ISO
     d = json.loads(p.read_text())
     (out / "qx4i_iso.json").write_text(json.dumps({"source": p.name, "sha256": sha(p), "x": bits(d["x"]), "y": bits(d["y"]),

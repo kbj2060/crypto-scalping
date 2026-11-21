@@ -204,7 +204,7 @@ pub struct EntryPlan {
     pub available_qty: f64,
     pub cap_room_after_usdt: Option<f64>,
     pub fallback_after_sec: f64,
-    pub fallback: String, // 원본 표시값 "taker" 그대로. 집행은 시장가를 내지 않고 NeedsMarketDecision 으로 멈춘다(exec.rs M1)
+    pub fallback: String, // 원본 표시값 "taker" 그대로. 집행 = 마감 잔량 시장가(exec.rs M1 · 2026-11-21 «원본 동작 유지»)
     pub cap_notional_usdt: Option<f64>,
     pub notes: Vec<String>,
     pub blocked: Option<String>,
@@ -788,7 +788,7 @@ pub fn bracket_key(symbol: &str, position_side: &str) -> String {
 }
 
 /// 옛 키(«LONG»/«SHORT»)를 «심볼:측면»으로 옮긴다.
-/// ponytail: 옛 키와 새 키가 같은 칸을 가리키면 파이썬은 **파일 순서상 뒤의 것**, 여기는 키 이름 순(serde_json Map) -- 옛 키는 09-26 이전 파일에만 있어 겹칠 일이 없다. 겹치는 파일이 나오면 순서 보존 Map 으로.
+/// 옛 키와 새 키가 같은 칸을 가리키면 **파일 순서상 뒤의 것**(자리는 앞의 것) -- 파이썬 dict 와 같다(serde_json preserve_order · 시험 watch_fixture `legacy_and_new_key_collide`).
 pub fn bracket_rekey(state: &Map<String, Value>) -> Map<String, Value> {
     let mut out = Map::new();
     for (k, v) in state {
@@ -932,8 +932,8 @@ pub fn build_exit_plan(a: &ExitInput) -> R<ExitPlan> {
     let want = if a.fraction >= 1.0 { held } else { held * a.fraction };
     let qty = pyfmt::min(floor_to(want, f.step)?, floor_to(held, f.step)?);
     let deadline = exit_deadline_sec(a.vol_bpm)?;
-    // 미정: 시장가 분기 #M6 — 사용자 결정 대기. 변동성 ≥ 30bp/√분이면 파이썬은 계획을 MARKET 으로 만든다.
-    //   계획은 «무엇을 할지»의 기술이라 원본 값 그대로 둔다(정답지 일치) -- 집행(exec.rs)이 MARKET 계획을 받으면 NeedsMarketDecision 으로 멈춘다.
+    // 시장가 분기 #M6(2026-11-21 «원본 동작 유지»). 변동성 ≥ 30bp/√분이면 파이썬은 계획을 MARKET 으로 만든다.
+    //   계획은 «무엇을 할지»의 기술이라 원본 값 그대로 둔다(정답지 일치) -- 집행(exec.rs)이 MARKET 계획이면 전량 시장가(2026-11-21 «원본 동작 유지»).
     let mut market = a.vol_bpm.is_some_and(|v| v >= EXIT_TAKER_VOL_BPM);
     let blocked = if qty <= 0.0 || qty < f.min_qty {
         Some(if held <= 0.0 {
@@ -942,7 +942,7 @@ pub fn build_exit_plan(a: &ExitInput) -> R<ExitPlan> {
             format!("{}% 는 {} ETH 라 최소 {} 미만입니다 -- 비율을 올리세요", fixed(round0(100.0 * a.fraction), 0, false), repr(qty), repr(f.min_qty))
         })
     } else if f.min_notional != 0.0 && qty * price < f.min_notional {
-        // 미정: 시장가 분기 #M7 — 사용자 결정 대기. 🔴먼지 포지션(최소명목 미만)은 막지 않고 시장가(2026-09-13 감사 «막으면 화면에서 영영 못 닫는다»).
+        // 시장가 분기 #M7(2026-11-21 «원본 동작 유지»). 🔴먼지 포지션(최소명목 미만)은 막지 않고 시장가(2026-09-13 감사 «막으면 화면에서 영영 못 닫는다»).
         market = true;
         dust_reason = Some(format!("명목 {} 가 거래소 최소 {} USDT 미만이라 지정가로는 못 보냅니다 — 시장가로 닫습니다",
             fixed(qty * price, 0, true), fixed(f.min_notional, 0, true)));

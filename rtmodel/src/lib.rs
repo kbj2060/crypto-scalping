@@ -10,6 +10,16 @@
 //! - LogisticRegression(이진): `X @ coef + intercept` → expit(유한값 아니면 예외).
 //! 파이썬이 예외를 내는 입력은 `None`.
 use serde::{Deserialize, Deserializer};
+
+pub mod ban;
+pub mod box_hold;
+pub mod dir4h;
+pub mod dirrest;
+pub mod dirshort;
+pub mod lgb;
+pub mod risk_radar;
+pub mod sr_lean;
+pub mod sr_live;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -81,6 +91,9 @@ pub enum Step {
         #[serde(deserialize_with = "bit")]
         baseline: f64,
         trees: Vec<HgbTree>,
+        /// 회귀(HistGradientBoostingRegressor · 제곱 오차 · 항등 연결): predict = raw 그대로 (2026-11-21 dir4h)
+        #[serde(default)]
+        regress: bool,
     },
     Imputer {
         #[serde(deserialize_with = "bits")]
@@ -110,18 +123,18 @@ pub fn expit(z: f64) -> f64 {
     1.0 / (1.0 + (-z).exp())
 }
 
-/// `predict_proba(x)[0, 1]` 한 줄. x = 학습 열 순서 그대로.
+/// `predict_proba(x)[0, 1]` 한 줄(회귀 HGB 면 `predict(x)[0]`). x = 학습 열 순서 그대로.
 pub fn predict_proba(model: &[Step], x: &[f64]) -> Option<f64> {
     let mut x = x.to_vec();
     for s in model {
         match s {
-            Step::Hgb { n_features, baseline, trees } => {
+            Step::Hgb { n_features, baseline, trees, regress } => {
                 assert_eq!(x.len(), *n_features);
                 let mut raw = 0.0 + baseline;
                 for t in trees {
                     raw += t.raw(&x);
                 }
-                return Some(expit(raw));
+                return Some(if *regress { raw } else { expit(raw) });
             }
             Step::Imputer { fill } => {
                 if x.iter().any(|v| v.is_infinite()) {
@@ -190,12 +203,18 @@ pub struct BoxScale {
     pub cols: Vec<String>,
     #[serde(deserialize_with = "bit")]
     pub train_base: f64,
+    #[serde(deserialize_with = "bit")]
+    pub q20: f64,
+    #[serde(deserialize_with = "bit")]
+    pub q80: f64,
     pub model: Model,
 }
 
 #[derive(Deserialize)]
 pub struct BoxBundle {
     pub source: String,
+    #[serde(deserialize_with = "bits")]
+    pub prof: Vec<f64>,
     pub scales: HashMap<String, BoxScale>,
 }
 
@@ -229,6 +248,14 @@ pub struct SrLean {
     #[serde(deserialize_with = "bits")]
     pub thr: Vec<f64>,
     pub models: Vec<Model>,
+    /// 2023 확인 검정의 «사건 쪽 먼저» 건수(화면 확률의 출처) -- 워커가 생존 표시 파일에 그대로 쓴다.
+    pub rate: SrRate,
+}
+
+#[derive(Deserialize)]
+pub struct SrRate {
+    pub top: [i64; 2],
+    pub bot: [i64; 2],
 }
 
 impl SrLean {

@@ -21,7 +21,7 @@
 //! - 보관: 새 초가 생길 때만 «그 초 − 660» 보다 오래된 초를 지운다(coin_flow.py 87~94 · 323~333 · 2026-09-20 660 결정).
 //!   그래서 뒤늦게 온 오래된 체결도 칸을 만든다(다음 새 초 때 지워진다) -- 파이썬과 같게 둔다.
 //! - 24시간 봉 창: 체결의 5분봉이 아직 없고 «수신 시각의 봉 − 287봉» 보다 오래되면 **통째로 버린다**(1초 칸도 안 건드린다)
-//!   (coin_flow.py 355~365 · KEEP_BARS 288). 봉 목록 자체는 풋프린트 몫이라 여기선 봉 시작 시각 집합만 든다.
+//!   (coin_flow.py 355~365 · KEEP_BARS 288). 봉과 가격 칸은 footprint.rs 가 들고, 같은 add 에서 같이 쌓는다(체결을 한 번만 처리).
 //! - 내보내기: 진행 중인 초(가장 새 초)는 seconds 에 넣지 않고 partial 로 따로(server.py supply_1s_payload 도크스트링 · 2026-09-24),
 //!   seconds 는 (가장 새 초 − 660, 가장 새 초) 열린 구간, 값은 파이썬 round(x, 3) 과 같은 수(아래 r3).
 //!
@@ -40,12 +40,11 @@
 //!   벽시계 초 − 3] -- 파이썬의 «수집기 2초 flush 를 기다리는 3초»를 스냅숏은 그대로 따른다(밀기는 기다리지 않는다).
 //! - 밀기: 사건마다 «그 사건으로 바뀐 초»만 싣는다. 청산은 파이썬 창의 오른쪽 끝(아직 안 닫힌 초)이어도 바로 민다 --
 //!   파이썬은 그 초가 닫혀야 보이지만 값은 같다(화면은 초 단위로 덮어쓴다). 창 왼쪽 밖은 앞으로도 안 보이므로 밀지 않는다.
-use crate::proto::{LiqRow, OkxMeta, Partial, SecRow, SpotMeta, Supply1s, Venue};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use crate::footprint::{bar_of, ring_floor, Bars};
+use crate::proto::{Footprint, LiqRow, OkxMeta, Partial, SecRow, SpotMeta, Supply1s, Venue};
+use std::collections::{BTreeMap, VecDeque};
 
 pub const SUPPLY_1S_SECONDS: i64 = 660;
-const BAR_SECONDS: i64 = 300;
-const KEEP_BARS: i64 = 288;
 const ORDER_GAP_MS: i64 = 100;
 /// (심볼, 리테일 상한, 고래 하한) USD. 표에 없으면 ETH 경계(collector 135~136).
 // ponytail: 파이썬 표를 옮겨 적은 사본 -- 경계를 바꾸면 tools/gen_supply1s_fixture.py 를 다시 돌려 정답지 bands 대조가 잡는다.
@@ -63,7 +62,7 @@ const SIZE_BANDS_USD: &[(&str, f64, f64)] = &[
 /// server.py liq_events_by · coin_flow.py okx_liq_events 의 deque(maxlen=5000).
 pub const LIQ_RING: usize = 5000;
 /// server.py supply_1s_payload `_bnow = int(time.time()) - 3`(수집기가 2초마다 쓴다).
-const BYBIT_LAG_S: i64 = 3;
+pub(crate) const BYBIT_LAG_S: i64 = 3;
 /// OKX 계약 크기(1계약 = 기초자산 몇 개). scripts/live_okx_trade_tape_collector_20260923.py CT_VALS 사본.
 /// 🔴안 곱하면 레인이 10배(coin_flow.py 112~114). 표에 없는 종목은 OKX 레인을 켜지 않는다(collect_okx_flow 723~726).
 // ponytail: 파이썬 표 사본 + 정답지 대조 -- 파이썬은 기동 때 거래소 REST(ctVal)와도 대조하지만 코어는 REST 를 안 부른다(범위 밖).
@@ -102,7 +101,7 @@ pub fn size_bands(symbol: &str) -> (f64, f64) {
 
 /// 파이썬 round(x, 3) 과 같은 수: 정확한 이진값을 십진 3자리로 반올림(동률은 짝수) → 다시 f64.
 /// Rust `{:.3}` 도 정확값 기준·동률 짝수라 같다(0.0625→0.062 · 2.0005→2.001 · 1.0005→1.0 대조, 2026-11-20).
-fn r3(x: f64) -> f64 {
+pub(crate) fn r3(x: f64) -> f64 {
     format!("{x:.3}").parse().unwrap_or(x)
 }
 
@@ -121,7 +120,7 @@ fn age(now_us: i64, ms: i64) -> Option<f64> {
     (ms != 0).then(|| r1(f64::max(0.0, (now_us as f64 / 1000.0 - ms as f64) / 1000.0)))
 }
 
-fn newest(m: &BTreeMap<i64, [f64; 7]>) -> i64 {
+pub(crate) fn newest(m: &BTreeMap<i64, [f64; 7]>) -> i64 {
     m.keys().next_back().copied().unwrap_or(0)
 }
 
@@ -134,7 +133,7 @@ fn sec_cell(m: &mut BTreeMap<i64, [f64; 7]>, s: i64) -> &mut [f64; 7] {
     m.get_mut(&s).expect("방금 넣었다")
 }
 
-fn sec_row(m: &BTreeMap<i64, [f64; 7]>, s: i64) -> Option<SecRow> {
+pub(crate) fn sec_row(m: &BTreeMap<i64, [f64; 7]>, s: i64) -> Option<SecRow> {
     let c = m.get(&s)?;
     Some((s, r3(c[0]), r3(c[1]), r3(c[2]), r3(c[3]), r3(c[4]), r3(c[5]), r3(c[6])))
 }
@@ -144,15 +143,15 @@ fn window_rows(m: &BTreeMap<i64, [f64; 7]>, top: i64) -> Vec<SecRow> {
     m.range(top - SUPPLY_1S_SECONDS + 1..top).filter_map(|(&s, _)| sec_row(m, s)).collect()
 }
 
-struct LiqEv {
-    ts_ms: i64,
-    long: bool,
-    qty: f64,
-    usd: f64,
+pub(crate) struct LiqEv {
+    pub(crate) ts_ms: i64,
+    pub(crate) long: bool,
+    pub(crate) qty: f64,
+    pub(crate) usd: f64,
 }
 
 /// 링 순서대로 초별로 더한다(파이썬 setdefault 루프와 같은 순서 -- 더하는 순서가 달라지면 끝자리가 갈린다).
-fn liq_rows(ev: &VecDeque<LiqEv>, keep: impl Fn(i64) -> bool) -> Vec<LiqRow> {
+pub(crate) fn liq_rows(ev: &VecDeque<LiqEv>, keep: impl Fn(i64) -> bool) -> Vec<LiqRow> {
     let mut by: BTreeMap<i64, [f64; 4]> = BTreeMap::new();
     for e in ev {
         let s = e.ts_ms.div_euclid(1000);
@@ -166,7 +165,7 @@ fn liq_rows(ev: &VecDeque<LiqEv>, keep: impl Fn(i64) -> bool) -> Vec<LiqRow> {
     by.into_iter().map(|(s, c)| (s, r3(c[0]), r3(c[1]), r0(c[2]), r0(c[3]))).collect()
 }
 
-fn push_capped(ring: &mut VecDeque<LiqEv>, e: LiqEv) {
+pub(crate) fn push_capped(ring: &mut VecDeque<LiqEv>, e: LiqEv) {
     if ring.len() == LIQ_RING {
         ring.pop_front();
     }
@@ -175,8 +174,8 @@ fn push_capped(ring: &mut VecDeque<LiqEv>, e: LiqEv) {
 
 /// 현물·OKX 한 레인: 초 칸 + 화면 meta(server.py okx_meta · spot_meta).
 #[derive(Default)]
-struct Lane {
-    sec: BTreeMap<i64, [f64; 7]>,
+pub(crate) struct Lane {
+    pub(crate) sec: BTreeMap<i64, [f64; 7]>,
     last_ms: i64,
     connected: bool,
     errors: u64,
@@ -194,21 +193,55 @@ struct Order {
 pub struct Supply {
     pub retail_max: f64,
     pub whale_min: f64,
-    sec: BTreeMap<i64, [f64; 7]>,
-    bars: BTreeSet<i64>,
+    pub(crate) sec: BTreeMap<i64, [f64; 7]>,
+    pub(crate) fp: Bars,
+    /// 지금까지 받은 `@trade` 의 가장 늦은 거래소 시각(ms) -- 코어 스냅숏의 `last_ms`, 다음 공백 메우기의 시작(restore.rs).
+    /// 파이썬은 «마지막으로 처리한 체결의 T»(coin_flow.py 625)라 늦게 온 체결 하나가 값을 뒤로 당긴다 -- 그러면 다음 메우기가
+    /// 이미 센 초를 테이프로 또 더한다. 코어는 가장 늦은 값을 든다(RESTORE.md «파이썬과 달라지는 지점»).
+    pub(crate) last_ms: i64,
+    /// 재시작·재연결 복원 상태(restore.rs).
+    pub(crate) rs: crate::restore::Pending,
     open: Option<Order>,
-    liq: VecDeque<LiqEv>,
+    pub(crate) liq: VecDeque<LiqEv>,
     spot: Lane,
-    okx: Lane,
-    okx_inst: String,
-    okx_oi: BTreeMap<i64, f64>,
+    pub(crate) okx: Lane,
+    pub(crate) okx_inst: String,
+    pub(crate) okx_oi: BTreeMap<i64, f64>,
     okx_last_oi_ms: i64,
-    okx_liq: VecDeque<LiqEv>,
-    bybit: VecDeque<LiqEv>,
+    pub(crate) okx_liq: VecDeque<LiqEv>,
+    pub(crate) bybit: VecDeque<LiqEv>,
+    /// 5분봉 강제청산 원(바이낸스 · server.py liq_5m_add 517~535): 봉 시작 초 → ([롱USD, 숏USD], 건수, 롱 최저가, 숏 최고가).
+    pub(crate) liq5m: BTreeMap<i64, ([f64; 2], i64, Option<f64>, Option<f64>)>,
+    /// 기록 시작(초) -- 그 봉과 앞은 «모름»(liq_5m_payload). 원본은 시작 시각, DB 에서 되살리면 되살린 첫 사건 시각(liq_events_load 1796~1811).
+    pub(crate) liq5m_from: f64,
+    /// 마지막 밀기 뒤 바뀐 봉.
+    pub(crate) liq5m_dirty: std::collections::BTreeSet<i64>,
 }
 
-fn bar_of(ms: i64) -> i64 {
-    ms.div_euclid(1000).div_euclid(BAR_SECONDS) * BAR_SECONDS
+const LIQ5M_BAR_S: i64 = 300;
+const LIQ5M_KEEP_BARS: i64 = 288;
+
+/// server.py liq_5m_add 그대로(봉 = ts//1000//300*300 · 극값 = 롱 청산의 가장 낮은 체결가·숏 청산의 가장 높은 체결가 · 가격 0 은 극값에 안 넣음 ·
+/// 이 사건 봉 − 288봉보다 오래된 봉은 지운다).
+pub(crate) fn liq5m_add(store: &mut BTreeMap<i64, ([f64; 2], i64, Option<f64>, Option<f64>)>, ts_ms: i64, long: bool, usd: f64, px: f64) -> i64 {
+    let bar = ts_ms.div_euclid(1000).div_euclid(LIQ5M_BAR_S) * LIQ5M_BAR_S;
+    let a = store.entry(bar).or_insert(([0.0; 2], 0, None, None));
+    a.0[(!long) as usize] += usd;
+    a.1 += 1;
+    if px > 0.0 {
+        if long {
+            a.2 = Some(a.2.map_or(px, |x: f64| if px < x { px } else { x })); // 파이썬 min(a, px): 같으면 앞의 것
+        } else {
+            a.3 = Some(a.3.map_or(px, |x: f64| if px > x { px } else { x }));
+        }
+    }
+    let cut = bar - LIQ5M_KEEP_BARS * LIQ5M_BAR_S;
+    *store = store.split_off(&cut);
+    bar
+}
+
+fn r2(x: f64) -> f64 {
+    format!("{x:.2}").parse().unwrap_or(x)
 }
 
 impl Supply {
@@ -218,7 +251,9 @@ impl Supply {
             retail_max,
             whale_min,
             sec: BTreeMap::new(),
-            bars: BTreeSet::new(),
+            fp: Bars::new(symbol),
+            last_ms: 0,
+            rs: Default::default(),
             open: None,
             liq: VecDeque::new(),
             spot: Lane::default(),
@@ -228,12 +263,16 @@ impl Supply {
             okx_last_oi_ms: 0,
             okx_liq: VecDeque::new(),
             bybit: VecDeque::new(),
+            liq5m: BTreeMap::new(),
+            liq5m_from: crate::now_us() as f64 / 1e6, // 복원이 없으면 «지금부터 기록»(원본 liq_events_load 의 now_ms / 1000)
+            liq5m_dirty: Default::default(),
         }
     }
 
     /// 재연결: 열린 주문 묶음을 버린다(끊긴 사이가 빠진 주문을 «한 주문»이라 부르지 않게).
     pub fn reset_orders(&mut self) {
         self.open = None;
+        self.rs.await_first = self.rs.on; // 복원이 켜져 있으면 이 연결의 첫 체결이 공백을 메운다(restore.rs)
     }
 
     /// 시험용: 원천별 1초 칸(반올림 전).
@@ -248,6 +287,16 @@ impl Supply {
     /// 시험용: OKX OI 칸.
     pub fn okx_oi_cells(&self) -> &BTreeMap<i64, f64> {
         &self.okx_oi
+    }
+
+    /// 시험용: 청산 링(받은·되살린 순서) -- (거래소 시각 ms, 롱 청산, 수량, USD).
+    pub fn liq_events(&self, venue: Venue) -> Vec<(i64, bool, f64, f64)> {
+        let ring = match venue {
+            Venue::Okx => &self.okx_liq,
+            Venue::Bybit => &self.bybit,
+            _ => &self.liq,
+        };
+        ring.iter().map(|e| (e.ts_ms, e.long, e.qty, e.usd)).collect()
     }
 
     /// 수신 연결이 붙거나 끊김(feed). 파이썬 connected 와 errors(끊김마다 +1).
@@ -265,6 +314,7 @@ impl Supply {
     /// 밀 것이 있으면 «바뀐 닫힌 초 + 진행 중인 초»를 돌려준다.
     pub fn trade(&mut self, px: f64, qty: f64, ts_ms: i64, sell: bool, tid: i64, now_us: i64) -> Option<Supply1s> {
         let now_ms = now_us.div_euclid(1000);
+        self.last_ms = self.last_ms.max(ts_ms);
         let mut touched: Vec<i64> = Vec::with_capacity(2);
         // 순서도 파이썬 그대로: 총량 먼저, 그다음 이 체결로 닫힌 주문의 구간(coin_flow.py 619~624).
         self.add(px, qty, ts_ms, sell, false, now_ms, &mut touched);
@@ -291,6 +341,8 @@ impl Supply {
         // 창 왼쪽 끝. 링(5000건)은 창 밖 사건도 넣어야 파이썬 deque 와 같은 때 같은 것이 밀려난다.
         let lo = match venue {
             Venue::Bn => {
+                let b = liq5m_add(&mut self.liq5m, ts_ms, long, e.usd, px); // 청산 원도 같은 사건으로(collect_force_orders 1842)
+                self.liq5m_dirty.insert(b);
                 push_capped(&mut self.liq, e);
                 newest(&self.sec) - SUPPLY_1S_SECONDS
             }
@@ -303,6 +355,11 @@ impl Supply {
                 let lo = now_us.div_euclid(1_000_000) - BYBIT_LAG_S - SUPPLY_1S_SECONDS;
                 while self.bybit.front().is_some_and(|f| f.ts_ms.div_euclid(1000) <= lo) {
                     self.bybit.pop_front();
+                }
+                // 복원(restore.rs)이 DB 에서 읽은 사건이 재시작 직후 실시간으로 한 번 더 오면 건너뛴다 -- 파이썬은 DB 만 읽어 한 번만 센다.
+                let dup = ts_ms <= self.rs.bybit_max_ms && self.bybit.iter().any(|f| f.ts_ms == ts_ms && f.long == e.long && f.qty == e.qty && f.usd == e.usd);
+                if dup {
+                    return None;
                 }
                 if s > lo {
                     let i = self.bybit.partition_point(|f| f.ts_ms <= ts_ms);
@@ -390,8 +447,43 @@ impl Supply {
         m
     }
 
+    /// 5분봉 강제청산 원 전부(스냅숏). 기록 시작 봉과 그 앞은 싣지 않는다(liq_5m_payload 의 b <= from_bar).
+    pub fn liq5m_all(&self) -> Option<crate::proto::Liq5m> {
+        self.fp.spec?;
+        Some(self.liq5m_rows(self.liq5m.keys().copied()))
+    }
+
+    /// 마지막 밀기 뒤 바뀐 봉만(없으면 None).
+    pub fn liq5m_delta(&mut self) -> Option<crate::proto::Liq5m> {
+        self.fp.spec?;
+        let keys = std::mem::take(&mut self.liq5m_dirty);
+        let m = self.liq5m_rows(keys.into_iter());
+        (!m.bars.is_empty()).then_some(m)
+    }
+
+    fn liq5m_rows(&self, keys: impl Iterator<Item = i64>) -> crate::proto::Liq5m {
+        let from_bar = (self.liq5m_from as i64).div_euclid(LIQ5M_BAR_S) * LIQ5M_BAR_S;
+        let bars = keys.filter(|b| *b > from_bar).filter_map(|b| self.liq5m.get(&b).map(|a| (b, r2(a.0[0]), r2(a.0[1]), a.1, a.2, a.3))).collect();
+        crate::proto::Liq5m { from_s: self.liq5m_from, bars }
+    }
+
+    /// 풋프린트 스냅숏(파이썬 /api/footprint since=0 의 봉·칸). 표에 없는 종목은 None.
+    pub fn footprint(&self) -> Option<Footprint> {
+        self.fp.snapshot(&self.sec, self.retail_max, self.whale_min)
+    }
+
+    /// 풋프린트 바뀐 몫(밀기 묶음마다 한 번 -- state.rs flush).
+    pub fn footprint_delta(&mut self) -> Option<Footprint> {
+        self.fp.take_delta(&self.sec, self.retail_max, self.whale_min)
+    }
+
+    /// 시험용: 봉 → 칸(반올림 전).
+    pub fn footprint_raw(&self) -> Vec<(i64, Vec<(i64, [f64; 6])>)> {
+        self.fp.raw()
+    }
+
     /// 목록 칸이 빈 메시지(밀기는 바뀐 초만 채운다).
-    fn base(&self, now_us: i64) -> Supply1s {
+    pub(crate) fn base(&self, now_us: i64) -> Supply1s {
         let (bn, sp, ok) = (newest(&self.sec), newest(&self.spot.sec), newest(&self.okx.sec));
         Supply1s {
             now: bn,
@@ -434,21 +526,28 @@ impl Supply {
         done
     }
 
-    /// footprint_add 의 1초 칸 몫. order=false 면 총량·가격, true 면 크기 구간.
+    /// footprint_add: 봉 칸(footprint.rs)과 1초 칸을 같은 호출에서. order=false 면 총량·가격, true 면 크기 구간.
     #[allow(clippy::too_many_arguments)]
     fn add(&mut self, px: f64, qty: f64, ts_ms: i64, sell: bool, order: bool, now_ms: i64, touched: &mut Vec<i64>) {
         let bar = bar_of(ts_ms);
-        if !self.bars.contains(&bar) {
-            let cutoff = bar_of(now_ms) - (KEEP_BARS - 1) * BAR_SECONDS;
-            if bar < cutoff {
-                return; // 창을 벗어난 봉 -- 넣어봐야 바로 지워진다(coin_flow.py 360~361)
-            }
-            self.bars.insert(bar);
-            self.bars = self.bars.split_off(&cutoff); // 새 봉이 생길 때만 정리(체결마다 돌 일이 아니다)
+        if !self.fp.keep(bar, now_ms) {
+            return; // 창을 벗어난 봉(coin_flow.py 360~361) -- 1초 칸도 안 건드린다
         }
+        self.fp.add(bar, px, qty, sell, order, self.whale_min, self.retail_max);
         let s = ts_ms.div_euclid(1000);
-        let c = sec_cell(&mut self.sec, s);
+        // 가장 새 초가 앞으로 가면 링이 s − 660 밑을 지운다(sec_cell) -- 그 사이에서 시작하는 봉은 지우기 전 링으로 dhl 을 얼린다.
+        if let Some(f) = ring_floor(&self.sec) {
+            if s - SUPPLY_1S_SECONDS > f {
+                self.fp.freeze(&self.sec, f, s - SUPPLY_1S_SECONDS);
+            }
+        }
         let side = sell as usize;
+        if !order && bar < s.max(newest(&self.sec)) - SUPPLY_1S_SECONDS {
+            // 링이 첫 초를 이미 지운 봉에 체결이 왔다 -- 얼려 둔 dhl 은 이제 틀리다(footprint.rs 머리 주석).
+            // 주문 단위 칸(order)은 dhl 이 안 쓰는 칸(크기 구간)만 바꾸므로 안 지운다 -- 드문 체결에서 닫히는 주문이 늦게 와도 그대로.
+            self.fp.forget_dhl(bar);
+        }
+        let c = sec_cell(&mut self.sec, s);
         if !order {
             c[4 + side] += qty;
             c[6] = px; // 그 초의 «마지막으로 받은» 체결가 = 1초 가격선

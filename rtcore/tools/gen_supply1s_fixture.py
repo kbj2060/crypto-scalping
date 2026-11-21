@@ -11,6 +11,7 @@ dashboard/server.py 는 import 하지 않는다 -- 그래서 payload 조립 몇 
 `.env` 를 읽지 않는다(coin_flow import 경로에 dotenv 없음 -- 2026-11-20 확인).
 
     python3 rtcore/tools/gen_supply1s_fixture.py      # 저장소 루트에서. rtcore/tests/fixtures/supply1s_eth.json 을 쓴다(약 6초: 재연결 대기 3초 x2)
+    python3 rtcore/tools/gen_supply1s_fixture.py xrp  # 칸 폭이 작은 종목(btc = 가격이 큰 종목) -- tests/fixtures/gen/ (커밋 안 함, 시험 전에 만든다)
 """
 from __future__ import annotations
 
@@ -24,7 +25,26 @@ from pathlib import Path
 from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / "rtcore" / "tests" / "fixtures" / "supply1s_eth.json"
+# 심볼별 합성 장(2026-11-20 XRP·BTC 추가 -- ETH 칸 폭 0.5·가격 소수 2자리에서는 «응답 가격 반올림» 변형이 값을 안 바꿔 못 잡혔다).
+# (중간가, 가격 소수 자리, 수량 배율, 수량 소수 자리, 경계 체결 3건 [(가격, 수량, 매도)] = 명목이 고래 하한 · 리테일 상한과 정확히 같음 · 바로 밑)
+# 가격 움직임은 ETH 를 칸 폭 비율(PX = 칸 폭 / 0.5)로 줄이고 늘린다. ETH 는 PX = 1.0 · 수량 배율 1.0 이라 예전 정답지와 바이트까지 같다.
+MARKETS = {
+    "eth": (3000.0, 2, 1.0, 3, [("2500.00", "40.000", False), ("2500.00", "4.000", True), ("2500.00", "3.999", False)]),
+    "xrp": (2.1, 4, 330.0, 1, [("2.0000", "11500.0", False), ("2.0000", "1700.0", True), ("2.0000", "1699.9", False)]),
+    "btc": (90000.0, 1, 0.05, 3, [("80000.0", "2.000", False), ("104000.0", "0.125", True), ("104000.0", "0.124", False)]),
+}
+# ponytail: 코인은 import 할 때 argv 로 정한다 -- gen_footprint_fixture 가 같은 인자로 이 모듈을 가져다 쓴다.
+COIN = sys.argv[1] if len(sys.argv) > 1 else "eth"
+MID, PD, QS, QD, EDGES = MARKETS[COIN]
+OUT = ROOT / "rtcore" / "tests" / "fixtures" / ("supply1s_eth.json" if COIN == "eth" else f"gen/supply1s_{COIN}.json")
+
+
+def pfmt(x: float) -> str:
+    return f"{x:.{PD}f}"
+
+
+def qfmt(q: float) -> str:
+    return f"{max(q * QS, 10 ** -QD):.{QD}f}"
 
 
 def _no_net(*_a, **_k):
@@ -39,7 +59,15 @@ from aiohttp import WSMsgType  # noqa: E402
 from scripts.live_trade_tape_collector_20260916 import BUCKETS, size_bands  # noqa: E402
 
 SEED = 20261120
-SYM = "ETHUSDT"
+SYM = f"{COIN.upper()}USDT"
+PX = cf.FLOW_SPECS[COIN].bucket / 0.5
+
+
+def _no_tape(*_a, **_k):
+    raise RuntimeError("gen_supply1s_fixture: 체결 테이프 SQLite 읽기 금지")
+
+
+cf.okx_tape_footprint = cf.tape_seconds = _no_tape   # ETH 외 코인은 재연결 때 REST 대신 테이프로 메운다 -- 개발기 파일을 읽지 않게
 T0 = 1_763_600_000_123        # 2025-11-20 무렵(ms). 합성 -- 실제 장과 무관
 N_SEC = 900                   # 660 초 보관 정리를 건드리려면 660 보다 길어야 한다
 CONN_AT = (300, 600)          # 이 초에서 재연결(열린 주문 묶음은 버려진다)
@@ -50,7 +78,7 @@ CONN_AT = (300, 600)          # 이 초에서 재연결(열린 주문 묶음은 
 def gen() -> list[list]:
     rng = random.Random(SEED)
     out: list[list] = []
-    st = {"tid": 50_000_000, "wall": T0, "mid": 3000.0, "conn": 0}
+    st = {"tid": 50_000_000, "wall": T0, "mid": MID, "conn": 0}
 
     def put(T: int, p: str, q: str, m: bool, *, late: bool = False, skip_tid: int = 0) -> None:
         st["tid"] += 1 + skip_tid
@@ -65,46 +93,47 @@ def gen() -> list[list]:
         for i, q in enumerate(qtys):
             if i:
                 T += gaps[i - 1]
-            put(T, f"{px:.2f}", f"{max(q, 0.001):.3f}", side)
+            put(T, pfmt(px), qfmt(q), side)
         return T
 
     for s in range(N_SEC):
         if s in CONN_AT:
             st["conn"] += 1
         base = T0 // 1000 * 1000 + s * 1000
-        st["mid"] += rng.gauss(0, 0.4)
-        mid = round(st["mid"], 2)
+        st["mid"] += rng.gauss(0, 0.4) * PX
+        mid = round(st["mid"], PD)
         if s == 50:      # 초 경계를 걸친 같은 가격·방향·연속ID 주문 → 초에서 잘린다
             fills(base + 995, mid, False, [2.0, 3.0], [4]); fills(base + 1002, mid, False, [40.0, 1.0], [8])
             continue
         if s == 51:
             continue     # (50 에서 다음 초까지 썼다)
         if s == 60:      # 가격 0 체결이 묶음 중간에 -- 체결ID 가 하나 빠진 셈이라 묶음이 끊긴다
-            put(base + 10, f"{mid:.2f}", "20.000", True)
+            put(base + 10, pfmt(mid), qfmt(20.0), True)
             put(base + 11, "0", "0", False)
-            put(base + 12, f"{mid:.2f}", "20.000", True)
+            put(base + 12, pfmt(mid), qfmt(20.0), True)
             continue
         if s == 70:      # 체결ID 건너뜀(가격 0 없이)
-            put(base + 5, f"{mid:.2f}", "18.000", False); put(base + 6, f"{mid:.2f}", "18.000", False, skip_tid=1)
+            put(base + 5, pfmt(mid), qfmt(18.0), False); put(base + 6, pfmt(mid), qfmt(18.0), False, skip_tid=1)
             continue
-        if s == 80:      # 경계값: $100,000 = 고래(>=) · $10,000 = 중형(< 아님) · $9,999 = 리테일
-            put(base + 100, "2500.00", "40.000", False); put(base + 400, "2500.00", "4.000", True)
-            put(base + 700, "2500.00", "3.999", False); put(base + 900, f"{mid:.2f}", "0.010", True)
+        if s == 80:      # 경계값(ETH): $100,000 = 고래(>=) · $10,000 = 중형(< 아님) · $9,999 = 리테일 -- 다른 코인은 MARKETS 경계 체결
+            for ms, e in zip((100, 400, 700), EDGES):
+                put(base + ms, *e)
+            put(base + 900, pfmt(mid), qfmt(0.01), True)
             continue
         if s == 90:      # 같은 가격, 방향만 번갈아 -- 묶이지 않는다
             for i in range(6):
-                put(base + 20 + i, f"{mid:.2f}", "7.500", i % 2 == 0)
+                put(base + 20 + i, pfmt(mid), qfmt(7.5), i % 2 == 0)
             continue
         if s == 100:     # 뒤늦게 온 과거 시각: 같은 초 앞 ms · 3초 전(이미 닫힌 초) · 그다음 정상
-            put(base + 500, f"{mid:.2f}", "1.000", False)
-            put(base + 200, f"{mid:.2f}", "2.000", True, late=True)
-            put(base - 3000 + 400, f"{mid + 0.5:.2f}", "50.000", False, late=True)
-            put(base + 600, f"{mid:.2f}", "0.500", True)
+            put(base + 500, pfmt(mid), qfmt(1.0), False)
+            put(base + 200, pfmt(mid), qfmt(2.0), True, late=True)
+            put(base - 3000 + 400, pfmt(mid + 0.5 * PX), qfmt(50.0), False, late=True)
+            put(base + 600, pfmt(mid), qfmt(0.5), True)
             continue
         if s == 200:     # 700초 전 체결(보관 660초 밖 -- 파이썬은 칸을 만들고 다음 새 초에 지운다)
-            put(base - 700_000 + 300, f"{mid:.2f}", "5.000", False, late=True)
+            put(base - 700_000 + 300, pfmt(mid), qfmt(5.0), False, late=True)
         if s == 400:     # 25시간 전 체결 -- 24시간 봉 창 밖이라 통째로 버려진다
-            put(base - 25 * 3600_000 + 300, f"{mid:.2f}", "60.000", True, late=True)
+            put(base - 25 * 3600_000 + 300, pfmt(mid), qfmt(60.0), True, late=True)
         if s == 450:     # 급증 초: 큰 주문 하나가 같은 가격 체결 수백 건으로 쪼개짐
             fills(base + 1, mid, True, [0.4] * 300, [rng.randint(0, 2) for _ in range(299)])
             continue
@@ -131,7 +160,7 @@ def gen() -> list[list]:
             gaps = [rng.choice([0, 0, 1, 3, 12, 40, 100, 101, 150]) for _ in range(n - 1)]
             if ms + sum(gaps) > 990:
                 break
-            px = round(mid + rng.choice([-0.02, -0.01, 0.0, 0.01, 0.02]) * rng.randint(0, 3), 2)
+            px = round(mid + rng.choice([-0.02, -0.01, 0.0, 0.01, 0.02]) * PX * rng.randint(0, 3), PD)
             ms = fills(base + ms, px, rng.random() < 0.5, qtys, gaps) - base + rng.choice([0, 1, 5, 30, 120])
             if ms > 990:
                 break
@@ -168,7 +197,7 @@ async def run(rows: list[list]) -> dict:
     async def no_rest(*_a, **_k):
         raise RuntimeError("REST 금지(시험)")   # 재연결 백필(ETH aggTrades)은 실패로 끝나고 ready=False -> 스냅샷 저장도 안 한다
     # 스냅샷 경로는 없는 곳 -- footprint_load 가 아무것도 못 읽게(저장은 ready=False 라 안 일어난다)
-    ns = cf.make_coin_flow(dataclasses.replace(cf.FLOW_SPECS["eth"],
+    ns = cf.make_coin_flow(dataclasses.replace(cf.FLOW_SPECS[COIN],
                                                snapshot_path=Path("/nonexistent/rtcore_fixture_footprint.json")),
                            no_rest, {})
     free = dict(zip(ns.start.__code__.co_freevars, ns.start.__closure__))
@@ -220,7 +249,7 @@ async def run(rows: list[list]) -> dict:
             pass
 
         def ws_connect(self, url, **k):
-            assert url.endswith("ethusdt@trade"), url
+            assert url.endswith(f"{SYM.lower()}@trade"), url
             c = FakeSession.n
             FakeSession.n += 1
             return FakeWS(conns[c], c == len(conns) - 1)

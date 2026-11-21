@@ -108,8 +108,9 @@ fn diff(py: &Value, rs: &Value, path: &str, out: &mut Vec<String>, exact: &mut (
             }
         }
         (Value::Object(a), Value::Object(b)) => {
-            let ka: Vec<_> = a.keys().collect();
-            let kb: Vec<_> = b.keys().collect();
+            // 키 «집합» 비교(serde_json preserve_order 를 켠 뒤에도 전과 같은 뜻 -- 전엔 BTreeMap 이라 양쪽이 정렬돼 있었다)
+            let (mut ka, mut kb): (Vec<_>, Vec<_>) = (a.keys().collect(), b.keys().collect());
+            (ka.sort(), kb.sort());
             if ka != kb {
                 out.push(format!("{path}: 키 py {ka:?} rs {kb:?}"));
                 return;

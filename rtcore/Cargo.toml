@@ -6,10 +6,14 @@ publish = false
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
+# float_roundtrip: 코어 스냅숏(restore.rs)의 실수를 읽을 때 비트까지 되살린다(기본 파서는 긴 가수에서 1ulp 틀릴 수 있다) -- rtcollect 와 같은 기능.
+serde_json = { version = "1", features = ["float_roundtrip"] }
+# signal: 감시자가 SIGTERM 으로 내릴 때 스냅숏을 한 번 쓰고 끝낸다(main.rs · 2026-11-21).
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal"] }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 # 2026-11-20 실서버: rustls 0.23 이 암호 제공자를 못 골라 wss 접속마다 패닉(tokio-tungstenite 는 rustls 를 default-features=false 로 받는다).
 #   이미 의존성 나무에 있는 rustls 에 `ring` 하나만 켠다 -- 제공자가 하나뿐이면 rustls 가 스스로 고른다(crypto/mod.rs from_crate_features).
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+# 재시작 복원(restore.rs)이 체결 테이프 hot SQLite 를 **읽기 전용**으로 연다. rtcollect 와 같은 판(bundled = 서버 시스템 SQLite 버전과 무관).
+rusqlite = { version = "0.37", features = ["bundled"] }
