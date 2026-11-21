@@ -26,6 +26,8 @@ from pathlib import Path
 
 import duckdb
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # shadow_tape 의 down_intervals·down_note 를 같이 쓴다(python -I 에서도)
+
 TALLY = [0, 0]   # --summary: [견준 수, 설명 못 하는 차이 수]
 KEYED = {  # 표 → (시각 열(ms 정수 또는 TIMESTAMP), 열쇠, 빼는 열)
     "hl_trades": ("ts_ms", ("coin", "tid"), ()),
@@ -76,10 +78,39 @@ def gap_minutes(cons, margin: int) -> set[int]:
     return out
 
 
-def compare(py, rs, lo: int, hi: int, margin: int, show: int) -> list[str]:
+def tcol_of(con, t: str):
+    s = spec(t)
+    ca = dict(cols(con, t))
+    c = s[0] if s else next((c for c in ca if c in ("ts", "ts_ms", "recorded_at_utc")), None)
+    return (c, ms_expr(c, ca[c])) if c else (None, None)
+
+
+def down_of(rs, tabs: list, starts: list, margin: int) -> list:
+    """shadow_tape.down_intervals 와 같은 규칙: 감독 «SUPERVISOR starting» T 마다 [T 전 Rust 마지막 자료, T 뒤 첫 자료] ± margin (초)."""
+    from shadow_tape import down_intervals  # noqa: E402
+
+    def times(T):
+        lo = hi = None
+        for t in tabs:
+            _, te = tcol_of(rs, t)
+            if te is None:
+                continue
+            a = rs.execute(f'SELECT max({te}) FROM "{t}" WHERE {te} < ?', [T * 1000]).fetchone()[0]
+            b = rs.execute(f'SELECT min({te}) FROM "{t}" WHERE {te} >= ?', [T * 1000]).fetchone()[0]
+            lo = a // 1000 if a is not None and (lo is None or a // 1000 > lo) else lo
+            hi = b // 1000 if b is not None and (hi is None or b // 1000 < hi) else hi
+        return lo, hi
+    return down_intervals(times, starts, margin) if starts else []
+
+
+def compare(py, rs, lo: int, hi: int, margin: int, show: int, starts=()) -> list[str]:
     tp = {r[0] for r in py.execute("SELECT table_name FROM duckdb_tables()").fetchall()}
     tr = {r[0] for r in rs.execute("SELECT table_name FROM duckdb_tables()").fetchall()}
     excl = gap_minutes((py, rs), margin)
+    down = down_of(rs, sorted(tp & tr - {"gaps"}), list(starts), margin)
+    if down:
+        from shadow_tape import down_note
+    nd = lambda te: "".join(f" AND NOT ({te} >= {a * 1000 if a > float('-inf') else -2**62} AND {te} < {b * 1000 if b < float('inf') else 2**62})" for a, b in down)   # noqa: E731
     out = [f"한쪽에만 있는 표: 파이썬 {sorted(tp - tr)} · Rust {sorted(tr - tp)}"] if tp ^ tr else []
     for t in sorted(tp & tr):
         if t == "gaps":
@@ -104,7 +135,7 @@ def compare(py, rs, lo: int, hi: int, margin: int, show: int) -> list[str]:
             w0, w1 = (t0 if lo is None else lo * 1000), (t1 if hi is None else hi * 1000)
         else:
             w0, w1 = lo * 1000, hi * 1000
-        where = f"WHERE {te} >= {w0} AND {te} < {w1}"
+        where = f"WHERE {te} >= {w0} AND {te} < {w1}" + nd(te)
         if not s:
             n = [c.execute(f'SELECT count(*) FROM "{t}" {where}').fetchone()[0] for c in (py, rs)]
             ok = abs(n[0] - n[1]) <= max(2, 0.01 * max(n))   # 각자 벽시계로 찍는 줄 -- 1% 안(재시작 몇 초)은 설명되는 차이
@@ -128,8 +159,10 @@ def compare(py, rs, lo: int, hi: int, margin: int, show: int) -> list[str]:
         bad = [k for k in both if a[k] != b[k]]
         TALLY[0] += len(both)
         TALLY[1] += len(bad) + len(a.keys() ^ b.keys())
+        n_down = sum(c.execute(f'SELECT count(*) FROM "{t}" WHERE {te} >= {w0} AND {te} < {w1}').fetchone()[0]
+                     - c.execute(f'SELECT count(*) FROM "{t}" {where}').fetchone()[0] for c in (py, rs)) if down else 0
         line = (f"{t}: 비교 {len(both):,}행 · 불일치 {len(bad):,} · 파이썬에만 {len(a.keys() - b.keys()):,} · Rust에만 {len(b.keys() - a.keys()):,}"
-                f" · 범위 [{w0 // 1000}, {w1 // 1000}) 초 · 뺀 분 {len(excl):,}")
+                f" · 범위 [{w0 // 1000}, {w1 // 1000}) 초 · 뺀 분 {len(excl):,}" + (down_note(down, n_down) if down else ""))
         first = [f"다름 {k}: 파이썬 {a[k]} · Rust {b[k]}" for k in sorted(bad, key=repr)[:show]]
         first += [f"파이썬에만 {k}" for k in sorted(a.keys() - b.keys(), key=repr)[:show]]
         first += [f"Rust에만 {k}" for k in sorted(b.keys() - a.keys(), key=repr)[:show]]
@@ -137,7 +170,7 @@ def compare(py, rs, lo: int, hi: int, margin: int, show: int) -> list[str]:
     return out or ["비교할 표가 없다"]
 
 
-def run(py_path: Path, rs_path: Path, lo: int | None, hi: int | None, tmp: Path | None = None, margin: int = 5, show: int = 3) -> list[str]:
+def run(py_path: Path, rs_path: Path, lo: int | None, hi: int | None, tmp: Path | None = None, margin: int = 5, show: int = 3, starts=()) -> list[str]:
     base = tmp or rs_path.parent
     d = Path(tempfile.mkdtemp(prefix=".shadow_duck_", dir=base))
     try:
@@ -145,7 +178,7 @@ def run(py_path: Path, rs_path: Path, lo: int | None, hi: int | None, tmp: Path 
         (d / "rs").mkdir()
         py, rs = snapshot(py_path, d / "py"), snapshot(rs_path, d / "rs")
         try:
-            return compare(py, rs, lo, hi, margin, show)
+            return compare(py, rs, lo, hi, margin, show, starts)
         finally:
             py.close()
             rs.close()
@@ -226,6 +259,10 @@ def selftest() -> None:
         hl2 = next(x for x in auto if x.startswith("hl_trades"))
         assert "불일치 1 · 파이썬에만 1 · Rust에만 0" in hl2, hl2
         assert TALLY[1] == 2 + 1, TALLY   # hl 2 + oi 1 · 미시구조 행 수는 같다
+        # 그림자 재기동 T+500: Rust 자료가 T+490 뒤 T+510 에 다시 -- 그 사이 파이썬에만(tid 500)은 뺀다
+        st = run(d / "py.duckdb", d / "rs.duckdb", None, None, tmp=d, starts=[T + 500])
+        hl3 = next(x for x in st if x.startswith("hl_trades"))
+        assert "불일치 1 · 파이썬에만 0 · Rust에만 0" in hl3 and "그림자 꺼진 구간 1개" in hl3, hl3
         # lake: 같은 파일 · 행 하나 다른 파일 · 한쪽에만
         con = duckdb.connect()
         for root, extra in ((d / "lp", 0), (d / "lr", 1)):
@@ -257,6 +294,7 @@ def main() -> None:
     ap.add_argument("--lake", action="store_true", help="두 경로 = lake 뿌리 · --only venue/stream · --days 시작,끝(YYYY-MM-DD)")
     ap.add_argument("--only", default="")
     ap.add_argument("--days", default="")
+    ap.add_argument("--starts", default="", help="그림자 Rust 감독 «SUPERVISOR starting» 시각(초, 쉼표) -- 그 앞뒤 Rust 가 비어 있던 구간을 뺀다")
     ap.add_argument("--summary", action="store_true", help="끝에 «요약: 견준 N · 설명 못 함 M» · M>0 이거나 N=0 이면 종료코드 1(takeover.sh check)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
@@ -268,7 +306,7 @@ def main() -> None:
         d0, _, d1 = a.days.partition(",")
         out = lake(a.py, a.rs, a.only, d0, d1 or "~", a.show)
     else:   # --from/--to 를 안 주면 표마다 두 쪽 자료가 함께 있는 구간
-        out = run(a.py, a.rs, a.lo, a.hi, a.tmp, a.margin, a.show)
+        out = run(a.py, a.rs, a.lo, a.hi, a.tmp, a.margin, a.show, [int(x) for x in a.starts.split(",") if x.strip()])
     print("\n".join(out))
     if a.summary:
         print(f"요약: 견준 {TALLY[0]:,} · 설명 못 함 {TALLY[1]:,}")

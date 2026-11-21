@@ -112,13 +112,14 @@
 
 ## 6. 넘겨도 되는가 (2026-11-21 열셋째 조각 · `takeover.sh` 종류별)
 
-`bash rtcollect/tools/takeover.sh check|go|back <종류> [<종목>]` -- 걸음은 §5. go 는 check 를 다시 돌려 통과일 때만 바꾼다. 끊긴 초는 go 가 «파이썬 수집기 종료 → 출력 파일 mtime 첫 전진»으로 잰다.
+`bash rtcollect/tools/takeover.sh check|go|back <종류> [<종목>]` -- 걸음은 §5. 종목 = 도는 파이썬 수집기의 목록 **통째로**(인자 없으면 그 종류의 수집기 하나 · 인자가 목록 안의 한 종목이면 그 수집기 · 10-31 통합 뒤 테이프·맥락은 한 프로세스가 여러 종목).
+check 는 그림자 감독 로그의 «SUPERVISOR starting» 시각마다 [그 앞 Rust 마지막 자료, 그 뒤 첫 자료] ±5초를 «그림자 꺼진 구간»으로 빼고(첫 기동 전은 전부) 그 수·길이·뺀 행을 찍는다 · 그림자 Rust 가 파이썬 목록 전부를 뜨는지도 본다(안 뜨는 종목이 있으면 불통과). go 는 check 를 다시 돌려 통과일 때만 바꾼다. 끊긴 초는 go 가 «파이썬 수집기 종료 → 출력 파일 mtime 첫 전진»으로 잰다.
 «그림자» 칸 = `shadow_start.sh` 기본으로 뜨는가(예약 셋은 `shadow_start.sh cron` 줄을 조정자가 등록했을 때만). 뜨지 않은 종류는 check 가 «그림자 출력 없음»으로 불통과 → go 안 됨.
 
 | 차례 | 종류 | 대조(check) | 끊김 예상 | 전진 검정 · 끊긴 구간이 남는 곳 | REST(넘긴 뒤) | 그림자 |
 |---|---|---|---|---|---|---|
 | 1 | `xyz` | shadow_tape 표 셋 · ctx 0.5% 기준 | 수 초 | — · 재접속 때 candleSnapshot 이 1분봉을 메움 | 켬(재접속 때만) | 뜸 |
-| 1 | `hl_ctx` | shadow_tape hl_asset_ctx(그림자 파일 = hl_ctx_only 가 있으면 그것) | 수 초 | — · 그 초가 빔(gaps 없음) | 없음 | 뜸(CTX_ONLY 줄 전부를 한 번에 넘김 · 전체 모드 호가 수집기가 서버에 있으면 거부) |
+| 1 | `hl_ctx` | shadow_tape hl_asset_ctx -- Rust 쪽 = hl_bt 그림자 hl_ctx.sqlite + hl_ctx 그림자 hl_ctx_only.sqlite 를 이어 하나로 | 수 초 | — · 그 초가 빔(gaps 없음) | 없음 | 뜸 · 🔴서버에는 파이썬 전체 모드(hl_bt, 코인별)도 같은 hl_ctx.sqlite 에 쓴다 -- go 는 거부(hl_bt 와 묶어 넘기는 꼴은 다음 조각) |
 | 2 | `depth <SYM>` | shadow_tape --depth(첫·끝 시 빼고 프레임 글자) | 수 초 | fwd_dirshort(간접) · 시 파일의 `_gap` 줄 · ob5m·bookdepth·iceberg 는 끊긴 자리를 끊김으로 읽음 | 켬(스냅숏 · 시간당 1) | 뜸 |
 | 3 | `ob5m <SYM>` · `bookdepth` · `iceberg <SYM>` | shadow_tape bars·marks / --events | 0(depthdiff 파일을 이어 읽는다 -- 다시 뜨면 따라잡음) | bookdepth = fwd_dirshort 피쳐 · 봉 값이 이어진다 | 없음 | 뜸 |
 | 4 | `raster <SYM>` | shadow_tape --raster(§5 SHADOW 99%·0.95 기준) | 수 초 + 스냅숏 | — · 그 초 행이 무효 | 켬(스냅숏) | 뜸 · 🔴넘긴 종목은 파이썬 `_purge_old` 가 멈춘다 -- 전 종목을 넘긴 뒤 `raster_archive` 예약 줄을 TAKEOVER 로(스크립트 밖 · 손으로) |
@@ -133,7 +134,7 @@
 | 11 | `news` | — | — | — | — | 스크립트 밖 -- 그림자 없음(바깥 8곳 ×2) |
 | 12 | `deribit` | shadow_duck option_trades·블록(체인·요약 표는 그림자에서 비어 행 수만) | 수 초 + 20초 플러시 | — · 재기동 REST 백필이 메움(gaps.backfilled) | 켬(백필·10분 체인·매시 대조) | 뜸(체결 WS 만) |
 | 13 | `seal`(예약) | shadow_duck --lake(그림자 lake 의 날짜 범위 · 파일마다 지문) | 0(다음 날 시각부터 Rust) | 🔴lake = 전진 검정 다수 · hot 정리가 켜진다(TAKEOVER) -- 첫 실행은 `--dry-run` 으로 «전부 건너뜀» 확인 권함 | 없음 | 예약 줄 등록 때만 |
-| — | `hl_bt` · `hl_positions` | — | — | — | — | 안 다룸: hl_bt = 파이썬 짝이 Pi · hl_positions = 조회 순간마다 값이 달라 견줄 방법 없음(REST ×2) |
+| — | `hl_bt` · `hl_positions` | — | — | — | — | 안 다룸: hl_bt = 서버에도 파이썬 전체 모드가 있다(위 hl_ctx 와 한 파일 -- 묶음 넘기기 다음 조각) · hl_positions = 조회 순간마다 값이 달라 견줄 방법 없음(REST ×2) |
 
 go 가 하는 일(상주): ① crontab 백업 `logs/supervisor/crontab_backup_<날짜시각>_takeover_<태그>.txt` ② 파이썬 @reboot 줄과 그림자 줄 앞에 `#takeover:<태그> ` · 끝에 Rust 줄(` #takeover:<태그>` 로 끝남) · 줄 수 +1·바뀐 줄 수 검증 뒤 적용 ·
 multicoin 매니페스트의 그 항목을 `taken_over` 로(백업 `logs/supervisor/multicoin_backup_*` -- `resume` 이 파이썬을 다시 띄우지 않게) ③ 파이썬 `_supervise.sh` 부모 → 수집기 SIGTERM(10초·30초 안에 안 죽으면 멈춤) · 다시 떴는지 확인
