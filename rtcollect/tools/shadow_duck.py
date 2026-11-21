@@ -86,21 +86,14 @@ def tcol_of(con, t: str):
 
 
 def down_of(rs, tabs: list, starts: list, margin: int) -> list:
-    """shadow_tape.down_intervals 와 같은 규칙: 감독 «SUPERVISOR starting» T 마다 [T 전 Rust 마지막 자료, T 뒤 첫 자료] ± margin (초)."""
-    from shadow_tape import down_intervals  # noqa: E402
-
-    def times(T):
-        lo = hi = None
-        for t in tabs:
-            _, te = tcol_of(rs, t)
-            if te is None:
-                continue
-            a = rs.execute(f'SELECT max({te}) FROM "{t}" WHERE {te} < ?', [T * 1000]).fetchone()[0]
-            b = rs.execute(f'SELECT min({te}) FROM "{t}" WHERE {te} >= ?', [T * 1000]).fetchone()[0]
-            lo = a // 1000 if a is not None and (lo is None or a // 1000 > lo) else lo
-            hi = b // 1000 if b is not None and (hi is None or b // 1000 < hi) else hi
-        return lo, hi
-    return down_intervals(times, starts, margin) if starts else []
+    """shadow_tape.holes 와 같은 규칙 -- 가장 행이 많은 표의 초 목록으로(프로세스가 꺼지면 모든 표가 빈다)."""
+    from shadow_tape import holes  # noqa: E402
+    tabs = [t for t in tabs if tcol_of(rs, t)[1]]
+    if not starts or not tabs:
+        return []
+    t = max(tabs, key=lambda x: rs.execute(f'SELECT count(*) FROM "{x}"').fetchone()[0])
+    te = tcol_of(rs, t)[1]
+    return holes([r[0] for r in rs.execute(f'SELECT DISTINCT {te} // 1000 FROM "{t}" ORDER BY 1').fetchall()], starts, margin)
 
 
 def minute_cols(py, rs, t: str, ca, te: str, where: str) -> str:
@@ -123,7 +116,7 @@ def compare(py, rs, lo: int, hi: int, margin: int, show: int, starts=()) -> list
     tr = {r[0] for r in rs.execute("SELECT table_name FROM duckdb_tables()").fetchall()}
     excl = gap_minutes((py, rs), margin)
     from shadow_tape import down_note
-    down: list = []
+    down = down_of(rs, sorted(tp & tr - {"gaps"}), list(starts), margin)
     nd = lambda te: "".join(f" AND NOT ({te} >= {a * 1000 if a > float('-inf') else -2**62} AND {te} < {b * 1000 if b < float('inf') else 2**62})" for a, b in down)   # noqa: E731
     out = [f"한쪽에만 있는 표: 파이썬 {sorted(tp - tr)} · Rust {sorted(tr - tp)}"] if tp ^ tr else []
     for t in sorted(tp & tr):
@@ -140,7 +133,6 @@ def compare(py, rs, lo: int, hi: int, margin: int, show: int, starts=()) -> list
             out.append(f"{t}: 시각 열 없음 -- 전체 행 파이썬 {n[0]:,} · Rust {n[1]:,}")
             continue
         te = ms_expr(tcol, dict(ca)[tcol])
-        down = down_of(rs, [t], list(starts), margin)   # 표마다(구독 때 받는 옛 사건의 ts 가 다른 표의 «살아 있던 증거»를 흐리지 않게)
         if lo is None or hi is None:   # 창을 안 주면 = 두 쪽에 자료가 함께 있는 구간(그림자가 떠 있던 창) · 끝 10초 뺌
             sp = [c.execute(f'SELECT min({te}), max({te}) FROM "{t}"').fetchone() for c in (py, rs)]
             if any(x[0] is None for x in sp):

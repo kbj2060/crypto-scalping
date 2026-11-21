@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""같은 시작점 재생 대조(2026-11-22): ob5m · 호가 깊이 10열(bookdepth)은 값이 «사슬을 어디서 시작했나·이력(z 점수 288봉·1시간 변화)»에 달려
+실시간 그림자로는 같은 값을 기대할 수 없다(그림자는 따로 뜬 때부터 센다). 그래서 두 구현을 **같은 h0 · 같은 시 파일 · 같은 «지금»** 으로 한 번씩 돌려 봉을 견준다.
+
+  1. depthdiff 시 파일 [끝 시 − 25, 끝 시] 26개를 임시 폴더로 복사(실시간으로 자라는 파일을 두 쪽이 다른 길이로 읽지 않게)
+  2. 파이썬 원본 main() -- time.time() = (끝 시 + 1)시 + 180초로 멈춤 · 기다려야 하면(파일 끝) 멈춤 · DB = 임시 파일(빈 DB → h0 = 지금 − 26시)
+  3. Rust 같은 종류 -- RTCOLLECT_FAKE_NOW 같은 값 · OB_DB 임시 · DD_ROOT 임시
+  4. shadow_tape 로 bars·marks 대조(warm 봉 빼고 · 호가 깊이 원값은 상대 1e-9) → «요약: 견준 N · 설명 못 함 M» · M>0 이거나 N=0 이면 종료코드 1
+읽기 전용(원본 시 파일·hot 테이프는 읽기만 · 쓰는 것은 --tmp 아래뿐 · 끝나면 지운다). 거래소 접속 없음.
+
+    nice -n 10 python3 rtcollect/tools/replay_book.py bookdepth --end-hour 2026-11-21T14 [--tmp 6TB 폴더] [--keep]
+    nice -n 10 python3 rtcollect/tools/replay_book.py ob5m --symbol BTCUSDT --end-hour 2026-11-21T14
+"""
+from __future__ import annotations
+
+import argparse
+import calendar
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+PY_RUNNER = r'''
+import functools, sys, time
+root, kind, sym, dd, db, now = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], float(sys.argv[6])
+sys.path.insert(0, root)
+sys.argv = ["x", "--symbol", sym] if kind == "ob5m" else ["x"]   # live_ob5m 은 import 때 --symbol 을 읽는다
+class Stop(BaseException):
+    pass
+def _sleep(s):
+    raise Stop
+time.time, time.sleep = (lambda: now), _sleep
+from pathlib import Path
+import scripts.live_ob5m_20261026 as ob
+ob.DD = Path(dd)
+m = ob if kind == "ob5m" else __import__("scripts.live_bookdepth_feat_20261028", fromlist=["x"])
+assert Path(db).resolve() != Path(m.DB).resolve(), "진짜 DB"
+m.db_open = functools.partial(m.db_open, Path(db))   # 기본 인자는 정의 때 굳었다 -- 바꿔 끼운다
+try:
+    m.main()
+except Stop:
+    pass
+'''
+
+
+def hour_name(h: int) -> str:
+    return time.strftime("%Y-%m-%dT%H", time.gmtime(h * 3600))
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("kind", choices=["ob5m", "bookdepth"])
+    ap.add_argument("--symbol", default="ETHUSDT")
+    ap.add_argument("--end-hour", required=True, help="마지막으로 넣을 온전한 시(UTC, YYYY-MM-DDTHH)")
+    ap.add_argument("--dd-root", type=Path, default=ROOT / "data/live/orderflow/depthdiff")
+    ap.add_argument("--tmp", type=Path, default=ROOT / "data/live/rtcollect", help="복사본·임시 DB 자리(6TB 쪽)")
+    ap.add_argument("--bin", type=Path, default=ROOT / "tmp/rtbin/rtcollect")
+    ap.add_argument("--keep", action="store_true")
+    a = ap.parse_args()
+    sym = a.symbol.upper()
+    if a.kind == "bookdepth" and sym != "ETHUSDT":
+        ap.error("bookdepth 는 ETHUSDT 만")
+    h_end = calendar.timegm(time.strptime(a.end_hour, "%Y-%m-%dT%H")) // 3600
+    now = (h_end + 1) * 3600 + 180.0          # 끝 시 다음 시 3분 -- 끝 시 파일은 «닫힌 것», 다음 시는 «아직 안 생김»으로 보인다
+    h0 = h_end - 25                            # 빈 DB → h0 = 지금 시 − 26 (두 구현 같은 식)
+    src = a.dd_root / sym
+    a.tmp.mkdir(parents=True, exist_ok=True)
+    d = Path(tempfile.mkdtemp(prefix=".replay_book_", dir=a.tmp))
+    try:
+        (d / "dd" / sym).mkdir(parents=True)
+        n = 0
+        for h in range(h0, h_end + 1):
+            for ext in (".jsonl", ".jsonl.gz"):    # 원본 hour_path 와 같은 차례(.jsonl 먼저) -- 있는 것을 그대로
+                p = src / f"{hour_name(h)}{ext}"
+                if p.exists():
+                    shutil.copy2(p, d / "dd" / sym / p.name)
+                    n += 1
+                    break
+        print(f"{a.kind} {sym}: 시 파일 {n}개 복사({hour_name(h0)} ~ {hour_name(h_end)}) · 지금 = {time.strftime('%F %T', time.gmtime(now))}Z")
+        if n == 0:
+            print("🔴시 파일이 없다")
+            return 1
+        t0 = time.time()
+        r = subprocess.run([sys.executable, "-c", PY_RUNNER, str(ROOT), a.kind, sym, str(d / "dd" / sym), str(d / "py.sqlite"), str(now)],
+                           cwd=ROOT, capture_output=True, text=True)
+        print(f"  파이썬 {time.time() - t0:.0f}초 · 종료 {r.returncode} · {(r.stdout.strip().splitlines() or [''])[-1][:160]}")
+        if r.returncode:
+            print(r.stderr[-2000:])
+            return 1
+        t0 = time.time()
+        env = {k: v for k, v in os.environ.items() if not k.startswith("RTCOLLECT_")}
+        env.update(RTCOLLECT_KIND=a.kind, OB_SYMBOL=sym, DD_ROOT=str(d / "dd"), OB_DB=str(d / "rs.sqlite"), RTCOLLECT_FAKE_NOW=repr(now),
+                   TAPE_DB_PATH=str(ROOT / "data/hot/binance_tape.sqlite"))
+        r = subprocess.run([str(a.bin)], cwd=ROOT, env=env, capture_output=True, text=True)
+        print(f"  Rust {time.time() - t0:.0f}초 · 종료 {r.returncode}")
+        if r.returncode:
+            print(r.stderr[-2000:])
+            return 1
+        import shadow_tape as S
+        S.TALLY[:] = [0, 0]
+        S.INTENDED_EXTRA.pop("bars", None)   # 같은 시작점이면 «Rust 에만 봉»도 설명이 안 된다
+        out = S.run(d / "py.sqlite", d / "rs.sqlite", show=5)
+        print("\n".join("  " + x for x in out))
+        print(f"요약: 견준 {S.TALLY[0]:,} · 설명 못 함 {S.TALLY[1]:,}")
+        return 1 if S.TALLY[1] or not S.TALLY[0] else 0
+    finally:
+        if a.keep:
+            print(f"  남김: {d}")
+        else:
+            shutil.rmtree(d, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

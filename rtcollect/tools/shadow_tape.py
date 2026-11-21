@@ -70,6 +70,9 @@ INTENDED_EXTRA = {
     "hl_xyz_1m": "원본은 끊길 때 마지막 플러시 뒤 행을 버린다",
     "hl_xyz_ctx_1s": "같은 이유",
 }
+# 받은 시각(초·ms)을 빼면 같은 값이 여러 번 찍힌 줄 -- 몇 번 찍혔는지는 각자 받은 초에 달렸다 → 값 묶음의 «종류»(집합)로 견준다
+#   (xyz ctx: 파이썬에만 2,219 · Rust에만 1,024 가 대부분 같은 값의 찍힌 횟수 차였다)
+SET_TABLES = {"hl_xyz_ctx_1s", "hl_asset_ctx"}
 SYM_COL = {"trade_tape_1s": "symbol", "bybit_liquidations": "symbol", "bybit_oi": "inst", "bybit_mark": "inst", "bybit_funding": "inst",
            "okx_oi": "inst", "okx_mark": "inst", "okx_funding": "inst", "okx_liquidations": "inst_id",
            "mark_price_1s": "symbol", "oi_1s": "symbol", "liquidations": "symbol", "hl_xyz_1m": "coin", "hl_xyz_ctx_1s": "coin", "hl_asset_ctx": "coin"}
@@ -96,18 +99,27 @@ def tables(con) -> set[str]:
                                       "UNION SELECT name FROM sqlite_temp_master WHERE type = 'view'")}
 
 
-def down_intervals(times, starts: list[int], margin: int) -> list[tuple[float, float]]:
-    """그림자 Rust 가 꺼져 있던 구간(초): 감독 로그의 «SUPERVISOR starting» 시각 T 마다 [T 전 Rust 마지막 자료, T 뒤 Rust 첫 자료] ± margin.
-    times(T) = (T 전 마지막 초 또는 None, T 뒤 첫 초 또는 None). 첫 기동 전은 -inf 부터(그림자가 뜨기 전 자료는 견주지 않는다)."""
-    out = []
-    for i, t in enumerate(sorted(starts)):
-        a, b = times(t)
-        if i == 0:   # 첫 기동: 그 앞은 전부 -- 구독 때 받는 «지난 사건»(OKX 청산 등)의 옛 ts 가 «T 전 마지막 자료»로 잡히지 않게
-            a = None
-        # ponytail: 꺼진 시간은 T 앞뒤 CAP 초 안으로 자른다(드문 종목 하나 때문에 몇 시간을 빼지 않게) -- 재기동이 CAP 보다 길면 늘린다
-        a = t - CAP if i and (a is None or a < t - CAP) else a
-        b = t + CAP if b is None or b > t + CAP else b
-        out.append((a - margin if a is not None else float("-inf"), b + margin))
+def holes(ts: list, starts: list, margin: int) -> list[tuple[float, float]]:
+    """그림자 Rust 가 꺼져 있던 구간(초). ts = 그 프로세스가 쓴 자료의 시각(정렬 · 가장 촘촘한 표 하나면 충분 -- 프로세스가 꺼지면 모든 표가 빈다).
+    starts = 감독 로그의 «SUPERVISOR starting» 시각.
+      첫 기동: (-inf, 그 뒤 첫 자료] -- 그림자가 뜨기 전은 전부(구독 때 받는 «지난 사건»의 옛 ts 에 속지 않게 «앞 자료»는 안 본다)
+      재기동 T: 앞 기동 뒤 ~ T+CAP 안에서 끝이 T−CAP 뒤인 **가장 큰 빈틈**(자료 사이) -- 죽인 때(K)는 로그에 없고,
+        다시 붙으면 거래소가 «최근 체결 몇 개»를 다시 보내 T 바로 앞까지 메우므로 «T 앞 마지막 자료»로는 K 를 못 찾는다(HL 체결 23:09 BTC 436행)."""
+    import bisect
+    st, out = sorted(starts), []
+    for i, T in enumerate(st):
+        if i == 0:
+            j = bisect.bisect_left(ts, T)
+            b = ts[j] if j < len(ts) else T + CAP
+            out.append((float("-inf"), min(b, T + CAP) + margin))
+            continue
+        seg = ts[bisect.bisect_left(ts, st[i - 1]):bisect.bisect_right(ts, T + CAP)]
+        best = (T - CAP, T + CAP) if not seg else None
+        cands = list(zip(seg, seg[1:])) + ([(seg[-1], T + CAP)] if seg and seg[-1] < T else [])
+        for a, b in cands:
+            if b >= T - CAP and (best is None or b - a > best[1] - best[0]):
+                best = (a, b)
+        out.append((best[0] - margin, best[1] + margin) if best else (T - margin, T + margin))
     return merge(out)
 
 
@@ -121,7 +133,8 @@ def merge(out: list) -> list:
     return merged
 
 
-CAP = 300
+RASTER_L1 = 0.02
+CAP = 300   # ponytail: 재기동 빈틈은 T 앞뒤 300초 안에서 찾는다(드문 종목 하나 때문에 몇 시간을 빼지 않게) -- 재기동이 더 길면 늘린다
 
 
 def down_note(d: list, n: int) -> str:
@@ -131,38 +144,34 @@ def down_note(d: list, n: int) -> str:
     return f" · 그림자 꺼진 구간 {len(d)}개(첫 기동 전 포함 · 유한 합 {fin:.0f}초)에서 뺀 행 {n:,}"
 
 
-def sym_down(con, t: str, tcol: str, ms: bool, symcol, starts: list, margin: int) -> dict:
-    """표 하나의 꺼진 구간을 종목마다({종목: 구간}, 종목 열이 없으면 {None: …}). 종목마다 «Rust 첫 자료 전»(그 종목을 아직 안 뜨던 때)도 뺀다
-    -- 종목마다 다시 붙는 때가 다르다(Bybit tickers · HL 코인별 프로세스)."""
-    f = 1000 if ms else 1
+def sec_expr(tcol: str, ms: bool) -> str:
+    return f"({tcol} / 1000)" if ms else tcol
+
+
+def proc_holes(con, tabs: list, starts: list, margin: int) -> list:
+    """sqlite: 가장 행이 많은 표의 초 목록으로 holes()."""
+    if not starts or not tabs:
+        return []
+    t, tcol, ms = max(tabs, key=lambda x: con.execute(f"SELECT count(*) FROM {x[0]}").fetchone()[0])
+    ts = [r[0] for r in con.execute(f"SELECT DISTINCT {sec_expr(tcol, ms)} FROM {t} ORDER BY 1")]
+    return holes(ts, starts, margin)
+
+
+def sym_down(con, t: str, tcol: str, ms: bool, symcol, proc: list, margin: int) -> dict:
+    """표 하나의 뺄 구간을 종목마다({종목: 구간}, 종목 열이 없으면 {None: …}):
+    프로세스 빈틈(proc) + 종목마다 «그 빈틈 뒤 그 종목 첫 자료»까지(종목마다 다시 붙는 때가 다르다 · CAP 까지) + «그 종목 Rust 첫 자료 전»."""
+    x = sec_expr(tcol, ms)
     g, sel = (f" GROUP BY {symcol}", f"{symcol}, ") if symcol else ("", "NULL, ")
-    first = dict(con.execute(f"SELECT {sel}min({tcol}) FROM {t}{g}").fetchall())
-    before, after = {}, {}
-    for T in starts:
-        before[T] = dict(con.execute(f"SELECT {sel}max({tcol}) FROM {t} WHERE {tcol} < ?{g}", [T * f]).fetchall())
-        after[T] = dict(con.execute(f"SELECT {sel}min({tcol}) FROM {t} WHERE {tcol} >= ?{g}", [T * f]).fetchall())
-    out = {}
-    for sym, f0 in first.items():
-        if f0 is None:
+    first = dict(con.execute(f"SELECT {sel}min({x}) FROM {t}{g}").fetchall())
+    out = {s: [(float("-inf"), f0 + (margin if proc else 0))] + list(proc) for s, f0 in first.items() if f0 is not None}
+    for a, b in proc:
+        if b == float("inf"):
             continue
-        d = down_intervals(lambda T: (None if before[T].get(sym) is None else before[T][sym] // f,
-                                      None if after[T].get(sym) is None else after[T][sym] // f), starts, margin) if starts else []
-        out[sym] = merge(d + [(float("-inf"), f0 // f + (margin if starts else 0))])   # 그 종목 Rust 첫 자료 전
-    return out
-
-
-def sql_times(con, starts_tables):
-    """sqlite 꼴: 표마다 시각 열에서 T 앞·뒤 Rust 자료(초)."""
-    def times(T):
-        lo = hi = None
-        for t, tcol, ms in starts_tables:
-            f = 1000 if ms else 1
-            a = con.execute(f"SELECT max({tcol}) FROM {t} WHERE {tcol} < ?", [T * f]).fetchone()[0]
-            b = con.execute(f"SELECT min({tcol}) FROM {t} WHERE {tcol} >= ?", [T * f]).fetchone()[0]
-            lo = a // f if a is not None and (lo is None or a // f > lo) else lo
-            hi = b // f if b is not None and (hi is None or b // f < hi) else hi
-        return lo, hi
-    return times
+        late = dict(con.execute(f"SELECT {sel}min({x}) FROM {t} WHERE {x} >= ?{g}", [int(b - margin)]).fetchall())
+        for s in out:
+            f1 = late.get(s)
+            out[s].append((a, min(f1 if f1 is not None else b + CAP, b + CAP) + margin))
+    return {s: merge(v) for s, v in out.items()}
 
 
 def cols(con, t: str) -> list[str]:
@@ -198,7 +207,7 @@ def span(con, t: str, tcol: str, ms: bool) -> tuple[int, int] | None:
     return (lo // 1000, hi // 1000) if ms else (lo, hi)
 
 
-def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, window: int, show: int, excl: dict, starts=()) -> str:
+def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, window: int, show: int, excl: dict, proc=()) -> str:
     tcol, ms, key, drop = TABLES[t]
     a, b = span(py, t, tcol, ms), span(rs, t, tcol, ms)
     if not a or not b:
@@ -215,7 +224,7 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
     allsym = excl.get(None, set())
     n_cmp = n_bad = only_py = only_rs = n_down = n_warm = 0
     skipped: set = set()
-    down = sym_down(rs, t, tcol, ms, SYM_COL.get(t), list(starts), margin)
+    down = sym_down(rs, t, tcol, ms, SYM_COL.get(t), list(proc), margin)
     wi = names.index("warm") if "warm" in names else None
     knames = [names[i] for i in keepcols]
     # 호가 깊이 10열 원값 = 원본이 BLAS 내적(서버 OpenBLAS) -- 끝자리가 기계·합 차례마다 다르다(ob5m_parity 930칸 1e-12 안) → 상대 1e-9 안이면 같음
@@ -229,6 +238,8 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
         return x == y   # 준비 구간 봉(warm=1)은 한쪽이라도 그러면 견주지 않는다(사슬 시작에 달렸다)
     first: list = []
     carry: tuple = (Counter(), Counter())
+    sp_: set = set()
+    sr_: set = set()
 
     def keep(r) -> bool:
         nonlocal n_down
@@ -270,6 +281,10 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
                     worst = max(worst, max(abs(x - y) / max(abs(x), abs(y)) for x, y in zip(dp[k], dr[k]) if isinstance(x, float) and isinstance(y, float) and x != y))
             po, ro_ = dp.keys() - dr.keys(), dr.keys() - dp.keys()
             po_min.update((tp_[k] // 60) * 60 for k in po)
+        elif t in SET_TABLES:
+            sp_.update(rp)
+            sr_.update(rr)
+            continue
         else:
             # 행 묶음: 못 맞춘 행은 다음 창으로 넘긴다(창 경계에 걸린 행 · 받은 시각이 한쪽만 늦은 행)
             cp, cr = Counter(rp) + carry[0], Counter(rr) + carry[1]
@@ -281,6 +296,8 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
         for tag, extra in (("파이썬에만", po), ("Rust에만", ro_)):
             for k in sorted(extra)[: max(0, show - len(first))]:
                 first.append(f"{tag} {k}")
+    if t in SET_TABLES:
+        n_cmp, carry = len(sp_ & sr_), (Counter(sp_ - sr_), Counter(sr_ - sp_))
     if not kidx:
         only_py, only_rs = sum(carry[0].values()), sum(carry[1].values())
         for tag, extra in (("파이썬에만", carry[0]), ("Rust에만", carry[1])):
@@ -294,7 +311,7 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
     TALLY[0] += n_cmp
     TALLY[1] += bad
     line = (f"{t}: 비교 {n_cmp:,}행 · 불일치 {n_bad:,} · 파이썬에만 {only_py:,} · Rust에만 {only_rs:,}{rs_note} · 범위 [{s0}, {s1}) 초 · "
-            f"뺀 (종목,분) {len(skipped):,}{down_note(max(down.values(), key=len, default=[]), n_down)}"
+            f"뺀 (종목,분) {len(skipped):,}{down_note(list(proc), n_down)}"
             f"{f' · 끝자리 차(상대 1e-9 안) 최대 {worst:.1e}' if worst else ''}"
             f"{hot}{f' · 준비 구간(warm) 봉 {n_warm:,} 뺌' if n_warm else ''}")
     return line + "".join(f"\n    {x}" for x in first)
@@ -305,20 +322,11 @@ def run(py_path: Path, rs_path: Path, lo=None, hi=None, margin=5, window=3600, s
     try:
         excl = excluded_minutes(py, rs, margin)
         common = sorted(tables(py) & tables(rs) & TABLES.keys())
-        return [compare_table(py, rs, t, lo, hi, margin, window, show, excl, starts) for t in common] or ["비교할 표가 없다"]
+        proc = proc_holes(rs, [(t, TABLES[t][0], TABLES[t][1]) for t in common], list(starts), margin)
+        return [compare_table(py, rs, t, lo, hi, margin, window, show, excl, proc) for t in common] or ["비교할 표가 없다"]
     finally:
         py.close()
         rs.close()
-
-
-def bisect_times(ts: list):
-    """정렬된 Rust 시각(초) 목록 → down_intervals 의 times(T)."""
-    import bisect
-
-    def times(T):
-        i = bisect.bisect_left(ts, T)
-        return (ts[i - 1] if i else None), (ts[i] if i < len(ts) else None)
-    return times
 
 
 def compare_depth(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", starts=(), margin: int = 5) -> list[str]:
@@ -343,7 +351,7 @@ def compare_depth(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", start
         m = ev.search(x)
         return int(m.group(1)) // 1000 if m else None
     a, b = read(py_dir), read(rs_dir)
-    down = down_intervals(bisect_times(sorted(t for h in b for x in b[h] if (t := sec(x)) is not None)), list(starts), margin) if starts else []
+    down = holes(sorted({t for h in b for x in b[h] if (t := sec(x)) is not None}), list(starts), margin) if starts else []
     n_down = 0
 
     def frames(lines):
@@ -391,7 +399,7 @@ def compare_raster(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", star
         return out
     hours = [(pp.stem, pp, rs_dir / pp.name) for pp in sorted(py_dir.glob("*.f32")) if lo <= pp.stem <= hi and (rs_dir / pp.name).exists()]
     data = [(h, rows(pp), rows(rp)) for h, pp, rp in hours]
-    down = down_intervals(bisect_times(sorted(t // 1000 for _, _, b in data for t in b)), list(starts), margin) if starts else []
+    down = holes(sorted({t // 1000 for _, _, b in data for t in b}), list(starts), margin) if starts else []
     res, n_down = [], 0
     for h, a, b in data:
         both = [t for t in sorted(a.keys() & b.keys()) if not any(x <= t // 1000 < y for x, y in down)]
@@ -408,7 +416,10 @@ def compare_raster(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", star
             l1.append(sum(abs(x - y) for x, y in zip(qa, qb)) / (sum(abs(x) + abs(y) for x, y in zip(qa, qb)) or 1))
         med = lambda v: sorted(v)[len(v) // 2] if v else None   # noqa: E731
         TALLY[0] += len(both)
-        TALLY[1] += int(bool(both) and (same_hdr < 0.99 * len(both) or med(near) is None or med(near) < 0.95))   # 기준(제안): bin_lo·mid 99% · mid ±20칸 같음 중앙 0.95
+        # 기준(11-22 확정 제안): 그 시 «잔량 상대차(L1) 중앙» ≤ RASTER_L1 -- 칸 같음 비율은 진단만.
+        #   까닭: 두 프로세스가 각자 벽시계 초에 북을 찍어 붐비는 종목(ETH·BTC)은 mid 근처 칸도 몇 이벤트씩 갈린다(조용한 SOL 은 1.0) -- 같음 비율은 «시각 차»를 잰다.
+        #   실측(11-21 12시간): L1 중앙 ETH 2e-5~6e-3 · BTC 1e-3~1.7e-2(재기동 시) · SOL 0~2.5e-10. 계산이 틀리면(부호·칸 밀림) L1 이 수십 % 로 뛴다.
+        TALLY[1] += int(bool(both) and (med(l1) is None or med(l1) > RASTER_L1))
         res.append(f"raster {h}: 두 쪽 유효 초 {len(both):,} · bin_lo·mid 같음 {same_hdr:,} · 칸 같음 비율 중앙 전체 {med(fr)} · mid ±20칸 {med(near)} · "
                    f"잔량 상대차(L1) 중앙 {med(l1)} · 파이썬만 유효 {len(a.keys() - b.keys()):,} · Rust만 유효 {len(b.keys() - a.keys()):,}")
     return (res + [f"raster:{down_note(down, n_down)}"] if down else res) or ["raster: 두 쪽에 같은 시 파일이 없다"]
@@ -565,7 +576,10 @@ def selftest() -> None:
         rz = compare_raster(Path(d) / "rp", Path(d) / "rr")
         assert "mid ±20칸 1.0" in rz[0] and TALLY == [10, 0], (rz, TALLY)
         # 첫 기동 전(-inf)은 뺀다: 기동 T+600 하나면 그 앞 Rust 자료가 있어도 첫 기동 = 로그의 가장 이른 것
-        assert down_intervals(lambda t: (None, t + 3), [t0 := T + 600], 5) == [(float("-inf"), t0 + 8)]
+        assert holes([T + 603], [t0 := T + 600], 5) == [(float("-inf"), t0 + 8)]
+        # 재기동: 죽인 때(T+100) 뒤 빈틈을 다시 붙을 때 받은 «최근 체결»(T+148~149)이 T 바로 앞까지 메워도, 가장 큰 빈틈 [T+100, T+148] 을 찾는다
+        tl = list(range(T, T + 101)) + [T + 148, T + 149] + list(range(T + 152, T + 400))
+        assert holes(tl, [T - 10, T + 150], 5) == [(float("-inf"), T + 5), (T + 95, T + 153)], holes(tl, [T - 10, T + 150], 5)
         (Path(d) / "a.jsonl").write_text('{"t_end":60,"side":1}\n{"t_end":90,"side":-1}\n{"t_end":120,"side":1}\n')
         (Path(d) / "b.jsonl").write_text('{"t_end":60,"side":1}\n{"t_end":120,"side":1}\n')
         ev = compare_events(Path(d) / "a.jsonl", Path(d) / "b.jsonl", lo=60, hi=120)[0]

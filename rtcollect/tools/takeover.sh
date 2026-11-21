@@ -8,6 +8,7 @@
 #      (예약): liq_tab seal    · 안 다룸: hl_bt(서버 파이썬 전체 모드가 hl_ctx 와 한 파일 -- 묶음 넘기기 다음) · hl_positions(대조 방법 없음) · news·treasury_futures·macro_5m(그림자 없음) · liqmap_scorer·soxl_weekend·cboe_chain(전진 장부 -- 손으로)
 # 죽이는 것: 명령줄 인자가 그 종류의 러너 파일로 끝나고 environ 의 종목이 맞는 프로세스와 그 부모 _supervise.sh 뿐(PID 마다 /proc/<pid>/cmdline 다시 확인 · 이름으로 한꺼번에 안 죽인다).
 #   SIGTERM 뒤 기다렸다가 살아 있으면 보고만 하고 멈춘다(그때는 `back` 으로 되돌린다). 대시보드·감시·주문은 러너가 달라 걸리지 않는다(걸리면 멈춘다).
+#   bash rtcollect/tools/takeover.sh weight binance_ctx  바이낸스 가중치 머리(x-mbx-used-weight-1m)만 WEIGHT_N 번 읽어 최고를 찍는다(binance_ctx go 가 넘기기 전·뒤에 쓴다)
 # 바꿔 끼우기(시험용): CRONTAB_CMD(기본 crontab) · TAKEOVER_ROOT · WATCH_S(60) · TERM_WAIT_S(120 -- 체결 테이프류는 SIGTERM 뒤 마지막 묶음을 쓰느라 30초를 넘긴다) · CHECK_PY · RTCOLLECT_BIN · RTDUCK_BIN
 set -uo pipefail
 TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -75,7 +76,7 @@ case "$KIND" in
   hl_bt|hl_positions|news|treasury_futures|macro_5m|liqmap_scorer|soxl_weekend|cboe_chain) die "$KIND 는 이 스크립트가 다루지 않는다 -- rtcollect/REMAINING.md «넘겨도 되는가» 표" ;;
   *) [ -n "$KIND" ] || { sed -n '2,12p' "$0"; exit 2; }; die "모르는 종류 '$KIND'" ;;
 esac
-case "$MODE" in check|go|back) ;; *) die "check|go|back 중 하나" ;; esac
+case "$MODE" in check|go|back|weight) ;; *) die "check|go|back 중 하나" ;; esac
 ENGU="$(echo "$ENG" | tr '[:lower:]' '[:upper:]')"
 BIN="$(eval echo "\${${ENGU}_BIN:-$ROOT/tmp/rtbin/$ENG}")"
 COVK="${COVK:-$RK}"
@@ -339,6 +340,22 @@ esac
 TAG="$KIND"; [ -z "$SELV" ] || [ "$GROUP" = 1 ] || TAG="${KIND}_${SEL//[,:]/_}"
 
 # ── 실행 ──
+# ── 바이낸스 가중치(binance_ctx 만) ── 응답 머리 x-mbx-used-weight-1m(이 IP 의 지난 1분 사용량)을 WEIGHT_GAP 초 간격으로 WEIGHT_N 번 · 가장 큰 값
+#   부르는 곳 = /fapi/v1/time(가중치 1) · 밴 파일이 살아 있으면 부르지 않는다(멈춤). 시험은 WEIGHT_URL 을 127.0.0.1 로.
+WEIGHT_URL="${WEIGHT_URL:-https://fapi.binance.com/fapi/v1/time}"; WEIGHT_N="${WEIGHT_N:-5}"; WEIGHT_GAP="${WEIGHT_GAP:-60}"
+weight_max() {
+  local i w max=0 ban=data/live/binance_ban_until
+  for i in $(seq "$WEIGHT_N"); do
+    [ "$i" = 1 ] || sleep "$WEIGHT_GAP"
+    if [ -f "$ban" ] && [ "$(cut -d. -f1 < "$ban" 2>/dev/null || echo 0)" -gt "$(date +%s)" ] 2>/dev/null; then echo "밴 중" >&2; return 1; fi
+    w="$(curl -s -D - -o /dev/null --max-time 10 "$WEIGHT_URL" | tr -d '\r' | sed -nE 's/^[Xx]-[Mm][Bb][Xx]-[Uu][Ss][Ee][Dd]-[Ww][Ee][Ii][Gg][Hh][Tt]-1[Mm]: *([0-9]+).*/\1/p')"
+    [ -n "$w" ] || { echo "가중치 머리를 못 읽음" >&2; return 1; }
+    echo "  가중치 $i/$WEIGHT_N: $w" >&2
+    [ "$w" -gt "$max" ] && max="$w"
+  done
+  echo "$max"
+}
+[ "$MODE" = weight ] && { weight_max; exit $?; }   # 시험·손 확인용
 [ "$MODE" = check ] && { check; exit $?; }
 [ -x "$BIN" ] || die "실행 파일이 없다: $BIN"
 CUR="$($CT -l 2>/dev/null)"; NCUR="$(printf '%s\n' "$CUR" | wc -l)"
@@ -377,6 +394,13 @@ fi
 # go
 echo "go $TAG -- check 부터"
 check || die "check 불통과 -- 아무것도 바꾸지 않았다"
+if [ "$KIND" = binance_ctx ]; then   # 넘기면 Rust 가 OI REST(분당 약 540 · 가중치 1)를 처음 실전에서 맡는다 -- 같은 조건 분당 요청 수 + 넘기기 전 가중치
+  echo "  binance_ctx: 가짜 서버로 분당 요청 수 나란히(${RATE_S:-300}초) -- rate_binance_ctx.py"
+  nice -n 10 "$PYC" "$TOOLS/rate_binance_ctx.py" --seconds "${RATE_S:-300}" --latency "${RATE_LAT:-0.03}" --bin "$BIN" | sed 's/^/    /'
+  [ "${PIPESTATUS[0]}" = 0 ] || die "분당 요청 수가 원본과 다르다 -- 아무것도 바꾸지 않았다"
+  W_BEFORE="$(weight_max)" || die "넘기기 전 가중치를 못 읽음 -- 아무것도 바꾸지 않았다"
+  echo "  넘기기 전 가중치(1분) 최고 $W_BEFORE"
+fi
 [ -z "$(rs_procs takeover)" ] || die "이미 진짜 경로 Rust 가 돈다(pid $(rs_procs takeover | tr '\n' ' ')) -- 멈춤"
 PY="$(py_procs)"
 if [ "$CRON" = 0 ]; then
@@ -439,6 +463,11 @@ BAD=0; for f in $(logs_glob); do BAD=$((BAD + $(tail -c +$(( ${LOG0[$f]:-0} + 1 
 GAP="$([ -n "$T_UP" ] && echo "$((T_UP - T_DOWN))초" || echo "${WATCH_S}초 안 첫 쓰기 없음(쓰는 주기가 길면 정상 -- check 로)")"
 echo "go $TAG: Rust pid ${R:-없음}· 끊김 $GAP · 로그 이상 $BAD · 다음 스트림 넘기기 전 check 한 번 더"
 [ -n "$R" ] || die "Rust 가 ${WATCH_S}초 안에 안 살았다"
+if [ "$KIND" = binance_ctx ]; then   # 넘긴 직후 가중치 -- 넘기기 전 최고보다 100 넘게 늘면 되돌린다(IP 밴은 주문 경로까지 막는다)
+  W_AFTER="$(weight_max)" || die "넘긴 뒤 가중치를 못 읽음"
+  echo "  가중치(1분) 최고: 넘기기 전 $W_BEFORE · 뒤 $W_AFTER"
+  [ "$W_AFTER" -le $((W_BEFORE + 100)) ] || die "가중치가 넘기기 전보다 $((W_AFTER - W_BEFORE)) 늘었다(> 100)"
+fi
 STAGE=0
 writers || exit 9
 [ "$BAD" = 0 ] || { echo "🔴 Rust 는 돌지만 로그에 이상 $BAD 줄 -- 보고 판단(되돌리기: back $KIND)"; exit 1; }

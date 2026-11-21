@@ -145,4 +145,22 @@ rm -f "$R/slow"
 for _ in $(seq 30); do p="$(pyp futures)"; [ -n "$p" ] && [ "$p" != "$FUT1" ] && break; sleep 1; done
 ok "수집기가 끝난 뒤 지킴이가 감독을 다시 띄움(새 파이썬 pid)" 'p="$(pyp futures)"; [ -n "$p" ] && [ "$p" != "$FUT1" ] && grep -q "py_exit futures" order.log'
 ok "그림자는 그대로(④ 전에 멈춤)" '[ -n "$(rsp "")" ]'
+echo "== 5. 바이낸스 가중치 머리 읽기(binance_ctx go 의 넘기기 전·뒤 단계) -- 127.0.0.1 가짜 서버"
+cat > "$R/wsrv.py" <<'X'
+import http.server, sys
+seq = iter([100, 250, 180, 90, 90, 90])
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200); self.send_header("X-MBX-USED-WEIGHT-1M", str(next(seq))); self.send_header("Content-Length", "2"); self.end_headers(); self.wfile.write(b"{}")
+    def log_message(self, *a): pass
+s = http.server.HTTPServer(("127.0.0.1", 0), H); print(s.server_address[1], flush=True); s.serve_forever()
+X
+python3 "$R/wsrv.py" > "$R/wport" & sleep 1
+WP="$(cat "$R/wport")"
+W="$(WEIGHT_URL="http://127.0.0.1:$WP/fapi/v1/time" WEIGHT_N=3 WEIGHT_GAP=0 bash rtcollect/tools/takeover.sh weight binance_ctx 2>/dev/null)"
+ok "가중치 세 번 중 최고 = 250 ($W)" '[ "$W" = 250 ]'
+echo "$(( $(date +%s) + 600 ))" > data/live/binance_ban_until
+WEIGHT_URL="http://127.0.0.1:$WP/fapi/v1/time" WEIGHT_N=1 bash rtcollect/tools/takeover.sh weight binance_ctx > /dev/null 2>&1; RC=$?
+ok "밴 파일이 살아 있으면 부르지 않고 실패" '[ "$RC" != 0 ]'
+rm -f data/live/binance_ban_until
 [ "$FAIL" = 0 ] && echo "takeover selftest OK" || { echo "takeover selftest 실패"; exit 1; }
