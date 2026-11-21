@@ -14,7 +14,10 @@ Rust 판 = `rtserve/`(새 크레이트). 설계 문서 `docs/rtcore_design_20261
   + 쓰기 4(acct-notes·acct-wrong POST · push/subscribe·unsubscribe) + 설정 읽기 2(push/config·devices) + client-timing + order_request_log(요청 111 · 쓴 파일 대조 184 일치)
   + rtcore 허브 구독 → `/api/supply-1s` · `/api/footprint` · SSE `/api/stream`(수급) · `/api/events`(rtcore 시험 정답지의 파이썬 행과 비트 일치). 양성 대조 §6.
 - **셋째 조각(2026-11-21 · 미커밋)**: 저장소+계산 7 중 2(session-alerts · liquidation-5m-signal · DuckDB 묶음) + swr 캐시(원본과 같은 ttl·max_stale) + 처리 시간 벤치(§4 셋째 조각 표).
-- **옮김 합계**: `/api/*` 78 중 33 + 화면·정적 6 전부. 남은 것 = §7.
+- **넷째 조각(2026-11-22 · 미커밋)**: 주문·계좌 14 프록시(rtorder 문 · 진짜 rtorder 실행 파일로 route 정답지 42건 바이트 일치) + `/api/events` acct_seq(rtorder `/internal/acct` 1초)
+  + `/api/oi-5m`(hot oi_1s + 코어 Micro.okx_oi5m · 요청 7) + `/api/liquidation-5m-history`(코어 Liq5m + hot OKX·HL · 요청 12) + 모델 5(dir4h · dir-short · vol-forecast · open-rev · dir-signals = rtmodel::handlers ·
+  가짜 REST 녹화본 · dir 5벌 payload 비트 + 요청 545 같은 열 · 본문 글자 4 · QX4 배선 · 밴·낡음). §4 넷째 조각 · §5 #23~#33.
+- **옮김 합계(2026-11-22)**: `/api/*` 78 중 **54**(33 + 넷째 조각 21) + 화면·정적 6 전부 = **60 / 84**. 남은 것 = §7.
 - 인증·세션: **원본 서버 안에 없다.** 127.0.0.1 에만 묶이고, 공개 경로는 Cloudflare 터널(`dashboard/scripts/start_cloudflare_tunnel.sh`) + Cloudflare Access 가 막는다
   (`dashboard/scripts/supervise_server.sh:31~32` 주석 · `docs/rtcore_browser_route_20261120.md:22`). «인증 없이 열면 `/` 는 302, 그 밖은 404» 로 보인 것은
   원본 라우터 그대로다(`/` = `HTTPFound("/dashboard/live/")`, 모르는 주소 = `404: Not Found`). rtserve 도 인증을 새로 만들지 않고 루프백이 아니면 시작을 거절한다.
@@ -35,7 +38,7 @@ Rust 판 = `rtserve/`(새 크레이트). 설계 문서 `docs/rtcore_design_20261
 | 꺼진 코인 탭 | 3609 | `<button … data-asset="x">` 의 x 가 `DASHBOARD_ASSETS`(env · 기본 eth,sol,xrp)에 없으면 ` hidden>` | 같음(정규식 대신 손으로 · 같은 결과) |
 | pwa | 3635 | sw.js·manifest = FileResponse + no-cache | 같음 |
 | 예외 응답 | aiohttp web_protocol | `HTTPException` 은 미들웨어를 안 지나고 `"{status}: {reason}"` text/plain · 400 은 상태 줄 글자도 reason(`400 unsupported_asset`) · 405 는 `Allow: GET,HEAD` · 잡히지 않은 예외 = 500 `500 Internal Server Error\n\nServer got itself in trouble` + 연결 닫음 | 같음(상태 줄 글자 포함) |
-| 요청 기록 `order_request_log` | 1352 | POST `/api/manual-*` 만: KST 시각·경로·쿼리(**키마다 첫 값**)·상태·error·ms·UA 200자·IP(CF-Connecting-IP → X-Forwarded-For → 접속 IP) → `data/live/order_requests.jsonl` 한 줄 덧붙이기. 예외(404·405)도 상태와 함께 적힌다 | **옮김**(`api2.rs order_request_log` · 주문 주소가 아직 없어 지금은 404 줄만 적힌다 -- rtorder 붙일 때 그대로 쓴다) |
+| 요청 기록 `order_request_log` | 1352 | POST `/api/manual-*` 만: KST 시각·경로·쿼리(**키마다 첫 값**)·상태·error·ms·UA 200자·IP(CF-Connecting-IP → X-Forwarded-For → 접속 IP) → `data/live/order_requests.jsonl` 한 줄 덧붙이기. 예외(404·405)도 상태와 함께 적힌다 | **옮김**(`api2.rs order_request_log` · 넷째 조각부터 rtorder 로 넘긴 요청은 rtorder 가 적고 rtserve 는 안 적는다 -- 502(문 닫힘)·404·405 만 rtserve 가 적는다) |
 | M0 `client_timing` | 5102 | POST `/api/client-timing` 본문 1KB·아는 키·숫자만 → 로그 한 줄 · 0.2초 상한 | **옮김**(로그 = `Config.log` · 실행 파일은 표준 출력) · 허용 숫자 칸 = 원본 10칸 + rt_* 9칸(main 4ff90f88 · 정답지도 같은 19칸) + 🔴머지 대기 2칸(rt_draw_s · rt_back_n · 원본 PR 전 -- 정답지 밖 · Rust 시험 rt_timing_keys) |
 | swr 캐시 | 1460~1500 | 키별 ttl·max_stale · 묵은 값 먼저 주고 뒤에서 갱신 | **안 옮김**(이 조각의 읽기는 µs) — §5 |
 | 시작·종료 | 5030~5043 · main 5123 | 시작: http 세션 · SSE 발행 · 흐름(코인별 WS) · 미시 루프 6종 · 손절 감시 · 대기 정리 · 사용자 스트림 · 멈춤 감지 / 종료는 역순 · `shutdown_timeout=2.0`(SSE 때문) | 시작 = 묶기만 · Ctrl+C 끝 · 백그라운드 루프 없음(§3) |
@@ -104,14 +107,14 @@ Rust 판 = `rtserve/`(새 크레이트). 설계 문서 `docs/rtcore_design_20261
 
 | 주소 | 핸들러 | 원본 상태(채우는 루프) | rtcore 대응물 | rtserve |
 |---|---|---|---|---|
-| `/api/events` SSE | 3651 | latest_event_*(publish_dashboard_events 1초 · 티커 REST) | Prices(티커) · 계좌 순번은 rtorder | **옮김**(첫 프레임·1초 발행·20초 keepalive · acct_seq 0 -- §5 #14) |
+| `/api/events` SSE | 3651 | latest_event_*(publish_dashboard_events 1초 · 티커 REST) | Prices(티커) · 계좌 순번은 rtorder | **옮김**(첫 프레임·1초 발행·20초 keepalive · acct_seq = rtorder /internal/acct -- §5 #14) |
 | `/api/stream` SSE | 3130 | footprint_state·oi_1s·okx_*·spot_*·liq_events_by·situation_state | Supply1s(밀기) — 화면이 허브로 가면 지움 | **수급만 옮김**(🔴situation 이벤트 없음 -- §5 #15) |
 | `/api/supply-1s` | 4341 | 같은 supply_1s_payload | Supply1s(실서버 그림자 일치 · 설계 문서 진행 기록 5·6) | **옮김**(oi 는 [] -- §5 #13) |
 | `/api/footprint` | 3971 | flows[a].footprint_state + fp_dhl(S) | Footprint(봉 623·칸 1,637 일치) | **옮김**(agg 늘 false · dhl 코어 판 -- §5 #16) |
 | `/api/situation` | 4721 | situation_state·fo_state·mp_state(collect_micro_ref 1초 · compute_situation) | 없음 — 계산 조각 | 다음 |
 | `/api/sr-watch` | 2041 | sr_watch(sr_break_loop 10초) | 없음 · 화면이 안 부름(SR 근접 알림 워커만) | 다음 |
-| `/api/oi-5m` | 4344 | S oi_1s + M oi_1s·okx_oi_5m | Oi 사건 · OI 5분 묶음은 아직 | 다음(바이낸스 OI 1초 원천이 코어에 없다) |
-| `/api/liquidation-5m-history` | 4394 | M liq_5m + S OKX·Bybit·HL 청산 + D tail_risk | Liq5m 밀기 · Liq 사건 | 다음(OKX·Bybit·HL 청산 SQLite 합치기) |
+| `/api/oi-5m` | 4363 | S oi_1s + M oi_1s·okx_oi_5m | Micro.okx_oi5m·okx_from | **옮김**(바이낸스 = hot oi_1s 그대로 · 현재 OI = hot 마지막 행 -- §5 #25) |
+| `/api/liquidation-5m-history` | 4413 | M liq_5m·okx_liq_events·bybit + S OKX(first_bar 앞)·HL 청산 + D tail_risk | Liq5m(.okx·.bybit) | **옮김**(코어에 없는 코인 = 빈 봉 -- §5 #26) |
 | `/api/market-context` | 2698 | M micro_state·mark_ring·mid_ring·depth25 + S/D 수집기 + R Deribit | Mark·Book · 나머지 계산 조각 | 다음 |
 | `/api/client-timing` POST | 5102 | 로그 한 줄 | — | **옮김** |
 
@@ -123,6 +126,7 @@ Rust 판 = `rtserve/`(새 크레이트). 설계 문서 `docs/rtcore_design_20261
 · `/api/swing-lines`(2743) · `/api/dir-signals`(2777 · Coinbase·바이낸스·FRED) · `/api/vol-forecast`(3072 · rtmodel `qx4`) · `/api/dir4h`(2915 · rtmodel `dir4h`)
 · `/api/dir-short`(2945 · rtmodel `lgb`·`dirshort`) · `/api/open-rev`(3109) · `/api/macro-trend`(2106 · FRED·DefiLlama) · `/api/push/test`(4904 · 웹푸시 발송).
 🔴개발기에서는 이 묶음의 REST 를 부르면 안 된다(서버와 IP 한도 공유) — 대조는 응답을 녹화한 가짜 서버로만.
+**넷째 조각에서 옮김 5**: `/api/dir4h` · `/api/dir-short` · `/api/vol-forecast` · `/api/open-rev` · `/api/dir-signals`(`src/model.rs` → `rtmodel::handlers` · §4 넷째 조각). 나머지 15 는 §7.
 
 ### 2-6. 주문·계좌 (14) — rtorder intake 붙이기
 
@@ -131,6 +135,9 @@ Rust 판 = `rtserve/`(새 크레이트). 설계 문서 `docs/rtcore_design_20261
 · `/tp-legs`(2215) · `/add`(2345) · `/modify`(2442) · `/api/manual-exit/submit`(2002).
 Rust: `rtorder/src/intake.rs` `Desk::api_*`(접수 핸들러가 HTTP 와 떨어진 함수로 이미 있다 · 정답지 = 원본 핸들러 대조 139건) — rtserve 가 쿼리를 넘기고 응답을 내면 된다.
 주문 경로 공통: `DASHBOARD_MANUAL_EXEC_ENABLED`(꺼지면 403) · `confirm=1` · busy 409 · order_request_log.
+**넷째 조각: 14개 전부 rtorder 문(따로 뜨는 프로세스 · `RTSERVE_RTORDER` 기본 127.0.0.1:8791 · 루프백만)으로 그대로 넘긴다**(`src/order.rs` · 규칙 = rtorder/SHADOW.md §7):
+메서드·경로·쿼리 원문 · User-Agent · CF-Connecting-IP · Content-Type · X-Forwarded-For(화면이 안 보냈으면 접속 주소) · 본문 → 받은 상태 줄·Content-Type·Cache-Control·Allow·본문 그대로(ETag·압축은 rtserve 미들웨어 = 원본도 바깥 미들웨어).
+시간 제한 15초(rtorder 칸 기다림 5초보다 길게). 접수 기록(order_requests.jsonl)은 rtorder 가 적는다 -- rtserve 는 넘긴 요청을 안 적고, 문이 닫혀 502 를 낸 요청·404·405 만 적는다(같은 줄이 두 번 생기지 않게).
 
 ### 2-7. 삭제됨
 
@@ -232,6 +239,31 @@ bubble-tape 의 «캐시 맞음»은 ttl 1초라 300건 반복 중 만료가 섞
 
 
 
+### 넷째 조각 (2026-11-22)
+
+- **주문·계좌 14 프록시**(`src/order.rs`): 시험 `tests/order_proxy.rs` = rtorder/tests/door_bin.rs 방식 그대로 진짜 rtorder 실행 파일(그림자 · 가짜 거래소 `rtorder::fakesrv` · 127.0.0.1:0)을 띄우고
+  rtserve 를 거쳐 route 정답지(rtorder/tests/fixtures/route_fixture.json) 중 바깥을 안 부르는 사례 **42건 · 불일치 0**(상태·Content-Type·Cache-Control·Allow·본문 -- 벽시계 칸은 door_bin 과 같게 ms0) ·
+  rtorder 가 받은 UA·IP(X-Forwarded-For 넣기 · CF 우선) · 거래소 쓰기 0 · POST 로 status = 405 · `/internal/acct` seq · rtorder 를 죽이면 주문 주소 502 · 다른 주소(acct-notes)는 200 · acct_seq 못 읽음.
+- **/api/events acct_seq**: 발행기가 1초마다 rtorder `GET /internal/acct`(연결 0.5초 · 읽기 1초)의 seq 를 읽는다 · 못 읽으면 마지막 값.
+- **/api/oi-5m**(`hub.rs`): 원본 api_oi_5m(4363~4411)·oi_5m_buckets(983~1019)를 Read 로 확인 · bars 1~288(기본 48 · 숫자 아니면 48) · swr `oi_5m:{sym}:{bars}` 5/0 · OKX = 코어 Micro 의 okx_oi5m([봉, Δ, 끝] = 원본 okx_d)
+  first_bar «뒤» 봉만 합산(OKX 가 있으면 OKX 를 모르는 봉은 뺀다 -- 원본 그대로). 정답지 `tools/gen_http4_fixture.py`(원본 두 함수를 옮겨 적고 합성 oi_1s · 수집기 공백 → gap 1).
+- **/api/liquidation-5m-history**(`hub.rs`): 원본 핸들러(4413~4473)·liq_5m_payload(537)·merge_bybit_liq(833)·okx_liq_hot_bars(856)·merge_okx_liq(878)·merge_hl_liq(907)·hl_whale_liq_events(504)를 Read 로 확인.
+  바이낸스 봉·OKX(first_bar 뒤)·Bybit(수집 시작 봉 뒤) = 코어 Liq5m(스냅숏 통째 · 밀기 = 바뀐 봉 덮어쓰기 · okx·bybit 실리면 통째) · OKX first_bar «앞» = hot `okx_ctx.sqlite` okx_liquidations 봉 합(swr `okx_liq_hot:{inst}` 60) ·
+  HL = hot `hl_positions*.sqlite`(코인별 원본 표 HL_LIQ_BY_ASSET · swr `hl_whale_liq_events:{asset}` 30 · 깊이 288봉 고정). 더하는 순서(OKX → Bybit → HL)·반올림(봉 합은 반올림 안 함 · 거래소 몫 칸은 round)·키 순서 원본 그대로.
+  시험 `tests/http4_parity.rs`: 원본 함수로 뜬 바이트 == rtserve(Liq5m 은 두 번에 나눠 밀어 합치기도 봄) -- 요청 12(bars 12·144·288·999·abc·0·-3 · SOL hot 만 · XRP OKX 없음·Bybit 만 · 400 · gzip). oi-5m 7 과 합쳐 **19 · 불일치 0**.
+- **모델 5**(`src/model.rs` → `rtmodel::handlers`): 원본 dir4h_cached·api_dir4h(2916~2945) · dir_short_cached·api_dir_short(2947~2975) · qx4_payload·api_vol_forecast(3049~3126) · api_open_rev(3128~3140) · api_dir_signals(2796~2802) ·
+  fetch_binance_json(1372~1392 · graft 로 찾고 동작은 aiohttp 로 문구 확인) · d4._get(live_eth_dir4h_20261015.py:279).
+  코인 표(dir4h = ETH·SOL·XRP · dir-short = ETH+BTC·SOL·XRP · vol = eth·xrp·btc·sol · 밖이면 `unsupported_asset`) · swr 원본 그대로(dir4h·dir_short·vol4h 300/1800 · open_rev 120/900 · dir_signals 3600/86400) ·
+  예외 → `{"ok": false, "reason": "<종류>: <글>"}`(dir4h·dir-short·open-rev 는 원본처럼 200자에서 자름) · 모델 JSON 은 mtime 이 바뀌면 다시 읽고, 읽은 모델이 «낡음»(rtmodel::model_stale: 원본 joblib(data/live)이 JSON 보다 새것이거나 없음)이면
+  값을 내지 않고 `ModelStale: …` 오류 · 밴 파일(data/live/binance_ban_until)이 있으면 보내지 않음 · 418·429 는 같은 파일에 적음(rtmodel::ban).
+  설정: `RTSERVE_MODELS`(기본 data/live/rtmodel = rt_dirpred 전환 때 RT_DIR_MODELS) · `RTSERVE_REST`(기본 원본 FAPI) · `FRED_API_KEY`(원본 이름 · 값은 찍지 않음). REST = ureq(rtmodel 실행 파일과 같은 판 · 새 크레이트 없음).
+  시험 `tests/model_parity.rs`(127.0.0.1 가짜 REST 가 rtmodel 정답지 녹화본을 돌려줌 · 바깥 접속 0):
+  ① dir4h SOL·XRP + dir-short BTC·SOL·XRP 첫 회차 = **payload 비트·키 순서 같음 5벌 · 요청 545개 순서·쿼리 같음**(dirrest_fixture) ② vol-forecast HGB(eth·xrp · 1000봉 × 10쪽 endTime)·open-rev(실수 시계)·dir-signals(FRED 키) **본문 글자 4 같음**(signals_fixture) ·
+  ③ 지원 밖 3 · 모델 없음 2 = REST 0 ④ QX4(qx4_fixture 첫 벌 4코인 봉을 쪽으로) = 요청 72 같은 열 · 본문 = 같은 녹화본으로 돌린 rtmodel 값(QX4 의 파이썬 비트 대조는 rtmodel/tests/qx4.rs · MLP 1ulp 차이 있음) ·
+  ⑤ 밴 = 안 보냄 2(BinanceBanned 문구 · HTTPServiceUnavailable binance_ip_ban) ⑥ 낡음 2(joblib 새것 · 원본 없음).
+- **못 한 것**: ETH dir-short(호가 깊이 sqlite 75열판 · rt_dirpred 와 같은 `dirshort::book_sqlite` 를 부르지만 rtserve 시험 정답지 없음) · ETH dir4h(정답지 모델 없음) · QX4I(Deribit 옵션 IV 칸 -- rtmodel 에 받기가 없다) ·
+  open-rev 의 다른 4벌·dir-signals 키 없음 벌(rtmodel 시험이 라이브러리로 봄) · 벤치(넷째 조각 주소는 안 쟀다).
+
 ## 5. 의도한 차이 · 원본에서 본 이상한 점
 
 | # | 무엇 | 원본 | rtserve |
@@ -249,7 +281,7 @@ bubble-tape 의 «캐시 맞음»은 ttl 1초라 300건 반복 중 만료가 섞
 | 11 | 🔴pred-record 코인 열쇠 순서 | `set(coins) \| {eth,btc,sol,xrp}` 를 **집합 순서(문자열 해시 무작위)**로 돌며 띠만 있는 코인을 더한다 → 기록 없이 띠만 있는 코인이 둘 이상이면 열쇠 순서가 프로세스마다 다르다(본문 ETag 도 재시작마다 바뀜) | 기록 있는 코인(이름 순) 뒤 eth·btc·sol·xrp 순으로 고정 · 정답지는 그런 코인을 하나만 둔다 |
 | 12 | pred-record `xsec.latest` | 서버 메모리 `_xs_latest`(pred_record_loop 가 5분마다 채움) | 늘 null -- 다음: rt_dirpred 가 스냅숏을 파일로 쓰게 |
 | 13 | supply-1s `oi` | 수집 루프의 바이낸스 OI 1초 REST 폴링 | 늘 [] -- 코어 범위 밖(rtcollect binance_ctx 는 OI REST 기본 꺼짐) |
-| 14 | events `acct_seq` · tickers | acct_seq = 사용자 스트림이 계좌를 새로 읽을 때마다 +1 · tickers = REST ticker/price · ts = 받은 시각 | acct_seq 늘 0(rtorder 붙일 때) · 가격 = 허브 마지막 체결가 · ts = 발행 시각 |
+| 14 | events `acct_seq` · tickers | acct_seq = 사용자 스트림이 계좌를 새로 읽을 때마다 +1 · tickers = REST ticker/price · ts = 받은 시각 | acct_seq = 넷째 조각부터 rtorder `/internal/acct` 의 seq(1초마다 · 못 읽으면 마지막 값) · 가격 = 허브 마지막 체결가 · ts = 발행 시각 |
 | 15 | 🔴/api/stream 의 `event: situation` | 상황 계산이 바뀔 때마다 | 안 낸다(상황 계산은 파이썬 몫) -- 화면은 스트림이 살면 /api/situation 폴링을 끄므로, 상황을 옮기기 전에는 화면을 rtserve 스트림으로 돌리면 안 된다 |
 | 16 | footprint `agg`·창 | aggTrades 로 메운 봉 = true · 창 288봉까지 | 코어가 agg 를 싣지 않아 늘 false · 코어 스냅숏이 144봉이라 bars>144 도 144봉까지 · dhl 은 코어 판(테이프 가지가 파이썬과 다른 봉 -- rtcore footprint.rs 머리 주석) |
 | 17 | supply-1s meta 나이 | 응답 시각 기준 tradeAge·oiAge | 코어가 보낸 시각 기준(받은 그대로) |
@@ -258,6 +290,17 @@ bubble-tape 의 «캐시 맞음»은 ttl 1초라 300건 반복 중 만료가 섞
 | 20 | liquidation-5m-signal 의 `db_read_error:` 뒤 글자 | 파이썬 duckdb 예외 글자 | duckdb-rs 예외 글자(다름) -- 화면은 warmed_up=false 만 본다 |
 | 21 | session-alerts 에 시간대 없는 시각 하나 | TypeError(naive − aware)를 안 잡아 **500** -- 달력 하나가 경보 전체를 막는다 | 같게 500(정답지 대조) -- 고칠지는 사용자 결정 |
 | 22 | /api/footprint 의 OKX 합산 | **확인함(실제 파일 Read · 3971~4036행): 원본은 바이낸스 선물만**(`venues: ["binance-perp"]` · 11-02 사용자 결정) | rtcore 의 OKX 합산 커밋은 되돌려졌다(PR 91 · main 9aefd9e5 · proto `okxFrom`·`Micro.okx_bars` 없음) · rtserve 도 venues 를 늘 ["binance-perp"] 로 |
+| 23 | 🔴주문 주소인데 rtorder 문이 닫혀 있음 | (원본은 한 프로세스라 해당 없음) | **502** `{"ok": false, "error": "rtorder_unavailable"}`(원본 주문 핸들러의 오류 꼴 · Cache-Control no-cache) · 다른 주소는 영향 없음 · 이 요청은 rtserve 가 접수 기록에 status 502 · error rtorder_unavailable 로 적는다. 둘째 조각 정답지(주문 주소가 없던 때의 404)는 tests/http2_parity.rs 가 이 값으로 바꿔 본다 |
+| 24 | 🔴supply-1s·footprint 의 `symbol` | 원본 `FlowSpec.symbol` = **"ETHUSDT"**(대문자) | 둘째 조각부터 소문자("ethusdt")로 내고 있었다(허브 시험이 symbol 을 안 봤다) → **고침**(대문자) |
+| 25 | oi-5m `openInterest`(지금 OI) | 수집 루프의 1초 링 마지막 값 | hot oi_1s 의 마지막 행(수집기 쓰기 주기만큼 늦을 수 있다 · 링이 비면 원본도 마지막 봉 끝 값) |
+| 26 | liquidation-5m-history: 코어가 Liq5m 을 안 보낸 코인(흐름 엔진 밖 HYPE 등 · 허브 끊김) | 서버 시작 때 hot liquidations 로 되살린 메모리(+ @forceOrder 전 종목) · 그 전 몇 초만 tail_risk DuckDB(compute_liquidation_5m_history) | 빈 봉(원본에서 «기록 시작 = 지금»과 같은 모양 `{"warmed_up": true, "bars": [], …}`) -- 원본의 DuckDB 갈래는 시작 직후 몇 초뿐이라 안 옮겼다(`ponytail:` 는 아님 · 필요하면 rtcore 가 그 코인도 Liq5m 을 밀게) |
+| 27 | 모델 핸들러의 적중 기록(pred_record_safe) | 화면 요청으로 계산할 때도 pred_record/{코인}.jsonl 에 덧붙임 | 안 적는다 -- rt_dirpred 가 5분마다 적는다(두 프로세스가 같은 파일에 같은 결정 시각을 쓰지 않게) |
+| 28 | 모델 핸들러의 REST | 화면 요청과 5분 루프가 같은 swr 캐시·같은 REST 캐시 | rtserve 와 rt_dirpred 가 따로 받는다(5분에 REST 한 벌 더 · 첫 요청은 코인마다 31일치) -- 줄이려면 rtserve 가 rt_dirpred 의 마지막 payload 파일(dir4h_<코인>.json)을 읽게 |
+| 29 | 모델 핸들러 예외 문구 | 파이썬 예외 글(requests HTTPError 의 URL 포함 문장 · JSONDecodeError 등) | 같은 종류 이름 + Rust 글(`HTTPError: 503` 등 -- 다름) · 같은 글: 지원 밖·artifact_missing·밴 두 문구(BinanceBanned … request not sent · HTTPServiceUnavailable: binance_ip_ban)·HTTPBadGateway: vol_upstream_error / open_rev_upstream_error |
+| 30 | 밴 중 상태 코드 | 코디네이터 지시는 «503» 이었으나 원본을 읽어 보니 fetch_binance_json 의 503(HTTPServiceUnavailable)은 핸들러의 except 가 잡아 **200 `{"ok": false, "reason": "HTTPServiceUnavailable: binance_ip_ban"}`** 로 나간다(dir4h·dir-short 은 requests 가드의 BinanceBanned) | 원본 그대로 200 + 그 문구 |
+| 31 | 모델이 낡음 | 원본은 joblib 을 바로 읽어 새 모델 값을 낸다 | rtserve 는 내보낸 JSON 만 읽는다 -- joblib 이 더 새것이거나 없으면 값을 안 내고 `{"ok": false, "reason": "ModelStale: 모델 낡음: …"}` (재학습 cron 뒤 export_*.py 를 다시 돌릴 때까지) |
+| 32 | vol-forecast 의 QX4I 칸(ETH·BTC: iv_atm·sig4h_iv_*·log_rv_iv) | Deribit 옵션 체결로 붙임(실패면 칸만 빠짐) | 늘 빠짐 -- 원본의 «iv_now 실패» 갈래와 같은 모양 |
+| 33 | vol-forecast QX4 이어 받기 중 일부 실패 | `refresh_rows` 가 False → HGB | 같음 · 다만 QX4 쪽 «낡음»은 HGB 로 떨어지지 않고 오류(옛 값·다른 모델 값을 안 냄) |
 
 ## 6. 양성 대조
 
@@ -269,11 +312,20 @@ bubble-tape 의 «캐시 맞음»은 ttl 1초라 300건 반복 중 만료가 섞
 **셋째 조각 결과(2026-11-22): 전체 95/95 잡힘**(셋째 조각 변이 12 = 세션 경보 3 · 청산 게이지 4 · swr 3 · 풋프린트 venues 1 · client-timing 머지 대기 칸 1 · 지운 «숫자 참조» 변이 1 은 rtcollect::html 로 옮겨 감). 고친 것: 청산 게이지 봉 길이 변이를 못 잡아 정답지 시계를 11:28 로(30분·15분 봉이 갈림) ·
 무변경 사본이 «링크 실패»(duckdb 묶음 디버그 정보 + 메모리 상한)·«허브 시험 기다림 부족»(부하에서 3초 안에 밀기가 다 안 닿음)으로 떨어져 사본은 debug=0 · ulimit 12GB · 허브 시험은 «칸이 스냅숏과 같아질 때까지 30초»로.
 
+**넷째 조각 결과(2026-11-22): 넷째 조각 변이 21/21 잡힘**(`④` 이름 · 주문 프록시 6 · oi-5m 3 · 청산 원 7 · 모델 핸들러 5) · 무변경 통과 · 원본 바이트 그대로.
+도구 바꿈(코디네이터 지시): 빌드 --release 만 · 산출물은 rtserve/target 하나(새 빌드 폴더 없음 · 사본은 새 수정 시각으로 복사해 `cargo clean` 없이 다시 빌드) · 변이마다 시험 하나 · 끝나면 사본·링크 지움.
+첫 판 못 잡음 4: X-Forwarded-For(rtorder 도 같은 127.0.0.1 을 접속 주소로 써 같아 보였다 → 시험이 127.0.0.2 에서 한 번 더 보냄) · oi 공백 300→600(정답지 공백이 1시간뿐 → 봉 하나 빈 600초 간격을 넣음) ·
+oi 기본 48→24(ETH 는 OKX 가 있어 20봉만 남아 같았다 → SOL 기본 요청을 더함) · «현재 OI = 마지막 봉 끝» 은 동등 변이(hot 마지막 행 = 마지막 봉 끝 행)라 뺐다. 앞 조각 변이 95개는 이번에 다시 돌리지 않았다.
+🔴같은 target 을 쓰니 끝난 뒤 원본 시험 실행 파일이 지운 사본 경로(CARGO_MANIFEST_DIR)를 가리킨 채 남았다(http4_parity 가 정답지 NotFound) -- 도구가 끝에 원본 src/lib.rs·tests/*.rs 수정 시각을 올려 다시 빌드되게 했다.
+
 ## 7. 다음 조각 순서
 
 1. **일봉·4시간 풋프린트 4**(footprint-daily·cells · footprint-4h·cells): 소급본(`data/footprint_daily/*_days|cells.parquet`)·lake(`read_parquet` hive)를 DuckDB(이번에 넣은 parquet 판)로 읽고,
    pandas 계산(groupby 합 = pandas 보정 합 · np.average · 날·4시간 칸 캐시 셋(_recent·_today 30초·_h4 닫힘/형성/빈칸 10분))을 옮긴다. 정답지는 합성 parquet 트리로.
 2. **flow/heatmap**: 래스터 read_window(.f32 시각 파일)·row_stats·vol_scores·approach_ratio(numpy f32) + 체결 대조(원본은 풋프린트 칸 «반올림 전» 값 -- 허브는 반올림한 칸만 민다:
    rtcore 가 칸 원값을 싣거나 대조를 «모름»으로 내는 결정 필요). 원본 quirk: 캐시된 payload 를 제자리에서 `update` 한다(접근·변동 신호가 다음 1초 캐시 값에도 남는다).
-3. 메모리 상태 남은 것(oi-5m · liquidation-5m-history · situation) -- rtcore 원천 먼저(코디네이터가 rtcore 에 맡김).
+3. 메모리 상태 남은 것: situation · sr-watch · market-context -- rtcore 상황 계산 먼저.
+4. 요청 때 REST 남은 15(§2-5): market-history · footprint-week · footprint-daily/xcvd·heat · footprint-4h/heat · opt-smile · chart-markers(안 옮김) · liquidation-map·tiers · position-profile · cycle-path · trend · swing-lines · macro-trend · push/test.
+
+남은 주소 집계(2026-11-22): 등록부 84 = 옮김 60(화면·정적 6 + `/api/*` 54) · 남음 24(`/api/*`: 저장소+계산 5 · 메모리 상태 3 · 요청 때 REST·모델 15 · 삭제 없음 -- 위 표의 «다음» 칸).
 4. 계좌·주문 14(rtorder 계좌 알림 뒤) · 5. 요청 때 REST·모델 · 6. 나란히 가동.

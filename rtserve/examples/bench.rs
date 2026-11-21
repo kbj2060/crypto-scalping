@@ -29,6 +29,7 @@ fn mkreq(path: &str, gzip: bool) -> rtserve::Req {
         method: "GET".into(),
         path: p.into(),
         query: q.split('&').filter(|x| !x.is_empty()).map(|kv| kv.split_once('=').map_or((kv.into(), String::new()), |(a, b)| (a.into(), b.into()))).collect(),
+        raw_query: q.to_string(),
         headers: if gzip { vec![("accept-encoding".into(), "gzip, deflate, br, zstd".into())] } else { vec![] },
         body: Vec::new(),
         peer: "127.0.0.1".into(),

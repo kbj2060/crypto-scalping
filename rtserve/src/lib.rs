@@ -9,6 +9,8 @@ pub mod api;
 pub mod api2;
 pub mod api3;
 pub mod hub;
+pub mod model;
+pub mod order;
 pub mod py;
 pub mod swr;
 pub mod text;
@@ -64,6 +66,15 @@ pub struct Config {
     pub events: Arc<hub::Events>,
     /// 원본 swr_cached(묵은 값 먼저·뒤에서 갱신) -- 키마다 원본과 같은 ttl·max_stale
     pub swr: Arc<swr::Swr>,
+    /// rtorder 문(주문·계좌 14개를 넘길 곳 · 루프백만) -- None 이면 그 주소들은 502
+    pub rtorder: Option<SocketAddr>,
+    /// 넷째 조각 모델 핸들러(model.rs): 바이낸스 선물 REST 뿌리(원본 FAPI) · 모델 JSON 자리(None = data/live/rtmodel) · FRED 키(원본 env FRED_API_KEY) ·
+    /// ext = 시험만(코인베이스·바이낸스 현물·FRED 주소의 뿌리를 가짜 서버로) · 모델·REST 캐시 상태
+    pub rest: String,
+    pub models: Option<PathBuf>,
+    pub fred_key: Option<String>,
+    pub ext: Option<String>,
+    pub models_state: Arc<model::State>,
 }
 
 impl Config {
@@ -78,8 +89,14 @@ impl Config {
             write_lock: Arc::new(Mutex::new(())),
             timing_at: Arc::new(Mutex::new(None)),
             live: Arc::new(hub::Live::default()),
-            events: Arc::new(hub::Events { clients: Mutex::new(Vec::new()), latest: Mutex::new((serde_json::Value::Null, serde_json::json!({}))) }),
+            events: Arc::new(hub::Events { clients: Mutex::new(Vec::new()), latest: Mutex::new((serde_json::Value::Null, serde_json::json!({}))), acct_seq: Mutex::new(0) }),
             swr: Arc::new(swr::Swr::default()),
+            rtorder: None,
+            rest: "https://fapi.binance.com".into(),
+            models: None,
+            fred_key: None,
+            ext: None,
+            models_state: Arc::new(model::State::default()),
         }
     }
     /// 켜진 흐름 엔진 코인(원본 `flows` 의 열쇠 · FLOW_SPECS 순서)
@@ -111,6 +128,8 @@ pub struct Req {
     pub path: String,
     pub query: Vec<(String, String)>,
     pub headers: Vec<(String, String)>, // 이름 소문자
+    /// 쿼리 원문(풀지 않은 것 · rtorder 로 그대로 넘긴다)
+    pub raw_query: String,
     pub body: Vec<u8>,
     /// 접속한 쪽 IP(원본 request.remote)
     pub peer: String,
@@ -138,6 +157,8 @@ pub struct Resp {
     pub close: bool,
     /// 핸들러가 «던진» 응답(HTTPException·500) -- 미들웨어를 안 지난다
     pub exc: bool,
+    /// rtorder 가 받아 답한 응답(접수 기록은 rtorder 가 적었다 -- rtserve 는 안 적는다)
+    pub upstream: bool,
 }
 
 impl Resp {
@@ -220,10 +241,14 @@ fn routes(p: &str) -> Vec<(&'static str, Handler)> {
     match p {
         "/api/supply-1s" => v.push(("GET", |c, r| hub::api_supply(c, &c.live, r))),
         "/api/footprint" => v.push(("GET", |c, r| hub::api_footprint(c, &c.live, r))),
+        "/api/oi-5m" => v.push(("GET", hub::api_oi_5m)),
+        "/api/liquidation-5m-history" => v.push(("GET", hub::api_liquidation_5m_history)),
         _ => {}
     }
     v.extend(api2::routes(p));
     v.extend(api3::routes(p));
+    v.extend(order::routes(p));
+    v.extend(model::routes(p));
     v
 }
 
@@ -257,7 +282,7 @@ pub fn handle(cfg: &Config, req: &Req) -> Resp {
         r = json_compress_etag(req, r);
         r = static_asset_headers(req, r);
     }
-    if req.method == "POST" && req.path.starts_with("/api/manual-") {
+    if req.method == "POST" && req.path.starts_with("/api/manual-") && !r.upstream {
         api2::order_request_log(cfg, req, &r, t0);
     }
     prepare(req, r)
@@ -605,6 +630,7 @@ pub fn parse_req<B>(r: &hyper::Request<B>, body: Vec<u8>, peer: String) -> Req {
         method: r.method().as_str().to_string(),
         path: decode(uri.path(), false),
         query,
+        raw_query: uri.query().unwrap_or("").to_string(),
         headers: r.headers().iter().map(|(k, v)| (k.as_str().to_string(), String::from_utf8_lossy(v.as_bytes()).into_owned())).collect(),
         body,
         peer,

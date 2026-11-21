@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """양성 대조: 규칙을 하나씩 틀리게 바꾼 rtserve 사본으로 시험(tests/http_parity.rs · 단위 시험)을 돌려 실패하는지 본다 (2026-11-21).
 
-사본 = <작업 폴더>/mut (원본 rtserve 는 안 건드린다 -- 끝에 src·tests 바이트를 처음과 대조한다). 빌드 산출물은 <작업 폴더>/mut_target
-하나를 같이 쓰되 변이마다 `cargo clean -p rtserve`(rtcollect mutate_check 의 교훈: 안 지우면 직전 변이 산출물을 그대로 쓴다).
-시험 실행만 `ulimit -v 12000000` + timeout.
+사본 = <작업 폴더>/mut (원본 rtserve 는 안 건드린다 -- 끝에 src·tests 바이트를 처음과 대조한다 · 끝나면 사본·링크를 지운다).
+2026-11-22: 빌드는 --release 만 · 산출물은 rtserve/target 하나(새 빌드 폴더를 안 만든다 -- 개발기 디스크가 한 번 꽉 찼다).
+  사본은 새 수정 시각으로 복사한다(직전 변이 산출물을 «새것»으로 잘못 보지 않게 -- 예전 `cargo clean -p rtserve` 대신 · 같은 target 의 원본 산출물을 안 지운다).
+  변이마다 시험 하나만 고를 수 있다(다섯째 칸 = --test 이름). 시험 실행만 `ulimit -v 12000000` + timeout · cargo -j 2.
 
     python3 rtserve/tools/mutate_check.py <작업 폴더> [이름 일부 ...]
 """
@@ -119,6 +120,30 @@ M = [
     ("swr 묵음 창 빼기", "src/swr.rs", "if age < ttl + max_stale {", "if false {"),
     ("파이썬 round 짝수 → 0에서 먼 쪽", "src/py.rs", "Ok(x.round_ties_even() as i64)", "Ok(x.round() as i64)"),
     ("splitlines \\r 안 끊음", "src/py.rs", "matches!(c, '\\n' | '\\r' |", "matches!(c, '\\n' |"),
+    # ── 넷째 조각(order · oi-5m · 청산 원 · 모델 핸들러) -- 이름 «④» ──
+    ("④무변경(대조: 통과해야 함)", "src/order.rs", "pub fn is_proxied", "pub fn is_proxied", "order_proxy"),
+    ("④X-Forwarded-For 접속 주소 안 넣음", "src/order.rs", ".map_or_else(|| req.peer.clone(), str::to_string)", ".map_or_else(String::new, str::to_string)", "order_proxy"),
+    ("④User-Agent 안 넘김", "src/order.rs", '["user-agent", "cf-connecting-ip", "content-type"]', '["cf-connecting-ip", "content-type"]', "order_proxy"),
+    ("④Cache-Control 안 돌려줌", "src/order.rs", '["Content-Type", "Cache-Control", "Allow"]', '["Content-Type", "Allow"]', "order_proxy"),
+    ("④쿼리 원문 안 넘김", "src/order.rs", 'format!("{}?{}", req.path, req.raw_query)', "req.path.clone()", "order_proxy"),
+    ("④문 닫힘 502→503", "src/order.rs", "r.status = 502;", "r.status = 503;", "order_proxy"),
+    ("④acct_seq +1", "src/order.rs", '["seq"].as_i64()', '["seq"].as_i64().map(|s| s + 1)', "order_proxy"),
+    ("④oi OKX first_bar 초과 → 이상", "src/hub.rs", "okx_d.get(&t).filter(|_| t > okx_from)", "okx_d.get(&t).filter(|_| t >= okx_from)", "http4_parity"),
+    ("④oi 공백 300→600초", "src/hub.rs", "let gap = prev_bar.is_none_or(|p| bar - p > 300);", "let gap = prev_bar.is_none_or(|p| bar - p > 600);", "http4_parity"),
+    # «현재 OI = 마지막 봉 끝 값» 변이는 동등 변이다(hot 마지막 행 = 마지막 봉의 끝 행) -- 뺐다.
+    ("④oi 기본 48→24봉", "src/hub.rs", "map_or(Some(48),", "map_or(Some(24),", "http4_parity"),
+    ("④청산 기록 시작 봉도 실음", "src/hub.rs", ".filter(|b| *b > from_bar)", ".filter(|b| *b >= from_bar)", "http4_parity"),
+    ("④청산 OKX hot 시작 봉 안 거름", "src/hub.rs", "hot_first.is_some_and(|h| t > h)", "hot_first.is_some()", "http4_parity"),
+    ("④청산 Bybit 시작 봉도 더함", "src/hub.rs", "            if t > first {", "            if t >= first {", "http4_parity"),
+    ("④청산 HL 주소 5→6", "src/hub.rs", "users[..users.len().min(5)]", "users[..users.len().min(6)]", "http4_parity"),
+    ("④청산 거래소 몫 round → 버림", "src/hub.rs", "json!(py::round0(x).unwrap_or(0))", "json!(x.trunc() as i64)", "http4_parity"),
+    ("④Liq5m 밀기가 앞 봉을 버림", "src/hub.rs", "old.bars.drain(..).map(|r| (r.0, r)).collect();", "{ old.bars.clear(); BTreeMap::new() };", "http4_parity"),
+    ("④Liq5m okx 갈아 끼우기 안 함", "src/hub.rs", "    if l.okx.is_some() {", "    if l.okx.is_none() {", "http4_parity"),
+    ("④모델 밴 가드 빼기", "src/model.rs", "    if left > 0.0 {", "    if false {", "model_parity"),
+    ("④모델 낡음 검사 빼기", "src/model.rs", "if let Some(why) = rtmodel::model_stale(&files[0], srcs(&hit), src) {", "if let Some(why) = None::<String> {", "model_parity"),
+    ("④dir-short 코인 표에서 BTC 빼기", "src/model.rs", 'const DS: [&str; 4] = ["ETH", "BTC", "SOL", "XRP"];', 'const DS: [&str; 4] = ["ETH", "DOGE", "SOL", "XRP"];', "model_parity"),
+    ("④vol HGB 바이낸스 밴 문구 None", "src/model.rs", 'reason.map_or(Ok(None), |_| Err("HTTPServiceUnavailable: binance_ip_ban".into()))', "Ok(None)", "model_parity"),
+    ("④vol 쪽 대체를 QX4 실패에도 안 함", "src/model.rs", "        Ok(None) => {}", "        Ok(None) => return Ok(json!({\"ok\": false, \"reason\": \"artifact_missing\"})),", "model_parity"),
 ]
 
 
@@ -133,54 +158,60 @@ def tree_hash(root: Path) -> str:
 def main() -> int:
     work = Path(sys.argv[1]).resolve()
     picks = sys.argv[2:]
-    mut, target = work / "mut", work / "mut_target"
+    mut, target = work / "mut", SRC / "target"
     before = tree_hash(SRC)
     env = {**os.environ, "CARGO_TARGET_DIR": str(target)}
     results = []
-    for name, rel, old, new in M:
+    for name, rel, old, new, *only in M:
         if picks and not any(p in name for p in picks):
             continue
         shutil.rmtree(mut, ignore_errors=True)
-        shutil.copytree(SRC, mut, ignore=shutil.ignore_patterns("target"))
+        shutil.copytree(SRC, mut, ignore=shutil.ignore_patterns("target"), copy_function=shutil.copy)   # 새 수정 시각
         man = mut / "Cargo.toml"
         # 사본은 저장소 밖 -- 형제 크레이트(rtcollect·rtcore: path 의존성 · 시험이 rtcore 정답지를 읽는다)를 작업 폴더에 심볼릭 링크로 ·
         #   위 폴더의 Cargo.toml 을 작업 공간으로 잘못 잡지 않게 [workspace]
         #   (path 의존성은 절대 경로로 -- 링크로 두면 cargo 가 링크 위 폴더에서 작업 공간을 찾다 깨진다 · 링크는 시험의 정답지 읽기용)
-        if not (work / "rtcore").exists():
-            (work / "rtcore").symlink_to(SRC.parent / "rtcore")
+        for sib in ("rtcore", "rtmodel", "rtorder"):   # 시험이 읽는 형제 정답지·실행 파일(../rtmodel/tests/fixtures · ../rtorder/target/release/rtorder)
+            if not (work / sib).exists():
+                (work / sib).symlink_to(SRC.parent / sib)
         t = man.read_text()
-        for sib in ("rtcollect", "rtcore"):
+        for sib in ("rtcollect", "rtcore", "rtmodel", "rtorder"):
             t = t.replace(f'path = "../{sib}"', f'path = "{SRC.parent / sib}"')
-        # 디버그 정보 없이(duckdb 묶음을 넣은 뒤 시험 실행 파일 링크가 메모리 상한에 걸려 «빌드 실패»가 났다 -- 2026-11-21)
-        man.write_text(t + "\n[workspace]\n\n[profile.dev]\ndebug = 0\n")
+        man.write_text(t + "\n[workspace]\n")
         f = mut / rel
         s = f.read_text()
         if s.count(old) != 1:
             results.append((name, f"찾을 글자 {s.count(old)}번 -- 변이 못 함"))
             continue
         f.write_text(s.replace(old, new))
-        subprocess.run(["cargo", "clean", "-p", "rtserve", "-q"], cwd=mut, env=env, check=False)
-        b = subprocess.run(["cargo", "test", "--no-run", "-q"], cwd=mut, env=env, capture_output=True, text=True)
+        sel = ["--test", only[0]] if only else []
+        b = subprocess.run(["cargo", "test", "--release", "-j", "2", "--offline", "--no-run", "-q", *sel], cwd=mut, env=env, capture_output=True, text=True)
         if b.returncode != 0:
-            if name.startswith("무변경"):
+            if "무변경" in name:
                 print(b.stderr[-3000:])
                 print("🔴무변경 사본이 빌드되지 않는다 -- 대조를 멈춘다")
                 return 1
             results.append((name, "빌드 실패(= 잡힘 · 컴파일러)"))
             continue
-        t = subprocess.run(["bash", "-c", "ulimit -v 12000000; timeout 600 cargo test -q 2>&1"], cwd=mut, env=env, capture_output=True, text=True)
+        t = subprocess.run(["bash", "-c", f"ulimit -v 12000000; timeout 600 cargo test --release -j 2 --offline -q {' '.join(sel)} 2>&1"], cwd=mut, env=env, capture_output=True, text=True)
         failed = t.returncode != 0
-        if failed and name.startswith("무변경"):   # 무변경이 실패하면 어느 시험인지 남긴다(흔들리는 시험 찾기)
+        if failed and "무변경" in name:   # 무변경이 실패하면 어느 시험인지 남긴다(흔들리는 시험 찾기)
             print("\n".join(t.stdout.splitlines()[-40:]))
-        want_fail = not name.startswith("무변경")
+        want_fail = "무변경" not in name
         results.append((name, ("잡힘" if failed else "🔴못 잡음") if want_fail else ("통과(정상)" if not failed else "🔴무변경인데 실패")))
     shutil.rmtree(mut, ignore_errors=True)
+    # 같은 target 이라 마지막 사본의 시험 실행 파일이 원본 자리 이름으로 남는다(CARGO_MANIFEST_DIR = 지운 사본) -- 원본을 다시 빌드하게 수정 시각만 올린다
+    for p in [SRC / "src" / "lib.rs", *SRC.glob("tests/*.rs")]:
+        os.utime(p)
+    for sib in ("rtcore", "rtmodel", "rtorder"):
+        if (work / sib).is_symlink():
+            (work / sib).unlink()
     for name, r in results:
         print(f"{r:24} {name}")
-    caught = sum(r.startswith(("잡힘", "빌드")) for n, r in results if not n.startswith("무변경"))
-    total = sum(not n.startswith("무변경") for n, _ in results)
+    caught = sum(r.startswith(("잡힘", "빌드")) for n, r in results if "무변경" not in n)
+    total = sum("무변경" not in n for n, _ in results)
     print(f"양성 대조 {caught}/{total} · 원본 rtserve 바이트 {'그대로' if tree_hash(SRC) == before else '🔴바뀜'}")
-    noop_ok = all(r == "통과(정상)" for n, r in results if n.startswith("무변경"))
+    noop_ok = all(r == "통과(정상)" for n, r in results if "무변경" in n)
     return 0 if caught == total and noop_ok and tree_hash(SRC) == before else 1
 
 

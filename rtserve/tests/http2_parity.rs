@@ -1,5 +1,7 @@
 //! 둘째 조각 대조: tools/gen_http2_fixture.py 가 진짜 aiohttp 객체로 뜬 바이트 == rtserve(127.0.0.1 · 실제 HTTP).
 //! 쓰기 시나리오는 요청마다 파일 바이트(메모·오답·구독·주문 기록)·남은 임시 파일·로그 줄까지 대조한다.
+//! 넷째 조각(2026-11-22)부터 주문·계좌 14개는 rtorder 로 넘긴다 -- 이 시험엔 rtorder 가 없으니 정답(원본 정답지는 «주소 없음» 404)을
+//! 의도한 다름으로 바꿔 본다: 502 `{"ok": false, "error": "rtorder_unavailable"}` · 접수 기록 줄의 status·error 도 그 값(문서 §5).
 
 mod common;
 
@@ -33,10 +35,16 @@ fn http2_parity() {
             let (m, p) = (c["method"].as_str().unwrap(), c["path"].as_str().unwrap());
             logs.lock().unwrap().clear();
             let got = request_body(addr, m, p, &rh, &b64(c["body_in"].as_str().unwrap()));
-            let want_h: Vec<(String, String)> = c["headers"].as_array().unwrap().iter().map(|h| (h[0].as_str().unwrap().into(), h[1].as_str().unwrap().into())).collect();
-            let want_body = b64(c["body_b64"].as_str().unwrap());
+            let mut want_h: Vec<(String, String)> = c["headers"].as_array().unwrap().iter().map(|h| (h[0].as_str().unwrap().into(), h[1].as_str().unwrap().into())).collect();
+            let mut want_body = b64(c["body_b64"].as_str().unwrap());
+            let (mut want_st, mut want_rs) = (c["status"].as_u64().unwrap() as u16, c["reason"].as_str().unwrap().to_string());
+            if rtserve::order::is_proxied(p.split('?').next().unwrap()) {
+                want_body = br#"{"ok": false, "error": "rtorder_unavailable"}"#.to_vec();
+                want_h = vec![("Content-Type".into(), "application/json; charset=utf-8".into()), ("Cache-Control".into(), "no-cache".into()), ("Content-Length".into(), want_body.len().to_string())];
+                (want_st, want_rs) = (502, "Bad Gateway".into());
+            }
             let mut diff = Vec::new();
-            if got.status != c["status"].as_u64().unwrap() as u16 || got.reason != c["reason"].as_str().unwrap() {
+            if got.status != want_st || got.reason != want_rs {
                 diff.push(format!("상태 {} {} != {} {}", got.status, got.reason, c["status"], c["reason"]));
             }
             if norm(&got.headers) != norm(&want_h) {
@@ -55,7 +63,12 @@ fn http2_parity() {
                 for (rel, want) in fa {
                     files_n += 1;
                     let have = std::fs::read(root.join(rel)).ok();
-                    let want = want.as_str().map(b64);
+                    let want = want.as_str().map(b64).map(|b| if rel.ends_with("order_requests.jsonl") {
+                        String::from_utf8(b).unwrap().lines().map(|l| {
+                            let v: Value = serde_json::from_str(l).unwrap();
+                            if rtserve::order::is_proxied(v["path"].as_str().unwrap()) { l.replace(r#""status": 404, "error": null"#, r#""status": 502, "error": "rtorder_unavailable""#) } else { l.to_string() }
+                        }).map(|l| l + "\n").collect::<String>().into_bytes()
+                    } else { b });
                     if have != want {
                         diff.push(format!("파일 {rel}\n    rust {:?}\n    py   {:?}", have.map(|b| String::from_utf8_lossy(&b).into_owned()), want.map(|b| String::from_utf8_lossy(&b).into_owned())));
                     }

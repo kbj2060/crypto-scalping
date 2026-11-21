@@ -706,6 +706,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
 name = "http"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1522,6 +1528,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "rtmodel"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "rusqlite",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "ureq",
+]
+
+[[package]]
+name = "rtorder"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "hex",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "ring",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "ureq",
+]
+
+[[package]]
 name = "rtserve"
 version = "0.1.0"
 dependencies = [
@@ -1539,11 +1578,14 @@ dependencies = [
  "percent-encoding",
  "rtcollect",
  "rtcore",
+ "rtmodel",
+ "rtorder",
  "rusqlite",
  "serde_json",
  "sha2",
  "tokio",
  "tokio-tungstenite",
+ "ureq",
 ]
 
 [[package]]
