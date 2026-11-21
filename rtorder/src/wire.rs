@@ -10,7 +10,7 @@ use crate::account::{self, AccountBook, AccountRest, StreamAccount, Swr, UserStr
 use crate::assemble::{Desk, DeskIo, Quotes};
 use crate::exec::Exchange;
 use crate::watch::{iso_utc, run_exit_into, Obj, WatchIo, Watcher};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 pub struct Wired<O: WatchIo, R: AccountRest, Q: Quotes, E: Exchange> {
     pub ops: O,
@@ -69,9 +69,6 @@ impl<R: AccountRest, O: WatchIo> DeskIo for Acct<'_, R, O> {
     fn sec_prices(&mut self, asset: &str) -> Option<Vec<(f64, f64)>> {
         self.ops.sec_prices(asset).ok().flatten()
     }
-    fn vol_mult(&self, _asset: &str) -> Value {
-        json!({})
-    }
     async fn clear_bracket(&mut self, _s: &str, _p: &str, _a: bool, _b: bool) -> Result<Value, String> {
         unreachable!("청산 조립은 손절 해제를 안 부른다")
     }
@@ -127,7 +124,7 @@ impl<O: WatchIo, R: AccountRest, Q: Quotes, E: Exchange> WatchIo for Wired<O, R,
     /// 감시 발동 청산 = assemble_exit_plan(pside, frac, fresh=True, asset, only_symbol) -- 원본은 for_order 를 넘기지 않아 화면용 펀딩·수수료까지 묻는다(그대로).
     async fn exit_plan(&mut self, pside: &str, fraction: f64, asset: &str, only_symbol: &str) -> Result<Value, Value> {
         let mut io = Acct { rest: &mut self.rest, book: &mut self.book, stream: self.stream.as_mut(), ops: &mut self.ops, source: &mut self.fresh_source };
-        self.planner.assemble_exit_plan(&mut self.quotes, &mut io, pside, fraction, true, asset, false, false, Some(only_symbol)).await.map_err(|e| e.0)
+        self.planner.assemble_exit_plan(&mut self.quotes, &mut io, pside, fraction, true, asset, false, Some(only_symbol)).await.map_err(|e| e.0)
     }
     async fn run_exit(&mut self, plan: &Value, slot: &mut Obj) -> Result<(), String> {
         let ops = &self.ops;
@@ -138,9 +135,6 @@ impl<O: WatchIo, R: AccountRest, Q: Quotes, E: Exchange> WatchIo for Wired<O, R,
     }
     async fn place_tp_ladder(&mut self, legs: &Value, symbol: &str, pside: &str) -> Result<Value, String> {
         self.ops.place_tp_ladder(legs, symbol, pside).await
-    }
-    async fn place_add_order(&mut self, symbol: &str, pside: &str, price: f64, qty: f64) -> Result<Value, String> {
-        self.ops.place_add_order(symbol, pside, price, qty).await
     }
     async fn cancel_wait_orphans(&mut self, symbols: &[String]) -> Result<Value, String> {
         self.ops.cancel_wait_orphans(symbols).await

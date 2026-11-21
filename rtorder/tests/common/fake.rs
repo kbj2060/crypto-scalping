@@ -274,7 +274,6 @@ fn entry_plan() -> ExecPlan {
 enum Kind {
     Entry,
     Exit,
-    Wait(f64, bool),
     Limit(f64, bool, bool),
 }
 
@@ -285,7 +284,6 @@ fn go(fx: &mut Fake, p: &ExecPlan, k: Kind) -> ExecState {
         match k {
             Kind::Entry => run_entry(fx, p, &s).await,
             Kind::Exit => run_exit(fx, p, &s).await,
-            Kind::Wait(w, of) => run_entry_wait(fx, p, &s, w, of).await,
             Kind::Limit(m, of, rp) => run_entry_limit(fx, p, &s, m, of, rp).await,
         }
     });

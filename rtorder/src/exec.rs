@@ -1,9 +1,8 @@
 //! 지정가 집행 상태 기계 -- `live/execution/live_manual_peg_execute_20260912.py` 의 `fill_maker`·`ensure_closed`·`run_entry`·`run_exit`·
-//! `run_entry_wait`·`run_entry_limit`·`run_entry_stop` 을 그대로 옮긴 것. 거래소 호출·시계는 `Exchange` trait 뒤(구현 = 시험의 가짜 · `http::Binance`).
+//! `run_entry_limit`·`run_entry_stop` 을 그대로 옮긴 것. 거래소 호출·시계는 `Exchange` trait 뒤(구현 = 시험의 가짜 · `http::Binance`).
 //!
-//! 🔴시장가는 **보내지 않는다**(사용자 결정 2026-11-20: 지정가로만 설계 · 기존 시장가 분기는 «옮길지 뺄지» 미정).
-//! 시장가 다리(M1·M2·M3·M4·M5·M6·M7·M8·M9)는 원본과 같은 순서·같은 요청·같은 결과(2026-11-21 사용자 결정 «원본 동작 유지») -- `Exchange::place_market`.
-//! 그래서 trait 에 시장가 메서드가 없다 -- 시장가가 «구조적으로» 못 나간다.
+//! 시장가 다리(M1·M2 감시 진입 TAKER 몫·M4·M5·M6·M7·M9)는 원본과 같은 순서·같은 요청·같은 결과(2026-11-21 사용자 결정 «원본 동작 유지») -- `Exchange::place_market`.
+//! M3(기다리기)·M8(«즉시» 청산)·스위칭은 원본 PR 61 처럼 지웠다(2026-11-21 사용자 «sltp 만»).
 //!
 //! 원본 run_* 머리(API 키 없음 → error · `_clock_offset` · 진입이면 `ensure_leverage`)는 `Exchange::prepare`(2026-11-21 일곱째 조각 --
 //! 전체 흐름 정답지에서 실행기가 시계 요청·레버리지를 빼먹던 것을 잡고 옮김. run_entry_stop 은 원본처럼 머리 없이 닿은 뒤 run_entry 가 한다).
@@ -18,7 +17,6 @@ pub const TERMINAL: [&str; 4] = ["FILLED", "CANCELED", "EXPIRED", "REJECTED"]; /
 pub const REPEG_MAX: u32 = 40; // 3초 × 120초 = 40회가 물리적 상한. 폭주 방지 이중 안전장치(E15)
 pub const PEG_TAG: &str = "dbpg"; // 2026-10-16 따라가기 GTX 표식 -- 모호한 POST 조회 · 재시작 고아 정리
 pub const WAIT_TAG: &str = "dbwt"; // 기다리기·지정가 대기 표식
-pub const WAIT_CHOICES_MIN: [u32; 2] = [15, 60];
 pub const LIMIT_MAX_SEC: f64 = 4.0 * 3600.0; // 지정가 대기 최대(검증 D2) -- 넘으면 «만료 취소»(시장가 없음)
 pub const REPRICE_SEC: f64 = 20.0;
 pub const REPRICE_MIN_REL: f64 = 1e-4;
@@ -74,7 +72,7 @@ pub trait Exchange {
     async fn reprice(&mut self) -> Result<Option<f64>, String> {
         Ok(None)
     }
-    /// 원본 run_entry·run_exit·run_entry_wait·run_entry_limit 머리: 키 없음 = Err("API 키가 없습니다") · 시계 맞추기 · leverage = Some(목표) 면
+    /// 원본 run_entry·run_exit·run_entry_limit 머리: 키 없음 = Err("API 키가 없습니다") · 시계 맞추기 · leverage = Some(목표) 면
     /// ensure_leverage 결과(state["leverage"] -- 실패해도 주문은 보낸다, P16). 기본(시험 가짜) = 아무것도 안 함.
     async fn prepare(&mut self, _symbol: &str, _leverage: Option<i64>) -> Result<Option<serde_json::Value>, String> {
         Ok(None)
@@ -107,7 +105,7 @@ pub enum Phase {
     Rejected,
     Error,
     Cancelled,
-    /// 시장가 다리가 체결됐다(2026-11-21 사용자 결정 «원본 동작 유지» -- M1·M2·M3·M4·M5·M6·M7·M8·M9).
+    /// 시장가 다리가 체결됐다(2026-11-21 사용자 결정 «원본 동작 유지» -- M1·M2·M4·M5·M6·M7·M9).
     FilledTaker,
     /// 시장가 다리 접수가 오류(원본 그대로 조회·재시도 없이 멈춤 -- 불명 응답도 같다).
     TakerFailed,
@@ -155,7 +153,8 @@ pub struct ExecState {
     pub taker_reason: Option<&'static str>,
     /// 감시 진입(run_entry_stop) 표시 · 닿아서 따라가기를 시작했나(원본은 시각 문자열).
     pub stop: bool,
-    pub triggered: bool,
+    /// 닿은 벽시계(epoch 초) -- 원본 state["triggered"] = now_iso()(닿기 전 None).
+    pub triggered: Option<f64>,
     pub done: bool,
     /// ensure_leverage 결과(원본 state["leverage"]).
     pub leverage: Option<serde_json::Value>,
@@ -462,99 +461,6 @@ pub async fn run_exit<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Shared) {
     }
 }
 
-/// 진입 «기다리기»(2026-10-10): GTX 를 **한 번** 걸고 앞질러도 다시 걸지 않는다(처음 -5022 만 새 호가로 재시도, E20).
-/// wait_sec 뒤 잔량 = 파이썬 시장가(M3). 거래소에서 사람이 취소했으면 «취소» -- 몰래 시장가로 채우지 않는다.
-pub async fn run_entry_wait<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Shared, wait_sec: f64, mut on_fill: bool) {
-    if !head(ex, plan, s, true).await {
-        return;
-    }
-    let ps = &plan.position_side;
-    let c = Common { symbol: &plan.symbol, side: &plan.side, position_side: ps };
-    let (total, mut price) = (plan.quantity, plan.price);
-    {
-        let mut g = st(s);
-        (g.phase, g.mode, g.filled, g.limit_price, g.quantity, g.repegs, g.deadline_sec) = (Phase::Working, "wait", 0.0, price, total, 0, wait_sec);
-    }
-    let deadline = ex.now() + wait_sec;
-    let (order, cid) = loop {
-        let cid = format!("{WAIT_TAG}{}{}", &ps[..1], ex.wall_ms());
-        let req = LimitOrder { symbol: plan.symbol.clone(), side: plan.side.clone(), position_side: ps.clone(), price: r8(price), quantity: total, client_order_id: cid.clone() };
-        let placed = ex.place_limit_gtx(&req).await;
-        let placed = match resolve_unknown_post(ex, &c, &cid, placed).await {
-            Ok(r) => r,
-            Err(msg) => {
-                st(s).error = Some(msg);
-                return finish(s, Phase::Error);
-            }
-        };
-        match placed {
-            Ok(o) => break (o, cid),
-            Err(e) => {
-                let (repegs, acted) = { let g = st(s); (g.repegs, g.action.is_some()) };
-                if !(is_post_only_reject(&e) && repegs < REPEG_MAX && !acted) {
-                    st(s).error = Some(e);
-                    return finish(s, Phase::Rejected);
-                }
-                match maker_price(ex, &plan.side, &plan.symbol).await {
-                    Err(x) => {
-                        st(s).error = Some(format!("호가 조회 실패 {x}"));
-                        return finish(s, Phase::Rejected);
-                    }
-                    Ok((p, _, _)) => price = p,
-                }
-                let mut g = st(s);
-                (g.repegs, g.limit_price) = (g.repegs + 1, price);
-            }
-        }
-    };
-    let oid = order.order_id;
-    {
-        let mut g = st(s);
-        (g.order_id, g.client_order_id, g.limit_price) = (oid, Some(cid), price);
-    }
-    let (mut filled, mut status) = (0.0, String::new());
-    while ex.now() < deadline && st(s).action.is_none() {
-        ex.nap(POLL_SEC).await;
-        let Ok(cur) = ex.get_order(&c, &OrderRef::Id(oid)).await else { continue };
-        (filled, status) = (cur.executed_qty, cur.status);
-        st(s).filled = filled;
-        if filled > 0.0 && on_fill {
-            ex.on_fill().await; // 첫 체결을 본 순간 한 번(서버가 손절을 바로 건다 -- 60분 무방비 금지)
-            on_fill = false;
-        }
-        if terminal(&status) {
-            break;
-        }
-    }
-    let outside_cancel = terminal(&status) && status != "FILLED";
-    if !terminal(&status) {
-        match ensure_closed(ex, &c, oid, 3).await {
-            None => {
-                st(s).error = Some(cancel_msg(oid));
-                return finish(s, Phase::Error);
-            }
-            Some(q) => filled = q,
-        }
-    }
-    st(s).filled = r8(filled);
-    let remaining = r8(total - filled);
-    if remaining <= 0.0 {
-        st(s).taker_qty = 0.0;
-        return finish(s, Phase::FilledMaker);
-    }
-    let action = st(s).action;
-    if action == Some(Action::Cancel) || outside_cancel {
-        let mut g = st(s);
-        g.cancel_reason = Some(g.action_reason.clone().filter(|r| !r.is_empty())
-            .unwrap_or_else(|| if action.is_some() { "사용자 취소".into() } else { format!("거래소에서 {status}") }));
-        drop(g);
-        return finish(s, Phase::Cancelled);
-    }
-    // M3: 대기 마감 잔량(또는 action=market) = 시장가(X:569 «미체결 포기는 안 된다» · 2026-11-21 «원본 동작 유지»)
-    let why = if action == Some(Action::Market) { "지금 시장가(사용자)" } else { "대기 마감" };
-    taker(ex, &c, remaining, s, |f, d| r8(f + d), Some(why)).await;
-}
-
 /// 감시 진입(2026-11-09 사용자 «롱은 지금가 위·숏은 아래 선을 감시하다가 걸기»): 닿기 전엔 거래소에 주문이 없다 · 닿으면 따라가기(maker_only) --
 /// 마감 뒤 잔량은 버린다(사용자 «지정가 체결은 절대 시장가로 바꾸지 않는다», E25). 1초마다 `touched(since)`(since = epoch 초 -- 호출부가 1초 체결가로 본다,
 /// 못 읽으면 false = 안 들어간다). amend = 선 옮김(닿음 판정을 그 시각부터 다시) · action cancel = 취소 · peg = 지금 닿은 것으로 · market = 시장가(미정 M5).
@@ -563,7 +469,7 @@ pub async fn run_entry_stop<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Shared
     {
         let mut g = st(s);
         (g.phase, g.mode, g.stop, g.triggered, g.filled, g.limit_price, g.quantity, g.amends, g.deadline_sec) =
-            (Phase::Working, "limit", true, false, 0.0, plan.price, plan.quantity, 0, max_sec);
+            (Phase::Working, "limit", true, None, 0.0, plan.price, plan.quantity, 0, max_sec);
         g.wait_until = Some(ex.wall_ms() as f64 / 1000.0 + max_sec);
     }
     let (mut since, deadline) = (ex.wall_ms() as f64 / 1000.0, ex.now() + max_sec);
@@ -610,7 +516,7 @@ pub async fn run_entry_stop<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Shared
         drop(g);
         return finish(s, Phase::Cancelled);
     }
-    st(s).triggered = true;
+    st(s).triggered = Some(ex.wall_ms() as f64 / 1000.0);
     // D11: 원본은 이 호가 조회가 try 밖이라 예외가 settle 의 «집행 오류»로 간다(그 시점 걸린 주문 없음)
     let price = match maker_price(ex, &plan.side, &plan.symbol).await {
         Ok((p, _, _)) => p,

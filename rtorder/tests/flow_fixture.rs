@@ -1,7 +1,7 @@
 //! 원본 «전체 흐름» 정답지 재생(2026-11-21 일곱째 조각). 정답지 = tools/gen_flow_fixture.py 가 진짜 `orders.entry_then_bracket`·`bracket_tick` +
 //! 진짜 집행·브래킷 함수 + aiohttp 를 127.0.0.1 모의 거래소에 붙여 뽑은 «걸음마다 나간 요청 열 · 받은 응답 열 · 상태 칸 · 무장 파일 · 복구 파일 · 가짜 의존성 호출».
 //! 여기서는 같은 응답 열을 프로세스 안 가짜 서버(127.0.0.1)에 걸고 Rust 실행기(`runner::entry_then_bracket`)와 감시(`Watcher::bracket_tick`)를
-//! 진짜 `http::Binance`·`bracket::*` 로 돌려 대조한다. 원본만 보내는 −5% 비상 스탑 요청(openAlgoOrders·algoOrder -- M10 제거)은 원본 열에서 뺀다.
+//! 진짜 `http::Binance`·`bracket::*` 로 돌려 대조한다. 2026-11-21 PR 61 판부터 요청 열이 통째로 같다(배포 전 dbsl 정리 목록 openAlgoOrders 도 양쪽).
 
 use rtorder::assemble::{Desk, Quotes};
 use rtorder::bracket;
@@ -132,9 +132,6 @@ impl WatchIo for Io {
     async fn place_tp_ladder(&mut self, legs: &Value, s: &str, p: &str) -> Result<Value, String> {
         bracket::place_tp_ladder(&mut self.bx, legs.as_array().unwrap(), s, p).await
     }
-    async fn place_add_order(&mut self, s: &str, p: &str, price: f64, qty: f64) -> Result<Value, String> {
-        Ok(bracket::place_add_order(&mut self.bx, s, p, price, qty).await)
-    }
     async fn cancel_wait_orphans(&mut self, syms: &[String]) -> Result<Value, String> {
         Ok(bracket::cancel_wait_orphans(&mut self.bx, &syms.iter().map(String::as_str).collect::<Vec<_>>()).await)
     }
@@ -175,17 +172,10 @@ impl Quotes for Q {
     async fn fees(&mut self, _: &str) -> Value {
         unreachable!()
     }
-    async fn margin_type(&mut self, _: &str) -> Option<String> {
-        unreachable!()
-    }
 }
 
 fn act_of(r: &Value) -> Act {
     Act::Send { status: r["status"].as_u64().unwrap() as u16, ctype: "application/json".into(), body: serde_json::to_string(&r["body"]).unwrap(), headers: vec![] }
-}
-
-fn is_stop_req(r: &Value) -> bool {
-    r["target"].as_str().unwrap().contains("lgoOrder")
 }
 
 /// 원본 칸에 없고 Rust 가 비어 있는 값(None·0)으로 쓴 칸은 같은 뜻이다(파이썬 state.get 기본값).
@@ -235,6 +225,9 @@ async fn flow_fixture_matches_python_full_flow() {
         let calls: Calls = Arc::new(Mutex::new(vec![]));
         let mut desk = Desk::new(Watcher::new(&dir, SYM));
         desk.w.entry = serde_json::from_value(json!({"phase": "submitting"})).unwrap();
+        if sc["file0"].is_object() {
+            std::fs::write(dir.join("manual_bracket_state.json"), serde_json::to_string(&sc["file0"]).unwrap()).unwrap();
+        }
         let mut ex = Vx { bx: bx(&srv.base, t0, &t, &ban), t: t.clone() };
         let mut io = Io { bx: bx(&srv.base, t0, &t, &ban), ex: Vx { bx: bx(&srv.base, t0, &t, &ban), t: t.clone() }, t: t.clone(), t0, calls: calls.clone(),
                           pos: json!({"LONG": 0.0, "SHORT": 0.0}), sec: vec![], exit_plans: VecDeque::new() };
@@ -249,7 +242,7 @@ async fn flow_fixture_matches_python_full_flow() {
             let reqs = st["requests"].as_array().unwrap();
             let resp = st["responses"].as_array().unwrap();
             assert_eq!(reqs.len(), resp.len());
-            *queue.lock().unwrap() = reqs.iter().zip(resp).filter(|(q, _)| !is_stop_req(q)).map(|(_, r)| r.clone()).collect();
+            *queue.lock().unwrap() = resp.iter().cloned().collect();
             srv.log.lock().unwrap().clear();
             calls.lock().unwrap().clear();
             io.sec = st["sec"].as_array().unwrap().iter().map(|x| (x[0].as_f64().unwrap(), x[1].as_f64().unwrap())).collect();
@@ -257,13 +250,13 @@ async fn flow_fixture_matches_python_full_flow() {
             if st["op"] == "entry" {
                 let plan = st["plan"].as_object().unwrap().clone();
                 let mut slot = std::mem::take(&mut desk.w.entry);
-                entry_then_bracket(&mut desk, &mut ex, &mut io, &mut quotes, &plan, &mut slot, None, st["limit"].as_bool().unwrap()).await;
+                entry_then_bracket(&mut desk, &mut ex, &mut io, &mut quotes, &plan, &mut slot, st["limit"].as_bool().unwrap()).await;
                 desk.w.entry = slot;
             } else if let Err(e) = desk.w.bracket_tick(&mut io).await {
                 d.push(format!("감시 틱 예외 {e} (원본 {})", st["raised"]));
             }
             let got: Vec<Value> = srv.log.lock().unwrap().iter().map(|g| json!({"method": g.method, "target": g.target, "key": g.key})).collect();
-            let want: Vec<Value> = reqs.iter().filter(|q| !is_stop_req(q)).cloned().collect();
+            let want: Vec<Value> = reqs.clone();
             if got != want {
                 let at = got.iter().zip(&want).position(|(a, b)| a != b).unwrap_or(got.len().min(want.len()));
                 d.push(format!("요청 열 다름 #{at}/{}: 원본 {} · Rust {}", want.len(), want.get(at).map_or("없음".into(), |x| x.to_string()), got.get(at).map_or("없음".into(), |x| x.to_string())));

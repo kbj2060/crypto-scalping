@@ -137,14 +137,13 @@ fn d2_unknown_outcome_same_on_all_paths() {
         ("e 조회·DELETE 전부 실패", Fake { place_err: Some((to(), true)), fail: vec!["lookup", "delete_cid"], ..Default::default() }, Phase::Error, 3, 1, 1),
         ("음성: 4xx 확정 거부", Fake { place_err: Some(("400 [-2019] Margin is insufficient.".into(), false)), ..Default::default() }, Phase::Rejected, 0, 0, 0),
     ];
-    for (path, tag) in [("exit", PEG_TAG), ("entry", PEG_TAG), ("wait", WAIT_TAG), ("limit", WAIT_TAG)] {
+    for (path, tag) in [("exit", PEG_TAG), ("entry", PEG_TAG), ("limit", WAIT_TAG)] {
         for (name, base, phase, lookups, dels, live_n) in &cases {
             let label = format!("불명 POST {path}/{name}");
             let mut fx = Fake { fill_after: 1, place_err: base.place_err.clone(), lookup_miss: base.lookup_miss, fail: base.fail.clone(), ..Default::default() };
             let (p, k) = match path {
                 "exit" => (exit_plan(), Kind::Exit),
                 "entry" => (entry_plan(), Kind::Entry),
-                "wait" => (entry_plan(), Kind::Wait(900.0, false)),
                 _ => (entry_plan(), Kind::Limit(60.0, false, false)),
             };
             let st = go(&mut fx, &p, k);
@@ -253,32 +252,7 @@ fn maker_only_and_market_entry_plans() {
     assert!(fx.placed.is_empty() && st.phase == Phase::FilledTaker && fx.markets.len() == 1);
 }
 
-// ── 기다리기(wait 시험) ──────────────────────────────────────────────────────
-
-#[test]
-fn wait_paths() {
-    let mut fx = Fake { drift: true, ..Default::default() };
-    let st = go(&mut fx, &entry_plan(), Kind::Wait(900.0, false));
-    check("기다리기 마감", &st, &fx, 2.0);
-    assert!(st.phase == Phase::FilledTaker && st.taker_reason == Some("대기 마감") && fx.placed.len() == 1 && fx.book_times.is_empty(), "앞질러도 다시 걸지 않는다");
-    assert!(fx.placed[0].client_order_id.starts_with(WAIT_TAG));
-    let mut fx = Fake { fill_after: 1, post_only_rejects: 2, ..Default::default() };
-    let st = go(&mut fx, &entry_plan(), Kind::Wait(900.0, false));
-    check("기다리기 -5022", &st, &fx, 2.0);
-    assert_eq!((st.phase, st.repegs), (Phase::FilledMaker, 2));
-    let mut fx = Fake { kill_at: Some(2), ..Default::default() };
-    let st = go(&mut fx, &entry_plan(), Kind::Wait(900.0, false));
-    check("거래소 취소", &st, &fx, 2.0);
-    assert_eq!((st.phase, st.cancel_reason.as_deref()), (Phase::Cancelled, Some("거래소에서 CANCELED")));
-    let mut fx = Fake { fill_after: 1, partial: Some(0.25), ..Default::default() };
-    let st = go(&mut fx, &entry_plan(), Kind::Wait(60.0, true));
-    check("첫 체결 on_fill", &st, &fx, 2.0);
-    assert_eq!((fx.on_fills, st.phase), (1, Phase::FilledTaker));
-    let mut fx = Fake { script: vec![(10.0, Cmd::Action(Action::Market))], ..Default::default() };
-    let st = go(&mut fx, &entry_plan(), Kind::Wait(900.0, false));
-    check("지금 시장가", &st, &fx, 2.0);
-    assert_eq!((st.taker_reason, fx.deletes.len()), (Some("지금 시장가(사용자)"), 1));
-}
+// 기다리기(run_entry_wait · M3)는 2026-11-21 원본 PR 61 처럼 지웠다.
 
 // ── 지정가 대기(limit 시험) ──────────────────────────────────────────────────
 
@@ -374,7 +348,7 @@ fn fuzz_random_faults_keep_invariants() {
             fx.script.push((rnd(60) as f64, Cmd::Action([Action::Cancel, Action::Market, Action::Peg][rnd(3) as usize])));
         }
         let p = if k == 1 { exit_plan() } else { entry_plan() };
-        let st = go(&mut fx, &p, match k { 0 => Kind::Entry, 1 => Kind::Exit, 2 => Kind::Limit(300.0, true, false), _ => Kind::Wait(300.0, true) });
+        let st = go(&mut fx, &p, match k { 0 => Kind::Entry, 1 => Kind::Exit, 2 => Kind::Limit(300.0, true, false), _ => Kind::Limit(300.0, true, true) });
         check(&format!("무작위 #{runs}"), &st, &fx, 2.0);
         repegs += st.repegs as u64;
         runs += 1;
@@ -406,7 +380,7 @@ fn e25_stop_entry_paths() {
     let mut fx = Fake { fill_after: 1, ..Default::default() };
     let (st, sinces) = go_stop(&mut fx, &entry_plan(), 5, 3600.0);
     check("감시 닿음", &st, &fx, 2.0);
-    assert!(st.phase == Phase::FilledMaker && st.stop && st.triggered && sinces.len() == 5 && fx.placed.len() == 1 && fx.placed[0].price == 2500.0);
+    assert!(st.phase == Phase::FilledMaker && st.stop && st.triggered.is_some() && sinces.len() == 5 && fx.placed.len() == 1 && fx.placed[0].price == 2500.0);
     assert!(fx.placed[0].client_order_id.starts_with(PEG_TAG));
     // 따라가기 마감 뒤 잔량은 버린다 -- 시장가 없음(사용자 «지정가 체결은 절대 시장가로 바꾸지 않는다»)
     let mut fx = Fake { fill_after: 1, partial: Some(0.5), ..Default::default() };
@@ -440,7 +414,7 @@ fn e25_stop_entry_paths() {
     let mut fx = Fake { fill_after: 1, script: vec![(2.5, Cmd::Action(Action::Peg))], ..Default::default() };
     let (st, _) = go_stop(&mut fx, &entry_plan(), 0, 3600.0);
     check("감시 PEG", &st, &fx, 2.0);
-    assert!(st.phase == Phase::FilledMaker && st.triggered && st.action.is_none());
+    assert!(st.phase == Phase::FilledMaker && st.triggered.is_some() && st.action.is_none());
     // 닿은 뒤 호가 조회 실패(D11: 원본은 try 밖 → settle «집행 오류») -- 걸린 주문 없음
     let mut fx = Fake { fail: vec!["book"], ..Default::default() };
     let (st, _) = go_stop(&mut fx, &entry_plan(), 1, 3600.0);

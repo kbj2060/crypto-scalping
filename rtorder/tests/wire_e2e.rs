@@ -60,9 +60,6 @@ impl WatchIo for Ops {
     async fn place_tp_ladder(&mut self, _: &Value, _: &str, _: &str) -> Result<Value, String> {
         unreachable!()
     }
-    async fn place_add_order(&mut self, _: &str, _: &str, _: f64, _: f64) -> Result<Value, String> {
-        unreachable!()
-    }
     async fn cancel_wait_orphans(&mut self, _: &[String]) -> Result<Value, String> {
         unreachable!()
     }

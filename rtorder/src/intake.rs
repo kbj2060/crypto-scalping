@@ -1,16 +1,16 @@
 //! 접수 문(2026-11-21 넷째 조각) -- `dashboard/orders.py` 의 주문 API 핸들러를 **HTTP 와 떼어** 옮긴 것:
 //! 입력 = 파싱된 질의(`Query`) · 출력 = 상태코드 + 본문 + «시작할 작업»(`Task` -- 실제로 돌리는 것은 `run_task`/다음 조각의 웹 서버).
-//! 옮긴 것: entry-preview/submit · exit-preview/submit · exit-all · limit-amend · wait-action · entry-cancel · bracket-disarm/rearm · query_* 검사 · 대기 칸 배정.
+//! 옮긴 것: entry-preview/submit · exit-submit · limit-amend · wait-action · entry-cancel · bracket-disarm/rearm · query_* 검사 · 대기 칸 배정.
 //! 안 옮긴 것(다음): 익절 on/off(`api_manual_bracket_tp`) · 분할 조각(`…_tp_legs`) · 선 추가(`…_add`) · 선 수정(`…_modify`) · 상태 조회(`…_status`) · 접수 기록(G18, server.py).
 //!
 //! 지키는 것(값·동작 그대로): POST 전용(G1 -- 웹 서버가 `POST_ONLY` 표로) · confirm=1(G2) · 실행 스위치 매 요청(G3) · 진입 칸 하나(G5) · 코인별 청산 칸(G6) ·
 //! 조립 뒤 칸 다시 보기(G7) · 주문 잠금 안/밖(G8 -- `LOCKED` 표, 잠금 자체는 `watch::busy_or`) · 대기 칸 규칙(G10–G12) · 대기 중 스위칭 409(G13) · 코인 표(G14) ·
 //! 조용히 고치지 않는 400(G15) · 스위칭은 전량+반대(G16).
 //!
-//! 시장가 분기(M8 «즉시» 청산 · M11 스위칭 · M13 대기 «지금 시장가» · M6·M7 조립이 낸 시장가 계획)는 원본과 같이 접수한다
-//! (2026-11-21 사용자 결정 «원본 동작 유지» -- 넷째 조각의 409 market_undecided 거절은 지웠다). 스위칭은 `Task::Switch`(exit_then_switch).
-use crate::assemble::{Desk, DeskIo, EntryArgs, Quotes, MANUAL_RULES_ENABLED};
-use crate::exec::{WAIT_CHOICES_MIN};
+//! 시장가 분기(M13 대기 «지금 시장가» · M6·M7 조립이 낸 시장가 계획)는 원본과 같이 접수한다(2026-11-21 «원본 동작 유지»).
+//! 2026-11-21 사용자 결정 «sltp(차트 선 주문 + 진입가 팝업 청산)만 쓴다»(원본 PR 61): 자동 규칙·기다리기·스위칭·«즉시» 청산·청산 미리보기·전량 일괄 청산을 지웠다 --
+//! 지운 인자는 400 removed_option · 선 없는 진입은 400 lines_required(조립) · 선 없는 포지션 추가 진입은 409 add_on_unlined_position(조립).
+use crate::assemble::{Desk, DeskIo, EntryArgs, Quotes};
 use crate::plan::{self, bracket_key};
 use crate::sign::{py_float, py_str, truthy};
 use crate::watch::{busy, iso_utc, Obj, SlotId, Watcher, WAIT_SLOTS_MAX};
@@ -20,13 +20,13 @@ use std::collections::HashMap;
 pub type Query = HashMap<String, String>;
 
 /// 주문 잠금 안(true)/밖(false) -- 원본 server.py 라우트 등록(규칙 문서 G8). 웹 서버가 이 표대로 `busy_or` 로 감싼다.
-pub const LOCKED: [(&str, bool); 10] = [
-    ("entry_submit", true), ("exit_submit", true), ("exit_all_submit", true), ("limit_amend", true),
+pub const LOCKED: [(&str, bool); 8] = [
+    ("entry_submit", true), ("exit_submit", true), ("limit_amend", true),
     ("wait_action", false), ("entry_cancel", false), ("bracket_disarm", false), ("bracket_rearm", false),
-    ("entry_preview", false), ("exit_preview", false),
+    ("entry_preview", false),
 ];
 /// 주문을 바꾸는 요청 = POST 만(G1 -- GET 이면 링크 미리보기·프리페치·주소창 재방문이 그대로 주문). 미리보기만 GET.
-pub const POST_ONLY: [&str; 8] = ["entry_submit", "exit_submit", "exit_all_submit", "limit_amend", "wait_action", "entry_cancel", "bracket_disarm", "bracket_rearm"];
+pub const POST_ONLY: [&str; 7] = ["entry_submit", "exit_submit", "limit_amend", "wait_action", "entry_cancel", "bracket_disarm", "bracket_rearm"];
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SlotRef {
@@ -38,12 +38,10 @@ pub enum SlotRef {
 /// 접수가 시작하라고 내놓는 작업(원본 `asyncio.create_task(...)` 하나).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Task {
-    /// entry_then_bracket(plan, state, wait_sec, limit)
-    Entry { key: String, slot: SlotRef, plan: Value, wait_sec: Option<f64>, limit: bool },
+    /// entry_then_bracket(plan, state, limit)
+    Entry { key: String, slot: SlotRef, plan: Value, limit: bool },
     /// settle(run_exit | exit_then_rearm(부분 청산))
     Exit { key: String, slot: SlotRef, plan: Value, rearm: bool },
-    /// exit_then_switch(plan, state, sw, asset) -- 스위칭(전량 청산이 다 닫힌 뒤 반대 진입 · 두 다리 다 시장가 M11)
-    Switch { key: String, plan: Value, sw: Value, asset: String },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -92,10 +90,17 @@ pub fn query_leverage(q: &Query, key: &str) -> Result<Option<i64>, String> {
     let v = x.trunc() as i64;
     Ok((1..=crate::assemble::EXCHANGE_MAX_LEVERAGE).contains(&v).then_some(v))
 }
-/// "c"(자동 2×) · "h"(보유 1.5×) · 없음 None · 그 밖 "bad"(직접 모드로 조용히 떨어지지 않는다).
-pub fn query_rule(q: &Query, key: &str) -> Option<String> {
-    let raw = g(q, key).filter(|s| !s.is_empty())?;
-    Some(if (raw == "c" || raw == "h") && MANUAL_RULES_ENABLED { raw.into() } else { "bad".into() })
+/// 2026-11-21 지운 진입 방식(자동 규칙 rule · 기다리기 mode=wait·wait_min) -- 옛 화면 캐시가 보내도 다른 방식으로 조용히 나가지 않게 400(원본 순서 rule·mode·wait_min).
+fn removed_entry(q: &Query) -> Option<Resp> {
+    let gone: Vec<&str> = ["rule", "mode", "wait_min"].into_iter().filter(|k| g(q, k).is_some_and(|v| !v.is_empty()) && !(*k == "mode" && g(q, k) == Some("limit"))).collect();
+    (!gone.is_empty()).then(|| bad(400, "removed_option", &format!("지운 주문 방식입니다({}) — 화면을 새로 고친 뒤 차트 선 주문으로 넣으세요", gone.join(", "))))
+}
+/// 청산: 스위칭(switch_to·sw_*)·«즉시»(exec 가 limit·빈 값이 아님) -- 키 이름순(원본 sorted).
+fn removed_exit(q: &Query) -> Option<Resp> {
+    let mut gone: Vec<&str> = q.iter().filter(|(k, v)| k.as_str() == "switch_to" || k.starts_with("sw_") || (k.as_str() == "exec" && !v.is_empty() && v.as_str() != "limit"))
+        .map(|(k, _)| k.as_str()).collect();
+    gone.sort();
+    (!gone.is_empty()).then(|| bad(400, "removed_option", &format!("지운 청산 방식입니다({}) — 화면을 새로 고친 뒤 진입가 팝업으로 청산하세요", gone.join(", "))))
 }
 pub enum Lines {
     None,
@@ -146,9 +151,6 @@ fn obj(v: &Value) -> Obj {
 fn fl(v: Option<&Value>) -> f64 {
     if truthy(v) { py_float(v.unwrap()).unwrap_or(0.0) } else { 0.0 }
 }
-fn bad_rule() -> Resp {
-    bad(400, "bad_rule", if !MANUAL_RULES_ENABLED { "자동 규칙이 꺼져 있습니다(수동 모드)" } else { "자동 규칙 값은 c 하나뿐입니다" })
-}
 fn err_resp(e: (Value, u16)) -> Resp {
     let mut b = json!({"ok": false});
     for (k, v) in obj(&e.0) {
@@ -183,9 +185,8 @@ impl Desk {
         if matches!(lines, Lines::Bad) {
             return bad(400, "bad_lines", "익절·손절 선(tp·sl)은 둘 다 양수여야 합니다");
         }
-        let rule = query_rule(q, "rule");
-        if rule.as_deref() == Some("bad") {
-            return bad_rule();
+        if let Some(r) = removed_entry(q) {
+            return r;
         }
         let lim = query_limit(q);
         if matches!(lim, Some(Err(()))) {
@@ -193,7 +194,7 @@ impl Desk {
         }
         let lev = match query_leverage(q, "lev") { Ok(v) => v, Err(e) => return server_error(&e) };
         let lim = lim.and_then(Result::ok);
-        let a = EntryArgs { side, fraction: frac, want_lev: lev, asset, fresh: g(q, "fresh") == Some("1"), rule_l: rule, lines: lines_of(&lines),
+        let a = EntryArgs { side, fraction: frac, want_lev: lev, asset, fresh: g(q, "fresh") == Some("1"), lines: lines_of(&lines),
                             limit_usdt: lim, stop: lim.is_some() && g(q, "stop") == Some("1"), skip_wait: None };
         match self.assemble_entry_plan(qs, io, &a).await {
             Err(e) => err_resp(e),
@@ -213,17 +214,15 @@ impl Desk {
         }
         let Some(asset) = query_asset(self, q) else { return bad(400, "bad_asset", "주문할 수 없는 코인입니다") };
         let Some(frac) = query_fraction(q, "pct") else { return bad(400, "bad_pct", "진입 비율은 0 초과 100 이하여야 합니다") };
-        // 2026-10-10 «기다리기»(mode=wait&wait_min=15|60) · 2026-10-31 지정가 대기(mode=limit, 선 진입 전용)
-        let (mut wait_min, mut limit_px) = (0i64, None::<f64>);
+        if let Some(r) = removed_entry(q) {
+            return r;
+        }
+        // 2026-10-31 지정가 대기(mode=limit, 선 진입 전용)
+        let mut limit_px = None::<f64>;
         if g(q, "mode") == Some("limit") {
             match query_limit(q) {
                 Some(Ok(v)) => limit_px = Some(v),
                 _ => return bad(400, "bad_limit", "지정가(limit)는 양수이고 익절·손절 선(tp·sl)과 같이 와야 합니다"),
-            }
-        } else if g(q, "mode") == Some("wait") {
-            wait_min = g(q, "wait_min").filter(|s| !s.is_empty()).unwrap_or("0").trim().parse().unwrap_or(0);
-            if !WAIT_CHOICES_MIN.iter().any(|m| *m as i64 == wait_min) {
-                return bad(400, "bad_wait", "기다리기는 15·60분만 됩니다");
             }
         }
         if !io.exec_enabled() {
@@ -251,13 +250,9 @@ impl Desk {
         if matches!(lines, Lines::Bad) {
             return bad(400, "bad_lines", "익절·손절 선(tp·sl)은 둘 다 양수여야 합니다");
         }
-        let rule = query_rule(q, "rule");
-        if rule.as_deref() == Some("bad") {
-            return bad_rule();
-        }
         let lev = match query_leverage(q, "lev") { Ok(v) => v, Err(e) => return server_error(&e) };
         // 비율은 여기서 다시 적용한다 -- 프런트가 계산한 수량을 받지 않는다(P1)
-        let a = EntryArgs { side: side.clone(), fraction: frac, want_lev: lev, asset: asset.clone(), fresh: g(q, "fresh") == Some("1"), rule_l: rule,
+        let a = EntryArgs { side: side.clone(), fraction: frac, want_lev: lev, asset: asset.clone(), fresh: g(q, "fresh") == Some("1"),
                             lines: lines_of(&lines), limit_usdt: limit_px, stop: limit_px.is_some() && stop_q, skip_wait: None };
         let mut plan = match self.assemble_entry_plan(qs, io, &a).await {
             Err(e) => return err_resp(e),
@@ -267,7 +262,7 @@ impl Desk {
             return resp(400, json!({"ok": false, "error": "blocked", "detail": plan["blocked"]}));
         }
         let now = io.now();
-        if wait_min != 0 || limit_px.is_some() {
+        if limit_px.is_some() {
             let bw = self.busy_waits(&asset); // 계획 조립(await) 사이에 바뀌었을 수 있어 다시 본다(G7)
             if !bw.is_empty() && (!truthy(plan.get("add_keep")) || bw.len() as i64 >= WAIT_SLOTS_MAX || !bw.iter().all(|(_, w)| add_ok(w) && !dup(w))) {
                 return resp(409, json!({"ok": false, "error": "wait_pending", "wait": bw[0].1,
@@ -288,7 +283,7 @@ impl Desk {
             let key = Watcher::wkey(&asset, wid);
             let ws = self.w.wait_slot(&asset, wid);
             ws.clear();
-            for (k, v) in [("phase", json!("submitting")), ("mode", json!(if limit_px.is_some() { "limit" } else { "wait" })), ("wait_min", json!(wait_min)),
+            for (k, v) in [("phase", json!("submitting")), ("mode", json!("limit")),
                            ("side", json!(side)), ("plan", plan.clone()), ("asset", json!(asset)), ("wid", json!(wid)), ("started_at", json!(iso_utc(now)))] {
                 ws.insert(k.into(), v);
             }
@@ -296,7 +291,7 @@ impl Desk {
             let tkey = format!("manual_wait_{key}");
             self.running.insert(tkey.clone());
             return Resp { status: 200, body: json!({"ok": true, "plan": plan, "state": ws, "wait": true, "wid": wid}),
-                          task: vec![Task::Entry { key: tkey, slot: SlotRef::Wait(key), plan, wait_sec: (wait_min != 0).then(|| wait_min as f64 * 60.0), limit: limit_px.is_some() }] };
+                          task: vec![Task::Entry { key: tkey, slot: SlotRef::Wait(key), plan, limit: true }] };
         }
         let e = &mut self.w.entry;
         e.clear();
@@ -305,25 +300,7 @@ impl Desk {
         }
         self.running.insert("manual_entry".into());
         Resp { status: 200, body: json!({"ok": true, "plan": plan, "state": self.w.entry}),
-               task: vec![Task::Entry { key: "manual_entry".into(), slot: SlotRef::Entry, plan, wait_sec: None, limit: false }] }
-    }
-
-    pub async fn api_exit_preview<Q: Quotes, I: DeskIo>(&mut self, qs: &mut Q, io: &mut I, q: &Query) -> Resp {
-        let side = g(q, "side").unwrap_or("").to_uppercase();
-        if side != "LONG" && side != "SHORT" {
-            return resp(400, json!({"ok": false, "error": "side must be LONG or SHORT"}));
-        }
-        let Some(asset) = query_asset(self, q) else { return bad(400, "bad_asset", "주문할 수 없는 코인입니다") };
-        let Some(frac) = query_fraction(q, "pct") else { return bad(400, "bad_pct", "청산 비율은 0 초과 100 이하여야 합니다") };
-        // 🔴청산 미리보기도 fresh(2026-09-14 «청산 누르면 강제 조회부터» · C1)
-        let ex = g(q, "exec").unwrap_or("limit");
-        if ex != "limit" && ex != "market" {
-            return bad(400, "bad_exec", "exec 는 limit 또는 market");
-        }
-        match self.assemble_exit_plan(qs, io, &side, frac, true, &asset, ex == "market", false, None).await {
-            Err(e) => err_resp(e),
-            Ok(plan) => resp(200, json!({"ok": true, "plan": plan, "exec_enabled": io.exec_enabled()})),
-        }
+               task: vec![Task::Entry { key: "manual_entry".into(), slot: SlotRef::Entry, plan, limit: false }] }
     }
 
     /// 실제 청산. 진입과 같은 방어(POST + confirm=1 + 게이트) · 칸은 코인별(G6).
@@ -337,32 +314,17 @@ impl Desk {
         }
         let Some(asset) = query_asset(self, q) else { return bad(400, "bad_asset", "주문할 수 없는 코인입니다") };
         let Some(frac) = query_fraction(q, "pct") else { return bad(400, "bad_pct", "청산 비율은 0 초과 100 이하여야 합니다") };
-        let ex = g(q, "exec").unwrap_or("limit");
-        if ex != "limit" && ex != "market" {
-            return bad(400, "bad_exec", "exec 는 limit 또는 market");
-        }
-        let to = g(q, "switch_to").unwrap_or("").to_uppercase();
-        let mut sw: Option<Value> = None;
-        if !to.is_empty() {
-            let (sw_frac, sw_rule) = (query_fraction(q, "sw_pct"), query_rule(q, "sw_rule"));
-            if to != if side == "LONG" { "SHORT" } else { "LONG" } || frac != 1.0 || sw_frac.is_none() || sw_rule.as_deref() == Some("bad") {
-                return bad(400, "bad_switch", "스위칭은 전량(100%) 청산 + 반대 방향 진입만 됩니다");
-            }
-            let lev = match query_leverage(q, "sw_lev") { Ok(v) => v, Err(e) => return server_error(&e) };
-            sw = Some(json!({"to": to, "frac": sw_frac, "lev": lev, "rule": sw_rule}));
+        if let Some(r) = removed_exit(q) {
+            return r;
         }
         if !io.exec_enabled() {
             return exec_off();
         }
         let st = self.w.exit_slot(&asset);
-        if st.is_none() || (sw.is_some() && st != Some(SlotId::Entry)) {
-            return resp(409, json!({"ok": false, "error": "already_working", "state": self.w.entry})); // 스위칭은 반대 진입이 따라오므로 위 칸만(C4)
+        if st.is_none() {
+            return resp(409, json!({"ok": false, "error": "already_working", "state": self.w.entry}));
         }
-        if sw.is_some() && self.wait_pending(&asset) {
-            return bad(409, "wait_pending", "기다리는 진입 주문이 있어 스위칭을 막습니다 — 먼저 취소하세요(그냥 청산은 됩니다)"); // G13
-        }
-        // 2026-10-10 사용자 결정: 스위칭은 즉시 체결(청산·반대 진입 둘 다 시장가 M11) · exec=market = «즉시»(M8) -- 2026-11-21 «원본 동작 유지»
-        let plan = match self.assemble_exit_plan(qs, io, &side, frac, true, &asset, sw.is_some() || ex == "market", true, None).await {
+        let plan = match self.assemble_exit_plan(qs, io, &side, frac, true, &asset, true, None).await {
             Err(e) => return err_resp(e),
             Ok(p) => p,
         };
@@ -380,113 +342,10 @@ impl Desk {
         for (k, v) in [("phase", json!("submitting")), ("kind", json!("exit")), ("side", json!(side)), ("plan", plan.clone()), ("asset", json!(asset)), ("started_at", json!(iso_utc(now)))] {
             s.insert(k.into(), v);
         }
-        if let Some(sw) = &sw {
-            s.insert("switch".into(), json!({"from": side, "to": sw["to"], "phase": "exit"}));
-        }
         let body = json!({"ok": true, "plan": plan, "state": s});
         let key = if st == SlotId::Entry { "manual_entry".to_string() } else { format!("manual_exit_{asset}") };
         self.running.insert(key.clone());
-        let task = match sw {
-            Some(sw) => Task::Switch { key, plan, sw, asset },
-            None => Task::Exit { key, slot: sref, plan, rearm: frac < 1.0 },
-        };
-        Resp { status: 200, body, task: vec![task] }
-    }
-
-    /// 2026-10-22 «코인 여러 개를 한꺼번에 청산». ⚠화면 단추는 삭제된 것으로 조사됐다(docs/rtcore_port_scope -- «불확실»). 옮기되 보고에 표시.
-    pub async fn api_exit_all_submit<Q: Quotes, I: DeskIo>(&mut self, qs: &mut Q, io: &mut I, q: &Query) -> Resp {
-        if g(q, "confirm") != Some("1") {
-            return resp(400, json!({"ok": false, "error": "confirm=1 required"}));
-        }
-        let ex = g(q, "exec").unwrap_or("limit");
-        if ex != "limit" && ex != "market" {
-            return bad(400, "bad_exec", "exec 는 limit 또는 market");
-        }
-        if !io.exec_enabled() {
-            return exec_off();
-        }
-        let account = match io.account(true).await {
-            Ok(a) => a,
-            Err(e) => return server_error(&e),
-        };
-        if !truthy(account.get("ok")) {
-            return bad(503, "account_unavailable", &format!("계좌 조회 실패: {}", account.get("error").map_or("None".into(), py_str)));
-        }
-        let mut targets: Vec<(Option<&'static str>, String, String)> = vec![];
-        for p in account.get("positions").and_then(Value::as_array).cloned().unwrap_or_default() {
-            let side = p.get("side").map(py_str).unwrap_or_else(|| "".into()).to_uppercase();
-            if fl(p.get("qty")) > 0.0 && (side == "LONG" || side == "SHORT") {
-                let sym = if truthy(p.get("symbol")) { py_str(&p["symbol"]) } else { String::new() };
-                let t = (self.w.exec_asset_of(Some(&json!(sym))), side, sym);
-                if !targets.contains(&t) {
-                    targets.push(t);
-                }
-            }
-        }
-        if targets.is_empty() {
-            return bad(400, "no_position", "열린 포지션이 없습니다");
-        }
-        let (mut results, mut seen, mut tasks) = (vec![], vec![], vec![]);
-        for (asset, side, symbol) in targets {
-            let mut r = json!({"asset": asset, "side": side, "symbol": symbol, "ok": false});
-            let Some(asset) = asset else {
-                r["error"] = json!("unknown_symbol");
-                r["detail"] = json!(format!("{symbol} 은 대시보드 주문 코인이 아닙니다 — 거래소에서 직접 닫으세요"));
-                results.push(r);
-                continue;
-            };
-            if seen.contains(&(asset, side.clone())) {
-                r["error"] = json!("already_working");
-                r["detail"] = json!("같은 코인·방향의 다른 심볼 — 앞 청산이 끝난 뒤 다시 누르세요");
-                results.push(r);
-                continue;
-            }
-            seen.push((asset, side.clone()));
-            let Some(st) = self.w.exit_slot(asset) else {
-                r["error"] = json!("already_working");
-                r["detail"] = json!("이 코인 주문이 진행 중입니다 — 끝난 뒤 다시 누르세요");
-                results.push(r);
-                continue;
-            };
-            let plan = match self.assemble_exit_plan(qs, io, &side, 1.0, true, asset, ex == "market", true, None).await {
-                Err(e) => {
-                    for (k, v) in obj(&e.0) {
-                        r[k] = v;
-                    }
-                    results.push(r);
-                    continue;
-                }
-                Ok(p) => p,
-            };
-            if truthy(plan.get("blocked")) {
-                r["error"] = json!("blocked");
-                r["detail"] = plan["blocked"].clone();
-                results.push(r);
-                continue;
-            }
-            if self.w.exit_slot(asset) != Some(st.clone()) {
-                r["error"] = json!("already_working");
-                r["detail"] = json!("이 코인 주문이 막 시작됐습니다 — 끝난 뒤 다시 누르세요");
-                results.push(r);
-                continue;
-            }
-            let now = io.now();
-            let s = self.w.slot_mut(&st);
-            s.clear();
-            for (k, v) in [("phase", json!("submitting")), ("kind", json!("exit")), ("side", json!(side)), ("plan", plan.clone()), ("asset", json!(asset)), ("started_at", json!(iso_utc(now)))] {
-                s.insert(k.into(), v);
-            }
-            let key = if st == SlotId::Entry { "manual_entry".to_string() } else { format!("manual_exit_{asset}") };
-            self.running.insert(key.clone());
-            tasks.push(Task::Exit { key, slot: match &st { SlotId::Entry => SlotRef::Entry, SlotId::Side(a) => SlotRef::Side(a.clone()) }, plan: plan.clone(), rearm: false });
-            r["ok"] = json!(true);
-            r["quantity"] = plan.get("quantity").cloned().unwrap_or(Value::Null);
-            r["type"] = plan.get("type").cloned().unwrap_or(Value::Null);
-            r["symbol"] = plan.get("symbol").cloned().unwrap_or(Value::Null);
-            results.push(r);
-        }
-        let ok = results.iter().any(|r| r["ok"] == json!(true));
-        Resp { status: if ok { 200 } else { 409 }, body: json!({"ok": ok, "results": results}), task: tasks }
+        Resp { status: 200, body, task: vec![Task::Exit { key, slot: sref, plan, rearm: frac < 1.0 }] }
     }
 
     /// 2026-10-31 «지정가 선을 끌면 주문 수정»(W6). 🔴일부라도 체결된 뒤엔 거절 · 앞 수정이 반영 중이면 거절 · 조립 뒤 상태를 다시 본다.
@@ -519,7 +378,7 @@ impl Desk {
         let lev = { let x = fl(old.get("target_leverage")).trunc() as i64; (x != 0).then_some(x) };
         let skip = Watcher::wkey(&asset, wid);
         let a = EntryArgs { side: st.get("side").map(py_str).unwrap_or_default(), fraction: { let f = fl(old.get("fraction")); if f == 0.0 { 1.0 } else { f } },
-                            want_lev: lev, asset: asset.clone(), fresh: true, rule_l: None, lines: Some((tp, sl)), limit_usdt: Some(lim), stop: watching, skip_wait: Some(skip) };
+                            want_lev: lev, asset: asset.clone(), fresh: true, lines: Some((tp, sl)), limit_usdt: Some(lim), stop: watching, skip_wait: Some(skip) };
         let plan = match self.assemble_entry_plan(qs, io, &a).await {
             Err(e) => return err_resp(e),
             Ok((p, _)) => p,
@@ -668,8 +527,15 @@ impl Desk {
         if truthy(b.get("sl_off")) {
             return resp(200, json!({"ok": true, "sl_off": b["sl_off"], "already": true}));
         }
-        // 2026-11-21 사용자 결정 «−5% 비상 스탑(M10) Rust 에서 제거»: 지울 거래소 스탑이 없다 -- 원본의 clear_bracket(only_sl) 요청·취소 실패 502 는 없다(의도한 차이)
-        let r = json!({"cancelled": 0, "errors": []});
+        // 2026-11-21 원본 PR 61 과 같이: 새로 거는 스탑은 없지만 배포 전에 걸린 우리 스탑(dbsl)은 지운다 -- 취소 실패면 아무것도 안 바꾼다
+        let r = match io.clear_bracket(&symbol, &side, true, false).await {
+            Ok(r) => r,
+            Err(e) => return server_error(&e),
+        };
+        if let Some(errs) = r.get("errors").and_then(Value::as_array).filter(|e| !e.is_empty()) {
+            let msg: Vec<String> = errs.iter().map(py_str).collect();
+            return bad(502, "cancel_failed", &format!("거래소 손절 취소 실패 — 손절은 그대로입니다: {}", msg.join("; ")));
+        }
         let mut st = self.w.load();
         if !st.get(&key).is_some_and(|c| crate::watch::same_armed(c.get("armed_at"), b.get("armed_at"))) {
             return bad(409, "rearmed", "그 사이 새로 무장됐습니다 — 다시 확인하세요");
@@ -683,7 +549,7 @@ impl Desk {
         resp(200, json!({"ok": true, "sl_off": off}))
     }
 
-    /// «손절 다시 켜기»(B22). 선 무장 = 감시만 다시 · 규칙 무장 = 거래소 스탑 다시(못 걸면 아무것도 안 바꾼다 · 시장가형 스탑 = M10).
+    /// «손절 다시 켜기»(B22). 선 무장 = 감시만 다시 · 규칙 무장 = sl_off 만 지워 5분봉 종가 감시(원본 PR 61 -- 거래소 스탑 없음).
     pub async fn api_bracket_rearm<I: DeskIo>(&mut self, io: &mut I, q: &Query) -> Resp {
         if g(q, "confirm") != Some("1") {
             return bad(400, "confirm_required", "confirm=1 이 필요합니다");
@@ -725,12 +591,9 @@ impl Desk {
             }
             return resp(200, json!({"ok": true, "lines": true}));
         }
-        let price = if truthy(b.get("backstop_price")) { b["backstop_price"].clone() } else { b.get("sl_price").cloned().unwrap_or(Value::Null) };
-        if !truthy(Some(&price)) {
+        if !(truthy(b.get("sl_level")) || truthy(b.get("sl_price"))) {
             return bad(409, "no_price", "다시 걸 손절가가 기록에 없습니다");
         }
-        // 2026-11-21 사용자 결정 «−5% 비상 스탑(M10) Rust 에서 제거»: 거래소 스탑을 다시 걸지 않는다 -- 5분봉 종가 감시만 다시 켠다(의도한 차이 · 원본 place_stop 실패 502 는 없다)
-        let r = Value::Null;
         let mut st = self.w.load();
         if !st.get(&key).is_some_and(|c| crate::watch::same_armed(c.get("armed_at"), b.get("armed_at"))) {
             return bad(409, "rearmed", "그 사이 새로 무장됐습니다 — 다시 확인하세요");
@@ -740,8 +603,8 @@ impl Desk {
         if let Err(e) = self.w.save(&st) {
             return server_error(&e);
         }
-        self.w.log(format!("bracket {side}: 손절 다시 켬(사용자) 거래소 스탑 없음(M10 제거) · 5분봉 감시 켬 {}", py_str(&price)));
-        resp(200, json!({"ok": true, "backstop": r}))
+        self.w.log(format!("bracket {side}: 손절 다시 켬(사용자) 5분봉 감시 켬 · 거래소 스탑 없음"));
+        resp(200, json!({"ok": true, "backstop": null}))
     }
 
     /// 작업이 끝났다(원본 asyncio Task.done()) -- 대기 칸 재사용 규칙(G12)이 본다.

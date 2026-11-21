@@ -1,7 +1,7 @@
 //! 손절·익절 감시와 주문 상태 칸 -- `dashboard/orders.py` 의 `register(...)` 안 클로저를 그대로 옮긴 것(2026-11-20 셋째 조각):
 //! 무장 저장본(`bracket_load`·`bracket_save`) · 상태 칸(`manual_entry_state`·`side_exit_states`·`manual_wait_states`·`exit_slot`·`_busy`·`busy_or`) ·
 //! 감시 한 틱(`bracket_tick`) · 감시 루프(`watch_brackets`) · 부분 청산 뒤 익절 다시 걸기(`partial_exit_rearm_tp`·`tp_watch_only`·`set_tp_legs`·`set_sl_legs`) ·
-//! 무장 쓰기(`arm_bracket`·`arm_rule_add`·`plan_from_current`·`keep_rearm`·`exit_then_rearm`) · 재시작(`limit_save`·`limit_recover`·`wait_cleanup`) · `stop_touched`.
+//! 무장 쓰기(`arm_bracket`·`plan_from_current`·`keep_rearm`·`exit_then_rearm`) · 재시작(`limit_save`·`limit_recover`·`wait_cleanup`) · `stop_touched`.
 //! **어디에도 연결하지 않는다** -- 바깥(계좌·5분봉·1초 체결가·거래소 함수·청산 계획 조립·시계·잠금·스위치)은 `WatchIo` 뒤. 구현은 시험의 가짜뿐.
 //!
 //! 저장본·상태 칸은 파이썬 dict 를 그대로 `serde_json::Map`(순서 보존)으로 둔다 -- 같은 파일을 파이썬과 주고받고(그림자·전환), 정답지와 칸 단위로 대조한다.
@@ -9,7 +9,7 @@
 //! D7·D8·D9(규칙 문서 «어긋나 보이는 곳»)는 파이썬 동작 그대로 -- 시험(tests/watch_fixture.rs)이 그 동작을 고정한다.
 
 use crate::exec::{self, Exchange, ExecPlan, ExecState, Phase, Shared};
-use crate::plan::{self, bracket_action, bracket_key, bracket_merge, bracket_rekey, sl_legs_hit, Armed, Position, TickAction};
+use crate::plan::{bracket_action, bracket_key, bracket_merge, bracket_rekey, sl_legs_hit, Armed, Position, TickAction};
 use crate::pyfmt;
 use crate::sign::{py_repr, py_str, truthy};
 use serde_json::{json, Map, Value};
@@ -25,7 +25,6 @@ pub const RETRY_SEC: f64 = 30.0; // 정리 실패·조회 실패·청산 실패 
 pub const TP_CANCEL_RETRY_SEC: f64 = 10.0; // 선 발동 전 익절 지정가 취소 실패 -- 계좌 조회(무게 ~50)를 2초마다 반복하지 않게
 pub const LIMIT_REC_MAX_AGE: f64 = 6.0 * 3600.0; // 대기 최대 4시간 + 여유 -- 이보다 오래된 파일은 지금 포지션의 것이 아니다(검증 #3)
 pub const WAIT_SLOTS_MAX: i64 = 10; // ponytail(원본): 대기마다 집행 루프가 3초마다 주문 조회 -- 10개 ≈ 분당 200회. 더 필요하면 올린다
-pub const REC_AUTO_ADD: bool = true;
 const MARKET_SYMBOLS: [(&str, &str); 9] = [("eth", "ETHUSDT"), ("sol", "SOLUSDT"), ("btc", "BTCUSDT"), ("xrp", "XRPUSDT"), ("hype", "HYPEUSDT"),
     ("sndk", "SNDKUSDT"), ("soxl", "SOXLUSDT"), ("skhynix", "SKHYNIXUSDT"), ("mu", "MUUSDT")];
 /// 코인 → 주문 심볼(eth 는 환경 `DASHBOARD_MANUAL_EXEC_SYMBOL` -- `Watcher::eth_symbol`). 순서 = 원본 dict 순서(exec_asset_of 가 앞에서부터 찾는다).
@@ -55,7 +54,6 @@ pub trait WatchIo {
     async fn run_exit(&mut self, plan: &Value, slot: &mut Obj) -> Result<(), String>;
     async fn place_bracket(&mut self, spec: &Value, symbol: &str, pside: &str, strict: bool) -> Result<Value, String>;
     async fn place_tp_ladder(&mut self, legs: &Value, symbol: &str, pside: &str) -> Result<Value, String>;
-    async fn place_add_order(&mut self, symbol: &str, pside: &str, price: f64, qty: f64) -> Result<Value, String>;
     async fn cancel_wait_orphans(&mut self, symbols: &[String]) -> Result<Value, String>;
     /// 2026-11-21 cancel_exit_orders(symbol, pside) -- 앞선 청산 따라가기(dbpg+측면 · 닫는 쪽) 지우고 목록 다시 읽어 확인. {"cancelled","errors"}.
     async fn cancel_exit_orders(&mut self, symbol: &str, pside: &str) -> Result<Value, String>;
@@ -943,18 +941,14 @@ impl Watcher {
         Ok(())
     }
 
-    /// 무장 쓰기: TP·비상 스탑을 걸고(place_bracket) 저장본에 이 측면을 새로 적는다(B3·B4). 원본 칸 순서 그대로.
-    /// D7: strict 없이 건다(원본 그대로).
-    pub async fn arm_bracket<I: WatchIo>(&mut self, io: &mut I, plan: &Obj, state: &mut Obj, add: bool) -> Result<(), String> {
+    /// 무장 쓰기: 익절을 걸고(place_bracket) 저장본에 이 측면을 새로 적는다(B3·B4). 원본 칸 순서 그대로.
+    /// D7: strict 없이 건다(원본 그대로). 2026-11-21 자동 물타기(add·add_order·auto)는 원본 PR 61 처럼 지웠다.
+    pub async fn arm_bracket<I: WatchIo>(&mut self, io: &mut I, plan: &Obj, state: &mut Obj) -> Result<(), String> {
         let b = obj_or_empty(plan.get("bracket"));
         let pside = req_str(plan, "positionSide")?;
         if !t(&b, "available") {
             state.insert("bracket".into(), json!({"placed": false, "reason": py_or(vec![val(&b, "reason"), json!("청산맵 레벨 없음")])}));
             return Ok(());
-        }
-        let add = add && !t(&b, "lines"); // 2026-10-28 선 진입 = 물타기 지정가 없음(익절 수량이 포지션 전량이라 크기가 늘면 어긋난다)
-        if add && REC_AUTO_ADD && t(&obj_or_empty(plan.get("rule")), "first") {
-            state.insert("add_order".into(), json!({"placed": false, "pending": true})); // 화면 폴링이 물타기 지정가 결과까지 기다리게
         }
         let spec = if t(&b, "tp_off") { let mut m = b.clone(); m.insert("tp_price".into(), Value::Null); m } else { b.clone() }; // 익절 지운 선에 추가 진입 = 익절 지정가 안 건다
         let placed = match req_str(plan, "symbol") {
@@ -962,7 +956,6 @@ impl Watcher {
             Ok(s) => io.place_bracket(&Value::Object(spec), &s, &pside, false).await,
         };
         state.insert("bracket".into(), placed.unwrap_or_else(|e| json!({"placed": false, "reason": e}))); // 결과 칸은 반드시 채운다(화면 폴링이 이걸 기다린다)
-        let add_v = if add { self.arm_rule_add(io, plan, state).await } else { Value::Null };
         let symbol = req_str(plan, "symbol")?;
         let mut st = self.load();
         let sb = state.get("bracket").cloned().unwrap_or(Value::Null);
@@ -972,10 +965,9 @@ impl Watcher {
                        ("sl_level", val(&b, "sl_level")), // 5분봉 종가 판정은 USDT 레벨로(bracket_sl_hit)
                        ("tp_price", val(&b, "tp_price")), ("backstop_price", val(&b, "backstop_price")),
                        ("rule", json!(t(&b, "rule"))), ("sl_name", val(&b, "sl_name")), // 2026-10-09 권고 규칙 손절 = 물타기해도 유지
-                       ("auto", json!(t(plan, "rule"))), // 2026-10-24 «자동 규칙 크기로 연 포지션»은 따로 -- 계좌 3배 공유 상한(rule_shared)이 이것만 본다
                        ("lines", json!(t(&b, "lines"))), ("tp_level", val(&b, "tp_level")), ("sl_up", val(&b, "sl_up")),
                        ("tp_resting", json!(tp_resting)), // 익절 지정가가 못 걸렸으면 닿을 때 서버가 peg 로
-                       ("armed_at", f(io.now())), ("placed", sb), ("add_order", add_v)] {
+                       ("armed_at", f(io.now())), ("placed", sb)] {
             rec.insert(k.into(), v);
         }
         for k in ["tp_off", "sl_off"] {
@@ -985,42 +977,6 @@ impl Watcher {
         }
         st.insert(bracket_key(&symbol, &pside), Value::Object(rec));
         self.save(&st)
-    }
-
-    /// 2026-10-14 사용자 «−0.75% 물타기 지정가도 자동으로»: 자동 규칙 **첫 진입**이 체결되면(손절을 건 바로 뒤) 남은 여유를 지정가로(§9 M12 GTC -- 요청 모양만 옮김).
-    async fn arm_rule_add<I: WatchIo>(&mut self, io: &mut I, plan: &Obj, state: &mut Obj) -> Value {
-        let r = obj_or_empty(plan.get("rule"));
-        let filled = float_or0(state, "filled");
-        if !(REC_AUTO_ADD && t(&r, "first") && filled > 0.0 && t(&obj_or_empty(plan.get("bracket")), "sl_price")) {
-            return Value::Null;
-        }
-        if !truthy(obj_or_empty(obj_or_empty(state.get("bracket")).get("backstop")).get("placed")) {
-            // 🔴손절 스탑이 안 걸렸으면 크기를 늘리지 않는다 -- 무방비 포지션을 키우는 게 가장 비싼 실패다(B6)
-            let v = json!({"placed": false, "reason": "손절 스탑이 안 걸려 물타기 지정가를 걸지 않았습니다"});
-            state.insert("add_order".into(), v.clone());
-            return v;
-        }
-        let res: Result<Value, String> = async {
-            // 원본 인자 계산 순서 그대로(어느 칸이 없을 때 어느 KeyError 인지까지)
-            let pside = req_str(plan, "positionSide")?;
-            let sl = req_float(&obj_or_empty(plan.get("bracket")), "sl_price")?;
-            let (stop, l, cap, room, lev) = (req_float(&r, "stop_pct")? / 100.0, req_float(&r, "l")?, req_float(&r, "cap_notional")?, req_float(&r, "room")?, float_or0(&r, "lev"));
-            let spec = if !(sl > 0.0 && 0.0 < stop && stop < 1.0 && l > 0.0 && cap > 0.0 && filled > 0.0) {
-                None // 원본은 이 검사 뒤에야 filters 를 읽는다
-            } else {
-                let fl = r.get("filters").filter(|v| truthy(Some(v))).cloned().unwrap_or(json!({"tick": 0.01, "step": 0.001}));
-                let fo = fl.as_object().cloned().unwrap_or_default();
-                let filters = plan::Filters { tick: req_float(&fo, "tick")?, step: req_float(&fo, "step")?, min_qty: float_or0(&fo, "min_qty"), min_notional: float_or0(&fo, "min_notional") };
-                plan::rec_rule_add_order(&pside, sl, stop, l, cap, room, filled, lev, &filters).map_err(|e| format!("{}: {}", e.py_type(), e.py_msg()))?
-            };
-            match spec {
-                None => Ok(json!({"placed": false, "reason": "남은 여유가 없거나 최소 주문보다 작습니다"})),
-                Some(s) => io.place_add_order(&req_str(plan, "symbol")?, &pside, s.price, s.qty).await,
-            }
-        }.await;
-        let v = res.unwrap_or_else(|e| json!({"placed": false, "reason": e})); // 진입·손절은 이미 됐다, 결과 칸만 채운다
-        state.insert("add_order".into(), v.clone());
-        v
     }
 
     /// 2026-11-13 검증: 선 주문 진입·추가가 체결된 뒤 TP 를 다시 걸 때 **지금 저장된 선**을 쓴다(W11). None = 다시 걸지 않는다(청산 진행 중 · 분할 조각).
@@ -1051,7 +1007,7 @@ impl Watcher {
         let cur = obj_or_empty(self.load().get(&key));
         if cur.is_empty() {
             // 검증 11-14(high): 대기 중 포지션이 닫혀 무장이 지워진 뒤 체결 = 새 포지션 -- 계획에 복사한 선으로 다시 무장
-            return self.arm_bracket(io, plan, state, false).await;
+            return self.arm_bracket(io, plan, state).await;
         }
         if cur.get("sl_legs").and_then(Value::as_array).is_some_and(|a| a.iter().any(|g| truthy(g.get("fired")))) {
             // 검증 11-14: 손절 조각 청산 중 -- 그 청산 뒤 다시 걸기와 겹쳐 익절이 두 벌 걸리지 않게 이쪽은 건너뛴다
@@ -1119,7 +1075,7 @@ impl Watcher {
                 && py_eq(p.get("side"), Some(&pside)) && (if truthy(p.get("qty")) { py_float(&p["qty"]).unwrap_or(0.0) } else { 0.0 }).abs() > 0.0));
             if has && !self.load().contains_key(&bracket_key(&py_str(&sym), &py_str(&pside))) {
                 let mut st = Obj::new();
-                self.arm_bracket(io, &plan, &mut st, false).await?;
+                self.arm_bracket(io, &plan, &mut st).await?;
                 let br = obj_or_empty(st.get("bracket"));
                 let ok = t(&br, "placed"); // arm_bracket 은 예외를 삼킨다 -- 실제로 걸렸는지 본다(검증 #3)
                 out.insert("armed".into(), json!(ok));

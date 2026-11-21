@@ -69,9 +69,6 @@ mod tests {
         async fn fees(&mut self, _: &str) -> Value {
             unreachable!()
         }
-        async fn margin_type(&mut self, _: &str) -> Option<String> {
-            unreachable!()
-        }
     }
 
     #[tokio::test]

@@ -94,9 +94,10 @@ M5022 = err(400, -5022, "Due to the order could not be executed as maker, the Po
 class Sim:
     """규칙으로 움직이는 모의 거래소(헤지 모드 한 심볼). fill(o) = 주문 조회 때 체결로 바꿀지 · del_fail(o) = 취소를 실패로 답할지."""
 
-    def __init__(self, fill=lambda o: False, del_fail=lambda o: False, tp_reject=False, lev="5"):
+    def __init__(self, fill=lambda o: False, del_fail=lambda o: False, tp_reject=False, lev="5", orders=(), algos=()):
         self.fill, self.del_fail, self.tp_reject, self.lev = fill, del_fail, tp_reject, lev
-        self.orders: dict[int, dict] = {}
+        self.orders: dict[int, dict] = {o["orderId"]: dict(o) for o in orders}   # 배포 전에 걸린 주문(dbad 물타기 등)
+        self.algos = [dict(a) for a in algos]   # 배포 전에 걸린 우리 스탑(dbsl · Algo)
         self.next = 100
         self.pos = {"LONG": 0.0, "SHORT": 0.0}
 
@@ -123,8 +124,14 @@ class Sim:
             return ok({"symbol": SYM, "leverage": int(q["leverage"]), "maxNotionalValue": "1000000"})
         if path == "/fapi/v1/openOrders":
             return ok([self.view(o) for o in self.orders.values() if o["status"] == "NEW"])
-        if path == "/fapi/v1/openAlgoOrders":   # 원본만 부른다(−5% 비상 스탑 M10 -- Rust 는 제거) · 대조 때 뺀다
-            return ok([])
+        if path == "/fapi/v1/openAlgoOrders":   # 배포 전 우리 스탑(dbsl) 정리 목록 -- 원본·Rust 둘 다 읽는다(2026-11-21 PR 61)
+            return ok(list(self.algos))
+        if path == "/fapi/v1/algoOrder" and method == "DELETE":
+            a = next((x for x in self.algos if str(x["algoId"]) == q.get("algoId")), None)
+            if a is None:
+                return err(400, -2011, "Unknown order sent.")
+            self.algos.remove(a)
+            return ok({"algoId": a["algoId"], "code": "200", "msg": "success"})
         if path == "/fapi/v1/order" and method == "POST":
             self.next += 1
             o = {"orderId": self.next, "clientOrderId": q.get("newClientOrderId") or f"x{self.next}", "symbol": q["symbol"], "side": q["side"],
@@ -276,6 +283,9 @@ def snap(x):
     return json.loads(json.dumps(x, ensure_ascii=False, default=str))
 
 
+RULE_ARM = {"symbol": SYM, "side": "LONG", "sl_price": 2375.1, "sl_level": 2374.5, "tp_price": None, "backstop_price": 2375.1, "rule": True, "auto": True,
+            "sl_name": "첫 진입가 −5%", "lines": False, "tp_level": None, "sl_up": None, "tp_resting": False, "armed_at": T0 - 600.0,
+            "placed": {"placed": True, "backstop": {"placed": True}}, "add_order": None}
 LINES = {"available": True, "lines": True, "rule": False, "tp_price": 2600.0, "tp_level": 2600.0, "sl_price": 2400.0, "sl_level": 2400.0,
          "sl_name": "선 손절 2400.00", "sl_up": None, "backstop_price": None}
 ENTRY = {"symbol": SYM, "side": "BUY", "positionSide": "LONG", "type": "LIMIT", "timeInForce": "GTX", "price": 2500.0, "quantity": 0.4,
@@ -308,6 +318,16 @@ SCN = [
     # 4. 실패 주입: 따라가기 120초 안 참 → 잔량 시장가(M1) → filled_taker → 무장
     {"name": "따라가기 미체결 → 시장가(M1) → 무장", "sim": lambda: Sim(),
      "steps": [{"op": "entry", "plan": ENTRY}]},
+    # 6. 배포 전 옛 규칙 무장(−5% 스탑 dbsl · 자동 물타기 dbad 가 거래소에 남음) → 포지션 닫힘 → 둘 다 지우고 무장 해제(PR 61 이 남긴 정리 경로)
+    {"name": "옛 규칙 무장 닫힘 → dbad·dbsl 정리 → 무장 해제", "file0": {"ETHUSDC:LONG": RULE_ARM},
+     "sim": lambda: Sim(orders=[{"orderId": 50, "clientOrderId": "dbadL1799990000000", "symbol": SYM, "side": "BUY", "positionSide": "LONG", "type": "LIMIT",
+                                 "price": "2481.25", "origQty": "0.5", "executedQty": "0", "status": "NEW"}],
+                        algos=[{"algoId": 11, "clientAlgoId": "dbslL1799990000000", "symbol": SYM}, {"algoId": 12, "clientAlgoId": "dbslL1799990000001", "symbol": "ETHUSDT"},
+                               {"algoId": 13, "clientAlgoId": "dbslS1799990000000", "symbol": SYM}]),
+     "steps": [{"op": "tick", "dt": 5.0, "sec": lambda: []}]},
+    # 7. 감시 진입(선 위에서 닿으면 따라가기 · maker_only) → 체결 → 무장
+    {"name": "감시 진입 닿음 → 따라가기 체결 → 무장", "sim": lambda: Sim(fill=lambda o: peg_in(o) and o["gets"] >= 1),
+     "steps": [{"op": "entry", "plan": {**ENTRY, "price": 2510.0, "limit": {"usdt": 2510.0}, "stop": True, "wid": 1}, "limit": True, "sec": lambda: [[now() + 0.5, 2511.0]]}]},
     # 5. P23 지정가 자동 재조정(20초 각본): basis 가 바뀌면 취소 확인 → 새 가격 → 체결 → 첫 체결 무장 → 끝 무장 → 복구 파일 지움
     {"name": "지정가 대기 자동 재조정(P23) → 체결 → 무장", "books": [(0.0, BOOK0), (15.0, BOOK1)],
      "sim": lambda: Sim(fill=lambda o: o["clientOrderId"].startswith("dbwt") and o["price"] != "2489.0" and o["gets"] >= 2),
@@ -325,7 +345,7 @@ async def run(sc):
     out = []
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2.0)) as session:
         with mock.patch.multiple(orders, LIVE_DIR=tmp, exec_enabled=lambda: True, nap=boom, datetime=FakeDT, time=fake_time, load_filters=f_filters,
-                                 fetch_account=boom, place_stop=boom, commission_bp=boom, margin_type=boom):
+                                 fetch_account=boom, commission_bp=boom):
             api = orders.register(account_trip_state={"seen": {}}, refresh_tasks={}, swr_locks={}, binance_session=lambda: session,
                                   fetch_binance_json=f_fetch, swr_cached=f_swr, _timed_produce=boom, load_market_history=f_hist,
                                   situation_by={}, NOCACHE={}, STALE_GRACE_SECONDS=60, sec_prices=f_sec)
@@ -337,6 +357,8 @@ async def run(sc):
             etb = cells["entry_then_bracket"].cell_contents
             entry_state.clear()
             entry_state.update(phase="submitting")
+            if sc.get("file0"):
+                (tmp / "manual_bracket_state.json").write_text(json.dumps(sc["file0"], ensure_ascii=False), "utf-8")
             for stp in sc["steps"]:
                 Clock.t += stp.get("dt", 0.0)
                 Ctl.sec = stp["sec"]() if "sec" in stp else []
@@ -346,7 +368,7 @@ async def run(sc):
                 with contextlib.redirect_stdout(buf):
                     try:
                         if stp["op"] == "entry":
-                            await etb(json.loads(json.dumps(stp["plan"])), entry_state, None, bool(stp.get("limit")))
+                            await etb(json.loads(json.dumps(stp["plan"])), entry_state, bool(stp.get("limit")))
                         else:
                             await api.bracket_tick()
                     except Exception as exc:  # noqa: BLE001
@@ -366,7 +388,7 @@ async def main():
     res = []
     for sc in SCN:
         steps = await run(sc)
-        res.append({"name": sc["name"], "books": [[t, b] for t, b in (sc.get("books") or [(0.0, BOOK0)])], "steps": steps})
+        res.append({"name": sc["name"], "file0": sc.get("file0"), "books": [[t, b] for t, b in (sc.get("books") or [(0.0, BOOK0)])], "steps": steps})
         print(sc["name"], [(s["op"], len(s["requests"]), s["entry"].get("phase"), sorted((s["file"] or {}).keys())) for s in steps], flush=True)
     assert not REAL_BAN.exists() or REAL_BAN.stat().st_mtime < __import__("time").time() - 5, "진짜 밴 파일을 건드렸다"
     dst = ROOT / "rtorder" / "tests" / "fixtures" / "flow_fixture.json"
