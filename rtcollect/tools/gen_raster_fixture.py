@@ -35,11 +35,15 @@ SYM = "ethusdt"
 
 
 class Feed:
-    def __init__(self, rng, t0):
+    def __init__(self, rng, t0, mid=2500.0, tick=0.01):
         self.rng, self.t, self.ev, self.snaps = rng, t0, [], []
-        self.mid, self.u = 2500.0, 5_000_000
+        self.mid, self.u, self.tick, self.nd = mid, 5_000_000, tick, round(-math.log10(tick))
+        self.scale = mid / 2500     # 드리프트 크기를 가격에 맞춘다(ETH = 1.0 -- 기존 정답지 그대로)
         self.bid_px: set[str] = set()
         self.ask_px: set[str] = set()
+
+    def px(self, x):
+        return f"{x:.{self.nd}f}"
 
     def add(self, dt, kind, body=""):
         self.t = round(self.t + dt, 6)
@@ -49,8 +53,8 @@ class Feed:
         if fail:
             self.snaps.append(None)
             return
-        bids = [[f"{self.mid - 0.01 * (k + 1):.2f}", f"{self.rng.uniform(0.001, 40):.3f}"] for k in range(width)]
-        asks = [[f"{self.mid + 0.01 * k:.2f}", f"{self.rng.uniform(0.001, 40):.3f}"] for k in range(width)]
+        bids = [[self.px(self.mid - self.tick * (k + 1)), f"{self.rng.uniform(0.001, 40):.3f}"] for k in range(width)]
+        asks = [[self.px(self.mid + self.tick * k), f"{self.rng.uniform(0.001, 40):.3f}"] for k in range(width)]
         bids.append([bids[3][0], "0.000"])                       # 0 은 거른다
         bids.append([bids[5][0], "7.777"])                       # 같은 가격 두 번 = 뒤 값(자리는 처음)
         self.bid_px |= {p for p, q in bids if q != "0.000"}
@@ -65,12 +69,12 @@ class Feed:
         self.last_U = u0
         b, a = [], []
         for _ in range(n):
-            off = self.rng.randint(1, 900 if far else 120) * 0.01
+            off = self.rng.randint(1, 900 if far else 120) * self.tick
             q = "0" if self.rng.random() < 0.25 else f"{self.rng.lognormvariate(0, 1.5):.3f}"
             if self.rng.random() < 0.5:
-                b.append([f"{self.mid - off:.2f}", q])
+                b.append([self.px(self.mid - off), q])
             else:
-                a.append([f"{self.mid + off - 0.01:.2f}", q])
+                a.append([self.px(self.mid + off - self.tick), q])
         a += [list(x) for x in extra_a]
         # 교차를 막는다: 지금 mid 쪽으로 넘어온 옛 레벨은 지운다(실제 거래소도 그렇다) -- 안 그러면 북이 교차해 모든 행이 무효
         b += [[p, "0"] for p in sorted(self.bid_px) if float(p) >= self.mid]
@@ -84,14 +88,14 @@ class Feed:
 
     def walk(self, secs, step=0.5, drift=0.0, **kw):
         for _ in range(int(secs / step)):
-            self.mid = round(self.mid + drift + self.rng.gauss(0, 0.02), 2)
+            self.mid = round(self.mid + drift * self.scale + self.rng.gauss(0, 2 * self.tick), self.nd)
             self.depth(step, **kw)
 
 
-def gen(rng) -> dict:
+def gen(rng, sym=SYM, mid=2500.0, tick=0.01, bin_size=None) -> dict:
     """스냅숏 lastUpdateId = 그 스냅숏을 부른 이벤트 «다음» 이벤트의 U(= 동기 첫 이벤트가 U <= L <= u) -- 스냅숏을 부른 이벤트 자체는 버려진다."""
     runs = []
-    f = Feed(rng, W0)
+    f = Feed(rng, W0, mid, tick)
     f.add(0.3, "o")
 
     def sync(dt=0.2):
@@ -102,7 +106,7 @@ def gen(rng) -> dict:
     f.walk(25)
     f.walk(15, far=True)                          # 먼 레벨(±9달러 -- 가지치기 ±4% 안)
     # 양성 대조용: +3.5% 매도 레벨(가지치기 ±4% 안 · ±3% 밖) -- 뒤의 +2% 드리프트 뒤 래스터 폭(±2.4%) 안으로 들어와 보인다
-    f.depth(0.2, extra_a=[[f"{f.mid * 1.035:.2f}", "55.555"]])
+    f.depth(0.2, extra_a=[[f.px(f.mid * 1.035), "55.555"]])
     f.ev.append([round(f.t + 0.1, 6), "t", '{"e":"depthUpdate","U":1'])   # 깨진 JSON → 재접속
     f.t = round(f.t + 0.1, 6)
     f.add(3.0, "o")
@@ -130,7 +134,7 @@ def gen(rng) -> dict:
     f.add(0.3, "c", "ConnectionClosedError: x")
     runs.append({"t0": W0, "events": f.ev, "snaps": f.snaps})
     # 재시작(같은 시 파일 -- 사이 초는 무효행으로 메운다)
-    g = Feed(rng, f.t + 20.0)
+    g = Feed(rng, f.t + 20.0, mid, tick)
     g.mid, g.u = f.mid, f.u + 500
     g.add(0.4, "o")
     g.depth(0.2)
@@ -138,11 +142,18 @@ def gen(rng) -> dict:
     g.walk(40)
     g.add(0.3, "c", "x")
     runs.append({"t0": g.ev[0][0] - 0.4, "events": g.ev, "snaps": g.snaps})
-    return {"symbol": SYM, "runs": runs}
+    out = {"symbol": sym, "runs": runs}
+    if bin_size is not None:
+        out["bin_size"] = bin_size        # 원본은 OF_BIN_SIZE 로 받는다(python_reference 가 환경변수로 넣고 모듈을 다시 읽는다)
+    return out
 
 
 def python_reference(inp, d: Path) -> None:
+    import importlib
     m = __import__("scripts.live_orderflow_raster_collector_20260914", fromlist=["x"])
+    os.environ["OF_BIN_SIZE"] = repr(inp.get("bin_size", 0.5))   # 서버 crontab 과 같은 길(환경변수 → 모듈 상수 · 기본 인자)
+    m = importlib.reload(m)
+    assert m.BIN_SIZE == inp.get("bin_size", 0.5), m.BIN_SIZE
     import logging
     logging.disable(logging.CRITICAL)
     clock = [0.0]
@@ -221,13 +232,14 @@ def python_reference(inp, d: Path) -> None:
         c._writer.close()
 
 
-def dump(d: Path) -> dict:
+def dump(d: Path, sym=SYM) -> dict:
     """파일마다 크기 · crc32(zlib -- Rust 시험이 같은 식을 직접 돈다) · 헤더 · 쓴 행(메움행 ts 0 제외)의 [행 번호, crc32]."""
     import zlib
     out = {}
-    for p in sorted((d / SYM.upper()).glob("*.f32")):
+    for p in sorted((d / sym.upper()).glob("*.f32")):
         b = p.read_bytes()
-        rows = [[k, zlib.crc32(b[32 + k * 976:32 + (k + 1) * 976])] for k in range((len(b) - 32) // 976) if b[32 + k * 976:32 + k * 976 + 8] != b"\0" * 8]
+        R = 16 + 4 * int.from_bytes(b[6:8], "little")      # 행 길이 = 헤더의 n_bins
+        rows = [[k, zlib.crc32(b[32 + k * R:32 + (k + 1) * R])] for k in range((len(b) - 32) // R) if b[32 + k * R:32 + k * R + 8] != b"\0" * 8]
         out[p.name] = {"size": len(b), "crc32": zlib.crc32(b), "sha256": hashlib.sha256(b).hexdigest(), "header": b[:32].hex(), "rows": rows}
     return out
 
@@ -279,14 +291,16 @@ def main() -> None:
             assert dump(td / "py") == dump(td / "rs")
         print("check-readers OK")
         return
-    inp = gen(random.Random(SEED))
-    with tempfile.TemporaryDirectory() as td:
-        python_reference(inp, Path(td))
-        golden = dump(Path(td))
-    (FIX / "raster_input.json").write_text(json.dumps({"seed": SEED, "input": inp}, separators=(",", ":"), ensure_ascii=False))
-    (FIX / "raster_golden.json").write_text(json.dumps(golden, separators=(",", ":")))
-    print("raster: " + " · ".join(f"{n} {g['size']:,}B 유효·무효 행 {len(g['rows'])}" for n, g in golden.items())
-          + f" · {(FIX / 'raster_input.json').stat().st_size // 1024}+{(FIX / 'raster_golden.json').stat().st_size // 1024}KB")
+    # 기본(ETH 0.5) · 작은 칸(XRP 0.0002 -- 0.0001 틱 가격의 약 28% 가 floor(p / bin) 과 p // bin 이 갈린다 · 헤더 f32 0.0002)
+    for tag, kw in (("raster", {}), ("raster_xrp", {"sym": "xrpusdt", "mid": 2.0, "tick": 0.0001, "bin_size": 0.0002})):
+        inp = gen(random.Random(SEED), **kw)
+        with tempfile.TemporaryDirectory() as td:
+            python_reference(inp, Path(td))
+            golden = dump(Path(td), inp["symbol"])
+        (FIX / f"{tag}_input.json").write_text(json.dumps({"seed": SEED, "input": inp}, separators=(",", ":"), ensure_ascii=False))
+        (FIX / f"{tag}_golden.json").write_text(json.dumps(golden, separators=(",", ":")))
+        print(f"{tag}: " + " · ".join(f"{n} {g['size']:,}B 유효·무효 행 {len(g['rows'])}" for n, g in golden.items())
+              + f" · {(FIX / f'{tag}_input.json').stat().st_size // 1024}+{(FIX / f'{tag}_golden.json').stat().st_size // 1024}KB")
 
 
 if __name__ == "__main__":
