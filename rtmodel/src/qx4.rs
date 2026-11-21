@@ -170,37 +170,9 @@ pub(crate) fn roll_sum(x: &[f64], w: usize, minp: usize) -> Vec<f64> {
 /// 한 코인 5분 격자(h·l·c·v·n) → 피쳐(배포 22 + HAR + hod·wkend). ts = 봉 시작 ms.
 fn features(ts: &[i64], h: &[f64], l: &[f64], c: &[f64], v: &[f64], nt: &[f64]) -> HashMap<&'static str, Vec<f64>> {
     let n = c.len();
-    let mut f: HashMap<&'static str, Vec<f64>> = HashMap::new();
-    let mx = |a: f64, b: f64| if a.is_nan() || b.is_nan() { NAN } else { a.max(b) }; // np.maximum
-    // ── live_eth_sizing_vol_model.build_features
-    let lcm: Vec<f64> = c.iter().map(|x| mx(*x, 1e-12).ln()).collect();
-    let lr: Vec<f64> = (0..n).map(|i| if i == 0 { lcm[0] - 0.0 } else { lcm[i] - lcm[i - 1] }).collect(); // np.diff(prepend=0.0)
-    let tr: Vec<f64> = (0..n).map(|i| if i == 0 { (c[0] - c[0]).abs() } else { (c[i] - c[i - 1]).abs() }).collect();
-    let m288 = crate::dir4h::roll_mean_pub(&tr, 288, 72);
-    f.insert("atr288", (0..n).map(|i| mx(m288[i] / mx(c[i], 1e-9), 1e-12).ln()).collect());
-    for (w, nm) in [(12usize, "rv12"), (48, "rv48"), (288, "rv288")] {
-        let sd = roll_std(&lr.iter().map(|x| if x.is_infinite() { NAN } else { *x }).collect::<Vec<_>>(), w, 8.max(w / 4));
-        f.insert(nm, sd.iter().map(|s| mx(*s, 1e-12).ln()).collect());
-    }
-    f.insert("volexp", (0..n).map(|i| f["rv12"][i].exp() / mx(f["rv288"][i].exp(), 1e-12)).collect());
-    let hour: Vec<f64> = ts.iter().map(|t| { let s = t.rem_euclid(86_400_000) / 1000; (s / 3600) as f64 + (s / 60 % 60) as f64 / 60.0 }).collect();
-    let tau = 2.0 * std::f64::consts::PI;
-    f.insert("hour_sin", hour.iter().map(|h| (tau * h / 24.0).sin()).collect());
-    f.insert("hour_cos", hour.iter().map(|h| (tau * h / 24.0).cos()).collect());
-    f.insert("dow", ts.iter().map(|t| (t.div_euclid(86_400_000) + 3).rem_euclid(7) as f64).collect());
     let qv: Vec<f64> = (0..n).map(|i| v[i] * c[i]).collect();
-    for (arr, nm) in [(&qv, "qv_z"), (&nt.to_vec(), "nt_z")] {
-        let (m, s) = (crate::dir4h::roll_mean_pub(arr, 288, 288), roll_std(&arr.iter().map(|x| if x.is_infinite() { NAN } else { *x }).collect::<Vec<_>>(), 288, 288));
-        f.insert(nm, (0..n).map(|i| (arr[i] - m[i]) / s[i]).collect());
-    }
-    for (w, nms) in [(12usize, ["ret12", "pos_in_range12", "dist_lo12", "dist_hi12"]), (48, ["ret48", "pos_in_range48", "dist_lo48", "dist_hi48"]),
-                     (144, ["ret144", "pos_in_range144", "dist_lo144", "dist_hi144"])] {
-        let (rmin, rmax) = (roll_ext(l, w, w, false), roll_ext(h, w, w, true));
-        f.insert(nms[0], (0..n).map(|i| if i >= w { c[i] / c[i - w] - 1.0 } else { NAN }).collect());
-        f.insert(nms[1], (0..n).map(|i| (c[i] - rmin[i]) / mx(rmax[i] - rmin[i], 1e-9)).collect());
-        f.insert(nms[2], (0..n).map(|i| (c[i] - rmin[i]) / mx(c[i], 1e-9)).collect());
-        f.insert(nms[3], (0..n).map(|i| (rmax[i] - c[i]) / mx(c[i], 1e-9)).collect());
-    }
+    let mut f = svm_features(ts, h, l, c, &qv, nt);
+    let mx = |a: f64, b: f64| if a.is_nan() || b.is_nan() { NAN } else { a.max(b) }; // np.maximum
     // ── 연구 features: HAR 원 피쳐
     let lc: Vec<f64> = c.iter().map(|x| x.ln()).collect();
     let r: Vec<f64> = (0..n).map(|i| if i == 0 { lc[0] - lc[0] } else { lc[i] - lc[i - 1] }).collect(); // prepend=log(c0)
@@ -229,6 +201,41 @@ fn features(ts: &[i64], h: &[f64], l: &[f64], c: &[f64], v: &[f64], nt: &[f64]) 
     }
     f.insert("hod", ts.iter().map(|t| ((t + BAR).rem_euclid(86_400_000) / 3_600_000) as f64).collect());
     f.insert("wkend", ts.iter().map(|t| (((t + BAR).div_euclid(86_400_000) + 3).rem_euclid(7) >= 5) as u8 as f64).collect());
+    f
+}
+
+/// live_eth_sizing_vol_model_20260912.build_features(ts, close, quote_vol, trades, high, low) -- 배포 22열(4h 변동성 HGB · QX4 가 같이 쓴다).
+pub(crate) fn svm_features(ts: &[i64], h: &[f64], l: &[f64], c: &[f64], qv: &[f64], nt: &[f64]) -> HashMap<&'static str, Vec<f64>> {
+    let n = c.len();
+    let mut f: HashMap<&'static str, Vec<f64>> = HashMap::new();
+    let mx = |a: f64, b: f64| if a.is_nan() || b.is_nan() { NAN } else { a.max(b) }; // np.maximum
+    let lcm: Vec<f64> = c.iter().map(|x| mx(*x, 1e-12).ln()).collect();
+    let lr: Vec<f64> = (0..n).map(|i| if i == 0 { lcm[0] - 0.0 } else { lcm[i] - lcm[i - 1] }).collect(); // np.diff(prepend=0.0)
+    let tr: Vec<f64> = (0..n).map(|i| if i == 0 { (c[0] - c[0]).abs() } else { (c[i] - c[i - 1]).abs() }).collect();
+    let m288 = crate::dir4h::roll_mean_pub(&tr, 288, 72);
+    f.insert("atr288", (0..n).map(|i| mx(m288[i] / mx(c[i], 1e-9), 1e-12).ln()).collect());
+    for (w, nm) in [(12usize, "rv12"), (48, "rv48"), (288, "rv288")] {
+        let sd = roll_std(&lr.iter().map(|x| if x.is_infinite() { NAN } else { *x }).collect::<Vec<_>>(), w, 8.max(w / 4));
+        f.insert(nm, sd.iter().map(|s| mx(*s, 1e-12).ln()).collect());
+    }
+    f.insert("volexp", (0..n).map(|i| f["rv12"][i].exp() / mx(f["rv288"][i].exp(), 1e-12)).collect());
+    let hour: Vec<f64> = ts.iter().map(|t| { let s = t.rem_euclid(86_400_000) / 1000; (s / 3600) as f64 + (s / 60 % 60) as f64 / 60.0 }).collect();
+    let tau = 2.0 * std::f64::consts::PI;
+    f.insert("hour_sin", hour.iter().map(|h| (tau * h / 24.0).sin()).collect());
+    f.insert("hour_cos", hour.iter().map(|h| (tau * h / 24.0).cos()).collect());
+    f.insert("dow", ts.iter().map(|t| (t.div_euclid(86_400_000) + 3).rem_euclid(7) as f64).collect());
+    for (arr, nm) in [(&qv.to_vec(), "qv_z"), (&nt.to_vec(), "nt_z")] {
+        let (m, s) = (crate::dir4h::roll_mean_pub(arr, 288, 288), roll_std(&arr.iter().map(|x| if x.is_infinite() { NAN } else { *x }).collect::<Vec<_>>(), 288, 288));
+        f.insert(nm, (0..n).map(|i| (arr[i] - m[i]) / s[i]).collect());
+    }
+    for (w, nms) in [(12usize, ["ret12", "pos_in_range12", "dist_lo12", "dist_hi12"]), (48, ["ret48", "pos_in_range48", "dist_lo48", "dist_hi48"]),
+                     (144, ["ret144", "pos_in_range144", "dist_lo144", "dist_hi144"])] {
+        let (rmin, rmax) = (roll_ext(l, w, w, false), roll_ext(h, w, w, true));
+        f.insert(nms[0], (0..n).map(|i| if i >= w { c[i] / c[i - w] - 1.0 } else { NAN }).collect());
+        f.insert(nms[1], (0..n).map(|i| (c[i] - rmin[i]) / mx(rmax[i] - rmin[i], 1e-9)).collect());
+        f.insert(nms[2], (0..n).map(|i| (c[i] - rmin[i]) / mx(c[i], 1e-9)).collect());
+        f.insert(nms[3], (0..n).map(|i| (rmax[i] - c[i]) / mx(c[i], 1e-9)).collect());
+    }
     f
 }
 

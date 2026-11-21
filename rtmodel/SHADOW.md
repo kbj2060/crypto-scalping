@@ -102,10 +102,42 @@ python rtmodel/tools/shadow_sr_lean.py data/live/sr_lean data/live/rt_sr_lean --
 | rt_dirpred 상대 강도(xsec) | 5분마다 9회(limit 61 · 가중치 1) | ×2 | 같음 | 둘 다 |
 | rt_radar | 분마다 코인 수만큼 1회(limit 99 · 가중치 1) + Deribit DVOL 시간에 1회 | ×2 | 코인마다 1분봉 45쪽(쪽 사이 0.5초) | 바이낸스만 |
 | rt_regime | 시간마다 8회(코인마다 limit 1500 두 쪽 · 가중치 10) = 시간당 80 | ×2(시간당 160) | 같음 | 둘 다 |
+| rt_dirfwd | 00·08·16시 6회(1일봉 93 · 5분봉 320 · 가중치 2) | ×2 | 같음 | Rust 만(원본은 urllib) |
 | rtduck(`RTDUCK_REST=1`) | 분당 36회 | ×2(분당 72) | — | rtcollect/SHADOW.md |
 
 - 다 켜도 평소 몫은 분당 가중치 수백 안(한도 2,400)이다. 위험은 **재기동 몰림**이 겹칠 때 -- rt_dirpred 첫 회차(~880회)·rt_radar 백필을 같은 분에 띄우지 않는다(하나씩 켜고 첫 회차가 끝난 걸 로그로 본 뒤 다음).
 - 418·429 를 받으면 Rust 쪽이 해제 시각을 공용 밴 파일에 적고 그동안 보내지 않는다. 파이썬 대시보드(binance_ban_guard)도 같은 파일을 본다.
+
+---
+
+# 방향 전진 기록기 그림자 (rt_dirfwd · 2026-11-21)
+
+원본 `scripts/live_eth_direction_forward_recorder_20261010.py --record` 처럼 **cron 이 00·08·16 UTC 31분 뒤** 한 번 부르고 끝나는 실행 파일. 전진 판정(dir4h_p2 2027-03-14 · dir3asset 2027-04-08)이 읽는 줄이다.
+
+- 빌드: `cd rtmodel && cargo build --release -j 2 --bin rt_dirfwd` → `bin/rt_dirfwd`(md5 대조). 모델 없음(규칙).
+- crontab(사람이 등록 · 파이썬 줄과 같은 분): `31 0,8,16 * * * cd <저장소> && nice -n 10 bin/rt_dirfwd >> logs/supervisor/rt_dirfwd_$(date +\%Y\%m\%d).log 2>&1`
+- 쓰는 곳: `data/live/rt_dirfwd/eth_direction_forward.jsonl`(RT_DIRFWD_OUT 디렉터리). 🔴`data/live` 는 종료코드 2(전환 때만 `RT_DIRFWD_TAKEOVER=1`).
+- REST: 자산 셋 × (1일봉 93 + 5분봉 320) = 회차당 6회 · 하루 18회(가중치 각 2) -- 그림자면 ×2.
+- 대조: 두 파일의 같은 (sym, date, hour) 줄에서 recorded_ms 를 뺀 나머지를 글자로(두 cron 이 같은 분에 돌아도 초가 다르다). 종료코드 0 정상 · 1 실패(원본처럼 앞 자산 줄은 남음 · 시각 밖 포함) · 2 설정 거부.
+
+---
+
+# 서버에서 옮겨 켤 때 순서 (초안 · 2026-11-21 · 사용자 결정 전)
+
+원칙: (1) 그림자 출력 폴더에 따로 쓰게 켠다 → (2) 파이썬과 글자 대조가 기준을 넘긴다 → (3) 사용자 승인 뒤 화면이 읽는 파일·전진 검정이 읽는 파일을 바꾼다(= 파이썬을 끄고 Rust 를 `*_TAKEOVER=1` 로 원래 자리에).
+한 번에 하나씩 켜고, 첫 회차(재기동 몰림)가 끝난 걸 로그로 본 뒤 다음을 켠다. 위 REST 표의 «처음 몰림»이 큰 것(rt_dirpred · rt_radar)은 서로 다른 날에.
+
+| 순서 | 실행 파일 | 그림자 폴더 | 글자 대조 기준(통과 = 이만큼 같음) | 화면·검정이 읽는 자리를 바꾸는 시점 |
+|---|---|---|---|---|
+| 1 | rt_regime(매시 · REST 시간당 8회 · 몰림 없음) | data/live/rt_regime_band | 7일 동안 regime_band_forward.jsonl 의 같은 (ts, coin) 줄 전부 같음 · 요약 파일 같음 | fwd_band(2027-01-08) 판정 뒤, 또는 사용자 승인 때 -- 전진 기록이라 «두 벌이 같다»가 확인된 뒤에만 |
+| 2 | rt_dirfwd(하루 3회 · 6회/회차) | data/live/rt_dirfwd | 14회차(5일) 줄이 recorded_ms 빼고 전부 같음 | 판정일(2027-03-14) 전에는 바꾸지 않는 것을 권함 -- 판정 원장은 한 벌로 |
+| 3 | rt_radar(매분 · 첫 회차 31일 백필) | data/live/rt_risk_radar | 24시간 latest.json 같은 updated 끼리 문자열 같음·숫자 1e-12 상대 · forward.jsonl 줄 수 같음 | 화면 `/api/risk-radar` 가 읽는 파일 -- 대조 통과 뒤 바로 가능(전진 검정 없음) |
+| 4 | rt_dirpred(5분 · 첫 회차 ~880회 · xsec 포함) | data/live/rt_dirpred | 3일 동안 pred_record/{코인}.jsonl·xsec.jsonl 같은 (k, t) 줄 전부 같음 · payload 숫자 비트 | fwd_dirshort(2027-01-08) 가 읽는 기록 -- 판정 뒤, 또는 사용자 승인 때. ETH 15분·1시간(75열판)은 아직 파이썬만 -- 전환해도 파이썬 몫이 남는다 |
+| 5 | rt_sr_lean(상주 · 웹소켓) | data/live/rt_sr_lean | `tools/shadow_sr_lean.py` 종료코드 0(양쪽 다 채점한 id 전부 같음) 3일 | `/api/sr-lean` 이 읽는 폴더 -- 사용자 승인 때 |
+| — | 4h 변동성 QX4·HGB 대체 · 개장 되돌림 · 7일/4~13주 신호 · dir4h·dir_short payload | (요청 때 계산 -- 웹 서버 몫) | 라이브러리만 옮김(rtserve 가 붙일 때 같은 정답지로) | rtserve 전환 때 |
+
+- 재기동 몰림 피하기: 서버 재부팅 @reboot 줄은 서로 다른 sleep(90·120·150초…)으로 띄우고, rt_dirpred 는 코인 사이 3초를 지킨다. 418·429 는 공용 밴 파일로 모두 멈춘다.
+- 되돌리기: Rust 를 끄고 파이썬을 다시 켠다(각 TAKEOVER 전 원래 파일을 복사해 둔다). 그림자 폴더는 지워도 된다.
 
 ---
 

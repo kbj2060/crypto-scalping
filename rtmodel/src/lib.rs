@@ -20,6 +20,7 @@ pub mod lgb;
 pub mod qx4;
 pub mod regime_band;
 pub mod risk_radar;
+pub mod signals;
 pub mod sr_lean;
 pub mod sr_live;
 use std::collections::HashMap;
