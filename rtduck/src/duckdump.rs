@@ -21,6 +21,7 @@ pub fn dump(path: &std::path::Path) -> duckdb::Result<Value> {
                 ValueRef::Double(f) => Value::from(rtcollect::py_float_repr(f)),
                 ValueRef::BigInt(i) => Value::from(i),
                 ValueRef::Int(i) => Value::from(i),
+                ValueRef::Boolean(b) => Value::from(b),
                 ValueRef::Text(s) => Value::from(String::from_utf8_lossy(s).to_string()),
                 v => Value::from(format!("{v:?}")),
             }).collect()));

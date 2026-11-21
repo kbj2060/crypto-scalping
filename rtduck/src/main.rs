@@ -1,4 +1,7 @@
-//! rtduck: DuckDB 로 쓰는 수집기. RTDUCK_KIND = oi_lsratio | hl_trades | hl_positions.
+//! rtduck: DuckDB 로 쓰는 수집기. RTDUCK_KIND = oi_lsratio | hl_trades | hl_positions | market_data.
+//!   market_data duckdb_persist_worker.py 서버 형태의 화면·감시 몫: TAIL_SYMBOLS(기본 ETHUSDT -- 서버 감독과 같다) 청산 요격기 → QUANT_TAIL_DB_PATH(기본 data/live/rtduck/tail_risk.duckdb)
+//!               + liq_burst_state.json · WRITE_DASHBOARD_STATE(기본 true) → dashboard_state.json (둘 다 RTDUCK_LIVE_DIR 기본 data/live/rtduck -- data/live 는 RTDUCK_TAKEOVER=1 일 때만)
+//!               🔴COLLECT_MICROSTRUCTURE=true 면 거부(미시구조는 아직 파이썬 몫) · REST 없음(웹소켓뿐)
 //!   hl_positions HL_POS_COINS(기본 ETH -- 원본과 같다 · HL_POS_COIN 도) · HL_ROOT(체결 DuckDB 를 읽기만) · HL_POS_DB(기본 data/hot/rtduck/<원본과 같은 이름> --
 //!               data/hot/<그 이름> 은 RTDUCK_TAKEOVER=1 일 때만) · 🔴HL info REST 전용이라 RTDUCK_REST=1 없으면 아무것도 안 한다
 //!   hl_trades   HL_COINS(기본 ETH) · HL_ROOT(기본 data/live/rtduck/orderflow/hyperliquid -- 원본 폴더 data/live/orderflow/hyperliquid 는 RTDUCK_TAKEOVER=1 일 때만)
@@ -25,7 +28,8 @@ fn main() {
         "oi_lsratio" => run_oi(),
         "hl_trades" => run_hl_trades(),
         "hl_positions" => run_hl_positions(),
-        k => die(2, &format!("모르는 종류 {k:?} -- oi_lsratio|hl_trades|hl_positions")),
+        "market_data" => run_market(),
+        k => die(2, &format!("모르는 종류 {k:?} -- oi_lsratio|hl_trades|hl_positions|market_data")),
     }
 }
 
@@ -185,4 +189,67 @@ fn run_hl_positions() {
     loop {
         c.cycle(&mut env);
     }
+}
+
+fn flag(k: &str, d: &str) -> bool {
+    !["false", "0", ""].contains(&env_s(k, d).trim().to_lowercase().as_str()) // 원본 `not in ("false", "0", "")`
+}
+
+/// market_data_worker 의 청산 요격기 + dashboard_state(duckdb_persist_worker.py main()). SIGTERM = 끝(원본도 남길 보류분이 없다).
+fn run_market() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    if flag("COLLECT_MICROSTRUCTURE", "true") {
+        die(2, "🔴미시구조(microstructure_1m)는 아직 Rust 로 안 옮겼다 -- COLLECT_MICROSTRUCTURE=false 로 띄우고 파이썬 워커가 그 몫을 계속 쓴다(rtcollect/REMAINING.md)");
+    }
+    let live = PathBuf::from(env_s("RTDUCK_LIVE_DIR", "data/live/rtduck"));
+    if live.ends_with("data/live") && env_s("RTDUCK_TAKEOVER", "") != "1" {
+        die(2, &format!("🔴{} 는 파이썬 워커의 폴더다(dashboard_state.json · liq_burst_state.json) -- 전환 때만 RTDUCK_TAKEOVER=1", live.display()));
+    }
+    let db = PathBuf::from(env_s("QUANT_TAIL_DB_PATH", &live.join("tail_risk.duckdb").display().to_string()));
+    if db.ends_with("data/live/tail_risk.duckdb") && env_s("RTDUCK_TAKEOVER", "") != "1" {
+        die(2, &format!("🔴{} 는 파이썬 워커의 파일이다 -- 전환 때만 RTDUCK_TAKEOVER=1", db.display()));
+    }
+    let tail: Vec<String> = if flag("COLLECT_TAIL_RISK", "true") {
+        env_s("TAIL_SYMBOLS", "ETHUSDT").split(',').map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()).collect()
+    } else {
+        vec![]
+    };
+    let dash = flag("WRITE_DASHBOARD_STATE", "true");
+    let url = env_s("RTDUCK_FORCE_WS_URL", rtduck::market::FORCE_ORDER_WS);
+    let wall: fn() -> f64 = rtcollect::rest::wall_s;
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    tokio::task::LocalSet::new().block_on(&rt, async {
+        let mut tasks = tokio::task::JoinSet::new();
+        for s in &tail {
+            let mut t = rtduck::market::TailRisk::new(s, &db, &live);
+            match t.init() {
+                Ok(n) => println!("🛡️ TailRiskInterceptor bootstrap({s}): {n} rows loaded"),
+                Err(e) => die(1, &format!("tail_risk DB 준비 실패: {e}")),
+            }
+            let t = Rc::new(RefCell::new(t));
+            tasks.spawn_local(rtduck::market::run_ws(t.clone(), url.replace("{symbol}", s), wall));
+            tasks.spawn_local(rtduck::market::run_ticks(t, wall));
+            tokio::time::sleep(Duration::from_secs(1)).await; // 원본: 시작 사이 1초
+        }
+        if dash {
+            let p = live.join("dashboard_state.json");
+            tasks.spawn_local(async move {
+                loop {
+                    if let Err(e) = rtduck::market::write_atomic(&p, &rtduck::market::dashboard_state_text(wall())) {
+                        eprintln!("dashboard_state write failed: {e}"); // 화면 갱신 신호일 뿐 -- 계속
+                    }
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                }
+            });
+        }
+        println!("rtduck market_data · 청산 {tail:?} → {} · dashboard_state {} · {}", db.display(), if dash { "씀" } else { "안 씀" }, live.display());
+        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
+        tokio::select! {
+            _ = term.recv() => {}
+            _ = tokio::signal::ctrl_c() => {}
+            r = tasks.join_next() => die(70, &format!("작업 끝남: {r:?}")),
+        }
+    });
+    println!("종료 신호 -- 끝낸다");
 }
