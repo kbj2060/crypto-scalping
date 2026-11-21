@@ -169,3 +169,72 @@ fn shadow_mode_panics_before_any_write_and_allows_reads() {
     let _ = rt().block_on(b.listen_key("PUT"));
     assert_eq!(log.lock().unwrap()[n0..], ["GET /fapi/v1/order".to_string(), "POST /fapi/v1/listenKey".into(), "PUT /fapi/v1/listenKey".into()]);
 }
+
+/// 2026-11-21 파이썬이 실제로 남긴 그림자 기록(order-shadow-log 판 `live/execution/order_shadow.py` · 진짜 run_entry·run_exit·place_bracket 을
+/// 127.0.0.1 가짜 거래소에 돌린 시험 test_order_shadow_log_20261121 RealExecRecordTest 가 남긴 합성 기록)을 그대로 재생 -- 차이 0 · 양성 대조.
+fn py_record() -> String {
+    std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/py_shadow_real.jsonl")).unwrap()
+}
+fn replay_text(text: &str) -> Vec<shadow::Report> {
+    let chs = shadow::chains(text).unwrap();
+    let dir = std::env::temp_dir().join(format!("rtorder_pyrec_{}_{}", std::process::id(), text.len()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let r = rt.block_on(shadow::replay(&chs, "ETHUSDT", &dir, false, None));
+    let _ = std::fs::remove_dir_all(&dir);
+    r
+}
+fn edit(text: &str, f: impl Fn(&mut Vec<Value>)) -> String {
+    let mut rows: Vec<Value> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    f(&mut rows);
+    rows.iter().map(|r| r.to_string() + "\n").collect()
+}
+
+#[test]
+fn python_shadow_record_replays_with_zero_diff_and_catches_mutations() {
+    let text = py_record();
+    let reps = replay_text(&text);
+    let rep = shadow::report_text(&reps);
+    println!("{rep}");
+    assert_eq!(reps.len(), 2, "진입·청산 작업 둘");
+    assert!(reps.iter().all(|r| r.diffs.is_empty()), "{rep}");
+    assert_eq!(reps.iter().map(|r| r.requests).sum::<usize>(), 13);
+    assert!(rep.contains("견준 작업 2 · 요청 13 · 어긋난 작업 0"), "{rep}");
+    // 깨움(chain "*")·작업 아닌 chain(접수 요청 자체) 은 재생하지 않는다 -- 그대로 같음
+    let extra = edit(&text, |rows| {
+        rows.push(json!({"rec": "input", "chain": "*", "what": "wake", "t": 1.0}));
+        rows.push(json!({"rec": "wire", "chain": "api-1", "method": "GET", "target": "/fapi/v1/commissionRate?symbol=ETHUSDT", "status": 200, "body": "{}"}));
+    });
+    assert!(replay_text(&extra).iter().all(|r| r.diffs.is_empty()));
+    // 벽시계 칸(done_at·armed_at)만 다른 것은 같음(실기록 = 진짜 시계)
+    let times = edit(&text, |rows| {
+        for r in rows.iter_mut().filter(|r| r["rec"] == "end") {
+            if let Some(s) = r.get_mut("slot").and_then(Value::as_object_mut) {
+                s.insert("done_at".into(), json!("2000-01-01T00:00:00+00:00"));
+            }
+        }
+    });
+    assert!(replay_text(&times).iter().all(|r| r.diffs.is_empty()));
+    // 양성 대조 1: 파이썬 요청 하나를 빼면(원본이 덜 보냈다) 요청 열 차이 · 첫 어긋남에 몇 번째·원본·Rust
+    let drop = edit(&text, |rows| {
+        let i = rows.iter().position(|r| r["rec"] == "wire" && r["target"].as_str().unwrap().starts_with("/fapi/v1/leverage")).unwrap();
+        rows.remove(i);
+    });
+    let r = shadow::report_text(&replay_text(&drop));
+    assert!(r.contains("어긋난 작업 1") && r.contains("요청 열 다름 #2/9"), "{r}");
+    let first = r.lines().find(|l| l.starts_with("첫 어긋남:")).unwrap();
+    assert!(first.starts_with("첫 어긋남: entry-") && first.contains("요청 열 다름 #2/9: 원본 POST"), "첫 어긋남 줄 = 요청 열의 첫 차이 {first}");
+    // 양성 대조 2: 원본 주문 수량이 다르면(같은 계획인데 다른 주문) 요청 열 차이
+    let qty = edit(&text, |rows| {
+        let w = rows.iter_mut().find(|r| r["rec"] == "wire" && r["method"] == "POST" && r["target"].as_str().unwrap().contains("side=BUY")).unwrap();
+        let t = w["target"].as_str().unwrap().replace("quantity=0.8", "quantity=0.9");
+        w["target"] = json!(t);
+    });
+    assert!(shadow::report_text(&replay_text(&qty)).contains("요청 열 다름"), "수량 바뀐 주문을 못 잡았다");
+    // 양성 대조 3: 끝 무장 파일의 손절선이 다르면 차이
+    let file = edit(&text, |rows| {
+        let e = rows.iter_mut().find(|r| r["rec"] == "end" && r["chain"].as_str().unwrap().starts_with("entry")).unwrap();
+        e["file"]["ETHUSDT:LONG"]["sl_level"] = json!(2390.0);
+    });
+    assert!(shadow::report_text(&replay_text(&file)).contains("무장 파일"), "무장 파일 차이를 못 잡았다");
+}

@@ -174,3 +174,91 @@ fn account_read_failure_in_exit_plan_keeps_stop_and_retries() {
     assert!(io.ex.placed.is_empty());
     assert!(io.ops.calls.iter().all(|c| !c.starts_with("clear_bracket")), "조회 실패를 «닫힘»으로 보고 정리하지 않는다");
 }
+
+/// 집행 전송을 감싸 첫 기다림(nap)에서 문이 열릴 때까지 멈춘다 -- 감시 발동 청산이 «도는 중»인 순간을 만든다.
+struct Gated {
+    inner: Fake,
+    entered: std::rc::Rc<tokio::sync::Notify>,
+    open: std::rc::Rc<tokio::sync::Notify>,
+    held: bool,
+}
+impl rtorder::exec::Exchange for Gated {
+    async fn place_limit_gtx(&mut self, o: &rtorder::exec::LimitOrder) -> rtorder::exec::Reply {
+        self.inner.place_limit_gtx(o).await
+    }
+    async fn place_market(&mut self, c: &rtorder::exec::Common<'_>, q: f64) -> rtorder::exec::Reply {
+        self.inner.place_market(c, q).await
+    }
+    async fn get_order(&mut self, c: &rtorder::exec::Common<'_>, r: &rtorder::exec::OrderRef) -> rtorder::exec::Reply {
+        self.inner.get_order(c, r).await
+    }
+    async fn cancel_order(&mut self, c: &rtorder::exec::Common<'_>, r: &rtorder::exec::OrderRef) -> rtorder::exec::Reply {
+        self.inner.cancel_order(c, r).await
+    }
+    async fn book(&mut self, s: &str) -> Result<(f64, f64), String> {
+        self.inner.book(s).await
+    }
+    fn now(&self) -> f64 {
+        self.inner.now()
+    }
+    fn wall_ms(&self) -> i64 {
+        self.inner.wall_ms()
+    }
+    async fn nap(&mut self, s: f64) {
+        if !std::mem::replace(&mut self.held, true) {
+            self.entered.notify_one();
+            self.open.notified().await;
+        }
+        self.inner.nap(s).await
+    }
+    async fn sleep(&mut self, s: f64) {
+        self.inner.sleep(s).await
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn watch_exit_runs_outside_desk_lock_status_answers_and_same_coin_exit_is_409() {
+    // 원본: 감시가 칸을 «submitting» 으로 바꾼 뒤 run_exit(최대 ~2분)를 기다리는 사이 다른 접수가 돈다 -- 상태 조회는 바로, 같은 코인 청산은 칸이 바빠 409.
+    // 2026-11-21 재구성 전에는 틱이 칸 잠금을 끝까지 쥐어 이 동안 접수가 5초 뒤 409(의도한 차이)였다.
+    use rtorder::route::Front;
+    use rtorder::runner::DeskCell;
+    use std::rc::Rc;
+    let (w, io0, _dir) = setup("unlocked", Some(5.0), true);
+    let (entered, open) = (Rc::new(tokio::sync::Notify::new()), Rc::new(tokio::sync::Notify::new()));
+    let Wired { ops, rest, quotes, .. } = io0;
+    let mut io = Wired::new(ops, rest, quotes, Gated { inner: Fake { fill_after: 2, ..Default::default() }, entered: entered.clone(), open: open.clone(), held: false }, "ETHUSDC");
+    let desk = std::sync::Arc::new(DeskCell::new(rtorder::assemble::Desk::new(w)));
+    io.desk = Some(desk.clone());
+    let local = tokio::task::LocalSet::new();
+    local.run_until(async {
+        let d2 = desk.clone();
+        let tick = tokio::task::spawn_local(async move {
+            let mut w2 = d2.lock().await.w.clone();
+            let r = w2.bracket_tick(&mut io).await;
+            (r, w2, io.touched.clone())
+        });
+        entered.notified().await; // 청산이 거래소 체결을 기다리는 중
+        let front = Front::default();
+        let hub = Hub::default();
+        let inp = json!({"account": {"ok": true, "positions": []}});
+        let mut dio = desk_io::FakeDeskIo::new(&inp, desk.lock().await.w.dir.clone());
+        let mut q = FakeQuotes::new(&json!({}));
+        let st = tokio::time::timeout(std::time::Duration::from_millis(500),
+            front.call(&desk, &hub, &mut q, &mut dio, "GET", "/api/manual-entry/status", &[("asset".into(), "eth".into())])).await
+            .expect("감시 청산이 도는 동안에도 상태 조회는 바로 답한다");
+        assert_eq!(st.status, 200);
+        let v: Value = serde_json::from_str(&st.body).unwrap();
+        assert_eq!((v["state"]["phase"].as_str(), v["state"]["trigger"].as_str()), (Some("submitting"), Some("bracket_sl")), "{}", st.body);
+        let ex2 = front.call(&desk, &hub, &mut q, &mut dio, "POST", "/api/manual-exit/submit", &[("side".into(), "LONG".into()), ("confirm".into(), "1".into())]).await;
+        assert_eq!(ex2.status, 409, "같은 코인 청산 = 칸이 바빠 409 {}", ex2.body);
+        assert!(ex2.body.contains("already_working"));
+        open.notify_one();
+        let (r, mut w2, touched) = tick.await.unwrap();
+        r.unwrap();
+        assert_eq!(touched, vec![SlotId::Entry]);
+        // 틱 끝에 원본으로(app 의 합치기와 같은 일)
+        let mut d = desk.lock().await;
+        *d.w.slot_mut(&SlotId::Entry) = w2.slot_mut(&SlotId::Entry).clone();
+        assert_eq!(d.w.entry["phase"], "filled_maker", "{:?}", d.w.entry);
+    }).await;
+}

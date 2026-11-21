@@ -20,6 +20,8 @@ struct Ex {
     open: Vec<Value>,
     next: i64,
     log: Vec<String>,
+    /// 계좌 응답을 늦추는 초(R6 시험 -- 답을 만드는 중인 요청)
+    slow: f64,
 }
 fn exchange(routes: Value) -> (Srv, Arc<Mutex<Ex>>) {
     let ex = Arc::new(Mutex::new(Ex {
@@ -29,6 +31,7 @@ fn exchange(routes: Value) -> (Srv, Arc<Mutex<Ex>>) {
                           "price": "2300", "origQty": "0.2", "executedQty": "0", "status": "NEW", "reduceOnly": false})],
         next: 100,
         log: vec![],
+        slow: 0.0,
     }));
     let e2 = ex.clone();
     let srv = serve(Arc::new(move |g: &Got| {
@@ -38,7 +41,16 @@ fn exchange(routes: Value) -> (Srv, Arc<Mutex<Ex>>) {
         e.log.push(format!("{} {path}", g.method));
         let body: Value = match (g.method.as_str(), path) {
             ("GET", "/fapi/v1/time") => json!({"serverTime": (now() * 1000.0) as i64}),
+            ("GET", "/fapi/v2/account") if e.slow > 0.0 => {
+                let b = routes["/fapi/v2/account"].to_string();
+                return Act::Hang(e.slow, Box::new(Act::Send { status: 200, ctype: "application/json".into(), body: b, headers: vec![] }));
+            }
             ("GET", "/fapi/v2/account") => routes["/fapi/v2/account"].clone(),
+            ("GET", "/fapi/v1/order") => match e.open.iter().find(|o| qm.get("orderId").is_some_and(|i| o["orderId"].to_string() == *i)
+                                                    || qm.get("origClientOrderId").is_some_and(|c| o["clientOrderId"] == *c)) {
+                Some(o) => o.clone(),
+                None => return Act::Send { status: 400, ctype: "application/json".into(), body: r#"{"code":-2013,"msg":"Order does not exist."}"#.into(), headers: vec![] },
+            },
             ("GET", "/fapi/v2/positionRisk") => json!([{"symbol": "ETHUSDC", "positionSide": "LONG", "positionAmt": "0.500", "entryPrice": "2400.5", "markPrice": "2450.25",
                                                        "liquidationPrice": "1900.1", "leverage": "10", "notional": "1225.125", "unRealizedProfit": "24.875", "updateTime": 1799990000123i64}]),
             ("GET", "/fapi/v1/userTrades") => json!([]),
@@ -339,5 +351,95 @@ async fn door_exit_submit_runs_task_on_shared_desk_and_shadow_sends_nothing() {
     assert!(log.iter().all(|l| l.starts_with("GET")), "그림자에서 쓰기가 나갔다 {log:?}");
     let rows = std::fs::read_to_string(dir.join("order_requests.jsonl")).unwrap();
     assert_eq!(rows.lines().count(), 2, "POST 둘만 기록 {rows}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn door_cfg(dir: &Path, base: &str, extra: &[(&str, &str)]) -> Config {
+    let (d, base) = (dir.to_string_lossy().to_string(), base.to_string());
+    let extra: Vec<(String, String)> = extra.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+    let get = move |k: &str| match k {
+        "RTORDER_DIR" => Some(d.clone()),
+        "RTORDER_BASE" => Some(base.clone()),
+        "RTORDER_PERIOD" => Some("0.05".into()),
+        _ => extra.iter().find(|x| x.0 == k).map(|x| x.1.clone()),
+    };
+    app::config_from(&get).unwrap()
+}
+async fn http(addr: std::net::SocketAddr, m: &str, t: &str) -> Result<String, String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut c = tokio::net::TcpStream::connect(addr).await.map_err(|e| e.to_string())?;
+    c.write_all(format!("{m} {t} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").as_bytes()).await.map_err(|e| e.to_string())?;
+    let mut b = String::new();
+    c.read_to_string(&mut b).await.map_err(|e| e.to_string())?;
+    if b.is_empty() { Err("빈 응답(끊김)".into()) } else { Ok(b) }
+}
+
+#[tokio::test]
+async fn stop_mid_exit_follow_cancels_task_and_restart_cleans_the_left_order() {
+    // R5: 도는 청산 따라가기(GTX 걸고 체결을 기다리는 중)에서 멈춤 → 원본 종료 훅처럼 작업을 그 자리에서 취소 → 재기동의 시작 정리가 남은 따라가기 주문(dbpg)을 지운다.
+    // (선 진입 대기는 1초 체결가 원천이 있어야 받아 이 시험 틀에서는 청산으로 본다)
+    // 보내는 곳 = 127.0.0.1 가짜 거래소뿐.
+    std::env::set_var("DASHBOARD_MANUAL_EXEC_ENABLED", "1");
+    let (srv, ex) = exchange(routes());
+    ex.lock().unwrap().open.clear();
+    let dir = std::env::temp_dir().join(format!("rtorder_app_r5_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    let stop = Stop::default();
+    let (s2, e2) = (stop.clone(), ex.clone());
+    let probe = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let r = http(addr, "POST", "/api/manual-exit/submit?side=LONG&confirm=1&pct=100&asset=eth").await.unwrap();
+        for _ in 0..100 {
+            if e2.lock().unwrap().open.iter().any(|o| o["clientOrderId"].as_str().unwrap_or("").starts_with("dbpg")) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        let t0 = std::time::Instant::now();
+        s2.stop();
+        (r, t0)
+    });
+    let s = app::run(&door_cfg(&dir, &srv.base, &[]), &mk(srv.base.clone(), dir.join("ban"), false), stop, Default::default(), Some(l)).await;
+    let (r, t0) = probe.await.unwrap();
+    assert!(r.starts_with("HTTP/1.1 200"), "{r}");
+    assert!(t0.elapsed().as_secs_f64() < 2.5, "멈춤이 도는 따라가기(3초 조회 주기 · 최대 120초)를 기다리지 않는다 {:?}", t0.elapsed());
+    let open: Vec<Value> = ex.lock().unwrap().open.clone();
+    assert!(open.iter().any(|o| o["clientOrderId"].as_str().unwrap().starts_with("dbpg")), "걸린 GTX 는 거래소에 남는다(정리는 다음 기동 몫) {open:?} {:?}", s.logs);
+    // 재기동 = 시작 정리: 남은 dbwt 를 지우고 복구 파일을 처리
+    let s = app::run(&door_cfg(&dir, &srv.base, &[("RTORDER_MAX_TICKS", "1")]), &mk(srv.base.clone(), dir.join("ban"), false), Stop::default(), Default::default(), None).await;
+    let open: Vec<Value> = ex.lock().unwrap().open.clone();
+    assert!(!open.iter().any(|o| o["clientOrderId"].as_str().unwrap().starts_with("dbpg")), "재기동이 남은 따라가기 주문을 지운다 {open:?}");
+    assert!(s.logs.iter().any(|l| l.starts_with("wait cleanup:")), "{:?}", s.logs);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn stop_waits_up_to_two_seconds_for_a_request_being_answered() {
+    // R6: 원본 shutdown_timeout=2 -- 답을 만드는 중인 요청(계좌 새로 읽기 1초)은 멈춤 뒤에도 끝까지 답한다.
+    std::env::set_var("DASHBOARD_MANUAL_EXEC_ENABLED", "1");
+    let (srv, ex) = exchange(routes());
+    let dir = std::env::temp_dir().join(format!("rtorder_app_r6_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    let stop = Stop::default();
+    let (s2, e2) = (stop.clone(), ex.clone());
+    let probe = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        e2.lock().unwrap().slow = 1.0;
+        let req = tokio::spawn(async move { http(addr, "GET", "/api/binance-account?fresh=1").await });
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        s2.stop();
+        req.await.unwrap()
+    });
+    let t0 = std::time::Instant::now();
+    let _ = app::run(&door_cfg(&dir, &srv.base, &[]), &mk(srv.base.clone(), dir.join("ban"), true), stop, Default::default(), Some(l)).await;
+    let r = probe.await.unwrap();
+    assert!(r.as_ref().is_ok_and(|b| b.starts_with("HTTP/1.1 200")), "멈춤 뒤에도 답 중이던 요청은 끝까지 {r:?}");
+    assert!(t0.elapsed().as_secs_f64() < 4.0);
     let _ = std::fs::remove_dir_all(&dir);
 }

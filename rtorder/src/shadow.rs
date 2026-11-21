@@ -70,6 +70,9 @@ pub fn chains(jsonl: &str) -> Result<Vec<Chain>, String> {
     for (n, line) in jsonl.lines().enumerate().filter(|(_, l)| !l.trim().is_empty()) {
         let v: Value = serde_json::from_str(line).map_err(|e| format!("{}번째 줄: {e}", n + 1))?;
         let id = v.get("chain").map(crate::sign::py_str).ok_or_else(|| format!("{}번째 줄: chain 없음", n + 1))?;
+        if id == "*" {
+            continue; // 파이썬 체결 알림(wake_fills · 모든 작업) -- 재생은 아직 깨움을 넣지 않는다(시각만 갈린다)
+        }
         let c = by.entry(id.clone()).or_insert_with(|| {
             order.push(id.clone());
             Chain { id: id.clone(), ..Default::default() }
@@ -82,7 +85,17 @@ pub fn chains(jsonl: &str) -> Result<Vec<Chain>, String> {
             _ => {}
         }
     }
-    Ok(order.into_iter().map(|id| by.remove(&id).unwrap()).collect())
+    // 시작 줄이 없는 chain = 작업이 아니다(접수 요청 자체의 조회 -- 파이썬 order_request_log 의 chain) -- 재생하지 않는다
+    Ok(order.into_iter().map(|id| by.remove(&id).unwrap()).filter(|c| !c.start.is_null()).collect())
+}
+
+/// 비교에서 뺄 벽시계 칸(실기록 = 진짜 시계 · 재생 = 가짜 시계): 이름이 `_at` 으로 끝나거나 `at`·`wait_until`.
+pub fn drop_times(v: &Value) -> Value {
+    match v {
+        Value::Object(m) => Value::Object(m.iter().filter(|(k, _)| !(k.ends_with("_at") || *k == "at" || *k == "wait_until")).map(|(k, x)| (k.clone(), drop_times(x))).collect()),
+        Value::Array(a) => Value::Array(a.iter().map(drop_times).collect()),
+        x => x.clone(),
+    }
 }
 
 /// 요청 하나를 비교용 글자로. exact = 글자 그대로(가짜 시계 기록) · 아니면 timestamp·signature 를 빼고 표식 뒤 숫자(벽시계 ms)를 `#` 로.
@@ -528,13 +541,14 @@ pub async fn replay(chs: &[Chain], symbol: &str, dir: &Path, exact: bool, secret
             d.push(format!("읽은 입력: 원본 {} · Rust {}", json!(py), json!(rs)));
         }
         // 끝 상태
+        let tm = |v: &Value| if exact { v.clone() } else { drop_times(v) }; // 실기록(진짜 시계)은 시각 칸을 빼고 본다
         if let Some(es) = c.end.get("slot") {
             let rs_slot = dk.slot_obj(&sref).clone();
-            slot_diff(es, &rs_slot, &mut d);
+            slot_diff(&tm(es), tm(&Value::Object(rs_slot)).as_object().unwrap(), &mut d);
         }
         if let Some(ef) = c.end.get("file") {
             let file = std::fs::read_to_string(&fpath).ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()).unwrap_or(Value::Null);
-            if !same(ef, &file) {
+            if !same(&tm(ef), &tm(&file)) {
                 d.push(format!("무장 파일: 원본 {ef} · Rust {file}"));
             }
         }
@@ -593,4 +607,20 @@ mod tests {
         assert_ne!(normalize("POST", a, false), normalize("POST", &a.replace("dbpgL", "dbwtL"), false), "표식 앞머리는 남긴다");
         assert_ne!(normalize("POST", a, false), normalize("DELETE", a, false));
     }
+}
+
+/// 재생 보고서(사람이 읽는 글자): 작업마다 한 줄(요청 수 · 같음/차이) + 맨 끝 요약
+/// «견준 작업 N · 요청 M · 어긋난 작업 K» + 첫 어긋남(작업 · 첫 차이 -- 요청 열이면 몇 번째·원본·Rust).
+pub fn report_text(reports: &[Report]) -> String {
+    let mut out = String::new();
+    for r in reports {
+        out.push_str(&format!("{} | 요청 {} | {}\n", r.chain, r.requests, if r.diffs.is_empty() { "같음".into() } else { r.diffs.join(" | ") }));
+    }
+    let bad: Vec<&Report> = reports.iter().filter(|r| !r.diffs.is_empty()).collect();
+    out.push_str(&format!("견준 작업 {} · 요청 {} · 어긋난 작업 {}\n", reports.len(), reports.iter().map(|r| r.requests).sum::<usize>(), bad.len()));
+    if let Some(b) = bad.first() {
+        let first = b.diffs.iter().find(|d| d.starts_with("요청 열")).unwrap_or(&b.diffs[0]);
+        out.push_str(&format!("첫 어긋남: {} -- {first}\n", b.chain));
+    }
+    out
 }

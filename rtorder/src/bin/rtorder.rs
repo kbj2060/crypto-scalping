@@ -20,7 +20,6 @@ fn main() {
         eprintln!("rtorder: 폴더 {}: {e}", cfg.dir.display());
         std::process::exit(2)
     });
-    let _ = std::fs::write(cfg.dir.join(app::DIR_MARK), "rtorder 상태 폴더\n");
     cfg.echo = true;
     // 루프백 문: 묶기 실패(이미 다른 rtorder 가 이 주소를 쥠 등) = 시작 안 함 -- 같은 계좌를 감시하는 둘째 프로세스가 뜨지 않게
     let std_l = std::net::TcpListener::bind(cfg.listen).and_then(|l| l.set_nonblocking(true).map(|_| l)).unwrap_or_else(|e| {

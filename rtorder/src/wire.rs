@@ -9,7 +9,7 @@
 use crate::account::{AccountRest, SharedAccount};
 use crate::assemble::{Desk, DeskIo, Quotes};
 use crate::exec::Exchange;
-use crate::watch::{iso_utc, run_exit_into, Obj, WatchIo, Watcher};
+use crate::watch::{iso_utc, run_exit_into, Obj, SlotId, WatchIo, Watcher};
 use crate::userstream::Hub;
 use serde_json::Value;
 use std::sync::Arc;
@@ -27,12 +27,16 @@ pub struct Wired<O: WatchIo, R: AccountRest, Q: Quotes, E: Exchange> {
     pub stream: Option<Arc<Hub>>,
     /// 청산 조립의 계좌가 어디서 왔나("stream" | 못 쓴 이유) -- 시험·로그.
     pub fresh_source: Vec<&'static str>,
+    /// 2026-11-21 실행 파일: 감시 틱은 칸 사본에서 돌고, 발동 청산의 칸 상태는 이 원본(접수가 보는 칸)에 올린다(`run_exit_at`). None = 사본 없이(시험).
+    pub desk: Option<Arc<crate::runner::DeskCell>>,
+    /// 이 틱에 원본에 올린 칸 -- 틱 끝에 사본의 마지막 값(정리 결과 등)을 원본에 옮긴다(app).
+    pub touched: Vec<SlotId>,
 }
 
 impl<O: WatchIo, R: AccountRest, Q: Quotes, E: Exchange> Wired<O, R, Q, E> {
     pub fn new(ops: O, rest: R, quotes: Q, ex: E, eth_symbol: &str) -> Self {
         Wired { ops, rest, quotes, ex, acct: Arc::new(SharedAccount::new(eth_symbol)),
-                planner: Desk::new(Watcher::new(std::env::temp_dir(), eth_symbol)), stream: None, fresh_source: vec![] }
+                planner: Desk::new(Watcher::new(std::env::temp_dir(), eth_symbol)), stream: None, fresh_source: vec![], desk: None, touched: vec![] }
     }
 }
 
@@ -126,6 +130,23 @@ impl<O: WatchIo, R: AccountRest, Q: Quotes, E: Exchange> WatchIo for Wired<O, R,
     async fn run_exit(&mut self, plan: &Value, slot: &mut Obj) -> Result<(), String> {
         let ops = &self.ops;
         run_exit_into(&mut self.ex, plan, slot, || iso_utc(ops.now())).await // done_at = 끝난 시각(원본 now_iso)
+    }
+    /// 원본: 감시가 칸을 «submitting» 으로 바꾼 **뒤** run_exit 를 기다린다 -- 그동안 접수는 그 칸을 바쁜 것으로 보고(409) 다른 칸·다른 요청은 돈다.
+    /// 칸 잠금은 올릴 때·내릴 때만 잡는다. 사본을 뜬 뒤 접수가 그 칸을 먼저 잡았으면 쏘지 않는다(칸은 «submitting» 그대로 → 감시가 30초 뒤 다시).
+    async fn run_exit_at(&mut self, at: &SlotId, plan: &Value, slot: &mut Obj) -> Result<(), String> {
+        let Some(desk) = self.desk.clone() else { return self.run_exit(plan, slot).await };
+        {
+            let mut d = desk.lock().await;
+            if crate::watch::busy(d.w.slot_mut(at)) {
+                slot.insert("error".into(), serde_json::json!("다른 청산이 먼저 이 칸을 잡았다 -- 다음 틱에 다시"));
+                return Ok(());
+            }
+            *d.w.slot_mut(at) = slot.clone();
+        }
+        self.touched.push(at.clone());
+        let r = self.run_exit(plan, slot).await;
+        *desk.lock().await.w.slot_mut(at) = slot.clone();
+        r
     }
     async fn place_bracket(&mut self, spec: &Value, symbol: &str, pside: &str, strict: bool) -> Result<Value, String> {
         self.ops.place_bracket(spec, symbol, pside, strict).await
