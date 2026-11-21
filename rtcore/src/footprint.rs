@@ -1,4 +1,7 @@
-//! 풋프린트(5분봉 × 가격 칸) -- 2026-11-20 파이썬에서 옮김. tokio 비의존. 바이낸스 선물 `@trade` 만(파이썬도 2026-11-02 부터 바이낸스만).
+//! 풋프린트(5분봉 × 가격 칸) -- 2026-11-20 파이썬에서 옮김. tokio 비의존. 봉은 바이낸스 선물 `@trade`.
+//! 2026-11-21 정정: 원본 /api/footprint 는 지금도 닫힌 봉에 OKX 칸을 더하고(`_merged`) OKX first_bar «뒤» 봉만 내보낸다
+//! (화면이 2026-11-02 에 뺀 것은 진행 봉의 okxLive 더하기뿐 -- app.js 4517). 코어도 그렇게 낸다: 칸 = 바이낸스 + OKX(supply.rs okx_fp) ·
+//! 창 = first_bar «뒤» 봉 중 가장 새 144봉(`from`) · first_bar 가 바뀌면 다음 밀기가 전량(full). 봉 안 델타 dhl 은 원본처럼 바이낸스만.
 //!
 //! 원본: dashboard/coin_flow.py `footprint_add`(338~394 의 봉 칸 몫) · 봉 보관(354~365) · FLOW_SPECS(269~279)
 //!       · dashboard/server.py `api_footprint`(3993~4059 · since=0, bars=144) · `fp_dhl` 의 1초 링 가지(3952~3965) · `bar_delta_hl`(237~243).
@@ -80,6 +83,9 @@ pub struct Bars {
     pub(crate) pending: Option<(i64, i64)>,
     /// holes·pending 이 바뀌었다 -- 다음 밀기가 봉이 안 바뀌었어도 나간다.
     pub(crate) holes_dirty: bool,
+    /// 화면 창은 이 봉 «뒤»만(OKX first_bar · 0 = 거르지 않음). 바뀌면 `full_dirty`.
+    pub(crate) from: i64,
+    pub(crate) full_dirty: bool,
 }
 
 /// 1초 링이 다 드는 가장 이른 초(가장 새 초 − 660). 링은 새 초 s 가 올 때 s − 660 밑만 지운다(supply.rs sec_cell).
@@ -116,7 +122,7 @@ pub(crate) fn dhl_ok(v: [f64; 3], bar: &Bar) -> Option<[f64; 3]> {
 
 impl Bars {
     pub fn new(symbol: &str) -> Bars {
-        Bars { spec: spec(symbol), bars: BTreeMap::new(), dirty: BTreeMap::new(), dropped: vec![], holes: vec![], pending: None, holes_dirty: false }
+        Bars { spec: spec(symbol), bars: BTreeMap::new(), dirty: BTreeMap::new(), dropped: vec![], holes: vec![], pending: None, holes_dirty: false, from: 0, full_dirty: false }
     }
 
     /// 체결의 봉을 들고 있어도 되나(coin_flow.py 355~365). 새 봉이면 만들고 창 밖 봉을 지운다.
@@ -179,20 +185,42 @@ impl Bars {
         }
     }
 
-    /// 화면 창(가장 새 144봉)의 첫 봉. 봉이 144 보다 적으면 가장 오래된 봉.
+    /// 화면 창(`from` «뒤» 봉 중 가장 새 144봉)의 첫 봉. 봉이 144 보다 적으면 가장 오래된 봉.
     pub(crate) fn window_lo(&self) -> Option<i64> {
+        self.bars.range(self.from + 1..).rev().take(WINDOW_BARS).last().map(|(&b, _)| b)
+    }
+
+    /// 거르지 않은 창(코어 스냅숏 파일 · 복원 -- 원본 footprint_save 도 거르지 않는다).
+    pub(crate) fn window_lo_raw(&self) -> Option<i64> {
         self.bars.keys().rev().take(WINDOW_BARS).last().copied()
     }
 
-    fn levels(&self, bar: &Bar, keys: Option<&BTreeSet<i64>>) -> Vec<Level> {
+    /// 봉 칸 줄. `add` = 같은 봉의 OKX 칸(server.py api_footprint `_merged`: 바이낸스 칸 사본에 OKX 를 더함 · OKX 만 있는 칸도 생긴다).
+    fn levels(&self, bar: &Bar, keys: Option<&BTreeSet<i64>>, add: Option<&Bar>) -> Vec<Level> {
         let (bucket, dp) = self.spec.expect("spec 있을 때만 부른다");
-        let row = |k: i64, c: &[f64; 6]| {
+        let row = |k: i64, c: [f64; 6]| {
             let px = format!("{:.*}", dp, k as f64 * bucket).parse().unwrap_or(0.0); // 파이썬 round(k * 칸 폭, dp) -- supply.rs r3 주석
             (px, r3(c[0]), r3(c[1]), r3(c[2]), r3(c[3]), r3(c[4]), r3(c[5]))
         };
+        let cell = |k: &i64| -> Option<[f64; 6]> {
+            let a = add.and_then(|o| o.cells.get(k));
+            let mut c = match (bar.cells.get(k), a) {
+                (None, None) => return None,
+                (b, _) => b.copied().unwrap_or([0.0; 6]),
+            };
+            if let Some(a) = a {
+                for j in 0..6 {
+                    c[j] += a[j];
+                }
+            }
+            Some(c)
+        };
         match keys {
-            None => bar.cells.iter().map(|(&k, c)| row(k, c)).collect(),
-            Some(ks) => ks.iter().filter_map(|k| bar.cells.get(k).map(|c| row(*k, c))).collect(),
+            None => {
+                let ks: BTreeSet<i64> = bar.cells.keys().chain(add.into_iter().flat_map(|o| o.cells.keys())).copied().collect();
+                ks.iter().filter_map(|k| cell(k).map(|c| row(*k, c))).collect()
+            }
+            Some(ks) => ks.iter().filter_map(|k| cell(k).map(|c| row(*k, c))).collect(),
         }
     }
 
@@ -216,6 +244,7 @@ impl Bars {
         Footprint {
             holes: self.holey(),
             full,
+            okx_from: (self.from != 0).then_some(self.from),
             bucket: self.spec.map_or(0.0, |s| s.0),
             bar_seconds: BAR_SECONDS,
             bars_expected: WINDOW_BARS,
@@ -228,17 +257,30 @@ impl Bars {
     }
 
     /// 구독 직후 1회 = 파이썬 `/api/footprint?bars=144&since=0` 의 봉·칸. 표에 없는 종목은 None.
-    pub fn snapshot(&self, sec: &BTreeMap<i64, [f64; 7]>, retail_max: f64, whale_min: f64) -> Option<Footprint> {
+    pub fn snapshot(&self, sec: &BTreeMap<i64, [f64; 7]>, retail_max: f64, whale_min: f64, okx: &Bars) -> Option<Footprint> {
         self.spec?;
-        let lo = self.window_lo().unwrap_or(i64::MIN);
-        let bars = self.bars.range(lo..).map(|(&b, bar)| FpBar { time: b, levels: self.levels(bar, None), dhl: self.dhl_now(sec, b, bar) }).collect();
+        let Some(lo) = self.window_lo() else { return Some(self.head(true, retail_max, whale_min, vec![])) };
+        let bars = self.bars.range(lo..).map(|(&b, bar)| FpBar { time: b, levels: self.levels(bar, None, okx.bars.get(&b)), dhl: self.dhl_now(sec, b, bar) }).collect();
         Some(self.head(true, retail_max, whale_min, bars))
     }
 
     /// 마지막 밀기 뒤 바뀐 것: 바뀐 봉의 바뀐 칸 + 그 봉의 dhl(실린 봉은 dhl 을 통째로 갈아 끼운다 -- 없으면 없음) + 지운 봉.
     /// 받은 쪽은 칸을 가격으로 덮어쓰고, 봉 수가 144 를 넘으면 오래된 쪽을 버린다(app.js refreshFootprint 와 같은 규칙).
-    pub fn take_delta(&mut self, sec: &BTreeMap<i64, [f64; 7]>, retail_max: f64, whale_min: f64) -> Option<Footprint> {
+    pub fn take_delta(&mut self, sec: &BTreeMap<i64, [f64; 7]>, retail_max: f64, whale_min: f64, okx: &mut Bars) -> Option<Footprint> {
         self.spec?;
+        // OKX 칸이 바뀐 바이낸스 봉도 싣는다(원본은 바이낸스 봉만 내보낸다 -- OKX 만 있는 봉은 안 보인다)
+        for (b, ks) in std::mem::take(&mut okx.dirty) {
+            if self.bars.contains_key(&b) {
+                self.dirty.entry(b).or_default().extend(ks);
+            }
+        }
+        if std::mem::take(&mut self.full_dirty) {
+            // first_bar·OKX 복원으로 창이 바뀜 -- 전량(원본 resync_until 동안의 full 응답)
+            self.dirty.clear();
+            self.dropped.clear();
+            self.holes_dirty = false;
+            return self.snapshot(sec, retail_max, whale_min, okx);
+        }
         // 링이 다 드는 봉(많아야 3봉)은 매번 다시 잰다 -- 스냅숏과 같은 식이라 받은 쪽이 스냅숏과 같아진다.
         if let Some(f) = ring_floor(sec) {
             for (&b, bar) in self.bars.range_mut(f..) {
@@ -253,11 +295,12 @@ impl Bars {
             return None;
         }
         self.holes_dirty = false;
-        let lo = self.window_lo().unwrap_or(i64::MIN);
+        // 창이 비면(first_bar «뒤» 봉이 아직 없음) 실을 봉도 없다 -- MIN 이면 first_bar 봉까지 실려 화면에 숨겨야 할 봉이 생긴다
+        let lo = self.window_lo().unwrap_or(i64::MAX);
         let dirty = std::mem::take(&mut self.dirty);
         let bars = dirty
             .range(lo..)
-            .filter_map(|(b, ks)| self.bars.get(b).map(|bar| FpBar { time: *b, levels: self.levels(bar, Some(ks)), dhl: bar.dhl }))
+            .filter_map(|(b, ks)| self.bars.get(b).map(|bar| FpBar { time: *b, levels: self.levels(bar, Some(ks), okx.bars.get(b)), dhl: bar.dhl }))
             .collect();
         let mut m = self.head(false, retail_max, whale_min, bars);
         m.drop = std::mem::take(&mut self.dropped);
