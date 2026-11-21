@@ -2,7 +2,7 @@
 """**LLM 해석 입력 조립기**(ETH) — 대시보드 API + 바이낸스 공개 REST → 스냅샷 + 윈도우 + 규칙 사건 + 청산맵 1d/7d/30d + 풋프린트 1h/2h/4h/1d (2026-10-17).
 
 왜: 사용자 «청산맵 1d/7d/30d 와 풋프린트 1h/2h/4h/1d 도 입력으로» → «그렇게 해줘». 형식 = research_llm_haiku_window_read_20261017 의 C(가장 정확).
-읽기만 한다(GET): 서버 /api/market-context · /api/box-hold · /api/liquidation-map(+/tiers 7·30) · /api/footprint?bars=288 ·
+읽기만 한다(GET): 서버 /api/market-context · /api/liquidation-map(+/tiers 7·30) · /api/footprint?bars=288 ·
   /api/footprint-daily(+/cells) · /api/liquidation-5m-history · /api/macro-calendar · /api/news · /api/trend,
   바이낸스 fapi klines·premiumIndexKlines·openInterestHist(5m·1h) · 현물 klines. 🔴주문·쓰기 없음. 방향 모델 신호(dir4h)는 일부러 뺀다(해석 전용).
   python scripts/live_llm_brief_20261017.py [--base http://127.0.0.1:8787] [--out brief.json]
@@ -76,7 +76,7 @@ def windows(base: str, now_ms: int, fp_bars: list, lq_bars: list) -> tuple[dict,
     return out["5m"], out["1h"], out["5m_close"]
 
 
-def snapshot(mc: dict, bh: dict, cal: dict, news: dict, trend: dict, now: datetime) -> dict:
+def snapshot(mc: dict, cal: dict, news: dict, trend: dict, now: datetime) -> dict:
     tag = lambda q: None if q is None else "low (bottom 10% of 7d)" if q <= .1 else "high (top 10% of 7d)" if q >= .9 else "normal"  # noqa: E731
     oi_all = (mc.get("oi") or {}).get("all") or {}
     z = oi_all.get("z1h")
@@ -99,10 +99,6 @@ def snapshot(mc: dict, bh: dict, cal: dict, news: dict, trend: dict, now: dateti
                             for k, v in (mc.get("profile") or {}).items() if k in ("prev_day", "vwap_week", "avwap_hi", "avwap_lo")},
          "options_dvol": {"dvol": r((mc.get("iv_rank") or {}).get("dvol")), "rank_365d": r((mc.get("iv_rank") or {}).get("rank365"), 2)},
          "daily_trend_votes": {"signal_-1to1": r(trend.get("signal")), "ups": trend.get("ups"), "n": trend.get("n_votes")}}
-    if bh.get("ok"):
-        s["box_hold"] = {k: {"p_hold": round(v["p"] * 100), "typical": round(v["base"] * 100), "half_width_pct": v["half_pct"],
-                             "tag": "likely to break (bottom 20%)" if v["p"] < v["q20"] else "likely to hold (top 20%)" if v["p"] > v["q80"] else "normal"}
-                         for k, v in bh["scales"].items() if v.get("ok")}
     nxt = []
     for e in cal.get("events", []):
         try:
@@ -125,7 +121,7 @@ def build(base: str) -> dict:
     now = datetime.now(timezone.utc)
     now_ms = int(now.timestamp() * 1000)
     g = lambda p, **q: get(base + p, q or None)  # noqa: E731
-    mc, bh, lm = g("/api/market-context", asset="eth"), g("/api/box-hold"), g("/api/liquidation-map", asset="eth")
+    mc, lm = g("/api/market-context", asset="eth"), g("/api/liquidation-map", asset="eth")   # 2026-11-21 /api/box-hold 서빙 끔 -- box_hold 칸 뺐다
     t7, t30 = g("/api/liquidation-map/tiers", asset="eth", days=7), g("/api/liquidation-map/tiers", asset="eth", days=30)
     fp = g("/api/footprint", asset="eth", bars=288)
     d3 = (now - timedelta(days=3)).strftime("%Y-%m-%d"); d0 = now.strftime("%Y-%m-%d")
@@ -137,7 +133,7 @@ def build(base: str) -> dict:
     w5, w1h, close5 = windows(base, now_ms, fp.get("bars", []), lq.get("bars", []))
     px = float(mc.get("mid") or close5[max(close5)])
     return {"asof_utc": now.strftime("%Y-%m-%d %H:%M"),
-            "snapshot": snapshot(mc, bh, cal, news, trend, now),
+            "snapshot": snapshot(mc, cal, news, trend, now),
             "w5": w5, "w1h": w1h, "events": lb.rule_events(w5),
             "liquidation_map": {"note": "estimated liquidation levels from volume-weighted virtual entries (model, not actual positions); above price = shorts, below = longs",
                                 "1d": lb.liqmap_summary(lm.get("tier_profile"), px), "7d": lb.liqmap_summary(t7.get("tier_profile"), px),

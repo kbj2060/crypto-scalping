@@ -5530,24 +5530,11 @@ async function refreshOpenRev() {
     if (res.ok) latestOpenRev = await res.json();
   } catch (error) { /* 다음 주기 */ }
 }
-// 2026-10-16 사용자 «①부터 재검증하고 시안»: 박스 유지 확률(ETH, /api/box-hold = dashboard/box_hold.py · 서버 1분 캐시) -- 방향 아님.
-//   박스 = 지금가 ± 지난 W분 고저폭의 절반 · 값 = 다음 W분 동안 한 번도 안 벗어날 확률(2022~24 학습, 2025·2026 보정 오차 ≤6pp).
-let latestBoxHold = null, boxHoldLastFetchAt = 0;
-// 2026-10-20 XRP 전용 모델(30분·1시간 통과 · 4시간 불통과 = 서버 ok false) -- 박스 줄·차트 1h 박스선이 그 코인 값만 쓴다
-const BOX_ASSETS = new Set(["eth", "xrp", "btc", "sol", "soxl"]);   // 10-31 BTC·SOL 30분·1h 통과(4h 는 불통과 → 서버가 칸을 끈다) · 11-18 SOXL 1h 만(ETH+SOXL 합동 · 30분·4h 는 서버가 끈다)
-const boxNow = () => (latestBoxHold && latestBoxHold.ok && (latestBoxHold.asset || "eth") === activeSnapshotAsset ? latestBoxHold : null);
+// 2026-10-16 박스 유지 확률(dashboard/box_hold.py · 방향 아님) -- 2026-11-21 사용자 «서빙을 끈다»: 11-14 부터 차트에 안 그리는데(BOX_ON_CHART)
+//   20초마다 /api/box-hold 를 묻던 것과 서버 라우트를 뺐다. 아래 그리기 코드는 BOX_ON_CHART 로 죽어 있다 -- 되살리려면 묻기·라우트부터(git log).
+const boxNow = () => null;
 const BOX_ON_CHART = false;   // 2026-10-16 사용자 «B로 배포» → 10-26 미래 칸 상자(renderCandleSvg «미래 상자») → 2026-11-14 펜 메모 «캔들 오른쪽 변동성 박스와 차트는 안 본다 · 제거 · 오른쪽 빈 칸 끌기는 그대로»: 미래 칸 상자·가격 경로(E2)·옵션 부채꼴 셋 다 끔(되살리려면 true)
 const BOX_STALE_MS = 180e3;   // 10-16 리뷰: 기준가가 3분 넘게 묵으면 «지연»·차트 선 숨김(30분 박스는 3분 뒤 9%가 이미 깨져 있다)
-async function refreshBoxHold() {
-  if (activePageTab !== "snapshot" || document.hidden || !BOX_ASSETS.has(activeSnapshotAsset)) return;
-  const now = Date.now();
-  if (now - boxHoldLastFetchAt < 20000 && (latestBoxHold?.asset || "eth") === activeSnapshotAsset) return;   // 서버 15초 캐시와 맞춤 · 코인을 바꾸면 바로
-  boxHoldLastFetchAt = now;
-  try {
-    const res = await fetch(`/api/box-hold?asset=${activeSnapshotAsset}`, { cache: "no-cache" });
-    if (res.ok) latestBoxHold = await res.json();
-  } catch (error) { /* 다음 주기 -- 묵으면 BOX_STALE_MS 가 «지연»으로 드러낸다 */ }
-}
 const BOX_NM = { "30m": "30분", "1h": "1시간", "4h": "4시간" };
 // 상태: 묵음(stale) · 이미 벗어남(out, 실시간 가격이 띠 밖) · 깨질 쪽(brk, 학습 예측 하위 20%) · 머물 쪽(hold, 상위 20%) · 보통
 function boxState(b, s) {
@@ -11591,7 +11578,6 @@ async function tick() {
       refreshVol4h();                // 2026-10-15 ⑤ 예측 판 4h 변동성 (5분, ETH)
       refreshDir4h();                // 2026-10-15 ⑤ 예측 판 4h 방향 (2분, ETH·SOL·XRP · 서버 5분 캐시)
       refreshDirShort();             // 2026-10-28 ⑤ 예측 판 15분·1시간 방향 (1분, ETH·BTC·SOL·XRP · 서버 5분 캐시)
-      refreshBoxHold();              // 2026-10-16 박스 유지 확률 (1분, ETH · 방향 아님)
       refreshOpenRev();              // 2026-10-16 ⑤ 종합의 09시 개장 되돌림 (2분, ETH)
       refreshMarketCtx();            // 2026-09-29 시장 맥락 카드 (1초 -- 10-03, ETH 만 · 서술)
       renderPaper();                 // 2026-10-31 #mcWall 지지·저항 서랍(옛 10초 모의 엔진 폴링 자리 -- 엔진 중단으로 폴링은 뺐다)
