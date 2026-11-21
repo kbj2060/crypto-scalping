@@ -27,6 +27,7 @@ setInterval(() => {
     const b = { ...(m0.order || {}) };
     const mm = (k, a) => { if (!a.length) return; const s = [...a].sort((x, y) => x - y); b[`${k}_n`] = s.length; b[`${k}_med_ms`] = Math.round(s[s.length >> 1]); b[`${k}_max_ms`] = Math.round(s[s.length - 1]); };
     mm("fp", m0.fp); mm("px", m0.px);
+    Object.assign(b, rtReport(rtM, Date.now()));   // 2026-11-21 rtcore /rt 그림자(ensureRtStream)
     if (m0.longtask) b.longtask_n = m0.longtask;
     m0.order = null; m0.fp = []; m0.px = []; m0.longtask = 0;
     if (!Object.keys(b).length) return;
@@ -4710,7 +4711,9 @@ function ensureLiveStream() {
   es.addEventListener("supply", (ev) => {
     if (es !== liveStream) return;                   // 닫힌(옛 코인) 스트림의 늦은 메시지
     liveStreamAt = Date.now();
-    try { applySupply1s(JSON.parse(ev.data)); } catch (e) { console.error("stream supply:", e); return; }
+    let p;
+    try { p = JSON.parse(ev.data); applySupply1s(p); } catch (e) { console.error("stream supply:", e); return; }
+    try { rtSse(rtM, p, Date.now()); } catch (e) { /* rt 그림자 재기 -- 실패해도 그리기는 그대로 */ }
     repaintSupply1sPanel();
   });
   es.addEventListener("situation", (ev) => {
@@ -4722,6 +4725,66 @@ function ensureLiveStream() {
   //   (막힌 환경에서 틱마다 실패를 반복하지 않게. 그동안은 폴링이 받는다).
   es.onerror = () => {
     if (liveStream === es) { es.close(); liveStream = null; liveStreamRetryAt = Date.now() + 5000; }
+  };
+}
+
+// 2026-11-21 rtcore 허브(/rt) «그림자» 구독(docs/rtcore_design_20261120.md §5-4 · M1) -- 받은 것으로 **그리지 않는다**, 재기만 해서 M0 보고에 싣는다:
+//   lat = rt 메시지의 거래소 시각(ex_ms) → 브라우저 받은 시각 · cmp/bad = 같은 닫힌 초의 1초 수급이 SSE(/api/stream supply)와 같은가 ·
+//   lead = 같은 초를 SSE 가 rt 보다 늦게 받은 ms(양수 = rt 가 먼저) · fail/reconn = 붙기 전 실패 · 받다가 끊김.
+//   Cloudflare /rt 규칙이 없으면 404 로 실패한다 -- 5초에서 두 배씩 60초까지 쉬어 콘솔·네트워크를 도배하지 않는다.
+const rtM = { lat: [], cmp: 0, bad: 0, lead: [], fail: 0, reconn: 0, rt: new Map(), sse: new Map() };
+let rtWs = null, rtKey = "", rtRetryAt = 0, rtFails = 0;
+function rtSeen(m, src, rows, now) {   // 닫힌 초 [초, 7칸] -- 같은 초가 다시 오면(늦은 체결) 값만 갈고 첫 도착 시각은 둔다
+  const map = m[src];
+  for (const r of rows || []) {
+    if (!Array.isArray(r) || r.length !== 8) continue;
+    const old = map.get(r[0]);
+    map.set(r[0], { v: r.slice(1).join(","), at: old ? old.at : now });
+  }
+  if (map.size > 1500) for (const k of [...map.keys()].sort((a, b) => a - b).slice(0, map.size - 1500)) map.delete(k);
+}
+function rtMeasure(m, msg, now) {
+  if (!msg || typeof msg !== "object") return;
+  if (msg.type !== "snapshot" && msg.ex_ms > 0 && m.lat.length < 2000) m.lat.push(now - msg.ex_ms);
+  rtSeen(m, "rt", msg.type === "snapshot" ? (msg.supply || {}).seconds : msg.type === "supply1s" ? msg.seconds : null, now);
+}
+function rtSse(m, payload, now) { rtSeen(m, "sse", (payload || {}).seconds, now); }
+// 둘 다 받은 지 10초 넘은 초를 견주고 지운다(한쪽만 늦게 온 초를 «어긋남»으로 세지 않게) · 2분 넘게 한쪽에만 있는 초는 버린다. 보고 칸을 돌려주고 비운다.
+function rtReport(m, now) {
+  for (const [s, a] of m.rt) {
+    const b = m.sse.get(s);
+    if (b && now - Math.max(a.at, b.at) > 10000) {
+      m.cmp++; if (a.v !== b.v) m.bad++;
+      if (m.lead.length < 2000) m.lead.push(b.at - a.at);
+      m.rt.delete(s); m.sse.delete(s);
+    } else if (!b && now - a.at > 120000) m.rt.delete(s);
+  }
+  for (const [s, b] of m.sse) if (!m.rt.has(s) && now - b.at > 120000) m.sse.delete(s);
+  const out = {};
+  const q = (k, a, p99) => { if (!a.length) return; const s = [...a].sort((x, y) => x - y); out[`${k}_n`] = s.length; out[`${k}_med_ms`] = Math.round(s[s.length >> 1]); if (p99) out[`${k}_p99_ms`] = Math.round(s[Math.min(s.length - 1, Math.floor(s.length * 0.99))]); };
+  q("rt_lat", m.lat, true); q("rt_lead", m.lead, false);
+  if (m.cmp) { out.rt_cmp_n = m.cmp; out.rt_bad_n = m.bad; }
+  if (m.fail) out.rt_fail_n = m.fail;
+  if (m.reconn) out.rt_reconn_n = m.reconn;
+  m.lat = []; m.lead = []; m.cmp = 0; m.bad = 0; m.fail = 0; m.reconn = 0;
+  return out;
+}
+function ensureRtStream() {
+  const key = activePageTab === "snapshot" && !document.hidden && flowOn() ? activeSnapshotAsset : "";
+  if (rtWs && key !== rtKey) { rtWs.onclose = null; rtWs.close(); rtWs = null; rtM.rt.clear(); rtM.sse.clear(); }   // 숨김·코인 바뀜 -- 셈에 안 넣는다
+  if (!key || rtWs || Date.now() < rtRetryAt || typeof WebSocket !== "function") return;
+  rtKey = key;
+  let ws, got = false;
+  try { ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/rt`); } catch (e) { rtM.fail++; rtRetryAt = Date.now() + 60000; return; }
+  rtWs = ws;
+  ws.onopen = () => { try { ws.send(JSON.stringify({ subscribe: [ASSET_CONFIG[key].symbol.toLowerCase()] })); } catch (e) { /* 닫힘이 뒤따른다 */ } };
+  ws.onmessage = (ev) => { if (ws !== rtWs) return; got = true; rtFails = 0; try { rtMeasure(rtM, JSON.parse(ev.data), Date.now()); } catch (e) { /* 재기만 한다 */ } };
+  ws.onclose = () => {
+    if (ws !== rtWs) return;
+    rtWs = null;
+    if (got) { rtM.reconn++; rtRetryAt = Date.now() + 5000; return; }
+    rtM.fail++; rtFails++;
+    rtRetryAt = Date.now() + Math.min(60000, 5000 * 2 ** (rtFails - 1));
   };
 }
 
@@ -11508,6 +11571,7 @@ async function tick() {
   tickInFlight = true;
   try {
     ensureLiveStream();              // 2026-09-24 수급·상황 밀어주기 (탭/코인/가시성 변화가 여기로 수렴)
+    ensureRtStream();                // 2026-11-21 rtcore /rt 그림자 구독(재기만 -- 그리지 않는다)
     refreshNotifyCenter();           // 2026-10-05 종 옆 점(판정일·새 알림) -- 탭과 무관 (자체 5분 게이트)
     // 2026-11-02 탭이 스냅샷 하나뿐이라 가드는 사실상 항상 참 -- 폴링을 멈추는 건 document.hidden(위)이다.
     if (activePageTab === "snapshot") {
@@ -11569,6 +11633,7 @@ document.addEventListener("visibilitychange", () => {
     disconnectDashboardEvents();
     ensurePriceWs();   // 숨으면 닫는다 -- 백그라운드 탭이 초당 수백 메시지를 받을 이유가 없다
     ensureLiveStream();
+    ensureRtStream();
     return;
   }
   connectDashboardEvents();

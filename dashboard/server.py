@@ -5095,7 +5095,10 @@ async def stop_loop_watch(app: web.Application) -> None:
 # 2026-11-20 M0 화면 시간 보고(app.js 가 60초마다 값이 있을 때만). 받으면 client_timing 한 줄 찍고 끝(저장 없음).
 #   공개 터널로 닿는 신뢰 경계다 -- 본문 1KB 상한 · 아는 키만 · 숫자만(유한·|v|≤1e7) · sym/kind 는 허용 목록 · 전체 0.2초에 한 줄.
 CLIENT_TIMING_NUM = {"order_rtt_ms", "order_srv_ms", "order_net_ms", "fp_n", "fp_med_ms", "fp_max_ms",
-                     "longtask_n", "px_n", "px_med_ms", "px_max_ms"}
+                     "longtask_n", "px_n", "px_med_ms", "px_max_ms",
+                     # 2026-11-21 rtcore /rt 그림자 구독(app.js ensureRtStream · rtReport) -- 지연·SSE 와 값 일치·먼저 받은 쪽·실패 횟수
+                     "rt_lat_n", "rt_lat_med_ms", "rt_lat_p99_ms", "rt_lead_n", "rt_lead_med_ms", "rt_cmp_n", "rt_bad_n",
+                     "rt_fail_n", "rt_reconn_n"}
 _client_timing_at = [0.0]
 
 
