@@ -4,6 +4,7 @@
 //! 환경변수(기본값):
 //!   RT_REGIME_OUT     data/live/rt_regime_band   regime_band_forward.jsonl · _scored.jsonl · _summary.json. 🔴data/live(= 파이썬 크론 자리)면 종료코드 2(전환 때만 RT_REGIME_TAKEOVER=1)
 //!   RT_REGIME_MODEL   <RT_REGIME_OUT>/regime_band.json   (python rtmodel/tools/export_regime.py)
+//!   RT_REGIME_SRC_DIR (있으면) 원본 joblib 디렉터리 -- 그 joblib 이 모델 JSON 보다 새것이면(재학습 뒤 내보내기 안 함) 아무것도 안 쓰고 종료코드 1
 //!   RT_REGIME_REST    https://fapi.binance.com
 //!   RT_SR_BAN_FILE    data/live/binance_ban_until   (밴 중이면 보내지 않고 실패)
 //!   RT_REGIME_NOW_MS  (시험만) 고정 시각
@@ -51,7 +52,13 @@ fn main() {
         die(2, &format!("🔴{} 는 파이썬 크론의 기록 자리다(regime_band_forward*) -- 그림자는 다른 경로에(기본 data/live/rt_regime_band). 전환이면 RT_REGIME_TAKEOVER=1", out.display()));
     }
     let model = PathBuf::from(env("RT_REGIME_MODEL", &out.join("regime_band.json").to_string_lossy()));
-    let b = read_json::<Value>(&model).and_then(|v| Bundle::from_json(&v)).unwrap_or_else(|e| die(2, &format!("모델: {e} -- python rtmodel/tools/export_regime.py")));
+    let mj = read_json::<Value>(&model).unwrap_or_else(|e| die(2, &format!("모델: {e} -- python rtmodel/tools/export_regime.py")));
+    if let Ok(d) = std::env::var("RT_REGIME_SRC_DIR") {
+        if let Some(why) = rtmodel::model_stale(&model, &mj, Path::new(&d)) {
+            die(1, &format!("FAIL {why}")); // 원본과 다른 값을 기록하지 않는다
+        }
+    }
+    let b = Bundle::from_json(&mj).unwrap_or_else(|e| die(2, &format!("모델: {e}")));
     let now: i64 = std::env::var("RT_REGIME_NOW_MS").ok().map_or_else(|| (wall() * 1000.0) as i64, |v| v.parse().unwrap_or_else(|_| die(2, "RT_REGIME_NOW_MS")));
     let (base, ban) = (env("RT_REGIME_REST", "https://fapi.binance.com"), PathBuf::from(env("RT_SR_BAN_FILE", "data/live/binance_ban_until")));
     let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(20))).http_status_as_error(false).proxy(None).build().into();

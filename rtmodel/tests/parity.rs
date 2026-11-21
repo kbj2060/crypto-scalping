@@ -123,3 +123,22 @@ fn parity() {
     let got: Vec<Option<f64>> = fx.qx4i.iter().map(|q| Some(iso.p(g(q[0]).unwrap(), g(q[1]), g(q[2]).unwrap()))).collect();
     compare("QX4I 4h 등조", &got, &fx.qx4i.iter().map(|q| g(q[3])).collect::<Vec<_>>());
 }
+
+/// model_stale: 원본 joblib 이 JSON 보다 새것이면(재학습 뒤 내보내기 안 함) 사유 · 없으면 사유 · 아니면 None.
+#[test]
+fn model_stale_rule() {
+    use std::time::{Duration, SystemTime};
+    let d = std::env::temp_dir().join(format!("rt_stale_{}", std::process::id()));
+    std::fs::create_dir_all(&d).unwrap();
+    let (j, src) = (d.join("m.json"), d.join("m.joblib"));
+    let v: serde_json::Value = serde_json::json!({"source": "m.joblib", "dir": {"source": "m.joblib"}});
+    std::fs::write(&j, "{}").unwrap();
+    assert!(rtmodel::model_stale(&j, &v, &d).unwrap().contains("원본 없음"));
+    std::fs::write(&src, "x").unwrap();
+    let t0 = SystemTime::now() - Duration::from_secs(100);
+    std::fs::File::options().write(true).open(&src).unwrap().set_modified(t0).unwrap();
+    assert_eq!(rtmodel::model_stale(&j, &v, &d), None, "JSON 이 더 새것 = 신선");
+    std::fs::File::options().write(true).open(&src).unwrap().set_modified(SystemTime::now() + Duration::from_secs(5)).unwrap();
+    assert!(rtmodel::model_stale(&j, &v, &d).unwrap().contains("모델 낡음"));
+    let _ = std::fs::remove_dir_all(&d);
+}

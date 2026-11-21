@@ -191,6 +191,33 @@ struct Header {
     sklearn: String,
 }
 
+/// 재학습 뒤 내보내기를 안 한 모델 JSON 인가(2026-11-21 · 옛 JSON 으로 조용히 원본과 다른 값을 내지 않게).
+/// JSON 의 "source"·"sources"(한 단계 안 객체의 "source" 도) = 원본 joblib 이름 → src_dir 의 그 파일이 JSON 보다 나중에 바뀌었거나 없으면 사유.
+pub fn model_stale(json: &Path, v: &serde_json::Value, src_dir: &Path) -> Option<String> {
+    let mut names: Vec<String> = vec![];
+    let mut take = |x: &serde_json::Value| match x {
+        serde_json::Value::String(s) => names.push(s.clone()),
+        serde_json::Value::Array(a) => names.extend(a.iter().filter_map(|s| s.as_str().map(str::to_string))),
+        _ => {}
+    };
+    take(&v["source"]);
+    take(&v["sources"]);
+    if let Some(o) = v.as_object() {
+        for x in o.values() {
+            take(&x["source"]);
+        }
+    }
+    let jm = std::fs::metadata(json).and_then(|m| m.modified()).ok()?;
+    for n in names {
+        match std::fs::metadata(src_dir.join(&n)).and_then(|m| m.modified()) {
+            Err(_) => return Some(format!("모델 원본 없음: {}", src_dir.join(&n).display())),
+            Ok(t) if t > jm => return Some(format!("모델 낡음: {n} 이 {} 보다 새것(재학습 뒤 내보내기 안 함 -- rtmodel/tools/export_*.py)", json.display())),
+            _ => {}
+        }
+    }
+    None
+}
+
 pub fn read_json<T: for<'de> Deserialize<'de>>(p: &Path) -> Result<T, String> {
     let s = std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?;
     if let Ok(h) = serde_json::from_str::<Header>(&s) {
