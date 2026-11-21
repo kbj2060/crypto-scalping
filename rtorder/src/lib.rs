@@ -7,6 +7,7 @@
 //! 규칙 추적표: rtorder/RULES.md.
 
 pub mod account;
+pub mod app;
 pub mod assemble;
 pub mod bracket;
 pub mod coreval;

@@ -1,10 +1,135 @@
 //! 실시간 코어(rtcore) 값 → rtorder 자리(2026-11-21 · 좁은 판: rtcore 를 의존성으로 넣지 않고 **값의 모양**만 받는다).
 //! 모양 = rtcore/src/quote.rs·proto.rs: `book_ticker` = (REST 꼴 dict {symbol, bidPrice, askPrice} 글자 그대로, 받은 시각 µs) ·
 //! `vol_bpm`(마감 1분봉 31개 전엔 None) + `kline_rx_us` · `bar5m` = (끝 초, 종가) · 1초 가격 = (초, 가격).
-//! 구독 연결·path 의존성은 다음 조각.
+//! 2026-11-21 E: 실제 구독(`subscribe`) -- rtcore 허브(ws://127.0.0.1:8788/rt · 첫 메시지 `{"subscribe":[..]}` → 심볼마다 스냅숏 → 사건 밀기)를 읽어 `Feed` 에 모은다.
+//!   rtcore 를 의존성으로 넣지 않고 JSON 모양만 읽는다(proto 는 «더하기만» -- 모르는 칸·모르는 type 은 무시).
+//!   주문 심볼(…USDC): book(bid_s·ask_s + rx_us) · kline(vol_bpm + rx_us) · 화면 심볼(…USDT): 1초 수급 seconds(가격 = 행[7]) · kline bar5m · 스냅숏 quote(bar5m·vol_bpm·kline_rx_us).
+//!   끊기면 값은 그대로 두고 나이만 먹는다 -- `Cached` 가 한도를 넘기면 REST 로 떨어진다 · 다시 붙으면 스냅숏으로 다시 채운다.
 
 use crate::assemble::{Cached, Quotes};
+use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+/// 허브에서 받아 둔 값(심볼은 대문자). secs = 화면 심볼의 1초 마지막 체결가 [(초, 가격)] -- 초 단위로 덮어쓴다 · 최근 SEC_KEEP 초만.
+#[derive(Debug, Default)]
+pub struct Feed {
+    pub books: HashMap<String, (Value, i64)>,
+    pub vols: HashMap<String, (Option<f64>, i64)>,
+    pub bar5m: HashMap<String, (i64, f64)>,
+    pub secs: HashMap<String, Vec<(i64, f64)>>,
+    pub connected: bool,
+    pub connects: u64,
+}
+pub const SEC_KEEP: i64 = 1800; // 감시 1초 닿음은 무장 뒤만 본다 -- 30분이면 넉넉(ponytail: 더 길게 쉬면 그 사이는 «모름»)
+
+impl Feed {
+    /// 허브 메시지 하나(Stamped JSON)를 반영한다.
+    pub fn apply(&mut self, m: &Value) {
+        let sym = m.get("s").and_then(Value::as_str).unwrap_or("").to_uppercase();
+        let rx = m.get("rx_us").and_then(Value::as_i64).unwrap_or(0);
+        match m.get("type").and_then(Value::as_str) {
+            Some("book") => self.book(&sym, m, rx),
+            Some("kline") => {
+                self.vols.insert(sym.clone(), (m.get("vol_bpm").and_then(Value::as_f64), rx));
+                if let Some(b) = pair(m.get("bar5m")) {
+                    self.bar5m.insert(sym, b);
+                }
+            }
+            Some("supply1s") => self.seconds(&sym, m.get("seconds")),
+            Some("snapshot") => {
+                if let Some(b) = m.get("book").filter(|b| b.is_object()) {
+                    self.book(&sym, b, b.get("rx_us").and_then(Value::as_i64).unwrap_or(0));
+                }
+                if let Some(q) = m.get("quote").filter(|q| q.is_object()) {
+                    let krx = q.get("kline_rx_us").and_then(Value::as_i64).unwrap_or(0);
+                    self.vols.insert(sym.clone(), (q.get("vol_bpm").and_then(Value::as_f64), krx));
+                    if let Some(b) = pair(q.get("bar5m")) {
+                        self.bar5m.insert(sym.clone(), b);
+                    }
+                }
+                self.seconds(&sym, m.get("supply").and_then(|s| s.get("seconds")));
+            }
+            _ => {}
+        }
+    }
+    fn book(&mut self, sym: &str, b: &Value, rx: i64) {
+        let g = |k: &str| b.get(k).and_then(Value::as_str).filter(|s| !s.is_empty()).map(String::from);
+        // 글자 칸(bid_s·ask_s)이 없는 옛 코어 = 받아 두지 않는다(REST 와 같은 글자 꼴을 못 맞춘다 -- 조용히 숫자 표기로 바꾸지 않는다)
+        if let (Some(bid), Some(ask)) = (g("bid_s"), g("ask_s")) {
+            self.books.insert(sym.into(), (json!({"symbol": sym, "bidPrice": bid, "askPrice": ask}), rx));
+        }
+    }
+    fn seconds(&mut self, sym: &str, rows: Option<&Value>) {
+        let Some(rows) = rows.and_then(Value::as_array) else { return };
+        let v = self.secs.entry(sym.into()).or_default();
+        for r in rows {
+            if let (Some(t), Some(px)) = (r.get(0).and_then(Value::as_i64), r.get(7).and_then(Value::as_f64)) {
+                match v.binary_search_by_key(&t, |x| x.0) {
+                    Ok(i) => v[i].1 = px,
+                    Err(i) => v.insert(i, (t, px)),
+                }
+            }
+        }
+        if let Some(&(last, _)) = v.last() {
+            v.retain(|x| x.0 > last - SEC_KEEP);
+        }
+    }
+}
+
+fn pair(v: Option<&Value>) -> Option<(i64, f64)> {
+    let a = v?.as_array()?;
+    Some((a.first()?.as_i64()?, a.get(1)?.as_f64()?))
+}
+
+/// 받아 둔 값 → `Cached`(나이는 rx_us). 감시 틱·조립 앞에서 부른다.
+pub fn sync_cached<Q: Quotes>(f: &Feed, c: &mut Cached<Q>) {
+    for (s, (b, rx)) in &f.books {
+        put_book(c, s, b.clone(), *rx);
+    }
+    for (s, (v, rx)) in &f.vols {
+        put_vol(c, s, *v, *rx);
+    }
+}
+
+/// `subscribe` 를 tokio::spawn 으로 띄울 때(주소를 소유).
+pub async fn subscribe_owned(url: String, feed: Arc<Mutex<Feed>>, stop: Arc<AtomicBool>) {
+    subscribe(&url, feed, stop).await
+}
+
+/// 허브 구독 루프: 붙고 → 구독 보내고 → 받는 대로 `Feed` 에. 끊기면 1·2·4…30초 뒤 다시(stop 이 서면 끝).
+pub async fn subscribe(url: &str, feed: Arc<Mutex<Feed>>, stop: Arc<AtomicBool>) {
+    let symbols = ["ethusdc", "ethusdt", "solusdc", "solusdt", "xrpusdc", "xrpusdt", "btcusdc", "btcusdt", "soxlusdt", "sndkusdt"];
+    let mut wait = 1.0f64;
+    while !stop.load(Ordering::SeqCst) {
+        if let Ok((mut ws, _)) = tokio_tungstenite::connect_async(url).await {
+            let sub = json!({"subscribe": symbols}).to_string();
+            if ws.send(tokio_tungstenite::tungstenite::Message::Text(sub.into())).await.is_ok() {
+                {
+                    let mut f = feed.lock().unwrap();
+                    f.connected = true;
+                    f.connects += 1;
+                }
+                wait = 1.0;
+                while let Some(Ok(m)) = ws.next().await {
+                    if let tokio_tungstenite::tungstenite::Message::Text(t) = m {
+                        if let Ok(v) = serde_json::from_str::<Value>(t.as_str()) {
+                            feed.lock().unwrap().apply(&v);
+                        }
+                    }
+                    if stop.load(Ordering::SeqCst) {
+                        break;
+                    }
+                }
+            }
+            feed.lock().unwrap().connected = false;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs_f64(wait)).await;
+        wait = (wait * 2.0).min(30.0);
+    }
+}
 
 fn sec(us: i64) -> f64 {
     us as f64 / 1e6

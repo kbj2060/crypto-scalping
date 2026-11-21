@@ -364,7 +364,7 @@ pub async fn replay(chs: &[Chain], symbol: &str, dir: &Path, exact: bool, secret
                 desk.w.entry = slot;
             }
             Some("exit") => {
-                // 청산 접수(원본 settle(run_exit | exit_then_rearm)) -- ⚠원본 정답지 없음(전체 흐름 정답지는 entry·tick 만)
+                // 청산 접수(원본 settle(run_exit | exit_then_rearm)) -- `ff` «팝업 청산 50% → 익절 다시 → 100%»
                 let plan = st.get("plan").cloned().unwrap_or(Value::Null);
                 let mut slot = std::mem::take(&mut desk.w.entry);
                 let tt = t.clone();

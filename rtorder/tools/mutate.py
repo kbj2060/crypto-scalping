@@ -179,6 +179,17 @@ EIGHT = [  # 그림자 실행(C): 전송 계층 막이 · 재생 도구
     ("shadow_replay", "실제 주소도 그림자 아님으로 시작", H, "shadow: !loopback(base) }", "shadow: false }"),
     ("shadow_replay", "재생 정규화가 수량까지 지움", "src/shadow.rs", '!kv.starts_with("signature="))', '!kv.starts_with("signature=") && !kv.starts_with("quantity="))'),
 ]
+NINE = [  # D 실행 파일 뼈대 · E 허브 구독
+    ("app_run", "그림자인데 손절 함수가 쓰기를 보냄(막이까지 감 → panic)", "src/app.rs", "        if self.bx.is_shadow() {\n            self.would.lock().unwrap().push(what);\n            return true;", "        if false {\n            self.would.lock().unwrap().push(what);\n            return true;"),
+    ("app_run", "시작 복구(wait_cleanup) 빠짐", "src/app.rs", "    if let Err(e) = w.wait_cleanup(&mut io).await {", "    if let Err(e) = Ok::<(), String>(()) {"),
+    ("app_run", "파이썬 서버 폴더도 받음", "src/app.rs", 'if dir.join("order_requests.jsonl").exists() {', "if false {"),
+    ("app_run", "SIGTERM 무시", "src/bin/rtorder.rs", "            sig.stop();", ""),
+    ("hub_feed", "끊김을 모름", "src/coreval.rs", "            feed.lock().unwrap().connected = false;", ""),
+    ("hub_feed", "다시 붙지 않음", "src/coreval.rs", "        tokio::time::sleep(std::time::Duration::from_secs_f64(wait)).await;\n        wait", "        return;\n        #[allow(unreachable_code)]\n        wait"),
+    ("hub_feed", "변동성 None 도 받아 둠(REST 로 안 떨어짐)", "src/coreval.rs", "        None => {\n            c.vol.remove(symbol);\n        }", "        None => {\n            c.vol.insert(symbol.into(), (None, sec(kline_rx_us)));\n        }"),
+    ("hub_feed", "1초가 열을 [6] 으로", "src/coreval.rs", "r.get(7).and_then(Value::as_f64)", "r.get(6).and_then(Value::as_f64)"),
+    ("flow_fixture", "부분 청산 뒤 익절 다시 걸기 빠짐(재생 op=exit)", "src/shadow.rs", "                    let _ = desk.w.partial_exit_rearm_tp(&mut io, plan.as_object().cloned().unwrap_or_default(), &mut slot).await;", ""),
+]
 WIRE = [  # wire_e2e(감시 → 계좌 → 조립 → 집행)로 잡혀야 한다
     ("스트림 계좌를 쓸 수 있어도 REST 로 읽음", A_, 'Ok(v) => Ok((v, "stream")),', 'Ok(_) => Ok((book.produce(rest).await?, "stream")),'),
     ("감시 청산 조립이 for_order=True(원본은 화면 조회까지 함)", "src/wire.rs", "pside, fraction, true, asset, false, Some(only_symbol)", "pside, fraction, true, asset, true, Some(only_symbol)"),
@@ -213,7 +224,7 @@ def main() -> int:
             ok = r.returncode != 0
             caught, total = caught + ok, total + 1
             print(f"{'잡음' if ok else '🔴못 잡음'} | {test} | {name} | {', '.join(failed)[:110]}", flush=True)
-    for grp, lst in (("six", SIX), ("seven", SEVEN), ("eight", EIGHT)):
+    for grp, lst in (("six", SIX), ("seven", SEVEN), ("eight", EIGHT), ("nine", NINE)):
       if not only or only == grp:
         for test, name, f, a, b in lst:
             shutil.rmtree(W, ignore_errors=True)
