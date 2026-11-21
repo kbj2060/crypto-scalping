@@ -1,4 +1,5 @@
 // 추가 진입(물타기) 레버리지 고정 + 자동 고정 배수(2026-10-13 20→10) 검증 (2026-09-20).
+// 2026-11-21 플로팅 주문 패널 제거: 배수의 원천이 #snapLevGauge·#snapLevAuto 에서 SLTP 선 도구의 lineLevAuto·lineLev 로 옮겼다.
 // 🔴여기는 실주문 경로다. 미리보기 쿼리와 실주문이 **같은 값**을 써야 한다 -- 따로 두면
 // «화면은 20배인데 주문은 모델값»이 된다(이 저장소가 여러 번 겪은 파리티 사고의 모양).
 //   node test/manual_leverage_lock_20260920.js
@@ -6,18 +7,17 @@ const fs = require("fs");
 const src = fs.readFileSync("dashboard/live/app.js", "utf8");
 const grab = (re, what) => { const m = src.match(re); if (!m) { console.log(`🔴 못 찾음: ${what}`); process.exit(1); } return m[0]; };
 
-const PRE = grab(/const manualLevAuto = [^\n]*\n/, "manualLevAuto")
-  + grab(/function manualLevValue\(\) \{[\s\S]*?\n\}\n/, "manualLevValue")
-  + grab(/const MANUAL_LEV_AUTO = \d+;/, "MANUAL_LEV_AUTO") + "\n"
+const PRE = grab(/const MANUAL_LEV_AUTO = \d+;/, "MANUAL_LEV_AUTO") + "\n"
   + grab(/const manualLevLocked = \(\) => \{[\s\S]*?\n\};\n/, "manualLevLocked")
   + grab(/function manualLevEffective\(\) \{[\s\S]*?\n\}\n/, "manualLevEffective")
   + grab(/const manualLevQuery = \(\) => \{[\s\S]*?\n\};\n/, "manualLevQuery");
 
+grab(/let lineLevAuto = true, lineLev = 10, lineLevMax = 50;/, "lineLev 상태(기본 자동 10배)");
+// 선 도구 슬라이더 처리기가 쓰는 5단위 맞춤(.lt-lv-r input) -- 같은 식을 여기서 돌린다
+const SNAP = grab(/lineLev = Math\.max\(5, Math\.round\(\(Number\(e\.target\.value\) \|\| 5\) \/ 5\) \* 5\);/, "슬라이더 5단위 맞춤");
 function run({ posLev, auto, gauge }) {
-  global.el = (id) => id === "snapLevAuto" ? { checked: auto }
-    : id === "snapLevGauge" ? { value: String(gauge) } : null;
   global.snapshotAccountPosition = () => (posLev ? { leverage: posLev } : null);
-  return eval(PRE + "[manualLevEffective(), manualLevQuery()];");
+  return eval(`let lineLevAuto = ${auto}, lineLev = 10; const e = { target: { value: ${gauge} } }; ${SNAP}\n` + PRE + "[manualLevEffective(), manualLevQuery()];");
 }
 
 let ok = true;
@@ -40,7 +40,7 @@ eq("신규 · 수동 게이지 37   ", run({ posLev: 0, auto: false, gauge: 37 }
 if (!/lev: (ov\?\.lev \?\? )?manualLevEffective\(\)/.test(src)) {   // 10-13: 재시도 덮어쓰기(ov.lev) 뒤에 같은 함수
   console.log("🔴 실주문 pending 이 manualLevEffective 를 안 쓴다 -- 미리보기와 어긋난다"); ok = false;
 } else console.log("✅ 실주문 pending 도 manualLevEffective");
-if (/manualLevAuto\(\) \? (null|"")/.test(src)) {
+if (/lineLevAuto \? (null|"")/.test(src)) {
   console.log("🔴 «자동이면 안 보낸다» 분기가 남았다 -- 서버가 모델값으로 떨어진다"); ok = false;
 } else console.log("✅ «자동이면 안 보낸다» 분기 없음");
 

@@ -454,11 +454,11 @@ function lineToolToggle(want) {   // 2026-10-30 사용자 «롱만 나오고 숏
   }
   renderLineTool(); linePreview(); lineToolReveal();
 }
-function lineToolReveal() {   // 2026-11-05 모바일: 플롯 아래 주문 상자가 탭바·플로팅 버튼 뒤로 밀리면 그만큼만 올려 보인다(플롯은 화면에 남긴다)
+function lineToolReveal() {   // 2026-11-05 모바일: 플롯 아래 주문 상자가 탭바 뒤로 밀리면 그만큼만 올려 보인다(플롯은 화면에 남긴다) · 2026-11-21 플로팅 버튼 몫(72px)을 빼고 8px 숨 쉴 자리만
   if (!isMobileChartMode()) return;
   const tk = document.querySelector("#lineTool:not([hidden]) .lt-tk");
   if (!tk) return;
-  const r = tk.getBoundingClientRect(), rail = el("cardRail"), tb = rail && !rail.hidden ? rail.offsetHeight : 0, over = r.bottom - (innerHeight - tb - 72);
+  const r = tk.getBoundingClientRect(), rail = el("cardRail"), tb = rail && !rail.hidden ? rail.offsetHeight : 0, over = r.bottom - (innerHeight - tb - 8);
   if (over > 0) scrollBy({ top: Math.min(over, Math.max(0, r.top - 400)), behavior: "smooth" });
 }
 // 2026-11-05 사용자 «SOXL 주문인데 계좌·SLTP 가능 금액이 안 맞는다» -- 단일자산 모드는 USDC·USDT 증거금 풀이 따로다: 이 코인 주문 심볼의 견적 자산 풀을 쓴다(서버 balances). 옛 응답(balances 없음)은 balance 그대로.
@@ -12217,7 +12217,7 @@ function manualEntryStateText(state) {
 let waitHid = "";   // ✕ 로 닫았거나 저절로 접힌 «끝난 대기»(done_at) -- 다음 조회가 같은 결과를 다시 띄우지 않게
 function ordAutoHide(node, onHide) {
   clearTimeout(node._ah);
-  if (node.hidden || node.querySelector(".bad") || /🔴|⚠/.test(node.textContent)) return;
+  if (node.hidden || node.matches(".bad") || node.querySelector(".bad") || /🔴|⚠/.test(node.textContent)) return;
   const h = node.innerHTML;
   node._ah = setTimeout(() => { if (node.innerHTML === h) { node.hidden = true; onHide?.(); } }, 10000);
 }

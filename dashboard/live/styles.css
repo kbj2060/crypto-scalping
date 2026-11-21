@@ -374,10 +374,6 @@ body {
 .ops-health-row.warn .ops-health-status-badge { color: var(--on-fill); background: var(--amber); border-color: transparent; }
 .ops-health-row.bad .ops-health-status-badge { color: var(--on-fill); background: var(--bad); border-color: transparent; }
 
-/* **강조** 가 실제 굵기로 나온다(2026-09-16). color 는 «자세히» 블록을 위한 것이다 --
-   .signal-detail 본문만 muted(라이트 85,92,108 · 다크 139,145,166)라 색이 실제로 올라간다. 실측으로 확인. */
-.signal-detail b { font-weight: 700; color: var(--text); }
-
 /* 2026-08-25: .ops-health-row.warn is shared markup between the Ops tab's health checklist and the
    Snapshot tab's model-indicator/evidence-signal rows (renderOpsStatus/renderModelIndicatorList/
    renderEvidenceSignals all emit the same class, no distinguishing modifier -- see app.js). User
@@ -386,37 +382,6 @@ body {
    only inside #snapshotTabPanel via ID specificity rather than editing the shared base rules. */
 #snapshotTabPanel .ops-health-row.warn .ops-health-dot { background: var(--warn); }
 #snapshotTabPanel .ops-health-row.warn .ops-health-status-badge { background: var(--warn); }
-
-/* Per-signal "자세히" expandable detail (model indicators + evidence signals, Snapshot tab).
-   Collapsed by default to keep the live-status view compact; open/closed state is tracked in JS
-   (detailOpenKeys) so it survives the periodic re-render. */
-.detail-toggle {
-  min-height: 24px;   /* 2026-09-21 15px 이었다 -- WCAG 2.5.8 AA */
-  justify-self: start;
-  margin-top: 4px;
-  padding: 0;
-  border: none;
-  background: none;
-  font: 800 11px/1.4 var(--font-mono);
-  letter-spacing: 0.03em;
-  color: var(--accent);
-  cursor: pointer;
-  opacity: 0.8;
-}
-.detail-toggle:hover { opacity: 1; text-decoration: underline; }
-.signal-detail {
-  display: none;
-  margin-top: 6px;
-  padding: 10px 12px;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent);   /* 2026-11-04 비평 P3: 색 막대(side-tab) 대신 가는 테두리 */
-  background: rgb(var(--lift) / 0.03);
-  border-radius: 6px;
-  color: var(--muted);
-  font: 11px/1.65 var(--font-mono);
-  white-space: pre-line;
-  overflow-wrap: anywhere;
-}
-.signal-detail.open { display: block; }
 
 /* Liquidation map panel (2026-08-24) -- price-ladder list, resistance above the current-price row,
    support below, matching how the chart overlay's lines read top-to-bottom. */
@@ -1114,19 +1079,6 @@ svg {
   .ops-health-status-badge,
   .detail-toggle { font-size: 11px; }
 
-  /* "자세히" 토글은 실측 41x14px -- 손가락으로 정확히 누르기 어렵다. 하지만 촘촘한 행 안에
-     있어서 실제 크기를 키우면 줄 높이가 밀린다. 그래서 **보이는 크기는 그대로 두고 탭 영역만**
-     투명 pseudo-element로 44px까지 넓힌다(레이아웃 영향 0).
-     ⚠️getBoundingClientRect()는 이 확장을 못 보므로 rect 기반 감사에는 계속 41x14로 잡힌다 --
-       감사 결과가 아니라 이 주석이 근거다. */
-  .detail-toggle { position: relative; }
-  .detail-toggle::after {
-    content: "";
-    position: absolute;
-    left: 50%; top: 50%;
-    width: 44px; height: 44px;
-    transform: translate(-50%, -50%);
-  }
 }
 
 /* 터치 기기 툴팁 말풍선 (2026-09-07, app.js::setupTouchTooltips). hover가 없는 기기에서만
@@ -1136,7 +1088,6 @@ svg {
    사용자 요청 "텍스트 말고 그래프나 그림으로 바로 알 수 있게" -> 목업 6안 중 C x E 혼합 채택.
    왼쪽 큰 숫자 셋 + 노출 막대, 오른쪽 왕복 손익 막대 + 누적선.
    색은 기존 4색(good/bad/warn/neutral)만 쓴다 -- 새 색을 만들지 않는다(표시 규약 §2). */
-
 
 /* 차트는 배경 없이 칸을 그대로 채운다(사용자 지시). 껍데기가 없으니 위 칩과 아래 주석이
    그대로 차트의 여백 역할을 한다. */
@@ -1299,54 +1250,14 @@ svg {
   .cy-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-/* 2026-09-12 수동 진입(미리보기). 버튼/배지는 기존 .notify-btn/.ops-readonly 를 그대로 쓴다. */
-/* 두 레인. 닫기가 왼쪽 -- 들고 있을 때 제일 급한 동작이다(09-14·09-20 과 같은 이유). */
-.acct-lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--soft-line);
-  margin: 12px -18px 0; }
-.acct-lanes > * { background: var(--panel); padding: 14px 18px 16px; min-width: 0; margin-top: 0;
-  align-content: start; }
-/* 🔴레인은 **항상 둘**이다(2026-09-22 사용자 지시). 포지션 유무로 접으면 진입 레인이
-   왼쪽↔오른쪽을 오가서, 같은 버튼을 매번 다른 자리에서 찾게 된다 -- 스캘핑에서 가장 비싼
-   종류의 흔들림이다. 닫을 게 없을 때는 그 자리에 그 사실을 적는다. */
-.lane-empty { display: none; margin: 0; }
-.acct-lanes > .manual-entry:has(#snapExitRow[hidden]) .lane-empty { display: block; }
-/* 빈 상태는 레인 **세로 중앙**에 둔다(2026-09-22 사용자). 레인은 flex 세로열이라
-   주축이 세로다 -- justify-content 한 줄이면 된다. 옆 진입 레인 높이가 이 칸을 정한다. */
-.acct-lanes > .manual-entry:has(#snapExitRow[hidden]) { justify-content: center; }
-.acct-lanes > .manual-entry:has(#snapExitRow[hidden]) .lane-pact { display: none; }
 /* 숨은 확인 버튼만 든 행이 flex gap 을 두 번 먹어 버튼과 «약속» 사이에 빈 60px 가 남는다.
    확인 버튼은 미리보기 뒤에만 잠깐 뜨므로 이 빈칸이 **평소 모습**이다. */
 .manual-entry-row:has(> [hidden]:only-child) { display: none; }
 
 #acctCard .acct-plot svg { max-height: none; }
 /* 각 레인의 «약속». 두 행동은 확인 방식이 다르고, 그 차이가 이 화면에서 가장 비싼 오해다. */
-@media (max-width: 720px) {
-  .acct-lanes { grid-template-columns: 1fr; margin-left: -14px; margin-right: -14px; }
 
-  .acct-lanes > * { padding: 12px 14px 14px; }
-}
-.lane-pact { margin: 10px 0 0; font: 600 11px/1.5 var(--font-sans); color: var(--muted); }
-.lane-pact b { color: var(--text); font-weight: 800; }
-
-.manual-entry { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .manual-entry-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: space-between; }
-/* 2026-09-13 롱/숏 버튼을 화면 전역 규약(롱=--good, 숏=--bad)에 맞추고 가운데로 모은다.
-   중앙정렬은 .actions 행에만 건다 -- 같은 .manual-entry-row 를 쓰는 크기/배지 행은
-   space-between 이 맞다.
-   숏 글자만 --bad(var(--bad)) 가 아니라 var(--bad) 이다: 버튼 배경이 흰 4% 라 패널보다 밝아
-   --bad 는 대비 4.15 로 AA 미달이고 이 값이 5.00 이다(롱 --good 은 5.53 로 그대로 통과).
-   hover 에 배경 틴트를 주지 않는 것도 대비 때문이다 -- 12% 만 줘도 롱 4.48/숏 4.26 으로
-   둘 다 미달로 떨어진다. 그래서 기존 .notify-btn:hover 처럼 테두리만 바꾼다. */
-.manual-entry-row.actions { justify-content: center; }
-.manual-entry-row.actions .notify-btn { text-align: center; min-width: 128px; }
-/* 2026-09-14 청산 행이 카드 맨 위로 올라갔다 -- 구분선도 아래쪽이다. */
-/* 2026-09-22 구분선을 뺐다 -- 진입 블록 «위»에 쌓여 있을 때의 경계였는데, 시안 B 로
-   둘이 나란해지면서 레인 사이 1px 헤어라인이 그 일을 한다(내 변경이 만든 고아). */
-.manual-entry-row.exit-row { gap: 10px; }
-/* 2026-09-20 사용자 요청: 버튼 줄에 위아래 숨 쉴 자리. 누르는 줄이 제일 빽빽하면 안 된다.
-   .entry-hold 는 청산 줄과 진입 버튼 줄 **둘 다** 가지고 있어 한 규칙으로 덮는다.
-   행 간격(.manual-entry 의 gap 8px) 위에 10px 을 더해 위아래 18px 이 된다. */
-.manual-entry-row.entry-hold { margin: 10px 0; }
 .manual-entry-row[hidden] { display: none; }
 
 /* ── 시안 B: 슬라이더 -> 칩 (2026-09-20 사용자 선택) ───────────────────────────
@@ -1378,76 +1289,11 @@ svg {
   background: color-mix(in srgb, var(--amber) 13%, transparent);
   color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, transparent);
 }
-.chip-val { font-size: 11px; color: var(--muted); min-width: 34px; }
-/* 2026-10-09 권고 규칙 칩: 고르면 진입비율 묶음을 숨긴다(크기를 서버 규칙이 정한다 -- 고를 수 없는 것을 보이지 않는다) */
-.rule-box { display: inline-flex; align-items: center; gap: 8px; }
-.rule-box[hidden] { display: none; }
-.entry-line.rule-on .frac-part, .entry-line.rule-on #snapEntryFrac { display: none !important; }
-/* 2026-10-10 동일위험 -- 자동이면 크기 칩 옆에 «손절 시 순자산 −7.5%»(크기를 정하는 단 하나의 약속) */
-.rule-risk { font: 600 11px/1 var(--font-sans); font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
-.entry-line:not(.rule-on) .rule-risk, .rule-risk[hidden] { display: none; }
-/* 확인 버튼 글자가 길다(스위칭 + «즉시 체결(시장가, 테이커 4bp)») -- 알약 공통 nowrap 이면 390 패널에서 양끝이 잘렸다. 줄을 넘긴다. */
-#snapEntryConfirm { white-space: normal; line-height: 1.35; text-align: center; }
-/* 기다리는 진입 -- 상태 한 줄 + 취소·지금 시장가. 주문이 거래소에 걸려 있다는 사실이 «주의»라 주황 테두리(방향색 아님). */
-.manual-wait { display: grid; gap: 8px; margin: 8px 0 0; }
-.manual-wait[hidden] { display: none; }
-.manual-wait .entry-note.live { border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent); font-variant-numeric: tabular-nums; }
-.manual-wait .wait-acts { justify-content: flex-start; gap: 8px; margin: 0; }
-.manual-wait .wait-acts[hidden] { display: none; }
 #snapWaitMarket.arm, #snapEntryResult [data-entry-cancel].arm { border-color: color-mix(in srgb, var(--amber) 70%, transparent); color: var(--amber); }
 .manual-entry-result .wait-acts { justify-content: flex-start; margin: 8px 0 0; }   /* 2026-10-11 따라가기 진입 «대기 취소» -- 기다리기 상자와 같은 줄 */
-/* 진입 한 줄: 레버·비율·버튼·보유가 한 행에 들어간다. 좁으면 감싸되 왼쪽 정렬을 지킨다. */
-.manual-entry-row.entry-line { justify-content: flex-start; row-gap: 6px; }
-.manual-entry-row.entry-line .entry-cap { flex: 0 0 auto; }
-/* 레버리지 줄과 진입비율 줄을 가른다(2026-09-25 사용자 지시). */
-.manual-entry-row.entry-line .entry-break { flex-basis: 100%; height: 0; }
-/* 청산 줄은 포지션 타일에 **붙어** 보여야 한 덩어리로 읽힌다(시안 B 의 핵심).
-   🔴.actions 가 justify-content:center 라 가운데로 떠 있었다 -- 포지션 타일은 왼쪽 열에
-     있으므로 왼쪽에 붙여야 «같은 줄»로 읽힌다(2026-09-20 미리보기에서 확인). */
-.manual-entry-row.exit-row { margin-top: 6px; justify-content: flex-start; }
-/* 칩이 값을 이미 말하고 있으면 옆 숫자는 같은 말을 두 번 한다 -- 칩에 없는 값일 때만 보인다. */
-.chipset[data-matched="1"] + .chip-val { display: none; }
 
-/* ── 길게 누르기 진입 (2026-09-20 사용자 선택: 시안 B) ──────────────────────────────
-   확인 클릭을 «의도적 지속»으로 바꾼 버튼. 채움 막대는 JS 가 width 를 긋고(app.js
-   manualHoldPaint) 여기서는 자리와 모양만 준다.
-   🔴touch-action: none 이 핵심이다 -- 없으면 모바일에서 버튼을 누른 채 스크롤하다 0.4초가
-     지나 **주문이 나간다**. 이 한 줄이 시안 B 의 유일한 실전 위험을 막는다.
-   🔴user-select: none -- 길게 누르면 글자가 잡혀 드래그가 되고, 그 상태로 손을 떼면
-     pointerup 이 버튼 밖에서 끝나 취소가 안 걸린다. */
-.entry-hold { gap: 10px; }
-.notify-btn.hold-fire {
-  position: relative;
-  overflow: hidden;
-  touch-action: none;
-  user-select: none;
-  -webkit-user-select: none;
-}
-.notify-btn.hold-fire > span { position: relative; z-index: 1; }
 /* 2026-09-25 터치는 길게 누르기가 아니라 «탭 → 확인»이다(app.js) -- 누른 채 스크롤해도 발주가 없으니
    버튼 위에서 시작한 스크롤을 다시 허용한다. */
-@media (pointer: coarse) { .notify-btn.hold-fire { touch-action: manipulation; } }
-.lane-pact .pact-touch { display: none; }
-@media (pointer: coarse) { .lane-pact .pact-touch { display: inline; } .lane-pact .pact-mouse { display: none; } }
-/* 2026-09-26 비평: 키보드(Enter)는 미리보기 → 확인인데 데스크톱에선 마우스 약속(«바로 나갑니다»)이 보였다.
-   주문 버튼에 키보드 포커스가 있으면 그 레인의 약속을 확인 쪽으로 바꿔 보인다. */
-.manual-entry:has(.hold-fire:focus-visible) .lane-pact .pact-touch { display: inline; }
-.manual-entry:has(.hold-fire:focus-visible) .lane-pact .pact-mouse { display: none; }
-.notify-btn.hold-fire .hold-fill {
-  position: absolute;
-  left: 0; top: 0; bottom: 0;
-  width: 0;
-  background: currentColor;
-  opacity: 0.30;
-  border-radius: inherit;
-  pointer-events: none;
-}
-
-/* 2026-09-14 보유 예정 / 레버리지 / 진입 비율 세 행의 **왼쪽 끝을 맞춘다**. .actions 의
-   가운데정렬 아래에서는 라벨 길이가 제각각이라 시작점이 들쑥날쑥했다. 라벨 열 폭을 고정하면
-   라벨도 그 오른쪽의 슬라이더·값도 같은 x 에서 시작한다(가장 긴 «보유 예정» 기준 54px). */
-.manual-entry-row.fields { justify-content: flex-start; }
-.manual-entry-row.fields .entry-cap { flex: 0 0 54px; }
 
 /* 계좌 강제 새로고침. 아이콘 하나라 .notify-btn 을 쓰지 않고 최소 스타일만 준다.
    🔴flex-shrink 를 0 으로 **못박는다**(2026-09-14). 기본값 1 이라 좁은 화면에서 지정한
@@ -1474,60 +1320,20 @@ svg {
   .acct-tools .ops-readonly { order: 3; }
 }
 .acct-refresh.spin { animation: acct-spin .8s linear infinite; }
-/* 진입/청산 카드 안의 «자세히» -- .detail-toggle/.signal-detail 을 그대로 쓰되
-   카드 폭에 맞춰 여백만 맞춘다. */
-.manual-entry-result .detail-toggle { margin: 2px 0 0; }
-.manual-entry-result .signal-detail { margin-top: 4px; }
 @keyframes acct-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .acct-refresh.spin { animation: none; } }
 
-/* 2026-09-14 청산 행 아래 한 줄(닫는 수량·남김·지금 손익). flex-basis 100% 로 제 줄을 쓴다. */
-.exit-now { flex: 1 0 100%; margin: 0; font: 600 11px/1.5 var(--font-sans); color: var(--muted); }
-.exit-now:empty { display: none; }
-.exit-now b { font: 700 11.5px/1.5 var(--font-mono); color: var(--text); }
-/* 2026-09-14 «지금 닫으면 순손익». 이 줄에서 제일 먼저 읽혀야 하는 숫자라 한 단계 크게 쓰고
-   부호를 색으로도 준다(+ 초록 / − 빨강). 색만으로는 부족하므로 숫자에 부호를 항상 붙인다. */
-/* 🔴`.exit-now b`(0,1,1)가 `.exit-net`(0,1,0)를 이긴다 -- 부모 클래스를 붙여 특이도를 올린다.
-   실측으로 잡았다: 규칙을 넣었는데 fontSize 가 11.5px 그대로였다. */
-/* 2026-09-22 «지금 닫으면»은 청산을 누르기 직전 유일하게 중요한 숫자인데 13.5px 였다(시안 B). */
-.exit-now .exit-net { font: 800 21px/1.1 var(--font-display); letter-spacing: -0.015em;
-  display: inline-block; vertical-align: -3px; margin: 0 3px 0 1px; }
-.entry-note .exit-net { font: 800 13.5px/1.4 var(--font-mono); }
-.exit-now .exit-net.good, .entry-note .exit-net.good { color: var(--good); }
-.exit-now .exit-net.bad, .entry-note .exit-net.bad { color: var(--bad); }
-.entry-note .exit-net { margin-left: 2px; }
 .notify-btn.long:hover:not(:disabled) { border-color: var(--good); }
 /* 2026-09-26 상한 여유가 없는 쪽 -- 누를 수는 있되(사유가 뜬다) 흐리게 «지금은 못 들어간다»를 보인다. */
 .notify-btn[aria-disabled="true"] { opacity: .45; }
 .notify-btn.short:hover:not(:disabled) { border-color: var(--bad); }
 
-/* 2026-09-14 진입 블록 접기. <details> 가 .manual-entry 의 flex 자식이 되면서 안쪽 행들은
-   더 이상 그 gap 을 못 받는다 -- 여기서 같은 간격을 준다. summary 는 display 를 바꾸지
-   않는다(바꾸면 브라우저가 그리는 펼침 삼각형이 사라진다). 높이는 패딩으로만 올린다. */
-.entry-fold { display: flex; flex-direction: column; gap: 8px; }
-/* 2026-09-25 상시 표시(접기 폐지) -- 제목 줄은 머리글일 뿐 누르는 곳이 아니다(늘 [open], 늘 본문색). */
-.entry-fold > summary { font: 700 11.5px/1.4 var(--font-sans); color: var(--text);
-  cursor: default; list-style: none; padding: 9px 2px; }
-.entry-fold > summary::-webkit-details-marker { display: none; }
 .manual-entry-result { margin: 0; display: grid; gap: 10px; color: var(--text); }
-/* 계좌 카드의 .acct-tile 을 그대로 쓰고, «전 → 후»만 덧입힌다.
-   눈금(u)은 이전 값의 자리다 -- 값이 늘든 줄든 같은 읽기 규칙이라 측면마다 뒤집지 않아도 된다. */
-.entry-head { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
-.entry-head b { font: 700 17px/1 var(--font-display); letter-spacing: 0.01em; }
-.entry-head span { font: 600 11.5px/1 var(--font-mono); color: var(--muted); }
-.entry-cap { font: 600 11px/1.5 var(--font-sans); color: var(--muted); }
-/* .entry-tiles / .entry-arrow 는 진입 미리보기 타일과 함께 나갔다(2026-09-16) -- 참조 0. */
-.entry-was { font: 600 11px/1 var(--font-sans); color: var(--muted); }
 
 .entry-note { font: 600 11px/1.55 var(--font-sans); padding: 8px 10px; border-radius: 8px;
   background: var(--glass); border: 1px solid var(--soft-line); color: var(--muted); }
 .entry-note.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
 .entry-note.live { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 35%, transparent); }
-
-/* 2026-09-13 레버리지 게이지의 «자동» 체크박스. 게이지와 같은 줄에 두되 폭을 안 먹게. */
-.lev-auto { display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
-            color: var(--muted); white-space: nowrap; }
-.lev-auto input { accent-color: var(--accent); }
 
 /* 라이트에서 깨지는 하드코딩 색 네 군데. 다크는 그대로 둔다. */
 [data-theme="light"] .chart-tooltip {
@@ -1619,10 +1425,6 @@ svg {
   .asset-tab { height: 38px; }
   .push-toggle { min-height: 38px; }
 
-  /* 360px 에서 내부 가로 넘침 3곳 -- 줄바꿈을 허용해 잘림 대신 두 줄로 간다. */
-  .manual-entry-row.fields { flex-wrap: wrap; }
-  
-  .entry-was { white-space: normal; word-break: keep-all; }
 }
 
 /* iOS 는 재질을 한 종류로 쓰지 않는다 -- 글자가 빽빽한 시트는 두껍고(.panel 0.46),
@@ -2062,9 +1864,6 @@ body.not-eth [data-eth-only]::after {
 
 /* 각주 텍스트를 뺀 뒤(2026-09-22) margin-left:auto 가 «둘 다»에 걸려 WS 점 두 개가 양끝으로
    벌어졌다. 미는 건 첫 번째 하나면 된다 -- 나머지는 gap 으로 붙는다. */
-
-/* 모바일: 페이지 끝이 떠 있는 버튼 뒤에 묻히지 않게 버튼 높이 + 16px 만큼 여백. */
-@media (pointer: coarse) { main.app { padding-bottom: 76px; } }
 
 
 /* 2026-09-27 넓은 화면(가로 ≥1700px) -- 풋프린트 카드 2단(사용자 선택 62:38).
