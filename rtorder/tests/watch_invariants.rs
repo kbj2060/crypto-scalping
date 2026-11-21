@@ -259,3 +259,26 @@ fn busy_or_refuses_while_locked() {
     let inner = block_on(busy_or(&lock, async { lock.try_lock().is_err() }));
     assert_eq!(inner, Some(true), "핸들러가 도는 동안 잠겨 있어야 한다");
 }
+
+#[test]
+fn tp_leg_filled_from_stream_queue_drops_that_leg_only() {
+    // 원본 tp_leg_filled: 스트림 «우리 dbtp 체결» → 그 조각만 무장에서 뺀다 · 모르는 표식·다른 측면은 그대로
+    let dir = std::env::temp_dir().join(format!("rtorder_tpfill_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut w = rtorder::watch::Watcher::new(&dir, "ETHUSDC");
+    let leg = |lv: f64, cid: &str| serde_json::json!({"level": lv, "price": lv, "w": 1, "resting": true, "cid": cid, "order_id": 1, "qty": 0.2});
+    let b = serde_json::json!({"symbol": "ETHUSDC", "side": "LONG", "tp_legs": [leg(2600.0, "dbtpLa"), leg(2650.0, "dbtpLb"), leg(2700.0, "dbtpLc")], "armed_at": T0});
+    w.save(&serde_json::from_value(serde_json::json!({"ETHUSDC:LONG": b})).unwrap()).unwrap();
+    let q = std::sync::Mutex::new(vec![("ETHUSDC".to_string(), "LONG".to_string(), "dbtpLa".to_string()),
+                                       ("ETHUSDC".to_string(), "LONG".to_string(), "dbtpLzz".to_string()),
+                                       ("ETHUSDC".to_string(), "SHORT".to_string(), "dbtpLb".to_string())]);
+    w.drain_tp_fills(&q).unwrap();
+    assert!(q.lock().unwrap().is_empty());
+    let cur = w.load()["ETHUSDC:LONG"].clone();
+    let cids: Vec<&str> = cur["tp_legs"].as_array().unwrap().iter().map(|x| x["cid"].as_str().unwrap()).collect();
+    assert_eq!(cids, ["dbtpLb", "dbtpLc"]);
+    assert_eq!(cur["tp_level"], serde_json::json!(2650.0), "가장 가까운 살아 있는 조각");
+    assert_eq!(w.logs, ["bracket LONG: 분할 익절 조각 체결 dbtpLa -- 남은 조각 2"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}

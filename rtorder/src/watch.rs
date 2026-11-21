@@ -380,6 +380,36 @@ impl Watcher {
     pub fn save(&self, st: &Obj) -> Result<(), String> {
         bracket_save(&self.dir, st)
     }
+    /// 원본 tp_leg_filled(orders.py): 사용자 스트림 «우리 익절(dbtp) 체결» → 그 조각을 무장에서 뺀다. 모르는 조각·조각 없는 무장은 그대로
+    /// (스트림이 놓치면 다음 다시 걸기가 «목록에 없는 조각 = 체결»로 뺀다).
+    pub fn tp_leg_filled(&mut self, symbol: &str, side: &str, cid: &str) -> Result<(), String> {
+        let mut st = self.load();
+        let key = bracket_key(symbol, side);
+        let Some(cur) = st.get_mut(&key).and_then(Value::as_object_mut) else { return Ok(()) };
+        let legs = match cur.get("tp_legs").and_then(Value::as_array) {
+            Some(l) if !l.is_empty() && l.iter().any(|x| x.get("cid").and_then(Value::as_str) == Some(cid)) => l.clone(),
+            _ => return Ok(()),
+        };
+        let legs: Vec<Value> = legs.into_iter().map(|mut x| {
+            let f = x.get("cid").and_then(Value::as_str) == Some(cid);
+            x["filled"] = json!(f);
+            x
+        }).collect();
+        set_tp_legs(cur, &legs)?;
+        let left = cur.get("tp_legs").and_then(Value::as_array).map_or(1, Vec::len);
+        self.save(&st)?;
+        self.log(format!("bracket {side}: 분할 익절 조각 체결 {cid} -- 남은 조각 {left}"));
+        Ok(())
+    }
+    /// 사용자 스트림 대기열(`userstream::Hub::tp_fills`)을 비우며 tp_leg_filled. 감시 루프가 틱 앞에서 부른다.
+    /// ponytail: 원본은 사건 순간 부른다 -- 여기는 다음 틱(≤2초·체결 알림이면 바로 깸) 앞에서. 화면 선이 그만큼 늦게 사라진다.
+    pub fn drain_tp_fills(&mut self, q: &Mutex<Vec<(String, String, String)>>) -> Result<(), String> {
+        let items = std::mem::take(&mut *q.lock().unwrap());
+        for (s, ps, c) in items {
+            self.tp_leg_filled(&s, &ps, &c)?;
+        }
+        Ok(())
+    }
     fn exec_symbols(&self) -> Vec<(&str, String)> {
         let mut v = vec![("eth", self.eth_symbol.clone())];
         v.extend(EXEC_REST.iter().map(|(a, s)| (*a, s.to_string())));
