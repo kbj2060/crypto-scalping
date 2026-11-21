@@ -59,6 +59,16 @@ def exec_enabled() -> bool:
 
 async def load_filters(session, symbol: str) -> dict[str, float]:
     """거래소의 수량/가격 격자. 캐시한다 -- 심볼 규격은 안 변한다."""
+    out = await _load_filters(session, symbol)
+    try:   # 2026-11-21 주문 경로 그림자 기록: exchangeInfo 원문(수 MB) 대신 그 심볼의 격자를 입력으로(맥락 밖이면 안 적음)
+        from live.execution import order_shadow
+        order_shadow.rec("input", what="filters", args=[symbol], value=out)
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+async def _load_filters(session, symbol: str) -> dict[str, float]:
     if symbol in _filters:
         return _filters[symbol]
     async with session.get(f"{FAPI}/fapi/v1/exchangeInfo") as response:

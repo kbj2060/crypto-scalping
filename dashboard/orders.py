@@ -39,6 +39,7 @@ from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     TP_LEGS_MAX, line_bracket)   # 2026-11-21 자동 규칙 진입·자동 물타기는 지웠다(사용자 «sltp 만 쓴다»)
 from live.execution.live_manual_peg_execute_20260912 import (  # noqa: E402
     FALLBACK_SEC, cancel_exit_orders, cancel_wait_orphans, clear_bracket, commission_bp, nap, order_mark, place_bracket, place_tp_ladder, run_entry, run_entry_limit, run_entry_stop, run_exit, wake_fills)
+from live.execution import order_shadow as shadow  # noqa: E402  -- 2026-11-21 주문 경로 그림자 기록(Rust 재생용 · 실패해도 주문은 그대로)
 import scripts.binance_ban_guard as ban_guard  # noqa: E402
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
 # 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).
@@ -626,6 +627,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
     """make_app() 이 부른다. 인자 = 코어·시장 쪽 객체(server.py make_app 지역 · 모듈 상수). sec_prices(asset) = 1초 마지막 체결가 [(초, 가격)] · 없는 코인 None(선 손절 감시). 돌려주는 것 = 라우트·기동/정리 훅이 쓸 함수들.
     라우트 등록·on_startup 순서는 server.py 에 그대로 둔다(기동 순서 불변)."""
     binance_account_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
+    shadow.set_path(LIVE_DIR / "order_shadow.jsonl")   # 기본 켜짐 · ORDER_SHADOW_LOG=0 이면 안 적음
     account_last_good: dict[str, Any] = {"ts": 0.0, "payload": None}   # 2026-11-02 마지막 정상 응답 -- 실패 응답에 «last_good» 로 붙여 화면이 낡음 배지와 함께 쓴다
     # 진행 중인 수동 주문 하나. 동시에 둘을 두지 않는다 -- 겹치면 단건 상한의 뜻이 흐려진다.
     manual_entry_state: dict[str, Any] = {"phase": "idle"}
@@ -877,6 +879,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         tmp = bracket_path().with_suffix(".tmp")
         tmp.write_text(json.dumps(st, ensure_ascii=False), "utf-8")
         tmp.replace(bracket_path())
+        shadow.saved(st)   # 감시 틱 안이면 «무장 파일이 바뀜»
 
     # 2026-10-31 지정가 대기는 서버가 죽거나 재시작돼도(최대 4시간) 걸려 있는 동안 체결될 수 있다 -- 그 몫은 익절·손절 무장이 없다(검증 D2).
     #   그래서 접수·수정 때 계획(선·심볼·방향)을 파일에 남기고, 정상 종료(체결 뒤 무장까지 끝)하면 지운다. 재시작 때(wait_cleanup)
@@ -1009,7 +1012,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         if not lim:
             return None
         book = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker", {"symbol": plan["symbol"]}, error_reason="book_ticker_failed")
-        tick = (await load_filters(binance_session(), plan["symbol"])).get("tick") or 0.01
+        shadow.rec("input", what="book", args=[plan["symbol"]], value=book)   # 그림자 기록(재조정 기준 호가)
+        tick =(await load_filters(binance_session(), plan["symbol"])).get("tick") or 0.01
         long_side = plan["positionSide"] == "LONG"
         b = await basis_for(book, exec_asset_of(plan["symbol"]) or "eth")
         if b == 1.0:   # basis_for 는 못 읽으면 1.0 으로 떨어진다 -- 그 값으로 주문가를 틀지 않는다(검증 S1)
@@ -1125,6 +1129,18 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             return False
         return True
 
+    async def shadow_bracket_tick() -> None:
+        """감시 틱 한 번 = 그림자 기록 틱(chain 하나 · 요청이 나갔거나 무장 파일을 썼을 때만 남긴다)으로 감싼 `bracket_tick` -- 감시 루프가 부른다."""
+        tb = shadow.tick_begin({"slot": manual_entry_state, "side": side_exit_states, "waits": manual_wait_states})
+        raised = None
+        try:
+            await bracket_tick()
+        except BaseException as exc:
+            raised = f"{type(exc).__name__}: {exc}"
+            raise
+        finally:
+            shadow.tick_end(tb, {"slot": manual_entry_state, "side": side_exit_states, "waits": manual_wait_states}, raised)
+
     async def bracket_tick() -> None:
         """무장된 측면마다: 포지션이 사라졌으면(TP·비상 스탑·수동 청산) 남은 우리 주문을 지우고 내린다.
         SL 을 넘었으면 **메이커 추격 청산**(청산 버튼과 같은 run_exit)을 돌린다."""
@@ -1134,6 +1150,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         account = await swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS,
                                    produce_account, max_stale=STALE_GRACE_SECONDS,
                                    cache=binance_account_cache)
+        shadow.tick_file(st)
+        shadow.rec("input", what="account", value=account)
         try:
             acct_ts = datetime.fromisoformat(str(account.get("generated_at"))).timestamp()
         except ValueError:
@@ -1148,8 +1166,9 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             #   (옛 판은 측면마다 2초에 한 번 bookTicker). 못 읽으면 None -> hold -- «정리»는 계속 판단한다.
             try:
                 now_s = time.time()
-                closed = [c for c in await load_market_history(exec_asset_of(b["symbol"]) or "eth")
-                          if int(c["time"]) + FOOTPRINT_BAR_SECONDS <= now_s]
+                bars = await load_market_history(exec_asset_of(b["symbol"]) or "eth")
+                shadow.rec("input", what="bars", args=[exec_asset_of(b["symbol"]) or "eth"], value=bars)
+                closed = [c for c in bars if int(c["time"]) + FOOTPRINT_BAR_SECONDS <= now_s]
                 last_bar = (int(closed[-1]["time"]) + FOOTPRINT_BAR_SECONDS, float(closed[-1]["close"])) if closed else None
             except Exception as exc:  # noqa: BLE001
                 last_bar = None
@@ -1158,6 +1177,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             if b.get("lines"):   # 2026-10-28 무장 뒤 1초 마지막 체결가 범위(USDT) -- 감시 2초 틱 사이도 빠짐없이
                 since = max(float(b["armed_at"]), float(b.get("watch_from") or 0))   # 손절 해제 → 다시 켜기 사이에 지나간 가격은 안 본다
                 pts = [px for t, px in sec_prices(exec_asset_of(b["symbol"]) or "eth") or [] if t > since]
+                shadow.rec("input", what="sec", args=[exec_asset_of(b["symbol"]) or "eth"], since=since,
+                           value=[[t, px] for t, px in sec_prices(exec_asset_of(b["symbol"]) or "eth") or [] if t > since])   # 그림자 기록(since 뒤 행 [초, 가격])
                 touch = (min(pts), max(pts)) if pts else None
             act = bracket_action(b, pside, account.get("positions") or [], bool(account.get("ok")),
                                  acct_ts, last_bar, touch)
@@ -1193,6 +1214,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 st2[key]["sl_legs"] = [{**x, "fired": True} if i in hit else x for i, x in enumerate(st2[key]["sl_legs"])]
                 bracket_save(st2)
                 plan, err = await assemble_exit_plan(pside, min(1.0, frac), fresh=True, asset=b_asset, only_symbol=b["symbol"])
+                shadow.rec("input", what="exit_plan", args=[pside, min(1.0, frac), True, b_asset, b["symbol"]], value={"plan": plan, "err": err})
                 slot = exit_slot(b_asset)
                 if (bracket_load().get(key) or {}).get("sl_off") or manual_order_lock.locked() or slot is None:
                     return
@@ -1248,6 +1270,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 changed = True
                 return
             plan, err = await assemble_exit_plan(pside, 1.0, fresh=True, asset=exec_asset_of(b["symbol"]) or "eth", only_symbol=b["symbol"])
+            shadow.rec("input", what="exit_plan", args=[pside, 1.0, True, exec_asset_of(b["symbol"]) or "eth", b["symbol"]], value={"plan": plan, "err": err})
             # 🔴검사는 조립(await) **뒤**에 -- 그 사이 «손절 해제»나 사용자 청산이 들어오면 쏘지 않는다(남의 상태를 clear 하고 두 번 청산하지 않게)
             if (bracket_load().get(key) or {}).get("sl_off") and not (b.get("lines") and b.get("sl_off")):   # 선 무장이 이미 손절 없이 판단한 fire = 익절(위와 같음)
                 return
@@ -1297,7 +1320,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         while True:
             await nap(2.0)   # 2026-11-09 체결 알림이 오면 2초를 안 기다린다(익절 체결 → 남은 손절 정리 · 지정가 체결 뒤 감시)
             try:
-                await bracket_tick()
+                await shadow_bracket_tick()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 -- 감시는 죽지 않는다(한 틱 실패는 다음 틱에)
@@ -1743,7 +1766,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             ws.update(phase="submitting", mode="limit", side=side, plan=plan,
                       asset=query_asset(request), wid=wid, started_at=datetime.now(timezone.utc).isoformat())
             refresh_tasks[f"manual_wait_{wkey(query_asset(request), wid)}"] = asyncio.create_task(
-                entry_then_bracket(plan, ws, limit=True))
+                shadow.task(entry_then_bracket(plan, ws, limit=True), op="entry", plan=plan, slot=ws, lazy_dir=LIVE_DIR, limit=True,
+                            slot_ref=f"wait:{wkey(query_asset(request), wid)}", waits=manual_wait_states))
             return web.json_response({"ok": True, "plan": plan, "state": ws, "wait": True, "wid": wid, "server_ms": int((time.perf_counter() - tm["t0"]) * 1000)},
                                      headers=NOCACHE)
         manual_entry_state.clear()
@@ -1751,7 +1775,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                                   started_at=datetime.now(timezone.utc).isoformat())
         # refresh_tasks 에 넣어 두면 stop_http_session 이 세션을 닫기 전에 취소해 준다.
         refresh_tasks["manual_entry"] = asyncio.create_task(
-            entry_then_bracket(plan, manual_entry_state))
+            shadow.task(entry_then_bracket(plan, manual_entry_state), op="entry", plan=plan, slot=manual_entry_state, lazy_dir=LIVE_DIR, limit=False,
+                        slot_ref="entry", waits=manual_wait_states))
         return web.json_response({"ok": True, "plan": plan, "state": manual_entry_state, "server_ms": int((time.perf_counter() - tm["t0"]) * 1000)},
                                  headers=NOCACHE)
 
@@ -2043,7 +2068,9 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         st.update(phase="submitting", kind="exit", side=side, plan=plan, asset=query_asset(request),
                   started_at=datetime.now(timezone.utc).isoformat())
         refresh_tasks["manual_entry" if st is manual_entry_state else f"manual_exit_{query_asset(request)}"] = asyncio.create_task(
-            settle(exit_then_rearm(plan, st) if frac < 1.0 else run_exit(binance_session(), plan, st), st))
+            shadow.task(settle(exit_then_rearm(plan, st) if frac < 1.0 else run_exit(binance_session(), plan, st), st),
+                        op="exit", plan=plan, slot=st, lazy_dir=LIVE_DIR, rearm=frac < 1.0,
+                        slot_ref="entry" if st is manual_entry_state else f"side:{query_asset(request)}"))
         return web.json_response({"ok": True, "plan": plan, "state": st, "server_ms": int((time.perf_counter() - tm["t0"]) * 1000)},
                                  headers=NOCACHE)
 
@@ -2813,6 +2840,21 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             refresh_tasks["user_stream"] = asyncio.create_task(user_stream_loop())
             refresh_tasks["account_refresher"] = asyncio.create_task(account_refresher())
 
+    def shadow_handler(name: str, h, slot_of):
+        """2026-11-21 그림자 기록(화면이 도는 작업의 칸에 넣은 값): 응답을 만든 **뒤** 그 칸을 도는 작업의 chain 으로 한 줄 -- 핸들러 동작·응답은 그대로."""
+        @functools.wraps(h)
+        async def wrapped(request: web.Request) -> web.Response:
+            r = await h(request)
+            try:
+                c = shadow.chain_of(slot_of(request)) if shadow.enabled() else None
+                if c:
+                    shadow.rec("input", chain=c, what="handler", args=[name, dict(request.query)],
+                               value={"status": r.status, "body": json.loads(r.body) if r.body else None})
+            except Exception:  # noqa: BLE001 -- 기록은 응답을 막지 않는다
+                pass
+            return r
+        return wrapped
+
     async def busy_or(handler, request: web.Request) -> web.Response:
         if manual_order_lock.locked():
             return web.json_response({"ok": False, "error": "already_working", "state": manual_entry_state}, status=409)
@@ -2824,17 +2866,18 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         start_user_stream=start_user_stream,
         acct_seq=lambda: user_stream["seq"],   # SSE 가 화면에 싣는다 -- 오르면 화면이 계좌를 바로 받는다
         start_bracket_watcher=start_bracket_watcher,
-        bracket_tick=bracket_tick,   # 시험이 감시 한 틱을 직접 돌린다(test_chart_lines_entry)
+        bracket_tick=bracket_tick,
+        shadow_bracket_tick=shadow_bracket_tick,   # 2026-11-21 감시 루프가 부르는 틱(그림자 기록 틱으로 감쌈) -- 시험용   # 시험이 감시 한 틱을 직접 돌린다(test_chart_lines_entry)
         stop_bracket_watcher=stop_bracket_watcher,
         start_wait_cleanup=start_wait_cleanup,
         api_binance_account=api_binance_account,
         api_manual_entry_preview=api_manual_entry_preview,
-        api_manual_limit_amend=api_manual_limit_amend,
+        api_manual_limit_amend=shadow_handler("api_manual_limit_amend", api_manual_limit_amend, lambda r: manual_wait_states.get(wkey(query_asset(r) or "eth", query_wid(r)))),
         busy_or=busy_or,
         api_manual_entry_submit=api_manual_entry_submit,
         api_manual_entry_status=api_manual_entry_status,
-        api_manual_wait_action=api_manual_wait_action,
-        api_manual_entry_cancel=api_manual_entry_cancel,
+        api_manual_wait_action=shadow_handler("api_manual_wait_action", api_manual_wait_action, lambda r: manual_wait_states.get(wkey(query_asset(r) or "eth", query_wid(r)))),
+        api_manual_entry_cancel=shadow_handler("api_manual_entry_cancel", api_manual_entry_cancel, lambda _r: manual_entry_state),
         api_manual_bracket_disarm=api_manual_bracket_disarm,
         api_manual_bracket_rearm=api_manual_bracket_rearm,
         api_manual_bracket_modify=api_manual_bracket_modify,

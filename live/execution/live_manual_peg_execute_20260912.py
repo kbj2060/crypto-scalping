@@ -33,6 +33,7 @@ from typing import Any
 # 서명·시계보정은 계좌 조회 모듈 것을 그대로 쓴다. 밑줄 이름을 건너 쓰는 건 보기 나쁘지만
 # HMAC 서명과 /fapi/v1/time 앵커를 **두 벌로 두는 것보다 낫다** -- 어긋나면 한쪽만 조용히
 # -1021 로 실패한다(2026-09-10 WSL 시계 1초 드리프트 전례).
+from live.execution import order_shadow as shadow
 from scripts import binance_ban_guard as ban_guard
 from scripts.live_binance_account_20260910 import _clock_offset, _sign
 
@@ -47,6 +48,7 @@ _wakers: set = set()
 
 
 def wake_fills() -> None:
+    shadow.rec("input", chain="*", what="wake")   # 그림자 기록(체결 알림으로 일찍 깬 시각 -- 도는 모든 작업의 조회 횟수가 갈린다 · chain "*" = 모두)
     for f in list(_wakers):
         if not f.done():
             f.set_result(None)
@@ -97,9 +99,13 @@ async def signed(session, method: str, path: str, params: dict, key: str, secret
     m, t_send = _ORDER_T.get(), 0.0   # M0: 이 접수의 첫 주문 POST 만 잰다(위 order_mark)
     if m is not None and "sent" not in m and method == "POST" and path == "/fapi/v1/order":
         m["sent"], t_send = True, time.perf_counter()
+    sent_at, held, noted = time.time(), None, False   # 그림자 기록(왕복 하나) -- 응답 원문은 json() 이 받아 둔 바이트를 쓴다(새로 읽지 않는다)
     try:
         async with session.request(method, url, headers={"X-MBX-APIKEY": key}) as response:
+            held = response
             payload = await response.json()
+            shadow.wire(method, url, sent_at, response, None)
+            noted = True
             if t_send:
                 _order_timing(m, t_send, response.status)
             if response.status != 200:
@@ -114,6 +120,8 @@ async def signed(session, method: str, path: str, params: dict, key: str, secret
                 return {"__error__": f"EmptyResponse: HTTP {response.status} 본문 {payload!r}"}
             return payload
     except Exception as exc:  # noqa: BLE001 -- 네트워크/TLS/JSON 전부 같은 취급
+        if not noted:
+            shadow.wire(method, url, sent_at, held, exc)
         return {"__error__": f"{type(exc).__name__}: {exc}"}
 
 
@@ -440,9 +448,11 @@ async def maker_price(session, order_side: str, symbol: str) -> tuple[float, flo
       값이 USDC 매도호가보다 위라 즉시 체결될 주문이 되고, post-only 라 거래소가 -5022 로
       거부한다(실측 5/5). 게다가 drifted() 도 같은 값을 받아 **항상 참**이 되어, 옳게 걸린
       첫 주문마저 3초 만에 취소했다. 증상은 「체결 0 · rejected」였다."""
+    sent_at = time.time()
     async with session.get(f"{FAPI}/fapi/v1/ticker/bookTicker",
                            params={"symbol": symbol}) as response:
         book = await response.json()
+        shadow.wire("GET", f"{FAPI}/fapi/v1/ticker/bookTicker?symbol={symbol}", sent_at, response, None)
     bid, ask = float(book["bidPrice"]), float(book["askPrice"])
     return (bid if order_side == "BUY" else ask), bid, ask
 
