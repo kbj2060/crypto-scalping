@@ -25,6 +25,7 @@ Rust 수집기(`rtcollect`)를 서버에서 **파이썬 수집기 옆에 나란�
 | `xyz` | `HL_XYZ_COINS`(글자 그대로) | `data/hot/rtcollect/hl_xyz.sqlite` | `data/hot/hl_xyz.sqlite` |
 | `hl_ctx` | `HL_BT_COIN`(쉼표 -- 원본은 코인마다 프로세스·`HL_BT_CTX_ONLY=1`) | `data/hot/rtcollect/hl_ctx.sqlite` | `data/hot/hl_ctx.sqlite` |
 | `raster` | `OF_SYMBOL`(한 종목) · 🔴`RTCOLLECT_REST=1` 필수(스냅숏 없이는 북을 못 세운다) | 폴더 `data/live/rtcollect/orderflow/raster/<SYM>/` | `data/live/orderflow/raster/<SYM>/`(폴더를 가리키면 종료코드 2) |
+| `ob5m` · `bookdepth` | `OB_SYMBOL`(ETHUSDT) · `DD_ROOT`(depthdiff 폴더 · 읽기만) · ob5m 은 `TAPE_DB_PATH`(hot 테이프 · 읽기만) | `data/live/rtcollect/<종류>/<SYM>.sqlite` | `data/live/ob5m/`·`data/live/bookdepth/` 파일(`RTCOLLECT_TAKEOVER=1` 없으면 종료) -- 대조는 같은 시각의 닫힌 봉 행을 두 DB 에서 비교(bookdepth dm·dp 계열은 1e-12 · BLAS 내적 차) |
 | `depth` | `DD_SYMBOL`(한 종목 -- 원본과 같다) | 폴더 `data/live/rtcollect/orderflow/depthdiff/<SYM>/` | `data/live/orderflow/depthdiff/<SYM>/`(폴더를 가리키면 종료코드 2) |
 
 - 심볼 목록은 **지금 도는 파이썬과 같게**: `tr '\0' '\n' < /proc/<파이썬 pid>/environ | grep -E 'TAPE_SYMBOL|TAPE_MARKET|OKX_TAPE_INST|BYBIT_'`.

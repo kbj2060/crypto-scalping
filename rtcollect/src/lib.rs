@@ -13,11 +13,13 @@
 //! 아직 안 옮긴 수집기(저장 형식이 SQLite 가 아닌 것들) = rtcollect/REMAINING.md.
 pub mod binance;
 pub mod binance_ctx;
+pub mod bookdepth;
 pub mod bybit_liq;
 pub mod bybit_tape;
 pub mod depth;
 pub mod net;
 pub mod hl_ctx;
+pub mod ob5m;
 pub mod okx;
 pub mod okx_ctx;
 pub mod raster;

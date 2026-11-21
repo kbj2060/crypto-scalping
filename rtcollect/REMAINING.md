@@ -17,8 +17,8 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | HL 자산 맥락(book ticker CTX_ONLY) | SQLite hot | server 시장 맥락 · seal · dqm | — | **옮김** `hl_ctx` | HL 호가 `.bt` 몫은 «불확실»(질문 4) |
 | depth_diff | JSONL → 시각별 gz | ob5m · iceberg · bookdepth_feat | fwd_dirshort(간접) | **옮김** `depth`(스냅숏 REST 기본 꺼짐 · 전환 때 켬) | — |
 | 호가 래스터 | 고정폭 `.f32`(+14일 뒤 parquet·duckdb 보관) | server read_window → 히트맵·시장 맥락 | — | **옮김** `raster`(.f32 쓰기만 · 스냅숏 REST 필수) | 보관·지우기 = 파이썬 cron 으로 남김(parquet·duckdb 크레이트) |
-| ob5m 실시간 워커 `live_ob5m` | SQLite `data/live/ob5m/<코인>.sqlite` | /api/ob5m(화면) | — | 안 옮김 | depthdiff 북 재구성(`replay`: numpy 중앙값·flatnonzero·추적) + 5분 봉 · 748줄 -- 같은 값 증명이 큰 일 · **다음 1순위** |
-| 호가 깊이 10열 `live_bookdepth_feat` | SQLite `data/live/bookdepth/ethusdt.sqlite` | live_eth_dir_short 피쳐(→ rtmodel) | fwd_dirshort | 안 옮김 | ob5m `replay` 를 그대로 쓴다 -- ob5m 을 옮기면 같이(219줄) |
+| ob5m 실시간 워커 `live_ob5m` | SQLite `data/live/ob5m/<코인>.sqlite` | /api/ob5m(화면) | — | **옮김** `ob5m`(기본 쓰기 자리 data/live/rtcollect/ob5m · 원본 자리는 RTCOLLECT_TAKEOVER=1) | 합성 14시간 depthdiff·테이프 → 봉·사건 벽·live 칸 7,417 비트 일치 · /api/ob5m 읽기 코드 교차 확인 |
+| 호가 깊이 10열 `live_bookdepth_feat` | SQLite `data/live/bookdepth/ethusdt.sqlite` | live_eth_dir_short 피쳐(→ rtmodel) | fwd_dirshort | **옮김** `bookdepth` | 칸 2,110 비트 · 930 은 1e-12 안(최대 3.6e-15 = 원본 `arr @ prices` 가 BLAS ddot · 서버 OpenBLAS·개발기 MKL) · dir_short.book_row float32 161/161 같음 |
 | 아이스버그 `live_eth_iceberg` | JSON 상태 + JSONL 사건 | /api/iceberg · 감시 | — | 안 옮김 | depthdiff + hot 테이프 30초 창 계산(numpy) · 291줄 |
 | HL 포지션 | SQLite hot `hl_positions*.sqlite` | server HL 고래 청산 · 시장 맥락 · seal | — | 안 옮김 | **입력이 HL 체결 DuckDB**(duckdb 크레이트 결정 전) |
 | HL 체결 | DuckDB 일별 → 3일 뒤 gz | HL 포지션 입력 · 감시 | — | 안 옮김 | duckdb 크레이트 |
@@ -46,7 +46,7 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | 월간 학습(dir4h·vol4h·dir_short·box_hold Platt) | 월간 | joblib | 서빙 | 여럿 | 파이썬 유지(학습) | — |
 | raw_failover · data_quality_monitor · morning_audit · multicoin_collectors · gen_data_map · verdict_ledger_health · backup | 여러 | JSON·보고 | 감시·사용자 | — | 범위 밖(R7 운영) | — |
 
-**요약**: 상주 수집기 중 옮김 10(테이프 셋 · 청산 · 맥락 넷 · depth · 래스터) · 안 옮김 9(SQLite·JSON 계산 워커 셋 = ob5m·bookdepth·iceberg · duckdb 넷 · XML 하나 · deribit) ·
+**요약**: 상주 수집기 중 옮김 12(테이프 셋 · 청산 · 맥락 넷 · depth · 래스터 · ob5m · bookdepth) · 안 옮김 7(계산 워커 하나 = iceberg · duckdb 넷 · XML 하나 · deribit) ·
 rtmodel 1 · 범위 밖 2 / 예약 중 안 옮김 8(크레이트 없이 되는 것 = treasury·macro_5m·cboe · 계산 기록기 다섯) · rtmodel 3 · parquet 1.
 옮기지 않은 «불확실»: HL 호가 .bt · 뉴스 판정·ollaya · prometheus · trend_core_forward · f4c altdata · llm_brief / «안 쓰임»: 돌파 워커 · 신호 워커 · maxpain 기록기 · maker_fill_shadow.
 

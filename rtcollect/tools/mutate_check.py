@@ -198,12 +198,20 @@ M = [
     ("래스터 재동기 드리프트 1→2%", "src/raster.rs", "RESYNC_DRIFT_PCT: f64 = 1.0;", "RESYNC_DRIFT_PCT: f64 = 2.0;", ["raster_parity"]),
     ("래스터 무효 메움행 빼기", "src/raster.rs", "for _ in 0..(target - size) / ROW as u64 {", "for _ in 0..0 {", ["raster_parity"]),
     ("래스터 bin_lo 가운데 120→119", "src/raster.rs", "- (N_BINS / 2) as i64;", "- (N_BINS / 2) as i64 + 1;", ["raster_parity"]),
-    ("래스터 동기 전 단절 = 다시 받기(물러남 없음)", "src/raster.rs", "                if !self.synced {\n                    // 방금", "                if false {\n                    // 방금", ["raster_parity"]),
+    ("래스터 동기 전 단절 = 다시 받기(물러남 없음)", "src/raster.rs", "                if !self.synced {\n                    // 방금", "                if false {\n                    // 방금", ["raster_parity", "venue_loop"]),
     ("루프 래스터 수신 시한 35→20초", "src/raster.rs", "RECV_TIMEOUT_S: f64 = 35.0;", "RECV_TIMEOUT_S: f64 = 20.0;", ["venue_loop"]),
     ("원본으로: depth 늦은 프레임 = 다시 열기(.gz 무시)", "src/depth.rs", "            if !path.exists() && gz.exists() {\n                self.late_gz = Some(gz);\n            }", "", ["depth_parity"]),
     ("원본으로: depth 늦은 프레임에 지금 시도 압축", "src/depth.rs", "                self.close(forward);", "                self.close(true);", ["depth_parity"]),
+    ("ob5m numpy 짝 더하기 → 차례 더하기", "src/ob5m.rs", "    if n < 8 {", "    if true {", ["ob5m_parity"]),
+    ("ob5m 중앙값 짝수 = 위쪽 하나", "src/ob5m.rs", "{ (v[n / 2 - 1] + v[n / 2]) / 2.0 }", "{ v[n / 2] }", ["ob5m_parity"]),
+    ("ob5m 반올림 짝수→0에서 먼 쪽", "src/ob5m.rs", "x.round_ties_even() as i64", "x.round() as i64", ["ob5m_parity"]),
+    ("ob5m 벽 되돌아옴 10→5초", "src/ob5m.rs", "WALL_BACK_MS: i64 = 10_000;", "WALL_BACK_MS: i64 = 5_000;", ["ob5m_parity"]),
+    ("ob5m 사건 벽 나이 30→20초", "src/ob5m.rs", "BIG_AGE_MS: i64 = 30_000;", "BIG_AGE_MS: i64 = 20_000;", ["ob5m_parity"]),
+    ("ob5m 예열 30→20분", "src/ob5m.rs", "WARM_MS: i64 = 1_800_000;", "WARM_MS: i64 = 1_200_000;", ["ob5m_parity"]),
+    ("bookdepth 예열 12→11시간", "src/bookdepth.rs", "WARM_S: i64 = 12 * 3600;", "WARM_S: i64 = 11 * 3600;", ["ob5m_parity"]),
+    ("bookdepth 매수 깊이 끝 bb+1 → bb", "src/bookdepth.rs", "bb + 1))", "bb))", ["ob5m_parity"]),
 ]
-PARITY = ["tape_parity", "venue_parity", "rest_parity", "ctx_parity", "venue_rest_parity", "depth_parity", "raster_parity"]
+PARITY = ["tape_parity", "venue_parity", "rest_parity", "ctx_parity", "venue_rest_parity", "depth_parity", "raster_parity", "ob5m_parity"]
 
 
 def digest() -> str:

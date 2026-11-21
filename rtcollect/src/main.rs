@@ -35,7 +35,7 @@ use std::time::Duration;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::task::JoinSet;
 
-const KINDS: &str = "binance_tape|bybit_liq|bybit_tape|okx_tape|okx_ctx|binance_ctx|xyz|hl_ctx|depth|raster";
+const KINDS: &str = "binance_tape|bybit_liq|bybit_tape|okx_tape|okx_ctx|binance_ctx|xyz|hl_ctx|depth|raster|ob5m|bookdepth";
 
 fn env_f(k: &str, d: f64) -> f64 {
     std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
@@ -97,6 +97,7 @@ fn main() {
             "hl_ctx" => run_hl_ctx().await,
             "depth" => run_depth().await,
             "raster" => run_raster().await,
+            "ob5m" | "bookdepth" => run_book_worker(&kind),
             k => die(2, &format!("RTCOLLECT_KIND={k} -- {KINDS}")),
         }
     });
@@ -370,6 +371,36 @@ async fn run_raster() {
     tasks.spawn_local(net::raster_ticks(r.clone()));
     wait_term(&mut tasks, || { let r = r.borrow(); println!("rtcollect raster 60s · 행 {}(무효 {}) · 호가 {}/{}", r.rows_written, r.rows_invalid, r.bids.len(), r.asks.len()) }).await;
     println!("종료 신호 -- 끝낸다");
+}
+
+/// ob5m(live_ob5m_20261026.py) · 호가 깊이 10열(live_bookdepth_feat_20261028.py): depthdiff 시 파일을 이어 읽는 워커(웹소켓·REST 없음 · 막는 루프).
+/// 입력은 읽기만(DD_ROOT/<SYM> · hot 테이프) · 출력 기본 data/live/rtcollect/{ob5m,bookdepth}/<sym>.sqlite -- 파이썬 파일이면 켜지지 않는다.
+fn run_book_worker(kind: &str) {
+    let sym = env_s("OB_SYMBOL", "ETHUSDT").to_uppercase();
+    if rtcollect::ob5m::coin(&sym).is_none() || (kind == "bookdepth" && sym != "ETHUSDT") {
+        die(2, &format!("OB_SYMBOL={sym} -- 원본이 아는 코인만(bookdepth 는 ETHUSDT 만)"));
+    }
+    let dd = PathBuf::from(env_s("DD_ROOT", "data/live/orderflow/depthdiff")).join(&sym);
+    let file = format!("{}.sqlite", sym.to_lowercase());
+    let db = PathBuf::from(env_s("OB_DB", &format!("data/live/rtcollect/{kind}/{file}")));
+    if db.ends_with(format!("data/live/{kind}/{file}")) && env_s("RTCOLLECT_TAKEOVER", "") != "1" {
+        die(2, &format!("🔴{} 는 파이썬 워커의 파일이다 -- 그림자는 다른 경로에. 전환이면 RTCOLLECT_TAKEOVER=1", db.display()));
+    }
+    let now = wall_s;
+    let sleep = |s: f64| {
+        std::thread::sleep(Duration::from_secs_f64(s));
+        true
+    };
+    // ponytail: SIGTERM 은 기본 처리(바로 끝남) -- 원본도 그렇다 · 봉은 쓸 때마다 커밋되니 잃는 것은 진행 중 봉뿐(다음 판이 재생으로 다시 만든다)
+    let r = if kind == "ob5m" {
+        let tape = PathBuf::from(env_s("TAPE_DB_PATH", "data/hot/binance_tape.sqlite"));
+        rtcollect::ob5m::run(&sym, &dd, &tape, &db, &now, &sleep, &|_| {})
+    } else {
+        rtcollect::bookdepth::run(&sym, &dd, &db, &now, &sleep, &|_| {})
+    };
+    if let Err(e) = r {
+        die(70, &format!("{kind} 끝남: {e}"));
+    }
 }
 
 /// Bybit 청산(live_bybit_liquidation_collector_20261003.py `run()`). 정지 감시 없음(원본 그대로).

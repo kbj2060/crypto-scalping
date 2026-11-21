@@ -929,3 +929,36 @@ async fn raster_loop_writes_rows_and_redials() {
     eprintln!("래스터 접속 루프: 행 {total}(유효 {valid}) · 스냅숏 {} · 다시 붙기 {:.2}·{:.2}초", n_snap.lock().unwrap(), redial(0), redial(1));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// 래스터: 스냅숏(lastUpdateId 1000)이 스트림보다 낡으면(동기 전 U > L) **그 연결을 끊고** 물러났다 다시 붙는다(원본: IP 공유 -- 곧바로 다시 받지 않는다).
+#[tokio::test]
+async fn raster_stale_snapshot_backs_off() {
+    let dir = tmpdir("raster_stale");
+    let (rest, n_snap) = snapshot_server();
+    let ev = |uu: i64, u: i64| json!({"e": "depthUpdate", "E": T0, "T": T0, "s": "ETHUSDT", "U": uu, "u": u, "pu": uu - 1, "b": [], "a": []}).to_string();
+    let (port, conns, _p) = serve_paths(vec![("ethusdt@depth@500ms", vec![
+        Conn { msgs: vec![ev(900, 950), ev(1100, 1110), ev(1111, 1120)], end: End::Read(Duration::from_secs(20)) },
+        Conn { msgs: raster_msgs(), end: End::Read(Duration::from_secs(20)) },
+    ])])
+    .await;
+    let env = [("RTCOLLECT_KIND", "raster".into()), ("OF_SYMBOL", "ETHUSDT".into()), ("OF_ROOT", dir.join("rs").display().to_string()), ("RTCOLLECT_REST", "1".into()),
+               ("RTCOLLECT_DEPTH_URL", format!("{rest}/x?symbol={{SYMBOL}}")), ("RTCOLLECT_BAN_FILE", dir.join("ban").display().to_string()),
+               ("RTCOLLECT_WS_URL", format!("ws://127.0.0.1:{port}/ws/{{symbol}}@depth@500ms"))];
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_rtcollect"));
+    for (k, v) in &env {
+        cmd.env(k, v);
+    }
+    let mut child = cmd.stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+    let t0 = Instant::now();
+    while conns.lock().unwrap().len() < 2 && t0.elapsed() < Duration::from_secs(8) {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let _ = Command::new("kill").args(["-TERM", &child.id().to_string()]).status();
+    let _ = tokio::task::spawn_blocking(move || child.wait()).await;
+    let c = conns.lock().unwrap().clone();
+    assert_eq!(c.len(), 2, "낡은 스냅숏 → 끊고 다시 붙는다(8초 안 둘째 연결)");
+    let redial = c[1].1 - c[0].2;
+    within(redial, 2.9, 4.0, "물러남 3초");
+    assert_eq!(*n_snap.lock().unwrap(), 2, "연결마다 한 번 -- 같은 연결에서 곧바로 다시 받지 않는다");
+    let _ = std::fs::remove_dir_all(&dir);
+}
