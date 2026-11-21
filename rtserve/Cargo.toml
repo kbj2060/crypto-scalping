@@ -11,7 +11,7 @@ hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
 bytes = "1"
-futures-util = { version = "0.3", default-features = false, features = ["std"] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
 # preserve_order: 원본 dict 순서 그대로 · float_roundtrip: 파이썬 float() 와 같은 f64 로 읽는다(rtcollect 와 같은 기능)
 serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
@@ -23,6 +23,13 @@ sha2 = "0.10"            # ETag(본문 sha256 앞 16자) · 버스터(화면 파
 flate2 = { version = "1", default-features = false, features = ["zlib"] }
 httpdate = "1"           # Last-Modified · If-Modified-Since
 percent-encoding = "2"   # 경로·쿼리 풀기
+# /api/macro-spikes 의 statistics.stdev(파이썬은 정확한 유리수로 분산을 구해 정확히 반올림한 제곱근을 낸다) -- 큰 정수가 있어야 같은 비트가 나온다
+num-bigint = "0.4"
+num-integer = "0.1"
+num-traits = "0.2"
+# 허브 구독(src/hub.rs): rtcore 의 메시지 형(proto)을 그대로 쓴다 · ws:// 접속은 tokio-tungstenite(형제 크레이트와 같은 0.26)
+rtcore = { path = "../rtcore" }
+tokio-tungstenite = "0.26"
 
 [profile.test]
 opt-level = 1

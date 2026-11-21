@@ -1,7 +1,9 @@
 //! rtserve 실행 파일. 설정은 환경변수:
 //!   RTSERVE_ROOT  저장소 뿌리(필수 · data/live·data/hot·dashboard/live 를 여기서 읽는다)
 //!   RTSERVE_ADDR  묶을 주소(기본 127.0.0.1:8790 · 루프백만 · 8787 은 파이썬 서버 몫)
-//!   DASHBOARD_ASSETS  원본과 같은 뜻(기본 eth,sol,xrp)
+//!   DASHBOARD_ASSETS  원본과 같은 뜻(기본 eth,btc,sol,xrp,sndk,soxl,skhynix,mu)
+//!   RTSERVE_HUB   rtcore 허브 주소(예 ws://127.0.0.1:8788/rt · 없으면 메모리 상태 엔드포인트는 빈 모양)
+//!   VAPID_PUBLIC_KEY · VAPID_PRIVATE_KEY  알림 설정(/api/push/config · 원본과 같은 이름)
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -27,11 +29,22 @@ async fn main() {
         eprintln!("{e}");
         std::process::exit(2);
     }
-    let cfg = rtserve::Config {
+    let mut cfg = rtserve::Config::new(
         root,
-        assets: rtserve::parse_assets(std::env::var("DASHBOARD_ASSETS").ok().as_deref()),
-        now: Arc::new(|| SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64()),
-    };
+        rtserve::parse_assets(std::env::var("DASHBOARD_ASSETS").ok().as_deref()),
+        Arc::new(|| SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64()),
+    );
+    // 알림 설정: 공개키 값과 «비밀키가 있는지»만(원본 /api/push/config 와 같은 뜻 · 비밀키 값은 들고 있지 않는다)
+    cfg.vapid_public = std::env::var("VAPID_PUBLIC_KEY").unwrap_or_default();
+    cfg.vapid_private_set = std::env::var("VAPID_PRIVATE_KEY").is_ok_and(|v| !v.is_empty());
+    let cfg = Arc::new(cfg);
+    // rtcore 허브(예 ws://127.0.0.1:8788/rt) -- 없으면 메모리 상태 엔드포인트는 «아직 없음» 모양만 낸다
+    if let Ok(url) = std::env::var("RTSERVE_HUB") {
+        let syms: Vec<String> = cfg.flows().iter().map(|a| format!("{a}usdt")).collect();
+        tokio::spawn(rtserve::hub::subscribe(url, syms, cfg.live.clone()));
+    }
+    tokio::spawn(cfg.events.clone().run(cfg.clone(), cfg.live.clone()));
+    let cfg = (*cfg).clone();
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap_or_else(|e| {
         eprintln!("bind {addr}: {e}");
         std::process::exit(1);

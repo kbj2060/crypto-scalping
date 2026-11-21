@@ -326,3 +326,136 @@ mod tests {
         assert_eq!(hkey(&json!(1.0)), hkey(&json!(1)));
     }
 }
+
+/// 파이썬 `json.dumps(v, separators=sep, ensure_ascii=a, indent=n)` -- 열쇠 순서 그대로 · 실수 = float repr.
+/// ensure_ascii=False 여도 제어 글자(< 0x20)는 \uXXXX · `"`·`\` 는 벗긴다(파이썬 py_encode_basestring 과 같다).
+pub fn dumps(v: &V, sep: (&str, &str), ascii: bool, indent: Option<usize>) -> String {
+    fn s(out: &mut String, t: &str, ascii: bool) {
+        out.push('"');
+        for c in t.chars() {
+            match c {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                '\u{08}' => out.push_str("\\b"),
+                '\u{0c}' => out.push_str("\\f"),
+                c if (c as u32) < 0x20 || (ascii && (c as u32) > 0x7e) => {
+                    let mut b = [0u16; 2];
+                    for u in c.encode_utf16(&mut b) {
+                        out.push_str(&format!("\\u{u:04x}"));
+                    }
+                }
+                c => out.push(c),
+            }
+        }
+        out.push('"');
+    }
+    fn go(out: &mut String, v: &V, sep: (&str, &str), ascii: bool, ind: Option<usize>, depth: usize) {
+        let nl = |out: &mut String, d: usize| {
+            if let Some(n) = ind {
+                out.push('\n');
+                out.push_str(&" ".repeat(n * d));
+            }
+        };
+        let item_sep = if ind.is_some() { "," } else { sep.0 };
+        match v {
+            V::Null => out.push_str("null"),
+            V::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            V::Number(n) => match (n.as_i64(), n.as_u64()) {
+                (Some(i), _) => out.push_str(&i.to_string()),
+                (_, Some(u)) => out.push_str(&u.to_string()),
+                _ => out.push_str(&rtcollect::py_float_repr(n.as_f64().unwrap())),
+            },
+            V::String(t) => s(out, t, ascii),
+            V::Array(a) if a.is_empty() => out.push_str("[]"),
+            V::Object(o) if o.is_empty() => out.push_str("{}"),
+            V::Array(a) => {
+                out.push('[');
+                for (k, x) in a.iter().enumerate() {
+                    if k > 0 {
+                        out.push_str(item_sep);
+                    }
+                    nl(out, depth + 1);
+                    go(out, x, sep, ascii, ind, depth + 1);
+                }
+                nl(out, depth);
+                out.push(']');
+            }
+            V::Object(o) => {
+                out.push('{');
+                for (k, (key, x)) in o.iter().enumerate() {
+                    if k > 0 {
+                        out.push_str(item_sep);
+                    }
+                    nl(out, depth + 1);
+                    s(out, key, ascii);
+                    out.push_str(sep.1);
+                    go(out, x, sep, ascii, ind, depth + 1);
+                }
+                nl(out, depth);
+                out.push('}');
+            }
+        }
+    }
+    let mut out = String::new();
+    go(&mut out, v, sep, ascii, indent, 0);
+    out
+}
+
+/// 파이썬 `statistics.stdev(xs)`(3.11): 정확한 유리수로 표본 분산 → 정확히 반올림한 제곱근(_float_sqrt_of_frac). 유한 실수만.
+pub fn stdev(xs: &[f64]) -> R<f64> {
+    use num_bigint::{BigInt, BigUint};
+    use num_integer::Integer;
+    if xs.len() < 2 {
+        return err("StatisticsError", "stdev requires at least two data points");
+    }
+    // x = m · 2^e (m 정수) -- 가장 작은 e 로 모두 맞춘다
+    let parts: Vec<(i64, i32)> = xs
+        .iter()
+        .map(|&x| {
+            if x == 0.0 {
+                return (0, 0);
+            }
+            let b = x.to_bits();
+            let exp = ((b >> 52) & 0x7ff) as i32;
+            let frac = (b & ((1 << 52) - 1)) as i64;
+            let (m, e) = if exp == 0 { (frac, -1074) } else { (frac | 1 << 52, exp - 1075) };
+            (if x < 0.0 { -m } else { m }, e)
+        })
+        .collect();
+    let e0 = parts.iter().filter(|p| p.0 != 0).map(|p| p.1).min().unwrap_or(0);
+    let (mut sx, mut sxx) = (BigInt::from(0), BigInt::from(0));
+    for &(m, e) in &parts {
+        let v = BigInt::from(m) << (e - e0) as usize;
+        sxx += &v * &v;
+        sx += v;
+    }
+    // x = X / 2^-e0 → ssd = (n·SXX − SX²) / (n · 4^-e0) · mss = ssd / (n−1)
+    let n = BigInt::from(xs.len());
+    let num = &n * &sxx - &sx * &sx;
+    let mut den = &n * BigInt::from(xs.len() - 1);
+    let mut num = num;
+    if e0 < 0 {
+        den <<= (-2 * e0) as usize;
+    } else {
+        num <<= (2 * e0) as usize;
+    }
+    let g = num.gcd(&den);
+    let (num, den) = ((num / &g).to_biguint().unwrap_or_default(), (den / &g).to_biguint().unwrap());
+    let rto = |a: &BigUint, b: &BigUint| -> BigUint {
+        let r = (a / b).sqrt();
+        if &(&r * &r * b) != a { r | BigUint::from(1u8) } else { r }
+    };
+    let bits = |x: &BigUint| x.bits() as i64;
+    let q = (bits(&num) - bits(&den) - 109).div_euclid(2);
+    let (numer, shift) = if q >= 0 { (rto(&num, &(&den << (2 * q) as usize)) << q as usize, 0) } else { (rto(&(&num << (-2 * q) as usize), &den), -q) };
+    // numer / 2^shift (int / int 정확 반올림): numer 는 많아야 57비트 남짓 -- u128 → f64 한 번 반올림 뒤 2 의 거듭제곱 나눗셈은 정확
+    if numer.bits() > 128 {
+        // ponytail: 분산이 2^200 넘게 큰 값 -- 화면 입력(bp 수익)에서 나올 길이 없다. num-bigint 반올림에 맡긴다.
+        return Ok(num_traits::ToPrimitive::to_f64(&numer).unwrap_or(f64::INFINITY) / 2f64.powi(shift as i32));
+    }
+    let digits = numer.to_u64_digits().iter().enumerate().fold(0u128, |acc, (k, d)| acc | (*d as u128) << (64 * k));
+    Ok(digits as f64 / 2f64.powi(shift as i32))
+}

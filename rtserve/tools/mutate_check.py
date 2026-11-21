@@ -66,7 +66,46 @@ M = [
     ("xyz full 늘 참", "src/api.rs", '"full": since == 0', '"full": true'),
     ("xyz 음수 since 그대로", "src/api.rs", ".clamp(0, 1 << 40)", ".clamp(-1 << 40, 1 << 40)"),
     ("오늘 칸 진행 중 1분봉 포함", "src/api.rs", "AND ts_sec + 60 <= ?", "AND ts_sec + 0 <= ?"),
-    ("달력 신선도 90→150분", "src/api.rs", "if age.is_some_and(|a| a > 90.0) {", "if age.is_some_and(|a| a > 150.0) {"),
+    ("달력 신선도 90→150분", "src/api.rs", "crate::api2::worker_payload(path, 90.0,", "crate::api2::worker_payload(path, 150.0,"),
+    # ── 둘째 조각(api2 · hub · py) ──
+    ("워커 낡음 글자", "src/api2.rs", '("error", json!("worker_stale"))', '("error", json!("worker_old"))'),
+    ("bare_missing 에도 tone", "src/api2.rs", "    if !o.bare_missing {\n        base.push", "    if true {\n        base.push"),
+    ("gex 블록 8→7건", "src/api2.rs", "a.iter().take(8)", "a.iter().take(7)"),
+    ("gex 최대 같은 값이면 뒤의 것", "src/api2.rs", "|(_, bk)| py::gt(&k, bk)", "|(_, bk)| py::ge(&k, bk)"),
+    ("state ETag repr 공백", "src/api2.rs", 'format!("(({a}, {b}),)")', 'format!("(({a},{b}),)")'),
+    ("state ensure_ascii 켬", "src/api2.rs", 'py::dumps(&json!({"state": st}), (",", ":"), false, None)', 'py::dumps(&json!({"state": st}), (",", ":"), true, None)'),
+    ("칩 burst 거르기 빼기", "src/api2.rs", ' && py::get(&r, "k")? == Some(&json!("burst"))', ""),
+    ("알림 최근 순서 그대로", "src/api2.rs", "    recent.reverse();\n", ""),
+    ("알림 최근 30→29", "src/api2.rs", "ls.len().saturating_sub(30)", "ls.len().saturating_sub(29)"),
+    ("뉴스 제목 엔티티 안 풂", "src/api2.rs", ".map(crate::text::unescape).unwrap_or_default()", ".map(str::to_string).unwrap_or_default()"),
+    ("뉴스 키 링크 안 뗌", "src/text.rs", "if skip > 0 && n > 0 {", "if false {"),
+    ("뉴스 키 12→20자", "src/text.rs", "if k.len() >= 12 {", "if k.len() >= 20 {"),
+    ("숫자 참조 &#x 무시", "src/text.rs", "let (start, n, hex) = if dec > 0 { (j + 1, dec, false) } else { (j + 2, hexn, true) };", "let (start, n, hex) = (j + 1, dec, false);"),
+    ("급변 z 4→3", "src/api2.rs", "(r / sd).abs() >= 4.0", "(r / sd).abs() >= 3.0"),
+    ("급변 NQ 개장 시간 안 거름", "src/api2.rs", 'if nm != "NQ" || cme_open(ts) {', "if true {"),
+    ("stdev 모분산(n−1 → n)", "src/py.rs", "let mut den = &n * BigInt::from(xs.len() - 1);", "let mut den = &n * BigInt::from(xs.len());"),
+    ("버블 반올림 6→5", "src/api2.rs", "f(py::round_nd(v[0], 6))", "f(py::round_nd(v[0], 5))"),
+    ("버블 창 −5초 → −4초", "src/api2.rs", "let mut lo = end - sec - 5;", "let mut lo = end - sec - 4;"),
+    ("적중 구멍 30→20분", "src/api2.rs", "const GAP_MS: i64 = 30 * 60_000;", "const GAP_MS: i64 = 20 * 60_000;"),
+    ("적중 신호 80→81", "src/api2.rs", "py::ge(p, &json!(80))?", "py::ge(p, &json!(81))?"),
+    ("순위 같은 값 평균 빼기", "src/api2.rs", "let r = (k + e) as f64 / 2.0 + 1.0;", "let r = k as f64 + 1.0;"),
+    ("메모 쓰기 ensure_ascii 켬", "src/api2.rs", "write_atomic(&path, \"tmp\", &py::dumps(&Value::Object(notes), (\", \", \": \"), false, None))", "write_atomic(&path, \"tmp\", &py::dumps(&Value::Object(notes), (\", \", \": \"), true, None))"),
+    ("오답 공백 안 접음", "src/api2.rs", '("text", json!(py_split_join(&text)))', '("text", json!(text))'),
+    ("구독 들여쓰기 2→4", "src/api2.rs", "(\", \", \": \"), false, Some(2))", "(\", \", \": \"), false, Some(4))"),
+    ("구독 옛 시각 안 지킴", "src/api2.rs", '("subscribed_utc", old_at.unwrap_or(json!(stamp)))', '("subscribed_utc", json!(stamp))'),
+    ("client-timing 0.2초 상한 빼기", "src/api2.rs", "t.elapsed().as_secs_f64() < 0.2", "t.elapsed().as_secs_f64() < 0.0"),
+    ("client-timing bool 받음", "src/api2.rs", "        _ => true,\n    });", "        Value::Bool(_) => false,\n        _ => true,\n    });"),
+    ("주문 기록 쿼리 마지막 값", "src/api2.rs", "q.entry(k.clone()).or_insert_with(|| json!(v));", "q.insert(k.clone(), json!(v));"),
+    ("주문 기록 UA 200→199", "src/api2.rs", '.chars().take(200).collect();\n    let ip', '.chars().take(199).collect();\n    let ip'),
+    ("주문 기록 IP X-Forwarded-For 먼저", "src/api2.rs", 'hdr("cf-connecting-ip").or(hdr("x-forwarded-for"))', 'hdr("x-forwarded-for").or(hdr("cf-connecting-ip"))'),
+    ("413 상태 줄 글자 빼기", "src/lib.rs", '        413 => "Request Entity Too Large", // 파이썬 HTTPStatus 글자(hyper 는 «Payload Too Large»)\n', ""),
+    ("수급 창 660→600초", "src/hub.rs", 'let floor = q_int(q, "since").max(newest - SUPPLY_S);', 'let floor = q_int(q, "since").max(newest - 600);'),
+    ("풋프린트 since 이상 → 초과", "src/hub.rs", "if !full && *t < since {", "if !full && *t <= since {"),
+    ("풋프린트 기본 창 12→24", "src/hub.rs", "const FP_BARS: i64 = 12;", "const FP_BARS: i64 = 24;"),
+    ("풋프린트 dhl 없음을 안 지움", "src/hub.rs", "        e.1 = b.dhl;", "        if b.dhl.is_some() { e.1 = b.dhl; }"),
+    ("스트림 커서 안 옮김", "src/hub.rs", "q.insert(name.into(), cur.max(last[0].as_i64().unwrap_or(0)).to_string());", "let _ = (name, cur, last);"),
+    ("events state 세 블록 → 둘", "src/hub.rs", 'for k in ["session", "microstructure", "tail_risk"] {', 'for k in ["session", "microstructure"] {'),
+    ("events ts 마이크로초 → 밀리초", "src/hub.rs", 'format!("{base}.{frac:06}+00:00")', 'format!("{base}.{:03}+00:00", frac / 1000)'),
     ("파이썬 round 짝수 → 0에서 먼 쪽", "src/py.rs", "Ok(x.round_ties_even() as i64)", "Ok(x.round() as i64)"),
     ("splitlines \\r 안 끊음", "src/py.rs", "matches!(c, '\\n' | '\\r' |", "matches!(c, '\\n' |"),
 ]
@@ -93,8 +132,15 @@ def main() -> int:
         shutil.rmtree(mut, ignore_errors=True)
         shutil.copytree(SRC, mut, ignore=shutil.ignore_patterns("target"))
         man = mut / "Cargo.toml"
-        # 사본은 저장소 밖이라 rtcollect 를 절대 경로로 · 위 폴더의 Cargo.toml 을 작업 공간으로 잘못 잡지 않게 [workspace]
-        man.write_text(man.read_text().replace('path = "../rtcollect"', f'path = "{SRC.parent / "rtcollect"}"') + "\n[workspace]\n")
+        # 사본은 저장소 밖 -- 형제 크레이트(rtcollect·rtcore: path 의존성 · 시험이 rtcore 정답지를 읽는다)를 작업 폴더에 심볼릭 링크로 ·
+        #   위 폴더의 Cargo.toml 을 작업 공간으로 잘못 잡지 않게 [workspace]
+        #   (path 의존성은 절대 경로로 -- 링크로 두면 cargo 가 링크 위 폴더에서 작업 공간을 찾다 깨진다 · 링크는 시험의 정답지 읽기용)
+        if not (work / "rtcore").exists():
+            (work / "rtcore").symlink_to(SRC.parent / "rtcore")
+        t = man.read_text()
+        for sib in ("rtcollect", "rtcore"):
+            t = t.replace(f'path = "../{sib}"', f'path = "{SRC.parent / sib}"')
+        man.write_text(t + "\n[workspace]\n")
         f = mut / rel
         s = f.read_text()
         if s.count(old) != 1:

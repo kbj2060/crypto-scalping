@@ -81,6 +81,40 @@ def etag_matches(request, etag):                                             # 1
     return any(candidate.strip() in {"*", etag} for candidate in candidates.split(","))
 
 
+@web.middleware
+async def static_asset_headers(request, handler):                       # 1287
+    response = await handler(request)
+    asset_name = Path(request.path).name
+    if asset_name in ASSET_FILES:
+        response.headers["Cache-Control"] = "no-cache"
+        response.enable_compression()
+    elif asset_name.endswith(".ttf"):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif asset_name.endswith(".html"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+@web.middleware
+async def json_compress_etag(request, handler):                         # 1325
+    response = await handler(request)
+    if isinstance(response, web.Response):
+        response._zlib_executor_size = 4096
+    if (request.method != "GET" or not isinstance(response, web.Response)
+            or response.status != 200 or response.body is None
+            or (response.content_type or "") != "application/json"):
+        return response
+    if "ETag" not in response.headers:
+        etag = f'W/"body-{hashlib.sha256(response.body).hexdigest()[:16]}"'
+        response.headers["ETag"] = etag
+        response.headers.setdefault("Cache-Control", "no-cache")
+        if etag_matches(request, etag):
+            return web.Response(status=web.HTTPNotModified.status_code,
+                                headers={"ETag": etag,
+                                         "Cache-Control": response.headers["Cache-Control"]})
+    response.enable_compression()
+    return response
+
+
 def make_app(R: Path) -> web.Application:
     LIVE_DIR = R / "data" / "live"
     DASHBOARD_DIR = R / "dashboard" / "live"
@@ -90,39 +124,6 @@ def make_app(R: Path) -> web.Application:
     MACRO_5M_DB = R / "data" / "hot" / "macro_5m.sqlite"                     # 643
     MACRO_CALENDAR_STATE_PATH = R / "data" / "live" / "macro_calendar_state.json"   # 370
     _read_only_rows = read_rows                                              # coin_flow.py:113 → data_store.read_rows
-
-    @web.middleware
-    async def static_asset_headers(request, handler):                       # 1287
-        response = await handler(request)
-        asset_name = Path(request.path).name
-        if asset_name in ASSET_FILES:
-            response.headers["Cache-Control"] = "no-cache"
-            response.enable_compression()
-        elif asset_name.endswith(".ttf"):
-            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-        elif asset_name.endswith(".html"):
-            response.headers["Cache-Control"] = "no-cache"
-        return response
-
-    @web.middleware
-    async def json_compress_etag(request, handler):                         # 1325
-        response = await handler(request)
-        if isinstance(response, web.Response):
-            response._zlib_executor_size = 4096
-        if (request.method != "GET" or not isinstance(response, web.Response)
-                or response.status != 200 or response.body is None
-                or (response.content_type or "") != "application/json"):
-            return response
-        if "ETag" not in response.headers:
-            etag = f'W/"body-{hashlib.sha256(response.body).hexdigest()[:16]}"'
-            response.headers["ETag"] = etag
-            response.headers.setdefault("Cache-Control", "no-cache")
-            if etag_matches(request, etag):
-                return web.Response(status=web.HTTPNotModified.status_code,
-                                    headers={"ETag": etag,
-                                             "Cache-Control": response.headers["Cache-Control"]})
-        response.enable_compression()
-        return response
 
     # order_request_log(1352)는 POST /api/manual-* 만 건드린다 -- 이 조각에는 그 주소가 없다(다음 조각).
     app = web.Application(middlewares=[static_asset_headers, json_compress_etag])
@@ -417,6 +418,12 @@ class _Proto:
     async def _drain_helper(self):
         return None
 
+    def resume_reading(self, *a, **k):   # 본문 StreamReader 가 부른다
+        return None
+
+    def pause_reading(self, *a, **k):
+        return None
+
 
 def _parse(raw: bytes) -> dict:
     head, _, body = raw.partition(b"\r\n\r\n")
@@ -438,11 +445,18 @@ def _parse(raw: bytes) -> dict:
     return {"status": status, "reason": reason, "headers": headers, "chunked": chunked, "body_b64": base64.b64encode(body).decode()}
 
 
-async def run_one(app: web.Application, method: str, path: str, headers: dict) -> dict:
+async def run_one(app: web.Application, method: str, path: str, headers: dict, body: bytes | None = None) -> dict:
     proto = _Proto()
     loop = asyncio.get_running_loop()
     writer = StreamWriter(proto, loop)
-    req = make_mocked_request(method, path, headers=headers, app=app, writer=writer, protocol=proto, transport=proto.transport)
+    kw = {}
+    if body is not None:   # POST 본문 -- aiohttp StreamReader 에 넣고 끝을 알린다
+        from aiohttp.streams import StreamReader
+        sr = StreamReader(proto, 2 ** 16, loop=loop)
+        sr.feed_data(body)
+        sr.feed_eof()
+        kw["payload"] = sr
+    req = make_mocked_request(method, path, headers=headers, app=app, writer=writer, protocol=proto, transport=proto.transport, **kw)
     try:
         resp = await app._handle(req)
     except web.HTTPException as exc:          # web_protocol._handle_request: resp = exc

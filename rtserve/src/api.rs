@@ -30,21 +30,21 @@ pub fn handler(path: &str) -> Option<fn(&Config, &Req) -> Resp> {
 }
 
 /// 원본 핸들러의 `try: … except Exception as exc: payload = {"ok": False, "reason": f"{type}: {exc}"}`
-fn guarded(r: R<V>) -> Resp {
+pub(crate) fn guarded(r: R<V>) -> Resp {
     Resp::json(&r.unwrap_or_else(|PyErr(m)| json!({"ok": false, "reason": m})))
 }
 
 /// 예외를 안 잡는 핸들러 -- 파이썬 예외 = 500
-fn or500(r: R<V>) -> Resp {
+pub(crate) fn or500(r: R<V>) -> Resp {
     r.map_or_else(|_| server_error(), |v| Resp::json(&v))
 }
 
-fn read_text(p: &Path) -> Option<String> {
+pub(crate) fn read_text(p: &Path) -> Option<String> {
     fs::read(p).ok().and_then(|b| String::from_utf8(b).ok())
 }
 
 /// 파일 꼬리 n 바이트를 utf-8(replace)로 풀어 줄로 -- 잘린 첫 줄은 버린다(sr_lean·regime_band 같은 모양)
-fn tail_lines(p: &Path, n: u64) -> Option<Vec<String>> {
+pub(crate) fn tail_lines(p: &Path, n: u64) -> Option<Vec<String>> {
     use std::io::{Read, Seek, SeekFrom};
     let mut fh = fs::File::open(p).ok()?;
     let size = fh.seek(SeekFrom::End(0)).ok()?;
@@ -86,7 +86,7 @@ fn timegm_z(s: &str) -> R<i64> {
     Ok(days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60 + se)
 }
 
-fn days_in_month(y: i64, m: i64) -> i64 {
+pub(crate) fn days_in_month(y: i64, m: i64) -> i64 {
     match m {
         2 if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 => 29,
         2 => 28,
@@ -414,7 +414,7 @@ fn iceberg(cfg: &Config, req: &Req) -> Resp {
 
 // ───────────────────────── SQLite 읽기 (scripts/data_store.read_rows · .sqlite = mode=ro) ─────────────────────────
 
-fn sql_v(v: Sql) -> V {
+pub(crate) fn sql_v(v: Sql) -> V {
     match v {
         Sql::Null => Value::Null,
         Sql::Integer(x) => i(x),
@@ -424,7 +424,7 @@ fn sql_v(v: Sql) -> V {
     }
 }
 
-fn rows(db: &Path, sql: &str, params: &[Sql]) -> Result<Vec<Vec<V>>, rusqlite::Error> {
+pub(crate) fn rows(db: &Path, sql: &str, params: &[Sql]) -> Result<Vec<Vec<V>>, rusqlite::Error> {
     let con = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
     con.busy_timeout(std::time::Duration::from_secs(10))?;
     let mut st = con.prepare(sql)?;
@@ -436,7 +436,7 @@ fn rows(db: &Path, sql: &str, params: &[Sql]) -> Result<Vec<Vec<V>>, rusqlite::E
 }
 
 /// 파이썬 `int(v)`(SQLite 값: 정수·실수)
-fn int_v(v: &V) -> R<i64> {
+pub(crate) fn int_v(v: &V) -> R<i64> {
     match v {
         Value::Number(n) => n.as_i64().map_or_else(|| Ok(n.as_f64().unwrap().trunc() as i64), Ok),
         Value::String(s) => s.trim().parse().or_else(|_| err("ValueError", format!("invalid literal for int() with base 10: '{s}'"))),
@@ -444,7 +444,7 @@ fn int_v(v: &V) -> R<i64> {
     }
 }
 
-fn hot(cfg: &Config, name: &str) -> PathBuf {
+pub(crate) fn hot(cfg: &Config, name: &str) -> PathBuf {
     cfg.root.join("data/hot").join(name)
 }
 
@@ -510,7 +510,7 @@ fn xyz100_payload(db: &Path, since: i64, now: f64) -> R<V> {
 }
 
 /// 파이썬 `int(s)`(공백·`+`·`_` 허용) → 실패면 None
-fn py_int_str(s: &str) -> Option<i128> {
+pub(crate) fn py_int_str(s: &str) -> Option<i128> {
     let t = s.trim();
     let (neg, body) = match t.strip_prefix('-') {
         Some(b) => (true, b),
@@ -663,7 +663,7 @@ fn ob5m(cfg: &Config, req: &Req) -> Resp {
 
 /// `datetime.fromisoformat(str(ts).replace(" ", "T"))`(파이썬 3.11) → UTC 마이크로초. 시간대 없으면 UTC.
 /// ponytail: 3.11 이 받는 꼴 중 확장형(`YYYY-MM-DD[THH[:MM[:SS[.f]]]][Z|±HH[:MM]]`)만 -- 기본형(`20261118T1038`)·주 날짜(`2026-W47`)는 None.
-fn iso_us(s: &str) -> Option<i64> {
+pub(crate) fn iso_us(s: &str) -> Option<i64> {
     let s = s.replace(' ', "T");
     let (date, rest) = s.split_once('T').unwrap_or((&s, ""));
     let num = |t: &str| (!t.is_empty() && t.bytes().all(|c| c.is_ascii_digit())).then(|| t.parse::<i64>().ok()).flatten();
@@ -714,34 +714,14 @@ fn iso_us(s: &str) -> Option<i64> {
 }
 
 /// `datetime.fromtimestamp(now)` 의 마이크로초(짝수 반올림)
-fn now_us(now: f64) -> i64 {
+pub(crate) fn now_us(now: f64) -> i64 {
     let s = now.trunc();
     s as i64 * 1_000_000 + ((now - s) * 1e6).round_ties_even() as i64
 }
 
-/// 원본 worker_payload(path, 90.0, ts_field="generated_at", extra_missing={"events": []}) -- macro_calendar_payload(server.py:1150)
+/// 원본 macro_calendar_payload(server.py:1150) = worker_payload(path, 90.0, ts_field="generated_at", extra_missing={"events": []})
 fn macro_calendar_payload(path: &Path, now: f64) -> R<V> {
-    let base = [("available", json!(false)), ("error", json!("worker_state_missing")), ("tone", json!("neutral")), ("subText", json!("데이터 없음"))];
-    let st = if path.exists() { py::loads(&read_text(path).ok_or_else(|| PyErr("UnicodeDecodeError".into()))?)? } else { Value::Null };
-    if !py::truthy(&st) {
-        let mut o: Map<String, V> = base.iter().map(|(k, v)| (k.to_string(), v.clone())).collect();
-        o.insert("events".into(), json!([]));
-        return Ok(Value::Object(o));
-    }
-    let ts = py::get(&st, "generated_at")?.cloned().unwrap_or(Value::Null);
-    let age = iso_us(&py::to_str(&ts)).map(|t| py::round_nd((now_us(now) - t) as f64 / 1e6 / 60.0, 1));
-    let stale = age.map_or(Value::Null, |a| f(py::round_nd(a, 1)));
-    let Value::Object(mut o) = st else { unreachable!() };
-    if age.is_some_and(|a| a > 90.0) {
-        for (k, v) in base {
-            o.insert(k.into(), v);
-        }
-        o.insert("error".into(), json!("worker_stale"));
-        o.insert("stale_min".into(), stale);
-        return Ok(Value::Object(o));
-    }
-    o.insert("stale_min".into(), stale);
-    Ok(Value::Object(o))
+    crate::api2::worker_payload(path, 90.0, "generated_at", crate::api2::Wp { extra: vec![("events", json!([]))], ..Default::default() }, now)
 }
 
 /// GET /api/macro-calendar (server.py:4836 → load_macro_calendar → macro_calendar_payload) -- 원본은 예외를 안 잡는다(500)
