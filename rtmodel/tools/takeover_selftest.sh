@@ -5,7 +5,7 @@
 set -uo pipefail
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 F=$(mktemp -d); R="$F/repo"; L="$R/data/live"
-mkdir -p "$R/rtmodel/tools" "$R/scripts/ops" "$R/bin" "$L/rtmodel" "$L/sr_lean" "$R/logs/supervisor" "$R/dashboard"
+mkdir -p "$R/rtmodel/tools" "$R/scripts/ops" "$R/tmp/rtbin" "$L/rtmodel" "$L/sr_lean" "$R/logs/supervisor" "$R/dashboard"
 cp "$SRC/rtmodel/tools/takeover.sh" "$SRC/rtmodel/tools/takeover_cmp.py" "$R/rtmodel/tools/"
 cp "$SRC/scripts/ops/_supervise.sh" "$SRC/scripts/ops/supervisor_sr_lean.sh" "$SRC/scripts/ops/supervisor_rt_sr_lean.sh" "$SRC/scripts/ops/supervisor_rt_radar.sh" "$R/scripts/ops/"
 echo "# 가짜 워커" > "$R/scripts/live_sr_lean_20261118.py"
@@ -34,9 +34,9 @@ cp "$F/crontab.txt" "$F/crontab.orig"
 printf '#!/usr/bin/env bash\nwhile :; do sleep 1; done\n' > "$F/fakepy"
 # 가짜 rt_sr_lean 은 #!/bin/bash -- comm 이 실행 파일 이름(rt_sr_lean)으로 남아야 진짜 Rust 실행 파일처럼 보인다(env 를 거치면 bash 가 된다)
 # 가짜 rt_regime: 파이썬이 그 결정 시각에 쓴 줄을 그대로(FAKE_BAD=1 이면 p_trend 를 바꿔) 이어 쓰고 요약을 쓴다
-cat > "$R/bin/rt_regime" <<'EOF'
+cat > "$R/tmp/rtbin/rt_regime" <<'EOF'
 #!/usr/bin/env bash
-O="$RT_REGIME_OUT"; P="$(dirname "$0")/../data/live"
+O="$RT_REGIME_OUT"; P="$(dirname "$0")/../../data/live"
 T=$(tail -1 "$P/regime_band_forward.jsonl" | sed 's/.*"ts": "\([^"]*\)".*/\1/')
 if [ "$O" != "data/live" ]; then
   grep -F "\"ts\": \"$T\"" "$P/regime_band_forward.jsonl" | { if [ "${FAKE_BAD:-}" = 1 ]; then sed 's/"p_trend": 0.4/"p_trend": 0.41/'; else cat; fi; } >> "$O/regime_band_forward.jsonl"
@@ -44,11 +44,11 @@ fi
 cp "$P/regime_band_forward_summary.json" "$O/regime_band_forward_summary.json.tmp" 2>/dev/null; mv "$O/regime_band_forward_summary.json.tmp" "$O/regime_band_forward_summary.json"
 echo '{"recorded": 0}'
 EOF
-cat > "$R/bin/rt_sr_lean" <<'EOF'
+cat > "$R/tmp/rtbin/rt_sr_lean" <<'EOF'
 #!/bin/bash
 while :; do date +%s.%N > "$RT_SR_OUT/ethusdt_state.json"; sleep 1; done
 EOF
-chmod +x "$F/crontab" "$F/fakepy" "$R/bin/"*
+chmod +x "$F/crontab" "$F/fakepy" "$R/tmp/rtbin/"*
 echo '{}' > "$L/rtmodel/sr_lean.json"; echo '{}' > "$L/rtmodel/regime_band.json"; touch -d '2 days ago' "$L/regime_band_h48_model.joblib"
 NOW=$(( $(date +%s) / 3600 * 3600 + 1800 ))                                      # 정시 30분(회차 시각 아님)
 T=$(date -u -d "@$(( NOW - 1800 ))" '+%Y-%m-%d %H:%M:%S')

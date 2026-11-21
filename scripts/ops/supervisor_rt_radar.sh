@@ -10,7 +10,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
-BIN="${RT_RADAR_BIN:-$ROOT/bin/rt_radar}"
+BIN="${RT_RADAR_BIN:-$ROOT/tmp/rtbin/rt_radar}"
 export RT_RADAR_OUT="${RT_RADAR_OUT:-data/live/rt_risk_radar}"
 PARAMS="${RT_RADAR_PARAMS:-dashboard/risk_radar_params_20261116.json}"
 mkdir -p logs/supervisor data/live

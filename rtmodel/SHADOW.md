@@ -13,7 +13,7 @@ Rust 실행 파일 `rt_sr_lean` 을 서버에서 **파이썬 워커(`scripts/liv
 ## 2. 띄우기
 
 ```
-cp rtmodel/target/release/rt_sr_lean bin/rt_sr_lean       # md5 를 개발기 것과 맞춘다
+cp rtmodel/target/release/rt_sr_lean tmp/rtbin/rt_sr_lean       # md5 를 개발기 것과 맞춘다
 bash scripts/ops/supervisor_rt_sr_lean.sh                  # 로그 logs/supervisor/rt_sr_lean_YYYYMMDD.log
 ```
 
@@ -83,7 +83,7 @@ python rtmodel/tools/shadow_sr_lean.py data/live/sr_lean data/live/rt_sr_lean --
 
 - 빌드: `cd rtmodel && cargo build --release -j 2 --bin rt_regime` → `bin/rt_regime`(md5 대조).
 - 모델(서버에서): `python rtmodel/tools/export_regime.py data/live/regime_band_h48_model.joblib data/live/rt_regime_band/regime_band.json`(원본 joblib sha256 이 파일 안에 있다).
-- crontab(사람이 등록): `2 * * * * cd <저장소> && flock -n data/live/.rt_regime.lock nice -n 10 bin/rt_regime >> logs/supervisor/rt_regime_$(date +\%Y\%m\%d).log 2>&1`
+- crontab(사람이 등록): `2 * * * * cd <저장소> && flock -n data/live/.rt_regime.lock nice -n 10 tmp/rtbin/rt_regime >> logs/supervisor/rt_regime_$(date +\%Y\%m\%d).log 2>&1`
 - 쓰는 곳: `data/live/rt_regime_band/`(regime_band_forward.jsonl · _scored.jsonl · _summary.json -- 원본과 같은 이름·글자). 🔴`RT_REGIME_OUT=data/live` 는 종료코드 2
   (전환 때만 `RT_REGIME_TAKEOVER=1`). `/api/regime-band` 는 파이썬 파일만 읽으므로 그림자는 화면에 안 나온다.
 - 종료코드: 0 정상(출력 JSON 한 줄 = 원본 print 와 같은 글자) · 1 실패(`FAIL …` · 아무것도 안 씀 · 묵은 자료 70분 초과 포함) · 2 설정 거부.
@@ -115,7 +115,7 @@ python rtmodel/tools/shadow_sr_lean.py data/live/sr_lean data/live/rt_sr_lean --
 원본 `scripts/live_eth_direction_forward_recorder_20261010.py --record` 처럼 **cron 이 00·08·16 UTC 31분 뒤** 한 번 부르고 끝나는 실행 파일. 전진 판정(dir4h_p2 2027-03-14 · dir3asset 2027-04-08)이 읽는 줄이다.
 
 - 빌드: `cd rtmodel && cargo build --release -j 2 --bin rt_dirfwd` → `bin/rt_dirfwd`(md5 대조). 모델 없음(규칙).
-- crontab(사람이 등록 · 파이썬 줄과 같은 분): `31 0,8,16 * * * cd <저장소> && nice -n 10 bin/rt_dirfwd >> logs/supervisor/rt_dirfwd_$(date +\%Y\%m\%d).log 2>&1`
+- crontab(사람이 등록 · 파이썬 줄과 같은 분): `31 0,8,16 * * * cd <저장소> && nice -n 10 tmp/rtbin/rt_dirfwd >> logs/supervisor/rt_dirfwd_$(date +\%Y\%m\%d).log 2>&1`
 - 쓰는 곳: `data/live/rt_dirfwd/eth_direction_forward.jsonl`(RT_DIRFWD_OUT 디렉터리). 🔴`data/live` 는 종료코드 2(전환 때만 `RT_DIRFWD_TAKEOVER=1`).
 - REST: 자산 셋 × (1일봉 93 + 5분봉 320) = 회차당 6회 · 하루 18회(가중치 각 2) -- 그림자면 ×2.
 - 대조: 두 파일의 같은 (sym, date, hour) 줄에서 recorded_ms 를 뺀 나머지를 글자로(두 cron 이 같은 분에 돌아도 초가 다르다). 종료코드 0 정상 · 1 실패(원본처럼 앞 자산 줄은 남음 · 시각 밖 포함) · 2 설정 거부.

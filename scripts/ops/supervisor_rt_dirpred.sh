@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # rt_dirpred(Rust 4h·15분/1시간 방향 예측 + 상대 강도 기록 루프) 크래시 재기동 래퍼 (2026-11-21). 지금은 **그림자** 전용 -- rtmodel/SHADOW.md.
 #
-# 실행 파일: rtmodel/target/release/rt_dirpred 를 개발기에서 빌드해 옮긴 것(RT_DIR_BIN, 기본 $ROOT/bin/rt_dirpred).
+# 실행 파일: rtmodel/target/release/rt_dirpred 를 개발기에서 빌드해 옮긴 것(RT_DIR_BIN, 기본 $ROOT/tmp/rtbin/rt_dirpred).
 # 쓰는 곳: 기본 data/live/rt_dirpred/(RT_DIR_OUT) -- 파이썬 서버의 data/live 는 실행 파일이 거부한다(종료코드 2 · 전환 때만 RT_DIR_TAKEOVER=1).
 # 모델: <RT_DIR_OUT>/dir4h_<코인>.json · ds_<코인>.json · oos_<코인>.json(RT_DIR_MODELS) -- SHADOW.md «rt_dirpred» 의 내보내기 두 줄. 하나도 없으면 켜지 않는다.
 # 로그: logs/supervisor/rt_dirpred_YYYYMMDD.log · 락: data/live/.supervisor_rt_dirpred.lock
@@ -13,7 +13,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
-BIN="${RT_DIR_BIN:-$ROOT/bin/rt_dirpred}"
+BIN="${RT_DIR_BIN:-$ROOT/tmp/rtbin/rt_dirpred}"
 OUTD="${RT_DIR_OUT:-data/live/rt_dirpred}"
 MODELS="${RT_DIR_MODELS:-$OUTD}"
 
