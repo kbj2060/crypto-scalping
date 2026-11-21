@@ -302,7 +302,7 @@ fn account_cache_rules_and_last_good() {
     let fx = fixture();
     let ok_in = &fx["account"].as_array().unwrap().iter().find(|c| c["name"] == "normal_usdc").unwrap()["in"];
     let bad_in = &fx["account"].as_array().unwrap().iter().find(|c| c["name"] == "risk_ban_418").unwrap()["in"];
-    let mut book = AccountBook { eth_symbol: "ETHUSDC".into(), last_good: None };
+    let mut book = AccountBook { eth_symbol: "ETHUSDC".into(), last_good: None, trades: true };
     let mut r1 = FakeRest::new(ok_in);
     let good = block_on(book.produce(&mut r1)).unwrap();
     assert_eq!(good["ok"], json!(true));

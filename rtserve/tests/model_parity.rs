@@ -292,3 +292,22 @@ fn qx4_ban_stale() {
     let _ = std::fs::remove_dir_all(root);
     let _ = std::fs::remove_dir_all(models);
 }
+
+/// 병행 가동 기본: RTSERVE_REST 없음 = 모델 주소가 REST 를 안 보냄 · RTSERVE_READONLY = 쓰기 POST 4개 503 · 접수 기록 안 적음
+#[test]
+fn shadow_rest_off_readonly() {
+    let (addr, root) = start_with(&serde_json::Map::new(), 0, 1.795e9, "eth", "model_ro", |cfg| cfg.readonly = true);
+    std::fs::create_dir_all(root.join("data/live")).unwrap(); // 있어야 «안 적음»을 볼 수 있다(없으면 적기가 조용히 실패)
+    let g = request(addr, "GET", "/api/open-rev", &[]);
+    assert_eq!(String::from_utf8_lossy(&g.body), r#"{"ok": false, "reason": "RestOff: RTSERVE_REST unset -- request not sent"}"#);
+    for p in rtserve::READONLY_BLOCK {
+        let g = common::request_body(addr, "POST", p, &[("Content-Type".into(), "application/json".into())], b"{}");
+        assert_eq!((g.status, String::from_utf8_lossy(&g.body).into_owned()), (503, r#"{"ok": false, "error": "readonly_shadow"}"#.to_string()), "{p}");
+    }
+    let g = common::request_body(addr, "POST", "/api/manual-entry/submit", &[], b"");
+    assert_eq!(g.status, 502, "주문 = rtorder 없음 그대로");
+    let g = common::request_body(addr, "POST", "/api/client-timing", &[], b"{}");
+    assert_ne!(g.status, 503, "client-timing 은 로그만 -- 안 막음");
+    assert!(!root.join("data/live/order_requests.jsonl").exists() && !root.join("data/live/acct_notes.json").exists(), "병행 중 파일을 안 쓴다");
+    let _ = std::fs::remove_dir_all(root);
+}

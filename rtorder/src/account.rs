@@ -349,6 +349,13 @@ fn err_of(v: &Value) -> Option<String> {
 /// 원본 `fetch_account`(income 없이 -- 화면 몫). 요청 순서: 시계 → /fapi/v2/account → /fapi/v2/positionRisk → 심볼마다 userTrades → 심볼마다 openOrders.
 /// Err = 파이썬에서 예외로 새던 것(KeyError 등) -- 조립이 502 로 받는다.
 pub async fn fetch_account<R: AccountRest>(rest: &mut R, symbols: &[String], quote: &str, trade_limit: i64) -> Result<Value, String> {
+    fetch_account_opts(rest, symbols, quote, trade_limit, true).await
+}
+
+/// `with_trades=false`(그림자 전용 · 2026-11-21 가중치 줄이기): 심볼마다 userTrades(가중치 5 × 11 = 55)를 건너뛴다.
+/// 원본이 userTrades 로 만드는 것 = 왕복 원장(trades · 화면 손익) + 열린 포지션의 entry_at(보유 시간 표시) 뿐 -- 감시·청산 계획의 수량·가격·손절 판정에는 안 쓴다.
+/// 건너뛰면 trades = [] · entry_at = updated_at(원본이 왕복을 못 찾았을 때와 같은 값) · `trades_skipped: true`.
+pub async fn fetch_account_opts<R: AccountRest>(rest: &mut R, symbols: &[String], quote: &str, trade_limit: i64, with_trades: bool) -> Result<Value, String> {
     if !rest.has_keys() {
         return Ok(json!({"ok": false, "error": "BINANCE_API_KEY/BINANCE_SECRET_KEY가 .env에 없습니다."}));
     }
@@ -401,7 +408,11 @@ pub async fn fetch_account<R: AccountRest>(rest: &mut R, symbols: &[String], quo
         }
     }
     // 2026-11-05 원본은 심볼별 조회를 한꺼번에(gather) -- 요청 수·무게는 같다. 2026-11-21 Rust 도 `get_many`(Binance = 동시 · 가짜 = 차례로)
-    let tr: Vec<(String, Vec<(String, P)>)> = symbols.iter().map(|s| ("/fapi/v1/userTrades".to_string(), vec![("symbol".into(), P::s(s)), ("limit".into(), P::I(trade_limit))])).collect();
+    let tr: Vec<(String, Vec<(String, P)>)> = if with_trades {
+        symbols.iter().map(|s| ("/fapi/v1/userTrades".to_string(), vec![("symbol".into(), P::s(s)), ("limit".into(), P::I(trade_limit))])).collect()
+    } else {
+        vec![]
+    };
     let all_fills = rest.get_many(&tr, off).await;
     let oo: Vec<(String, Vec<(String, P)>)> = symbols.iter().map(|s| ("/fapi/v1/openOrders".to_string(), vec![("symbol".into(), P::s(s))])).collect();
     let all_rows = rest.get_many(&oo, off).await;
@@ -468,12 +479,20 @@ pub async fn fetch_account<R: AccountRest>(rest: &mut R, symbols: &[String], quo
               "balance_asset": if multi { Value::Null } else { json!(quote) }, "multi_assets_margin": multi, "assets": listed,
               "positions": positions, "open_orders": open_orders, "leverage_by_symbol": lev_by, "trades": trips,
               "trades_truncated": truncated, "trades_failed": failed}))
+        .map(|mut v| {
+            if !with_trades {
+                v["trades_skipped"] = json!(true);
+            }
+            v
+        })
 }
 
 /// `produce_account` 의 주문 경로 몫: fetch_account + exec_symbol·exec_symbols · 마지막 정상값(화면용 last_good, 30분).
 pub struct AccountBook {
     pub eth_symbol: String,
     pub last_good: Option<(f64, Value)>,
+    /// false = 그림자 전용(userTrades 건너뜀 -- `fetch_account_opts`).
+    pub trades: bool,
 }
 
 impl AccountBook {
@@ -493,7 +512,7 @@ impl AccountBook {
     }
     pub async fn produce<R: AccountRest>(&mut self, rest: &mut R) -> Result<Value, String> {
         let quote = if self.eth_symbol.ends_with("USDC") { "USDC" } else { "USDT" };
-        let mut p = fetch_account(rest, &self.symbols(), quote, DEFAULT_TRADE_LIMIT).await?;
+        let mut p = fetch_account_opts(rest, &self.symbols(), quote, DEFAULT_TRADE_LIMIT, self.trades).await?;
         p["exec_symbol"] = json!(self.eth_symbol);
         p["exec_symbols"] = self.exec_symbols();
         // 🔴2026-11-02 ok=false 는 그대로 둔다(감시·주문 경로는 «못 읽음 = 모름», 09-26) -- 화면용으로만 마지막 정상값을 같이 싣는다(30분까지)
@@ -518,11 +537,14 @@ pub struct SharedAccount {
     pub cache: std::sync::Mutex<Option<(f64, Value)>>,
     pub book: tokio::sync::Mutex<AccountBook>,
     pub stale_grace: f64,
+    /// 감시 틱 캐시 수명(원본 10초 · 그림자는 기본 60초 -- 같은 IP 의 파이썬 주문 경로 가중치를 지킨다).
+    pub ttl: f64,
 }
 
 impl SharedAccount {
     pub fn new(eth_symbol: &str) -> Self {
-        SharedAccount { cache: Default::default(), book: tokio::sync::Mutex::new(AccountBook { eth_symbol: eth_symbol.into(), last_good: None }), stale_grace: 60.0 }
+        SharedAccount { cache: Default::default(), book: tokio::sync::Mutex::new(AccountBook { eth_symbol: eth_symbol.into(), last_good: None, trades: true }), stale_grace: 60.0,
+                        ttl: ACCOUNT_CACHE_SEC }
     }
     /// 원본 produce_account(새로 읽기 · 캐시에 안 넣음) + 스트림 계좌 대조.
     pub async fn produce<R: AccountRest>(&self, rest: &mut R, hub: Option<&crate::userstream::Hub>) -> Result<Value, String> {
@@ -538,7 +560,7 @@ impl SharedAccount {
         let now = rest.now();
         let c = self.cache.lock().unwrap().clone();
         let (ts, has) = c.as_ref().map_or((0.0, false), |c| (c.0, true));
-        match swr_decide(now, ts, has, ACCOUNT_CACHE_SEC, self.stale_grace) {
+        match swr_decide(now, ts, has, self.ttl, self.stale_grace) {
             Swr::Serve => Ok(c.unwrap().1),
             Swr::ServeAndRefresh | Swr::Fetch => self.store(rest, hub, now).await,
         }
@@ -752,6 +774,10 @@ pub trait RefreshIo {
     async fn sleep(&mut self, sec: f64) -> bool;
     /// produce_account → 캐시에 넣기(swr 잠금 안). Err = 예외 문자열.
     async fn refresh(&mut self) -> Result<(), String>;
+    /// 다시 읽기 사이 최소 간격(원본 3초 · 그림자는 30초).
+    fn gap(&self) -> f64 {
+        ACCOUNT_PUSH_GAP_S
+    }
     fn wake(&mut self);
     fn log(&mut self, s: String);
 }
@@ -770,7 +796,7 @@ pub async fn account_refresher<R: RefreshIo>(io: &mut R, us: &mut UserStream) {
             }
             Err(e) => io.log(format!("user stream: 계좌 재조회 실패 {e}")),
         }
-        if !io.sleep(ACCOUNT_PUSH_GAP_S).await {
+        if !io.sleep(io.gap()).await {
             return;
         }
     }

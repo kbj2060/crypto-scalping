@@ -8,6 +8,7 @@
 pub mod api;
 pub mod api2;
 pub mod api3;
+pub mod fpd;
 pub mod hub;
 pub mod model;
 pub mod order;
@@ -75,6 +76,10 @@ pub struct Config {
     pub fred_key: Option<String>,
     pub ext: Option<String>,
     pub models_state: Arc<model::State>,
+    /// 병행 가동(파이썬 8787 과 같은 data/live): 파일을 쓰는 POST 4개는 503 readonly_shadow · 접수 기록(order_requests.jsonl)도 안 적는다 -- 같은 파일을 둘이 쓰지 않게
+    pub readonly: bool,
+    /// 일봉·4시간 풋프린트(fpd.rs) 코인마다 하나 -- 처음 요청 때 만든다(원본 fp_daily 표)
+    pub fpd: Arc<std::sync::OnceLock<std::collections::HashMap<String, fpd::Fpd>>>,
 }
 
 impl Config {
@@ -92,11 +97,13 @@ impl Config {
             events: Arc::new(hub::Events { clients: Mutex::new(Vec::new()), latest: Mutex::new((serde_json::Value::Null, serde_json::json!({}))), acct_seq: Mutex::new(0) }),
             swr: Arc::new(swr::Swr::default()),
             rtorder: None,
-            rest: "https://fapi.binance.com".into(),
+            rest: String::new(), // 빈 값 = REST 꺼짐(모델 주소 · main 의 RTSERVE_REST 로 켠다)
             models: None,
             fred_key: None,
             ext: None,
             models_state: Arc::new(model::State::default()),
+            readonly: false,
+            fpd: Arc::default(),
         }
     }
     /// 켜진 흐름 엔진 코인(원본 `flows` 의 열쇠 · FLOW_SPECS 순서)
@@ -274,15 +281,23 @@ fn route(cfg: &Config, req: &Req) -> Resp {
 }
 
 /// 요청 하나 → 연결에 낼 응답(압축·길이까지 정한 것)
+/// 병행 가동 때 막는 쓰기 주소(api2: 메모·오답·푸시 구독 -- 파이썬과 같은 파일을 rename 으로 덮는다)
+pub const READONLY_BLOCK: [&str; 4] = ["/api/acct-notes", "/api/acct-wrong", "/api/push/subscribe", "/api/push/unsubscribe"];
+
 pub fn handle(cfg: &Config, req: &Req) -> Resp {
     let t0 = (cfg.now)();
+    if cfg.readonly && req.method == "POST" && READONLY_BLOCK.contains(&req.path.as_str()) {
+        let mut r = Resp::json(&serde_json::json!({"ok": false, "error": "readonly_shadow"}));
+        r.status = 503;
+        return prepare(req, r);
+    }
     let mut r = route(cfg, req);
     if !r.exc {
         // 미들웨어 둘(안쪽부터) -- 예외 응답(302·4xx·500)은 원본처럼 미들웨어를 안 지난다
         r = json_compress_etag(req, r);
         r = static_asset_headers(req, r);
     }
-    if req.method == "POST" && req.path.starts_with("/api/manual-") && !r.upstream {
+    if req.method == "POST" && req.path.starts_with("/api/manual-") && !r.upstream && !cfg.readonly {
         api2::order_request_log(cfg, req, &r, t0);
     }
     prepare(req, r)

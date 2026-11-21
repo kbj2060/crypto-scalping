@@ -289,6 +289,7 @@ fn binary_starts_stops_on_sigterm_restarts_and_refuses_bad_config() {
     assert!(ex.lock().unwrap().log.iter().all(|l| !l.contains("listenKey")));
     // 설정 오류 = 시작 안 함(종료코드 2)
     let code = |c: &mut std::process::Command| finish(c.spawn().unwrap(), 10.0).and_then(|x| x.0);
+    #[cfg(not(feature = "live"))] // 기본 빌드에는 실전송이 없다(확인 문구를 줘도 거절) -- live 빌드는 아래 live_build_* 시험이 «문구 없음 = 거절»을 본다
     assert_eq!(code(run(&[("RTORDER_MODE", "live"), ("RTORDER_LIVE_CONFIRM", rtorder::shadow::LIVE_CONFIRM)]).env_remove("RTORDER_X")), Some(2), "기본 빌드에서 live");
     assert_eq!(code(run(&[("RTORDER_MODE", "turbo")]).env_remove("RTORDER_X")), Some(2));
     assert_eq!(code(std::process::Command::new(bin).env_clear()), Some(2), "RTORDER_DIR 없음");
@@ -441,5 +442,48 @@ async fn stop_waits_up_to_two_seconds_for_a_request_being_answered() {
     let r = probe.await.unwrap();
     assert!(r.as_ref().is_ok_and(|b| b.starts_with("HTTP/1.1 200")), "멈춤 뒤에도 답 중이던 요청은 끝까지 {r:?}");
     assert!(t0.elapsed().as_secs_f64() < 4.0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 서버 그림자 가동 판(`cargo build --release --features live`): 키를 환경에서 읽어 계좌를 읽지만, RTORDER_MODE 를 주지 않으면 그림자 --
+/// 첫 줄 «모드: 그림자 · 쓰기 막힘» · 시작 정리·감시가 쓰려는 것은 «안 보낸 쓰기»로만 · 가짜 거래소에 쓰기 0 · 키 머리가 붙은 읽기는 나간다 ·
+/// 확인 문구 없이 RTORDER_MODE=live = 시작 거절(2). 키는 합성 값.
+#[cfg(feature = "live")]
+#[test]
+fn live_build_shadow_reads_with_keys_but_sends_no_write() {
+    let bin = env!("CARGO_BIN_EXE_rtorder");
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let (srv, ex) = rt.block_on(async { exchange(routes()) });
+    let dir = std::env::temp_dir().join(format!("rtorder_live_shadow_{}", std::process::id()));
+    seed(&dir);
+    let run = |extra: &[(&str, &str)]| {
+        let mut c = std::process::Command::new(bin);
+        c.env_clear().env("PATH", std::env::var("PATH").unwrap_or_default()).env("RTORDER_DIR", &dir).env("RTORDER_BASE", &srv.base)
+            .env("RTORDER_PERIOD", "0.05").env("RTORDER_LISTEN", "127.0.0.1:0").env("DASHBOARD_MANUAL_EXEC_ENABLED", "1")
+            .env("BINANCE_API_KEY", "test_key").env("BINANCE_SECRET_KEY", "test_secret");
+        for (k, v) in extra {
+            c.env(k, v);
+        }
+        c.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+        c
+    };
+    let child = run(&[]).spawn().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    std::process::Command::new("kill").args(["-TERM", &child.id().to_string()]).status().unwrap();
+    let (code, so) = finish(child, 10.0).expect("SIGTERM 뒤 멈춘다");
+    assert_eq!(code, Some(0), "{so}");
+    assert_eq!(so.lines().next(), Some("모드: 그림자 · 쓰기 막힘"), "{so}");
+    assert!(so.contains("그림자(안 보냄): CANCEL_WAIT_ORPHANS") && so.contains("그림자(안 보냄): BRACKET ETHUSDC LONG"), "시작 정리·복구 무장은 적기만 {so}");
+    let log = ex.lock().unwrap().log.clone();
+    assert!(log.iter().all(|l| l.starts_with("GET")), "그림자에서 쓰기가 나갔다 {log:?}");
+    assert!(log.iter().any(|l| l == "GET /fapi/v2/account"), "키로 계좌를 읽는다 {log:?}");
+    assert!(srv.log.lock().unwrap().iter().filter(|g| g.target.starts_with("/fapi/v2/")).all(|g| g.key.as_deref() == Some("test_key")));
+    assert_eq!(ex.lock().unwrap().open.len(), 2, "거래소 주문 그대로");
+    // 확인 문구 없이 live = 시작 거절 · 틀린 문구도 거절
+    for extra in [vec![("RTORDER_MODE", "live")], vec![("RTORDER_MODE", "live"), ("RTORDER_LIVE_CONFIRM", "yes")]] {
+        let (code, so) = finish(run(&extra).spawn().unwrap(), 10.0).unwrap();
+        assert_eq!(code, Some(2), "{so}");
+    }
+    assert!(ex.lock().unwrap().log.iter().all(|l| l.starts_with("GET")));
     let _ = std::fs::remove_dir_all(&dir);
 }

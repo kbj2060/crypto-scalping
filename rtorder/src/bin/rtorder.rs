@@ -16,6 +16,15 @@ fn main() {
         eprintln!("rtorder: 모드 오류 -- {e}");
         std::process::exit(2)
     });
+    {
+        // 첫 줄 = 모드(감독 로그에서 바로 보이게)
+        use std::io::Write;
+        match &mode {
+            Mode::Shadow => println!("모드: 그림자 · 쓰기 막힘"),
+            Mode::Live(_) => println!("모드: 실전송"),
+        }
+        let _ = std::io::stdout().flush();
+    }
     std::fs::create_dir_all(&cfg.dir).unwrap_or_else(|e| {
         eprintln!("rtorder: 폴더 {}: {e}", cfg.dir.display());
         std::process::exit(2)

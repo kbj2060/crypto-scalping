@@ -70,6 +70,19 @@ impl Swr {
         Ok(v)
     }
 
+    /// 원본 api_footprint_daily_cells 의 칸 키 정리(server.py:3874~3877): 저장된 값이 max 개를 넘으면 접두사가 맞는 키 중 오래된(ts) 절반을 지운다
+    pub fn prune_oldest_half(&self, max: usize, prefixes: &[&str]) {
+        let mut g = self.slots.lock().unwrap();
+        if g.values().filter(|s| s.payload.is_some()).count() <= max {
+            return;
+        }
+        let mut old: Vec<(f64, String)> = g.iter().filter(|(k, s)| s.payload.is_some() && prefixes.iter().any(|p| k.starts_with(p))).map(|(k, s)| (s.ts, k.clone())).collect();
+        old.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        for (_, k) in &old[..old.len() / 2] {
+            g.remove(k);
+        }
+    }
+
     fn store(&self, key: &str, v: &V) {
         let mut g = self.slots.lock().unwrap();
         let s = g.entry(key.to_string()).or_default();

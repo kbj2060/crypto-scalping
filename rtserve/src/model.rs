@@ -128,6 +128,7 @@ fn query(params: &[(&'static str, String)]) -> String {
 
 /// 원본 d4._get(requests · 서버 안에선 binance_ban_guard 가 감쌈 · 20초): 밴 중이면 BinanceBanned · raise_for_status · json
 fn rest_get(cfg: &Config, path: &str, params: &[(&'static str, String)]) -> Result<Value, String> {
+    rest_on(cfg)?;
     let (ban, now) = (ban_file(cfg), (cfg.now)());
     let left = rtmodel::ban::ban_left(&ban, now);
     if left > 0.0 {
@@ -143,6 +144,7 @@ fn rest_get(cfg: &Config, path: &str, params: &[(&'static str, String)]) -> Resu
 
 /// 원본 fetch_binance_json(10초): 밴 중 = 안 보냄(error_reason 있으면 HTTPServiceUnavailable binance_ip_ban · 없으면 None) · 200 아님 = 418·429 기록 뒤 HTTPBadGateway(reason) · None
 fn fetch_binance(cfg: &Config, url: &str, reason: Option<&str>) -> Result<Option<Value>, String> {
+    rest_on(cfg)?;
     let (ban, now) = (ban_file(cfg), (cfg.now)());
     if rtmodel::ban::ban_left(&ban, now) > 0.0 {
         return reason.map_or(Ok(None), |_| Err("HTTPServiceUnavailable: binance_ip_ban".into()));
@@ -153,6 +155,11 @@ fn fetch_binance(cfg: &Config, url: &str, reason: Option<&str>) -> Result<Option
         return reason.map_or(Ok(None), |r| Err(format!("HTTPBadGateway: {r}")));
     }
     serde_json::from_str(&body).map(Some).map_err(|m| format!("ContentTypeError: {m}"))
+}
+
+/// REST 꺼짐(RTSERVE_REST 없음 = 병행 가동 기본 -- 파이썬과 같은 IP 로 같은 REST 를 겹쳐 부르지 않게): 보내지 않고 오류
+fn rest_on(cfg: &Config) -> Result<(), String> {
+    if cfg.rest.is_empty() { Err("RestOff: RTSERVE_REST unset -- request not sent".into()) } else { Ok(()) }
 }
 
 /// rtmodel 이 낸 본문 글자 → 값(swr 에 넣는다 · 직렬화는 rtserve 파이썬 서식 = 같은 글자)
@@ -288,6 +295,7 @@ fn api_open_rev(cfg: &Config, _: &Req) -> Resp {
 
 /// 원본 dir_signals._get: urllib · User-Agent Mozilla/5.0 · 30초(바이낸스 현물도 requests 가 아니라 밴 가드 밖)
 fn ext_get(cfg: &Config, url: &str) -> Result<Value, String> {
+    rest_on(cfg)?;
     let u = match &cfg.ext {
         Some(b) => ["https://api.exchange.coinbase.com", "https://api.binance.com", "https://api.stlouisfed.org"].iter()
             .find_map(|h| url.strip_prefix(h).map(|r| format!("{b}{r}"))).unwrap_or_else(|| url.into()),
