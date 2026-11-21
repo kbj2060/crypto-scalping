@@ -53,6 +53,9 @@ TABLES = {  # 표 → (시각 열, 시각 단위 ms 인가, 열쇠 열 또는 No
     "hl_xyz_1m": ("ts_sec", False, ("coin", "ts_sec"), ()),
     "hl_xyz_ctx_1s": ("recv_sec", False, None, ("recv_sec",)),
     "hl_asset_ctx": ("recv_ms", True, None, ("recv_ms",)),
+    "treasury_fut_1m": ("ts_sec", False, ("symbol", "ts_sec"), ()),   # 국채선물 1분봉(Yahoo) -- 받은 시각 칸 없음
+    "yahoo_5m": ("ts_sec", False, ("symbol", "ts_sec"), ()),          # macro 5분봉(Yahoo)
+    "items": ("pub_ms", True, ("source", "link"), ("first_seen_ms", "backfill")),   # 뉴스 -- 처음 본 시각·메움 표시는 각자
     "bars": ("t", True, ("t",), ("written_ms", "chain_age_s")),   # chain_age_s = 사슬 시작부터 초(각자 띄운 때에 달렸다 -- 진단 칸)
     "marks": ("t", True, ("t", "side", "px"), ()),
 }
@@ -74,7 +77,8 @@ INTENDED_EXTRA = {
 #   (xyz ctx: 파이썬에만 2,219 · Rust에만 1,024 가 대부분 같은 값의 찍힌 횟수 차였다)
 BAR_W = {"hl_xyz_1m": 60}
 SET_TABLES = {"hl_xyz_ctx_1s", "hl_asset_ctx"}
-SYM_COL = {"trade_tape_1s": "symbol", "bybit_liquidations": "symbol", "bybit_oi": "inst", "bybit_mark": "inst", "bybit_funding": "inst",
+SUBSET = False   # --subset: Rust 가 받은 것이 파이썬에 있나만(파이썬이 오래 모은 «파이썬에만»은 세지 않음 -- 뉴스 한 회차)
+SYM_COL = {"treasury_fut_1m": "symbol", "yahoo_5m": "symbol", "items": "source","trade_tape_1s": "symbol", "bybit_liquidations": "symbol", "bybit_oi": "inst", "bybit_mark": "inst", "bybit_funding": "inst",
            "okx_oi": "inst", "okx_mark": "inst", "okx_funding": "inst", "okx_liquidations": "inst_id",
            "mark_price_1s": "symbol", "oi_1s": "symbol", "liquidations": "symbol", "hl_xyz_1m": "coin", "hl_xyz_ctx_1s": "coin", "hl_asset_ctx": "coin"}
 
@@ -369,7 +373,7 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
                 resub += c
     rs_note = f"(의도한 차이 후보 -- {INTENDED_EXTRA[t]})" if t in INTENDED_EXTRA and only_rs else ""
     hot = (" · 파이썬에만 많은 분(서버 시각) " + ", ".join(f"{time.strftime('%F %R', time.localtime(m))}({c})" for m, c in po_min.most_common(3))) if po_min else ""
-    bad = n_bad + only_py - dup_py - same_sec[0] + (0 if t in INTENDED_EXTRA else only_rs - dup_rs - resub - same_sec[1])
+    bad = n_bad + (0 if SUBSET else only_py - dup_py - same_sec[0]) + (0 if t in INTENDED_EXTRA else only_rs - dup_rs - resub - same_sec[1])
     if t == "hl_xyz_ctx_1s" and only_py + only_rs <= 0.005 * n_cmp:   # 받은 초가 1칸 밀린 합침 -- §5 의 0.5% 기준
         bad = n_bad
     TALLY[0] += n_cmp
@@ -567,6 +571,50 @@ def compare_bt(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", starts=(
         res.append(f"bt {h}: 같은 행 {same:,} · 파이썬에만 {op:,} · Rust에만 {orr:,}")
     res.append(f"bt: 연결 끊김 Rust {len(rsil)}번(로그 «끊김» {reconnects}줄 → {min(len(rsil), reconnects)} 설명) · 파이썬 {len(psil)}번{down_note(hs, n_down)}")
     return res if len(res) > 1 else ["bt: 두 쪽에 같은 시 파일이 없다"]
+
+
+VOLATILE = ("recorded", "generated", "written", "updated", "_at", "at_ms", "elapsed")
+
+
+def strip_vol(v):
+    if isinstance(v, dict):
+        return {k: strip_vol(x) for k, x in v.items() if not any(w in k for w in VOLATILE)}
+    return [strip_vol(x) for x in v] if isinstance(v, list) else v
+
+
+def compare_jsonl(py: Path, rs: Path, key: str) -> list[str]:
+    """전진 장부 JSONL(청산지도 점수 origin · SOXL 주말 weekend): 같은 열쇠 줄끼리 받은·쓴 시각 칸을 빼고 글자 비교.
+    Rust 에만 있는 열쇠가 파이썬 마지막 열쇠보다 뒤면 «파이썬이 아직 안 쓴 회차»(세지 않음) · 앞이면 설명 못 함."""
+    import json
+    rd = lambda f: {o[key]: o for o in (json.loads(x) for x in f.read_text().splitlines() if x.strip()) if key in o}   # noqa: E731
+    a, b = rd(py), rd(rs)
+    both = sorted(a.keys() & b.keys())
+    bad = [k for k in both if strip_vol(a[k]) != strip_vol(b[k])]
+    later = [k for k in b.keys() - a.keys() if a and k > max(a)]
+    lost = sorted(b.keys() - a.keys() - set(later))
+    TALLY[0] += len(both)
+    TALLY[1] += len(bad) + len(lost)
+    out = [f"jsonl {key}: 같은 열쇠 {len(both):,} · 다름 {len(bad):,} · Rust 에만(파이썬 마지막 뒤 = 아직 안 쓴 회차) {len(later):,} · Rust 에만(앞) {len(lost):,} · 파이썬에만 {len(a.keys() - b.keys()):,}"]
+    out += [f"    다름 {k}" for k in bad[:3]] + [f"    Rust 에만(앞) {k}" for k in lost[:3]]
+    return out
+
+
+def compare_cboe(py: Path, rs: Path) -> list[str]:
+    """CBOE 요약 상태 JSON: 값은 체인을 받은 순간의 호가라 두 번 받으면 원래 다르다 -- 열쇠 모양(2단까지)이 같은지만 센다(값 차는 적기만).
+    계산 일치 근거는 정답지(cboe_summary_parity)뿐."""
+    import json
+    a, b = json.loads(py.read_text()), json.loads(rs.read_text())
+
+    def keys(v, pre=""):
+        if isinstance(v, dict):
+            for k, x in v.items():
+                yield pre + str(k)
+                if pre.count("/") < 1:
+                    yield from keys(x, pre + str(k) + "/")
+    ka, kb = set(keys(strip_vol(a))), set(keys(strip_vol(b)))
+    TALLY[0] += len(ka & kb)
+    TALLY[1] += len(ka - kb)
+    return [f"cboe 상태: 같은 열쇠 {len(ka & kb):,} · 파이썬에만 {len(ka - kb):,} {sorted(ka - kb)[:5]} · Rust 에만 {len(kb - ka):,} · 값은 받은 순간 호가라 견주지 않음"]
 
 
 def compare_events(py: Path, rs: Path, lo=None, hi=None, show: int = 3) -> list[str]:
@@ -792,6 +840,12 @@ def selftest() -> None:
         TALLY[:] = [0, 0]
         ll = next(x for x in run(l1, l2, starts=[T + 190]) if x.startswith("okx_liquidations"))
         assert "파이썬에만 1 " in ll and TALLY[1] == 1, (TALLY, ll)   # ADBE T+50(그림자 뜨기 전)은 빼고 T+400 만 남는다
+        # 전진 장부 JSONL: 같은 열쇠 줄(기록 시각만 다름) · 다른 값 · 파이썬 마지막 뒤 Rust 에만(안 셈) · 앞 Rust 에만(셈)
+        (Path(d) / "j1.jsonl").write_text('{"origin":"a","cp":1,"recorded_at":1}\n{"origin":"b","cp":2}\n{"origin":"d","cp":4}\n')
+        (Path(d) / "j2.jsonl").write_text('{"origin":"a","cp":1,"recorded_at":2}\n{"origin":"b","cp":3}\n{"origin":"c","cp":9}\n{"origin":"d","cp":4}\n{"origin":"e","cp":5}\n')
+        TALLY[:] = [0, 0]
+        jl = compare_jsonl(Path(d) / "j1.jsonl", Path(d) / "j2.jsonl", "origin")
+        assert TALLY == [3, 2] and "아직 안 쓴 회차) 1" in jl[0], (TALLY, jl)
         # 같은 초 다른 값(xyz ctx): 파이썬 T+50 에 1.5(Rust 는 같은 초에 1.6) → 설명 · 파이썬 T+300 에 9.9(Rust 는 T+298~302 에 줄 없음) → 설명 못 함
         e1, e2 = Path(d) / "e1.sqlite", Path(d) / "e2.sqlite"
         for f in (e1, e2):
@@ -858,6 +912,9 @@ def main() -> None:
     ap.add_argument("--starts", default="", help="그림자 Rust 감독 «SUPERVISOR starting» 시각(초, 쉼표) -- 그 앞뒤 Rust 가 비어 있던 구간을 뺀다(takeover.sh 가 로그에서 읽어 넘긴다)")
     ap.add_argument("--reconnects", type=int, default=0, help="그림자 Rust 감독 로그의 «끊김» 줄 수(takeover.sh 가 센다) -- 그만큼의 Rust 만 빈 곳을 설명으로")
     ap.add_argument("--summary", action="store_true", help="끝에 «요약: 견준 N · 설명 못 함 M» · M>0 이거나 N=0 이면 종료코드 1(takeover.sh check)")
+    ap.add_argument("--subset", action="store_true", help="Rust 에만·다름만 센다(파이썬이 오래 모은 것은 안 셈)")
+    ap.add_argument("--jsonl", default="", help="두 경로 = JSONL · 값 = 열쇠 칸(origin · weekend)")
+    ap.add_argument("--cboe", action="store_true", help="두 경로 = cboe_option_state.json")
     ap.add_argument("--bt", action="store_true", help="두 경로 = HL .bt 코인 폴더 · --hours 시작,끝")
     ap.add_argument("--events", action="store_true", help="두 경로 = 아이스버그 <sym>_events.jsonl · --from/--to = t_end 초")
     a = ap.parse_args()
@@ -867,7 +924,13 @@ def main() -> None:
         ap.error("파이썬 DB 와 Rust DB 경로가 필요하다")
     lo, _, hi = a.hours.partition(",")
     st = [int(x) for x in a.starts.split(",") if x.strip()]
-    if a.json:
+    global SUBSET
+    SUBSET = a.subset
+    if a.jsonl:
+        out = compare_jsonl(a.py, a.rs, a.jsonl)
+    elif a.cboe:
+        out = compare_cboe(a.py, a.rs)
+    elif a.json:
         out = compare_json(a.py, a.rs, a.json, a.drop)
     elif a.bt:
         out = compare_bt(a.py, a.rs, lo, hi or "~", st, a.margin, a.reconnects)

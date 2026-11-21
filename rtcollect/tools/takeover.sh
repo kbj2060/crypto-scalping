@@ -51,7 +51,7 @@ is_sup() { argv "$1" | grep -qE '(^|/)_supervise\.sh$'; }
 # ── 종류 표 ── ENG(rtcollect|rtduck) RK(Rust 종류) PYSUP(crontab 의 파이썬 줄 글자) PYRUN(파이썬 러너 파일) SELV·SELD(종목 변수·기본)
 #   XV·XD·XW(파이썬 environ 에서 XV(기본 XD) 가 XW 여야 -- 같은 러너의 다른 스트림 가르기) XR(Rust·crontab 줄에도 X 를 적용) RVAR(Rust 종목 변수)
 #   COPY(파이썬 environ 에서 그대로 넘길 변수) TENV(진짜 경로·REST) CHK(대조 목록 «모드:파이썬:Rust») W(끊긴 초를 재는 파일·폴더) CRON(예약 종류) SHARED(여러 종목이 한 파일)
-ENG=rtcollect; RK="$KIND"; COVK=""; PYSUP=""; PYRUN=""; SELV=""; SELD=""; XV=""; XD=""; XW=""; XR=0; RVAR=""; COPY=""; TENV=""; CHK=""; W=""; CRON=0; SHARED=0; GROUP=0
+ENG=rtcollect; RK="$KIND"; COVK=""; PYSUP=""; PYMAIN=""; ONCE=""; REQ=""; PYRUN=""; SELV=""; SELD=""; XV=""; XD=""; XW=""; XR=0; RVAR=""; COPY=""; TENV=""; CHK=""; W=""; CRON=0; SHARED=0; GROUP=0
 case "$KIND" in
   binance_tape) PYSUP=supervisor_trade_tape.sh; PYRUN=live_trade_tape_collector_20260916.py; SELV=TAPE_SYMBOL; SELD=ethusdt; XV=TAPE_MARKET; XD=futures; XW=futures; XR=1; SHARED=1
                 TENV="TAPE_MARKET=futures TAPE_DB_PATH=data/hot/binance_tape.sqlite RTCOLLECT_REST=1"; CHK="sq:data/hot/binance_tape.sqlite:data/hot/rtcollect/binance_tape.sqlite"; W="data/hot/binance_tape.sqlite data/hot/binance_tape.sqlite-wal" ;;
@@ -93,7 +93,25 @@ case "$KIND" in
   hl_bt)        PYSUP=supervisor_hyperliquid_book_ticker.sh; PYRUN=live_hyperliquid_book_ticker_collector_20260923.py; SELV=HL_BT_COIN; SELD=ETH; XV=HL_BT_CTX_ONLY; XD=""; XW=""
                 TENV="HL_BT_ROOT=data/live/orderflow/hyperliquid_bookticker HL_CTX_DB_PATH=data/hot/hl_ctx.sqlite"; COVK="hl_bt" ;;   # 경로는 종목을 안 뒤에(아래)
   raster_archive) ENG=rtduck; CRON=1; PYSUP=""; PYRUN="__none__"; TENV="OF_ROOT=data/live/orderflow/raster OF_ARCHIVE_ROOT=data/live/orderflow/raster_archive" ;;
-  hl_positions|news|treasury_futures|macro_5m|liqmap_scorer|soxl_weekend|cboe_chain) die "$KIND 는 이 스크립트가 다루지 않는다 -- rtcollect/REMAINING.md «넘겨도 되는가» 표" ;;
+  # 한 회차 대조 종류(그림자 없음 · check 가 Rust 를 그 자리에서 한 번 그림자 경로로 돌려 파이썬이 쓴 것과 견준다 · REQ = 그 한 번의 바깥 요청)
+  treasury_futures) CRON=1; PYSUP=live_treasury_futures_collector_20261006; PYRUN=live_treasury_futures_collector_20261006.py; ONCE="--range 5d"
+                TENV="TREASURY_FUTURES_DB=data/hot/treasury_futures.sqlite RTCOLLECT_REST=1"; CHK="once_sq:data/hot/treasury_futures.sqlite:data/hot/rtcollect/treasury_futures.sqlite"
+                REQ="Yahoo 차트 --range 5d 종목마다 1회(cron.rs TREASURY 종목 수)" ;;
+  macro_5m)     CRON=1; PYSUP=live_macro_5m_collector_20261028; PYRUN=live_macro_5m_collector_20261028.py
+                TENV="MACRO_5M_DB=data/hot/macro_5m.sqlite RTCOLLECT_REST=1"; CHK="once_sq:data/hot/macro_5m.sqlite:data/hot/rtcollect/macro_5m.sqlite"
+                REQ="Yahoo 5분봉 종목마다 1회(1.5초 간격)" ;;
+  liqmap_scorer) CRON=1; PYSUP=live_liqmap_scorer_20261008; PYRUN=live_liqmap_scorer_20261008.py
+                TENV="LIQMAP_OUT=data/live/liqmap_score.jsonl LIQMAP_STATUS=data/live/liqmap_score_status.json RTCOLLECT_REST=1"
+                CHK="once_jsonl:data/live/liqmap_score.jsonl:data/live/rtcollect/liqmap_score.jsonl:origin"; REQ="바이낸스 klines 1h×198 1회(가중치 2)" ;;
+  soxl_weekend) CRON=1; PYSUP=live_soxl_weekend_forward_recorder_20261022; PYRUN=live_soxl_weekend_forward_recorder_20261022.py; ONCE="--record"
+                TENV="SOXL_WEEKEND_OUT=data/live/soxl_weekend_forward.jsonl RTCOLLECT_REST=1"
+                CHK="once_jsonl:data/live/soxl_weekend_forward.jsonl:data/live/rtcollect/soxl_weekend_forward.jsonl:weekend"; REQ="끝난 새 주말이 있을 때만 klines 8 + fundingRate 1" ;;
+  cboe_chain)   CRON=1; PYSUP="live_cboe_option_chain_collector_20261101|cboe_option_summary_20261101"; PYMAIN=live_cboe_option_chain_collector_20261101; PYRUN=live_cboe_option_chain_collector_20261101.py
+                TENV="CBOE_OUT=data/live/options_equity/cboe CBOE_STATE=data/live/cboe_option_state.json RTCOLLECT_REST=1"
+                CHK="once_cboe:data/live/cboe_option_state.json:data/live/rtcollect/cboe_option_state.json"; REQ="CBOE 체인 종목마다 1 + 바이낸스 klines 1h 종목마다 하루 1(캐시)" ;;
+  news)         PYSUP=supervisor_news_rss.sh; PYRUN=live_news_rss_collector_20261005.py; TENV="NEWS_RSS_DB=data/hot/news_rss.sqlite"
+                CHK="once_news:data/hot/news_rss.sqlite:data/hot/rtcollect/news_rss.sqlite"; REQ="RSS 8곳을 원본 주기대로 NEWS_S(기본 180)초 동안(같은 IP 두 배는 그 동안만)" ;;
+  hl_positions) die "$KIND 는 이 스크립트가 다루지 않는다 -- rtcollect/REMAINING.md «넘겨도 되는가» 표" ;;
   *) [ -n "$KIND" ] || { sed -n '2,12p' "$0"; exit 2; }; die "모르는 종류 '$KIND'" ;;
 esac
 case "$MODE" in check|go|back|weight|weight-judge) ;; *) die "check|go|back 중 하나" ;; esac
@@ -155,10 +173,12 @@ replay_check() { # ob5m·bookdepth: 실시간 그림자 대신 «같은 시작�
   else
     end="$(date -u -d '1 hour ago' +%Y-%m-%dT%H)"
     echo "  재생 대조: 끝 시 $end(UTC) · nice · 무겁다(파이썬 수 분)"
-    nice -n 10 "$PYC" "$TOOLS/replay_book.py" "$KIND" --symbol "$s" --end-hour "$end" --bin "${RTCOLLECT_BIN:-$ROOT/tmp/rtbin/rtcollect}" > "$f.part" 2>&1
-    mv "$f.part" "$f"
+    # -u + 도구 안 줄 단위 출력: 진행 줄이 바로 파일·화면에 · 상한 REPLAY_LIMIT_S(기본 1800초)를 넘으면 도구가 «시간 초과(단계)» 로 끝낸다
+    nice -n 10 "$PYC" -u "$TOOLS/replay_book.py" "$KIND" --symbol "$s" --end-hour "$end" --bin "${RTCOLLECT_BIN:-$ROOT/tmp/rtbin/rtcollect}" \
+      --limit "${REPLAY_LIMIT_S:-1800}" 2>&1 | tee "$f.part" | sed 's/^/    /'
+    mv "$f.part" "$f"; REPLAY_SHOWN=1
   fi
-  sed 's/^/    /' "$f" | tail -12
+  [ -n "${REPLAY_SHOWN:-}" ] || sed 's/^/    /' "$f" | tail -12
   local nm; nm="$(sed -nE 's/^요약: 견준 ([0-9,]+) · 설명 못 함 ([0-9,]+).*/\1 \2/p' "$f" | tr -d ,)"
   read -r a b <<< "${nm:-0 1}"
   echo "check $KIND $s (재생): 견준 $a · 설명 못 함 $b · $([ "$b" = 0 ] && [ "$a" -gt 0 ] && echo 통과 || echo '🔴불통과')"
@@ -174,7 +194,36 @@ archive_check() { # raster_archive: 원본은 래스터 수집기 안(매시 _pu
   OF_SYMS="$syms"
   [ "$bad" = 0 ]
 }
+py_args() { # 파이썬 예약 줄의 스크립트 뒤 인자(>> 앞까지) -- 첫 줄
+  printf '%s\n' "$($CT -l 2>/dev/null)" | grep -vE '^[[:space:]]*#' | grep -E "${PYMAIN:-$PYSUP}" | head -1 | sed -E "s/.*(${PYMAIN:-$PYSUP})[^ ]*//; s/>>.*//; s/2>&1//" | xargs
+}
+once_check() { # Rust 를 그림자 경로로 한 번 돌리고(REST 켬) 파이썬이 쓴 것과 견준다
+  local e mode py rs key out rc=0 a b
+  echo "  바깥 요청(이 check 한 번): ${REQ:-없음}"
+  for e in $CHK; do
+    IFS=: read -r mode py rs key <<< "$e"
+    [ -e "$py" ] || { echo "  $py: 파이썬 출력 없음"; return 1; }
+    local args="$ONCE"; [ "$KIND" != cboe_chain ] || args="$(py_args)"
+    echo "  Rust 한 회차: RTCOLLECT_KIND=$RK $args (그림자 경로)"
+    if [ "$mode" = once_news ]; then
+      env RTCOLLECT_KIND=news timeout "${NEWS_S:-180}" "$BIN" > logs/supervisor/takeover_once_news.log 2>&1
+    else
+      env RTCOLLECT_KIND="$RK" RTCOLLECT_REST=1 "$BIN" $args > "logs/supervisor/takeover_once_$RK.log" 2>&1 || { echo "  🔴Rust 한 회차 실패: $(tail -3 "logs/supervisor/takeover_once_$RK.log")"; return 1; }
+    fi
+    case "$mode" in
+      once_sq)   out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "$py" "$rs" --to $(( $(date +%s) - 600 )) --summary)" || rc=1 ;;   # 끝 10분 = 아직 자라는 봉
+      once_news) out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "$py" "$rs" --subset --summary)" || rc=1 ;;   # 파이썬이 오래 모은 것은 견주지 않는다 -- Rust 가 받은 것이 파이썬에 같은 글자로 있나
+      once_jsonl) out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" --jsonl "$key" "$py" "$rs" --summary)" || rc=1 ;;
+      once_cboe) out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" --cboe "$py" "$rs" --summary)" || rc=1 ;;
+    esac
+    echo "$out" | sed 's/^/  /' | head -40
+    read -r a b <<< "$(echo "$out" | sed -nE 's/^요약: 견준 ([0-9,]+) · 설명 못 함 ([0-9,]+).*/\1 \2/p' | tr -d ,)"
+  done
+  echo "check $KIND (한 회차): 견준 ${a:-0} · 설명 못 함 ${b:-?} · $([ "$rc" = 0 ] && echo 통과 || echo '🔴불통과')"
+  return "$rc"
+}
 check() {
+  [[ "$CHK" == once_* ]] && { once_check; return $?; }
   [ "$KIND" = raster_archive ] && { archive_check; return $?; }
   [ "$KIND" = ob5m ] || [ "$KIND" = bookdepth ] && { replay_check; return $?; }
   local n=0 m=0 rc=0 e mode py rs out h f d0 d1
@@ -312,7 +361,7 @@ rollback() {
 cron_lines() { # 이 종류가 주석 처리할 줄 번호: 파이썬 줄 + 그림자 줄
   echo "$1" | awk '{print NR "\t" $0}' | while IFS=$'\t' read -r i l; do
     [[ "$l" =~ ^[[:space:]]*# ]] && continue
-    if [ -n "$PYSUP" ] && [[ "$l" == *"$PYSUP"* ]]; then
+    if [ -n "$PYSUP" ] && [[ "$l" =~ $PYSUP ]]; then
       if [ "$CRON" = 1 ]; then [[ "$l" == @reboot* ]] && continue; else [[ "$l" == @reboot* ]] || continue; fi
       if [ "$GROUP" = 1 ]; then [ "$(val "$l" "$XV")" = "$XW" ] || continue
       elif [ -n "$SELV" ]; then
@@ -496,28 +545,36 @@ RENV="$(echo $RENV)"
 B="logs/supervisor/crontab_backup_${TS}_takeover_$TAG.txt"; mkdir -p logs/supervisor; printf '%s\n' "$CUR" > "$B"
 LN="$(cron_lines "$CUR")"
 if [ "$CRON" = 1 ]; then
-  if [ "$KIND" = raster_archive ]; then SCHED="40 * * * *"; RENV="$RENV OF_SYMBOLS=$OF_SYMS"   # 그림자 보관과 같은 분 · 넘긴 래스터 종목만
-  else
-    first="$(echo "$LN" | head -1)"
-    for i in $LN; do printf '%s\n' "$CUR" | sed -n "${i}p" | grep -qF "$PYSUP" && { first="$i"; break; }; done
-    [ -n "$first" ] || die "파이썬 예약 줄($PYSUP)을 못 찾음 -- 시각을 모른다 · 아무것도 안 바꿈"
-    SCHED="$(printf '%s\n' "$CUR" | sed -n "${first}p" | awk '{print $1, $2, $3, $4, $5}')"
+  ADD=""; SCHED=""
+  if [ "$KIND" = raster_archive ]; then ADD="40 * * * * cd $ROOT && $RENV OF_SYMBOLS=$OF_SYMS ${ENGU}_KIND=$RK $BIN >> logs/supervisor/rt_$RK.log 2>&1 #takeover:$TAG"; SCHED="40 * * * *"
+  else   # 파이썬 예약 줄마다(PYMAIN 에 맞는 것만 -- cboe 요약 줄은 주석만) 같은 시각 · 스크립트 뒤 인자 그대로(국채선물 1d·5d 두 줄 · cboe 종목)
+    for i in $LN; do
+      l="$(printf '%s\n' "$CUR" | sed -n "${i}p")"
+      [[ "$l" =~ ${PYMAIN:-$PYSUP} ]] || continue
+      sc="$(echo "$l" | awk '{print $1, $2, $3, $4, $5}')"; ar="$(echo "$l" | sed -E "s/.*(${PYMAIN:-$PYSUP})[^ ]*//; s/>>.*//; s/2>&1//" | xargs)"
+      ADD="${ADD:+$ADD$'\n'}$sc cd $ROOT && $RENV ${ENGU}_KIND=$RK $BIN $ar >> logs/supervisor/rt_$RK.log 2>&1 #takeover:$TAG"; SCHED="${SCHED:+$SCHED · }$sc"
+    done
+    [ -n "$ADD" ] || die "파이썬 예약 줄(${PYMAIN:-$PYSUP})을 못 찾음 -- 시각을 모른다 · 아무것도 안 바꿈"
   fi
-  read -r SM SH _ <<< "$SCHED"   # 회차 시각 앞뒤 3분이면 거부(파이썬 회차와 Rust 회차가 같은 장부·파일에 두 번 쓰지 않게)
-  if [[ "$SM" =~ ^[0-9]+$ ]] && { [ "$SH" = '*' ] || [ "$((10#$SH))" = "$((10#$(date +%H)))" ]; }; then
-    d=$(( ( $((10#$(date +%M))) - SM + 60 ) % 60 )); [ "$d" -le 3 ] || [ "$d" -ge 57 ] && die "회차 시각($SCHED) 앞뒤 3분 -- 지금은 안 바꾼다(${d}분)"
-  fi
-  ADD="$SCHED cd $ROOT && $RENV ${ENGU}_KIND=$RK $BIN >> logs/supervisor/rt_$RK.log 2>&1 #takeover:$TAG"
+  while IFS= read -r l; do   # 회차 시각 앞뒤 3분이면 거부(파이썬 회차와 Rust 회차가 같은 장부·파일에 두 번 쓰지 않게) -- */N 이면 N 분 주기의 앞뒤 1분
+    read -r SM SH _ <<< "$l"
+    if [[ "$SM" =~ ^[0-9]+$ ]] && { [ "$SH" = '*' ] || [ "$((10#$SH))" = "$((10#$(date +%H)))" ]; }; then
+      d=$(( ( $((10#$(date +%M))) - SM + 60 ) % 60 )); { [ "$d" -le 3 ] || [ "$d" -ge 57 ]; } && die "회차 시각($l) 앞뒤 3분 -- 지금은 안 바꾼다(${d}분)"
+    elif [[ "$SM" =~ ^\*/([0-9]+)$ ]]; then
+      N="${BASH_REMATCH[1]}"; d=$(( $((10#$(date +%M))) % N )); { [ "$d" -le 1 ] || [ "$d" -ge $((N - 1)) ]; } && die "회차 시각($l) 앞뒤 1분 -- 지금은 안 바꾼다"
+    fi
+  done <<< "$(echo "$ADD" | awk '{print $1, $2}')"
 else
   ADD="@reboot sleep 100 && cd $ROOT && ${ENGU}_BIN=$BIN $RENV bash scripts/ops/supervisor_$ENG.sh $RK >> logs/supervisor/${ENG}_reboot.log 2>&1 & #takeover:$TAG"
 fi
+NADD="$(printf '%s\n' "$ADD" | grep -c .)"
 NEW="$(printf '%s\n' "$CUR" | awk -v L=",$(echo $LN | tr ' ' ','),"  -v T="#takeover:$TAG " 'index(L, "," NR ",") {print T $0; next} {print}')"$'\n'"$ADD"
 NL="$(echo $LN | wc -w)"
-[ "$(diff <(printf '%s\n' "$CUR") <(printf '%s\n' "$NEW" | sed '$d') | grep -c '^>')" = "$NL" ] || die "치환 검증 실패 -- 적용 안 함"
-cron_apply "$NEW" $((NCUR + 1))
+[ "$(diff <(printf '%s\n' "$CUR") <(printf '%s\n' "$NEW" | head -n "$NCUR") | grep -c '^>')" = "$NL" ] || die "치환 검증 실패 -- 적용 안 함"
+cron_apply "$NEW" $((NCUR + NADD))
 STAGE=2
-NPY="$(for i in $LN; do printf '%s\n' "$CUR" | sed -n "${i}p"; done | grep -cF "$PYSUP")"
-echo "  ① crontab 백업 $B ② 주석 $NL줄(파이썬 $NPY · 그림자 $((NL - NPY))) + Rust 줄 1 · $NCUR → $((NCUR + 1))줄"
+NPY="$(for i in $LN; do printf '%s\n' "$CUR" | sed -n "${i}p"; done | grep -cE "${PYSUP:-^$}")"
+echo "  ① crontab 백업 $B ② 주석 $NL줄(파이썬 $NPY · 그림자 $((NL - NPY))) + Rust 줄 $NADD · $NCUR → $((NCUR + NADD))줄"
 manifest take
 if [ "$CRON" = 1 ]; then
   t0=$SECONDS; while [ -n "$(py_procs any)" ] && [ $((SECONDS - t0)) -lt 300 ]; do nap 1; done

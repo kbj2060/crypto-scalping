@@ -160,4 +160,8 @@ back 은 이 태그가 바꾼 줄만 되돌린다(그 뒤 다른 종류를 넘�
 | ob5m · bookdepth | **재생 대조**(replay_book.py · 같은 h0·같은 시 파일·같은 «지금») · 결과 파일이 2시간 안이면 다시 안 돌림 | 실시간 그림자(사슬 시작·이력에 달림) |
 | raster_archive | 넘긴 래스터 표지(#takeover:raster_…)가 있고 그림자 보관 로그 끝 200줄에 오류 0 | 값 대조 없음(그림자 보관은 그림자 래스터 파일을 보관한다) -- 정답지 raster_archive_parity 뿐 |
 | hl_bt(새로) | .bt 시 파일 행 바이트 묶음(거래소 ts · 재기동·끊김 빼고) + hl_ctx.sqlite(두 Rust 파일 이음) | — |
+| treasury_futures · macro_5m(새로 · 한 회차) | check 가 Rust 를 그 자리에서 한 번(REST 켬 · 그림자 경로) → 같은 (symbol, ts_sec) 봉 값 비트 · 끝 10분(자라는 봉) 뺌 · 바깥 요청을 찍음 | 파이썬이 그 앞에 쌓은 봉(범위 밖) |
+| liqmap_scorer · soxl_weekend(새로 · 한 회차) | 같은 열쇠(origin · weekend) 줄을 받은·쓴 시각 칸 빼고 글자 · Rust 에만 있는데 파이썬 마지막 열쇠 뒤 = «아직 안 쓴 회차»(세지 않음) · 앞 = 설명 못 함 | go 는 회차 시각 앞뒤 3분이면 거부(장부 두 줄 금지) |
+| cboe_chain(+요약 · 새로 · 한 회차) | 상태 JSON 열쇠 모양(2단)이 같은지 · 파이썬 체인·요약 두 줄을 주석, Rust 줄은 체인 줄마다(같은 종목 인자) | 값(받은 순간의 호가라 두 번 받으면 원래 다르다) -- 계산 근거는 정답지 cboe_summary_parity |
+| news(새로 · 상주 · 한 회차) | check 가 Rust 뉴스를 NEWS_S(180)초만 그림자로 → Rust 가 받은 (source, link) 기사가 파이썬에 같은 글자로 있나(--subset) | 파이썬이 오래 모은 기사 |
 
