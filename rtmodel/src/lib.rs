@@ -17,6 +17,7 @@ pub mod dir4h;
 pub mod dirrest;
 pub mod dirshort;
 pub mod lgb;
+pub mod qx4;
 pub mod risk_radar;
 pub mod sr_lean;
 pub mod sr_live;

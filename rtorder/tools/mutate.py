@@ -190,6 +190,13 @@ NINE = [  # D 실행 파일 뼈대 · E 허브 구독
     ("hub_feed", "1초가 열을 [6] 으로", "src/coreval.rs", "r.get(7).and_then(Value::as_f64)", "r.get(6).and_then(Value::as_f64)"),
     ("flow_fixture", "부분 청산 뒤 익절 다시 걸기 빠짐(재생 op=exit)", "src/shadow.rs", "                    let _ = desk.w.partial_exit_rearm_tp(&mut io, plan.as_object().cloned().unwrap_or_default(), &mut slot).await;", ""),
 ]
+TEN = [  # W12 다리: 화면 입력이 도는 집행에 닿는다(원본 접수 핸들러를 작업 도중 실제로 부른 정답지 6시나리오)
+    ("flow_fixture", "다리 끊음: 핸들러가 쓴 값을 집행에 안 넣음(push_live)", IN, "            let slot = self.slot_obj(s).clone();\n            crate::runner::slot_to_exec(&slot, &sh);", "            let _ = (self.slot_obj(s).clone(), sh);"),
+    ("flow_fixture", "다리 끊음: 핸들러가 집행의 지금 값을 안 봄(pull_live)", IN, "                crate::runner::exec_to_slot(&e, self.slot_obj(s));", "                let _ = e;"),
+    ("flow_fixture", "실행기가 도는 작업을 표에 안 올림", "src/runner.rs", "        d.live.insert(key.clone(), s.clone());", ""),
+    ("flow_fixture", "PEG 전환 시각 대신 참값", "src/runner.rs", '        slot.insert("pegged".into(), json!(iso_utc(t)));', '        let _ = t;\n        slot.insert("pegged".into(), json!(true));'),
+    ("flow_fixture", "선 옮김 뒤 첫 체결 무장이 옛 계획으로", "src/runner.rs", "        let plan = cur_plan(&mut d, self.sref, self.plan);\n        let mut slot", "        let plan = self.plan.clone();\n        let mut slot"),
+]
 WIRE = [  # wire_e2e(감시 → 계좌 → 조립 → 집행)로 잡혀야 한다
     ("스트림 계좌를 쓸 수 있어도 REST 로 읽음", A_, 'Ok(v) => Ok((v, "stream")),', 'Ok(_) => Ok((book.produce(rest).await?, "stream")),'),
     ("감시 청산 조립이 for_order=True(원본은 화면 조회까지 함)", "src/wire.rs", "pside, fraction, true, asset, false, Some(only_symbol)", "pside, fraction, true, asset, true, Some(only_symbol)"),
@@ -224,7 +231,7 @@ def main() -> int:
             ok = r.returncode != 0
             caught, total = caught + ok, total + 1
             print(f"{'잡음' if ok else '🔴못 잡음'} | {test} | {name} | {', '.join(failed)[:110]}", flush=True)
-    for grp, lst in (("six", SIX), ("seven", SEVEN), ("eight", EIGHT), ("nine", NINE)):
+    for grp, lst in (("six", SIX), ("seven", SEVEN), ("eight", EIGHT), ("nine", NINE), ("ten", TEN)):
       if not only or only == grp:
         for test, name, f, a, b in lst:
             shutil.rmtree(W, ignore_errors=True)

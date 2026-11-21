@@ -18,15 +18,17 @@ pub fn flow_to_log(doc: &Value) -> Vec<Value> {
             let id = format!("s{si}.{i}");
             let slot0 = if st["slot0"].is_object() { st["slot0"].clone() } else { slot.clone() }; // 작업 직전 칸(청산 접수는 접수 문이 칸을 바꾼 뒤)
             out.push(json!({"rec": "start", "chain": id, "op": st["op"], "t": t0 + st["t"].as_f64().unwrap(), "plan": st["plan"], "limit": st["limit"],
-                            "rearm": st["rearm"], "slot": slot0, "file": file, "name": sc["name"]}));
+                            "rearm": st["rearm"], "slot": slot0, "slot_ref": st["slot_ref"], "file": file, "name": sc["name"]}));
             for (q, r) in st["requests"].as_array().unwrap().iter().zip(st["responses"].as_array().unwrap()) {
                 out.push(json!({"rec": "wire", "chain": id, "method": q["method"], "target": q["target"], "status": r["status"], "body": r["body"]}));
             }
             let mut xp = st["exit_plans"].as_array().unwrap().iter();
-            for c in st["calls"].as_array().unwrap() {
+            for (ci, c) in st["calls"].as_array().unwrap().iter().enumerate() {
                 let (t, what) = (t0 + c[0].as_f64().unwrap(), c[1].as_str().unwrap());
                 let args: Vec<Value> = c.as_array().unwrap()[2..].to_vec();
-                let value = match what {
+                // 생성기가 돌려준 값을 적었으면 그것(2026-11-21 · 화면 입력 걸음부터) -- 옛 걸음은 아래에서 다시 만든다
+                let recorded = st.get("vals").and_then(|v| v.get(ci)).and_then(|v| v.get("v")).cloned();
+                let value = if let Some(v) = recorded { v } else { match what {
                     "account" => {
                         let p: Vec<Value> = ["LONG", "SHORT"].iter().filter(|s| pos[**s].as_f64().unwrap() != 0.0).map(|s| json!({"symbol": "ETHUSDC", "side": s, "qty": pos[*s]})).collect();
                         json!({"ok": true, "generated_at": iso(t), "positions": p})
@@ -37,7 +39,7 @@ pub fn flow_to_log(doc: &Value) -> Vec<Value> {
                     "book" => books.iter().filter(|(bt, _)| t - t0 >= *bt).last().unwrap().1[args[0].as_str().unwrap()].clone(),
                     "filters" => json!({"step": 0.001, "tick": 0.01, "min_qty": 0.001, "min_notional": 5.0}),
                     x => panic!("모르는 입력 {x}"),
-                };
+                } };
                 out.push(json!({"rec": "input", "chain": id, "t": t, "what": what, "args": args, "value": value}));
             }
             out.push(json!({"rec": "end", "chain": id, "t": t0 + st["t_end"].as_f64().unwrap(), "slot": st["entry"], "file": st["file"], "limits": st["limits"],

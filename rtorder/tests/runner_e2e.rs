@@ -102,7 +102,9 @@ fn enter(name: &str, fx: Fake, tp_fail: bool) -> (Desk, Io, desk_io::TmpDir) {
     assert!(matches!(task, Task::Entry { .. }));
     let mut io = Io { fx: Fake::default(), t: T0, qty: 0.0, sec: vec![(T0 - 1.0, 2499.6)], calls: vec![], tp_fail, exit_vol: Some(5.0) };
     let mut ex = fx;
-    block_on(run_task(&mut desk, &mut ex, &mut io, &mut qs, task));
+    let cell = rtorder::runner::DeskCell::new(desk);
+    block_on(run_task(&cell, &mut ex, &mut io, &mut qs, task));
+    let desk = cell.into_inner();
     io.qty = desk.w.entry.get("filled").and_then(Value::as_f64).unwrap_or(0.0);
     io.fx = Fake { fill_after: 1, ..Default::default() };
     (desk, io, dir)

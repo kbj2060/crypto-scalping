@@ -89,7 +89,7 @@
 | E15 | 옮김 | `REPEG_MAX`=40 · 컴파일 시점 단언 `REPEG_MAX×POLL_SEC ≥ FALLBACK_SEC` · inv11(상한 소진 → rejected) |
 | E16 | 옮김 | 알림에 깨도 리페그 판단은 3초마다 · inv `e16_…` · mut «매번 리페그 판단» |
 | E17 | 옮김 | `run_entry`·`run_exit`·PEG 가 `fill_maker` 하나 · ⚠시험 없음(구조 -- 원본도 Xself 소스 검사뿐) |
-| E18 | 옮김 | `run_entry` 대기 취소 · inv `e18_…`(취소·부분 뒤 취소·확인 실패·음성 대조) · mut «취소 무시» |
+| E18 | 옮김 | `run_entry` 대기 취소 · inv `e18_…`(취소·부분 뒤 취소·확인 실패·음성 대조) · `ff` «따라가기 진입 중 취소»(원본 entry-cancel 핸들러) · mut «취소 무시» |
 | E19 | 옮김 | `PEG_TAG`·`WAIT_TAG`(exec) · `bracket::{TP_TAG,SL_TAG,ADD_TAG,bracket_tag}` · `cancel_bracket` 은 표식+측면 글자로만 · 스탑은 그 심볼(칸 없으면 이 심볼) · only_sl/only_tp · 고아 정리는 dbwt·dbpg 만 · inv(wait·d2) · rp(cancel_bracket 7 · 고아 정리 2) · mut «only_tp 인데 물타기도» «다른 코인 스탑» «고아 정리가 dbtp 도» |
 | E20 | 제거(사용자 결정 2026-11-21 sltp 만) | run_entry_wait(기다리기) -- 삭제(exec.rs · runner · intake mode=wait · WAIT_CHOICES_MIN) · mode=wait·wait_min = 400 removed_option |
 | E21 | 옮김 | `run_entry_limit`(따라가지 않음 · -5022 는 수정 직후 3회만) · inv `limit_paths` |
@@ -97,7 +97,7 @@
 | E23 | 옮김 | 자동 재조정(20초·1bp·50회·체결 시작 뒤 멈춤) · inv `limit_paths` |
 | E24 | 옮김 | 취소 확인 중 체결 몫 on_fill · inv `limit_paths`(on_fill 한 번) |
 | E25 | 옮김 | `exec::run_entry_stop`(닿기 전 주문 0 · 1초마다 touched(since) · 선 옮기면 since 를 지금으로 · 4시간 만료 · 닿으면 `run_entry(maker_only)` → 잔량 버림 · PEG = 지금 닿음 · TAKER = 미정 M5 · 닿은 뒤 호가 실패 = error(D11)) · inv `e25_stop_entry_paths`(9사례) · mut «since 그대로» «maker_only 빠짐» «M5 빠짐» · ⚠수정 API 가 plan 을 바꾸는 몫은 amend 칸 수량을 계획 사본에 싣는 것으로 갈음(exec.rs ponytail) |
-| E26 | 옮김 | `run_entry_limit` PEG(취소 확인 → action 비움 → 따라가기 → 잔량 버림) · inv `limit_paths`(PEG 두 사례) |
+| E26 | 옮김 | `run_entry_limit` PEG(취소 확인 → action 비움 → 따라가기 → 잔량 버림 · 칸 pegged = 전환 시각 · PEG 시작·끝 로그) · inv `limit_paths`(PEG 두 사례) · `ff` «대기 중 PEG» |
 
 ## 4. 대기 주문 W1–W12
 
@@ -108,13 +108,13 @@
 | W3 | 옮김 | 4시간 만료(E21·E25 inv) · 기다리기(mode=wait · 마감 잔량 시장가 M3) 몫은 제거(사용자 결정 2026-11-21 sltp 만) |
 | W4 | 옮김 | 접수·수정 때 `limit_save_at` · 정상 종료에서만 복구 파일 지움(`entry_then_bracket` -- error 면 남김) · wf·rt |
 | W5 | 옮김 | `Watcher::limit_recover`(6시간 · 계좌 못 읽음 유지 · 포지션 있고 무장 없으면 저장한 선으로 무장하고 placed 확인 · 고아 실패면 유지 · 예외 = «복구 실패» 유지) · wf `restart_cleanup_and_recover`·`restart_orphan_errors_keep_file`·`restart_account_fails_and_cleanup_raises`·`restart_already_armed_or_no_position` · mut «고아 실패여도 지움» «6시간 넘어도 복구» |
-| W6 | 옮김 | `api_limit_amend`(mode=limit·working·동작 없음·주문 있음/감시 닿기 전 · 일부 체결 뒤 거절 · 반영 중 거절 · 조립 뒤 다시 봄 · 선은 복구 파일에) · `dk` am_* 9 · mut «일부 체결 뒤에도 수정» |
-| W7 | 옮김 | «지금 시장가»(체결될 쪽 호가 = 반대편)·«PEG»(내 쪽) 둘 다 선 재검사 `api_wait_action` · `dk` wa_* |
+| W6 | 옮김 | `api_limit_amend`(mode=limit·working·동작 없음·주문 있음/감시 닿기 전 · 일부 체결 뒤 거절 · 반영 중 거절 · 조립 뒤 다시 봄 · 선은 복구 파일에) · 도는 집행에 닿음(W12) · `dk` am_* · `ff` «지정가 대기 중 선 옮김» |
+| W7 | 옮김 | «지금 시장가»(체결될 쪽 호가 = 반대편)·«PEG»(내 쪽) 둘 다 선 재검사 `api_wait_action` · `dk` wa_* · `ff` «대기 중 PEG»·«지금 시장가» |
 | W8 | 옮김 | PEG 는 지정가 대기만(400) · `dk` wa_peg_on_wait_mode |
 | W9 | 옮김 | `bracket_tick`(clear·fire 때 같은 심볼·같은 쪽 대기에 action=cancel · 다른 코인·반대쪽은 둠 · 분할 손절(sl_leg)엔 안 함 = 원본) · wf `position_gone_clears_and_cancels_same_side_wait` · mut «같은 쪽 대기 취소 빼기» |
 | W10 | 옮김 | 첫 체결 순간 `RunEx::on_fill` = 추가 진입이면 keep_rearm · 아니면 plan_from_current 로 물타기 없이 무장 · 예외는 칸 bracket 에 · `re` |
 | W11 | 옮김 | 대기 종료 뒤: 선 주문 = plan_from_current · 지정가 대기에서 mod·sl_off·tp_off·fired 면 덮지 않음(`entry_then_bracket`) · ⚠원본 전체 흐름 정답지 없음 |
-| W12 | 옮김 | `exec::Shared`(집행 루프와 API 가 같은 칸) · inv(가짜가 시각표대로 action·amend 를 넣는다) |
+| W12 | 옮김 | 🔴2026-11-21 다리: 도는 진입 작업의 집행 상태를 `Desk::live`(칸 이름 → `exec::Shared`)에 올리고 · 접수 핸들러(wait-action·limit-amend·entry-cancel)가 칸을 읽기 전 `pull_live`(집행 → 칸) · 쓴 뒤 `push_live`(칸 → 집행) · 집행은 원본과 같은 자리(3초 조회 뒤·1초 잠 뒤·따라가기 조회 뒤)에서 Shared 를 읽는다 · Desk = `runner::DeskCell`(tokio Mutex · 실행기는 집행이 기다리는 동안 안 잠금) · 칸 plan 은 원본처럼 같은 dict(선 옮김이 고친 선으로 무장·재조정·감시 선) · `ff` 작업 도중 화면 입력 6시나리오(원본 핸들러를 집행이 잠든 사이 실제 호출) · inv · mut 5 |
 
 ## 5. 브래킷 B1–B33
 
@@ -333,7 +333,7 @@
 - **전송 계층 막이**(`http::Binance::guard`): 그림자 모드면 GET·`/fapi/v1/listenKey` 가 아닌 요청(주문 POST·취소 DELETE·레버리지 POST·algo DELETE …)은 **보내기 전에 panic**. 루프백이 아닌 주소로 만든 값은 늘 그림자로 시작 · 끄는 길은 `arm_live(&LiveProof)`(feature `live` 에만 있음). 키를 읽는 `Binance::from_env` 도 feature `live` 에만 있다(기본 빌드 = 키 없음).
 - **재생 도구**(`shadow::replay` · 실행기 `cargo run --example shadow_replay -- <기록.jsonl>`): 작업(chain) 하나의 기록 = start(계획·칸·무장 파일) · wire(왕복) · input(읽은 입력) · end(칸·무장 파일·복구 파일·로그). 127.0.0.1 가짜 서버가 기록된 응답을 차례로 돌려주고 진짜 `Binance`·`runner::entry_then_bracket`·`Watcher::bracket_tick`·`run_exit_into` 가 돈다. 실제 기록 비교는 timestamp·signature 를 빼고 표식 뒤 ms 를 `#` 로(비밀값은 재생에 넣지 않는다) · 가짜 시계 정답지는 글자 그대로.
 - 시험: `ff`(전체 흐름 정답지 19걸음을 재생 도구로 글자 그대로 -- 요청 282 · 서명 URL 192 · 청산 접수 op=exit 2걸음 포함) · `sr` = tests/shadow_replay.rs(합성 실기록 차이 0 · 양성 대조 4 · 쓰기 5종 panic + 대조군 · 읽기·listenKey 는 보냄).
-- ⚠재생이 아직 못 하는 것: 작업 도중 화면이 쓴 대기 칸 action·amend 를 그 시각에 넣기. 원인 = 아래 «실행기 ↔ 접수 다리» 결함과 같은 자리(실행기가 칸을 집행 상태로 **시작할 때 한 번만** 옮긴다).
+- 화면 입력(rec=input · what="handler" · args [핸들러 이름, 질의] · value {status, body} · t)을 그 시각에 넣는다: 집행이 잠든 자리(nap·sleep)에서 진짜 `Desk::api_*` 를 부르고 응답도 대조 -- W12 다리로 도는 집행에 닿는다. 합성 실기록 25작업 차이 0.
 
 ## 실행 파일 뼈대 · 허브 구독 (2026-11-21 · D · E)
 
@@ -342,7 +342,7 @@
   - ponytail: 원본은 정리를 작업으로 띄우고 바로 감시 -- 여기는 정리를 끝낸 뒤 감시 · 알림(텔레그램)은 로그로만 · 주문 잠금 없음(접수 문이 없다 -- R6).
 - `coreval::subscribe`(E): rtcore 허브에 붙어 `{"subscribe":[..]}` → 스냅숏(book bid_s·ask_s · quote vol_bpm·bar5m·kline_rx_us · supply seconds) · 밀기(book·kline·supply1s)를 `Feed` 에 · 모르는 칸·type 무시 · 글자 칸 없는 옛 book 은 안 받아 둠 · 끊기면 1·2·4…30초 뒤 다시. 감시 5분봉·1초가 = 화면 심볼(USDT) 몫 · 호가·변동성 = `sync_cached`(나이는 rx_us → 한도 넘으면 REST).
 - 시험: `ar` = tests/app_run.rs(가짜 거래소로 기동 → 남은 dbwt 정리 · 복구 파일로 롱 무장 · 포지션 없는 숏 정리 → 멈춤 · 재시작 쓰기 0 · 그림자 쓰기 0·목록 3 · 진짜 실행 파일 SIGTERM 두 번 · 설정 오류 4) · `hf` = tests/hub_feed.rs(붙음 → 받아 둔 값 REST 0 → 끊김 → 3초 뒤 REST → 재연결 스냅숏 → 다시 받아 둔 값 · 변동성 None = REST).
-- 🔴**실행기 ↔ 접수 다리 결함(R6 전에 설계 필요)**: `runner::run_task` 는 칸을 꺼내(take_slot) 집행 상태로 **시작할 때 한 번** 옮기고 끝나면 되돌린다. 원본은 같은 dict 를 집행 루프가 ≤3초마다 다시 읽어 화면의 «취소·지금 시장가·PEG·선 옮김»을 따른다(W12). Rust 에서 작업 도중 접수 문이 같은 칸을 보면 빈 칸이고, 써도 집행이 모른다. 웹 서버를 붙일 때 «도는 작업의 Shared 를 칸 키로 찾아 action·amend 를 넣는» 다리가 필요하다(재생의 slot_write 도 같은 다리로).
+- ✅~~실행기 ↔ 접수 다리 결함~~ → 2026-11-21 고침(W12 행): `Desk::live` + `pull_live`·`push_live` + `runner::DeskCell`. 같이 잡은 원본과 다른 곳 4: 선 옮김 뒤 옛 계획으로 무장하던 것(원본은 같은 dict) · 감시 선을 시작 때 한 번만 읽던 것 · 칸 `pegged` 가 참값(원본 = 시각) · PEG 시작·끝 로그 없음. ponytail: 집행 로그는 작업 끝에 모아 감시 로그로(원본은 그 순간 print -- 사이에 다른 로그가 끼면 순서가 갈린다).
 - ⚠시험 없는 것: `drain_tp_fills` 를 틱 앞에서 부르는 자리(Hub 가 run 안에 있어 밖에서 넣을 수 없다 -- 함수 자체는 wi 시험) · 사용자 스트림을 켠 실행(전송은 us 시험).
 
 ### 그림자 기록 -- 파이썬이 기록해 줘야 하는 칸 (파이썬은 안 고쳤다 · 사용자 결정 필요)
@@ -363,7 +363,7 @@
 | 9 | orders.py:1195·1250 assemble_exit_plan | 읽은 입력 | what="exit_plan" · args=[pside, frac, fresh, asset, only_symbol] · value={"plan": …, "err": [본문, 상태] 또는 null} |
 | 10 | orders.py:1005 `limit_reprice` 의 fetch_binance_json·load_filters · 853 `basis_for` 의 기준 호가 | 읽은 입력 | what="book" · args=[symbol] · value=호가 dict · what="filters" · value=필터 dict |
 | 11 | X:49 `wake_fills` | 체결 알림으로 대기가 일찍 깬 시각(조회 횟수가 갈린다) | rec=input · what="wake" · t · mono |
-| 12 | orders.py `api_manual_wait_action`·`api_manual_limit_amend`(대기 칸에 action·amend 를 쓰는 자리) | 화면이 작업 도중 넣은 값 | rec=input · what="slot_write" · chain(그 대기 칸 작업) · t · key · value |
+| 12 | orders.py `api_manual_wait_action`·`api_manual_limit_amend`·`api_manual_entry_cancel`(도는 작업의 칸에 action·amend 를 쓰는 핸들러) | 화면이 작업 도중 넣은 값 | rec=input · what="handler" · chain(그 칸의 도는 작업) · t · args=[핸들러 이름, 질의 dict] · value={status, body}(재생이 같은 핸들러를 그 시각에 다시 부르고 응답도 대조) |
 | 13 | orders.py `entry_then_bracket` 끝 · `settle` 뒤 · `bracket_tick` 끝 | 작업 끝 | rec=end · t · mono · slot(사본) · file(bracket_load) · limits · raised · logs(그 작업의 print 줄 -- 어렵다면 생략, 재생은 칸이 없으면 안 본다) |
 | 14 | G18 `order_request_log` 의 row | 접수 기록과 그림자 기록 잇기 | `chain` 칸 하나 더 |
 

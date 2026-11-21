@@ -51,6 +51,7 @@
 "slot0": {
 "phase": "submitting"
 },
+"slot_ref": "entry",
 "t": 0.0,
 "sec": [],
 "requests": [
@@ -219,6 +220,7 @@
 }
 ],
 "calls": [],
+"vals": [],
 "exit_plans": [],
 "entry": {
 "phase": "filled_maker",
@@ -325,6 +327,7 @@
 "placed": true
 }
 },
+"slot_ref": "entry",
 "t": 13.0,
 "sec": [
 [
@@ -507,6 +510,71 @@ true,
 "ETHUSDC"
 ]
 ],
+"vals": [
+{
+"v": {
+"ok": true,
+"generated_at": "2027-01-15T08:00:13+00:00",
+"positions": [
+{
+"symbol": "ETHUSDC",
+"side": "LONG",
+"qty": 0.4,
+"entry_price": 2500.0,
+"mark_price": 2500.0,
+"leverage": 10.0
+}
+],
+"open_orders": [],
+"leverage_by_symbol": {
+"ETHUSDC": 10.0
+},
+"balances": {
+"USDC": {
+"margin": 1000.0,
+"available": 800.0,
+"initial_margin": 0.0
+},
+"USDT": {
+"margin": 0.0,
+"available": 0.0,
+"initial_margin": 0.0
+}
+}
+}
+},
+{
+"v": []
+},
+{
+"v": [
+[
+1800000012.0,
+2401.0
+],
+[
+1800000013.0,
+2400.0
+]
+]
+},
+{
+"v": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2500.1,
+"quantity": 0.4,
+"fallback_after_sec": 30.0,
+"vol_bpm": 5.0,
+"blocked": null
+}
+}
+}
+],
 "exit_plans": [
 {
 "symbol": "ETHUSDC",
@@ -618,6 +686,7 @@ true,
 "slot0": {
 "phase": "submitting"
 },
+"slot_ref": "entry",
 "t": 0.0,
 "sec": [],
 "requests": [
@@ -778,6 +847,7 @@ true,
 }
 ],
 "calls": [],
+"vals": [],
 "exit_plans": [],
 "entry": {
 "phase": "filled_maker",
@@ -884,6 +954,7 @@ true,
 "placed": false
 }
 },
+"slot_ref": "entry",
 "t": 13.0,
 "sec": [
 [
@@ -1029,6 +1100,67 @@ true,
 "ETHUSDC"
 ]
 ],
+"vals": [
+{
+"v": {
+"ok": true,
+"generated_at": "2027-01-15T08:00:13+00:00",
+"positions": [
+{
+"symbol": "ETHUSDC",
+"side": "LONG",
+"qty": 0.4,
+"entry_price": 2500.0,
+"mark_price": 2500.0,
+"leverage": 10.0
+}
+],
+"open_orders": [],
+"leverage_by_symbol": {
+"ETHUSDC": 10.0
+},
+"balances": {
+"USDC": {
+"margin": 1000.0,
+"available": 800.0,
+"initial_margin": 0.0
+},
+"USDT": {
+"margin": 0.0,
+"available": 0.0,
+"initial_margin": 0.0
+}
+}
+}
+},
+{
+"v": []
+},
+{
+"v": [
+[
+1800000013.0,
+2600.5
+]
+]
+},
+{
+"v": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2500.1,
+"quantity": 0.4,
+"fallback_after_sec": 30.0,
+"vol_bpm": 5.0,
+"blocked": null
+}
+}
+}
+],
 "exit_plans": [
 {
 "symbol": "ETHUSDC",
@@ -1140,6 +1272,7 @@ true,
 "slot0": {
 "phase": "submitting"
 },
+"slot_ref": "entry",
 "t": 0.0,
 "sec": [],
 "requests": [
@@ -1308,6 +1441,7 @@ true,
 }
 ],
 "calls": [],
+"vals": [],
 "exit_plans": [],
 "entry": {
 "phase": "filled_maker",
@@ -1414,6 +1548,7 @@ true,
 "placed": true
 }
 },
+"slot_ref": "entry",
 "t": 13.0,
 "sec": [
 [
@@ -1973,6 +2108,71 @@ true,
 "ETHUSDC"
 ]
 ],
+"vals": [
+{
+"v": {
+"ok": true,
+"generated_at": "2027-01-15T08:00:13+00:00",
+"positions": [
+{
+"symbol": "ETHUSDC",
+"side": "LONG",
+"qty": 0.4,
+"entry_price": 2500.0,
+"mark_price": 2500.0,
+"leverage": 10.0
+}
+],
+"open_orders": [],
+"leverage_by_symbol": {
+"ETHUSDC": 10.0
+},
+"balances": {
+"USDC": {
+"margin": 1000.0,
+"available": 800.0,
+"initial_margin": 0.0
+},
+"USDT": {
+"margin": 0.0,
+"available": 0.0,
+"initial_margin": 0.0
+}
+}
+}
+},
+{
+"v": []
+},
+{
+"v": [
+[
+1800000012.0,
+2401.0
+],
+[
+1800000013.0,
+2400.0
+]
+]
+},
+{
+"v": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2500.1,
+"quantity": 0.4,
+"fallback_after_sec": 30.0,
+"vol_bpm": 5.0,
+"blocked": null
+}
+}
+}
+],
 "exit_plans": [
 {
 "symbol": "ETHUSDC",
@@ -2095,6 +2295,7 @@ true,
 "error": "주문 103 취소를 확인하지 못했습니다 — 거래소에서 직접 확인하세요",
 "done_at": "2027-01-15T08:00:46+00:00"
 },
+"slot_ref": "entry",
 "t": 80.0,
 "sec": [
 [
@@ -2192,6 +2393,55 @@ true,
 "sec",
 "eth"
 ]
+],
+"vals": [
+{
+"v": {
+"ok": true,
+"generated_at": "2027-01-15T08:01:20+00:00",
+"positions": [
+{
+"symbol": "ETHUSDC",
+"side": "LONG",
+"qty": 0.4,
+"entry_price": 2500.0,
+"mark_price": 2500.0,
+"leverage": 10.0
+}
+],
+"open_orders": [],
+"leverage_by_symbol": {
+"ETHUSDC": 10.0
+},
+"balances": {
+"USDC": {
+"margin": 1000.0,
+"available": 800.0,
+"initial_margin": 0.0
+},
+"USDT": {
+"margin": 0.0,
+"available": 0.0,
+"initial_margin": 0.0
+}
+}
+}
+},
+{
+"v": []
+},
+{
+"v": [
+[
+1800000079.0,
+2401.0
+],
+[
+1800000080.0,
+2400.0
+]
+]
+}
 ],
 "exit_plans": [],
 "entry": {
@@ -2300,6 +2550,7 @@ true,
 "error": "주문 103 취소를 확인하지 못했습니다 — 거래소에서 직접 확인하세요",
 "done_at": "2027-01-15T08:00:46+00:00"
 },
+"slot_ref": "entry",
 "t": 111.0,
 "sec": [
 [
@@ -2482,6 +2733,71 @@ true,
 "ETHUSDC"
 ]
 ],
+"vals": [
+{
+"v": {
+"ok": true,
+"generated_at": "2027-01-15T08:01:51+00:00",
+"positions": [
+{
+"symbol": "ETHUSDC",
+"side": "LONG",
+"qty": 0.4,
+"entry_price": 2500.0,
+"mark_price": 2500.0,
+"leverage": 10.0
+}
+],
+"open_orders": [],
+"leverage_by_symbol": {
+"ETHUSDC": 10.0
+},
+"balances": {
+"USDC": {
+"margin": 1000.0,
+"available": 800.0,
+"initial_margin": 0.0
+},
+"USDT": {
+"margin": 0.0,
+"available": 0.0,
+"initial_margin": 0.0
+}
+}
+}
+},
+{
+"v": []
+},
+{
+"v": [
+[
+1800000110.0,
+2401.0
+],
+[
+1800000111.0,
+2400.0
+]
+]
+},
+{
+"v": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2500.1,
+"quantity": 0.4,
+"fallback_after_sec": 30.0,
+"vol_bpm": 5.0,
+"blocked": null
+}
+}
+}
+],
 "exit_plans": [
 {
 "symbol": "ETHUSDC",
@@ -2593,6 +2909,7 @@ true,
 "slot0": {
 "phase": "submitting"
 },
+"slot_ref": "entry",
 "t": 0.0,
 "sec": [],
 "requests": [
@@ -2761,6 +3078,7 @@ true,
 }
 ],
 "calls": [],
+"vals": [],
 "exit_plans": [],
 "entry": {
 "phase": "filled_maker",
@@ -2867,6 +3185,7 @@ true,
 "placed": true
 }
 },
+"slot_ref": "entry",
 "t": 13.0,
 "sec": [
 [
@@ -2951,6 +3270,55 @@ true,
 "sec",
 "eth"
 ]
+],
+"vals": [
+{
+"v": {
+"ok": true,
+"generated_at": "2027-01-15T08:00:13+00:00",
+"positions": [
+{
+"symbol": "ETHUSDC",
+"side": "LONG",
+"qty": 0.4,
+"entry_price": 2500.0,
+"mark_price": 2500.0,
+"leverage": 10.0
+}
+],
+"open_orders": [],
+"leverage_by_symbol": {
+"ETHUSDC": 10.0
+},
+"balances": {
+"USDC": {
+"margin": 1000.0,
+"available": 800.0,
+"initial_margin": 0.0
+},
+"USDT": {
+"margin": 0.0,
+"available": 0.0,
+"initial_margin": 0.0
+}
+}
+}
+},
+{
+"v": []
+},
+{
+"v": [
+[
+1800000012.0,
+2401.0
+],
+[
+1800000013.0,
+2400.0
+]
+]
+}
 ],
 "exit_plans": [],
 "entry": {
@@ -3060,6 +3428,7 @@ true,
 "placed": true
 }
 },
+"slot_ref": "entry",
 "t": 24.0,
 "sec": [
 [
@@ -3262,6 +3631,71 @@ true,
 "ETHUSDC"
 ]
 ],
+"vals": [
+{
+"v": {
+"ok": true,
+"generated_at": "2027-01-15T08:00:24+00:00",
+"positions": [
+{
+"symbol": "ETHUSDC",
+"side": "LONG",
+"qty": 0.4,
+"entry_price": 2500.0,
+"mark_price": 2500.0,
+"leverage": 10.0
+}
+],
+"open_orders": [],
+"leverage_by_symbol": {
+"ETHUSDC": 10.0
+},
+"balances": {
+"USDC": {
+"margin": 1000.0,
+"available": 800.0,
+"initial_margin": 0.0
+},
+"USDT": {
+"margin": 0.0,
+"available": 0.0,
+"initial_margin": 0.0
+}
+}
+}
+},
+{
+"v": []
+},
+{
+"v": [
+[
+1800000023.0,
+2401.0
+],
+[
+1800000024.0,
+2400.0
+]
+]
+},
+{
+"v": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2500.1,
+"quantity": 0.4,
+"fallback_after_sec": 30.0,
+"vol_bpm": 5.0,
+"blocked": null
+}
+}
+}
+],
 "exit_plans": [
 {
 "symbol": "ETHUSDC",
@@ -3373,6 +3807,7 @@ true,
 "slot0": {
 "phase": "submitting"
 },
+"slot_ref": "entry",
 "t": 0.0,
 "sec": [],
 "requests": [
@@ -4901,6 +5336,7 @@ true,
 }
 ],
 "calls": [],
+"vals": [],
 "exit_plans": [],
 "entry": {
 "phase": "filled_taker",
@@ -5028,6 +5464,7 @@ true,
 "slot0": {
 "phase": "submitting"
 },
+"slot_ref": "entry",
 "t": 5.0,
 "sec": [],
 "requests": [
@@ -5136,6 +5573,34 @@ true,
 "eth"
 ]
 ],
+"vals": [
+{
+"v": {
+"ok": true,
+"generated_at": "2027-01-15T08:00:05+00:00",
+"positions": [],
+"open_orders": [],
+"leverage_by_symbol": {
+"ETHUSDC": 10.0
+},
+"balances": {
+"USDC": {
+"margin": 1000.0,
+"available": 800.0,
+"initial_margin": 0.0
+},
+"USDT": {
+"margin": 0.0,
+"available": 0.0,
+"initial_margin": 0.0
+}
+}
+}
+},
+{
+"v": []
+}
+],
 "exit_plans": [],
 "entry": {
 "phase": "submitting"
@@ -5209,6 +5674,7 @@ true,
 "slot0": {
 "phase": "submitting"
 },
+"slot_ref": "entry",
 "t": 0.0,
 "sec": [
 [
@@ -5401,6 +5867,16 @@ true,
 "eth"
 ]
 ],
+"vals": [
+{
+"v": [
+[
+1800000000.5,
+2511.0
+]
+]
+}
+],
 "exit_plans": [],
 "entry": {
 "phase": "filled_maker",
@@ -5529,6 +6005,7 @@ true,
 "slot0": {
 "phase": "submitting"
 },
+"slot_ref": "entry",
 "t": 0.0,
 "sec": [],
 "requests": [
@@ -5697,6 +6174,7 @@ true,
 }
 ],
 "calls": [],
+"vals": [],
 "exit_plans": [],
 "entry": {
 "phase": "filled_maker",
@@ -5803,6 +6281,7 @@ true,
 "asset": "eth",
 "started_at": "2027-01-15T08:00:08+00:00"
 },
+"slot_ref": "entry",
 "t": 8.0,
 "sec": [],
 "requests": [
@@ -5967,6 +6446,7 @@ true,
 }
 ],
 "calls": [],
+"vals": [],
 "exit_plans": [],
 "entry": {
 "phase": "filled_maker",
@@ -6085,6 +6565,7 @@ true,
 "asset": "eth",
 "started_at": "2027-01-15T08:00:16+00:00"
 },
+"slot_ref": "entry",
 "t": 16.0,
 "sec": [],
 "requests": [
@@ -6143,6 +6624,7 @@ true,
 }
 ],
 "calls": [],
+"vals": [],
 "exit_plans": [],
 "entry": {
 "phase": "filled_maker",
@@ -6245,6 +6727,7 @@ true,
 "taker_qty": 0.0,
 "done_at": "2027-01-15T08:00:19+00:00"
 },
+"slot_ref": "entry",
 "t": 29.0,
 "sec": [],
 "requests": [
@@ -6329,6 +6812,37 @@ true,
 "eth"
 ]
 ],
+"vals": [
+{
+"v": {
+"ok": true,
+"generated_at": "2027-01-15T08:00:29+00:00",
+"positions": [],
+"open_orders": [],
+"leverage_by_symbol": {
+"ETHUSDC": 10.0
+},
+"balances": {
+"USDC": {
+"margin": 1000.0,
+"available": 800.0,
+"initial_margin": 0.0
+},
+"USDT": {
+"margin": 0.0,
+"available": 0.0,
+"initial_margin": 0.0
+}
+}
+}
+},
+{
+"v": []
+},
+{
+"v": []
+}
+],
 "exit_plans": [],
 "entry": {
 "phase": "filled_maker",
@@ -6365,6 +6879,3092 @@ true,
 ],
 "raised": null,
 "t_end": 29.0,
+"pos": {
+"LONG": 0.0,
+"SHORT": 0.0
+}
+}
+]
+},
+{
+"name": "지정가 대기 중 선 옮김 → 새 가격 → 체결 → 새 선으로 무장",
+"file0": null,
+"books": [
+[
+0.0,
+{
+"ETHUSDC": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.00",
+"askPrice": "2500.10"
+},
+"ETHUSDT": {
+"symbol": "ETHUSDT",
+"bidPrice": "2501.00",
+"askPrice": "2501.10"
+}
+}
+]
+],
+"steps": [
+{
+"op": "entry",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2479.0,
+"quantity": 3.162,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2598.97,
+"tp_level": 2600.0,
+"sl_up": false,
+"sl_price": 2379.04839967,
+"sl_level": 2380.0,
+"backstop_price": null,
+"sl_pct": -4.03,
+"sl_name": "선 손절 2380.00"
+},
+"limit": {
+"usdt": 2480.0,
+"price": 2479.0
+},
+"wid": 1,
+"notional_usdt": 7838.6
+},
+"limit": true,
+"rearm": null,
+"slot0": {
+"phase": "submitting",
+"mode": "limit",
+"side": "LONG",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2489.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+},
+"limit": {
+"usdt": 2490.0
+},
+"wid": 1
+},
+"asset": "eth",
+"wid": 1,
+"started_at": "2027-01-15T08:00:00+00:00"
+},
+"slot_ref": "wait:eth",
+"t": 0.0,
+"sec": [
+[
+1799999999.0,
+2489.5
+]
+],
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/leverage?symbol=ETHUSDC&leverage=10&recvWindow=5000&timestamp=1800000000037&signature=4af09baa51735d412bc9c480be3ba13f0b59ef15b9106db0a3f4940bbff46154",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2489.0&quantity=0.4&newClientOrderId=dbwtL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=c99393b7b89fe0aa8d1945dc5e440841cee1d9bbb1cb03de89c1696a89cba1e7",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000006037&signature=ed3bc2e8062c2a39dd53e00cb8eec53afb53419aa4a3c0c8ff8bceaf89be0c04",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2479.0&quantity=3.162&newClientOrderId=dbwtL1800000009000&recvWindow=5000&timestamp=1800000009037&signature=e4be04133be9160eccd44ca3a2ccd9d2994cd76d4c010af5b558cc0ada331681",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=102&recvWindow=5000&timestamp=1800000012037&signature=afe79a6c0d90919417ac5aff53cc3bcb0316750c015d093ec1ebb469ca3343b7",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=102&recvWindow=5000&timestamp=1800000015037&signature=136946fc89054796bf4b072bd55bca44f8d92a6d6b90bbc5021fcf76e49c6d6b",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000015037&signature=4f6b9649f451fbda14612a3ece34fd39b029f605e7eaf4a9721bae57c4c3a15f",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000015037&signature=4f6b9649f451fbda14612a3ece34fd39b029f605e7eaf4a9721bae57c4c3a15f",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000015037&signature=4f6b9649f451fbda14612a3ece34fd39b029f605e7eaf4a9721bae57c4c3a15f",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2598.97&quantity=3.162&newClientOrderId=dbtpL1800000015000&recvWindow=5000&timestamp=1800000015037&signature=47d2773d677e4304a19a81ddc282bb86184f98bf614c0f72b47f43c39d78aa10",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000015037&signature=4f6b9649f451fbda14612a3ece34fd39b029f605e7eaf4a9721bae57c4c3a15f",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000015037&signature=4f6b9649f451fbda14612a3ece34fd39b029f605e7eaf4a9721bae57c4c3a15f",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=103&recvWindow=5000&timestamp=1800000015037&signature=d94d82e6be109403ab278af6a14ace0a902ae3c9863bfb0340424beb1d9c61cd",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000015037&signature=4f6b9649f451fbda14612a3ece34fd39b029f605e7eaf4a9721bae57c4c3a15f",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2598.97&quantity=3.162&newClientOrderId=dbtpL1800000015000&recvWindow=5000&timestamp=1800000015037&signature=47d2773d677e4304a19a81ddc282bb86184f98bf614c0f72b47f43c39d78aa10",
+"key": "test_key"
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "0.0",
+"leverage": "5",
+"marginType": "cross"
+},
+{
+"symbol": "ETHUSDC",
+"positionSide": "SHORT",
+"positionAmt": "-0.0",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"leverage": 10,
+"maxNotionalValue": "1000000"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "CANCELED"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "CANCELED"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 102,
+"clientOrderId": "dbwtL1800000009000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2479.0",
+"origQty": "3.162",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 102,
+"clientOrderId": "dbwtL1800000009000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2479.0",
+"origQty": "3.162",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 102,
+"clientOrderId": "dbwtL1800000009000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2479.0",
+"origQty": "3.162",
+"executedQty": "3.162",
+"status": "FILLED"
+}
+},
+{
+"status": 200,
+"body": {
+"serverTime": 1800000015037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "3.162",
+"leverage": "10",
+"marginType": "cross"
+},
+{
+"symbol": "ETHUSDC",
+"positionSide": "SHORT",
+"positionAmt": "-0.0",
+"leverage": "10",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": {
+"orderId": 103,
+"clientOrderId": "dbtpL1800000015000",
+"symbol": "ETHUSDC",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2598.97",
+"origQty": "3.162",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"serverTime": 1800000015037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "3.162",
+"leverage": "10",
+"marginType": "cross"
+},
+{
+"symbol": "ETHUSDC",
+"positionSide": "SHORT",
+"positionAmt": "-0.0",
+"leverage": "10",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": [
+{
+"orderId": 103,
+"clientOrderId": "dbtpL1800000015000",
+"symbol": "ETHUSDC",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2598.97",
+"origQty": "3.162",
+"executedQty": "0",
+"status": "NEW"
+}
+]
+},
+{
+"status": 200,
+"body": {
+"orderId": 103,
+"clientOrderId": "dbtpL1800000015000",
+"symbol": "ETHUSDC",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2598.97",
+"origQty": "3.162",
+"executedQty": "0",
+"status": "CANCELED"
+}
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": {
+"orderId": 104,
+"clientOrderId": "dbtpL1800000015000",
+"symbol": "ETHUSDC",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2598.97",
+"origQty": "3.162",
+"executedQty": "0",
+"status": "NEW"
+}
+}
+],
+"calls": [
+[
+9.0,
+"handler",
+"api_manual_limit_amend",
+{
+"confirm": "1",
+"asset": "eth",
+"limit": "2480",
+"tp": "2600",
+"sl": "2380"
+}
+],
+[
+9.0,
+"produce_account"
+],
+[
+9.0,
+"book",
+"ETHUSDC"
+],
+[
+9.0,
+"filters",
+"ETHUSDC"
+],
+[
+9.0,
+"vol",
+"ETHUSDC"
+],
+[
+9.0,
+"funding",
+"ETHUSDC"
+],
+[
+9.0,
+"fees",
+"ETHUSDC"
+],
+[
+9.0,
+"sec",
+"eth"
+],
+[
+9.0,
+"book",
+"ETHUSDT"
+]
+],
+"vals": [
+{
+"v": {
+"status": 200,
+"body": {
+"ok": true,
+"moved": true,
+"price": 2479.0,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2598.97,
+"tp_level": 2600.0,
+"sl_up": false,
+"sl_price": 2379.04839967,
+"sl_level": 2380.0,
+"backstop_price": null,
+"sl_pct": -4.03,
+"sl_name": "선 손절 2380.00"
+},
+"wait": {
+"phase": "working",
+"mode": "limit",
+"side": "LONG",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2479.0,
+"quantity": 3.162,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2598.97,
+"tp_level": 2600.0,
+"sl_up": false,
+"sl_price": 2379.04839967,
+"sl_level": 2380.0,
+"backstop_price": null,
+"sl_pct": -4.03,
+"sl_name": "선 손절 2380.00"
+},
+"limit": {
+"usdt": 2480.0,
+"price": 2479.0
+},
+"wid": 1,
+"notional_usdt": 7838.6
+},
+"asset": "eth",
+"wid": 1,
+"started_at": "2027-01-15T08:00:00+00:00",
+"leverage": {
+"changed": true,
+"from": 5,
+"to": 10
+},
+"filled": 0.0,
+"limit_price": 2489.0,
+"quantity": 0.4,
+"repegs": 0,
+"amends": 0,
+"deadline_sec": 14400.0,
+"wait_until": "2027-01-15T12:00:00+00:00",
+"order_id": 101,
+"client_order_id": "dbwtL1800000000000",
+"amend": {
+"price": 2479.0,
+"qty": 3.162,
+"at": 1800000009.0
+}
+}
+}
+}
+},
+{
+"v": {
+"ok": true,
+"generated_at": "2027-01-15T08:00:09+00:00",
+"positions": [],
+"open_orders": [],
+"leverage_by_symbol": {
+"ETHUSDC": 10.0
+},
+"balances": {
+"USDC": {
+"margin": 1000.0,
+"available": 800.0,
+"initial_margin": 0.0
+},
+"USDT": {
+"margin": 0.0,
+"available": 0.0,
+"initial_margin": 0.0
+}
+}
+}
+},
+{
+"v": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.00",
+"askPrice": "2500.10"
+}
+},
+{
+"v": {
+"step": 0.001,
+"tick": 0.01,
+"min_qty": 0.001,
+"min_notional": 5.0
+}
+},
+{
+"v": null
+},
+{
+"v": null
+},
+{
+"v": {
+"symbol": "ETHUSDC",
+"maker_bp": 2.0,
+"taker_bp": 5.0,
+"source": "fallback"
+}
+},
+{
+"v": [
+[
+1799999999.0,
+2489.5
+]
+]
+},
+{
+"v": {
+"symbol": "ETHUSDT",
+"bidPrice": "2501.00",
+"askPrice": "2501.10"
+}
+}
+],
+"exit_plans": [],
+"entry": {
+"phase": "filled_maker",
+"mode": "limit",
+"side": "LONG",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2479.0,
+"quantity": 3.162,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2598.97,
+"tp_level": 2600.0,
+"sl_up": false,
+"sl_price": 2379.04839967,
+"sl_level": 2380.0,
+"backstop_price": null,
+"sl_pct": -4.03,
+"sl_name": "선 손절 2380.00"
+},
+"limit": {
+"usdt": 2480.0,
+"price": 2479.0
+},
+"wid": 1,
+"notional_usdt": 7838.6
+},
+"asset": "eth",
+"wid": 1,
+"started_at": "2027-01-15T08:00:00+00:00",
+"leverage": {
+"changed": true,
+"from": 5,
+"to": 10
+},
+"filled": 3.162,
+"limit_price": 2479.0,
+"quantity": 3.162,
+"repegs": 0,
+"amends": 1,
+"deadline_sec": 14400.0,
+"wait_until": "2027-01-15T12:00:00+00:00",
+"order_id": 102,
+"client_order_id": "dbwtL1800000009000",
+"bracket": {
+"qty": 3.162,
+"cleared": {
+"cancelled": 1,
+"errors": []
+},
+"tp": {
+"placed": true,
+"price": 2598.97,
+"order_id": 104,
+"error": null
+},
+"placed": true
+},
+"taker_qty": 0.0,
+"done_at": "2027-01-15T08:00:15+00:00"
+},
+"file": {
+"ETHUSDC:LONG": {
+"symbol": "ETHUSDC",
+"side": "LONG",
+"sl_price": 2379.04839967,
+"sl_level": 2380.0,
+"tp_price": 2598.97,
+"backstop_price": null,
+"rule": false,
+"sl_name": "선 손절 2380.00",
+"lines": true,
+"tp_level": 2600.0,
+"sl_up": false,
+"tp_resting": true,
+"armed_at": 1800000015.0,
+"placed": {
+"qty": 3.162,
+"cleared": {
+"cancelled": 1,
+"errors": []
+},
+"tp": {
+"placed": true,
+"price": 2598.97,
+"order_id": 104,
+"error": null
+},
+"placed": true
+}
+}
+},
+"limits": [],
+"logs": [
+"limit entry: 수정(사용자) 지정가 → 2479.0 · 익절 2600.0 손절 2380.0"
+],
+"raised": null,
+"t_end": 15.0,
+"pos": {
+"LONG": 3.162,
+"SHORT": 0.0
+}
+}
+]
+},
+{
+"name": "지정가 대기 중 PEG → 따라가기 체결 → 무장",
+"file0": null,
+"books": [
+[
+0.0,
+{
+"ETHUSDC": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.00",
+"askPrice": "2500.10"
+},
+"ETHUSDT": {
+"symbol": "ETHUSDT",
+"bidPrice": "2501.00",
+"askPrice": "2501.10"
+}
+}
+]
+],
+"steps": [
+{
+"op": "entry",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2489.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+},
+"limit": {
+"usdt": 2490.0
+},
+"wid": 1
+},
+"limit": true,
+"rearm": null,
+"slot0": {
+"phase": "submitting",
+"mode": "limit",
+"side": "LONG",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2489.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+},
+"limit": {
+"usdt": 2490.0
+},
+"wid": 1
+},
+"asset": "eth",
+"wid": 1,
+"started_at": "2027-01-15T08:00:00+00:00"
+},
+"slot_ref": "wait:eth",
+"t": 0.0,
+"sec": [],
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/leverage?symbol=ETHUSDC&leverage=10&recvWindow=5000&timestamp=1800000000037&signature=4af09baa51735d412bc9c480be3ba13f0b59ef15b9106db0a3f4940bbff46154",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2489.0&quantity=0.4&newClientOrderId=dbwtL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=c99393b7b89fe0aa8d1945dc5e440841cee1d9bbb1cb03de89c1696a89cba1e7",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000006037&signature=ed3bc2e8062c2a39dd53e00cb8eec53afb53419aa4a3c0c8ff8bceaf89be0c04",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.0&quantity=0.4&newClientOrderId=dbpgL1800000009000&recvWindow=5000&timestamp=1800000009037&signature=c24f2dd10edd7f0f64e168eff63535e5da1ccaf7f2d270fd3e50fcb304bf26d2",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=102&recvWindow=5000&timestamp=1800000012037&signature=afe79a6c0d90919417ac5aff53cc3bcb0316750c015d093ec1ebb469ca3343b7",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000012037&signature=8b3c934dfa15089b05f14e0d3353a44b0ce8fbc0d14ec21bba3ed8fa8e05db5c",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000012037&signature=8b3c934dfa15089b05f14e0d3353a44b0ce8fbc0d14ec21bba3ed8fa8e05db5c",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000012037&signature=8b3c934dfa15089b05f14e0d3353a44b0ce8fbc0d14ec21bba3ed8fa8e05db5c",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2600.0&quantity=0.4&newClientOrderId=dbtpL1800000012000&recvWindow=5000&timestamp=1800000012037&signature=5ce7d0655d13afbaaa65ba74d1c2e313d66469cdc2f9090d87518c89345dcff7",
+"key": "test_key"
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "0.0",
+"leverage": "5",
+"marginType": "cross"
+},
+{
+"symbol": "ETHUSDC",
+"positionSide": "SHORT",
+"positionAmt": "-0.0",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"leverage": 10,
+"maxNotionalValue": "1000000"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "CANCELED"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "CANCELED"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.00",
+"askPrice": "2500.10"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 102,
+"clientOrderId": "dbpgL1800000009000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2500.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 102,
+"clientOrderId": "dbpgL1800000009000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2500.0",
+"origQty": "0.4",
+"executedQty": "0.4",
+"status": "FILLED"
+}
+},
+{
+"status": 200,
+"body": {
+"serverTime": 1800000012037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "0.4",
+"leverage": "10",
+"marginType": "cross"
+},
+{
+"symbol": "ETHUSDC",
+"positionSide": "SHORT",
+"positionAmt": "-0.0",
+"leverage": "10",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": {
+"orderId": 103,
+"clientOrderId": "dbtpL1800000012000",
+"symbol": "ETHUSDC",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2600.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+}
+],
+"calls": [
+[
+9.0,
+"handler",
+"api_manual_wait_action",
+{
+"action": "peg",
+"confirm": "1",
+"asset": "eth"
+}
+],
+[
+9.0,
+"book",
+"ETHUSDC"
+],
+[
+9.0,
+"book",
+"ETHUSDT"
+],
+[
+9.0,
+"filters",
+"ETHUSDC"
+]
+],
+"vals": [
+{
+"v": {
+"status": 200,
+"body": {
+"ok": true,
+"wait": {
+"phase": "working",
+"mode": "limit",
+"side": "LONG",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2489.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+},
+"limit": {
+"usdt": 2490.0
+},
+"wid": 1
+},
+"asset": "eth",
+"wid": 1,
+"started_at": "2027-01-15T08:00:00+00:00",
+"leverage": {
+"changed": true,
+"from": 5,
+"to": 10
+},
+"filled": 0.0,
+"limit_price": 2489.0,
+"quantity": 0.4,
+"repegs": 0,
+"amends": 0,
+"deadline_sec": 14400.0,
+"wait_until": "2027-01-15T12:00:00+00:00",
+"order_id": 101,
+"client_order_id": "dbwtL1800000000000",
+"action": "peg",
+"action_at": "2027-01-15T08:00:09+00:00",
+"action_reason": null
+}
+}
+}
+},
+{
+"v": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.00",
+"askPrice": "2500.10"
+}
+},
+{
+"v": {
+"symbol": "ETHUSDT",
+"bidPrice": "2501.00",
+"askPrice": "2501.10"
+}
+},
+{
+"v": {
+"step": 0.001,
+"tick": 0.01,
+"min_qty": 0.001,
+"min_notional": 5.0
+}
+}
+],
+"exit_plans": [],
+"entry": {
+"phase": "filled_maker",
+"mode": "limit",
+"side": "LONG",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2489.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+},
+"limit": {
+"usdt": 2490.0
+},
+"wid": 1
+},
+"asset": "eth",
+"wid": 1,
+"started_at": "2027-01-15T08:00:00+00:00",
+"leverage": {
+"changed": true,
+"from": 5,
+"to": 10
+},
+"filled": 0.4,
+"limit_price": 2500.0,
+"quantity": 0.4,
+"repegs": 0,
+"amends": 0,
+"deadline_sec": 14400.0,
+"wait_until": "2027-01-15T12:00:00+00:00",
+"order_id": 102,
+"client_order_id": "dbwtL1800000000000",
+"action_at": "2027-01-15T08:00:09+00:00",
+"action_reason": null,
+"pegged": "2027-01-15T08:00:09+00:00",
+"taker_qty": 0.0,
+"done_at": "2027-01-15T08:00:12+00:00",
+"bracket": {
+"qty": 0.4,
+"cleared": {
+"cancelled": 0,
+"errors": []
+},
+"tp": {
+"placed": true,
+"price": 2600.0,
+"order_id": 103,
+"error": null
+},
+"placed": true
+}
+},
+"file": {
+"ETHUSDC:LONG": {
+"symbol": "ETHUSDC",
+"side": "LONG",
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"tp_price": 2600.0,
+"backstop_price": null,
+"rule": false,
+"sl_name": "선 손절 2400.00",
+"lines": true,
+"tp_level": 2600.0,
+"sl_up": null,
+"tp_resting": true,
+"armed_at": 1800000012.0,
+"placed": {
+"qty": 0.4,
+"cleared": {
+"cancelled": 0,
+"errors": []
+},
+"tp": {
+"placed": true,
+"price": 2600.0,
+"order_id": 103,
+"error": null
+},
+"placed": true
+}
+}
+},
+"limits": [],
+"logs": [
+"wait-action peg: 접수 eth LONG order_id=101",
+"limit entry: PEG 따라가기 시작 ETHUSDC LONG 0.4 @ 2500.0",
+"limit entry: PEG 끝 filled_maker 체결 0.4 리페그 0 마지막 2500.0"
+],
+"raised": null,
+"t_end": 12.0,
+"pos": {
+"LONG": 0.4,
+"SHORT": 0.0
+}
+}
+]
+},
+{
+"name": "지정가 대기 중 지금 시장가(M4) → 무장",
+"file0": null,
+"books": [
+[
+0.0,
+{
+"ETHUSDC": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.00",
+"askPrice": "2500.10"
+},
+"ETHUSDT": {
+"symbol": "ETHUSDT",
+"bidPrice": "2501.00",
+"askPrice": "2501.10"
+}
+}
+]
+],
+"steps": [
+{
+"op": "entry",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2489.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+},
+"limit": {
+"usdt": 2490.0
+},
+"wid": 1
+},
+"limit": true,
+"rearm": null,
+"slot0": {
+"phase": "submitting",
+"mode": "limit",
+"side": "LONG",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2489.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+},
+"limit": {
+"usdt": 2490.0
+},
+"wid": 1
+},
+"asset": "eth",
+"wid": 1,
+"started_at": "2027-01-15T08:00:00+00:00"
+},
+"slot_ref": "wait:eth",
+"t": 0.0,
+"sec": [],
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/leverage?symbol=ETHUSDC&leverage=10&recvWindow=5000&timestamp=1800000000037&signature=4af09baa51735d412bc9c480be3ba13f0b59ef15b9106db0a3f4940bbff46154",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2489.0&quantity=0.4&newClientOrderId=dbwtL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=c99393b7b89fe0aa8d1945dc5e440841cee1d9bbb1cb03de89c1696a89cba1e7",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000006037&signature=ed3bc2e8062c2a39dd53e00cb8eec53afb53419aa4a3c0c8ff8bceaf89be0c04",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=MARKET&quantity=0.4&recvWindow=5000&timestamp=1800000009037&signature=8cd60d3e71f0af76f3b6a5c67b3f6bd577032bdb24454d05ed89e443baa30132",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000009037&signature=551511153dcec3b2caed40d4565701b91802018171867c6fde0245437e483ab9",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000009037&signature=551511153dcec3b2caed40d4565701b91802018171867c6fde0245437e483ab9",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000009037&signature=551511153dcec3b2caed40d4565701b91802018171867c6fde0245437e483ab9",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2600.0&quantity=0.4&newClientOrderId=dbtpL1800000009000&recvWindow=5000&timestamp=1800000009037&signature=65ef3eebb100a1c5da71d5356502176fc0e43c7d5612ec6f4298587db8b88b94",
+"key": "test_key"
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "0.0",
+"leverage": "5",
+"marginType": "cross"
+},
+{
+"symbol": "ETHUSDC",
+"positionSide": "SHORT",
+"positionAmt": "-0.0",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"leverage": 10,
+"maxNotionalValue": "1000000"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "CANCELED"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "CANCELED"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 102,
+"clientOrderId": "x102",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "MARKET",
+"price": "0",
+"origQty": "0.4",
+"executedQty": "0.4",
+"status": "FILLED"
+}
+},
+{
+"status": 200,
+"body": {
+"serverTime": 1800000009037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "0.4",
+"leverage": "10",
+"marginType": "cross"
+},
+{
+"symbol": "ETHUSDC",
+"positionSide": "SHORT",
+"positionAmt": "-0.0",
+"leverage": "10",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": {
+"orderId": 103,
+"clientOrderId": "dbtpL1800000009000",
+"symbol": "ETHUSDC",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2600.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+}
+],
+"calls": [
+[
+9.0,
+"handler",
+"api_manual_wait_action",
+{
+"action": "market",
+"confirm": "1",
+"asset": "eth"
+}
+],
+[
+9.0,
+"book",
+"ETHUSDC"
+],
+[
+9.0,
+"book",
+"ETHUSDT"
+],
+[
+9.0,
+"filters",
+"ETHUSDC"
+]
+],
+"vals": [
+{
+"v": {
+"status": 200,
+"body": {
+"ok": true,
+"wait": {
+"phase": "working",
+"mode": "limit",
+"side": "LONG",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2489.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+},
+"limit": {
+"usdt": 2490.0
+},
+"wid": 1
+},
+"asset": "eth",
+"wid": 1,
+"started_at": "2027-01-15T08:00:00+00:00",
+"leverage": {
+"changed": true,
+"from": 5,
+"to": 10
+},
+"filled": 0.0,
+"limit_price": 2489.0,
+"quantity": 0.4,
+"repegs": 0,
+"amends": 0,
+"deadline_sec": 14400.0,
+"wait_until": "2027-01-15T12:00:00+00:00",
+"order_id": 101,
+"client_order_id": "dbwtL1800000000000",
+"action": "market",
+"action_at": "2027-01-15T08:00:09+00:00",
+"action_reason": null
+}
+}
+}
+},
+{
+"v": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.00",
+"askPrice": "2500.10"
+}
+},
+{
+"v": {
+"symbol": "ETHUSDT",
+"bidPrice": "2501.00",
+"askPrice": "2501.10"
+}
+},
+{
+"v": {
+"step": 0.001,
+"tick": 0.01,
+"min_qty": 0.001,
+"min_notional": 5.0
+}
+}
+],
+"exit_plans": [],
+"entry": {
+"phase": "filled_taker",
+"mode": "limit",
+"side": "LONG",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2489.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+},
+"limit": {
+"usdt": 2490.0
+},
+"wid": 1
+},
+"asset": "eth",
+"wid": 1,
+"started_at": "2027-01-15T08:00:00+00:00",
+"leverage": {
+"changed": true,
+"from": 5,
+"to": 10
+},
+"filled": 0.4,
+"limit_price": 2489.0,
+"quantity": 0.4,
+"repegs": 0,
+"amends": 0,
+"deadline_sec": 14400.0,
+"wait_until": "2027-01-15T12:00:00+00:00",
+"order_id": 101,
+"client_order_id": "dbwtL1800000000000",
+"action": "market",
+"action_at": "2027-01-15T08:00:09+00:00",
+"action_reason": null,
+"taker_qty": 0.4,
+"taker_order_id": 102,
+"taker_reason": "지금 시장가(사용자)",
+"done_at": "2027-01-15T08:00:09+00:00",
+"bracket": {
+"qty": 0.4,
+"cleared": {
+"cancelled": 0,
+"errors": []
+},
+"tp": {
+"placed": true,
+"price": 2600.0,
+"order_id": 103,
+"error": null
+},
+"placed": true
+}
+},
+"file": {
+"ETHUSDC:LONG": {
+"symbol": "ETHUSDC",
+"side": "LONG",
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"tp_price": 2600.0,
+"backstop_price": null,
+"rule": false,
+"sl_name": "선 손절 2400.00",
+"lines": true,
+"tp_level": 2600.0,
+"sl_up": null,
+"tp_resting": true,
+"armed_at": 1800000009.0,
+"placed": {
+"qty": 0.4,
+"cleared": {
+"cancelled": 0,
+"errors": []
+},
+"tp": {
+"placed": true,
+"price": 2600.0,
+"order_id": 103,
+"error": null
+},
+"placed": true
+}
+}
+},
+"limits": [],
+"logs": [
+"wait-action market: 접수 eth LONG order_id=101"
+],
+"raised": null,
+"t_end": 9.0,
+"pos": {
+"LONG": 0.4,
+"SHORT": 0.0
+}
+}
+]
+},
+{
+"name": "지정가 대기 취소",
+"file0": null,
+"books": [
+[
+0.0,
+{
+"ETHUSDC": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.00",
+"askPrice": "2500.10"
+},
+"ETHUSDT": {
+"symbol": "ETHUSDT",
+"bidPrice": "2501.00",
+"askPrice": "2501.10"
+}
+}
+]
+],
+"steps": [
+{
+"op": "entry",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2489.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+},
+"limit": {
+"usdt": 2490.0
+},
+"wid": 1
+},
+"limit": true,
+"rearm": null,
+"slot0": {
+"phase": "submitting",
+"mode": "limit",
+"side": "LONG",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2489.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+},
+"limit": {
+"usdt": 2490.0
+},
+"wid": 1
+},
+"asset": "eth",
+"wid": 1,
+"started_at": "2027-01-15T08:00:00+00:00"
+},
+"slot_ref": "wait:eth",
+"t": 0.0,
+"sec": [],
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/leverage?symbol=ETHUSDC&leverage=10&recvWindow=5000&timestamp=1800000000037&signature=4af09baa51735d412bc9c480be3ba13f0b59ef15b9106db0a3f4940bbff46154",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2489.0&quantity=0.4&newClientOrderId=dbwtL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=c99393b7b89fe0aa8d1945dc5e440841cee1d9bbb1cb03de89c1696a89cba1e7",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000006037&signature=ed3bc2e8062c2a39dd53e00cb8eec53afb53419aa4a3c0c8ff8bceaf89be0c04",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "0.0",
+"leverage": "5",
+"marginType": "cross"
+},
+{
+"symbol": "ETHUSDC",
+"positionSide": "SHORT",
+"positionAmt": "-0.0",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"leverage": 10,
+"maxNotionalValue": "1000000"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "CANCELED"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbwtL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2489.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "CANCELED"
+}
+}
+],
+"calls": [
+[
+9.0,
+"handler",
+"api_manual_wait_action",
+{
+"action": "cancel",
+"confirm": "1",
+"asset": "eth"
+}
+]
+],
+"vals": [
+{
+"v": {
+"status": 200,
+"body": {
+"ok": true,
+"wait": {
+"phase": "working",
+"mode": "limit",
+"side": "LONG",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2489.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+},
+"limit": {
+"usdt": 2490.0
+},
+"wid": 1
+},
+"asset": "eth",
+"wid": 1,
+"started_at": "2027-01-15T08:00:00+00:00",
+"leverage": {
+"changed": true,
+"from": 5,
+"to": 10
+},
+"filled": 0.0,
+"limit_price": 2489.0,
+"quantity": 0.4,
+"repegs": 0,
+"amends": 0,
+"deadline_sec": 14400.0,
+"wait_until": "2027-01-15T12:00:00+00:00",
+"order_id": 101,
+"client_order_id": "dbwtL1800000000000",
+"action": "cancel",
+"action_at": "2027-01-15T08:00:09+00:00",
+"action_reason": "사용자 취소"
+}
+}
+}
+}
+],
+"exit_plans": [],
+"entry": {
+"phase": "cancelled",
+"mode": "limit",
+"side": "LONG",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2489.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+},
+"limit": {
+"usdt": 2490.0
+},
+"wid": 1
+},
+"asset": "eth",
+"wid": 1,
+"started_at": "2027-01-15T08:00:00+00:00",
+"leverage": {
+"changed": true,
+"from": 5,
+"to": 10
+},
+"filled": 0.0,
+"limit_price": 2489.0,
+"quantity": 0.4,
+"repegs": 0,
+"amends": 0,
+"deadline_sec": 14400.0,
+"wait_until": "2027-01-15T12:00:00+00:00",
+"order_id": 101,
+"client_order_id": "dbwtL1800000000000",
+"action": "cancel",
+"action_at": "2027-01-15T08:00:09+00:00",
+"action_reason": "사용자 취소",
+"taker_qty": 0.0,
+"done_at": "2027-01-15T08:00:09+00:00",
+"cancel_reason": "사용자 취소"
+},
+"file": null,
+"limits": [],
+"logs": [
+"wait-action cancel: 접수 eth LONG order_id=101"
+],
+"raised": null,
+"t_end": 9.0,
+"pos": {
+"LONG": 0.0,
+"SHORT": 0.0
+}
+}
+]
+},
+{
+"name": "따라가기 진입 중 취소",
+"file0": null,
+"books": [
+[
+0.0,
+{
+"ETHUSDC": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.00",
+"askPrice": "2500.10"
+},
+"ETHUSDT": {
+"symbol": "ETHUSDT",
+"bidPrice": "2501.00",
+"askPrice": "2501.10"
+}
+}
+]
+],
+"steps": [
+{
+"op": "entry",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2500.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+}
+},
+"limit": false,
+"rearm": null,
+"slot0": {
+"phase": "submitting",
+"side": "LONG",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2500.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+}
+},
+"asset": "eth",
+"started_at": "2027-01-15T08:00:00+00:00"
+},
+"slot_ref": "entry",
+"t": 0.0,
+"sec": [],
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/leverage?symbol=ETHUSDC&leverage=10&recvWindow=5000&timestamp=1800000000037&signature=4af09baa51735d412bc9c480be3ba13f0b59ef15b9106db0a3f4940bbff46154",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.0&quantity=0.4&newClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=b5b2aa78dcae42dbb33129b9ac918309fd46581a19f2ee426aa89a08d980e184",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000006037&signature=ed3bc2e8062c2a39dd53e00cb8eec53afb53419aa4a3c0c8ff8bceaf89be0c04",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000009037&signature=2ea91d7455c530e081aee3b902999b8668f5f9222d03c249347661afd5bf1c9e",
+"key": "test_key"
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "0.0",
+"leverage": "5",
+"marginType": "cross"
+},
+{
+"symbol": "ETHUSDC",
+"positionSide": "SHORT",
+"positionAmt": "-0.0",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"leverage": 10,
+"maxNotionalValue": "1000000"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbpgL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2500.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbpgL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2500.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.00",
+"askPrice": "2500.10"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbpgL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2500.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.00",
+"askPrice": "2500.10"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbpgL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2500.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.00",
+"askPrice": "2500.10"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbpgL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2500.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "CANCELED"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbpgL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2500.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "CANCELED"
+}
+}
+],
+"calls": [
+[
+9.0,
+"handler",
+"api_manual_entry_cancel",
+{
+"confirm": "1"
+}
+]
+],
+"vals": [
+{
+"v": {
+"status": 200,
+"body": {
+"ok": true,
+"state": {
+"phase": "working",
+"side": "LONG",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2500.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+}
+},
+"asset": "eth",
+"started_at": "2027-01-15T08:00:00+00:00",
+"leverage": {
+"changed": true,
+"from": 5,
+"to": 10
+},
+"filled": 0.0,
+"limit_price": 2500.0,
+"quantity": 0.4,
+"repegs": 0,
+"deadline_sec": 120.0,
+"order_id": 101,
+"action": "cancel",
+"action_at": "2027-01-15T08:00:09+00:00",
+"action_reason": "사용자 취소"
+}
+}
+}
+}
+],
+"exit_plans": [],
+"entry": {
+"phase": "cancelled",
+"side": "LONG",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2500.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+}
+},
+"asset": "eth",
+"started_at": "2027-01-15T08:00:00+00:00",
+"leverage": {
+"changed": true,
+"from": 5,
+"to": 10
+},
+"filled": 0.0,
+"limit_price": 2500.0,
+"quantity": 0.4,
+"repegs": 0,
+"deadline_sec": 120.0,
+"order_id": 101,
+"action": "cancel",
+"action_at": "2027-01-15T08:00:09+00:00",
+"action_reason": "사용자 취소",
+"taker_qty": 0.0,
+"cancel_reason": "사용자 취소",
+"done_at": "2027-01-15T08:00:09+00:00"
+},
+"file": null,
+"limits": [],
+"logs": [],
+"raised": null,
+"t_end": 9.0,
+"pos": {
+"LONG": 0.0,
+"SHORT": 0.0
+}
+}
+]
+},
+{
+"name": "감시 진입 대기 중 취소",
+"file0": null,
+"books": [
+[
+0.0,
+{
+"ETHUSDC": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.00",
+"askPrice": "2500.10"
+},
+"ETHUSDT": {
+"symbol": "ETHUSDT",
+"bidPrice": "2501.00",
+"askPrice": "2501.10"
+}
+}
+]
+],
+"steps": [
+{
+"op": "entry",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2510.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+},
+"limit": {
+"usdt": 2510.0
+},
+"stop": true,
+"wid": 1
+},
+"limit": true,
+"rearm": null,
+"slot0": {
+"phase": "submitting",
+"mode": "limit",
+"side": "LONG",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2510.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+},
+"limit": {
+"usdt": 2510.0
+},
+"stop": true,
+"wid": 1
+},
+"asset": "eth",
+"wid": 1,
+"started_at": "2027-01-15T08:00:00+00:00"
+},
+"slot_ref": "wait:eth",
+"t": 0.0,
+"sec": [
+[
+1799999999.0,
+2490.0
+]
+],
+"requests": [],
+"responses": [],
+"calls": [
+[
+0.0,
+"sec",
+"eth"
+],
+[
+1.0,
+"sec",
+"eth"
+],
+[
+2.0,
+"sec",
+"eth"
+],
+[
+3.0,
+"handler",
+"api_manual_wait_action",
+{
+"action": "cancel",
+"confirm": "1",
+"asset": "eth"
+}
+]
+],
+"vals": [
+{
+"v": [
+[
+1799999999.0,
+2490.0
+]
+]
+},
+{
+"v": [
+[
+1799999999.0,
+2490.0
+]
+]
+},
+{
+"v": [
+[
+1799999999.0,
+2490.0
+]
+]
+},
+{
+"v": {
+"status": 200,
+"body": {
+"ok": true,
+"wait": {
+"phase": "working",
+"mode": "limit",
+"side": "LONG",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2510.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+},
+"limit": {
+"usdt": 2510.0
+},
+"stop": true,
+"wid": 1
+},
+"asset": "eth",
+"wid": 1,
+"started_at": "2027-01-15T08:00:00+00:00",
+"stop": true,
+"triggered": null,
+"filled": 0.0,
+"limit_price": 2510.0,
+"quantity": 0.4,
+"amends": 0,
+"deadline_sec": 14400.0,
+"wait_until": "2027-01-15T12:00:00+00:00",
+"action": "cancel",
+"action_at": "2027-01-15T08:00:03+00:00",
+"action_reason": "사용자 취소"
+}
+}
+}
+}
+],
+"exit_plans": [],
+"entry": {
+"phase": "cancelled",
+"mode": "limit",
+"side": "LONG",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2510.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+},
+"limit": {
+"usdt": 2510.0
+},
+"stop": true,
+"wid": 1
+},
+"asset": "eth",
+"wid": 1,
+"started_at": "2027-01-15T08:00:00+00:00",
+"stop": true,
+"triggered": null,
+"filled": 0.0,
+"limit_price": 2510.0,
+"quantity": 0.4,
+"amends": 0,
+"deadline_sec": 14400.0,
+"wait_until": "2027-01-15T12:00:00+00:00",
+"action": "cancel",
+"action_at": "2027-01-15T08:00:03+00:00",
+"action_reason": "사용자 취소",
+"taker_qty": 0.0,
+"cancel_reason": "사용자 취소",
+"done_at": "2027-01-15T08:00:03+00:00"
+},
+"file": null,
+"limits": [],
+"logs": [
+"wait-action cancel: 접수 eth LONG order_id=None"
+],
+"raised": null,
+"t_end": 3.0,
 "pos": {
 "LONG": 0.0,
 "SHORT": 0.0
@@ -6441,6 +10041,7 @@ true,
 "slot0": {
 "phase": "submitting"
 },
+"slot_ref": "entry",
 "t": 0.0,
 "sec": [],
 "requests": [
@@ -6950,6 +10551,30 @@ true,
 "book",
 "ETHUSDT"
 ]
+],
+"vals": [
+{
+"v": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.00",
+"askPrice": "2500.10"
+}
+},
+{
+"v": {
+"step": 0.001,
+"tick": 0.01,
+"min_qty": 0.001,
+"min_notional": 5.0
+}
+},
+{
+"v": {
+"symbol": "ETHUSDT",
+"bidPrice": "2503.00",
+"askPrice": "2503.10"
+}
+}
 ],
 "exit_plans": [],
 "entry": {

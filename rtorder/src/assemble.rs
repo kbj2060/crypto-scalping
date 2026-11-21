@@ -395,6 +395,8 @@ pub struct Desk {
     pub override_x: f64,
     /// 아직 도는 작업 이름(원본 refresh_tasks 의 not done) -- 대기 칸 재사용 규칙(G12).
     pub running: std::collections::BTreeSet<String>,
+    /// 2026-11-21 W12 다리: 도는 진입 작업의 집행 상태(칸 이름 `runner::slot_key` → Shared). 접수 핸들러가 `pull_live`·`push_live` 로 읽고 쓴다.
+    pub live: std::collections::HashMap<String, crate::exec::Shared>,
 }
 
 pub fn override_x_from(v: Option<&str>) -> f64 {
@@ -403,7 +405,7 @@ pub fn override_x_from(v: Option<&str>) -> f64 {
 
 impl Desk {
     pub fn new(w: Watcher) -> Desk {
-        Desk { w, override_x: override_x_from(std::env::var("DASHBOARD_SIZING_CAP_EQUITY_X").ok().as_deref()), running: Default::default() }
+        Desk { w, override_x: override_x_from(std::env::var("DASHBOARD_SIZING_CAP_EQUITY_X").ok().as_deref()), running: Default::default(), live: Default::default() }
     }
 
     /// 코인 → 주문 심볼(MANUAL_EXEC_SYMBOLS).
@@ -424,6 +426,13 @@ impl Desk {
 
     /// 주문 심볼(USDC) 중간가 ÷ 화면 심볼(USDT) 중간가. ponytail(원본): 못 읽으면 1(5분봉 감시만 수 bp 어긋남 · P21).
     pub async fn basis_for<Q: Quotes>(&self, q: &mut Q, book: &Value, asset: &str) -> f64 {
+        basis_of(q, book, asset).await
+    }
+}
+
+/// `Desk::basis_for` 의 몸(Desk 상태를 안 읽는다 -- 실행기가 Desk 를 잠그지 않고 부른다).
+pub async fn basis_of<Q: Quotes>(q: &mut Q, book: &Value, asset: &str) -> f64 {
+    {
         let Some(ms) = market_symbol(asset) else { return 1.0 };
         let Ok(r) = q.book(ms).await else { return 1.0 };
         let g = |o: &Value, k: &str| o.get(k).ok_or(()).and_then(|v| py_float(v).map_err(|_| ()));
@@ -435,7 +444,9 @@ impl Desk {
             _ => 1.0,
         }
     }
+}
 
+impl Desk {
     /// 대기 칸의 남은 명목(`(quantity − filled) × limit_price`).
     fn wait_left(w: &Value) -> Result<f64, String> {
         let pl = w.get("plan").filter(|v| truthy(Some(v))).cloned().unwrap_or(json!({}));

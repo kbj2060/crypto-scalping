@@ -145,7 +145,10 @@ pub struct ExecState {
     pub amend: Option<Amend>,
     pub amends: u32,
     pub reprices: u32,
-    pub pegged: bool,
+    /// PEG 전환 시각(원본 state["pegged"] = now_iso() -- 진릿값으로도 쓰인다).
+    pub pegged: Option<f64>,
+    /// 원본이 집행 중 print 한 줄(PEG 시작·끝) -- 실행기가 감시 로그로 옮긴다.
+    pub logs: Vec<String>,
     pub vol_bpm: Option<f64>,
     pub market_reason: Option<String>,
     /// 시장가 다리의 주문 번호(원본 taker_order_id).
@@ -160,6 +163,8 @@ pub struct ExecState {
     pub leverage: Option<serde_json::Value>,
     /// 지정가·감시 대기 만료 벽시계(epoch 초 · 원본 wait_until iso).
     pub wait_until: Option<f64>,
+    /// 감시 진입의 닿음 선(USDT · 원본 plan["limit"]["usdt"] -- 선 옮김이 바꾼다 · 실행기가 칸 plan 에서 넣는다).
+    pub stop_level: Option<f64>,
 }
 pub type Shared = Arc<Mutex<ExecState>>;
 
@@ -178,6 +183,11 @@ pub struct ExecPlan {
     pub market_reason: Option<String>,
     /// int(plan.get("target_leverage") or 0) -- 진입 머리의 ensure_leverage.
     pub target_leverage: i64,
+}
+
+/// 파이썬 f-string 의 float 표기(repr).
+fn round_repr(x: f64) -> String {
+    crate::pyfmt::repr(x)
 }
 
 fn r8(x: f64) -> f64 {
@@ -660,7 +670,7 @@ pub async fn run_entry_limit<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Share
         {
             let mut g = st(s);
             g.action = None; // fill_maker 는 action=cancel 만 멈춤으로 본다 -- 비워 둬야 따라가는 중 ✕ 취소가 먹는다
-            g.pegged = true;
+            g.pegged = Some(ex.wall_ms() as f64 / 1000.0); // 원본 state["pegged"] = now_iso()
         }
         // D11: 원본은 이 호가 조회가 try 밖이라 예외가 settle 의 «집행 오류»로 간다(그 시점 걸린 주문 없음). 같은 결과(error)로 옮긴다.
         let px = match maker_price(ex, c.side, c.symbol).await {
@@ -670,6 +680,7 @@ pub async fn run_entry_limit<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Share
                 return finish(s, Phase::Error);
             }
         };
+        st(s).logs.push(format!("limit entry: PEG 따라가기 시작 {} {} {} @ {}", c.symbol, ps, round_repr(remaining), round_repr(px)));
         let (got, px, rp, err) = fill_maker(ex, &c, px, remaining, ex.now() + FALLBACK_SEC, s).await;
         let mut g = st(s);
         (g.filled, g.repegs, g.limit_price, g.taker_qty) = (r8(done + got), rp, px, 0.0);
@@ -682,6 +693,8 @@ pub async fn run_entry_limit<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Share
             g.cancel_reason = Some(g.action_reason.clone().filter(|r| !r.is_empty()).unwrap_or_else(|| "따라가기 마감 — 남은 수량 버림(시장가 없음)".into()));
             Phase::Cancelled
         };
+        let line = format!("limit entry: PEG 끝 {} 체결 {} 리페그 {rp} 마지막 {}", crate::watch::phase_name(ph), round_repr(g.filled), round_repr(px));
+        g.logs.push(line);
         drop(g);
         finish(s, ph);
     } else {
