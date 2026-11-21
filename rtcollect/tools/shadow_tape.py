@@ -268,14 +268,18 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
     carry: tuple = (Counter(), Counter())
     sp_: set = set()
     sr_: set = set()
-    matched: set = set()   # 묶음 표: 두 쪽에 다 있던 줄 -- 남은 «한쪽에만»이 그 줄의 또 한 벌이면 «같은 줄 두 번»(받기 차이 · 값 정보는 같다)
+    matched: set = set()
+    sec_p: dict = {}
+    sec_r: dict = {}
+    cs_p: set = set()
+    cs_r: set = set()   # 묶음 표: 두 쪽에 다 있던 줄 -- 남은 «한쪽에만»이 그 줄의 또 한 벌이면 «같은 줄 두 번»(받기 차이 · 값 정보는 같다)
 
     def keep(r) -> bool:
         nonlocal n_down
         sec = r[ti] // 1000 if ms else r[ti]
         sym = r[si] if si is not None else None
         w = BAR_W.get(t, 1)   # 봉 표: 그 봉 [시작, 시작+폭) 이 뺄 구간에 걸치면 뺀다(끊김이 걸친 1분봉은 받은 체결 수가 갈린다 -- SHADOW.md §5)
-        if any(a < sec + w and sec < b for a, b in down.get(sym, ())):
+        if any(a < sec + w and sec < b for a, b in down.get(sym, proc)):   # Rust 표에 한 번도 없는 종목(OKX 청산 ADBE 등)도 프로세스 빈틈은 뺀다
             n_down += 1
             return False
         m = sec // 60
@@ -290,6 +294,12 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
         q = f"SELECT {sel} FROM {t} WHERE {tcol} >= ? AND {tcol} < ?"
         rp = [r for r in py.execute(q, args) if keep(r)]
         rr = [r for r in rs.execute(q, args) if keep(r)]
+        if t in SET_TABLES:   # 받은 초(와 종목)를 따로 둔다 -- 아래 «같은 초에 둘 다 받았다» 판정용
+            for side, rows_ in ((sec_p, rp), (sec_r, rr)):
+                for r in rows_:
+                    sc = r[ti] // 1000 if ms else r[ti]
+                    side.setdefault(tuple(r[i] for i in keepcols), []).append(sc)
+                    (cs_p if side is sec_p else cs_r).add((r[si], sc))
         if not kidx:
             rp, rr = [tuple(r[i] for i in keepcols) for r in rp], [tuple(r[i] for i in keepcols) for r in rr]
         if kidx:
@@ -327,8 +337,18 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
         for tag, extra in (("파이썬에만", po), ("Rust에만", ro_)):
             for k in sorted(extra)[: max(0, show - len(first))]:
                 first.append(f"{tag} {k}")
+    same_sec = [0, 0]
     if t in SET_TABLES:
         n_cmp, carry = len(sp_ & sr_), (Counter(sp_ - sr_), Counter(sr_ - sp_))
+        # 같은 초에 둘 다 받았는데 값만 다름 = 거래소가 연결마다 맥락 값을 묶어 보낸다(xyz ctx 는 (coin, recv_sec) INSERT OR REPLACE 라 그 초 마지막 값만 남는다)
+        #   -- 그 줄의 종목·초(±1)에 다른 쪽도 줄이 있으면 설명(받기는 했다) · 다른 쪽이 그 초에 아무것도 없으면 설명 못 함(못 받음)
+        kpos = keepcols.index(si) if si in keepcols else None
+        for k in carry[0]:
+            if kpos is not None and any((k[kpos], x + d) in cs_r for x in sec_p.get(k, ()) for d in (-1, 0, 1)):
+                same_sec[0] += 1
+        for k in carry[1]:
+            if kpos is not None and any((k[kpos], x + d) in cs_p for x in sec_r.get(k, ()) for d in (-1, 0, 1)):
+                same_sec[1] += 1
     if not kidx:
         only_py, only_rs = sum(carry[0].values()), sum(carry[1].values())
         for tag, extra in (("파이썬에만", carry[0]), ("Rust에만", carry[1])):
@@ -349,7 +369,7 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
                 resub += c
     rs_note = f"(의도한 차이 후보 -- {INTENDED_EXTRA[t]})" if t in INTENDED_EXTRA and only_rs else ""
     hot = (" · 파이썬에만 많은 분(서버 시각) " + ", ".join(f"{time.strftime('%F %R', time.localtime(m))}({c})" for m, c in po_min.most_common(3))) if po_min else ""
-    bad = n_bad + only_py - dup_py + (0 if t in INTENDED_EXTRA else only_rs - dup_rs - resub)
+    bad = n_bad + only_py - dup_py - same_sec[0] + (0 if t in INTENDED_EXTRA else only_rs - dup_rs - resub - same_sec[1])
     if t == "hl_xyz_ctx_1s" and only_py + only_rs <= 0.005 * n_cmp:   # 받은 초가 1칸 밀린 합침 -- §5 의 0.5% 기준
         bad = n_bad
     TALLY[0] += n_cmp
@@ -359,7 +379,8 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
             f"{f' · 끝자리 차(상대 1e-9 안) 최대 {worst:.1e}' if worst else ''}"
             f"{hot}{f' · 준비 구간(warm) 봉 {n_warm:,} 뺌' if n_warm else ''}"
             f"{f' · 같은 줄 두 번(설명) 파이썬 {dup_py:,}·Rust {dup_rs:,}' if dup_py or dup_rs else ''}"
-            f"{f' · Rust 재구독 현재값(직전 파이썬 줄과 같은 값 · 설명) {resub:,}' if resub else ''}")
+            f"{f' · Rust 재구독 현재값(직전 파이썬 줄과 같은 값 · 설명) {resub:,}' if resub else ''}"
+            f"{f' · 같은 초(±1)에 다른 쪽도 받음(값만 다름 · 설명) 파이썬에만 {same_sec[0]:,}·Rust에만 {same_sec[1]:,}' if any(same_sec) else ''}")
     return line + "".join(f"\n    {x}" for x in first)
 
 
@@ -756,6 +777,40 @@ def selftest() -> None:
         assert o2[0].startswith("연결 끊김") and "Rust 2번(그림자 로그 «끊김» 2줄 → 2번 설명" in o2[0], o2[0]
         # 끊김 줄 0 → 두 끊김(30초씩 = 60행) 다 설명 못 함 · 1 → 하나만 · 2 → 0 · 진짜 파이썬에만 1·Rust 에만 1 은 늘 남는다
         assert TALLY0 - TALLY1 == 30 and TALLY1 - TALLY[1] == 30 and TALLY[1] == 2, (TALLY0, TALLY1, TALLY[1], o0)
+        # Rust 표에 한 번도 없는 종목: 첫 기동 전 행은 빼고, 뒤 행은 설명 못 함(11-22 OKX 청산 ADBE 165)
+        l1, l2 = Path(d) / "l1.sqlite", Path(d) / "l2.sqlite"
+        for f in (l1, l2):
+            con = sqlite3.connect(f)
+            con.execute("CREATE TABLE okx_mark(inst TEXT, ts_ms INTEGER, mark REAL)")
+            con.execute("CREATE TABLE okx_liquidations(inst_id TEXT, inst_family TEXT, ts_ms INTEGER, side TEXT, pos_side TEXT, bk_px REAL, sz_contracts REAL, sz_base REAL, bk_loss REAL)")
+            con.executemany("INSERT INTO okx_mark VALUES ('ETH', ?, 1.0)", [(1000 * (T + k),) for k in range(0, 600) if f == l1 or k >= 200])   # Rust 는 T+200 부터
+            con.executemany("INSERT INTO okx_liquidations VALUES ('ETH', 'ETH', ?, 'b', 'l', 1, 1, 1, 0)", [(1000 * (T + 10),), (1000 * (T + 500),)])   # T+10 = Rust 가 구독 때 받은 옛 사건(ts 가 앞)
+            if f == l1:
+                con.executemany("INSERT INTO okx_liquidations VALUES ('ADBE', 'ADBE', ?, 'b', 'l', 1, 1, NULL, 0)", [(1000 * (T + 50),), (1000 * (T + 400),)])
+            con.commit()
+            con.close()
+        TALLY[:] = [0, 0]
+        ll = next(x for x in run(l1, l2, starts=[T + 190]) if x.startswith("okx_liquidations"))
+        assert "파이썬에만 1 " in ll and TALLY[1] == 1, (TALLY, ll)   # ADBE T+50(그림자 뜨기 전)은 빼고 T+400 만 남는다
+        # 같은 초 다른 값(xyz ctx): 파이썬 T+50 에 1.5(Rust 는 같은 초에 1.6) → 설명 · 파이썬 T+300 에 9.9(Rust 는 T+298~302 에 줄 없음) → 설명 못 함
+        e1, e2 = Path(d) / "e1.sqlite", Path(d) / "e2.sqlite"
+        for f in (e1, e2):
+            con = sqlite3.connect(f)
+            con.execute("CREATE TABLE hl_xyz_ctx_1s(coin TEXT NOT NULL, recv_sec INTEGER NOT NULL, mid REAL, mark REAL, oracle REAL, PRIMARY KEY(coin, recv_sec))")
+            con.executemany("INSERT INTO hl_xyz_ctx_1s VALUES ('xyz:JPY', ?, ?, 1.0, 1.0)",
+                            [(T + k, 1.0 + k) for k in range(0, 600) if not (f == e2 and 295 <= k <= 305)])
+            if f == e1:
+                con.execute("UPDATE hl_xyz_ctx_1s SET mid = 1.5 WHERE recv_sec = ?", [T + 50])
+                con.execute("UPDATE hl_xyz_ctx_1s SET mid = 9.9 WHERE recv_sec = ?", [T + 300])
+            else:
+                con.execute("UPDATE hl_xyz_ctx_1s SET mid = 1.6 WHERE recv_sec = ?", [T + 50])
+            con.commit()
+            con.close()
+        TALLY[:] = [0, 0]
+        xl = next(x for x in run(e1, e2) if x.startswith("hl_xyz_ctx_1s"))
+        assert "같은 초(±1)에 다른 쪽도 받음(값만 다름 · 설명) 파이썬에만 3·Rust에만 1" in xl, xl
+        # 파이썬에만 12 = 1.5(설명) + T+295~305 의 11(가장자리 295·305 는 Rust 가 ±1초 안에 받음 → 설명 · 296~304 의 9 는 못 받음 → 설명 못 함)
+        assert "파이썬에만 12" in xl and TALLY[1] == 9, (TALLY, xl)
         # 첫 기동 전(-inf)은 뺀다: 기동 T+600 하나면 그 앞 Rust 자료가 있어도 첫 기동 = 로그의 가장 이른 것
         assert holes([T + 603], [t0 := T + 600], 5) == [(float("-inf"), t0 + 8)]
         # 재기동: 죽인 때(T+100) 뒤 빈틈을 다시 붙을 때 받은 «최근 체결»(T+148~149)이 T 바로 앞까지 메워도, 가장 큰 빈틈 [T+100, T+148] 을 찾는다

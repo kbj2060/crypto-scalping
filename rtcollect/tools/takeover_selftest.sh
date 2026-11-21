@@ -14,7 +14,7 @@ cp "$SRC"/rtcollect/tools/{takeover.sh,shadow_tape.py,shadow_duck.py} "$R/rtcoll
 # 가짜 파이썬 수집기: 감독(부모)이 먼저 죽었는지 SIGTERM 때 적는다 · 쓰는 파일 mtime 을 민다
 cat > "$R/scripts/live_trade_tape_collector_20260916.py" <<'X'
 P0=$PPID
-trap 'if kill -0 $P0 2>/dev/null; then echo "py_term $TAPE_MARKET parent_alive" >> $R/order.log; else echo "py_term $TAPE_MARKET parent_gone" >> $R/order.log; fi; [ -e $R/slow ] && for i in $(seq 40); do touch "$f"; sleep 0.5; done; echo "py_exit $TAPE_MARKET" >> $R/order.log; exit 0' TERM   # slow 가 있으면 SIGTERM 뒤 20초 더 쓰다가 끝남(마지막 묶음 흉내)
+trap 'if kill -0 $P0 2>/dev/null; then echo "py_term $TAPE_MARKET parent_alive" >> $R/order.log; else echo "py_term $TAPE_MARKET parent_gone" >> $R/order.log; fi; [ -s $R/slow ] && for i in $(seq $(( $(cat $R/slow) * 2 ))); do touch "$f"; sleep 0.5; done; echo "py_exit $TAPE_MARKET" >> $R/order.log; exit 0' TERM   # slow 파일에 적힌 초만큼 SIGTERM 뒤 더 쓰다가 끝남(마지막 묶음 흉내)
 echo "py_start $TAPE_SYMBOL $TAPE_MARKET" >> $R/order.log
 f=$R/data/hot/binance_tape.sqlite; [ "$TAPE_MARKET" = futures ] || f=$R/data/hot/binance_spot_tape.sqlite
 while :; do touch "$f"; sleep 0.3 & wait $!; done
@@ -132,10 +132,11 @@ ok "매니페스트 되돌림" 'python3 -c "import json; m=json.load(open(\"data
 ok "파이썬 현물은 끝까지 그대로" '[ "$(pyp spot)" = "$SPOT0" ]'
 echo "== 4. 느리게 죽는 파이썬: 기다림을 넘기면 스스로 되돌린다(crontab·매니페스트·감독 다시 · 쓰는 프로세스 0 으로 안 끝남)"
 env RTCOLLECT_BIN="$R/tmp/rtbin/rtcollect" TAPE_SYMBOL=ethusdt,btcusdt setsid nohup bash scripts/ops/supervisor_rtcollect.sh binance_tape > /dev/null 2>&1 < /dev/null &
-sleep 3; touch "$R/slow"; : > order.log
+sleep 3; echo 20 > "$R/slow"; : > order.log
 FUT1="$(pyp futures)"
-OUT="$(TERM_WAIT_S=12 bash rtcollect/tools/takeover.sh go binance_tape 2>&1)"; RC=$?; echo "$OUT" | grep -vE '^  (trade_tape|목록|그림자 감독)'
+G0=$SECONDS; OUT="$(TERM_WAIT_S=12 bash rtcollect/tools/takeover.sh go binance_tape 2>&1)"; RC=$?; GW=$((SECONDS - G0)); echo "$OUT" | grep -vE '^  (trade_tape|목록|그림자 감독)'
 ok "종료코드 8(되돌림)" '[ "$RC" = 8 ]'
+ok "«12초 뒤에도 산다»는 실제로 12초 넘게 기다린 뒤에만(go 전체 ${GW}초)" '[ "$GW" -ge 12 ] && echo "$OUT" | grep -q "SIGTERM 1[2-4]초 뒤에도 산다(기다림 한도 12초"'
 ok "기다리는 동안 «살아 있음 · mtime 전진» 을 찍음" 'echo "$OUT" | grep -q "기다림 10초: .*살아 있음 · 파일 mtime 전진"'
 ok "crontab = 원래 것" '[ "$(cat crontab.txt)" = "$ORIG" ]'
 ok "매니페스트 되돌림" 'python3 -c "import json; m=json.load(open(\"data/live/multicoin_collectors.json\")); assert sorted(m[\"collectors\"])==[\"bn_tape_all\",\"okx_tape_all\"] and not m.get(\"taken_over\")"'
@@ -145,6 +146,16 @@ rm -f "$R/slow"
 for _ in $(seq 30); do p="$(pyp futures)"; [ -n "$p" ] && [ "$p" != "$FUT1" ] && break; sleep 1; done
 ok "수집기가 끝난 뒤 지킴이가 감독을 다시 띄움(새 파이썬 pid)" 'p="$(pyp futures)"; [ -n "$p" ] && [ "$p" != "$FUT1" ] && grep -q "py_exit futures" order.log'
 ok "그림자는 그대로(④ 전에 멈춤)" '[ -n "$(rsp "")" ]'
+echo "== 4b. 40초 걸려 죽는 파이썬 + 기본 기다림(120초) → 넘김 성공 · 실제 기다린 초를 찍음"
+sleep 3; echo 40 > "$R/slow"; : > order.log
+G0=$SECONDS; OUT="$(TERM_WAIT_S=120 bash rtcollect/tools/takeover.sh go binance_tape 2>&1)"; RC=$?; GW=$((SECONDS - G0))
+echo "$OUT" | grep -E "끔:|기다림|go binance"
+ok "go 종료코드 0 · 40초쯤 기다림(go 전체 ${GW}초)" '[ "$RC" = 0 ] && [ "$GW" -ge 40 ] && echo "$OUT" | grep -qE "수집기 pid [0-9]+ \(SIGTERM 뒤 (39|4[0-9])초\)"'
+ok "기다리는 동안 10초마다 «살아 있음»(30초 줄 있음)" 'echo "$OUT" | grep -q "기다림 30초: .*살아 있음"'
+rm -f "$R/slow"
+bash rtcollect/tools/takeover.sh back binance_tape > /dev/null 2>&1
+ok "back 뒤 crontab 원래대로" '[ "$(cat crontab.txt)" = "$ORIG" ]'
+sleep 3
 echo "== 5. 바이낸스 가중치 머리 읽기(binance_ctx go 의 넘기기 전·뒤 단계) -- 127.0.0.1 가짜 서버"
 cat > "$R/wsrv.py" <<'X'
 import http.server, sys
@@ -157,8 +168,12 @@ s = http.server.HTTPServer(("127.0.0.1", 0), H); print(s.server_address[1], flus
 X
 python3 "$R/wsrv.py" > "$R/wport" & sleep 1
 WP="$(cat "$R/wport")"
-W="$(WEIGHT_URL="http://127.0.0.1:$WP/fapi/v1/time" WEIGHT_N=3 WEIGHT_GAP=0 bash rtcollect/tools/takeover.sh weight binance_ctx 2>/dev/null)"
-ok "가중치 세 번 중 최고 = 250 ($W)" '[ "$W" = 250 ]'
+W="$(WEIGHT_URL="http://127.0.0.1:$WP/fapi/v1/time" WEIGHT_N=3 WEIGHT_GAP=0 bash rtcollect/tools/takeover.sh weight binance_ctx 2>/dev/null | tr '\n' '|')"
+ok "가중치 세 번 = 100 250 180 · 중앙 180 ($W)" '[ "$W" = "100 250 180|중앙 180|" ]'
+J() { bash rtcollect/tools/takeover.sh weight-judge binance_ctx "" "$1" "$2" > /dev/null 2>&1; }
+ok "11-22 실측(뒤 다섯 중 하나만 튐 1382) → 통과" 'J "1095 1067 1078 1059 1032" "1382 1020 1140 1098 1100"'
+ok "다섯 번 다 +300 → 되돌림" '! J "1095 1067 1078 1059 1032" "1395 1367 1378 1359 1332"'
+ok "두 번 연속 +200(중앙은 그대로) → 되돌림" '! J "1095 1067 1078 1059 1032" "1100 1300 1300 1090 1080"'
 echo "$(( $(date +%s) + 600 ))" > data/live/binance_ban_until
 WEIGHT_URL="http://127.0.0.1:$WP/fapi/v1/time" WEIGHT_N=1 bash rtcollect/tools/takeover.sh weight binance_ctx > /dev/null 2>&1; RC=$?
 ok "밴 파일이 살아 있으면 부르지 않고 실패" '[ "$RC" != 0 ]'

@@ -29,6 +29,22 @@ envof() { tr '\0' '\n' 2>/dev/null < "/proc/$1/environ" | grep "^$2=" | head -1 
 argv() { tr '\0' '\n' 2>/dev/null < "/proc/$1/cmdline"; }
 val() { echo "$1" | grep -oE "(^| )$2=[^ ]+" | head -1 | sed -E "s/^ ?$2=//"; }
 gone() { [ ! -e "/proc/$1" ] || [ "$(ps -o stat= -p "$1" 2>/dev/null | cut -c1)" = Z ]; }
+# 기다림은 «돈 횟수»가 아니라 벽시계 초(SECONDS)로 잰다 -- 11-22 hl_trades XRP go 에서 «120초 뒤에도 산다»가 9초 만에 나왔다
+#   (횟수 고리 seq×sleep 0.2 가 실제로 얼마나 기다렸는지 남지 않았다 · sleep 이 바로 돌아오는 환경이면 횟수는 시간이 아니다)
+nap() { sleep "$1" 2>/dev/null || read -rt "$1" _ <> <(:) 2>/dev/null || :; }
+wait_gone() { # wait_gone <pid> <초> [이름] -- 그 초까지 벽시계로 기다린다 · 10초마다 «살아 있음 · mtime» · 끝에 실제로 기다린 초를 WAITED 에
+  local p="$1" lim="$2" t0=$SECONDS nxt=$((SECONDS + 10)) m0 m1
+  m0="$(mt)"
+  while ! gone "$p" && [ $((SECONDS - t0)) -lt "$lim" ]; do
+    nap 0.2
+    if [ -n "${3:-}" ] && [ $SECONDS -ge $nxt ]; then
+      m1="$(mt)"; echo "  기다림 $((SECONDS - t0))초: $3 pid $p 살아 있음 · 파일 mtime $([ "${m1:-0}" -gt "${m0:-0}" ] && echo 전진 || echo 멈춤)(마지막 묶음 쓰는 중이면 전진)"
+      m0="$m1"; nxt=$((nxt + 10))
+    fi
+  done
+  WAITED=$((SECONDS - t0))
+  gone "$p"
+}
 ppid_of() { ps -o ppid= -p "$1" 2>/dev/null | tr -d ' '; }
 is_sup() { argv "$1" | grep -qE '(^|/)_supervise\.sh$'; }
 
@@ -80,7 +96,7 @@ case "$KIND" in
   hl_positions|news|treasury_futures|macro_5m|liqmap_scorer|soxl_weekend|cboe_chain) die "$KIND 는 이 스크립트가 다루지 않는다 -- rtcollect/REMAINING.md «넘겨도 되는가» 표" ;;
   *) [ -n "$KIND" ] || { sed -n '2,12p' "$0"; exit 2; }; die "모르는 종류 '$KIND'" ;;
 esac
-case "$MODE" in check|go|back|weight) ;; *) die "check|go|back 중 하나" ;; esac
+case "$MODE" in check|go|back|weight|weight-judge) ;; *) die "check|go|back 중 하나" ;; esac
 ENGU="$(echo "$ENG" | tr '[:lower:]' '[:upper:]')"
 BIN="$(eval echo "\${${ENGU}_BIN:-$ROOT/tmp/rtbin/$ENG}")"
 COVK="${COVK:-$RK}"
@@ -237,22 +253,18 @@ stop() { # stop <수집기 pid> <이름> [nosave] -- 감독(_supervise.sh 부모
   argv "$c" | grep -qE 'server\.py|trading_bot|rtorder|ops_watchdog|rtserve' && die "pid $c 는 대시보드·주문·감시로 보인다 -- 멈춤"
   if [ -n "$s" ] && [ "$s" != 1 ] && is_sup "$s"; then
     [ "${3:-}" = nosave ] || save "$s" "$c" "$2 감독"
-    kill -TERM "$s" 2>/dev/null; for _ in $(seq 50); do gone "$s" && break; sleep 0.2; done
-    gone "$s" || { echo "  🔴$2 감독 pid $s 가 SIGTERM 10초 뒤에도 산다"; return 1; }
+    kill -TERM "$s" 2>/dev/null
+    wait_gone "$s" 10 || { echo "  🔴$2 감독 pid $s 가 SIGTERM ${WAITED}초 뒤에도 산다"; return 1; }
     echo "  끔: $2 감독 pid $s"
   else
     echo "  ⚠️ $2 pid $c 의 부모($s)가 _supervise.sh 가 아니다 -- 수집기만 끈다"
     [ "${3:-}" = nosave ] || save "$c" "$c" "$2 수집기"
   fi
   kill -TERM "$c" 2>/dev/null
-  m0="$(mt)"
-  for k in $(seq $((TERM_WAIT_S * 5))); do
-    gone "$c" && break
-    sleep 0.2
-    if [ $((k % 50)) = 0 ]; then m1="$(mt)"; echo "  기다림 $((k / 5))초: $2 수집기 pid $c 살아 있음 · 파일 mtime $([ "${m1:-0}" -gt "${m0:-0}" ] && echo 전진 || echo 멈춤)(마지막 묶음 쓰는 중이면 전진)"; m0="$m1"; fi
-  done
-  gone "$c" || { echo "  🔴$2 수집기 pid $c 가 SIGTERM ${TERM_WAIT_S}초 뒤에도 산다(감독은 이미 꺼짐)"; return 2; }
-  echo "  끔: $2 수집기 pid $c"
+  wait_gone "$c" "$TERM_WAIT_S" "$2 수집기" || {
+    echo "  🔴$2 수집기 pid $c 가 SIGTERM ${WAITED}초 뒤에도 산다(기다림 한도 ${TERM_WAIT_S}초 · 감독은 이미 꺼짐) -- $(ps -o pid=,stat=,etime=,args= -p "$c" 2>/dev/null | cut -c1-160)"
+    return 2; }
+  echo "  끔: $2 수집기 pid $c (SIGTERM 뒤 ${WAITED}초)"
 }
 writers() { # 끝날 때마다 찍는다 -- 0 이면 종료코드 9
   local np nr ns
@@ -390,19 +402,32 @@ TAG="$KIND"; [ -z "$SELV" ] || [ "$GROUP" = 1 ] || TAG="${KIND}_${SEL//[,:]/_}"
 # ── 바이낸스 가중치(binance_ctx 만) ── 응답 머리 x-mbx-used-weight-1m(이 IP 의 지난 1분 사용량)을 WEIGHT_GAP 초 간격으로 WEIGHT_N 번 · 가장 큰 값
 #   부르는 곳 = /fapi/v1/time(가중치 1) · 밴 파일이 살아 있으면 부르지 않는다(멈춤). 시험은 WEIGHT_URL 을 127.0.0.1 로.
 WEIGHT_URL="${WEIGHT_URL:-https://fapi.binance.com/fapi/v1/time}"; WEIGHT_N="${WEIGHT_N:-5}"; WEIGHT_GAP="${WEIGHT_GAP:-60}"
-weight_max() {
-  local i w max=0 ban=data/live/binance_ban_until
-  for i in $(seq "$WEIGHT_N"); do
-    [ "$i" = 1 ] || sleep "$WEIGHT_GAP"
+weight_max() { # 값 WEIGHT_N 개를 빈칸으로(이름은 옛 것 -- 최고가 아니라 전부를 낸다)
+  local i w all="" ban=data/live/binance_ban_until
+  for ((i = 1; i <= WEIGHT_N; i++)); do
+    [ "$i" = 1 ] || nap "$WEIGHT_GAP"
     if [ -f "$ban" ] && [ "$(cut -d. -f1 < "$ban" 2>/dev/null || echo 0)" -gt "$(date +%s)" ] 2>/dev/null; then echo "밴 중" >&2; return 1; fi
     w="$(curl -s -D - -o /dev/null --max-time 10 "$WEIGHT_URL" | tr -d '\r' | sed -nE 's/^[Xx]-[Mm][Bb][Xx]-[Uu][Ss][Ee][Dd]-[Ww][Ee][Ii][Gg][Hh][Tt]-1[Mm]: *([0-9]+).*/\1/p')"
     [ -n "$w" ] || { echo "가중치 머리를 못 읽음" >&2; return 1; }
     echo "  가중치 $i/$WEIGHT_N: $w" >&2
-    [ "$w" -gt "$max" ] && max="$w"
+    all="${all:+$all }$w"
   done
-  echo "$max"
+  echo "$all"
 }
-[ "$MODE" = weight ] && { weight_max; exit $?; }   # 시험·손 확인용
+median() { tr ' ' '\n' <<< "$1" | grep . | sort -n | awk '{v[NR]=$1} END {print (NR % 2) ? v[(NR + 1) / 2] : int((v[NR / 2] + v[NR / 2 + 1]) / 2)}'; }
+weight_judge() { # weight_judge "<전 값들>" "<뒤 값들>" -- 되돌릴 까닭을 찍고 1, 아니면 0
+  # 근거: 가중치 머리는 같은 IP 의 모든 프로세스 몫(대시보드·봇·다른 수집기)이라 한 번 튀는 값은 우리 몫이 아니다(11-22: 뒤 다섯 중 1382 하나만 튐 ·
+  #   나머지 넷은 전과 같음 · 수집기 자체 요청률은 508.8 대 512.2 = 0.66%). 늘 얹히는 몫은 «중앙값»으로, 연달아 넘는 것은 «두 번 연속»으로 잡는다.
+  local mb ma lim prev=0 x
+  mb="$(median "$1")"; ma="$(median "$2")"; lim=$((mb + 100))
+  echo "  가중치(1분): 넘기기 전 [$1] 중앙 $mb · 뒤 [$2] 중앙 $ma"
+  [ "$ma" -le "$lim" ] || { echo "  🔴중앙값이 $((ma - mb)) 늘었다(> 100)"; return 1; }
+  for x in $2; do
+    if [ "$x" -gt "$lim" ]; then [ "$prev" = 1 ] && { echo "  🔴두 번 연속 넘기기 전 중앙 + 100($lim) 초과"; return 1; }; prev=1; else prev=0; fi
+  done
+}
+[ "$MODE" = weight-judge ] && { weight_judge "${4:-}" "${5:-}"; exit $?; }   # 시험용: weight-judge binance_ctx "" "<전>" "<뒤>"
+[ "$MODE" = weight ] && { v="$(weight_max)" || exit 1; echo "$v"; echo "중앙 $(median "$v")"; exit 0; }   # 시험·손 확인용
 [ "$MODE" = check ] && { check; exit $?; }
 [ -x "$BIN" ] || die "실행 파일이 없다: $BIN"
 CUR="$($CT -l 2>/dev/null)"; NCUR="$(printf '%s\n' "$CUR" | wc -l)"
@@ -446,7 +471,7 @@ if [ "$KIND" = binance_ctx ]; then   # 넘기면 Rust 가 OI REST(분당 약 540
   nice -n 10 "$PYC" "$TOOLS/rate_binance_ctx.py" --seconds "${RATE_S:-300}" --latency "${RATE_LAT:-0.03}" --bin "$BIN" | sed 's/^/    /'
   [ "${PIPESTATUS[0]}" = 0 ] || die "분당 요청 수가 원본과 다르다 -- 아무것도 바꾸지 않았다"
   W_BEFORE="$(weight_max)" || die "넘기기 전 가중치를 못 읽음 -- 아무것도 바꾸지 않았다"
-  echo "  넘기기 전 가중치(1분) 최고 $W_BEFORE"
+  echo "  넘기기 전 가중치(1분) [$W_BEFORE] 중앙 $(median "$W_BEFORE")"
 fi
 [ -z "$(rs_procs takeover)" ] || die "이미 진짜 경로 Rust 가 돈다(pid $(rs_procs takeover | tr '\n' ' ')) -- 멈춤"
 PY="$(py_procs)"
@@ -495,7 +520,7 @@ NPY="$(for i in $LN; do printf '%s\n' "$CUR" | sed -n "${i}p"; done | grep -cF "
 echo "  ① crontab 백업 $B ② 주석 $NL줄(파이썬 $NPY · 그림자 $((NL - NPY))) + Rust 줄 1 · $NCUR → $((NCUR + 1))줄"
 manifest take
 if [ "$CRON" = 1 ]; then
-  for _ in $(seq 300); do [ -z "$(py_procs any)" ] && break; sleep 1; done
+  t0=$SECONDS; while [ -n "$(py_procs any)" ] && [ $((SECONDS - t0)) -lt 300 ]; do nap 1; done
   [ -z "$(py_procs any)" ] || die "지금 도는 파이썬 $PYRUN 이 5분 뒤에도 안 끝났다 -- 줄은 이미 바뀜(되돌리기: back)"
   echo "go $TAG: 예약 줄 바꿈 -- 다음 «$SCHED» 부터 Rust · 그 시각 뒤 check 한 번 더"; exit 0
 fi
@@ -510,8 +535,9 @@ echo "  ⑤ 띄움: $RENV $ENG $RK"
 env "${ENGU}_BIN=$BIN" $RENV nohup setsid bash "scripts/ops/supervisor_$ENG.sh" "$RK" >> "logs/supervisor/${ENG}_takeover.log" 2>&1 < /dev/null &
 # ⑥ 지켜보기
 T_UP=""
-for _ in $(seq "$WATCH_S"); do
-  sleep 1
+t0=$SECONDS
+while [ $((SECONDS - t0)) -lt "$WATCH_S" ]; do
+  nap 1
   [ -n "$T_UP" ] || { m="$(mt)"; [ -n "$m" ] && [ "$m" -gt "$T_DOWN" ] && T_UP="$m"; }
 done
 R="$(rs_procs takeover | tr '\n' ' ')"
@@ -521,8 +547,7 @@ echo "go $TAG: Rust pid ${R:-없음}· 끊김 $GAP · 로그 이상 $BAD · 다�
 [ -n "$R" ] || die "Rust 가 ${WATCH_S}초 안에 안 살았다"
 if [ "$KIND" = binance_ctx ]; then   # 넘긴 직후 가중치 -- 넘기기 전 최고보다 100 넘게 늘면 되돌린다(IP 밴은 주문 경로까지 막는다)
   W_AFTER="$(weight_max)" || die "넘긴 뒤 가중치를 못 읽음"
-  echo "  가중치(1분) 최고: 넘기기 전 $W_BEFORE · 뒤 $W_AFTER"
-  [ "$W_AFTER" -le $((W_BEFORE + 100)) ] || die "가중치가 넘기기 전보다 $((W_AFTER - W_BEFORE)) 늘었다(> 100)"
+  weight_judge "$W_BEFORE" "$W_AFTER" || die "넘긴 뒤 가중치가 늘었다"
 fi
 STAGE=0
 writers || exit 9
