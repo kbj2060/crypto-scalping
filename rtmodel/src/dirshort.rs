@@ -1,6 +1,6 @@
 //! 15분·1시간 방향 -- 피쳐(dir4h::build_features 와 같은 65열) → LightGBM 시드 앙상블(lgb) → 화면 payload (2026-11-21 · R5).
 //! 원본 scripts/live_eth_dir_short_20261028.py `load_art`·`predict`·`oos_sorted`·`payload_from_features`(65열판 = BTC·SOL·XRP).
-//! ETH 는 75열판(65 + 호가 깊이 워커 sqlite 10열 · warm·결측·빈 칸이면 그 봉 예측을 비움 -- `book_status`·`payload_book`). sqlite 읽기는 부르는 쪽(rtmodel 은 sqlite 의존성 없음).
+//! ETH 는 75열판(65 + 호가 깊이 워커 sqlite 10열 · warm·결측·빈 칸이면 그 봉 예측을 비움 -- `book_status`·`payload_book`). sqlite 읽기 = `book_sqlite`(원본 book_row 와 같은 질의 · 읽기 전용).
 //! `book_feats`·`dataset` 은 학습 몫(서빙은 워커가 이미 계산해 둔 sqlite 10열을 그대로 읽는다) -- 안 옮겼다.
 use crate::box_hold::py_round;
 use crate::dir4h::{Features, FEATS};
@@ -60,6 +60,33 @@ pub fn book_status(row: Option<(f64, &[Option<f64>])>) -> (Option<Vec<f64>>, &'s
         Some((_, v)) if v.iter().any(Option::is_none) => (None, "nan"),
         Some((_, v)) => (Some(v.iter().map(|x| x.unwrap() as f32 as f64).collect()), "ok"),
     }
+}
+
+/// 호가 깊이 10열(원본 BOOKF = live_bookdepth_feat FEAT 순서).
+pub const BOOKF: [&str; 10] = ["dimb1", "dimb2", "dimb5", "dimb1_d1h", "dimb2_d1h", "dimb5_d1h", "depth1_z", "bid_near", "ask_near", "d_age"];
+
+/// 원본 book_row 의 sqlite 읽기: `file:<db>?mode=ro` 로 열고 봉(t = 시작 ms)마다 `SELECT warm, <10열> FROM bars WHERE t = ?` → book_status.
+/// 열기·표 확인 실패 = Err(원본도 payload 전체가 예외). 그 봉의 행이 없으면 "missing".
+pub fn book_sqlite(db: &std::path::Path) -> Result<impl Fn(i64) -> (Option<Vec<f64>>, &'static str), String> {
+    let con = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI)
+        .map_err(|e| format!("sqlite3.OperationalError: {e} ({})", db.display()))?;
+    let sql = format!("SELECT warm, {} FROM bars WHERE t = ?", BOOKF.join(", "));
+    con.prepare(&sql).map_err(|e| format!("sqlite3.OperationalError: {e}"))?; // 표·열이 없으면 원본처럼 실패(봉마다 «없음»으로 숨기지 않게)
+    Ok(move |t: i64| {
+        let row = con.query_row(&sql, [t], |r| {
+            let warm: Option<f64> = r.get::<_, rusqlite::types::Value>(0).map(|v| match v {
+                rusqlite::types::Value::Integer(i) => Some(i as f64),
+                rusqlite::types::Value::Real(f) => Some(f),
+                _ => None,
+            })?;
+            let v: Vec<Option<f64>> = (1..=BOOKF.len()).map(|k| r.get::<_, Option<f64>>(k)).collect::<Result<_, _>>()?;
+            Ok((warm.unwrap_or(0.0), v)) // warm NULL = 거짓(원본 `if r[0]`)
+        });
+        match row {
+            Ok((w, v)) => book_status(Some((w, &v))),
+            Err(_) => book_status(None),
+        }
+    })
 }
 
 /// payload_from_features(65열판): f 의 마지막 n_hist 봉(원본 live_payload 는 13). oos = 지평 이름별 정렬된 표본 밖 예측.

@@ -56,7 +56,7 @@ python rtmodel/tools/shadow_sr_lean.py data/live/sr_lean data/live/rt_sr_lean --
 - 대조: 두 `pred_record/{코인}.jsonl` 의 같은 (k, t) 줄을 글자로 비교한다(시작 시각이 달라 처음 몇 줄은 한쪽에만 있다).
 - 회차 끝 상대 강도: 9코인 5분봉 60개(코인마다 1회 · limit 61) → `pred_record/xsec.jsonl`(원본 xsec_record 와 같은 글자) + `xsec_latest.json`
   (원본은 서버 프로세스 안 `_xs_latest` -- 화면 «4h 상대 강도» 칸이 읽는 스냅숏). 대조: 두 xsec.jsonl 의 같은 t 줄을 글자로.
-- 🔴아직 못 하는 것: ETH 15분·1시간(75열판 · 호가 깊이 sqlite) -- 파이썬 서버 기록만 있다.
+- ETH 15분·1시간(75열판)도 돈다(2026-11-22 · 호가 깊이 sqlite `RT_DIR_BOOK_DB` 읽기 전용) -- 모델 JSON ds_eth·oos_eth 는 `export_dirshort.py` 가 낸다.
 
 ---
 
@@ -140,8 +140,8 @@ bash rtmodel/tools/takeover_selftest.sh          # 가짜 저장소·가짜 cron
 | rt_regime | 파이썬 마지막 결정 시각 T 의 4줄 vs Rust 한 회차(그 결정 줄만 뺀 기록 사본에 이어 씀) 글자 · 요약 파일 글자(빼는 칸 없음) · T 뒤 55분 안에 | 8 | (ts, coin) 중복 제거(원본·Rust 둘 다) · 정시 0~5분엔 거부 | 즉시 한 회차(새 줄 0 · 요약 다시 씀) → 요약 파일 갱신 |
 | rt_dirfwd | 파이썬 마지막 회차 3줄 vs Rust(같은 recorded_ms) 글자 · 회차 뒤 90분 안에 | 6 | 회차 시각(00·08·16시 29~40분) 거부 -- 원본 기록기는 중복 제거가 없다 | 다음 회차 뒤 `status` |
 | rt_radar | latest.json 칸별(updated·data_age_s 빼고 · 실수 1e-12 상대 = X@β BLAS 끝자리) · **가격(price)이 다른 코인은 마지막 1분봉에서 나오는 칸만 이름으로 뺌**(price·sigma15·band80·band95·sigma60·ratio60·state60·alert·valid·usual60·baseline7d) · 가격 같은 코인은 전부 견줌 · 같은 코인이 하나도 없으면 불통과 · 뺀 칸과 이유를 출력에 찍음 · 파이썬 latest 90초 안 | 처음: 코인마다 1분봉 45쪽 + DVOL · 다음부터 코인마다 1 | 분의 20초 뒤에만 바꿈 + 그림자 1분봉 캐시를 data/live/cache 로 옮겨 첫 회차 백필 없음 | 다음 분 latest 갱신 |
-| rt_dirpred | pred_record/{코인}.jsonl·xsec.jsonl 의 같은 (k, t) 줄 글자 | 약 890(처음 회차) | — | 🔴go 불가: 파이썬 몫이 대시보드 서버 프로세스 안(pred_record_loop) -- server.py 에 루프를 끄는 스위치가 있어야 한다 |
-| rt_sr_lean | `shadow_sr_lean.py`(양쪽 다 채점한 id 의 줄 글자) -- 그림자가 없으면 띄우고 65분 뒤 다시(원본도 재시작 뒤 1시간 준비) | 웹소켓 1 + klines | 파이썬 감독·워커를 /proc cmdline(저장소 경로·락 파일까지)으로 찾아 감독 먼저 끔 → Rust 감독(같은 폴더 · TAKEOVER) · 재시작이라 1시간 준비(원본 재시작과 같다) | Rust 워커 pid · 상태 파일 갱신 |
+| rt_dirpred | pred_record/{코인}.jsonl·xsec.jsonl 의 같은 (k, t) 줄 글자 | 약 890(처음 회차) | 표식 파일 `data/live/rtmodel/pred_record_rust.on`(대시보드가 회차마다 봄 · 재시작 없음) → 만든 뒤 Rust 시작 · 5분 회차의 60~240초에만 · 대시보드에 스위치가 없으면 거부 | 다음 회차에 xsec_latest.json(Rust 만 씀) 갱신 |
+| rt_sr_lean | `shadow_sr_lean.py`(양쪽 다 채점한 id 의 줄 글자) -- **첫 호출** = 그림자가 없으면 띄우고 «그림자 시작 … 65분 뒤 check 다시» 를 찍고 종료코드 3 · **65분 안 다시** = «그림자 준비 중(시작 N분 전)» 종료코드 3 · **65분 뒤** = 대조 한 줄(통과면 check.ok) | 웹소켓 1 + klines | 파이썬 감독·워커를 /proc cmdline(저장소 경로·락 파일까지)으로 찾아 감독 먼저 끔 → Rust 감독(같은 폴더 · TAKEOVER) · 재시작이라 1시간 준비(원본 재시작과 같다) | Rust 워커 pid · 상태 파일 갱신 |
 | — 요청 때 계산(vol-forecast · open-rev · dir-signals · dir-short · dir4h) | rtserve 몫 | — | — | **rtserve 전환 때**(rtmodel::handlers) |
 
 - 🔴check 의 «같은 시각» 조건: Rust 한 회차는 REST 최근 창을 다시 받는다 -- 파이썬 회차 직후(위 표의 «안에»)에 돌려야 같은 봉을 본다. 늦으면 도구가 거부한다.
@@ -151,24 +151,21 @@ bash rtmodel/tools/takeover_selftest.sh          # 가짜 저장소·가짜 cron
   다른 이름: rt_regime(:02 에 받음 · 마지막 봉은 2분 전에 닫힘)·rt_dirfwd(00:31 에 받음 · 쓰는 봉은 00:25 봉 = 6분 전)는 해당 없음.
   rt_dirpred 는 마지막 5분봉이 닫힌 지 20초 뒤에 받고 metrics(OI·롱숏비)의 마지막 점이 늦게 올라오거나 고쳐질 수 있어 가장 새 결정 시각 줄만 어긋날 수 있다 -- 지금은 그대로 어긋남으로 찍는다(원인 칸이 예로 보인다 · 그 줄만이면 다음 회차 뒤 다시).
   rt_sr_lean 은 같은 웹소켓 체결을 양쪽이 받는다 -- `shadow_sr_lean.py` 의 «정당한 차이»(한쪽 끊김·시작 시각·같은 초 도착 순서) 그대로.
-- 내보내기 목록에 ETH 의 ds·oos 가 없는 것: `export_dirshort.py` 는 65열판 표(`ds.TABLE` = BTC·SOL·XRP)만 돈다 -- ETH 15분·1시간(75열판)은 rt_dirpred 가 아직 건너뛰므로(호가 깊이 sqlite 읽기 없음) 그대로 둔다.
+- ETH 15분·1시간(75열판): 2026-11-22 rt_dirpred 가 호가 깊이 sqlite(`RT_DIR_BOOK_DB` 기본 data/live/bookdepth/ethusdt.sqlite · 읽기 전용 · `dirshort::book_sqlite`)를 읽어 ETH 도 돈다.
+  `export_dirshort.py` 가 이제 ETH 의 ds·oos 도 내보낸다(전엔 65열판 표 BTC·SOL·XRP 만이라 목록에 없었다) -- 서버에서 `takeover.sh rt_dirpred export` 를 한 번 더.
 - 모델이 매달 바뀌는 것 따라가기: Rust 는 원본 joblib 이 모델 JSON 보다 새것이면(재학습 뒤 내보내기 안 함) **값을 내지 않는다** -- rt_regime 은 종료코드 1(`RT_REGIME_SRC_DIR`) ·
   rt_dirpred 는 그 모델만 건너뜀(`RT_DIR_SRC_DIR` · 로그 «모델 낡음»). 규칙 = `rtmodel::model_stale`(JSON 의 source·sources 이름 → mtime).
   crontab 후보(재학습 cron 시각을 몰라도 되게 매시): `17 * * * * cd <저장소> && bash rtmodel/tools/takeover.sh all export-if-stale >> logs/supervisor/rt_export.log 2>&1`
 
-## rt_dirpred go 에 필요한 서버 스위치 (제안 · 대시보드 서버 파일은 읽기만 했다 -- 코디네이터 검토·배포)
+## rt_dirpred 를 넘기는 대시보드 스위치 = 표식 파일 (2026-11-22 · 구현은 워크트리 pred-record-switch · 코디네이터 검토·배포)
 
-환경 변수 `PRED_RECORD_RUST`(기본 = 없음 = 지금 동작 그대로). `1` 이면 대시보드 서버는 적중 기록·상대 강도를 **쓰지 않고**, Rust(rt_dirpred · `RT_DIR_OUT=data/live RT_DIR_TAKEOVER=1 RT_DIR_MODELS=data/live/rtmodel RT_DIR_SRC_DIR=data/live`)가 같은 파일에 이어 쓴다.
-
-| 자리(2026-11-21 기준 줄) | 넣을 것 | 왜 |
-|---|---|---|
-| dashboard/server.py:2840 `pred_record_loop()` 첫 줄 | `if os.environ.get("PRED_RECORD_RUST") == "1": return` | 5분 루프(4코인 예측 + 9코인 상대 강도)를 Rust 가 맡는다. 화면 요청 때 계산(dir4h_cached·dir_short_cached)은 그대로 남는다 |
-| dashboard/server.py:2831 `pred_record_safe()` 첫 줄 | 같은 조건이면 `return` | 🔴이게 없으면 화면이 열릴 때마다 파이썬이 같은 pred_record/{코인}.jsonl 에 줄을 덧붙인다 -- Rust 의 «이미 쓴 시각» 집합은 시작 때 파일 꼬리에서 한 번만 읽어 그 뒤 파이썬이 쓴 줄을 모른다 → 같은 (k, t) 두 번 |
-| dashboard/pred_record.py:183 `_xsec()` 의 `fresh = _xs_latest …` 앞 | 조건이면 `data/live/xsec_latest.json`(rt_dirpred 가 회차마다 원자적으로 씀 · 같은 {t, rel_bp} 꼴)을 읽어 `_xs_latest` 대신 | 파이썬 루프가 안 돌면 프로세스 안 `_xs_latest` 가 영영 안 바뀌어 화면 «4h 상대 강도» 최신 칸이 20분 뒤 사라진다 |
-
-넘기는 순서: `takeover.sh rt_dirpred check` 통과 → 서버를 `PRED_RECORD_RUST=1` 로 재시작(파이썬이 마지막으로 쓴 5분 회차 뒤) → 곧바로 `supervisor_rt_dirpred.sh`(위 환경 변수로) → 다음 5분 회차에 pred_record 줄·xsec_latest.json 이 Rust 로 갱신되는지 확인.
-되돌리기 = 그 변수를 빼고 서버 재시작 + Rust 감독 종료. takeover.sh 의 rt_dirpred go 는 이 스위치가 배포될 때까지 종료코드 3 으로 거부한다.
-(Rust 는 TAKEOVER 때 data/live 에 dir4h_<코인>.json·dir_short_<코인>.json 마지막 payload 도 쓴다 -- 파이썬 파일과 이름이 겹치지 않는다.)
+환경 변수 대신 **표식 파일** `data/live/rtmodel/pred_record_rust.on`(환경 파일을 건드리지 않고 · 대시보드 재시작 없이 · 파일 하나 만들고 지우는 것으로 전환·되돌리기).
+대시보드는 매 회차(5분 루프 한 바퀴·기록 한 번·상대 강도 읽기 한 번)마다 이 파일이 있는지만 본다 -- 없으면 지금 동작과 한 글자도 같다.
+있으면 ① `pred_record_loop` 가 그 회차의 예측·상대 강도 기록을 건너뛰고 ② `pred_record_safe`(화면 요청 때 기록)가 아무것도 안 쓰고 ③ `pred_record._xsec` 의 «최신 스냅숏»을 Rust 가 쓰는 `data/live/xsec_latest.json` 에서 읽는다.
+④ 표식이 사라지는 순간(되돌리기) 파이썬의 «이미 쓴 시각» 캐시를 비워, 다시 쓸 때 파일 꼬리를 새로 읽는다(Rust 가 쓴 줄을 두 번 쓰지 않게).
+Rust 쪽 순서(takeover.sh go): 표식 만듦 → Rust 감독 시작(`RT_DIR_OUT=data/live RT_DIR_TAKEOVER=1 RT_DIR_MODELS=data/live/rtmodel RT_DIR_SRC_DIR=data/live`) -- Rust 는 첫 덧붙이기 때 파일 꼬리를 읽어 파이썬이 쓴 줄을 다시 안 쓴다.
+5분 회차의 60~240초(파이썬 +20초 회차가 끝나고 다음 회차 전)에만 → 다음 회차가 Rust 의 첫 회차 = 끊김·중복 없음. back = Rust 끔 → 표식 지움 → 태그 crontab 줄 지움.
+(Rust 는 TAKEOVER 때 data/live 에 dir4h_<코인>.json·dir_short_<코인>.json 마지막 payload 와 xsec_latest.json 도 쓴다 -- 파이썬 파일과 이름이 겹치지 않는다.)
 
 ## card30 · 상황 카드에 dir_p·reach_p 싣기 (결론)
 

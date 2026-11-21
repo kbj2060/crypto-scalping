@@ -14,6 +14,8 @@ tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 ureq = { version = "3", default-features = false, features = ["rustls"] }
+# ETH 15분·1시간(75열판)의 호가 깊이 워커 sqlite 읽기(dirshort::book_sqlite) -- rtcollect·rtcore·rtserve 와 같은 판
+rusqlite = { version = "0.37", features = ["bundled"] }
 
 [profile.test]
 opt-level = 2   # 시험이 트리 수십만 노드 × 수천 행을 돈다

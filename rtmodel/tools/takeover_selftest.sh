@@ -85,9 +85,21 @@ ok "go: 파이썬 감독·워커 없음" '[ -z "$(pys)" ] && [ -z "$(pyw)" ]'
 ok "go: Rust 워커(RT_SR_OUT=data/live/sr_lean) 있음 · @reboot 줄 바뀜" '[ -n "$(rsw)" ] && grep -q "^#rt-takeover:rt_sr_lean# @reboot" "$F/crontab.txt" && grep -q "^@reboot cd .*supervisor_rt_sr_lean.sh.*# rt-takeover:rt_sr_lean$" "$F/crontab.txt"'
 $TK rt_sr_lean back; upw
 ok "back: Rust 없음 · 파이썬 감독·워커 다시 · crontab 원래대로" '[ -z "$(rsw)" ] && [ -n "$(pys)" ] && [ -n "$(pyw)" ] && cmp -s "$F/crontab.txt" "$F/crontab.orig"'
-echo "5. rt_dirpred go = 거부(파이썬 몫이 대시보드 서버 안)"
-$TK rt_dirpred go 2>&1 | tail -1; rc=${PIPESTATUS[0]}
-ok "종료코드 3 · crontab 그대로" '[ "$rc" = 3 ] && cmp -s "$F/crontab.txt" "$F/crontab.orig"'
+echo "5. rt_dirpred go·back(표식 파일 · 대시보드 스위치)"
+cp "$SRC/scripts/ops/supervisor_rt_dirpred.sh" "$R/scripts/ops/"; RB="$R/tmp/rtbin"
+printf '%s\n' '#!/bin/bash' 'while :; do echo "{\"t\": 1}" > "$RT_DIR_OUT/xsec_latest.json.tmp"; mv "$RT_DIR_OUT/xsec_latest.json.tmp" "$RT_DIR_OUT/xsec_latest.json"; sleep 1; done' > "$RB/rt_dirpred"
+chmod +x "$RB/rt_dirpred"; echo '{}' > "$L/rtmodel/dir4h_eth.json"; echo '{}' > "$L/rtmodel/ds_eth.json"
+mkdir -p "$F/shadow/rt_dirpred"; echo "$NOW 칸 9" > "$F/shadow/rt_dirpred/check.ok"
+$TK rt_dirpred go 2>&1 | tail -1
+ok "대시보드에 스위치가 없으면 거부 · 표식 없음 · crontab 그대로" '[ ! -f "$L/rtmodel/pred_record_rust.on" ] && cmp -s "$F/crontab.txt" "$F/crontab.orig"'
+echo 'RUST_ON = ROOT / "data" / "live" / "rtmodel" / "pred_record_rust.on"' > "$R/dashboard/pred_record.py"
+NOW_S=$(( NOW + 290 )) $TK rt_dirpred go 2>&1 | tail -1
+ok "회차 경계 근처(290초)면 거부" '[ ! -f "$L/rtmodel/pred_record_rust.on" ]'
+rdp() { for p in /proc/[0-9]*; do [ "$(cat "$p/comm" 2>/dev/null)" = rt_dirpred ] && tr '\0' '\n' 2>/dev/null < "$p/environ" | grep -qx "RT_DIR_OUT=data/live" && echo "${p#/proc/}"; done; }
+NOW_S=$(( NOW + 120 )) DIRPRED_WATCH_S=8 $TK rt_dirpred go
+ok "go: 표식 · Rust 워커(RT_DIR_OUT=data/live) · xsec_latest.json 갱신 · @reboot 줄 +1" '[ -f "$L/rtmodel/pred_record_rust.on" ] && [ -n "$(rdp)" ] && [ -f "$L/xsec_latest.json" ] && grep -q "^@reboot sleep 120 && cd .*supervisor_rt_dirpred.sh.*# rt-takeover:rt_dirpred$" "$F/crontab.txt" && [ $(wc -l < "$F/crontab.txt") = $(( $(wc -l < "$F/crontab.orig") + 1 )) ]'
+$TK rt_dirpred back
+ok "back: Rust 없음 · 표식 없음 · crontab 원래대로" '[ -z "$(rdp)" ] && [ ! -f "$L/rtmodel/pred_record_rust.on" ] && cmp -s "$F/crontab.txt" "$F/crontab.orig"'
 echo "6. export-if-stale: joblib 이 JSON 보다 새것이면 내보내기 시도"
 sleep 1; touch "$L/regime_band_h48_model.joblib"; out=$(PY=/bin/false $TK all export-if-stale 2>&1); echo "$out"
 ok "낡음 감지 → 내보내기 시도 → 실패 문구(옛 값을 내지 않음)" '[[ "$out" == *"[rt_regime] 모델 JSON 낡음"* ]] && [[ "$out" == *"[rt_regime] 🔴내보내기 실패"* ]]'
