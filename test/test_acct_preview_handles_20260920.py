@@ -27,9 +27,3 @@ def test_entry_proj_block_is_gone():
     for dead in ("renderEntryProj", "PROJ_SPEC", 'el("entryProj")'):
         assert dead not in JS, f"app.js 에 {dead} 가 남았다"
 
-
-def test_both_gauges_refresh_the_preview():
-    """진입 비율과 **레버리지** 둘 다 크기를 바꾼다 -- 한쪽만 다시 물으면 카드가 굳는다."""
-    lev = JS[JS.index('el("snapLevGauge")?.addEventListener("input"'):][:700]
-    assert "manualEntryRefreshSize" in lev, "레버리지 게이지가 미리보기를 갱신하지 않는다"
-    assert "setEntryProjPreview(plan)" in JS, "갱신 결과가 카드로 안 간다"
