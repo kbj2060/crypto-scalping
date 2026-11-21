@@ -53,6 +53,9 @@ pub enum Event {
         /// 2026-11-21 더함 -- 마지막 30분 상황 근거(situation.rs · 흐름 엔진 종목만 · 아직 안 셌으면 없음).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         situation: Option<Situation>,
+        /// 2026-11-21 더함 -- 마지막 미시 값(`okx_oi5m` 은 가진 봉 전부).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        micro: Option<Micro>,
     },
     /// 1초 수급 바뀐 몫: 묶음(state.rs FLUSH_MS)마다 1건. 목록 칸 = 그 사이 바뀐 초만(받은 쪽은 초 단위로 덮어쓴다),
     /// `partial` = 원천별 진행 중인 초. 빈 목록은 «바뀐 것 없음»이지 «지워라»가 아니다.
@@ -83,6 +86,34 @@ pub enum Event {
     /// 2026-11-21 더함 -- 30분 상황 근거(파이썬 `situation_state["now"]` = situation.classify 결과 + computed_at). 1초마다 세고 바뀌었을 때만 민다
     /// (computed_at 만 바뀐 것은 안 민다). `missing` = 코어가 못 채우는 입력(원본은 채운다 · situation.rs 머리 주석).
     Situation(Situation),
+    /// 2026-11-21 더함 -- 미시 값(원본 `micro_state["payload"]` 의 코어 입력만으로 되는 칸 + /api/oi-5m 의 OKX 몫). situation 과 같은 1초 박자,
+    /// 바뀌었을 때만. `okx_oi5m` 은 바뀐 봉부터 끝까지(받는 쪽은 봉마다 덮어쓴다 -- 봉 Δ 가 앞 봉 끝값에 걸려 있어 뒤 봉도 같이 싣는다).
+    Micro(Micro),
+}
+
+/// 이름은 원본 payload 키 그대로. 호가를 받기 전이면 mid·spread·qi 가 null.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Micro {
+    /// 센 초(벽시계 정수 초 · 원본 `ts`).
+    pub ts: i64,
+    pub mid: Option<f64>,
+    pub spread: Option<f64>,
+    /// micro_ref.qi(bidQty, askQty).
+    pub qi: Option<f64>,
+    /// 지난 60초(진행 초 뺌) 바이낸스 선물 체결량(기초자산).
+    pub vol60: f64,
+    pub liq60: Liq60,
+    /// [봉, ΔOI, 봉 끝 OI] -- server.py api_oi_5m 의 okx_d(반올림 전 · 바이낸스 봉과 더하는 것은 받는 쪽).
+    #[serde(default)]
+    pub okx_oi5m: Vec<(i64, f64, f64)>,
+}
+
+/// 지난 60초 바이낸스 강제청산 USD 합(롱 = 롱 포지션 청산) · 건수.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Liq60 {
+    pub long: f64,
+    pub short: f64,
+    pub n: i64,
 }
 
 /// situation.classify 반환과 같은 칸(ok=false 면 `reason` 만). 이름은 파이썬 dict 키 그대로.

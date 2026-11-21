@@ -9,8 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mutate_footprint as mf  # noqa: E402
 
 S = "src/situation.rs"
-mf.FILES = [S]
-mf.TESTS = ["--test", "situation_parity"]
+mf.FILES = [S, "src/supply.rs"]
+mf.TESTS = ["--test", "situation_parity", "--test", "micro_parity"]
 mf.M = [
     ("슈미트 진입 문턱 0.45 → 0.40", S, "pub const TREND_ENTER: f64 = 0.45;", "pub const TREND_ENTER: f64 = 0.40;"),
     ("슈미트 이탈 문턱 0.25 → 0.30", S, "pub const TREND_EXIT: f64 = 0.25;", "pub const TREND_EXIT: f64 = 0.30;"),
@@ -39,6 +39,18 @@ mf.M = [
     ("cvd 반올림 동률 → 0 에서 먼 쪽", S, "x.round_ties_even() as i64", "x.round() as i64"),
     ("소수 반올림 없음(move_bp)", S, "move_bp: rn(move_bp, 1),", "move_bp: move_bp,"),
     ("BTC 기준 봉 하나 어긋남", S, "bc.get(&want[want.len() - WINDOW - 1].0)?", "bc.get(&want[want.len() - WINDOW].0)?"),
+    # 미시 값(2026-11-21 · micro_parity)
+    ("vol60 창 하나 어긋남(진행 초 넣음)", S, "sec.range(now_sec - 60..now_sec)", "sec.range(now_sec - 60..=now_sec)"),
+    ("vol60 창 61초", S, "sec.range(now_sec - 60..now_sec)", "sec.range(now_sec - 61..now_sec)"),
+    ("vol60 매도만", S, ".map(|(_, c)| c[4] + c[5])", ".map(|(_, c)| c[5])"),
+    ("liq60 경계 >= → >", S, "e.0 as f64 >= cut", "e.0 as f64 > cut"),
+    ("liq60 롱·숏 뒤바뀜", S, "if long { l.long += usd } else { l.short += usd }", "if !long { l.long += usd } else { l.short += usd }"),
+    ("qi 부호", S, "if s > 0.0 { (b.1 - b.3) / s }", "if s > 0.0 { (b.3 - b.1) / s }"),
+    ("spread 부호", S, "spread: book.map(|b| b.2 - b.0),", "spread: book.map(|b| b.0 - b.2),"),
+    ("OKX Δ: 300초 넘게 떨어져도 앞 봉 끝 씀", S, "Some((pb, pc)) if ob - pb <= BAR_S => v[1] - pc,", "Some((_pb, pc)) => v[1] - pc,"),
+    ("OKX Δ: 늘 봉 안", S, "Some((pb, pc)) if ob - pb <= BAR_S => v[1] - pc,", "Some((pb, pc)) if ob - pb < 0 => v[1] - pc,"),
+    ("OKX 바뀐 봉 앞 봉을 기준으로 안 씀", S, "let mut prev = m.range(..from).next_back().map(|(&b, v)| (b, v[1]));", "let mut prev: Option<(i64, f64)> = None;"),
+    ("OKX 봉 끝값 안 갱신", "src/supply.rs", "                Some(v) => v[1] = oi,", "                Some(v) => v[0] = oi,"),
 ]
 
 if __name__ == "__main__":

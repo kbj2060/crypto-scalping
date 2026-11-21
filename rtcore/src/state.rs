@@ -26,6 +26,8 @@ struct Sym {
     ohlc: BTreeMap<i64, ([f64; 3], u64)>,
     marks: situation::MarkRing,
     sit: Option<Situation>,
+    /// 마지막 미시 값(okx_oi5m 은 비움 -- 스냅숏이 전부를 다시 센다).
+    micro: Option<crate::proto::Micro>,
 }
 
 /// 1초 수급·풋프린트 밀기 묶음 간격(ms). 화면은 한 프레임(60Hz ≈ 16.7ms)에 한 번 칠한다 -- 더 잘게 보내도 안 보이고
@@ -66,6 +68,7 @@ impl State {
                     ohlc: BTreeMap::new(),
                     marks: situation::MarkRing::new(crate::now_us() as f64 / 1e6),
                     sit: None,
+                    micro: None,
                 };
                 (s.clone(), Mutex::new(sym))
             })
@@ -265,7 +268,7 @@ impl State {
                 g.marks.push(m.ex_ms, (mark, index, funding), m.rx_us as f64 / 1e6);
                 g.mark = Some(m.clone())
             }
-            Event::Snapshot { .. } | Event::Supply1s(_) | Event::Footprint(_) | Event::Prices { .. } | Event::Liq5m(_) | Event::Situation(_) => return,
+            Event::Snapshot { .. } | Event::Supply1s(_) | Event::Footprint(_) | Event::Prices { .. } | Event::Liq5m(_) | Event::Situation(_) | Event::Micro(_) => return,
         }
         if let Some(up) = supply {
             g.first.get_or_insert((m.ex_ms, m.rx_us));
@@ -348,6 +351,10 @@ impl State {
                 quote: Some(g.quote.msg()),
                 liq5m: g.supply.liq5m_all(),
                 situation: g.sit.clone(),
+                micro: g.micro.clone().map(|mut m| {
+                    m.okx_oi5m = situation::okx_oi_rows(&g.supply.okx_oi5m, i64::MIN);
+                    m
+                }),
             },
         })
     }
@@ -360,6 +367,22 @@ impl State {
         for (s, cell) in &self.syms {
             let mut g = cell.lock().unwrap();
             let Some((bucket, _)) = g.supply.fp.spec else { continue };
+            // 미시 값(원본은 같은 1초 틱에서 payload 를 먼저 만들고 상황을 센다)
+            let book = match &g.book {
+                Some(Stamped { ev: Event::Book { bid, bid_qty, ask, ask_qty, .. }, .. }) => Some((*bid, *bid_qty, *ask, *ask_qty)),
+                _ => None,
+            };
+            let from = g.supply.okx_oi5m_dirty.first().copied();
+            g.supply.okx_oi5m_dirty.clear();
+            let liq = g.supply.liq.iter().map(|e| (e.ts_ms, e.long, e.usd));
+            let mut mc = situation::micro(now_s, book, g.supply.cells_of(Venue::Bn), liq, &g.supply.okx_oi5m, from);
+            let fresh = !mc.okx_oi5m.is_empty() || g.micro.as_ref().is_none_or(|o| crate::proto::Micro { ts: mc.ts, ..o.clone() } != mc);
+            if fresh {
+                g.seq += 1;
+                let _ = self.tx.send(Stamped { s: s.clone(), seq: g.seq, ex_ms: 0, rx_us: now_us, tx_us: 0, ev: Event::Micro(mc.clone()) });
+            }
+            mc.okx_oi5m.clear();
+            g.micro = Some(mc);
             let candles: BTreeMap<i64, [f64; 3]> = g.ohlc.iter().map(|(&b, v)| (b, v.0)).collect();
             let liq: BTreeMap<i64, [f64; 2]> = g.supply.liq5m.iter().map(|(&b, v)| (b, v.0)).collect();
             let mid = match &g.book {

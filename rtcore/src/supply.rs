@@ -207,6 +207,9 @@ pub struct Supply {
     pub(crate) okx: Lane,
     pub(crate) okx_inst: String,
     pub(crate) okx_oi: BTreeMap<i64, f64>,
+    /// OKX OI 5분봉 [처음, 끝](coin_flow.py okx_oi_5m · 288봉) · 마지막 밀기 뒤 바뀐 봉.
+    pub(crate) okx_oi5m: BTreeMap<i64, [f64; 2]>,
+    pub(crate) okx_oi5m_dirty: std::collections::BTreeSet<i64>,
     okx_last_oi_ms: i64,
     pub(crate) okx_liq: VecDeque<LiqEv>,
     pub(crate) bybit: VecDeque<LiqEv>,
@@ -260,6 +263,8 @@ impl Supply {
             okx: Lane::default(),
             okx_inst: okx_inst(symbol),
             okx_oi: BTreeMap::new(),
+            okx_oi5m: BTreeMap::new(),
+            okx_oi5m_dirty: Default::default(),
             okx_last_oi_ms: 0,
             okx_liq: VecDeque::new(),
             bybit: VecDeque::new(),
@@ -422,6 +427,18 @@ impl Supply {
         let s = ts_ms.div_euclid(1000);
         self.okx_oi.insert(s, oi);
         self.okx_last_oi_ms = ts_ms;
+        if oi > 0.0 && ts_ms > 0 {
+            // coin_flow.py 805~812: 봉 [처음, 끝] · 새 봉이 생길 때 288봉 밖을 지운다
+            let ob = s.div_euclid(300) * 300;
+            match self.okx_oi5m.get_mut(&ob) {
+                Some(v) => v[1] = oi,
+                None => {
+                    self.okx_oi5m.insert(ob, [oi, oi]);
+                    self.okx_oi5m.retain(|&x, _| x >= ob - crate::footprint::KEEP_BARS * 300);
+                }
+            }
+            self.okx_oi5m_dirty.insert(ob);
+        }
         self.okx_oi = self.okx_oi.split_off(&(s - SUPPLY_1S_SECONDS));
         let top = *self.okx_oi.keys().next_back().expect("방금 넣었다");
         let mut m = self.base(now_us);

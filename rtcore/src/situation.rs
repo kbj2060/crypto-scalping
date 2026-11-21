@@ -270,3 +270,52 @@ pub fn classify(inp: &Inputs, prev_dir: i64) -> Situation {
         missing: miss,
     }
 }
+
+/// 미시 값(server.py collect_micro_ref payload 의 mid·spread·qi·vol60·liq60 · 2026-11-21). `book` = (매수호가, 수량, 매도호가, 수량) ·
+/// `liq` = 바이낸스 강제청산 (거래소 ms, 롱 청산, USD) 받은 차례대로 · `okx_oi5m` = OKX OI 5분봉 [처음, 끝] · `from` = 실을 첫 봉(None = 안 실음).
+pub fn micro(
+    now_s: f64,
+    book: Option<(f64, f64, f64, f64)>,
+    sec: &BTreeMap<i64, [f64; 7]>,
+    liq: impl Iterator<Item = (i64, bool, f64)>,
+    okx_oi5m: &BTreeMap<i64, [f64; 2]>,
+    from: Option<i64>,
+) -> crate::proto::Micro {
+    let now_sec = now_s as i64;
+    // ponytail: 초 순서로 더한다(원본 dict 는 넣은 차례 -- 늦은 체결이 새 초를 만들면 끝에 온다) -- 마지막 비트만 갈린다. 같게 하려면 1초 링에 넣은 차례를 들어야 한다.
+    // 원본 합은 0(정수)에서 시작한다 -- f64 Sum 은 -0.0 에서 시작해 빈 합이 -0.0 이 된다
+    let vol60 = sec.range(now_sec - 60..now_sec).map(|(_, c)| c[4] + c[5]).fold(0.0, |a, x| a + x);
+    let cut = now_s * 1000.0 - 60_000.0;
+    let mut l = crate::proto::Liq60 { long: 0.0, short: 0.0, n: 0 };
+    for (_, long, usd) in liq.filter(|e| e.0 as f64 >= cut) {
+        if long { l.long += usd } else { l.short += usd }
+        l.n += 1;
+    }
+    crate::proto::Micro {
+        ts: now_sec,
+        mid: book.map(|b| (b.0 + b.2) / 2.0),
+        spread: book.map(|b| b.2 - b.0),
+        qi: book.map(|b| {
+            let s = b.1 + b.3;
+            if s > 0.0 { (b.1 - b.3) / s } else { 0.0 }
+        }),
+        vol60,
+        liq60: l,
+        okx_oi5m: from.map_or_else(Vec::new, |f| okx_oi_rows(okx_oi5m, f)),
+    }
+}
+
+/// server.py api_oi_5m 의 okx_d: 봉 Δ = 직전 봉 끝 → 이 봉 끝, 앞 봉이 없거나 300초 넘게 떨어졌으면 봉 안(끝 − 처음). `from` 부터.
+pub fn okx_oi_rows(m: &BTreeMap<i64, [f64; 2]>, from: i64) -> Vec<(i64, f64, f64)> {
+    let mut prev = m.range(..from).next_back().map(|(&b, v)| (b, v[1]));
+    m.range(from..)
+        .map(|(&ob, v)| {
+            let d = match prev {
+                Some((pb, pc)) if ob - pb <= BAR_S => v[1] - pc,
+                _ => v[1] - v[0],
+            };
+            prev = Some((ob, v[1]));
+            (ob, d, v[1])
+        })
+        .collect()
+}
