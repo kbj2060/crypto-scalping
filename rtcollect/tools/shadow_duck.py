@@ -9,7 +9,7 @@
   나머지 표(미시구조·청산 요격기처럼 각자 벽시계로 찍는 줄 · REST 전용 표)는 창 안 행 수만 적는다.
 lake(--lake): <venue>/<stream>/coin=*/date=*/part.parquet 마다 행 수·hash(row) XOR 지문(seal_to_lake 가 «건너뜀»을 가리는 것과 같은 지문).
 
-    nice -n 10 python3 rtcollect/tools/shadow_duck.py <파이썬.duckdb> <rust.duckdb> --from S --to S [--tmp 폴더] [--margin 5] [--show 3]
+    nice -n 10 python3 rtcollect/tools/shadow_duck.py <파이썬.duckdb> <rust.duckdb> [--from S --to S(없으면 두 쪽 함께 있는 구간)] [--summary] [--tmp 폴더] [--margin 5] [--show 3]
     nice -n 10 python3 rtcollect/tools/shadow_duck.py --lake data/lake data/rtduck/lake [--only binance/tape] [--days 2026-11-21,2026-11-27]
     python3 rtcollect/tools/shadow_duck.py --selftest
 🔴--tmp 는 6TB 쪽(기본 = Rust 파일 옆 · 그림자 폴더)이어야 한다 -- 사본 크기 = 원본 크기.
@@ -26,6 +26,7 @@ from pathlib import Path
 
 import duckdb
 
+TALLY = [0, 0]   # --summary: [견준 수, 설명 못 하는 차이 수]
 KEYED = {  # 표 → (시각 열(ms 정수 또는 TIMESTAMP), 열쇠, 빼는 열)
     "hl_trades": ("ts_ms", ("coin", "tid"), ()),
     "option_trades": ("ts_ms", ("trade_id",), ()),
@@ -94,10 +95,22 @@ def compare(py, rs, lo: int, hi: int, margin: int, show: int) -> list[str]:
             out.append(f"{t}: 시각 열 없음 -- 전체 행 파이썬 {n[0]:,} · Rust {n[1]:,}")
             continue
         te = ms_expr(tcol, dict(ca)[tcol])
-        where = f"WHERE {te} >= {lo * 1000} AND {te} < {hi * 1000}"
+        if lo is None or hi is None:   # 창을 안 주면 = 두 쪽에 자료가 함께 있는 구간(그림자가 떠 있던 창) · 끝 10초 뺌
+            sp = [c.execute(f'SELECT min({te}), max({te}) FROM "{t}"').fetchone() for c in (py, rs)]
+            if any(x[0] is None for x in sp):
+                out.append(f"{t}: 한쪽이 비었다")
+                continue
+            t0, t1 = max(sp[0][0], sp[1][0]), min(sp[0][1], sp[1][1]) - 10_000
+            w0, w1 = (t0 if lo is None else lo * 1000), (t1 if hi is None else hi * 1000)
+        else:
+            w0, w1 = lo * 1000, hi * 1000
+        where = f"WHERE {te} >= {w0} AND {te} < {w1}"
         if not s:
             n = [c.execute(f'SELECT count(*) FROM "{t}" {where}').fetchone()[0] for c in (py, rs)]
-            out.append(f"{t}: (행 수만) 파이썬 {n[0]:,} · Rust {n[1]:,}")
+            ok = abs(n[0] - n[1]) <= max(2, 0.01 * max(n))   # 각자 벽시계로 찍는 줄 -- 1% 안(재시작 몇 초)은 설명되는 차이
+            TALLY[0] += min(n)
+            TALLY[1] += 0 if ok else abs(n[0] - n[1])
+            out.append(f"{t}: (행 수만) 파이썬 {n[0]:,} · Rust {n[1]:,}{'' if ok else ' 🔴1% 넘게 다름'}")
             continue
         names = [c for c, _ in ca if c not in s[2]]
         sel = ", ".join([f"{te} AS __t"] + [ms_expr(c, dict(ca)[c]).replace("epoch_ms", "epoch_us") for c in names])
@@ -113,8 +126,10 @@ def compare(py, rs, lo: int, hi: int, margin: int, show: int) -> list[str]:
         a, b = rows
         both = a.keys() & b.keys()
         bad = [k for k in both if a[k] != b[k]]
+        TALLY[0] += len(both)
+        TALLY[1] += len(bad) + len(a.keys() ^ b.keys())
         line = (f"{t}: 비교 {len(both):,}행 · 불일치 {len(bad):,} · 파이썬에만 {len(a.keys() - b.keys()):,} · Rust에만 {len(b.keys() - a.keys()):,}"
-                f" · 범위 [{lo}, {hi}) 초 · 뺀 분 {len(excl):,}")
+                f" · 범위 [{w0 // 1000}, {w1 // 1000}) 초 · 뺀 분 {len(excl):,}")
         first = [f"다름 {k}: 파이썬 {a[k]} · Rust {b[k]}" for k in sorted(bad, key=repr)[:show]]
         first += [f"파이썬에만 {k}" for k in sorted(a.keys() - b.keys(), key=repr)[:show]]
         first += [f"Rust에만 {k}" for k in sorted(b.keys() - a.keys(), key=repr)[:show]]
@@ -122,7 +137,7 @@ def compare(py, rs, lo: int, hi: int, margin: int, show: int) -> list[str]:
     return out or ["비교할 표가 없다"]
 
 
-def run(py_path: Path, rs_path: Path, lo: int, hi: int, tmp: Path | None = None, margin: int = 5, show: int = 3) -> list[str]:
+def run(py_path: Path, rs_path: Path, lo: int | None, hi: int | None, tmp: Path | None = None, margin: int = 5, show: int = 3) -> list[str]:
     base = tmp or rs_path.parent
     d = Path(tempfile.mkdtemp(prefix=".shadow_duck_", dir=base))
     try:
@@ -164,12 +179,14 @@ def lake(py_root: Path, rs_root: Path, only: str = "", d0: str = "", d1: str = "
             continue
         x, y = fp(a[rel]), fp(b[rel])
         c["같음" if x == y else "다름"] += 1
+        TALLY[0] += x == y
         c["행"] += x[0]
         if x != y and c["다름"] <= show:
             per.setdefault(k + "#", []).append(f"다름 {rel}: 파이썬 {x} · Rust {y}")
     out = []
     for k in sorted(x for x in per if not x.endswith("#")):
         c = per[k]
+        TALLY[1] += c["다름"] + c["파이썬에만"] + c["Rust에만"]
         out.append(f"{k}: 파일 같음 {c['같음']:,} · 다름 {c['다름']:,} · 파이썬에만 {c['파이썬에만']:,} · Rust에만 {c['Rust에만']:,} · 파이썬 행 {c['행']:,}"
                    + "".join(f"\n    {x}" for x in per.get(k + "#", [])))
     return out or ["lake: 파일이 없다"]
@@ -204,6 +221,11 @@ def selftest() -> None:
         assert "비교 3행 · 불일치 1 · 파이썬에만 0 · Rust에만 0" in oi, oi     # collected_at 은 안 본다 · T+900 봉은 끊긴 분(전 표 공통)
         assert any(x == "microstructure: (행 수만) 파이썬 10 · Rust 10" for x in out), out
         assert list(d.glob(".shadow_duck_*")) == [], "사본이 남았다"
+        TALLY[:] = [0, 0]
+        auto = run(d / "py.duckdb", d / "rs.duckdb", None, None, tmp=d)   # 창 없이 = 두 쪽 함께 있는 구간
+        hl2 = next(x for x in auto if x.startswith("hl_trades"))
+        assert "불일치 1 · 파이썬에만 1 · Rust에만 0" in hl2, hl2
+        assert TALLY[1] == 2 + 1, TALLY   # hl 2 + oi 1 · 미시구조 행 수는 같다
         # lake: 같은 파일 · 행 하나 다른 파일 · 한쪽에만
         con = duckdb.connect()
         for root, extra in ((d / "lp", 0), (d / "lr", 1)):
@@ -235,6 +257,7 @@ def main() -> None:
     ap.add_argument("--lake", action="store_true", help="두 경로 = lake 뿌리 · --only venue/stream · --days 시작,끝(YYYY-MM-DD)")
     ap.add_argument("--only", default="")
     ap.add_argument("--days", default="")
+    ap.add_argument("--summary", action="store_true", help="끝에 «요약: 견준 N · 설명 못 함 M» · M>0 이거나 N=0 이면 종료코드 1(takeover.sh check)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
@@ -243,10 +266,13 @@ def main() -> None:
         ap.error("파이썬 쪽과 Rust 쪽 경로가 필요하다")
     if a.lake:
         d0, _, d1 = a.days.partition(",")
-        return print("\n".join(lake(a.py, a.rs, a.only, d0, d1 or "~", a.show)))
-    if a.lo is None or a.hi is None:
-        ap.error("--from/--to(초)가 필요하다 -- 창 하나씩")
-    print("\n".join(run(a.py, a.rs, a.lo, a.hi, a.tmp, a.margin, a.show)))
+        out = lake(a.py, a.rs, a.only, d0, d1 or "~", a.show)
+    else:   # --from/--to 를 안 주면 표마다 두 쪽 자료가 함께 있는 구간
+        out = run(a.py, a.rs, a.lo, a.hi, a.tmp, a.margin, a.show)
+    print("\n".join(out))
+    if a.summary:
+        print(f"요약: 견준 {TALLY[0]:,} · 설명 못 함 {TALLY[1]:,}")
+        return 1 if TALLY[1] or not TALLY[0] else 0
 
 
 if __name__ == "__main__":
