@@ -32,6 +32,15 @@ M = [
     ("시장 마이크로초 0 이어도 소수부", "src/market.rs", "if us == 0 { format!(\"{base}{tail}\") } else {", "if false { format!(\"{base}{tail}\") } else {"),
     ("시장 분 저장 15초 → 10초", "src/market.rs", "minute != self.last_saved_minute && second < 15", "minute != self.last_saved_minute && second < 10"),
     ("시장 깨진 메시지도 마지막 수신 시각", "src/market.rs", "        let Ok(Value::Object(m)) = serde_json::from_str::<Value>(raw) else { return };", "        self.last_msg = now;\n        let Ok(Value::Object(m)) = serde_json::from_str::<Value>(raw) else { return };"),
+    ("미시 percentile 위쪽 빼기 길 없앰", "src/micro.rs", "if g >= 0.5 { y - d * (1.0 - g) } else { x + d * g }", "x + d * g"),
+    ("미시 호가 앞 10단 → 12단", "src/micro.rs", "self.bids.iter().take(10)", "self.bids.iter().take(12)"),
+    ("미시 체결 흐름 무효여도 taker_buy_ratio 씀", "src/micro.rs", "vt.then(|| f(\"taker_buy_ratio\"))", "Some(f(\"taker_buy_ratio\"))"),
+    ("미시 부트스트랩 60분 → 59분", "src/micro.rs", "query_map([cut(3600.0)]", "query_map([cut(3540.0)]"),
+    ("미시 aggTrades 대체 30초 → 60초", "src/micro.rs", "if now() - self.trade_last > 30.0 {", "if now() - self.trade_last > 60.0 {"),
+    ("미시 대체 체결 같은 id 도 다시", "src/micro.rs", "if self.last_agg_id.is_some_and(|l| id <= l) {", "if self.last_agg_id.is_some_and(|l| id < l) {"),
+    ("미시 squeeze 펀딩 0.0008 → 0.001", "src/micro.rs", "if eai > self.eai_threshold && f.abs() > 0.0008 {", "if eai > self.eai_threshold && f.abs() > 0.001 {"),
+    ("미시 고래 이탈 문턱 = 진입 문턱", "src/micro.rs", "let exit = self.exit_th.min(entry - 1e-6);", "let exit = entry;"),
+    ("미시 깊이 시각 = 호가가 읽힌 뒤에만", "src/micro.rs", "        self.depth_last = now;\n        let side", "        let side"),
     ("HL체결 주소 소문자 안 함", "src/hl_trades.rs", "py_str(&users[0]).to_lowercase()", "py_str(&users[0])"),
 ]
 

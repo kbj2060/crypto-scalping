@@ -16,8 +16,9 @@ pub fn flow_to_log(doc: &Value) -> Vec<Value> {
         let mut pos = json!({"LONG": 0.0, "SHORT": 0.0});
         for (i, st) in sc["steps"].as_array().unwrap().iter().enumerate() {
             let id = format!("s{si}.{i}");
+            let slot0 = if st["slot0"].is_object() { st["slot0"].clone() } else { slot.clone() }; // 작업 직전 칸(청산 접수는 접수 문이 칸을 바꾼 뒤)
             out.push(json!({"rec": "start", "chain": id, "op": st["op"], "t": t0 + st["t"].as_f64().unwrap(), "plan": st["plan"], "limit": st["limit"],
-                            "slot": slot, "file": file, "name": sc["name"]}));
+                            "rearm": st["rearm"], "slot": slot0, "file": file, "name": sc["name"]}));
             for (q, r) in st["requests"].as_array().unwrap().iter().zip(st["responses"].as_array().unwrap()) {
                 out.push(json!({"rec": "wire", "chain": id, "method": q["method"], "target": q["target"], "status": r["status"], "body": r["body"]}));
             }

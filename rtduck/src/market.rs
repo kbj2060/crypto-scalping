@@ -177,6 +177,8 @@ pub struct TailRisk {
     last_saved_minute: i64,
     /// 시험: 쓴 liq_burst_state 글자를 차례로 모은다.
     pub burst_log: Option<Vec<String>>,
+    /// 부트스트랩으로 읽은 행 수.
+    pub boot: usize,
 }
 
 fn env_f(k: &str, d: f64) -> f64 {
@@ -197,7 +199,7 @@ impl TailRisk {
             last_crisis_ts: 0.0, peak: 0.0, decay: 0.0, shadow: (0.0, 0.0, "normal"),
             z_threshold: env_f("TR_Z_THRESHOLD", 3.5), beta: env_f("TR_HAWKES_BETA", 0.005), release: env_f("TR_HAWKES_RELEASE_RATIO", 0.35),
             min_trigger: env_f("TR_HAWKES_MIN_TRIGGER_USD", if eth { 10_000.0 } else { 0.0 }),
-            ws_connected: false, connected_since: 0.0, last_msg: 0.0, stale_s: env_f("TR_LIQ_STALE_THRESHOLD_SEC", 14_400.0), last_saved_minute: -1, burst_log: None,
+            ws_connected: false, connected_since: 0.0, last_msg: 0.0, stale_s: env_f("TR_LIQ_STALE_THRESHOLD_SEC", 14_400.0), last_saved_minute: -1, burst_log: None, boot: 0,
         }
     }
 
@@ -216,8 +218,8 @@ impl TailRisk {
         Err(last.unwrap())
     }
 
-    /// `_db_init`(:128-177): 표 · 없는 칸 더하기 · 최근 30분 부트스트랩(now() = DuckDB 시계 -- 원본 그대로).
-    pub fn init(&mut self) -> duckdb::Result<usize> {
+    /// `_db_init`(:128-177): 표 · 없는 칸 더하기 · 최근 30분 부트스트랩(원본 now() = 그 순간 -- 여기는 부르는 쪽이 준다).
+    pub fn init(&mut self, now: f64) -> duckdb::Result<usize> {
         if let Some(d) = self.db.parent() {
             let _ = std::fs::create_dir_all(d);
         }
@@ -243,11 +245,12 @@ impl TailRisk {
                 con.execute_batch(&format!("ALTER TABLE {} ADD COLUMN {c} {ty}", self.table))?;
             }
         }
+        // 🔴묶은 DuckDB 에는 ICU 가 없어 TIMESTAMPTZ − INTERVAL 이 Binder Error -- epoch µs 로 같은 비교
         let rows: Vec<(Option<f64>, Option<f64>)> = con.prepare(&format!("
                 SELECT long_usd_1m, short_usd_1m FROM {}
-                WHERE ts >= now() - INTERVAL '{WINDOW} minutes'
+                WHERE epoch_us(ts) >= ?
                 ORDER BY ts ASC
-            ", self.table)).and_then(|mut st| st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()).unwrap_or_default();
+            ", self.table)).and_then(|mut st| st.query_map([(now * 1e6).round() as i64 - WINDOW as i64 * 60_000_000], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()).unwrap_or_default();
         for (l, s) in &rows {
             self.push_hist(l.unwrap_or(0.0), s.unwrap_or(0.0));
         }
@@ -435,12 +438,20 @@ impl TailRisk {
     }
 }
 
-/// 정답지 입력 먹이기. 사건 = [벽시계 초, 종류, 본문]: 'o' 접속 · 't' 메시지 · 'e' 예외로 끊김 · 'n' 정상 종료(아무것도 안 바뀜) · 'd' dashboard_state 쓰기.
+/// 정답지 입력 먹이기. 사건 = [벽시계 초, 종류, 본문]: 'o' 접속 · 't' 메시지 · 'e' 예외로 끊김 · 'n' 정상 종료(아무것도 안 바뀜) · 'd' dashboard_state 쓰기 · 'z' 틱 루프가 본문 초만큼 멎음.
 /// 10초 경계 + 0.05초 틱은 사건 사이에 원본 _agg_loop 처럼 끼운다(그 시각 ≤ 사건 시각이면 먼저). 반환 = (liq_burst 글자들, dashboard 글자들).
 pub fn replay(inp: &Value, db: &Path, live: &Path) -> (Vec<String>, Vec<String>) {
+    let t0 = inp["t0"].as_f64().unwrap();
+    TailRisk::new(inp["symbol"].as_str().unwrap(), db, live).init(t0).unwrap(); // 빈 표 → 씨앗 → 새 요격기의 부트스트랩
+    {
+        let con = Connection::open(db).unwrap();
+        for r in inp["seeds"].as_array().into_iter().flatten() {
+            con.execute("INSERT INTO tail_risk_1m (ts, long_usd_1m, short_usd_1m) VALUES (make_timestamptz(?),?,?)", params![r[0].as_i64(), r[1].as_f64(), r[2].as_f64()]).unwrap();
+        }
+    }
     let mut tr = TailRisk::new(inp["symbol"].as_str().unwrap(), db, live);
     tr.burst_log = Some(vec![]);
-    tr.init().unwrap();
+    tr.boot = tr.init(t0).unwrap();
     let mut dash = vec![];
     let mut next_tick = (inp["t0"].as_f64().unwrap() / 10.0).floor() * 10.0 + 10.0 + 0.05;
     for e in inp["events"].as_array().unwrap() {
@@ -450,6 +461,10 @@ pub fn replay(inp: &Value, db: &Path, live: &Path) -> (Vec<String>, Vec<String>)
             next_tick = ((next_tick / 10.0).floor() + 1.0) * 10.0 + 0.05; // sleep(10 - now%10 + 0.05)
         }
         match kind {
+            "z" => {
+                let wake = t + body.parse::<f64>().unwrap(); // 루프 멎음 -- 그동안 틱 없음 · 깨면 다음 10초 경계 + 0.05초
+                next_tick = ((wake / 10.0).floor() + 1.0) * 10.0 + 0.05;
+            }
             "o" => tr.on_connect(t),
             "t" => tr.on_text(t, body),
             "e" => tr.on_error(),
@@ -469,9 +484,18 @@ pub fn replay(inp: &Value, db: &Path, live: &Path) -> (Vec<String>, Vec<String>)
     (tr.burst_log.take().unwrap(), dash)
 }
 
-/// `_ws_loop`(:378-423): 접속(시한 10초 -- websockets open_timeout 기본) → 메시지마다 on_text · 20초 핑·10초 퐁 시한 ·
-/// 서버 정상 종료(1000·1001)면 곧바로 다시(상태 그대로) · 그 밖의 끊김이면 ws_connected=false 후 3초부터 1.5배씩 60초까지 쉬고 다시.
-pub async fn run_ws(tr: std::rc::Rc<std::cell::RefCell<TailRisk>>, url: String, wall: fn() -> f64) {
+/// 웹소켓 한 줄기(요격기 `_ws_loop` :378-423 · 미시구조 `_depth_loop`·`_trade_loop` :279-352 의 같은 뼈대): 접속(시한 10초 -- websockets open_timeout 기본)
+/// → 메시지마다 on_text · 20초 핑·10초 퐁 시한 · recv = 수신 시한(체결 35초 -- 넘으면 끊고 다시) ·
+/// 서버 정상 종료(1000·1001)면 close_ok_again 일 때 곧바로 다시(상태 그대로 -- `async for` 가 조용히 끝난다) · 아니면 on_error 후 3초부터 1.5배씩 60초까지 쉬고 다시.
+pub struct Stream {
+    pub on_connect: Box<dyn FnMut(f64)>,
+    pub on_text: Box<dyn FnMut(f64, &str)>,
+    pub on_error: Box<dyn FnMut()>,
+    pub recv: Option<std::time::Duration>,
+    pub close_ok_again: bool,
+}
+
+pub async fn ws_loop(mut s: Stream, url: String, wall: fn() -> f64) {
     use futures_util::{SinkExt, StreamExt};
     use tokio::time::{sleep, timeout, Duration, Instant};
     use tokio_tungstenite::tungstenite::{protocol::frame::coding::CloseCode, Message};
@@ -480,13 +504,15 @@ pub async fn run_ws(tr: std::rc::Rc<std::cell::RefCell<TailRisk>>, url: String, 
         let err: Option<String> = match timeout(Duration::from_secs(10), tokio_tungstenite::connect_async(url.as_str())).await {
             Ok(Ok((ws, _))) => {
                 delay = 3.0;
-                tr.borrow_mut().on_connect(wall());
+                (s.on_connect)(wall());
                 let (mut tx, mut rx) = ws.split();
                 let mut ping_at = Instant::now() + Duration::from_secs(20);
                 let mut pong_by: Option<Instant> = None;
+                let mut recv_by = s.recv.map(|d| Instant::now() + d);
                 loop {
-                    let deadline = pong_by.unwrap_or(ping_at);
+                    let deadline = [Some(pong_by.unwrap_or(ping_at)), recv_by].into_iter().flatten().min().unwrap();
                     match timeout(deadline.saturating_duration_since(Instant::now()), rx.next()).await {
+                        Err(_) if recv_by.is_some_and(|r| Instant::now() >= r) => break Some("TimeoutError: recv 시한".into()),
                         Err(_) if pong_by.is_some() => break Some("ConnectionClosedError: keepalive ping timeout".into()),
                         Err(_) => {
                             if let Err(e) = tx.send(Message::Ping(Default::default())).await {
@@ -494,14 +520,17 @@ pub async fn run_ws(tr: std::rc::Rc<std::cell::RefCell<TailRisk>>, url: String, 
                             }
                             pong_by = Some(Instant::now() + Duration::from_secs(10));
                         }
-                        Ok(Some(Ok(Message::Text(t)))) => tr.borrow_mut().on_text(wall(), t.as_str()),
+                        Ok(Some(Ok(Message::Text(t)))) => {
+                            recv_by = s.recv.map(|d| Instant::now() + d);
+                            (s.on_text)(wall(), t.as_str())
+                        }
                         Ok(Some(Ok(Message::Pong(_)))) => {
                             pong_by = None;
                             ping_at = Instant::now() + Duration::from_secs(20);
                         }
                         Ok(Some(Ok(Message::Close(f)))) => {
                             let ok = f.as_ref().is_some_and(|f| matches!(f.code, CloseCode::Normal | CloseCode::Away));
-                            break if ok { None } else { Some(format!("ConnectionClosedError: {f:?}")) };
+                            break if ok && s.close_ok_again { None } else { Some(format!("ConnectionClosed: {f:?}")) };
                         }
                         Ok(Some(Ok(_))) => {}
                         Ok(Some(Err(e))) => break Some(format!("ConnectionClosedError: {e}")),
@@ -513,12 +542,19 @@ pub async fn run_ws(tr: std::rc::Rc<std::cell::RefCell<TailRisk>>, url: String, 
             Err(_) => Some("TimeoutError".into()),
         };
         if let Some(e) = err {
-            tr.borrow_mut().on_error();
-            eprintln!("TR WS 재연결 ({delay:.0}s): {e}");
+            (s.on_error)();
+            eprintln!("WS 재연결 ({delay:.0}s) {url}: {e}");
             sleep(Duration::from_secs_f64(delay)).await;
             delay = (delay * 1.5).min(60.0);
         }
     }
+}
+
+/// 요격기 줄기(@forceOrder -- 정상 종료면 곧바로 다시 · 수신 시한 없음).
+pub async fn run_ws(tr: std::rc::Rc<std::cell::RefCell<TailRisk>>, url: String, wall: fn() -> f64) {
+    let (a, b, c) = (tr.clone(), tr.clone(), tr);
+    ws_loop(Stream { on_connect: Box::new(move |t| a.borrow_mut().on_connect(t)), on_text: Box::new(move |t, x| b.borrow_mut().on_text(t, x)),
+                     on_error: Box::new(move || c.borrow_mut().on_error()), recv: None, close_ok_again: true }, url, wall).await
 }
 
 /// `_agg_loop`(:425-465): 10초 경계 + 0.05초마다 tick.

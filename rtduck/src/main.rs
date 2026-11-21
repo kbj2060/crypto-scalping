@@ -1,7 +1,8 @@
 //! rtduck: DuckDB 로 쓰는 수집기. RTDUCK_KIND = oi_lsratio | hl_trades | hl_positions | market_data.
 //!   market_data duckdb_persist_worker.py 서버 형태의 화면·감시 몫: TAIL_SYMBOLS(기본 ETHUSDT -- 서버 감독과 같다) 청산 요격기 → QUANT_TAIL_DB_PATH(기본 data/live/rtduck/tail_risk.duckdb)
 //!               + liq_burst_state.json · WRITE_DASHBOARD_STATE(기본 true) → dashboard_state.json (둘 다 RTDUCK_LIVE_DIR 기본 data/live/rtduck -- data/live 는 RTDUCK_TAKEOVER=1 일 때만)
-//!               🔴COLLECT_MICROSTRUCTURE=true 면 거부(미시구조는 아직 파이썬 몫) · REST 없음(웹소켓뿐)
+//!               + 미시구조 COLLECT_MICROSTRUCTURE(기본 true) · BOT_SYMBOLS(기본 ETHUSDT,BTCUSDT,SOLUSDT) → QUANT_MICRO_DB_PATH(기본 data/live/rtduck/microstructure.duckdb)
+//!               🔴미시구조의 REST(openInterest·premiumIndex 10초 · aggTrades 대체)는 RTDUCK_REST=1 일 때만 -- 꺼지면 poll_connected=false(data_stale)
 //!   hl_positions HL_POS_COINS(기본 ETH -- 원본과 같다 · HL_POS_COIN 도) · HL_ROOT(체결 DuckDB 를 읽기만) · HL_POS_DB(기본 data/hot/rtduck/<원본과 같은 이름> --
 //!               data/hot/<그 이름> 은 RTDUCK_TAKEOVER=1 일 때만) · 🔴HL info REST 전용이라 RTDUCK_REST=1 없으면 아무것도 안 한다
 //!   hl_trades   HL_COINS(기본 ETH) · HL_ROOT(기본 data/live/rtduck/orderflow/hyperliquid -- 원본 폴더 data/live/orderflow/hyperliquid 는 RTDUCK_TAKEOVER=1 일 때만)
@@ -199,9 +200,6 @@ fn flag(k: &str, d: &str) -> bool {
 fn run_market() {
     use std::cell::RefCell;
     use std::rc::Rc;
-    if flag("COLLECT_MICROSTRUCTURE", "true") {
-        die(2, "🔴미시구조(microstructure_1m)는 아직 Rust 로 안 옮겼다 -- COLLECT_MICROSTRUCTURE=false 로 띄우고 파이썬 워커가 그 몫을 계속 쓴다(rtcollect/REMAINING.md)");
-    }
     let live = PathBuf::from(env_s("RTDUCK_LIVE_DIR", "data/live/rtduck"));
     if live.ends_with("data/live") && env_s("RTDUCK_TAKEOVER", "") != "1" {
         die(2, &format!("🔴{} 는 파이썬 워커의 폴더다(dashboard_state.json · liq_burst_state.json) -- 전환 때만 RTDUCK_TAKEOVER=1", live.display()));
@@ -210,8 +208,22 @@ fn run_market() {
     if db.ends_with("data/live/tail_risk.duckdb") && env_s("RTDUCK_TAKEOVER", "") != "1" {
         die(2, &format!("🔴{} 는 파이썬 워커의 파일이다 -- 전환 때만 RTDUCK_TAKEOVER=1", db.display()));
     }
+    let bot = env_s("BOT_SYMBOLS", "ETHUSDT,BTCUSDT,SOLUSDT");
+    let micro: Vec<String> = if flag("COLLECT_MICROSTRUCTURE", "true") {
+        bot.split(',').map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()).collect()
+    } else {
+        vec![]
+    };
+    let mdb = PathBuf::from(env_s("QUANT_MICRO_DB_PATH", &live.join("microstructure.duckdb").display().to_string()));
+    if mdb.ends_with("data/live/microstructure.duckdb") && env_s("RTDUCK_TAKEOVER", "") != "1" {
+        die(2, &format!("🔴{} 는 파이썬 워커의 파일이다 -- 전환 때만 RTDUCK_TAKEOVER=1", mdb.display()));
+    }
+    let rest = env_s("RTDUCK_REST", "") == "1";
+    let ban = PathBuf::from(env_s("RTCOLLECT_BAN_FILE", "data/live/binance_ban_until"));
+    let base = env_s("RTDUCK_BINANCE_REST", "https://fapi.binance.com");
+    let (depth_url, trade_url) = (env_s("RTDUCK_DEPTH_WS_URL", rtduck::micro::DEPTH_WS), env_s("RTDUCK_TRADE_WS_URL", rtduck::micro::TRADE_WS));
     let tail: Vec<String> = if flag("COLLECT_TAIL_RISK", "true") {
-        env_s("TAIL_SYMBOLS", "ETHUSDT").split(',').map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()).collect()
+        env_s("TAIL_SYMBOLS", &bot).split(',').map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()).collect()
     } else {
         vec![]
     };
@@ -221,9 +233,41 @@ fn run_market() {
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     tokio::task::LocalSet::new().block_on(&rt, async {
         let mut tasks = tokio::task::JoinSet::new();
+        // 원본 순서: 미시구조 → 요격기(시작 사이 1초 -- 새 DuckDB 파일에서 DDL 이 겹치지 않게)
+        for s in &micro {
+            let mut c = rtduck::micro::Scanner::new(s, &mdb);
+            match c.init(wall()) {
+                Ok(n) => println!("MS bootstrap({s}): rows={n}"),
+                Err(e) => die(1, &format!("microstructure DB 준비 실패: {e}")),
+            }
+            let c = Rc::new(RefCell::new(c));
+            let agent = rtcollect::rest::agent(Duration::from_secs(5)); // ClientTimeout(total=5)
+            let (ban, base) = (ban.clone(), base.clone());
+            // 🔧밴 파일을 지킨다(원본은 모른다) · REST 기본 꺼짐 -- 꺼지면 폴링이 예외 길(poll_connected=false · data_stale)
+            let get: Box<dyn FnMut(&str) -> Result<serde_json::Value, String>> = Box::new(move |u: &str| {
+                if !rest {
+                    return Err("REST 꺼짐(RTDUCK_REST=1)".into());
+                }
+                let now = rtcollect::rest::wall_s();
+                if rtcollect::rest::ban_left(&ban, now) > 0.0 {
+                    return Err("binance IP ban -- 안 보냄".into());
+                }
+                let u = u.replacen("https://fapi.binance.com", &base, 1);
+                let mut r = agent.get(&u).call().map_err(|e| e.to_string())?;
+                let st = r.status().as_u16();
+                let ra = r.headers().get("retry-after").and_then(|v| v.to_str().ok()).map(str::to_string);
+                let body = r.body_mut().read_to_string().map_err(|e| e.to_string())?;
+                rtcollect::rest::ban_note(&ban, st, &body, ra.as_deref(), now);
+                serde_json::from_str(&body).map_err(|e| e.to_string()) // 원본 json(content_type=None) -- 상태 코드는 안 본다
+            });
+            tasks.spawn_local(rtduck::micro::run_streams(c.clone(), depth_url.replace("{symbol}", s), trade_url.replace("{symbol}", s), wall));
+            tasks.spawn_local(rtduck::micro::run_poll(c.clone(), get, wall));
+            tasks.spawn_local(rtduck::micro::run_scan(c, wall));
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
         for s in &tail {
             let mut t = rtduck::market::TailRisk::new(s, &db, &live);
-            match t.init() {
+            match t.init(rtcollect::rest::wall_s()) {
                 Ok(n) => println!("🛡️ TailRiskInterceptor bootstrap({s}): {n} rows loaded"),
                 Err(e) => die(1, &format!("tail_risk DB 준비 실패: {e}")),
             }
@@ -243,7 +287,8 @@ fn run_market() {
                 }
             });
         }
-        println!("rtduck market_data · 청산 {tail:?} → {} · dashboard_state {} · {}", db.display(), if dash { "씀" } else { "안 씀" }, live.display());
+        println!("rtduck market_data · 미시구조 {micro:?} → {} (REST {}) · 청산 {tail:?} → {} · dashboard_state {} · {}", mdb.display(),
+                 if rest { "켬" } else { "🔴꺼짐" }, db.display(), if dash { "씀" } else { "안 씀" }, live.display());
         let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
         tokio::select! {
             _ = term.recv() => {}

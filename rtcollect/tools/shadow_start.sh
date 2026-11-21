@@ -95,8 +95,12 @@ if [ -x "$DBIN" ]; then
     while IFS= read -r l; do [ -n "$l" ] || continue
       c="$(val "$l" HL_COINS)"; upd hl_trades "HL_COINS=${c:-ETH}"
     done <<< "$(echo "$CT" | grep 'supervisor_hyperliquid_trades.sh')"
-    # market_data_worker 의 청산 요격기 + dashboard_state(웹소켓뿐) -- 미시구조는 파이썬 몫이라 안 띄운다(감독이 COLLECT_MICROSTRUCTURE=false)
-    echo "$CT" | grep -q 'supervisor_market_data_worker.sh' && upd market_data TAIL_SYMBOLS=ETHUSDT
+    # market_data_worker(미시구조 ETH·BTC·SOL + 청산 요격기 ETH + dashboard_state). 미시구조 REST(OI·premiumIndex 10초 · aggTrades 대체)는
+    #   그림자에서 켜면 파이썬과 합쳐 두 배라 RTDUCK_SHADOW_REST=1 일 때만 -- 꺼 두면 웹소켓 칸만 쌓이고 poll_connected=false(data_stale)
+    if echo "$CT" | grep -q 'supervisor_market_data_worker.sh'; then
+      if [ "${RTDUCK_SHADOW_REST:-}" = 1 ]; then upd market_data TAIL_SYMBOLS=ETHUSDT BOT_SYMBOLS=ETHUSDT,BTCUSDT,SOLUSDT RTDUCK_REST=1
+      else upd market_data TAIL_SYMBOLS=ETHUSDT BOT_SYMBOLS=ETHUSDT,BTCUSDT,SOLUSDT; fi
+    fi
     if [ "${RTDUCK_SHADOW_REST:-}" = 1 ]; then
       echo "$CT" | grep -q 'supervisor_oi_lsratio_worker.sh' && upd oi_lsratio RTDUCK_REST=1 BOT_SYMBOLS=ETHUSDT,BTCUSDT,SOLUSDT,XRPUSDT
       while IFS= read -r l; do [ -n "$l" ] || continue

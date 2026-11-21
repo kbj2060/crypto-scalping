@@ -42,5 +42,5 @@ async fn flow_fixture_matches_python_full_flow() {
         println!("불일치 {b}");
     }
     assert!(bad.is_empty(), "불일치 {}건", bad.len());
-    assert_eq!((by_sc.len(), nreq), (8, 256), "시나리오·요청 수");
+    assert_eq!((by_sc.len(), nreq), (9, 282), "시나리오·요청 수(청산 접수 3걸음 포함)");
 }

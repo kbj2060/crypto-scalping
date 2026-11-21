@@ -328,6 +328,10 @@ SCN = [
     # 7. 감시 진입(선 위에서 닿으면 따라가기 · maker_only) → 체결 → 무장
     {"name": "감시 진입 닿음 → 따라가기 체결 → 무장", "sim": lambda: Sim(fill=lambda o: peg_in(o) and o["gets"] >= 1),
      "steps": [{"op": "entry", "plan": {**ENTRY, "price": 2510.0, "limit": {"usdt": 2510.0}, "stop": True, "wid": 1}, "limit": True, "sec": lambda: [[now() + 0.5, 2511.0]]}]},
+    # 8. 청산 접수(진입가 팝업 청산): 50% → 남은 수량으로 익절 다시 걸기(exit_then_rearm) → 100% → 감시 틱이 무장 정리
+    {"name": "팝업 청산 50% → 익절 다시 → 100% → 무장 정리", "sim": lambda: Sim(fill=lambda o: peg_in(o) and o["gets"] >= 1),
+     "steps": [{"op": "entry", "plan": ENTRY}, {"op": "exit", "dt": 5.0, "frac": 0.5}, {"op": "exit", "dt": 5.0, "frac": 1.0},
+               {"op": "tick", "dt": 10.0, "sec": lambda: []}]},
     # 5. P23 지정가 자동 재조정(20초 각본): basis 가 바뀌면 취소 확인 → 새 가격 → 체결 → 첫 체결 무장 → 끝 무장 → 복구 파일 지움
     {"name": "지정가 대기 자동 재조정(P23) → 체결 → 무장", "books": [(0.0, BOOK0), (15.0, BOOK1)],
      "sim": lambda: Sim(fill=lambda o: o["clientOrderId"].startswith("dbwt") and o["price"] != "2489.0" and o["gets"] >= 2),
@@ -365,16 +369,27 @@ async def run(sc):
                 S.log, S.given, Ctl.calls, Ctl.exit_plans = [], [], [], []
                 buf, raised = io.StringIO(), None
                 t_start = Clock.t
+                plan_used, rearm = stp.get("plan"), None
+                if stp["op"] == "exit":   # 청산 접수(api_manual_exit_submit): 칸을 진입 상태로 바꾼 뒤 settle(exit_then_rearm | run_exit) -- 계획은 조립 대신 모의 거래소 포지션의 frac
+                    frac = stp["frac"]
+                    plan_used = exit_plan_for("LONG", round(S.sim.pos["LONG"] * frac, 3))
+                    rearm = frac < 1.0
+                    entry_state.clear()
+                    entry_state.update(phase="submitting", kind="exit", side="LONG", plan=plan_used, asset="eth", started_at=FakeDT.now(timezone.utc).isoformat())
+                slot0 = snap(entry_state)
                 with contextlib.redirect_stdout(buf):
                     try:
                         if stp["op"] == "entry":
                             await etb(json.loads(json.dumps(stp["plan"])), entry_state, bool(stp.get("limit")))
+                        elif stp["op"] == "exit":
+                            await cells["settle"].cell_contents(cells["exit_then_rearm"].cell_contents(plan_used, entry_state) if rearm
+                                                                else X.run_exit(session, plan_used, entry_state), entry_state)
                         else:
                             await api.bracket_tick()
                     except Exception as exc:  # noqa: BLE001
                         raised = f"{type(exc).__name__}: {exc}"
                 p = tmp / "manual_bracket_state.json"
-                out.append({"op": stp["op"], "plan": stp.get("plan"), "limit": bool(stp.get("limit")), "t": t_start, "sec": Ctl.sec,
+                out.append({"op": stp["op"], "plan": plan_used, "limit": bool(stp.get("limit")), "rearm": rearm, "slot0": slot0, "t": t_start, "sec": Ctl.sec,
                             "requests": S.log, "responses": S.given, "calls": snap(Ctl.calls), "exit_plans": snap(Ctl.exit_plans),
                             "entry": snap(entry_state), "file": json.loads(p.read_text("utf-8")) if p.exists() else None,
                             "limits": sorted(q.name for q in tmp.glob("manual_limit_wait*.json")),

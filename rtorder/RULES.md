@@ -332,8 +332,18 @@
 - **모드**: 기본 = 그림자. `shadow::mode_from` -- `RTORDER_MODE` 가 없거나 shadow = 그림자 · live 는 cargo feature `live` 빌드 + `RTORDER_LIVE_CONFIRM=실주문을-보낸다` 둘 다 있어야(하나만이면 시작 안 함 · 모르는 값도 시작 안 함). 허가증 `LiveProof` 는 모듈 밖에서 못 만든다.
 - **전송 계층 막이**(`http::Binance::guard`): 그림자 모드면 GET·`/fapi/v1/listenKey` 가 아닌 요청(주문 POST·취소 DELETE·레버리지 POST·algo DELETE …)은 **보내기 전에 panic**. 루프백이 아닌 주소로 만든 값은 늘 그림자로 시작 · 끄는 길은 `arm_live(&LiveProof)`(feature `live` 에만 있음). 키를 읽는 `Binance::from_env` 도 feature `live` 에만 있다(기본 빌드 = 키 없음).
 - **재생 도구**(`shadow::replay` · 실행기 `cargo run --example shadow_replay -- <기록.jsonl>`): 작업(chain) 하나의 기록 = start(계획·칸·무장 파일) · wire(왕복) · input(읽은 입력) · end(칸·무장 파일·복구 파일·로그). 127.0.0.1 가짜 서버가 기록된 응답을 차례로 돌려주고 진짜 `Binance`·`runner::entry_then_bracket`·`Watcher::bracket_tick`·`run_exit_into` 가 돈다. 실제 기록 비교는 timestamp·signature 를 빼고 표식 뒤 ms 를 `#` 로(비밀값은 재생에 넣지 않는다) · 가짜 시계 정답지는 글자 그대로.
-- 시험: `ff`(전체 흐름 정답지 15걸음을 재생 도구로 글자 그대로 -- 요청 256 · 서명 URL 172) · `sr` = tests/shadow_replay.rs(합성 실기록 차이 0 · 양성 대조 4 · 쓰기 5종 panic + 대조군 · 읽기·listenKey 는 보냄).
-- ⚠재생이 아직 못 하는 것: 작업 도중 화면이 쓴 대기 칸 action·amend 를 그 시각에 넣기 · 청산 접수(op=exit)는 원본 정답지 없음.
+- 시험: `ff`(전체 흐름 정답지 19걸음을 재생 도구로 글자 그대로 -- 요청 282 · 서명 URL 192 · 청산 접수 op=exit 2걸음 포함) · `sr` = tests/shadow_replay.rs(합성 실기록 차이 0 · 양성 대조 4 · 쓰기 5종 panic + 대조군 · 읽기·listenKey 는 보냄).
+- ⚠재생이 아직 못 하는 것: 작업 도중 화면이 쓴 대기 칸 action·amend 를 그 시각에 넣기. 원인 = 아래 «실행기 ↔ 접수 다리» 결함과 같은 자리(실행기가 칸을 집행 상태로 **시작할 때 한 번만** 옮긴다).
+
+## 실행 파일 뼈대 · 허브 구독 (2026-11-21 · D · E)
+
+- `src/app.rs` + `src/bin/rtorder.rs`: 설정(RTORDER_DIR 필수 -- 파이썬 서버 폴더(order_requests.jsonl 있음)는 거절 · RTORDER_BASE · RTORDER_WS · DASHBOARD_MANUAL_EXEC_SYMBOL · RTORDER_PERIOD · RTORDER_STREAM=1 · RTORDER_HUB · RTORDER_BAN_FILE · RTORDER_MAX_TICKS) → 모드 → 시작 복구(원본 순서: wait_cleanup = 남은 대기 주문 정리 → 지정가 대기 복구 파일로 무장) → 감시 루프(nap → 허브 값을 Cached 로 → drain_tp_fills → bracket_tick) + 사용자 스트림(켜면) + 허브 구독(켜면) → SIGTERM/SIGINT 로 멈춤(종료코드 0 · 설정·모드 오류 2).
+  - 그림자: 손절 함수(정리·익절·분할 익절·고아 정리·재발동 정리)와 집행(GTX·시장가·취소·레버리지)은 보내지 않고 «안 보낸 쓰기» 목록에 적은 뒤 «못 함»을 돌려준다(원본 «키 없음»과 같은 모양 -- 무장은 남고 30초 뒤 다시). 그래도 새면 전송 막이가 panic.
+  - ponytail: 원본은 정리를 작업으로 띄우고 바로 감시 -- 여기는 정리를 끝낸 뒤 감시 · 알림(텔레그램)은 로그로만 · 주문 잠금 없음(접수 문이 없다 -- R6).
+- `coreval::subscribe`(E): rtcore 허브에 붙어 `{"subscribe":[..]}` → 스냅숏(book bid_s·ask_s · quote vol_bpm·bar5m·kline_rx_us · supply seconds) · 밀기(book·kline·supply1s)를 `Feed` 에 · 모르는 칸·type 무시 · 글자 칸 없는 옛 book 은 안 받아 둠 · 끊기면 1·2·4…30초 뒤 다시. 감시 5분봉·1초가 = 화면 심볼(USDT) 몫 · 호가·변동성 = `sync_cached`(나이는 rx_us → 한도 넘으면 REST).
+- 시험: `ar` = tests/app_run.rs(가짜 거래소로 기동 → 남은 dbwt 정리 · 복구 파일로 롱 무장 · 포지션 없는 숏 정리 → 멈춤 · 재시작 쓰기 0 · 그림자 쓰기 0·목록 3 · 진짜 실행 파일 SIGTERM 두 번 · 설정 오류 4) · `hf` = tests/hub_feed.rs(붙음 → 받아 둔 값 REST 0 → 끊김 → 3초 뒤 REST → 재연결 스냅숏 → 다시 받아 둔 값 · 변동성 None = REST).
+- 🔴**실행기 ↔ 접수 다리 결함(R6 전에 설계 필요)**: `runner::run_task` 는 칸을 꺼내(take_slot) 집행 상태로 **시작할 때 한 번** 옮기고 끝나면 되돌린다. 원본은 같은 dict 를 집행 루프가 ≤3초마다 다시 읽어 화면의 «취소·지금 시장가·PEG·선 옮김»을 따른다(W12). Rust 에서 작업 도중 접수 문이 같은 칸을 보면 빈 칸이고, 써도 집행이 모른다. 웹 서버를 붙일 때 «도는 작업의 Shared 를 칸 키로 찾아 action·amend 를 넣는» 다리가 필요하다(재생의 slot_write 도 같은 다리로).
+- ⚠시험 없는 것: `drain_tp_fills` 를 틱 앞에서 부르는 자리(Hub 가 run 안에 있어 밖에서 넣을 수 없다 -- 함수 자체는 wi 시험) · 사용자 스트림을 켠 실행(전송은 us 시험).
 
 ### 그림자 기록 -- 파이썬이 기록해 줘야 하는 칸 (파이썬은 안 고쳤다 · 사용자 결정 필요)
 
