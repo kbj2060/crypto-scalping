@@ -50,6 +50,9 @@ pub enum Event {
         quote: Option<Quote>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         liq5m: Option<Liq5m>,
+        /// 2026-11-21 더함 -- 마지막 30분 상황 근거(situation.rs · 흐름 엔진 종목만 · 아직 안 셌으면 없음).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        situation: Option<Situation>,
     },
     /// 1초 수급 바뀐 몫: 묶음(state.rs FLUSH_MS)마다 1건. 목록 칸 = 그 사이 바뀐 초만(받은 쪽은 초 단위로 덮어쓴다),
     /// `partial` = 원천별 진행 중인 초. 빈 목록은 «바뀐 것 없음»이지 «지워라»가 아니다.
@@ -77,6 +80,62 @@ pub enum Event {
     Prices { rows: Vec<(String, f64, i64)> },
     /// 2026-11-21 더함 -- 5분봉 강제청산 원의 바뀐 봉(바이낸스 · server.py liq_5m_add 와 같은 칸). 받는 쪽은 봉마다 덮어쓴다.
     Liq5m(Liq5m),
+    /// 2026-11-21 더함 -- 30분 상황 근거(파이썬 `situation_state["now"]` = situation.classify 결과 + computed_at). 1초마다 세고 바뀌었을 때만 민다
+    /// (computed_at 만 바뀐 것은 안 민다). `missing` = 코어가 못 채우는 입력(원본은 채운다 · situation.rs 머리 주석).
+    Situation(Situation),
+}
+
+/// situation.classify 반환과 같은 칸(ok=false 면 `reason` 만). 이름은 파이썬 dict 키 그대로.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Situation {
+    pub ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dir: Option<i64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<Evidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regime: Option<Regime>,
+    /// 센 시각(초, 벽시계).
+    pub computed_at: f64,
+    #[serde(default)]
+    pub missing: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Evidence {
+    pub mid: f64,
+    pub move_bp: f64,
+    pub range_bp: f64,
+    pub dir: i64,
+    pub move_ratio: f64,
+    pub cvd: i64,
+    pub reject: bool,
+    pub liq_long: i64,
+    pub liq_short: i64,
+    pub veto: i64,
+    pub obi: Option<f64>,
+    pub persist: Option<f64>,
+    pub funding: Option<f64>,
+    pub basis_bp: Option<f64>,
+    pub basis_d_bp: Option<f64>,
+    pub basis_thr_bp: Option<f64>,
+    pub crowd: i64,
+    pub lead: i64,
+    pub btc_move_bp: Option<f64>,
+    pub btc_rel: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Regime {
+    pub ratio: f64,
+    pub thr: f64,
+    pub margin: f64,
+    pub enter: f64,
+    pub exit: f64,
 }
 
 /// 주문 경로가 쓰는 받아 둔 시세(스냅숏 칸 · quote.rs). 값마다 코어가 받은 시각(rx_us)을 같이 싣는다 -- rtorder 가 나이를 잰다.

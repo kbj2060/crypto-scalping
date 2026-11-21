@@ -3,10 +3,11 @@
 //! 번호 매기기와 broadcast 를 같은 락 안에서 해서, 스냅숏(같은 락)과 밀기 사이에 빠짐·겹침이 없다.
 //! 1초 수급·풋프린트는 사건마다 밀지 않고 FLUSH_MS 마다 모아 민다(flush). 스냅숏은 모으던 것까지 이미 반영한 상태라,
 //! 스냅숏 뒤 첫 묶음이 같은 값을 한 번 더 덮어써도 결과가 같다.
-use crate::proto::{Event, Stamped, Supply1s, Venue};
+use crate::proto::{Event, Situation, Stamped, Supply1s, Venue};
 use crate::restore;
+use crate::situation;
 use crate::supply::Supply;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc};
 
@@ -21,6 +22,10 @@ struct Sym {
     first: Option<(i64, i64)>,
     /// 주문 경로가 쓰는 받아 둔 시세(quote.rs).
     quote: crate::quote::Quote,
+    /// 30분 상황 근거(situation.rs): 체결로 센 5분봉 [고가, 저가, 종가] + 종가 체결 id · 마크 링 · 마지막 결과.
+    ohlc: BTreeMap<i64, ([f64; 3], u64)>,
+    marks: situation::MarkRing,
+    sit: Option<Situation>,
 }
 
 /// 1초 수급·풋프린트 밀기 묶음 간격(ms). 화면은 한 프레임(60Hz ≈ 16.7ms)에 한 번 칠한다 -- 더 잘게 보내도 안 보이고
@@ -49,7 +54,19 @@ impl State {
         let syms = symbols
             .iter()
             .map(|s| {
-                let sym = Sym { seq: 0, book: None, mark: None, trades: VecDeque::new(), supply: Supply::new(s), pending: None, first: None, quote: Default::default() };
+                let sym = Sym {
+                    seq: 0,
+                    book: None,
+                    mark: None,
+                    trades: VecDeque::new(),
+                    supply: Supply::new(s),
+                    pending: None,
+                    first: None,
+                    quote: Default::default(),
+                    ohlc: BTreeMap::new(),
+                    marks: situation::MarkRing::new(crate::now_us() as f64 / 1e6),
+                    sit: None,
+                };
                 (s.clone(), Mutex::new(sym))
             })
             .collect();
@@ -219,6 +236,7 @@ impl State {
                 g.trades.push_back(m.clone());
                 g.quote.last = Some((px, m.ex_ms, m.rx_us));
                 g.quote.price_dirty = true;
+                ohlc_add(&mut g.ohlc, px, id, m.ex_ms);
                 // 24시간 봉 창은 «수신 시각» 기준(파이썬 time.time()) -- rx_us 가 그 벽시계다.
                 supply = g.supply.trade(px, qty, m.ex_ms, sell, id as i64, m.rx_us);
             }
@@ -243,8 +261,11 @@ impl State {
             Event::Kline { open_ms, close, ref mut vol_bpm, ref mut bar5m, .. } => {
                 (*vol_bpm, *bar5m) = g.quote.kline(open_ms, close, m.rx_us); // 실어 보내는 메시지에 이 봉까지의 변동성·5분봉 종가를 채운다
             }
-            Event::Mark { .. } => g.mark = Some(m.clone()),
-            Event::Snapshot { .. } | Event::Supply1s(_) | Event::Footprint(_) | Event::Prices { .. } | Event::Liq5m(_) => return,
+            Event::Mark { mark, index, funding, .. } => {
+                g.marks.push(m.ex_ms, (mark, index, funding), m.rx_us as f64 / 1e6);
+                g.mark = Some(m.clone())
+            }
+            Event::Snapshot { .. } | Event::Supply1s(_) | Event::Footprint(_) | Event::Prices { .. } | Event::Liq5m(_) | Event::Situation(_) => return,
         }
         if let Some(up) = supply {
             g.first.get_or_insert((m.ex_ms, m.rx_us));
@@ -326,8 +347,43 @@ impl State {
                 footprint: g.supply.footprint(),
                 quote: Some(g.quote.msg()),
                 liq5m: g.supply.liq5m_all(),
+                situation: g.sit.clone(),
             },
         })
+    }
+
+    /// 30분 상황 근거를 센다(lib.rs 가 1초마다 · 원본 SITUATION_EVERY_TICKS = 1). 흐름 엔진 종목만. 바뀌었으면 민다.
+    /// BTC 같은 창은 btcusdt 를 받을 때만(그 종목의 체결 캔들을 먼저 떠 둔다 -- 락은 하나씩만 잡는다).
+    pub fn situation_tick(&self, now_us: i64) {
+        let now_s = now_us as f64 / 1e6;
+        let btc: Option<BTreeMap<i64, [f64; 3]>> = self.syms.get("btcusdt").map(|c| c.lock().unwrap().ohlc.iter().map(|(&b, v)| (b, v.0)).collect());
+        for (s, cell) in &self.syms {
+            let mut g = cell.lock().unwrap();
+            let Some((bucket, _)) = g.supply.fp.spec else { continue };
+            let candles: BTreeMap<i64, [f64; 3]> = g.ohlc.iter().map(|(&b, v)| (b, v.0)).collect();
+            let liq: BTreeMap<i64, [f64; 2]> = g.supply.liq5m.iter().map(|(&b, v)| (b, v.0)).collect();
+            let mid = match &g.book {
+                Some(Stamped { ev: Event::Book { bid, ask, .. }, .. }) => Some((bid + ask) / 2.0),
+                _ => None,
+            };
+            let fbars = g.supply.fp.bars.iter().map(|(&b, bar)| (b, &bar.cells));
+            let inp = situation::inputs(now_s, bucket, fbars, g.supply.cells_of(Venue::Bn), &candles, btc.as_ref(), &liq, &g.marks.ring, mid);
+            let prev = g.sit.as_ref().and_then(|x| x.dir).unwrap_or(0);
+            let mut res = situation::classify(&inp, prev);
+            res.computed_at = now_s;
+            let same = g.sit.as_ref().is_some_and(|o| Situation { computed_at: now_s, ..o.clone() } == res);
+            g.sit = Some(res.clone());
+            if same {
+                continue;
+            }
+            g.seq += 1;
+            let _ = self.tx.send(Stamped { s: s.clone(), seq: g.seq, ex_ms: 0, rx_us: now_us, tx_us: 0, ev: Event::Situation(res) });
+        }
+    }
+
+    /// 시험용: 체결로 센 5분봉 [고가, 저가, 종가].
+    pub fn ohlc(&self, s: &str) -> Option<Vec<(i64, [f64; 3])>> {
+        Some(self.syms.get(s)?.lock().unwrap().ohlc.iter().map(|(&b, v)| (b, v.0)).collect())
     }
 
     /// 바뀐 종목의 마지막 체결가를 «모든 종목» 메시지(`s = "*"`)로 민다(lib.rs 가 PRICES_MS 마다). 바뀐 것이 없으면 안 보낸다.
@@ -392,5 +448,24 @@ impl State {
     pub fn sec_prices(&self, s: &str) -> Option<Vec<(i64, f64)>> {
         let g = self.syms.get(s)?.lock().unwrap();
         Some(g.supply.cells_of(Venue::Bn).iter().filter(|(_, c)| c[6] != 0.0).map(|(&t, c)| (t, c[6])).collect())
+    }
+}
+
+/// 체결 하나를 5분봉 [고가, 저가, 종가]에 더한다(klines 와 같은 값 -- 종가 = 체결 id 가 가장 큰 체결). 새 봉이 생길 때 15봉 앞을 지운다.
+fn ohlc_add(ohlc: &mut BTreeMap<i64, ([f64; 3], u64)>, px: f64, id: u64, ex_ms: i64) {
+    let b = crate::footprint::bar_of(ex_ms);
+    match ohlc.get_mut(&b) {
+        Some((v, last)) => {
+            v[0] = v[0].max(px);
+            v[1] = v[1].min(px);
+            if id >= *last {
+                (v[2], *last) = (px, id);
+            }
+        }
+        None => {
+            ohlc.insert(b, ([px, px, px], id));
+            // 상황 근거는 완결 봉 13개만 본다(situation.rs WINDOW) -- 늦은 체결 몫으로 둘 더
+            ohlc.retain(|&k, _| k > b - 15 * situation::BAR_S);
+        }
     }
 }

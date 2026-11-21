@@ -6,6 +6,7 @@ pub mod hub;
 pub mod proto;
 pub mod quote;
 pub mod restore;
+pub mod situation;
 pub mod state;
 pub mod supply;
 
@@ -187,6 +188,15 @@ pub fn start(cfg: &Cfg, listener: TcpListener) -> (Arc<state::State>, tokio::tas
         feeds.push((src.url.clone(), tokio::spawn(feed::run_src(src, state.clone(), cfg.silence))));
     }
     tokio::spawn(hub::serve(listener, state.clone(), cfg.hub.clone()));
+    let st = state.clone();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(1)); // 원본 micro-ref 1초 루프마다(SITUATION_EVERY_TICKS = 1)
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            st.situation_tick(now_us());
+        }
+    });
     let st = state.clone();
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_millis(state::FLUSH_MS));
