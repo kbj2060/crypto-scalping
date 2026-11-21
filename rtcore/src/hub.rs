@@ -16,7 +16,7 @@
 //!   `if o.hostHeader != "" { req.Header.Set("X-Forwarded-Host", req.Host); req.Host = o.hostHeader }`(빈 값이면 그 블록을 건너뛰어 req.Host 가
 //!   들어온 그대로 · 2026-11-21 확인. 공식 문서 origin-parameters 는 기본값 "" 만 적고 빈 값일 때 무엇이 가는지는 안 적는다).
 //!   🔴터널 설정에 httpHostHeader 를 넣으면 Host 가 그 값(예: 127.0.0.1:8788)이 되어 같은 호스트 판정이 늘 거짓이 된다 -- 그때는 목록에 적는다.
-//! - 동시 연결 `RTCORE_MAX_CONNS`(기본 16 -- 사용자 한 명의 데스크톱·휴대폰·탭 몇 개) · 연결당 구독 심볼 `RTCORE_MAX_SUBS`(기본 8).
+//! - 동시 연결 `RTCORE_MAX_CONNS`(기본 16 -- 사용자 한 명의 데스크톱·휴대폰·탭 몇 개) · 연결당 구독 심볼 `RTCORE_MAX_SUBS`(기본 16 -- 코어 심볼 8 + 호가 심볼 4 = 12 · rtorder 가 10개를 한 번에 구독한다).
 //!   연결 수 × QUEUE_CAP 이 큐 메모리 상한이다.
 //! - ping: `RTCORE_PING_SECS`(기본 20)마다 보내고, 다음 ping 때까지 아무것도 못 받았으면(pong 포함) 끊는다 -- Cloudflare 가 조용한
 //!   웹소켓을 닫고(시간 미공개), 반쯤 죽은 연결이 칸을 쥐고 있지 않게.
@@ -59,7 +59,7 @@ impl HubCfg {
             path: env("RTCORE_PATH", "/rt"),
             origins: env("RTCORE_ALLOW_ORIGINS", "").split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
             max_conns: env("RTCORE_MAX_CONNS", "16").parse().unwrap_or(16),
-            max_subs: env("RTCORE_MAX_SUBS", "8").parse().unwrap_or(8),
+            max_subs: env("RTCORE_MAX_SUBS", "16").parse().unwrap_or(16),
             ping: Duration::from_secs_f64(env("RTCORE_PING_SECS", "20").parse().unwrap_or(20.0)),
         }
     }
