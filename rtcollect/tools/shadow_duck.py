@@ -103,13 +103,27 @@ def down_of(rs, tabs: list, starts: list, margin: int) -> list:
     return down_intervals(times, starts, margin) if starts else []
 
 
+def minute_cols(py, rs, t: str, ca, te: str, where: str) -> str:
+    """분마다 한 줄인 표(미시구조·청산 요격기): 같은 분(ts // 60초)끼리 칸마다 «같음 비율 · 상대차 중앙 · 최대». 받은 시각·나이 칸은 원래 다르다."""
+    names = [c for c, _ in ca if c != "ts"]
+    sel = ", ".join([f"{te} // 60000"] + [f'"{c}"' for c in names])
+    a, b = ({r[0]: r[1:] for r in c.execute(f'SELECT {sel} FROM "{t}" {where}').fetchall()} for c in (py, rs))
+    both = sorted(a.keys() & b.keys())
+    lines = []
+    for j, c in enumerate(names):
+        eq = sum(a[m][j] == b[m][j] for m in both)
+        rel = sorted(abs(a[m][j] - b[m][j]) / max(abs(a[m][j]), abs(b[m][j])) for m in both
+                     if isinstance(a[m][j], float) and isinstance(b[m][j], float) and a[m][j] != b[m][j])
+        lines.append(f"{c} 같음 {eq}/{len(both)}" + (f" · 다른 줄 상대차 중앙 {rel[len(rel) // 2]:.2e} 최대 {rel[-1]:.2e}" if rel else ""))
+    return f"    {t} 같은 분 {len(both)}줄 칸별: " + " | ".join(lines)
+
+
 def compare(py, rs, lo: int, hi: int, margin: int, show: int, starts=()) -> list[str]:
     tp = {r[0] for r in py.execute("SELECT table_name FROM duckdb_tables()").fetchall()}
     tr = {r[0] for r in rs.execute("SELECT table_name FROM duckdb_tables()").fetchall()}
     excl = gap_minutes((py, rs), margin)
-    down = down_of(rs, sorted(tp & tr - {"gaps"}), list(starts), margin)
-    if down:
-        from shadow_tape import down_note
+    from shadow_tape import down_note
+    down: list = []
     nd = lambda te: "".join(f" AND NOT ({te} >= {a * 1000 if a > float('-inf') else -2**62} AND {te} < {b * 1000 if b < float('inf') else 2**62})" for a, b in down)   # noqa: E731
     out = [f"한쪽에만 있는 표: 파이썬 {sorted(tp - tr)} · Rust {sorted(tr - tp)}"] if tp ^ tr else []
     for t in sorted(tp & tr):
@@ -126,6 +140,7 @@ def compare(py, rs, lo: int, hi: int, margin: int, show: int, starts=()) -> list
             out.append(f"{t}: 시각 열 없음 -- 전체 행 파이썬 {n[0]:,} · Rust {n[1]:,}")
             continue
         te = ms_expr(tcol, dict(ca)[tcol])
+        down = down_of(rs, [t], list(starts), margin)   # 표마다(구독 때 받는 옛 사건의 ts 가 다른 표의 «살아 있던 증거»를 흐리지 않게)
         if lo is None or hi is None:   # 창을 안 주면 = 두 쪽에 자료가 함께 있는 구간(그림자가 떠 있던 창) · 끝 10초 뺌
             sp = [c.execute(f'SELECT min({te}), max({te}) FROM "{t}"').fetchone() for c in (py, rs)]
             if any(x[0] is None for x in sp):
@@ -142,17 +157,21 @@ def compare(py, rs, lo: int, hi: int, margin: int, show: int, starts=()) -> list
             TALLY[0] += min(n)
             TALLY[1] += 0 if ok else abs(n[0] - n[1])
             out.append(f"{t}: (행 수만) 파이썬 {n[0]:,} · Rust {n[1]:,}{'' if ok else ' 🔴1% 넘게 다름'}")
+            if t.startswith(("microstructure_1m", "tail_risk_1m")):   # 진단: 같은 분 줄의 칸마다 같음 비율·상대차 -- 값이 다른 칸은 세지 않고 적기만(REST 켠 실험용)
+                out.append(minute_cols(py, rs, t, ca, te, where))
             continue
         names = [c for c, _ in ca if c not in s[2]]
         sel = ", ".join([f"{te} AS __t"] + [ms_expr(c, dict(ca)[c]).replace("epoch_ms", "epoch_us") for c in names])
-        rows = []
+        rows, tof = [], {}
         for c in (py, rs):
             d = {}
             for r in c.execute(f'SELECT {sel} FROM "{t}" {where}').fetchall():
                 if r[0] // 60000 in excl:
                     continue
                 v = r[1:]
-                d[tuple(v[names.index(k)] for k in s[1])] = v
+                k = tuple(v[names.index(k)] for k in s[1])
+                d[k] = v
+                tof[k] = r[0] // 1000
             rows.append(d)
         a, b = rows
         both = a.keys() & b.keys()
@@ -163,9 +182,13 @@ def compare(py, rs, lo: int, hi: int, margin: int, show: int, starts=()) -> list
                      - c.execute(f'SELECT count(*) FROM "{t}" {where}').fetchone()[0] for c in (py, rs)) if down else 0
         line = (f"{t}: 비교 {len(both):,}행 · 불일치 {len(bad):,} · 파이썬에만 {len(a.keys() - b.keys()):,} · Rust에만 {len(b.keys() - a.keys()):,}"
                 f" · 범위 [{w0 // 1000}, {w1 // 1000}) 초 · 뺀 분 {len(excl):,}" + (down_note(down, n_down) if down else ""))
-        first = [f"다름 {k}: 파이썬 {a[k]} · Rust {b[k]}" for k in sorted(bad, key=repr)[:show]]
-        first += [f"파이썬에만 {k}" for k in sorted(a.keys() - b.keys(), key=repr)[:show]]
-        first += [f"Rust에만 {k}" for k in sorted(b.keys() - a.keys(), key=repr)[:show]]
+        ts_ = lambda k: time.strftime("%F %T", time.localtime(tof[k]))   # noqa: E731 -- 서버 시각
+        first = [f"다름 {k} {ts_(k)}: " + " · ".join(f"{n} 파이썬 {x} / Rust {y}" for n, x, y in zip(names, a[k], b[k]) if x != y) for k in sorted(bad, key=repr)[:show]]
+        first += [f"파이썬에만 {k} {ts_(k)}" for k in sorted(a.keys() - b.keys(), key=repr)[:show]]
+        first += [f"Rust에만 {k} {ts_(k)}" for k in sorted(b.keys() - a.keys(), key=repr)[:show]]
+        hot = Counter(tof[k] // 60 * 60 for k in a.keys() - b.keys()).most_common(3)
+        if hot:
+            first.append("파이썬에만 많은 분(서버 시각) " + ", ".join(f"{time.strftime('%F %R', time.localtime(m))}({c})" for m, c in hot))
         out.append(line + "".join(f"\n    {x}" for x in first))
     return out or ["비교할 표가 없다"]
 
@@ -238,8 +261,8 @@ def selftest() -> None:
             con.execute("CREATE TABLE oi_lsratio_5m (ts TIMESTAMPTZ, symbol VARCHAR, sum_open_interest DOUBLE, collected_at TIMESTAMPTZ)")
             con.executemany("INSERT INTO oi_lsratio_5m VALUES (to_timestamp(?), 'ETHUSDT', ?, to_timestamp(?))",
                             [(T + 300 * k, 1.5 + (bump and k == 1), T + 300 * k + 7 + bump) for k in range(4)])
-            con.execute("CREATE TABLE microstructure (ts TIMESTAMPTZ, obi DOUBLE)")
-            con.executemany("INSERT INTO microstructure VALUES (to_timestamp(?), 0.1)", [(T + s + bump,) for s in range(0, 600, 60)])
+            con.execute("CREATE TABLE microstructure_1m (ts TIMESTAMPTZ, obi DOUBLE)")
+            con.executemany("INSERT INTO microstructure_1m VALUES (to_timestamp(?), 0.1)", [(T + s + bump,) for s in range(0, 600, 60)])
             if bump:
                 con.execute("UPDATE hl_trades SET px = 1 WHERE tid = 100")
                 con.execute("INSERT INTO gaps VALUES ('ETH', ?, ?, 'ws')", [1000 * (T + 900), 1000 * (T + 905)])
@@ -252,7 +275,8 @@ def selftest() -> None:
         assert "비교 107행 · 불일치 1 · 파이썬에만 1 · Rust에만 0" in hl and "뺀 분 2" in hl, hl
         oi = next(x for x in out if x.startswith("oi_lsratio_5m"))
         assert "비교 3행 · 불일치 1 · 파이썬에만 0 · Rust에만 0" in oi, oi     # collected_at 은 안 본다 · T+900 봉은 끊긴 분(전 표 공통)
-        assert any(x == "microstructure: (행 수만) 파이썬 10 · Rust 10" for x in out), out
+        assert any(x == "microstructure_1m: (행 수만) 파이썬 10 · Rust 10" for x in out), out
+        assert any("microstructure_1m 같은 분 10줄 칸별: obi 같음 10/10" in x for x in out), out   # 받은 초는 달라도 같은 분
         assert list(d.glob(".shadow_duck_*")) == [], "사본이 남았다"
         TALLY[:] = [0, 0]
         auto = run(d / "py.duckdb", d / "rs.duckdb", None, None, tmp=d)   # 창 없이 = 두 쪽 함께 있는 구간
@@ -260,9 +284,9 @@ def selftest() -> None:
         assert "불일치 1 · 파이썬에만 1 · Rust에만 0" in hl2, hl2
         assert TALLY[1] == 2 + 1, TALLY   # hl 2 + oi 1 · 미시구조 행 수는 같다
         # 그림자 재기동 T+500: Rust 자료가 T+490 뒤 T+510 에 다시 -- 그 사이 파이썬에만(tid 500)은 뺀다
-        st = run(d / "py.duckdb", d / "rs.duckdb", None, None, tmp=d, starts=[T + 500])
+        st = run(d / "py.duckdb", d / "rs.duckdb", None, None, tmp=d, starts=[T - 100, T + 500])
         hl3 = next(x for x in st if x.startswith("hl_trades"))
-        assert "불일치 1 · 파이썬에만 0 · Rust에만 0" in hl3 and "그림자 꺼진 구간 1개" in hl3, hl3
+        assert "불일치 1 · 파이썬에만 0 · Rust에만 0" in hl3 and "그림자 꺼진 구간 2개" in hl3, hl3
         # lake: 같은 파일 · 행 하나 다른 파일 · 한쪽에만
         con = duckdb.connect()
         for root, extra in ((d / "lp", 0), (d / "lr", 1)):
