@@ -198,7 +198,10 @@ fn binary_door_serves_route_fixture_bytes_logs_and_stops() {
         want_log.push(json!({"korean": true}));
         // 내부 주소 · 모르는 주소
         let (st, _, body) = http(&b.addr, "GET", "/internal/acct", &[], &[]);
-        assert_eq!((st, body.as_str()), (200, r#"{"seq": 0, "user_stream": {"connected": false, "last_event_at": null, "error": null}}"#));
+        assert_eq!(st, 200);
+        assert!(body.starts_with(r#"{"seq": 0, "user_stream": {"connected": false, "last_event_at": null, "error": null}, "feed": "#), "{body}");
+        let v: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["feed"], json!({"connected": false, "connects": 0, "last_rx_age_s": null, "stale": true, "symbols": {}}), "허브 없음 = 한 번도 못 받음(stale)");
         let (st, h, body) = http(&b.addr, "GET", "/api/nope", &[], &[]);
         assert_eq!((st, body.as_str(), hdr(&h, "content-type").as_deref()), (404, "404: Not Found", Some("text/plain; charset=utf-8")));
         let (st, _, body) = http(&b.addr, "GET", "/api/binance-account", &[], &[]);

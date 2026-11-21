@@ -422,3 +422,58 @@ oi 기본 48→24(ETH 는 OKX 가 있어 20봉만 남아 같았다 → SOL 기�
 
 빼는 칸에 더한 것(벽시계 몫이 확실한 것만): `asof_ms`(pred_record.summary 에 요청 순간 ms) · `bar_elapsed_sec`. 대조 주소에 footprint-daily · footprint-4h · flow/heatmap(rows) 둘을 더했다.
 처리 시간: 거의 전 주소에서 rtserve 가 1/2~1/5 · 예외 `/dashboard/live/`(rtserve 10.4ms 대 3.6ms -- 버스터 sha256 을 요청마다 다시 계산하는 것으로 보임 · 다음에 mtime 메모).
+
+## 9. 일곱째 조각 (2026-11-22)
+
+### 9-1. 🔴래스터 읽기 할당 한도(raster_read.rs)
+원본 read_window(327~407 Read): 머리 n_bins 로 `np.zeros((total, n_bins))` · 행 bin_lo 로 `np.zeros((total, g_hi − g_lo))` -- 깨진 파일이면 numpy 가 **MemoryError** 를 던져 그 요청만 실패한다
+(_heatmap_read 는 잡지 않아 → 500 · 원본 api_flow_heatmap 의 접근행동·변동 신호는 try/except 로 삼킴 · 상황 카드 micro 틱은 collect_micro_ref 의 예외 갈래).
+Rust 는 할당 실패 = 프로세스 abort 라 **`MAX_CELLS` = 6,400만 칸**(정상 최대 = 히트맵 900열 × 60초 접기 = 54,000행 × N_BINS 240 × 가격 이동 여유 5배 ≈ 6,480만)을 넘으면 할당 전에 멈춘다:
+`try_read_window` → `Err("MemoryError: …")` (히트맵 본체 = 500 · 접근행동 = 빈 맵 → 원본처럼 뒤까지 건너뜀) · `read_window`(함수 모양 그대로) = 빈 창(n_bins 0 -- 상황 카드처럼 «못 읽음 = 없음»).
+시험 `heatmap_parity::broken_raster_does_not_abort`: bin_lo ±20억 행 · 머리 n_bins 65535 × 54,000행 -- 죽지 않고 Err/500/빈 창.
+
+| 곳 | 크기를 정하는 것 | 한도 · 근거 |
+|---|---|---|
+| raster_read `raw`·`out` | 파일 머리 n_bins · 행 bin_lo · cols×agg | **MAX_CELLS**(위) |
+| heatmap `dm`·`bkt`(접근행동) · `up`(변동 신호) · `fill_*` | 창 칸 수(위 한도 안) | 창 × 50 거리대 · 600행 × 고른 칸 |
+| heatmap 요청 cols·agg | 쿼리 | 원본처럼 10~900 · 1~60 으로 자름 |
+| fpd `rebin` 의 `vec![0; n]` | 칸 키의 (최대 − 최소)/row -- 소급본 parquet·hot 테이프 가격 | **`REBIN_MAX` 100만 칸**(원본 footprint_daily.rebin 193~201 `np.zeros(n)` = MemoryError → cells 는 ValueError 가 아니라 **500** · 시험 fpd_parity handles_match_server) |
+| fpd 읽기 행 | SQL 시각 범위(날·4시간 창) | 시각 범위가 상한 |
+| hub `fp_bars`·`liq`·`okx_oi5m` | 코어 메시지(같은 기계의 rtcore) | 288봉·600봉 자르기 |
+| hub `oi_rows` | hot oi_1s 지금−690초 뒤 | 초마다 한 행 → ≤ 700 |
+| order `parse`(rtorder 응답) | rtorder 본문 길이 | 루프백 rtorder · 15초 · ponytail: 길이 상한 없음 |
+
+### 9-2. 상황 카드 붙이기(hub.rs · CTX.md «붙이는 쪽 사용법»)
+`/api/situation` · SSE `event: situation`(computed_at 이 바뀔 때 · `situation_run` 이 hub 시계로 매초) · ETH 만(원본 2489~2490).
+재료: 코어 Situation(스냅숏·밀기) · Micro(vol60·liq60·streams·flow → `ctx_x::apply_flow`) · 코어 @bookTicker(Book 사건 · REST 0 -- 결정) · 래스터 12초(`raster_read::read_window`) · evidence.obi·persist = 히트맵 rows 요약(swr 5초).
+
+빠진 칸(«없음» 모양 -- 원천이 rtserve 에 아직 없음):
+
+| 칸 | 원본 원천 | 지금 | 다음 |
+|---|---|---|---|
+| now.evidence.veto | REST klines 720봉 trend_veto_rows | 0 | RTSERVE_REST 조각(5분봉 하루와 함께) |
+| vol_mult · vol_mult_by | candles_day(REST klines 300) → vol_size_mult | 빈 목록 → null | 같음 |
+| x.move60_p75 · range30_pct · card30(dir_p·reach_p) | candles_day | 빈 봉(계산 안 됨) | 같음 + rtmodel::card30 |
+| x.z60h·z30h·*_all(기준선) | hot 테이프 14일 flow_hour_scales(1시간마다) | **붙임**(아래) | — |
+| x.venues 의 Bybit | bybit_bars(hot bybit 테이프 · 20초) | **붙임** | — |
+| micro.sr(청산맵 레벨) | load_liquidation_map(REST 90일) | null | 청산맵 조각 |
+| micro baseline_from_tape(vol60_pct) | hot 테이프 7일 | **붙임** | — |
+| 장부(flow_read_fused.jsonl) | 봉마다 한 줄 | 안 씀(병행 중 READONLY · 경로 상수 미확인) | 전환 때 |
+| 원본 collect_micro_ref 예외 → now {ok false, reason} | | 호가가 오기 전엔 micro 틱을 건너뜀(available false) | — |
+| inp.bars(close·oi_delta) | 코어 상황 입력 봉 | 빈 목록(코어 Situation 에 실리지 않음) | rtcore |
+
+시험 `http4_parity::situation_before_core`(코어 전 = «계산 전» · computed_at 0.0).
+**통합 시험(일곱째 조각 둘째 판)** `tests/sit_parity.rs`: 정답지 `tools/gen_sit_fixture.py`(서버 판 venv · gen_ctx_x_fixture.py 의 정의부를 읽어 실행 -- 파일은 안 고침 ·
+원본 situation.classify · flow_read.read · vol_size_mult 를 그대로 · situation_payload 2734~2738 · SSE 3175~3179 옮겨 적음) -- 40걸음(완결 봉 부족 16 · ok 24 · OKX 시작 · 수신 상태 바뀜):
+코어 Situation·Micro(flow = rtcore flow_nets_tick·flow_delta 로 만든 실제 밀기 · streams) 를 Live::apply 로 넣고 situation_once → HTTP 본문·SSE 줄 **40/40 글자 같음** · 양성 대조(코어 값 한 칸 틀림 → 다름).
+원본 쪽 «없음»으로 맞춘 재료: candles_day·candles·bybit·flow_scales·micro payload(코어 호가 없음)·imb40 링·inp.bars(코어 Situation 에 없음)·veto 0·obi/persist null.
+이 시험에서 고친 결함: `vol_mult_by` 를 빈 dict 로 냈다 -- 원본은 흐름 코인마다 열쇠(situation_by 2738) → 코인마다 `vol_size_mult([])` 모양으로.
+
+**파일만 읽는 재료 붙임**(`hub.rs sit_materials` · 원본 collect_micro_ref 1926~1954 · compute_situation 2470~2472 Read):
+기준선 주기(`MicroRef::baseline_due/baseline_set` = 1시간 · 없으면 60초 · 실패면 있던 값 · 60초 뒤 다시) 때 `baseline_from_tape`(hot binance_tape 7일 → vol60_pct) ·
+flow_scales(`tape_flow_rows`+`flow_hour_scales_from_bars` · 14일 · since = size_bands_since(479~490: 표 sol·xrp 1790487335 · 아니면 meta size_bands_changed) · 빈 결과면 있던 값) ·
+flow_scales_all(`flow_hour_scales_combos` · binance·okx(okx_tape · ETH-USDT-SWAP)·bybit(bybit_tape · ETHUSDT) · 조합마다 빈 결과면 있던 값) · Bybit 봉(`bybit_bars` 26시간 · 닫힌 지 10초 넘은 봉 · 20초마다).
+1초 틱 안(spawn_blocking)에서 돈다 -- 무거운 SQL 은 주기마다만(원본과 같은 주기). 🔴이 셋의 «주기·유지» 갈래는 시험이 없다(함수 값은 ctx_x_parity·ctx_micro_parity 가 원본과 대조).
+
+### 9-3. `/dashboard/live/` 버스터 메모
+`asset_buster` = 파일마다 (수정 시각 ns · 크기)가 그대로면 지난 값(ponytail 주석). http_parity 113 그대로 통과.

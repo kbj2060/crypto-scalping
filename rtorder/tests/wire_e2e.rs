@@ -262,3 +262,45 @@ async fn watch_exit_runs_outside_desk_lock_status_answers_and_same_coin_exit_is_
         assert_eq!(d.w.entry["phase"], "filled_maker", "{:?}", d.w.entry);
     }).await;
 }
+
+#[test]
+fn run_exit_at_does_not_fire_when_intake_took_the_slot_after_snapshot() {
+    // 감시 틱은 칸 사본에서 돈다 -- 사본을 뜬 뒤 접수가 같은 칸(위 칸)을 청산으로 잡았으면 발동 청산은 쏘지 않는다(두 번 닫지 않게 · 30초 뒤 다시)
+    use rtorder::runner::DeskCell;
+    let (w, io0, _dir) = setup("busy_after_snapshot", Some(5.0), true);
+    let Wired { ops, rest, quotes, .. } = io0;
+    let mut io = Wired::new(ops, rest, quotes, Fake { fill_after: 2, ..Default::default() }, "ETHUSDC");
+    let desk = std::sync::Arc::new(DeskCell::new(rtorder::assemble::Desk::new(w)));
+    io.desk = Some(desk.clone());
+    let mut w2 = block_on(desk.lock()).w.clone();
+    let intake = json!({"phase": "working", "kind": "exit", "side": "LONG", "asset": "eth", "note": "접수가 먼저"});
+    block_on(desk.lock()).w.entry = intake.as_object().unwrap().clone();
+    block_on(w2.bracket_tick(&mut io)).unwrap();
+    assert!(io.ex.placed.is_empty() && io.ex.markets.is_empty(), "칸을 뺏긴 발동 청산이 주문을 냈다");
+    assert_eq!(Value::Object(block_on(desk.lock()).w.entry.clone()), intake, "접수의 칸을 덮지 않는다");
+    assert!(w2.entry.get("error").is_some_and(|e| e.as_str().unwrap().contains("다른 청산")), "{:?}", w2.entry);
+}
+
+#[test]
+fn tick_end_merge_pushes_wait_cancel_into_running_exec() {
+    // 감시가 포지션이 닫혀 같은 쪽 대기 진입을 거둘 때(action=cancel): 사본에서 쓴 값이 원본 칸과 **도는 대기 집행**(live)에 바로 들어간다
+    use rtorder::exec::{Action, ExecState, Phase};
+    let dir = std::env::temp_dir().join(format!("rtorder_merge_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let mut d = rtorder::assemble::Desk::new(Watcher::new(&dir, "ETHUSDC"));
+    d.w.waits.insert("eth".into(), json!({"phase": "working", "mode": "limit", "side": "LONG"}));
+    let sh = std::sync::Arc::new(std::sync::Mutex::new(ExecState { phase: Phase::Working, ..Default::default() }));
+    d.live.insert(rtorder::runner::slot_key(&rtorder::intake::SlotRef::Wait("eth".into())), sh.clone());
+    let waits0 = d.w.waits.clone();
+    let mut w2 = d.w.clone();
+    let ws = w2.waits.get_mut("eth").unwrap().as_object_mut().unwrap();
+    ws.insert("action".into(), json!("cancel"));
+    ws.insert("action_reason".into(), json!("포지션이 닫힘(손절·청산) — 같은 쪽 대기 진입 취소"));
+    // 그 사이 접수가 원본 칸에 다른 칸을 썼다 -- 그것은 원본이 이긴다
+    d.w.waits["eth"]["amend"] = json!({"price": 2400.0, "qty": 0.1});
+    rtorder::app::merge_tick(&mut d, &mut w2, &waits0, &[]);
+    assert_eq!(d.w.waits["eth"]["action"], "cancel");
+    assert_eq!(d.w.waits["eth"]["amend"]["price"], json!(2400.0), "접수 값은 그대로");
+    assert_eq!(sh.lock().unwrap().action, Some(Action::Cancel), "도는 대기 집행에 바로");
+    let _ = std::fs::remove_dir_all(&dir);
+}

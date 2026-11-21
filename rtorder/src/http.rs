@@ -86,6 +86,15 @@ pub mod meter {
     }
 }
 
+/// 2026-11-21 재생(`rtorder replay`) 전용: 켜면 127.0.0.1 이 아닌 주소로 가는 요청은 보내기 전에 panic(실기록 재생이 바깥으로 아무것도 안 보낸다).
+pub static LOOPBACK_ONLY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+fn loopback_guard(url: &str) {
+    if LOOPBACK_ONLY.load(std::sync::atomic::Ordering::SeqCst) && !url.starts_with("http://127.0.0.1:") {
+        let host = url.split("://").nth(1).and_then(|r| r.split('/').next()).unwrap_or("");
+        panic!("재생: 바깥 주소로 보내려 했다 ({host}) -- 재생은 127.0.0.1 가짜 서버만");
+    }
+}
+
 fn wall_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
@@ -246,6 +255,7 @@ impl Binance {
 
     async fn send(&self, method: &'static str, url: &str, signed: bool) -> Result<Resp, String> {
         self.guard(method, url);
+        loopback_guard(url);
         if self.shadow {
             if let Some(e) = meter::paused(wall_ms()) {
                 return Err(e);
@@ -291,6 +301,7 @@ impl Binance {
                     continue;
                 }
             }
+            loopback_guard(&url);
             meter::sent(&url);
             let (agent, u, k) = (self.agent.clone(), url.clone(), self.key.clone());
             hs.push(tokio::task::spawn_blocking(move || {

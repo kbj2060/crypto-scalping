@@ -487,3 +487,37 @@ fn live_build_shadow_reads_with_keys_but_sends_no_write() {
     assert!(ex.lock().unwrap().log.iter().all(|l| l.starts_with("GET")));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn stop_cancels_a_tick_waiting_on_a_slow_account_read() {
+    // R5(감시 틱): 멈춤 신호면 도는 틱도 그 자리에서 끝낸다(원본 stop_bracket_watcher 가 감시 작업을 취소) -- 계좌 읽기가 5초 걸리는 틱 도중 멈춤 → 2.5초 안에 끝
+    std::env::set_var("DASHBOARD_MANUAL_EXEC_ENABLED", "1");
+    let (srv, ex) = exchange(routes());
+    ex.lock().unwrap().slow = 5.0;
+    let dir = std::env::temp_dir().join(format!("rtorder_app_tickstop_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let arm = json!({"ETHUSDC:LONG": {"symbol": "ETHUSDC", "side": "LONG", "sl_price": 1000.0, "sl_level": 1000.0, "tp_price": 9000.0, "tp_level": 9000.0,
+                                       "backstop_price": null, "rule": false, "lines": true, "tp_resting": true, "armed_at": now() - 600.0, "placed": {"placed": true}}});
+    std::fs::write(dir.join("manual_bracket_state.json"), arm.to_string()).unwrap();
+    let stop = Stop::default();
+    let (s2, e2) = (stop.clone(), ex.clone());
+    let t_stop = std::sync::Arc::new(std::sync::Mutex::new(None::<std::time::Instant>));
+    let t2 = t_stop.clone();
+    tokio::spawn(async move {
+        for _ in 0..200 {   // 틱이 계좌 읽기에 들어갈 때까지
+            if e2.lock().unwrap().log.iter().any(|l| l == "GET /fapi/v2/account") {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        *t2.lock().unwrap() = Some(std::time::Instant::now());
+        s2.stop();
+    });
+    let _ = app::run(&door_cfg(&dir, &srv.base, &[]), &mk(srv.base.clone(), dir.join("ban"), true), stop, Default::default(), None).await;
+    let el = t_stop.lock().unwrap().expect("멈춤을 보냈다").elapsed();
+    assert!(ex.lock().unwrap().log.iter().any(|l| l == "GET /fapi/v2/account"), "틱이 계좌를 읽고 있었다");
+    assert!(el.as_secs_f64() < 1.5, "느린 계좌 읽기(5초 · 요청 시간 제한 3초)를 기다리지 않고 끝나야 한다 {el:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

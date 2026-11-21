@@ -31,7 +31,7 @@
 |---|---|---|---|---|---|---|---|---|---|
 | 10 | 사이징 변동성·MAE 분위 | `live_eth_sizing_vol_model_20260912.py` · `live_eth_mae_quantile_model_20260913.py` | — | — | — | — | — | — | **안 옮김(꺼짐)** -- 서버 `SIZING_RISK_MODEL_ENABLED=False` · 주문 범위가 sltp 만(2026-11-21) |
 | 11 | 차트 표식(극값 탐지) | `live_eth_chart_markers_20260909.py` · `live_eth_extreme_detector_20260909.py` | — | — | — | — | — | — | **안 옮김** -- 사용자 결정(2026-11-21) |
-| 12 | 4h 방향 **ETH 판** | `live_eth_dir4h_20261015.py`(SOL·XRP 와 같은 코드 · 팔 S) | 5분(서버 루프)·요청 때 | HGB 회귀(65피쳐) | REST(rest_frames) | `/api/dir4h?asset=eth` · pred_record ETH «4» 줄 | ⑤ 예측 판 «4h 방향» | **없음 → 모델 파일을 개발기로 가져와야 함**(서버 `data/live/eth_dir4h_model.joblib` · 개발기엔 oos 씨앗만) | dir4h_p2 2027-03-14 |
+| 12 | 4h 방향 **ETH 판** | `live_eth_dir4h_20261015.py`(SOL·XRP 와 같은 코드 · 팔 S) | 5분(서버 루프)·요청 때 | HGB 회귀(65피쳐) | REST(rest_frames) | `/api/dir4h?asset=eth` · pred_record ETH «4» 줄 | ⑤ 예측 판 «4h 방향» | **옮김(2026-11-22)** -- 서버 사본(11-22 가져옴 · 대조 뒤 지움)으로 export → 피쳐·예측 6벌(normal·gaps·zero_vol·nan_metrics·missing_coin·exact) 65열 비트(P_ac144 만 1.1e-13)·payload 같음 · 짧은 패널 예외 같음 · 핸들러(d4.live_payload) 2회차 요청 147개·payload 비트 | dir4h_p2 2027-03-14 |
 
 ### 2026-11-22 서빙 쪽 파이썬 모델 코드 전수(재학습 스크립트 = 연구 몫이라 뺌)
 근거 = `scripts/live_*.py` 중 모델을 읽는 것(joblib·pickle·TabPFN·LightGBM·torch 글자) 10개 + 대시보드가 import 하는 모듈(dashboard/server.py 머리 import 줄을 Read 로) + 대시보드 안 모델 읽기(dashboard/*.py).
@@ -39,7 +39,7 @@
 
 | 파이썬 | 쓰임(서빙 경로) | Rust |
 |---|---|---|
-| live_eth_dir4h_20261015 | 대시보드 루프·`/api/dir4h` | dir4h.rs · dirrest.rs -- ETH 판은 #12(모델 필요) |
+| live_eth_dir4h_20261015 | 대시보드 루프·`/api/dir4h` | dir4h.rs · dirrest.rs -- ETH 판 포함(#12 · 11-22) |
 | live_eth_dir_short_20261028 | 대시보드 루프·`/api/dir-short` | dirshort.rs(65열판 + ETH 75열판·sqlite) · 핸들러 정답지 ETH 2회차 요청 147개·payload 비트 |
 | live_vol4h_qx4_20261025 | `/api/vol-forecast` 먼저 | qx4.rs(+ QX4I iv_now) |
 | live_eth_sizing_vol_model_20260912 | `/api/vol-forecast` 대체(HGB) · 사이징은 꺼짐 | signals.rs vol4h(서버 사본 eth·xrp) · 사이징 #10 안 옮김 |
@@ -52,7 +52,7 @@
 | live_eth_sweep_v_rebound_signal_20260829 · live_eth_vol_forecast_20260910 | 읽는 곳 0 · 연구만 | 범위 밖 |
 | 대시보드 안: card30(_card30_pred) · box_hold | 상황 카드 dir_p·reach_p · 박스(서빙 꺼짐) | card30.rs · box_hold.rs |
 | 대시보드 안: dir_signals(7일·4~13주·개장 되돌림) | `/api/dir-signals`·`/api/open-rev` | signals.rs · handlers.rs |
-남은 서빙 모델 코드 = **#12 ETH 4h 모델 파일**뿐. 나머지는 붙이기(rtserve 핸들러 · rt_dirpred·rt_sr_lean 넘기기) 몫.
+남은 서빙 모델 코드 = **없음**(2026-11-22 · #12 ETH 4h 옮김). 나머지는 붙이기(rtserve 핸들러 · rt_dirpred·rt_sr_lean 넘기기) 몫.
 
 **안 옮김(안 쓰임 판정 · 범위 문서)**: `live_eth_sweep_v_rebound_signal_20260829.py`(610, 읽는 곳 0) · `live_eth_vol_forecast_20260910.py`(168, 연구만 import) ·
 `live_eth_breakout_detector_*`(화면 0) · `live_eth_maxpain_oos_ledger`(판정 닫힘).

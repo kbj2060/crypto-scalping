@@ -139,9 +139,11 @@ fn handles_match_server() {
     assert_eq!(fpd::h4_key(1795255200), "2026-11-21T08", "10:00 = 08시 칸");
     // rebin 하한 = 파이썬 round(lo × row × CELL, 6): XRP 2627 × 0.0005 = 1.3135000000000001(실수) → 1.3135 (원본 python3 -c 로 확인)
     let x = fpd::Spec::of("xrp").unwrap();
-    let v = fpd::rebin(&x, &(vec![2627], vec![1.0], vec![0.0]), 1);
+    let v = fpd::rebin(&x, &(vec![2627], vec![1.0], vec![0.0]), 1).unwrap();
     assert_eq!(rtserve::py::dumps(&v, (", ", ": "), true, None), "[1.3135, [1.0], [0.0]]");
-    let e = fpd::rebin(&x, &(vec![], vec![], vec![]), 5);
+    let e = fpd::rebin(&x, &(vec![], vec![], vec![]), 5).unwrap();
+    // 🔴엉뚱한 가격 칸(±20억 칸 폭) = 할당 전에 오류(원본 np.zeros MemoryError → 그 요청만 500) -- 죽지 않는다
+    assert!(fpd::rebin(&x, &(vec![-2_000_000_000, 2_000_000_000], vec![1.0, 1.0], vec![0.0, 0.0]), 1).unwrap_err().starts_with("MemoryError"));
     assert_eq!(rtserve::py::dumps(&e, (", ", ": "), true, None), "[0, [], []]", "빈 칸 = 정수 0");
     assert_eq!(fpd::h4_key(1795255200 + 2 * 3600), "2026-11-21T12");
 }

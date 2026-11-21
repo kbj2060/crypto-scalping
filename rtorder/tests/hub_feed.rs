@@ -145,3 +145,51 @@ async fn subscribe_uses_cached_then_falls_back_on_disconnect_then_recovers() {
     go.notify_one();
     sub.abort();
 }
+
+/// 가짜 허브: 접속마다 구독을 읽고 -- `greet` 면 메시지 하나 보낸 뒤 -- Close(Policy, 사유)로 닫는다.
+async fn refusing_hub(greet: bool) -> String {
+    use tokio_tungstenite::tungstenite::protocol::{frame::coding::CloseCode, CloseFrame};
+    let lis = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}/rt", lis.local_addr().unwrap());
+    tokio::spawn(async move {
+        loop {
+            let (s, _) = lis.accept().await.unwrap();
+            tokio::spawn(async move {
+                let mut ws = tokio_tungstenite::accept_async(s).await.unwrap();
+                let _ = ws.next().await;
+                if greet {
+                    let m = json!({"s": "ethusdt", "rx_us": now_us(), "type": "supply1s", "seconds": [[now_us() / 1_000_000, 0, 0, 0, 0, 0, 0, 2500.0]]});
+                    let _ = ws.send(Message::Text(m.to_string().into())).await;
+                }
+                let _ = ws.close(Some(CloseFrame { code: CloseCode::Policy, reason: "구독 심볼 10개 > 상한 8".into() })).await;
+                while let Some(Ok(_)) = ws.next().await {}
+            });
+        }
+    });
+    url
+}
+
+#[tokio::test]
+async fn refused_subscribe_backs_off_and_first_message_resets_to_one_second() {
+    let run = |greet: bool| async move {
+        let url = refusing_hub(greet).await;
+        let feed = Arc::new(Mutex::new(Feed::default()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let h = tokio::spawn(coreval::subscribe_owned(url, feed.clone(), stop.clone()));
+        tokio::time::sleep(std::time::Duration::from_millis(4500)).await;
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        h.abort();
+        let f = feed.lock().unwrap();
+        (f.connects, f.logs.clone(), f.health(coreval::wall()))
+    };
+    let ((n_ref, logs, h_ref), (n_ok, _, h_ok)) = tokio::join!(run(false), run(true));
+    // 거절: 0 · 1 · 3(· 7) 초 = 4.5초에 3번 · 옛 판(보내기 성공이면 1초로) = 5번
+    assert_eq!(n_ref, 3, "거절이면 1·2·4초로 늘어난다");
+    // 받은 뒤엔 1초: 0 · 1 · 2 · 3 · 4 초 = 5번
+    assert!(n_ok >= 4, "첫 메시지를 받으면 1초로 돌아온다 ({n_ok})");
+    assert_eq!(logs.len(), 1, "같은 닫힘 사유는 1분에 한 줄: {logs:?}");
+    assert!(logs[0].contains("닫힘 1008 구독 심볼 10개 > 상한 8"), "{}", logs[0]);
+    assert_eq!((h_ref["stale"].clone(), h_ref["last_rx_age_s"].clone(), h_ref["connected"].clone()), (json!(true), Value::Null, json!(false)), "한 번도 못 받음 = stale");
+    assert_eq!(h_ok["stale"], false);
+    assert!(h_ok["symbols"]["ETHUSDT"].as_f64().unwrap() < 3.0, "심볼별 마지막 가격 뒤 초: {h_ok}");
+}

@@ -1,13 +1,12 @@
 //! 미시 참고 payload(server.py collect_micro_ref 1912~2022 의 한 틱) -- 관계 읽기 x 의 imb40·agree·trigger·sr·act·vol_pct · 시장 맥락의 sweep·depth25 재료. 2026-11-22 옮김.
 //! 원본(Read 로 본 실제 줄): collect_micro_ref 1912~2022 · micro_ref.py qi 39~41 · side_of 44~45 · raster_flow 48~82 · qi_side_hyst 85~94 · agree_state 97~103 ·
 //! pct_rank 106~111 · act_label 114~117 · sr_context 120~142 · baseline_from_tape 152~175 · market_ctx.py sweep_depth 38~61 ·
-//! scripts/live_orderflow_raster_collector_20260914.py read_window 327~407 · _hour_path 102~105 · HEADER·ROW_HEAD 91~94(파일 형식 = rtcollect/src/raster.rs 머리 주석).
+//! 래스터 읽기는 crate::raster_read::read_window(원본 수집기 327~407 -- 그 파일이 옮긴 것을 부르기만).
 //! 원본과 다르게 둔 것(결정 대기 · CTX.md «bookTicker»): 원본은 틱마다 REST bookTicker 를 부른다 -- 여기는 호가를 인자로 받는다(코어 @bookTicker 최신값을 넣으면 REST 0).
 //! 청산맵 레벨(load_liquidation_map)도 인자(그 계산은 REST klines 90일 -- 다른 조각).
 use serde_json::{json, Map, Value as V};
 use std::collections::{BTreeMap, VecDeque};
-use std::io::{Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub const BAND_SHALLOW_BP: f64 = 10.0;
 pub const BAND_DEEP_BP: f64 = 40.0;
@@ -16,110 +15,10 @@ pub const QI_EXIT: f64 = 0.45;
 pub const TRIGGER_LIVE_S: i64 = 2;
 pub const NEAR_BP: f64 = 15.0;
 pub const SWEEP_BPS: [f64; 3] = [25.0, 50.0, 100.0];
-/// 기준선 주기(server.py 467 주석 «1시간마다» · MICRO_BASELINE_SECONDS) · 기준선이 없을 때 다시 시도 60초(1926).
+/// 기준선 주기 = server.py 972 `MICRO_BASELINE_SECONDS = 3600`(쓰는 줄 1926·1939) · 기준선이 없을 때 다시 시도 60초(1926).
 pub const BASELINE_S: f64 = 3600.0;
-/// 수집기 기본 칸 수·칸 폭(OF_N_BINS 240 · OF_BIN_SIZE 0.5 -- 수집기 65~66) -- 파일이 하나도 없을 때만 쓰인다.
-pub const N_BINS: usize = 240;
-pub const BIN_SIZE: f64 = 0.5;
-
-/// read_window 결과(agg = 1). `qty[i]` = 초 i 의 절대 격자 칸(+ 매수호가 · − 매도호가) · `mid` = NaN 이면 그 초 무효.
-#[derive(Clone, Debug)]
-pub struct Window {
-    pub bin_size: f64,
-    pub bin_lo: i64,
-    pub qty: Vec<Vec<f32>>,
-    pub mid: Vec<f32>,
-}
-
-fn civil(days: i64) -> (i64, u32, u32) {
-    // 1970-01-01 기준 날 수 → (연, 월, 일) (Howard Hinnant days_from_civil 의 역)
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    (yoe + era * 400 + (m <= 2) as i64, m, d)
-}
-
-/// 수집기 _hour_path(102~105): `<root>/<SYM 대문자>/<UTC %Y-%m-%dT%H>.f32`.
-pub fn hour_path(root: &Path, symbol: &str, hour_ms: i64) -> PathBuf {
-    let s = hour_ms.div_euclid(1000);
-    let (y, m, d) = civil(s.div_euclid(86400));
-    root.join(symbol.to_uppercase()).join(format!("{y:04}-{m:02}-{d:02}T{:02}.f32", s.rem_euclid(86400) / 3600))
-}
-
-/// 수집기 read_window(327~407) -- agg = 1 만(collect_micro_ref 가 쓰는 모양).
-// ponytail: agg > 1(히트맵 축소)은 안 옮겼다 -- 히트맵을 옮길 때 원본 398~404 를 더한다.
-pub fn read_window(root: &Path, symbol: &str, to_ms: i64, cols: usize) -> Window {
-    let total = cols as i64;
-    let t_end = to_ms.div_euclid(1000) * 1000;
-    let t0 = t_end - (total - 1) * 1000;
-    let mut ts = vec![0i64; cols];
-    let mut lo = vec![0i64; cols];
-    let mut mid = vec![f32::NAN; cols];
-    let (mut n_bins, mut bin_size) = (N_BINS, BIN_SIZE);
-    let mut raw: Option<Vec<Vec<f32>>> = None;
-    let mut hour = t0 - t0.rem_euclid(3_600_000);
-    while hour <= t_end {
-        if let Ok(mut fh) = std::fs::File::open(hour_path(root, symbol, hour)) {
-            let mut head = [0u8; 32];
-            if fh.read_exact(&mut head).is_ok() && &head[0..4] == b"FLWR" && u16::from_le_bytes([head[4], head[5]]) == 1 {
-                let hb = u16::from_le_bytes([head[6], head[7]]) as usize;
-                let hbin = f32::from_le_bytes(head[8..12].try_into().unwrap()) as f64;
-                if raw.is_none() {
-                    (n_bins, bin_size) = (hb, hbin);
-                    raw = Some(vec![vec![0.0; n_bins]; cols]);
-                }
-                if hb == n_bins {
-                    let rb = 16 + 4 * n_bins;
-                    let i0 = ((hour - t0) / 1000).max(0) as usize;
-                    let j0 = ((t0 - hour).div_euclid(1000)).max(0);
-                    let j1 = 3600.min((t_end - hour).div_euclid(1000) + 1);
-                    if j1 > j0 && fh.seek(SeekFrom::Start(32 + j0 as u64 * rb as u64)).is_ok() {
-                        let mut buf = vec![];
-                        let _ = fh.take(((j1 - j0) as usize * rb) as u64).read_to_end(&mut buf);
-                        let raw = raw.as_mut().unwrap();
-                        for (g, row) in buf.chunks_exact(rb).enumerate() {
-                            let i = i0 + g;
-                            if i >= cols {
-                                break;
-                            }
-                            ts[i] = i64::from_le_bytes(row[0..8].try_into().unwrap());
-                            lo[i] = i32::from_le_bytes(row[8..12].try_into().unwrap()) as i64;
-                            mid[i] = f32::from_le_bytes(row[12..16].try_into().unwrap());
-                            for (k, c) in row[16..].chunks_exact(4).enumerate() {
-                                raw[i][k] = f32::from_le_bytes(c.try_into().unwrap());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        hour += 3_600_000;
-    }
-    let raw = raw.unwrap_or_else(|| vec![vec![0.0; n_bins]; cols]);
-    let valid: Vec<bool> = (0..cols).map(|i| mid[i].is_finite() && ts[i] > 0).collect();
-    for i in 0..cols {
-        if !valid[i] {
-            mid[i] = f32::NAN;
-        }
-    }
-    if !valid.iter().any(|v| *v) {
-        return Window { bin_size, bin_lo: 0, qty: vec![vec![]; cols], mid: vec![f32::NAN; cols] };
-    }
-    let g_lo = (0..cols).filter(|&i| valid[i]).map(|i| lo[i]).min().unwrap();
-    let g_hi = (0..cols).filter(|&i| valid[i]).map(|i| lo[i] + n_bins as i64).max().unwrap();
-    let width = (g_hi - g_lo) as usize;
-    let mut out = vec![vec![0f32; width]; cols];
-    for i in (0..cols).filter(|&i| valid[i]) {
-        let s = (lo[i] - g_lo) as usize;
-        out[i][s..s + n_bins].copy_from_slice(&raw[i]);
-    }
-    Window { bin_size, bin_lo: g_lo, qty: out, mid }
-}
+/// 래스터 창 = `crate::raster_read::read_window(root, sym, now_ms, 12, 1)`(원본 1962 · 같은 원본 327~407 을 한 곳에서만 옮긴다).
+pub use crate::raster_read::Window;
 
 /// np.sum(float32 1차원) -- numpy 짝 합을 f32 로(rtcollect::ob5m::np_sum 과 같은 갈래).
 fn np_sum_f32(a: &[f32]) -> f32 {
@@ -174,12 +73,12 @@ pub struct Flow {
 }
 
 fn px_of(w: &Window) -> Vec<f64> {
-    (0..w.qty.first().map_or(0, Vec::len)).map(|k| (w.bin_lo + k as i64) as f64 * w.bin_size).collect()
+    (0..w.n_bins).map(|k| (w.bin_lo + k as i64) as f64 * w.bin_size).collect()
 }
 
 /// micro_ref.raster_flow(48~82). None = {"ok": False}.
 pub fn raster_flow(w: &Window) -> Option<Flow> {
-    let n = w.qty.first().map_or(0, Vec::len);
+    let n = w.n_bins;
     let last = w.mid.iter().rposition(|m| m.is_finite())?;
     if n == 0 {
         return None;
@@ -193,8 +92,8 @@ pub fn raster_flow(w: &Window) -> Option<Flow> {
         let neg: Vec<f32> = r.iter().copied().filter(|v| *v < 0.0).collect();
         (np_sum_f32(&pos) as f64, (-np_sum_f32(&neg)) as f64)
     };
-    let (b10, a10) = band(&w.qty[last], BAND_SHALLOW_BP);
-    let (b40, a40) = band(&w.qty[last], BAND_DEEP_BP);
+    let (b10, a10) = band(w.row(last), BAND_SHALLOW_BP);
+    let (b40, a40) = band(w.row(last), BAND_DEEP_BP);
     let mut sums = vec![];
     let stop = last as i64 - 11;
     let mut i = last as i64;
@@ -202,7 +101,7 @@ pub fn raster_flow(w: &Window) -> Option<Flow> {
         if !w.mid[i as usize].is_finite() {
             break;
         }
-        sums.push(band(&w.qty[i as usize], BAND_DEEP_BP));
+        sums.push(band(w.row(i as usize), BAND_DEEP_BP));
         i -= 1;
     }
     let mut ofi = 0.0;
@@ -445,7 +344,7 @@ impl MicroRef {
         if let Some(f) = &flow {
             push_cap(&mut self.ofi_hist, f.ofi10.abs(), 600);
             push_cap(&mut self.imb40_ring, f.imb40, 6 * 3600);
-            sweep = sweep_depth(&w.qty[f.last], &px_of(w), f.mid, Some(book));
+            sweep = sweep_depth(w.row(f.last), &px_of(w), f.mid, Some(book));
             push_cap(&mut self.depth25_ring, (sweep["bid"][0].as_f64().unwrap(), sweep["ask"][0].as_f64().unwrap()), 6 * 3600);
         }
         let ofi_thr = (self.ofi_hist.len() >= 30).then(|| rtcollect::ob5m::np_median(&mut self.ofi_hist.iter().copied().collect::<Vec<_>>()));

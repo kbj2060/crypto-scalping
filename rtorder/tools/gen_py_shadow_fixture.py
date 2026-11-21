@@ -146,6 +146,8 @@ def case_tick(fire: bool):
         raise AssertionError("진입 경로")
 
     async def go():
+        from aiohttp import ClientSession
+        sess = ClientSession()   # 진짜 집행 함수가 쓰는 세션(가짜 거래소 127.0.0.1 로만 간다 -- FAPI 를 바꿔 둠)
         with tempfile.TemporaryDirectory() as tmp:
             ps = env(x.base) + [mock.patch.object(orders, "LIVE_DIR", Path(tmp)), mock.patch.object(orders, "fetch_account", fake_account),
                                 mock.patch.object(orders, "exec_enabled", lambda: True), mock.patch.object(orders, "load_filters", filters),
@@ -155,7 +157,7 @@ def case_tick(fire: bool):
             try:
                 (Path(tmp) / "manual_bracket_state.json").write_text(json.dumps({f"{SYM}:LONG": arm}), "utf-8")
                 (Path(tmp) / "eth_position_sizing_state.json").write_text(json.dumps(FAKE_STATE), "utf-8")
-                api = orders.register(account_trip_state={"seen": {}}, refresh_tasks={}, swr_locks={}, binance_session=lambda: None,
+                api = orders.register(account_trip_state={"seen": {}}, refresh_tasks={}, swr_locks={}, binance_session=lambda: sess,
                                       fetch_binance_json=fetch, swr_cached=swr, _timed_produce=None, load_market_history=hist,
                                       situation_by={}, NOCACHE={}, STALE_GRACE_SECONDS=60,
                                       sec_prices=lambda a: [(2001, 2490.0), (2002, 2479.0)] if a == "eth" else None)
@@ -165,6 +167,7 @@ def case_tick(fire: bool):
             finally:
                 for p in reversed(ps):
                     p.stop()
+                await sess.close()
 
     try:
         asyncio.run(go())

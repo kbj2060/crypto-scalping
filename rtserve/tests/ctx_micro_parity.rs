@@ -5,6 +5,7 @@
 mod ctx_micro;
 
 use ctx_micro::MicroRef;
+use rtserve::raster_read; // ctx_micro.rs 가 crate::raster_read 로 부른다
 use rtserve::py::dumps;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -57,7 +58,7 @@ fn micro_payload_matches_python_tick_by_tick() {
         assert_eq!(m.baseline_at, t["baseline_at"].as_f64().unwrap(), "#{k}");
         let b = &t["book"];
         let book = (b[0].as_f64().unwrap(), b[1].as_f64().unwrap(), b[2].as_f64().unwrap(), b[3].as_f64().unwrap());
-        let w = ctx_micro::read_window(&dir().join("raster"), "ethusdt", (now * 1000.0) as i64, 12);
+        let w = raster_read::read_window(&dir().join("raster"), "ethusdt", (now * 1000.0) as i64, 12, 1);
         let p = m.tick(now, book, &w, t["vol60"].as_f64().unwrap(), &t["levels"], &t["liq60"]);
         let got = dumps(p, D, true, None);
         let want = t["payload"].as_str().unwrap();
@@ -83,9 +84,9 @@ fn small_functions_match() {
         assert_eq!(json!([a, p]), c["out"], "{c}");
     }
     for c in f["windows"].as_array().unwrap() {
-        let w = ctx_micro::read_window(&dir().join("raster"), c["sym"].as_str().unwrap(), c["to"].as_i64().unwrap(), 12);
+        let w = raster_read::read_window(&dir().join("raster"), c["sym"].as_str().unwrap(), c["to"].as_i64().unwrap(), 12, 1);
         let mid: Vec<Value> = w.mid.iter().map(|m| if m.is_nan() { Value::Null } else { json!(*m as f64) }).collect();
-        let qty: Vec<Vec<f64>> = w.qty.iter().map(|r| r.iter().map(|v| *v as f64).collect()).collect();
+        let qty: Vec<Vec<f64>> = (0..w.cols).map(|i| w.row(i).iter().map(|v| *v as f64).collect()).collect();
         assert_eq!((json!(w.bin_size), json!(w.bin_lo), json!(mid), json!(qty)), (c["bin_size"].clone(), c["bin_lo"].clone(), c["mid"].clone(), c["qty"].clone()), "{} {}", c["sym"], c["to"]);
     }
     for c in f["pct"].as_array().unwrap() {

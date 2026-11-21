@@ -229,6 +229,18 @@ THIRTEEN = [  # 루프백 문 · 감시와 접수가 같은 DeskCell · 계좌 �
     ("door_bin", "표식 무시(자기 기록 폴더도 거절)", AP, '    if dir.join("order_requests.jsonl").exists() && !dir.join(DIR_MARK).exists() {', '    if dir.join("order_requests.jsonl").exists() {'),
     ("app_run", "문으로 들어온 작업을 안 돌림", DR, "                            for t in task {\n                                let _ = tx.send(t);\n                            }", "                            let _ = (task, &tx);"),
 ]
+SH = "src/shadow.rs"
+FIFTEEN = [  # 실기록 재생 하위 명령 · 양성 대조가 없던 셋(2026-11-21)
+    ("wire_e2e", "사본 뒤 접수가 잡은 칸에도 발동 청산", "src/wire.rs", "            if crate::watch::busy(d.w.slot_mut(at)) {", "            if false && crate::watch::busy(d.w.slot_mut(at)) {"),
+    ("wire_e2e", "틱 끝 대기 칸 취소를 도는 집행에 안 넣음", AP, "            d.push_live(&crate::intake::SlotRef::Wait(k.clone()));\n        }\n    }\n    d.w.alerted", "        }\n    }\n    d.w.alerted"),
+    ("app_run", "멈춤에 도는 틱을 안 끊음", AP, "let r = tokio::select! { r = w2.bracket_tick(&mut io) => Some(r), _ = stop.notify.notified() => None };", "let r = Some(w2.bracket_tick(&mut io).await);"),
+    ("replay_cmd", "재생 막이(127.0.0.1 밖) 없음", "src/http.rs", "    if LOOPBACK_ONLY.load(std::sync::atomic::Ordering::SeqCst) && !url.starts_with(\"http://127.0.0.1:\") {", "    if false {"),
+    ("replay_cmd", "값 없는 출력에 값이 샘", SH, '} else if values { r.diffs.join(" | ") } else { format!("다름 -- {}", r.where_.join(" | ")) };', '} else { r.diffs.join(" | ") };'),
+    ("replay_cmd", "조립 구간 왕복을 안 뗌", SH, 'pub const ASSEMBLY_PATHS: [&str; 2] = ["/fapi/v1/time", "/fapi/v1/commissionRate"];', 'pub const ASSEMBLY_PATHS: [&str; 2] = ["/none/1", "/none/2"];'),
+    ("replay_cmd", "잘린 chain 도 재생", SH, "        if c0.end.is_null() {", "        if false {"),
+    ("replay_cmd", "돌린 파일(.1)을 안 읽음", "src/bin/rtorder.rs", '    if let Ok(t) = std::fs::read_to_string(format!("{path}.1")) {', '    if let Ok(t) = std::fs::read_to_string(format!("{path}.none")) {'),
+    ("replay_cmd", "파이썬 err 튜플을 그대로", SH, "            Some(Value::Array(a)) if !a.is_empty() => Err(a[0].clone()),\n", ""),
+]
 RT = "src/route.rs"
 TWELVE = [  # 주문·계좌 주소 14개 -- route_fixture(원본 aiohttp 앱 바이트 158사례) · route_concurrency(동시 요청)
     ("route_fixture", "청산 접수가 주문 잠금 밖", RT, '("POST", "/api/manual-exit/submit", "exit_submit", true)', '("POST", "/api/manual-exit/submit", "exit_submit", false)'),
@@ -274,13 +286,13 @@ def main() -> int:
             s = p.read_text()
             assert s.count(a) >= 1, (name, a)
             p.write_text(s.replace(a, b, 1))
-            r = subprocess.run(["cargo", "test", "-j", "2", "--offline", "--test", test], cwd=W, env=env, capture_output=True, text=True, timeout=600)
+            r = subprocess.run(["cargo", "test", "--release", "-j", "2", "--offline", "--test", test], cwd=W, env=env, capture_output=True, text=True, timeout=600)
             out = r.stdout + r.stderr
             failed = sorted({l.split()[1] for l in out.splitlines() if l.startswith("test ") and l.endswith("FAILED")})
             ok = r.returncode != 0
             caught, total = caught + ok, total + 1
             print(f"{'잡음' if ok else '🔴못 잡음'} | {test} | {name} | {', '.join(failed)[:110]}", flush=True)
-    for grp, lst in (("six", SIX), ("seven", SEVEN), ("eight", EIGHT), ("nine", NINE), ("ten", TEN), ("eleven", ELEVEN), ("twelve", TWELVE), ("thirteen", THIRTEEN), ("fourteen", FOURTEEN)):
+    for grp, lst in (("six", SIX), ("seven", SEVEN), ("eight", EIGHT), ("nine", NINE), ("ten", TEN), ("eleven", ELEVEN), ("twelve", TWELVE), ("thirteen", THIRTEEN), ("fourteen", FOURTEEN), ("fifteen", FIFTEEN)):
       if not only or only == grp:
         for test, name, f, a, b in lst:
             shutil.rmtree(W, ignore_errors=True)
@@ -289,13 +301,14 @@ def main() -> int:
             t = p.read_text()
             assert t.count(a) >= 1, (name, a)
             p.write_text(t.replace(a, b, 1))
-            r = subprocess.run(["cargo", "test", "-j", "2", "--offline", "--test", test], cwd=W, env=env, capture_output=True, text=True, timeout=900)
+            r = subprocess.run(["cargo", "test", "--release", "-j", "2", "--offline", "--test", test], cwd=W, env=env, capture_output=True, text=True, timeout=900)
             out = r.stdout + r.stderr
             failed = sorted({l.split()[1] for l in out.splitlines() if l.startswith("test ") and l.endswith("FAILED")})
             ok = r.returncode != 0
             caught, total = caught + ok, total + 1
             print(f"{'잡음' if ok else '🔴못 잡음'} | {test} | {name} | {', '.join(failed)[:110]}", flush=True)
     shutil.rmtree(W, ignore_errors=True)
+    shutil.rmtree(SRC / "target" / "mut", ignore_errors=True)   # 2026-11-21 개발기 디스크 -- 변이용 빌드 폴더는 쓰고 지운다
     assert digest() == before, "원본 소스가 바뀌었다"
     print(f"{caught}/{total} 잡음 · 원본 소스 해시 그대로")
     return 0 if caught == total else 1

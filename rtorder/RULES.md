@@ -406,3 +406,20 @@
 - 정답지 `tests/fixtures/py_shadow_real.jsonl` = 파이썬 시험(test_order_shadow_log_20261121 RealExecRecordTest)이 진짜 run_entry·run_exit·place_bracket 을 127.0.0.1 가짜 거래소에 돌려 남긴 합성 기록(키·서명 없음) -- 작업 2 · 요청 13 · 차이 0 · 양성 대조(요청 하나 빼기 → «요청 열 다름 #2/9» · 주문 수량 바꾸기 · 끝 무장 파일 손절선 바꾸기) 잡음 · 깨움·접수 chain·벽시계 칸은 차이 아님.
 - 감시 틱 = 칸 **사본**(Watcher clone)에서 돈다: `exiting` 은 같은 Arc(`SharedSet` · B1) · 발동 청산은 `WatchIo::run_exit_at` → `Wired` 가 원본 칸에 «submitting» 을 올리고(그새 접수가 잡았으면 쏘지 않음) 칸 잠금을 놓고 청산 → 결과를 올린다 · 틱 끝에 올린 칸의 마지막 값·대기 칸 취소(action → push_live)·알림 표시를 원본으로. 그래서 손절 청산이 도는 동안 상태 조회는 바로 답하고 같은 코인 청산은 409(원본과 같다) -- `wire_e2e` watch_exit_runs_outside_desk_lock_*. «틱이 칸을 쥐어 5초 뒤 409» 의도한 차이는 없어졌다(`DESK_WAIT_SEC` 는 접수끼리만 -- 접수 하나가 조립 REST 동안 칸을 쥐는 것은 그대로).
 
+## 실기록 재생 하위 명령 · 주문 전환 전 점검표 (2026-11-21)
+
+- `rtorder replay <order_shadow.jsonl> [--show-values] [--symbol S]`: 서버 파이썬 실기록을 127.0.0.1 가짜 서버로 재생한다. `http::LOOPBACK_ONLY` 를 켜서 그 밖 주소로 가는 요청은 보내기 전에 panic 한다.
+  - 출력: 작업마다 «chain | op | 요청 N(· 조립 구간 왕복 k) | 같음/다름 -- 어긋난 위치(칸 이름만)» · 끝 «견준 작업 N · 요청 M · 어긋난 작업 K · 잘림 · 조립 구간 왕복» · «첫 어긋남». 값(금액·수량·키)은 `--show-values` 일 때만.
+  - 입력: `.1`(돌린 앞부분)을 먼저 읽고, 깨진 줄(쓰는 중인 반쪽)·접수만 chain·깨움 줄은 세기만 한다. 끝 없는 chain = «잘림»(건너뜀). 감시 틱 안 청산 계획 조립 왕복(`/time`·`commissionRate` · 계획 입력 바로 앞에 이어진 것)은 떼어 따로 센다. 파이썬 계획 오류 기록 `[본문, 상태]` 를 감시가 보는 본문으로 고쳤다. `retry_after` 도 벽시계 칸으로 뺐다.
+  - 시험: `tests/replay_cmd.rs`(진짜 실행 파일 · 합성 기록 «견준 작업 4 · 요청 23 · 어긋난 작업 0 · 잘림 1» · 값 없는 출력 · `.1`+반쪽 줄 · 조립 구간 왕복 2 · `unshare -rn` 망 없이도 같은 결과 · 바깥 주소 panic · 입력 파일 그대로). 정답지 `tests/fixtures/py_shadow_cases.jsonl` = `tools/gen_py_shadow_fixture.py`(main 판 파이썬을 망 차단 + 루프백으로 -- 진입·청산·접수만 chain·감시 발동 청산·무장 파일만 바뀐 틱·잘린 chain).
+- 양성 대조가 없던 넷 중 셋에 시험을 붙였다. «작업 바깥 계좌 캐시 공유» 는 그림자에서 드러나는 행동이 없어 시험이 없다(작업 Wired 가 계좌를 읽는 것은 체결 뒤 무장뿐 -- 그림자에서는 체결이 없다).
+  - run_exit_at 이 원본 칸이 바쁘면 쏘지 않음: `wire_e2e` run_exit_at_does_not_fire_*
+  - 틱 끝 대기 칸 취소 push_live: `app::merge_tick` 으로 빼고 `wire_e2e` tick_end_merge_*
+  - 감시 틱 취소: `app_run` stop_cancels_a_tick_*(5초 걸리는 계좌 읽기 도중 멈춤 → 1.5초 안)
+- 주문 전환(실전송) 전 점검표와 전환·되돌리기 순서 = SHADOW.md 9절. 전환은 사용자 승인 사항이다.
+
+## 허브 구독 물러나기·감시 자료 빈 상태 드러내기 (2026-11-22 · 서버 그림자에서 찾은 결함)
+- 결함: `coreval::subscribe` 가 «구독 보내기 성공»이면 물러나기를 1초로 되돌렸다 → 허브가 구독을 Close(Policy)로 거절해도(연결당 상한 8 < 구독 10) 1초마다 다시 붙었고, 가격을 한 번도 못 받은 채 panic 0 으로 떠 있었다.
+- 고침: 1초로 되돌리는 것은 **첫 메시지를 받은 뒤**만(거절·곧 끊김이면 1·2·4…30초). 닫힘 사유(코드·사유 글자, 접속 실패면 그 오류)를 «rtorder 허브 연결 끝 · … · N초 뒤 다시» 한 줄로, 같은 사유는 1분에 한 번. `Feed.last_rx`(마지막 수신 벽시계) · `Feed::health(now)` = {connected, connects, last_rx_age_s, stale(10초 넘게 못 받음·한 번도 못 받음), symbols{심볼: 마지막 가격 뒤 초}} → `/internal/acct` 의 `feed` 칸 · 계량 줄 자리에 stale 이면 «rtorder 허브 가격 못 받음» 한 줄.
+- 시험: `hub_feed::refused_subscribe_backs_off_and_first_message_resets_to_one_second` -- 가짜 허브가 Close(1008)로 거절하면 4.5초에 3번(옛 판 5번) · 메시지 하나 보낸 뒤 닫으면 4번 이상 · 사유 줄은 1줄 · health stale/심볼 나이. 양성 대조: 1초 되돌리기를 보내기 성공 자리로 옮기면 이 시험이 실패한다(손으로 확인 · 되돌림).
+

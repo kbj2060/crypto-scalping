@@ -2,6 +2,7 @@
 원본 그대로: ds.live_payload(art) = d4.rest_frames(가짜 _get · 합성 거래소 = gen_dirrest_fixture.Exchange) + build_features + payload_from_features
 (+ 호가 깊이 BOOK_DB = 임시 sqlite · warm·빈 칸·없는 봉 포함). 모델 = 서버 사본 tmp/rtmodel_models_20261121/eth_dirshort_model.joblib(md5 같음 · data/live 로 옮기지 않음).
 표본 밖 분위 씨앗 = 개발기 eth_dirshort_oos_seed.parquet(서버와 md5 같음 3885488c). 회차 둘: 처음(31일치) → 5분 뒤(꼬리).
++ 4h ETH 판(d4.live_payload · data/live/eth_dir4h_model.joblib = 11-22 서버에서 가져온 사본 · 가짜 거래소로만) 같은 두 회차(steps4h).
     (tools/server_env.sh 의 환경) python rtmodel/tools/gen_dirshort_eth_fixture.py      # → tests/fixtures/dirshort_eth_fixture.json · ds_eth.json(gen_dirshort_fixture 와 같은 꼴)
 """
 import json
@@ -21,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts")); sys.path.insert(0, str(ROOT / "dashboard")); sys.path.insert(0, str(Path(__file__).resolve().parent))
 import live_eth_dir_short_20261028 as ds  # noqa: E402
 import gen_dir4h_fixture as G  # noqa: E402
-from gen_dirrest_fixture import Exchange, BAR, DAY  # noqa: E402
+from gen_dirrest_fixture import Exchange, BAR, DAY, module  # noqa: E402
 
 LIVE = Path("/home/kbj20/crypto-scalping/data/live")
 OUT = ROOT / "rtmodel" / "tests" / "fixtures"
@@ -60,11 +61,23 @@ def main():
         pay = ds.live_payload(art)
         steps.append({"now_ms": now, "requests": reqs, "payload": G.enc(pay)})
         print("ETH dir_short", now, "REST", len(reqs), "book", pay["book"], "pred", pay["pred"], "hist", len(pay["hist"]), flush=True)
+    # 4h ETH 판(11-22 서버에서 가져온 사본 · 서버는 4h 를 다른 모듈 인스턴스로 부른다 -- 캐시 따로)
+    d4h, art4 = module("d4_server"), joblib.load(LIVE / "eth_dir4h_model.joblib")
+    steps4 = []
+    for now in (T0, T0 + 300_000):
+        reqs = []
+
+        def fake_get4(path, params, now=now, reqs=reqs):
+            r = ex.get(now, path, params); reqs.append([path, [[k, str(v)] for k, v in params.items()], r]); return r
+        d4h._get, d4h.time = fake_get4, types.SimpleNamespace(time=lambda now=now: now / 1000)
+        pay = d4h.live_payload(art4)
+        steps4.append({"now_ms": now, "requests": reqs, "payload": G.enc(pay)})
+        print("ETH dir4h", now, "REST", len(reqs), "pred_bp", pay.get("pred_bp"), "signal", pay.get("signal"), flush=True)
     mj = {"coin": "ETH", "month": art["month"], "src": art.get("src"), "sources": [ds.ARTIFACT.name],
           "models": {str(h): [[{"txt": m.booster_.model_to_string(), "scale": G.bits([s])[0]} for m, s in ms] for ms in seeds] for h, seeds in art["models"].items()}}
     (OUT / "ds_eth.json").write_text(json.dumps(mj))
     p = OUT / "dirshort_eth_fixture.json"
-    p.write_text(json.dumps({"oos": {nm: G.bits(q) for nm, q in Q.items()}, "book": book, "steps": steps}))
+    p.write_text(json.dumps({"oos": {nm: G.bits(q) for nm, q in Q.items()}, "book": book, "steps": steps, "steps4h": steps4}))
     print(p.name, f"{p.stat().st_size:,}")
 
 

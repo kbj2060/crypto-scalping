@@ -139,8 +139,9 @@ check_ok_fresh() {
 }
 record_check() {   # $1 = 대조기 종료코드 · 나머지 = 대조 한 줄
   local rc="$1"; shift
+  local msg; msg=$(printf '%s' "$*" | tr '\n' ' ' | tr -s ' ')   # 대조기 출력이 여러 줄(깨진 줄 알림 등)이어도 check.ok 는 한 줄 = «epoch 내용»
   mkdir -p "$SH"
-  if [ "$rc" = 0 ]; then echo "$(now_s) $*" > "$SH/check.ok"; say "통과 · $*"; else rm -f "$SH/check.ok"; say "🔴불통과 · $*"; fi
+  if [ "$rc" = 0 ]; then echo "$(now_s) $msg" > "$SH/check.ok"; say "통과 · $msg"; else rm -f "$SH/check.ok"; say "🔴불통과 · $msg"; fi
   return "$rc"
 }
 
@@ -244,10 +245,14 @@ check_dirpred() {
 }
 check_sr_lean() {
   local start
-  if [ -n "$(pids_env rt_sr_lean RT_SR_OUT "$SH/run")" ]; then
-    start=$(cat "$SH/started" 2>/dev/null || echo 0)
+  local pid; pid=$(pids_env rt_sr_lean RT_SR_OUT "$SH/run" | head -n 1)
+  if [ -n "$pid" ]; then
+    # 그림자를 이 도구 밖에서 띄웠으면 started 가 없다 -- 워커 프로세스가 생긴 시각(/proc/<pid> 의 시각)으로(0 으로 두면 준비 구간까지 견준다)
+    start=$(head -n 1 "$SH/started" 2>/dev/null || stat -c %Y "/proc/$pid")
     [ $(( $(now_s) - start )) -ge 3900 ] || die "그림자 준비 중(시작 $(( ($(now_s) - start) / 60 ))분 전 · 1시간 준비 + 5분) -- 그 뒤 check 다시" 3
-    local out; out=$("$PY" rtmodel/tools/shadow_sr_lean.py "$LIVE/sr_lean" "$SH/run" --since $(( start + 3600 )) 2>&1 | tail -1); record_check $? "$out"
+    # 대조기 종료코드 그대로(0 = 양쪽 다 채점한 id 전부 같음 · 1 = 다른 줄 · 2 = 양쪽 id 없음) · 출력 전부(사건 수·다른 줄 예)를 한 줄로
+    local out rc; out=$("$PY" rtmodel/tools/shadow_sr_lean.py "$LIVE/sr_lean" "$SH/run" --since $(( start + 3600 )) 2>&1); rc=$?
+    record_check "$rc" "그림자 시작 $(date -u -d "@$start" +%H:%MZ) · 견줌 시작 $(date -u -d "@$(( start + 3600 ))" +%H:%MZ) · $out"
   else
     mkdir -p "$SH/run"; now_s > "$SH/started"
     RT_SR_OUT="$SH/run" RT_SR_MODEL="$MODELS/sr_lean.json" setsid nohup bash scripts/ops/supervisor_rt_sr_lean.sh > /dev/null 2>&1 < /dev/null &

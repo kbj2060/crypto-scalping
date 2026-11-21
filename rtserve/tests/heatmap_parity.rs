@@ -132,3 +132,32 @@ fn heatmap_route_over_http() {
     println!("heatmap HTTP: 요청 {n} · 다름 {}", bad.len());
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
+
+/// 🔴깨진 래스터(행 bin_lo ±20억 · 머리 n_bins 65535 × 큰 창)로 할당하다 죽지 않는다 -- 원본 MemoryError 처럼 그 요청만 실패(heatmap = 500 · 읽기 = Err/빈 창)
+#[test]
+fn broken_raster_does_not_abort() {
+    let dir = std::env::temp_dir().join(format!("rtserve_badraster_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let sym = dir.join("ETHUSDT");
+    std::fs::create_dir_all(&sym).unwrap();
+    let hour: i64 = 1_795_000_000_000 / 3_600_000 * 3_600_000;
+    let head = |nb: u16| [&b"FLWR"[..], &1u16.to_le_bytes(), &nb.to_le_bytes(), &0.5f32.to_le_bytes(), &0u32.to_le_bytes(), &hour.to_le_bytes(), &1000u32.to_le_bytes(), &0u32.to_le_bytes()].concat();
+    let mut f = head(240);
+    for (k, lo) in [(0i64, 6000i32), (1, 2_000_000_000), (2, -2_000_000_000), (3, 6001)] {
+        f.extend_from_slice(&(hour + k * 1000).to_le_bytes());
+        f.extend_from_slice(&lo.to_le_bytes());
+        f.extend_from_slice(&3000f32.to_le_bytes());
+        f.extend(std::iter::repeat_n(1f32.to_le_bytes(), 240).flatten());
+    }
+    std::fs::write(rtserve::raster_read::hour_path(&dir, "ethusdt", hour), &f).unwrap();
+    let to = hour + 10_000;
+    let e = rtserve::raster_read::try_read_window(&dir, "ethusdt", to, 300, 1).unwrap_err();
+    assert!(e.starts_with("MemoryError"), "{e}");
+    assert_eq!(rtserve::raster_read::read_window(&dir, "ethusdt", to, 300, 1).n_bins, 0, "못 읽음 = 빈 창");
+    assert!(rtserve::heatmap::heatmap_read(&dir, "ethusdt", to, 300, 1, false, None).is_err(), "히트맵 = 오류(→ 500)");
+    assert!(rtserve::heatmap::approach_read(&dir, "ethusdt", to).is_empty());
+    // 머리 n_bins 65535 × 54,000행 = 35억 칸
+    std::fs::write(rtserve::raster_read::hour_path(&dir, "ethusdt", hour), head(65535)).unwrap();
+    assert!(rtserve::raster_read::try_read_window(&dir, "ethusdt", to, 900, 60).unwrap_err().starts_with("MemoryError"));
+    let _ = std::fs::remove_dir_all(dir);
+}

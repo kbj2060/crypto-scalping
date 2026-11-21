@@ -236,19 +236,27 @@ pub(crate) fn day_from_tape(sp: &Spec, t: &Tape) -> Bucket {
 }
 
 /// footprint_daily.rebin: CELL 칸 → row 칸. [첫 칸 하한($), [매수…], [매도…]] (빈 칸 0 채움 · np.add.at 차례 합 · np.round 3).
-pub(crate) fn rebin(sp: &Spec, c: &Cells, row: i64) -> V {
+/// 🔴칸 수 상한(2026-11-22): 원본은 `np.zeros(n)` -- 엉뚱한 가격 칸 하나면 MemoryError 가 그 요청만 깨뜨린다(→ 500 · ValueError 가 아니라 400 range 도 아님).
+/// Rust 는 할당 실패 = 프로세스 abort 라 할당 전에 막는다. 정상 = 하루 가격 범위 ÷ row(ETH ±20% 를 1칸으로 봐도 1,200칸) → 100만 칸이면 넉넉하다.
+pub const REBIN_MAX: i64 = 1_000_000;
+
+pub(crate) fn rebin(sp: &Spec, c: &Cells, row: i64) -> Res<V> {
     if c.0.is_empty() {
-        return json!([0, [], []]);
+        return Ok(json!([0, [], []]));
     }
     let k: Vec<i64> = c.0.iter().map(|b| b.div_euclid(row)).collect();
     let lo = *k.iter().min().unwrap();
-    let n = (k.iter().max().unwrap() - lo + 1) as usize;
+    let span = k.iter().max().unwrap().saturating_sub(lo).saturating_add(1);
+    if span > REBIN_MAX {
+        return Err(format!("MemoryError: Unable to allocate array with shape ({span},)"));
+    }
+    let n = span as usize;
     let (mut bb, mut ss) = (vec![0.0; n], vec![0.0; n]);
     for (i, kk) in k.iter().enumerate() {
         bb[(kk - lo) as usize] += c.1[i];
         ss[(kk - lo) as usize] += c.2[i];
     }
-    json!([py_round((lo * row) as f64 * sp.cell, sp.dp), bb.iter().map(|&x| np_round3(x)).collect::<Vec<_>>(), ss.iter().map(|&x| np_round3(x)).collect::<Vec<_>>()])
+    Ok(json!([py_round((lo * row) as f64 * sp.cell, sp.dp), bb.iter().map(|&x| np_round3(x)).collect::<Vec<_>>(), ss.iter().map(|&x| np_round3(x)).collect::<Vec<_>>()]))
 }
 
 pub const COLS: [&str; 14] = ["d", "o", "h", "l", "c", "bq", "sq", "bv", "sv", "oi", "ll", "ls", "src", "part"];
@@ -556,7 +564,7 @@ impl Fpd {
         let mut out = Map::new();
         for k in have {
             let c = hist_cells.and_then(|h| h.get(&k)).unwrap_or_else(|| &recent_cells[&k]);
-            out.insert(k, rebin(&self.sp, c, row));
+            out.insert(k, rebin(&self.sp, c, row)?);
         }
         Ok(json!({"row": py_round(row as f64 * self.sp.cell, self.sp.dp), "cells": out}))
     }
@@ -684,7 +692,7 @@ impl Fpd {
         let mut out = Map::new();
         for (k, v) in b {
             if frm <= k.as_str() && k.as_str() <= to {
-                out.insert(k, rebin(&self.sp, &v.1, row));
+                out.insert(k, rebin(&self.sp, &v.1, row)?);
             }
         }
         Ok(json!({"row": py_round(row as f64 * self.sp.cell, self.sp.dp), "cells": out}))

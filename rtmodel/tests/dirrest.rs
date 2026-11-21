@@ -180,3 +180,33 @@ fn eth_dir_short_handler() {
     }
     assert!(bad.is_empty());
 }
+
+/// ETH 4h 서빙 길 = 원본 d4.live_payload(서버의 4h 모듈 인스턴스 · 캐시 따로)를 가짜 거래소로 부른 것과 대조: 요청 열 · payload 숫자 비트 · 두 회차.
+/// 모델 = 11-22 서버에서 가져온 data/live/eth_dir4h_model.joblib 를 export_dir4h.py 로 내보낸 dir4h_eth.json. 정답지 = gen_dirshort_eth_fixture.py 의 steps4h
+#[test]
+fn eth_dir4h_handler() {
+    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let fx: Value = rtmodel::read_json(&d.join("dirshort_eth_fixture.json")).expect("python rtmodel/tools/gen_dirshort_eth_fixture.py 먼저");
+    let art = dir4h::Art::load(&d.join("dir4h_eth.json")).expect("python rtmodel/tools/export_dir4h.py <data/live> rtmodel/tests/fixtures 먼저");
+    let mut r4 = Rest::default();
+    let (mut bad, mut nreq) = (vec![], 0);
+    for st in fx["steps4h"].as_array().unwrap() {
+        let now = st["now_ms"].as_i64().unwrap();
+        let mut q: VecDeque<&Value> = st["requests"].as_array().unwrap().iter().collect();
+        let mut get = |path: &str, params: &[(&'static str, String)]| -> Result<Value, String> {
+            let w = q.pop_front().expect("원본보다 요청이 많다");
+            let wp: Vec<(String, String)> = w[1].as_array().unwrap().iter().map(|p| (p[0].as_str().unwrap().into(), p[1].as_str().unwrap().into())).collect();
+            assert_eq!((path, params.iter().map(|(k, v)| (k.to_string(), v.clone())).collect::<Vec<_>>()), (w[0].as_str().unwrap(), wp));
+            nreq += 1;
+            Ok(w[2].clone())
+        };
+        let pay = rtmodel::handlers::dir4h_body(&mut r4, &mut get, now, now as f64, "ETH", &art).unwrap();
+        assert!(q.is_empty(), "{now}: 원본 요청이 남았다");
+        same(&pay, &st["payload"], &format!("ETH 4h/{now}"), &mut bad);
+    }
+    println!("ETH 4h 핸들러: 회차 {} · 요청 {nreq} · payload 다른 값 {}", fx["steps4h"].as_array().unwrap().len(), bad.len());
+    for b in bad.iter().take(8) {
+        println!("  {b}");
+    }
+    assert!(bad.is_empty());
+}
