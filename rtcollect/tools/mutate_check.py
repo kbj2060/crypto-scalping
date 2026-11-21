@@ -243,6 +243,17 @@ M = [
     ("청산지도 유지증거금 더하기 → 빼기", "src/liqmap_scorer.rs", "1.0 - 1.0 / l + MMR", "1.0 - 1.0 / l - MMR", ["liqmap_parity"]),
     ("청산지도 적힌 기준도 다시", "src/liqmap_scorer.rs", "filter(|&i| !done.contains(&iso(k.t[i])))", "filter(|&i| i < usize::MAX)", ["liqmap_parity"]),
     ("청산지도 실측 창 끝 포함", "src/liqmap_scorer.rs", "x.ts >= t0 && x.ts < t1", "x.ts >= t0 && x.ts <= t1", ["liqmap_parity"]),
+    ("np.sum 8192칸 묶음 없앰", "src/ob5m.rs", "    if a.len() <= 8192 {\n        return pairwise(a);\n    }", "    if true {\n        return pairwise(a);\n    }", ["np_sum_parity"]),
+    ("뉴스 링크 쿼리 안 뗌", "src/news.rs", "strip(raw).split('?').next().unwrap_or(\"\")", "strip(raw)", ["news_parity"]),
+    ("뉴스 링크 끝 / 안 뗌", "src/news.rs", ".trim_end_matches('/').to_string();", ".to_string();", ["news_parity"]),
+    ("뉴스 guid 대체 안 함", "src/news.rs", ".or_else(|| or_empty(findtext(it, \"guid\")))", "", ["news_parity"]),
+    ("뉴스 이름공간 item 도 셈", "src/news.rs", "ResolveResult::Bound(_) => None,", "ResolveResult::Bound(_) => Some(String::from_utf8_lossy(e.local_name().as_ref()).to_string()),", ["news_parity"]),
+    ("뉴스 429 주기 4배 → 1배", "src/news.rs", "due.insert(src, t0 + 4.0 * every);", "due.insert(src, t0 + every);", ["news_parity"]),
+    ("뉴스 두 자리 연도 68 경계", "src/news.rs", "y += if y > 68 { 1900 } else { 2000 };", "y += if y >= 68 { 1900 } else { 2000 };", ["news_parity"]),
+    ("뉴스 BWE 거르기 끔", "src/news.rs", "items.retain(|it| !bwe_drop(&it.1));", "items.retain(|_| true);", ["news_parity"]),
+    ("뉴스 줄 끝 정규화 안 함", "src/news.rs", "            Event::Text(t) => {\n                let s = t.xml10_content()", "            Event::Text(t) => {\n                let s = t.decode()", ["news_parity"]),
+    ("뉴스 첫 폴링도 backfill 아님", "src/news.rs", "store(&c, src, &items, (clock() * 1000.0) as i64, first[src])", "store(&c, src, &items, (clock() * 1000.0) as i64, false)", ["news_parity"]),
+    ("뉴스 첫 자식 뒤 글자도 .text", "src/news.rs", "            if top.kids.is_empty() {\n                top.text", "            if true {\n                top.text", ["news_parity"]),
     ("SOXL주말 펀딩 0건 = 0.0", "src/soxl_weekend.rs", "let mut sum = json!(0);", "let mut sum = json!(0.0);", ["soxl_weekend_parity"]),
     ("SOXL주말 lag 안 적음", "src/soxl_weekend.rs", "            if lag != 0 {", "            if false {", ["soxl_weekend_parity"]),
     ("SOXL주말 적힌 주말도 다시", "src/soxl_weekend.rs", "if done.contains(&iso_date(sat)) {", "if false {", ["soxl_weekend_parity"]),
@@ -250,7 +261,7 @@ M = [
     ("SOXL주말 펀딩 시작 +1ms 안 함", "src/soxl_weekend.rs", "pt[0].1 + 1, pt[1].1))?;", "pt[0].1, pt[1].1))?;", ["soxl_weekend_parity"]),
     ("예약 cboe 요약기 실패도 저장으로", "src/cron.rs", "                    println!(\"{s} 실패 {e}\");\n                    saved.push(p);\n                    rc = 1;", "                    let _ = e;\n                    saved.push(p);", ["cron_parity"]),
 ]
-PARITY = ["tape_parity", "venue_parity", "rest_parity", "ctx_parity", "venue_rest_parity", "depth_parity", "raster_parity", "ob5m_parity", "iceberg_parity", "cron_parity", "cboe_summary_parity", "liqmap_parity", "soxl_weekend_parity"]
+PARITY = ["tape_parity", "venue_parity", "rest_parity", "ctx_parity", "venue_rest_parity", "depth_parity", "raster_parity", "ob5m_parity", "iceberg_parity", "cron_parity", "cboe_summary_parity", "liqmap_parity", "soxl_weekend_parity", "np_sum_parity", "news_parity"]
 
 
 def digest() -> str:

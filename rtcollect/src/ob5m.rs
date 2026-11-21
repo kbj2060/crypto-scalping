@@ -43,8 +43,21 @@ pub fn coin(sym: &str) -> Option<(f64, f64, [f64; 3], usize)> {
     })
 }
 
-/// numpy 짝 합(pairwise_sum): 8칸 미만 차례 합 · 128칸 이하 8갈래 펼침 · 넘으면 8의 배수로 반 나눔.
+/// np.sum(연속 f64 1차원): numpy 는 버퍼 8192칸 묶음마다 짝 합을 내고 그 묶음 합을 차례로 더한다(2026-11-21 서버 판 numpy 2.2.5 비트 대조 -- tests/np_sum_parity.rs).
+/// 8192칸 이하는 짝 합 하나(전과 같다).
 pub fn np_sum(a: &[f64]) -> f64 {
+    if a.len() <= 8192 {
+        return pairwise(a);
+    }
+    let mut s = 0.0;
+    for c in a.chunks(8192) {
+        s += pairwise(c);
+    }
+    s
+}
+
+/// numpy 짝 합(pairwise_sum): 8칸 미만 차례 합 · 128칸 이하 8갈래 펼침 · 넘으면 8의 배수로 반 나눔.
+fn pairwise(a: &[f64]) -> f64 {
     let n = a.len();
     if n < 8 {
         let mut s = 0.0;
@@ -72,7 +85,7 @@ pub fn np_sum(a: &[f64]) -> f64 {
     }
     let mut n2 = n / 2;
     n2 -= n2 % 8;
-    np_sum(&a[..n2]) + np_sum(&a[n2..])
+    pairwise(&a[..n2]) + pairwise(&a[n2..])
 }
 
 pub fn np_mean(a: &[f64]) -> f64 {

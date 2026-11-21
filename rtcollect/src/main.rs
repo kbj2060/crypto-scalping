@@ -35,7 +35,7 @@ use std::time::Duration;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::task::JoinSet;
 
-const KINDS: &str = "binance_tape|bybit_liq|bybit_tape|okx_tape|okx_ctx|binance_ctx|xyz|hl_ctx|hl_bt|depth|raster|ob5m|bookdepth|iceberg|treasury_futures|macro_5m|cboe_chain|liqmap_scorer|soxl_weekend";
+const KINDS: &str = "binance_tape|bybit_liq|bybit_tape|okx_tape|okx_ctx|binance_ctx|xyz|hl_ctx|hl_bt|depth|raster|ob5m|bookdepth|iceberg|treasury_futures|macro_5m|cboe_chain|liqmap_scorer|soxl_weekend|news";
 
 fn env_f(k: &str, d: f64) -> f64 {
     std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
@@ -103,6 +103,7 @@ fn main() {
             "treasury_futures" | "macro_5m" | "cboe_chain" => run_cron(&kind),
             "liqmap_scorer" => run_liqmap(),
             "soxl_weekend" => run_soxl_weekend(),
+            "news" => run_news(),
             k => die(2, &format!("RTCOLLECT_KIND={k} -- {KINDS}")),
         }
     });
@@ -639,5 +640,40 @@ fn run_soxl_weekend() -> ! {
             std::process::exit(0)
         }
         Err(e) => die(1, &e),
+    }
+}
+
+/// 뉴스 RSS(live_news_rss_collector_20261005 -- 상주). NEWS_RSS_DB(기본 data/hot/rtcollect/news_rss.sqlite -- data/hot/news_rss.sqlite 는 RTCOLLECT_TAKEOVER=1 일 때만) ·
+/// NEWS_RSS_TICK_S(5) · RTCOLLECT_NEWS_BASE(시험만 -- 피드 주소의 "https://<호스트>" 를 이 앞부분으로 바꾼다 · 127.0.0.1 만).
+/// 🔴바깥 사이트 8곳(CoinDesk·Cointelegraph·The Block·Tree·BWE·FinancialJuice·Fed·SEC)을 원본과 같은 주기로 부른다 -- 그림자로 켜면 그 사이트들 호출이 두 배(429 를 본 피드: tree 15초·financialjuice 30초).
+fn run_news() -> ! {
+    let db = db_path("NEWS_RSS_DB", "news_rss.sqlite");
+    let tick = env_f("NEWS_RSS_TICK_S", 5.0);
+    let base = std::env::var("RTCOLLECT_NEWS_BASE").ok().map(|_| rtcollect::cron::base("RTCOLLECT_NEWS_BASE", ""));
+    let agent = rtcollect::rest::agent(Duration::from_secs(20)); // urlopen(timeout=20)
+    let mut get = |u: &str, h: &[(&str, String)]| -> rtcollect::news::Resp {
+        let u = match &base {
+            Some(b) => format!("{b}/{}", u.splitn(4, '/').nth(3).unwrap_or("")),
+            None => u.to_string(),
+        };
+        let mut rq = agent.get(&u);
+        for (k, v) in h {
+            rq = rq.header(*k, v);
+        }
+        let mut r = rq.call().map_err(|e| format!("URLError({e})"))?;
+        let st = r.status().as_u16();
+        let hs = r.headers().iter().map(|(k, v)| (k.as_str().to_lowercase(), v.to_str().unwrap_or("").to_string())).collect();
+        let mut body = vec![];
+        std::io::Read::read_to_end(&mut r.body_mut().as_reader(), &mut body).map_err(|e| format!("OSError({e})"))?;
+        Ok((st, body, hs))
+    };
+    let mut clock = wall_s;
+    let mut sleep = |s: f64| {
+        std::thread::sleep(Duration::from_secs_f64(s));
+        true
+    };
+    match rtcollect::news::run(&db, &rtcollect::news::FEEDS, &mut clock, &mut sleep, &mut get, tick, &mut |l| println!("{l}")) {
+        Ok(()) => std::process::exit(0),
+        Err(e) => die(1, &format!("DB: {e}")),
     }
 }

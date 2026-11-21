@@ -50,7 +50,7 @@ M = [
     ("래스터보관 14일 → 13일", "src/raster_archive.rs", "now_s - (retention_days * 86_400) as f64", "now_s - ((retention_days - 1) * 86_400) as f64", ["raster_archive_parity"]),
     ("래스터보관 mid 행 = 0 아닌 칸만", "src/raster_archive.rs", "            am.append_row(params![ts, mid]).map_err(|e| e.to_string())?;", "            if nb > 0 && raw[o + 16] != 0 { am.append_row(params![ts, mid]).map_err(|e| e.to_string())?; }", ["raster_archive_parity"]),
     ("청산탭 groupby Kahan → 그냥 합", "src/liq_tab.rs", "kahan(m.entry(k).or_insert((0.0, 0.0)), v);", "m.entry(k).or_insert((0.0, 0.0)).0 += v;", ["liq_tab_parity"]),
-    ("청산탭 8192칸 묶음 없앰", "src/liq_tab.rs", "for c in a.chunks(8192) {", "for c in a.chunks(usize::MAX) {", ["liq_tab_parity"]),
+    # «청산탭 8192칸 묶음 없앰» → rtcollect mutate_check «np.sum 8192칸 묶음 없앰»(묶음을 공유 np_sum 으로 옮김 · 2026-11-21 아홉째 조각)
     ("청산탭 convolve 차례 뒤집음", "src/liq_tab.rs", "for x in &v[j.saturating_sub(5)..(j + 6).min(m)] {", "for x in v[j.saturating_sub(5)..(j + 6).min(m)].iter().rev() {", ["liq_tab_parity"]),
     # (뺌) «청산탭 np.round → 파이썬 round»: 사실상 같은 변이 -- rint(x·10^d)/10^d 와 정확 반올림은 x·10^d 의 곱셈 반올림이 .5 경계를 넘을 때만 갈린다
     #   (값 ~1e7·d=2 면 값 하나에 ~1e-7 · share 단위 d=8 은 ~1e-11 확률). 2026-11-21 돌린 결과 «통과»(못 잡음) -- 합성으로 그 경계를 만들 길이 없다.
@@ -61,6 +61,11 @@ M = [
     ("청산탭 바이비트 OI 10분 → 100분", "src/liq_tab.rs", "let since = now_ms - 600_000;", "let since = now_ms - 6_000_000;", ["liq_tab_parity"]),
     ("청산탭 띠 30일 → 29일", "src/liq_tab.rs", "days[days.len().saturating_sub(30)..]", "days[days.len().saturating_sub(29)..]", ["liq_tab_parity"]),
     ("청산탭 12시간 앞 봉 무게 안 지움", "src/liq_tab.rs", ".take(m.saturating_sub(h))", ".take(0)", ["liq_tab_parity"]),
+    ("봉인 RESEAL 8일 → 0일", "src/seal.rs", "pub const RESEAL_DAYS: i64 = 8;", "pub const RESEAL_DAYS: i64 = 0;", ["seal_parity"]),
+    ("봉인 적은 원천도 덮음", "src/seal.rs", "                    if n < on {", "                    if false {", ["seal_parity"]),
+    ("봉인 LAG 2시간 → 0", "src/seal.rs", "pub const LAG_HOURS: i64 = 2;", "pub const LAG_HOURS: i64 = 0;", ["seal_parity"]),
+    ("봉인 날짜 하루 밀림", "src/seal.rs", "cast(floor(({ts_sql}) / 86400000.0) as integer)", "cast(floor(({ts_sql}) / 86400000.0) as integer) + 1", ["seal_parity"]),
+    ("HL체결 가짜 시계 = 벽시계 + 차이", "src/hl_trades.rs", "        Some((i0, t)) => t + i0.elapsed().as_secs_f64(),", "        Some((_, t)) => *t + 0.0 * rtcollect::rest::wall_s(),", ["hl_trades_loop"]),
     ("청산탭 앞쪽 메움 안 함", "src/liq_tab.rs", "        if mn > need + DAY {", "        if false {", ["liq_tab_parity"]),
 ]
 

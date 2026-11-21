@@ -8,3 +8,4 @@ pub mod market;
 pub mod micro;
 pub mod oi;
 pub mod raster_archive;
+pub mod seal;

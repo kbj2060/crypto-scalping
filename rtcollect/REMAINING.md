@@ -25,7 +25,7 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | HL 체결 | DuckDB 일별 → 3일 뒤 gz | HL 포지션 입력 · 감시 | — | **옮김** `rtduck hl_trades` | — |
 | market_data_worker `duckdb_persist_worker` | DuckDB 둘(microstructure 1분 ETH·BTC·SOL · tail_risk 1분 ETH) + JSON 둘(dashboard_state · liq_burst_state) | 화면 세션 칸·SSE 갱신 신호(dashboard_state) · 감시 check_dashboard·check_data_sources·신선도 4줄 · seal micro_1m·tail_risk_1m | — | **옮김** `rtduck market_data` = 미시구조(depth20·aggTrade 웹소켓 + OI·premiumIndex 10초 REST + aggTrades 대체 · 34칸) + 청산 요격기 + dashboard_state(장 달력 = pandas_market_calendars 를 뜬 표) · 미시구조 REST 기본 꺼짐 | 감시 check_data_sources 를 Rust 파일로 돌려 파이썬 파일과 같은 판정(OK) |
 | oi_lsratio 워커 | DuckDB | **server 롱숏비(server.py:2536)** · seal | — | **옮김** `rtduck oi_lsratio`(REST 기본 꺼짐 · 밴 파일) | — |
-| 뉴스 RSS | SQLite hot | /api/news | — | 안 옮김 | XML·HTML 엔티티·RFC822 날짜·정규식 크레이트(사용자 결정) |
+| 뉴스 RSS | SQLite hot | /api/news | — | **옮김** `news`(quick-xml·regex · 조정자 결정 2026-11-21) | 원본 run() 90바퀴 정답지와 요청 68(머리글 포함)·기사 49행·polls 69행·스키마 일치 |
 | deribit 블록체결·GEX | JSON 둘 + 옵션 DuckDB | server 옵션 카드 · 감시 | — | 안 옮김 | 옵션 DuckDB 몫(크레이트) · JSON 몫만 떼는 것은 결정 필요 |
 | SR lean `live_sr_lean` | JSONL | /api/sr-lean | sr_ml_5m_forward | **rtmodel** | 모델 서빙 |
 | 푸시 알림 · SR 근접 알림 | 웹푸시·텔레그램 | 폰 · 알림 센터 | — | 범위 밖(알림) | — |
@@ -43,7 +43,7 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | soxl_weekend_forward | 매일 | JSONL | 판정 | soxl_wknd1·2 | 안 옮김 | 바이낸스 REST + 규칙 계산 |
 | macro_bias_forward | 주말 | JSONL | 판정 | fwd_macro_regime | 안 옮김 | pandas 계산 |
 | risk_radar · regime_band · eth_direction_forward_recorder | 매분·매시·매일 | JSON·JSONL | 화면·판정 | regime: fwd_band · dir: dir4h_p2·dir3asset | **rtmodel** | 모델 예측 기록 |
-| seal_to_lake | 매일 | Parquet | 전진 다수 · 감시 | 여럿 | 안 옮김 | parquet(arrow) 크레이트 |
+| seal_to_lake | 매일 | Parquet | 전진 다수 · 감시 | 여럿 | **반쯤** `rtduck::seal`(DuckDB 원천 · 첫 표 binance/oi_lsratio_5m) | 원본도 DuckDB COPY 로 쓴다 · 🔴SQLite 원천은 sqlite 확장 없음 · hot 정리·seal_status 남음 · 실행 종류 아직 없음 |
 | 월간 학습(dir4h·vol4h·dir_short·box_hold Platt) | 월간 | joblib | 서빙 | 여럿 | 파이썬 유지(학습) | — |
 | raw_failover · data_quality_monitor · morning_audit · multicoin_collectors · gen_data_map · verdict_ledger_health · backup | 여러 | JSON·보고 | 감시·사용자 | — | 범위 밖(R7 운영) | — |
 
@@ -78,8 +78,8 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | 상주 | HL 체결 `hl_trades` | 옮김 | rtduck | ×1 |
 | 상주 | HL 포지션 `hl_positions` | 옮김 | rtduck | ×2 -- 🔴가중치 600/분 → 1,200 = HL 한도 100%(전환 때만 켬) |
 | 상주 | market_data_worker `market_data` | 옮김 | rtduck | ×2 -- 미시구조 36/분 → 72(기본 꺼짐) |
-| 상주 | 뉴스 RSS | 안 옮김 | — | (XML·HTML 엔티티·RFC822 -- 크레이트 결정) |
-| 상주 | deribit 블록체결·GEX | 안 옮김 | — | (옵션 DuckDB) |
+| 상주 | 뉴스 RSS `news` | 옮김 | rtcollect(quick-xml · regex) | ×2 -- 바깥 8곳(429 본 피드 있음) · 그림자 등록 후보에서 뺌 |
+| 상주 | deribit 블록체결·GEX | 안 옮김(조사만 -- 아래) | — | (Deribit WS·REST · history API) |
 | 상주 | SR lean | rtmodel | — | — |
 | 상주 | 푸시·SR 근접 알림 | 범위 밖(알림) | — | — |
 | 예약 | treasury_futures · macro_5m | 옮김 | rtcollect | ×2 -- 🔴Yahoo 429 위험 · 기본 안 켬 |
@@ -89,13 +89,13 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | 예약 | liq_tab | 옮김 `liq_tab` | rtduck | ×1(그림자 = REST 끄고 파이썬 1h 봉 캐시 복사) · 켜면 ×2(코인당 1회/시) |
 | 예약 | soxl_weekend_forward | 옮김 `soxl_weekend`(`--record`·`--status`) | rtcollect | ×2 -- 새 주말마다 9요청 → 18/주 |
 | 예약 | macro_bias_forward · macro_daily | 안 옮김(조정자 결정) | — | (FRED 키·Yahoo·재무부·DefiLlama) · 막는 것 = 위 조사 표 |
-| 예약 | seal_to_lake | 안 옮김 | — | parquet(arrow) |
+| 예약 | seal_to_lake | **반쯤** -- `rtduck::seal` DuckDB 원천(첫 표 binance/oi_lsratio_5m 일치) · SQLite 원천 13 스트림 남음(sqlite 확장) · hot 정리·상태 JSON 남음 | rtduck | ×1(REST 없음) |
 | 예약 | risk_radar · regime_band · eth_direction_forward | rtmodel | — | — |
 | 예약 | 월간 학습 | 파이썬 유지 | — | — |
 | 예약 | raw_failover · dqm · morning_audit · multicoin · gen_data_map · verdict_ledger_health · backup | 범위 밖(R7 운영) | — | — |
 
-**요약**: 상주 옮김 18(rtcollect 14 · rtduck 4) · 안 옮김 2(뉴스 RSS · deribit) · rtmodel 1 · 범위 밖 1 /
-예약 옮김 7(treasury · macro_5m · cboe+요약기 · liqmap_scorer · soxl_weekend · 래스터 보관 · liq_tab) · 안 옮김 3(macro_bias · macro_daily -- 조정자 결정 · seal_to_lake -- parquet 확장이 생겨 크레이트 막힘은 풀림) · rtmodel 3.
+**요약**: 상주 옮김 19(rtcollect 15 · rtduck 4) · 안 옮김 1(deribit -- 조사 표 아래) · rtmodel 1 · 범위 밖 1 /
+예약 옮김 7(treasury · macro_5m · cboe+요약기 · liqmap_scorer · soxl_weekend · 래스터 보관 · liq_tab) · 안 옮김 2(macro_bias · macro_daily -- 조정자 결정) · 반쯤 1(seal_to_lake -- DuckDB 원천만) · rtmodel 3.
 옮기지 않은 «불확실»: 뉴스 판정·ollaya · prometheus · trend_core_forward · f4c altdata · llm_brief / «안 쓰임»: 돌파 워커 · 신호 워커 · maxpain 기록기 · maker_fill_shadow.
 
 ---
@@ -131,3 +131,17 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 - 미시구조: 분 버킷을 `datetime.now()`(지역 시각, naive)로 TIMESTAMPTZ 에 넣는다(:840·853) · 주석 «trading_bot.py 가 미시구조를 소유»(`duckdb_persist_worker.py:32-37`)는 봇 은퇴(10-12) 뒤 낡음 ·
   tail risk 는 ETH 만 쓰는데 ETH 외 폴백은 더 이상 갱신되지 않는 `tail_risk_1m_btc` 등을 읽는다(`coin_config.py:48·60`).
 - 뉴스: 동기 루프라 한 피드 시간초과(20초)가 나머지를 민다(:126) · 저장 실패해도 polls 에 status 200·n 이 남는다(:127·146-150) · sec.gov 는 연락처 UA 를 요구하는데 브라우저 UA(:50).
+
+
+## deribit 블록체결·GEX 조사 (2026-11-21 아홉째 조각 -- 옮기지 않음)
+
+| 몫 | 원본 | 크기 | 하는 것 | 옮길 때 막는 것 |
+|---|---|---|---|---|
+| 체결 WS | live_deribit_block_trade_collector `run`·`row`·`write` | ~200줄 | `wss://www.deribit.com/ws/api/v2` 구독 `trades.option.{ETH,BTC,USDC}.100ms` · 하트비트 30초·90초 무음 = 끊김 · 20초마다 option_trades(trade_id PK)·gaps 에 · 재기동 틈은 REST 백필(24시간) | tokio-tungstenite·duckdb 로 된다(새 크레이트 없음) · 가짜 WS·REST 로 정답지 |
+| 블록 묶음·구조 | `group_blocks`·`block_shape`·`_shape` | ~110줄 | 블록 다리 → 구조 13종(straddle…iron_condor) · BS 델타·베가 부호 | GEX 모듈의 `_parse_instrument`·`_bs_delta` 를 같이 옮겨야 한다(cboe_summary 의 BS 와 식이 비슷하나 별개) |
+| 시간당 대조 | `reconcile`·`hourly_doi`·`hourly_flow` | ~140줄 | history.deribit.com 으로 3시간 겹쳐 빠진 체결·block_rfq_trades·block_future_legs 메움 · 시간당 OI 변화 | REST 셋(history·public 둘) |
+| 체인·요약 10분 | collect_deribit_option_gex `poll_once`·`options_summary`·`write_state` | ~450줄(pandas) | ETH·BTC·SOL·XRP 체인 스냅숏 · GEX·감마 플립 · DVOL·실현 7일·만기별 ATM IV/RR/BF·max pain · OKX·Bybit 옵션 가격(다른 거래소) | pandas 계산 450줄을 값 일치로(cboe_summary 와 같은 종류의 일 -- 1~2 조각) · 다른 거래소 REST 둘 |
+| 옛 파일 옮기기 | `migrate_once` | ~30줄 | 첫 기동 때 옛 duckdb 둘의 이력 복사 | 서버에서는 이미 끝남(옮길 필요 없음일 가능성 -- 확인) |
+| 상태 JSON 둘 | deribit_block_trades_state.json · deribit_gex_state.json | — | 대시보드 «옵션» 카드의 원천 | 위 전부가 있어야 같은 글자 |
+
+순서 제안: ① 체결 WS + 블록 묶음 + 상태 JSON(블록 몫) → ② 체인·요약(pandas 450줄) → ③ 시간당 대조. 🔴단일 writer: 그림자는 다른 duckdb 파일에(원본과 같은 파일이면 하나가 죽는다).

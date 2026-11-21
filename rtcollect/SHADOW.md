@@ -287,3 +287,18 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
 | treasury_futures · macro_5m | Yahoo 매분·매시 / 5분 | ×2 | 후보에서 뺌(429) |
 
 대조: liqmap = 같은 origin 줄 글자 · soxl = 같은 weekend 줄(recorded_at 빼고) · cboe = cboe_option_state.json 의 종목 칸(generated 시각 빼고) · liq_tab = generated_ms 빼고 글자 · 래스터 보관 = 같은 시각 파일을 두 쪽 duckdb 로 읽은 행.
+
+## 16. 뉴스 RSS · lake 봉인 첫 표 · 간헐 실패 (2026-11-21 아홉째 조각)
+
+- `news`(rtcollect · 상주): `NEWS_RSS_DB`(기본 `data/hot/rtcollect/news_rss.sqlite` -- 원본 `data/hot/news_rss.sqlite` 는 TAKEOVER 때만) · `NEWS_RSS_TICK_S`(5).
+  피드 8개·주기·조건부 GET·429 4배 쉼·BWE 거르기·polls 7일 정리 = 원본 그대로. 🔴그림자로 켜면 바깥 사이트 8곳 호출이 **두 배**(tree 15초·financialjuice 30초에서 429 를 본 적 있다 -- 원본 주석) → 등록 후보에서 뺀다(전환 때만).
+  감독 줄 후보: `@reboot sleep 90 && cd <저장소> && RTCOLLECT_KIND=news bash scripts/ops/supervisor_rtcollect.sh >> logs/supervisor/rtcollect_reboot.log 2>&1 &`(전환 때 NEWS_RSS_DB=data/hot/news_rss.sqlite RTCOLLECT_TAKEOVER=1).
+  원본과 다를 수 있는 곳(정답지 밖): XML 인코딩은 UTF-8 만 · DOCTYPE 안 개체 선언 안 풂 · 잘못된 XML 의 오류 판정은 quick-xml 기준(expat 보다 너그러운 곳이 있을 수 있다 -- 그 경우 원본은 그 폴링 «실패», Rust 는 읽음) · int() 의 유니코드 숫자.
+  HTML 개체 표는 `rtcollect/src/html.rs` 한 곳(rtserve 의 `src/html_entities.rs`·`text::unescape` 는 이쪽을 쓰도록 옮길 것 -- rtserve 에이전트 몫).
+- `rtduck::seal`(봉인 · 실행 종류는 아직 없음): 원본 seal_to_lake 도 DuckDB `COPY … (format parquet, compression zstd)` 로 쓴다(pyarrow 아님). DuckDB 파일 원천만 됨 --
+  binance/oi_lsratio_5m 으로 원본과 두 번(봉인 → 재봉인·거부·건너뜀) stats·파일·열·형·값 일치 · 서버 판 파이썬이 Rust lake 를 같은 값으로 읽고, 원본 seal() 을 그 위에 다시 돌리면 46파일 모두 «건너뜀»(지문 = hash(row) XOR 같음).
+  🔴SQLite 원천(hot 테이프·맥락 13 스트림)은 `attach … (TYPE sqlite)` = sqlite 확장이 묶음에 없다 → 다음 조각(rusqlite 로 읽어 DuckDB 임시 표로 -- 형 대응을 sqlite_scanner 와 같게 해야 지문이 같다). 날짜 식은 ICU 없이 정수 ms 산수(같은 날짜).
+- 간헐 실패(조정자 재실행 5회 중 1회): 부하(바쁜 고리 6개) 아래 rtduck 시험 9개 × 20회 → **hl_trades_loop 2/20**, 나머지 0/20.
+  원인 = 시험용 가짜 시계(`RTDUCK_FAKE_START`)가 «벽시계 + 차이»라 WSL 벽시계가 1.5~2.4초 뒤로 뛰면 자정 넘기가 밀려, 다시 붙은 뒤 공백 줄이 전날 파일에 들어갔다(`gaps` 0줄).
+  고침: 가짜 시계만 «시작 + 단조 경과»(실제 실행은 원본처럼 벽시계 그대로 -- 실행 파일 쪽 시험 전용 길) · 시험의 시간 창을 부하 여유로 넓힘.
+  market_loop 는 20/20 통과했지만 같은 가짜 서버를 두 실행이 같이 써서, 밴 중 실행이 끝나기 직전의 요격기 재접속이 다음 실행 기록·각본 번호에 섞일 수 있는 경쟁이 있었다 → 실행마다 새 포트 서버 · 첫 실행은 «웹소켓 셋이 붙은 뒤»로 조건 대기.
