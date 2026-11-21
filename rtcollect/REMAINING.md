@@ -20,7 +20,7 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | 호가 래스터 | 고정폭 `.f32`(+14일 뒤 parquet·duckdb 보관) | server read_window → 히트맵·시장 맥락 | — | **옮김** `raster`(.f32 쓰기만 · 스냅숏 REST 필수) | 보관·지우기 = 파이썬 cron 으로 남김(parquet·duckdb 크레이트) |
 | ob5m 실시간 워커 `live_ob5m` | SQLite `data/live/ob5m/<코인>.sqlite` | /api/ob5m(화면) | — | **옮김** `ob5m`(기본 쓰기 자리 data/live/rtcollect/ob5m · 원본 자리는 RTCOLLECT_TAKEOVER=1) | 합성 14시간 depthdiff·테이프 → 봉·사건 벽·live 칸 7,417 비트 일치 · /api/ob5m 읽기 코드 교차 확인 |
 | 호가 깊이 10열 `live_bookdepth_feat` | SQLite `data/live/bookdepth/ethusdt.sqlite` | live_eth_dir_short 피쳐(→ rtmodel) | fwd_dirshort | **옮김** `bookdepth` | 칸 2,110 비트 · 930 은 1e-12 안(최대 3.6e-15 = 원본 `arr @ prices` 가 BLAS ddot · 서버 OpenBLAS·개발기 MKL) · dir_short.book_row float32 161/161 같음 |
-| 아이스버그 `live_eth_iceberg` | JSON 상태 + JSONL 사건 | /api/iceberg · 감시 | — | 안 옮김 | depthdiff + hot 테이프 30초 창 계산(numpy) · 291줄 |
+| 아이스버그 `live_eth_iceberg` | JSON 상태 + JSONL 사건 | /api/iceberg · 감시 | — | **옮김** `iceberg`(ETH·XRP · depthdiff·hot 테이프 읽기만) | 사건 글자·2초 state 3,582개 글자 일치 |
 | HL 포지션 | SQLite hot `hl_positions*.sqlite` | server HL 고래 청산 · 시장 맥락 · seal | — | **옮김** `rtduck hl_positions`(HL info REST 전용 -- `RTDUCK_REST=1` 없으면 안 돈다) | 입력 = HL 체결 DuckDB 를 읽어서 rtduck 에 둠 |
 | HL 체결 | DuckDB 일별 → 3일 뒤 gz | HL 포지션 입력 · 감시 | — | **옮김** `rtduck hl_trades` | — |
 | market_data_worker `duckdb_persist_worker` | DuckDB 둘(microstructure 1분 ETH·BTC·SOL · tail_risk 1분 ETH) + JSON 둘(dashboard_state · liq_burst_state) | 화면 세션 칸·SSE 갱신 신호(dashboard_state) · 감시 check_dashboard·check_data_sources·신선도 4줄 · seal micro_1m·tail_risk_1m | — | **옮김** `rtduck market_data` = 미시구조(depth20·aggTrade 웹소켓 + OI·premiumIndex 10초 REST + aggTrades 대체 · 34칸) + 청산 요격기 + dashboard_state(장 달력 = pandas_market_calendars 를 뜬 표) · 미시구조 REST 기본 꺼짐 | 감시 check_data_sources 를 Rust 파일로 돌려 파이썬 파일과 같은 판정(OK) |
@@ -34,10 +34,10 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 
 | 프로그램 | 주기 | 저장 형식 | 읽는 곳 | 전진 검정 | rtcollect | 막는 것 · 다음 |
 |---|---|---|---|---|---|---|
-| treasury_futures | 매분 | SQLite | /api/treasury-futures · 감시 · lake | — | 안 옮김 | 없음(야후 차트 REST → SQLite, 93줄) · 화면 빈도 낮음 |
-| macro_5m | */5 | SQLite | Macro Trend · /api/macro-today · 감시 | — | 안 옮김 | 없음(야후 REST, 123줄) |
+| treasury_futures | 매분·매시 | SQLite | /api/treasury-futures · 감시 · lake | — | **옮김** `treasury_futures`(한 번 실행 · --range 1d/5d) | 🔴그림자에서 켜면 Yahoo 호출 두 배(429 위험) -- 기본 안 켬 |
+| macro_5m | */5 | SQLite | Macro Trend · /api/macro-today · 감시 | — | **옮김** `macro_5m`(한 번 실행) | 〃 |
 | macro_daily | 매시 | SQLite | macro_trend | macro_bias | 안 옮김 | pandas 계산 · 재무부 REST |
-| cboe 옵션 체인 | */10 | JSON | /api/gex | soxl_own_iv | 안 옮김 | 없음(CBOE REST → JSON, 106줄) -- 전진 기록이라 JSON 글자 일치 필요(preserve_order 있음) |
+| cboe 옵션 체인 | */10 | 원본 gz + JSON | /api/gex | soxl_own_iv | **반쯤** `cboe_chain` = 원본 스냅숏 저장·last_seqno 만 | 🔴cboe_option_state.json(요약기 `cboe_option_summary_20261101.py` 361줄 + Deribit 계산 도구 · pandas·블랙숄즈·실현변동성 REST) 남음 -- soxl_own_iv 가 읽는 것은 이 JSON |
 | liqmap_scorer | 매시 | JSONL·JSON | 알림 센터 · 판정 | liqmap_fwd | 안 옮김 | pandas merge_asof 채점 -- 전진 채점기라 값 일치 증명 필수 |
 | liq_tab | 매시 | JSON | /api/liq-tab | — | 안 옮김 | numpy·pandas 계산 + 바이낸스 klines REST |
 | soxl_weekend_forward | 매일 | JSONL | 판정 | soxl_wknd1·2 | 안 옮김 | 바이낸스 REST + 규칙 계산 |

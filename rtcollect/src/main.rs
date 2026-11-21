@@ -35,7 +35,7 @@ use std::time::Duration;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::task::JoinSet;
 
-const KINDS: &str = "binance_tape|bybit_liq|bybit_tape|okx_tape|okx_ctx|binance_ctx|xyz|hl_ctx|hl_bt|depth|raster|ob5m|bookdepth";
+const KINDS: &str = "binance_tape|bybit_liq|bybit_tape|okx_tape|okx_ctx|binance_ctx|xyz|hl_ctx|hl_bt|depth|raster|ob5m|bookdepth|iceberg|treasury_futures|macro_5m|cboe_chain";
 
 fn env_f(k: &str, d: f64) -> f64 {
     std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
@@ -99,6 +99,8 @@ fn main() {
             "depth" => run_depth().await,
             "raster" => run_raster().await,
             "ob5m" | "bookdepth" => run_book_worker(&kind),
+            "iceberg" => run_iceberg(),
+            "treasury_futures" | "macro_5m" | "cboe_chain" => run_cron(&kind),
             k => die(2, &format!("RTCOLLECT_KIND={k} -- {KINDS}")),
         }
     });
@@ -474,4 +476,75 @@ async fn run_bybit_tape() {
     // 원본이 연결이 끊길 때 하는 쓰기(flush(True): 열린 묶음·진행 중인 초까지) -- 다음 판은 last_ts_ms 부터 공백을 적는다.
     c.borrow_mut().on_error(net::mono_s(), wall_s(), "SIGTERM");
     println!("종료 신호 -- 남은 행 쓰고 끝낸다");
+}
+
+/// 칸별 아이스버그(live_eth_iceberg_20261016.py main()): 2초마다 한 바퀴. ICEBERG_SYMBOL(ETHUSDT·XRPUSDT) · DD_ROOT(depthdiff 읽기만) · TAPE_DB_PATH(hot 테이프 읽기만)
+/// · ICEBERG_OUT(기본 data/live/rtcollect/iceberg -- 파이썬 폴더 data/live/iceberg 는 RTCOLLECT_TAKEOVER=1 일 때만).
+fn run_iceberg() {
+    let sym = env_s("ICEBERG_SYMBOL", "ETHUSDT").to_uppercase();
+    let dd = PathBuf::from(env_s("DD_ROOT", "data/live/orderflow/depthdiff")).join(&sym);
+    let tape = PathBuf::from(env_s("TAPE_DB_PATH", "data/hot/binance_tape.sqlite"));
+    let out = PathBuf::from(env_s("ICEBERG_OUT", "data/live/rtcollect/iceberg"));
+    if out.ends_with("data/live/iceberg") && env_s("RTCOLLECT_TAKEOVER", "") != "1" {
+        die(2, &format!("🔴{} 는 파이썬 탐지기의 폴더다 -- 그림자는 다른 경로에. 전환이면 RTCOLLECT_TAKEOVER=1", out.display()));
+    }
+    let mut ic = rtcollect::iceberg::Iceberg::new(&sym, &dd, &tape, &out).unwrap_or_else(|e| die(2, &format!("{e}")));
+    println!("시작 · 기존 아이스버그 {}건(전진) · {sym} {} → {}", ic.n, dd.display(), out.display());
+    let mut term = false;
+    let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let f2 = flag.clone();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(async { let _ = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap().recv().await; });
+        f2.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+    while !term {
+        ic.step(rtcollect::rest::wall_s());
+        std::thread::sleep(Duration::from_secs(2));
+        term = flag.load(std::sync::atomic::Ordering::Relaxed);
+    }
+    println!("종료 신호 -- 끝낸다");
+}
+
+/// 예약 수집기(cron 이 부른다 -- 한 번 돌고 끝 · 종료코드는 원본과 같다). 쓰는 곳 기본 = 그림자 자리(파이썬 파일이면 RTCOLLECT_TAKEOVER=1 일 때만):
+///   treasury_futures [--range 1d|5d] → TREASURY_FUTURES_DB(기본 data/hot/rtcollect/treasury_futures.sqlite)
+///   macro_5m → MACRO_5M_DB(기본 data/hot/rtcollect/macro_5m.sqlite) · cboe_chain [종목…] → CBOE_OUT(기본 data/live/rtcollect/options_equity/cboe)
+fn run_cron(kind: &str) -> ! {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let agent = rtcollect::rest::agent(Duration::from_secs(30)); // urlopen(timeout=30)
+    let mut get = |u: &str, ua: &str| -> Result<(u16, String, Vec<u8>), String> {
+        let mut r = agent.get(u).header("User-Agent", ua).call().map_err(|e| format!("URLError({e})"))?;
+        let st = r.status();
+        let mut body = vec![];
+        std::io::Read::read_to_end(&mut r.body_mut().as_reader(), &mut body).map_err(|e| format!("OSError({e})"))?;
+        Ok((st.as_u16(), st.canonical_reason().unwrap_or("").to_string(), body))
+    };
+    let mut now = rtcollect::rest::wall_s;
+    let code = match kind {
+        "treasury_futures" => {
+            let rng = args.iter().position(|a| a == "--range").and_then(|i| args.get(i + 1)).cloned().unwrap_or_else(|| "5d".into());
+            if rng != "1d" && rng != "5d" {
+                die(2, &format!("--range 는 1d 또는 5d: {rng}"));
+            }
+            let db = db_path("TREASURY_FUTURES_DB", "treasury_futures.sqlite");
+            let b = rtcollect::cron::base("RTCOLLECT_YAHOO_BASE", rtcollect::cron::YAHOO);
+            rtcollect::cron::treasury(&db, &rng, &b, &mut get, &mut now).unwrap_or_else(|e| die(1, &format!("DB: {e}")))
+        }
+        "macro_5m" => {
+            let db = db_path("MACRO_5M_DB", "macro_5m.sqlite");
+            let b = rtcollect::cron::base("RTCOLLECT_YAHOO_BASE", rtcollect::cron::YAHOO);
+            let gap: f64 = env_s("RTCOLLECT_MACRO_GAP_S", "1.5").parse().unwrap_or(1.5); // 원본 GAP_S(시험만 0)
+            let mut sleep = |s: f64| std::thread::sleep(Duration::from_secs_f64(s * gap / 1.5));
+            rtcollect::cron::macro_5m(&db, &b, &mut get, &mut now, &mut sleep).unwrap_or_else(|e| die(1, &format!("DB: {e}")))
+        }
+        _ => {
+            let out = PathBuf::from(env_s("CBOE_OUT", "data/live/rtcollect/options_equity/cboe"));
+            if out.ends_with("data/live/options_equity/cboe") && env_s("RTCOLLECT_TAKEOVER", "") != "1" {
+                die(2, &format!("🔴{} 는 파이썬 수집기의 폴더다 -- 전환 때만 RTCOLLECT_TAKEOVER=1", out.display()));
+            }
+            let b = rtcollect::cron::base("RTCOLLECT_CBOE_BASE", rtcollect::cron::CBOE);
+            rtcollect::cron::cboe(&args, &out, &b, &mut get, rtcollect::rest::wall_s()).0
+        }
+    };
+    std::process::exit(code)
 }

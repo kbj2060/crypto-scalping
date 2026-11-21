@@ -69,6 +69,10 @@ while IFS= read -r l; do [ -n "$l" ] || continue
   s="$(echo "$l" | grep -oE 'supervisor_ob5m\.sh [A-Z0-9]+' | awk '{print $2}')"; up ob5m "OB_SYMBOL=${s:-ETHUSDT}"
 done <<< "$(echo "$CT" | grep 'supervisor_ob5m.sh')"
 echo "$CT" | grep -q 'supervisor_bookdepth.sh' && up bookdepth OB_SYMBOL=ETHUSDT
+# 칸별 아이스버그(depthdiff·hot 테이프 읽기만 -- 거래소 호출 없음): 줄마다 ICEBERG_SYMBOL(없으면 ETHUSDT)
+while IFS= read -r l; do [ -n "$l" ] || continue
+  s="$(val "$l" ICEBERG_SYMBOL)"; up iceberg "ICEBERG_SYMBOL=${s:-ETHUSDT}"
+done <<< "$(echo "$CT" | grep 'supervisor_eth_iceberg.sh')"
 
 # ── rtduck(DuckDB 로 쓰는 수집기 · 따로 된 실행 파일) ──
 # 웹소켓만 쓰는 종류(hl_trades)는 띄운다. 🔴REST 종류(oi_lsratio · hl_positions)는 기본 꺼짐 -- 파이썬과 합쳐 호출이 두 배다(SHADOW.md §12).

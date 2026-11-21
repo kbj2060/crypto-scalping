@@ -26,6 +26,8 @@ Rust 수집기(`rtcollect`)를 서버에서 **파이썬 수집기 옆에 나란�
 | `hl_ctx` | `HL_BT_COIN`(쉼표 -- 원본은 코인마다 프로세스·`HL_BT_CTX_ONLY=1`) | `data/hot/rtcollect/hl_ctx.sqlite` | `data/hot/hl_ctx.sqlite` |
 | `raster` | `OF_SYMBOL`(한 종목) · `OF_BIN_SIZE`·`OF_N_BINS`(원본과 같은 이름 · 기본 0.5·240 -- 종목마다 crontab 줄 값 그대로, `tools/shadow_start.sh` 가 읽는다) · 🔴`RTCOLLECT_REST=1` 필수(스냅숏 없이는 북을 못 세운다) | 폴더 `data/live/rtcollect/orderflow/raster/<SYM>/` | `data/live/orderflow/raster/<SYM>/`(폴더를 가리키면 종료코드 2) |
 | `hl_bt` | `HL_BT_COIN`(한 코인 -- 원본과 같다) · `HL_BT_ROOT` | 폴더 `data/live/rtcollect/orderflow/hyperliquid_bookticker/<COIN>/<UTC 시>.bt` + 맥락 `data/hot/rtcollect/hl_ctx.sqlite` | `data/live/orderflow/hyperliquid_bookticker/`(폴더를 가리키면 종료코드 2) -- 원본 전체 모드는 Pi 에서 돈다 · hl_ctx 와 같이 뜨면 hl_ctx 는 `data/hot/rtcollect/hl_ctx_only.sqlite`(`HL_CTX_DB_PATH`) -- 대조는 두 파일을 합쳐 파이썬 hl_ctx.sqlite 와 |
+| `iceberg` | `ICEBERG_SYMBOL`(ETHUSDT·XRPUSDT) · `DD_ROOT`·`TAPE_DB_PATH`(읽기만) | `data/live/rtcollect/iceberg/<coin>_{events.jsonl,state.json}`(`ICEBERG_OUT`) | `data/live/iceberg/`(가리키면 종료코드 2) -- 거래소 호출 없음 · 그림자 기본으로 띄운다 |
+| `treasury_futures` · `macro_5m` · `cboe_chain` | 한 번 돌고 끝(cron) · `--range 1d|5d` · cboe 는 인자 종목 + SNDK·SOXL·MU | `data/hot/rtcollect/{treasury_futures,macro_5m}.sqlite`(`TREASURY_FUTURES_DB`·`MACRO_5M_DB`) · `data/live/rtcollect/options_equity/cboe`(`CBOE_OUT`) | 파이썬 파일·폴더면 종료코드 2 -- 🔴그림자 cron 은 등록하지 않는다: Yahoo 는 서버 국채선물(매분 4)·매크로(5분 16)와 같은 IP 라 그림자를 켜면 분당 Yahoo 호출이 ~7 → ~14(429 위험 · 원본 주석) · CBOE 는 10분 3 → 6 |
 | `ob5m` · `bookdepth` | `OB_SYMBOL`(ETHUSDT) · `DD_ROOT`(depthdiff 폴더 · 읽기만) · ob5m 은 `TAPE_DB_PATH`(hot 테이프 · 읽기만) | `data/live/rtcollect/<종류>/<SYM>.sqlite` | `data/live/ob5m/`·`data/live/bookdepth/` 파일(`RTCOLLECT_TAKEOVER=1` 없으면 종료) -- 대조는 같은 시각의 닫힌 봉 행을 두 DB 에서 비교(bookdepth dm·dp 계열은 1e-12 · BLAS 내적 차) |
 | `depth` | `DD_SYMBOL`(한 종목 -- 원본과 같다) | 폴더 `data/live/rtcollect/orderflow/depthdiff/<SYM>/` | `data/live/orderflow/depthdiff/<SYM>/`(폴더를 가리키면 종료코드 2) |
 
@@ -192,6 +194,8 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
 | 15 | OKX 맥락 · 바이낸스 맥락(gaps) | 재연결 공백 «1.5초 미만은 안 적음» 을 벽시계로 쟀다 -- WSL 벽시계가 뒤로 뛰면(실측 −1.5~−2.4초) 3초 공백이 짧게 재여 gaps 행이 빠졌다 | 판단만 단조 시계 · 적는 from/to 는 벽시계 그대로 | 벽시계가 뛴 재연결에서 Rust 에만 gaps 행 | — | 코드(okx_ctx.rs·binance_ctx.rs·net.rs) |
 | 16 | ob5m · bookdepth(북 재구성 `replay`) | 시 파일 스냅숏의 한쪽(또는 양쪽)이 비면 `np.flatnonzero(bid)[-1]` IndexError 로 프로세스가 죽는다(얇은 주식 선물 -- 2026-11-21 그림자 SNDKUSDT 에서 Rust 가 같은 자리에서 패닉) | 그 사슬을 «empty_book» 으로 끝내고 restart 규칙대로 다음 시 파일 스냅숏에서 다시 | 파이썬은 죽고(감독이 다시 띄움) Rust 는 다음 시부터 봉을 잇는다 | — | 코드(ob5m.rs `replay`) |
 | 17 | 롱숏비 워커(rtduck oi_lsratio) | 바이낸스 IP 밴 파일을 모른다(밴 중에도 5분마다 20요청) | 밴 중이면 안 보내고(그 원천 실패 = 기존 값 유지) 418·429 는 밴 파일에 | 밴 동안 Rust 에만 그 폴이 없음 | — | 코드(rtduck/src/main.rs) |
+| 18 | 아이스버그 | 시 파일 스냅숏 한쪽이 비면 `np.flatnonzero(...)[0]` IndexError 로 죽는다(ob5m #16 과 같은 자리) | 그 시를 «스냅샷 없음» 처럼 건너뛴다 | 파이썬은 죽고 Rust 는 다음 시부터 | — | 코드(iceberg.rs) |
+| 19 | 예약 수집기 polls.status | 실패 글자 = 파이썬 예외 repr | HTTP 오류는 `<HTTPError 429: 'Too Many Requests'>` 그대로 · 그 밖(연결·JSON·모양)은 이름+글 근사 | 오류 행의 status 글자 | — | 코드(cron.rs) |
 
 `shadow_tape.py` 는 1·3·8·9·12 의 표에서 «Rust에만» 을 `(의도한 차이 후보 -- 이유)` 로 따로 적는다(«파이썬에만»·값 불일치는 그대로 실패).
 원본 그대로 둔 것(고치지 않음 -- 범위 밖이거나 값이 원본 정의다): depth 의 재접속 사이 구멍이 `_gap` 으로 안 남는 것 · 재시작이 시 경계를 넘으면 지난 시
@@ -220,6 +224,6 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
 - 매일 대조: 두 파일을 사본으로 떠서(쓰는 쪽이 열 때 다른 프로세스 열기가 막힌다 -- seal_to_lake 방식) 같은 ts 의 14칸·sources_ok 를 비교(collected_at 은 다르다).
 - 🔴DuckDB 파일은 쓰는 프로세스가 하나다: 그림자와 파이썬이 **같은 파일**을 가리키면 하나가 «Conflicting lock» 으로 죽는다(위 기본 경로가 다른 이유).
 
-- 장 달력(market_data 의 dashboard_state 세션 칸): `rtduck/src/sessions.json` = 개발기 pandas_market_calendars 5.4.0 의 JPX·LSE·NYSE schedule(2024~2035). 🔴서버 판이 다르면 휴장·마감 규칙이 다를 수 있다 -- 서버에서 `tools/gen_sessions.py` 로 다시 떠서 비교. 범위 밖 날짜는 원본 예외 길(UTC 시각 규칙)이라 원본과 다를 수 있다.
+- 장 달력(market_data 의 dashboard_state 세션 칸): `rtduck/src/sessions.json` = **서버 판 pandas_market_calendars 5.3.1.1** 의 JPX·LSE·NYSE schedule(2024~2035 · 표 `_source` 에 판이 적힌다 · 다시 뜨기 = `rtduck/tools/server_env.sh` venv 로 `tools/gen_sessions.py`). 개발기 5.4.0 판과 비교: JPX 2,931 · LSE 3,035 · NYSE 3,012 거래일이 **날짜·개장·마감·점심까지 하나도 다르지 않다**(2026-11-21). 범위 밖 날짜는 원본 예외 길(UTC 시각 규칙)이라 원본과 다를 수 있다.
 - 🔴묶은 DuckDB(Rust)에는 ICU 가 없다: `TIMESTAMPTZ - INTERVAL` 이 Binder Error 라 부트스트랩(«최근 30분·60분·5분»)을 epoch µs 비교로 썼다(같은 순간 비교). 서버 SQL·seal_to_lake 는 파이썬 duckdb(ICU 있음)로 Rust 파일을 읽으니 상관없다.
 - 분 저장(요격기·미시구조)은 원본이 지역 시각 `datetime.now()` 의 분·초로 정한다 -- 정답지는 TZ=Asia/Seoul(서버와 같다 · 일광절약 없음)로 만들어 Rust(UTC 분·초)와 같음을 고정했다. 오프셋이 분 단위인 시간대(실제 시간대는 모두 그렇다 · +05:45 도)면 «분이 바뀐 첫 15초» 판정과 저장 시각이 같다. 일광절약 전환 시각에는 지역 분이 같아도 순간이 한 시간 건너뛰어 원본 쪽이 한 분을 다르게 볼 수 있다(서버 KST 는 없음).
