@@ -334,7 +334,7 @@ impl Record {
             return Ok((0, None)); // 결측 봉이 있으면 «49번째 앞»이 4h 앞이 아니다
         }
         let rel: Vec<f64> = maps.iter().map(|m| m[&ts[n - 1]] / m[&ts[n - 49]] - 1.0).collect();
-        let mean = crate::box_hold::npsum(&rel) / rel.len() as f64; // ponytail: Series.mean = numpy 짝 합 / n 가정 -- 서버에 bottleneck 이 있으면 차례 합(끝자리 · 0.1bp 반올림 뒤엔 거의 안 보임)
+        let mean = crate::box_hold::npsum(&rel) / rel.len() as f64; // Series.mean = numpy 짝 합 / n -- 서버에 bottleneck·numexpr 없음(2026-11-21 확인)
         let bp: Vec<String> = X_COINS.iter().zip(&rel).map(|(c, v)| format!("\"{c}\": {}", crate::sr_lean::jf(crate::box_hold::py_round((v - mean) * 1e4, 1)))).collect();
         let latest = format!("{{\"t\": {}, \"rel_bp\": {{{}}}}}", ts[n - 1] + BAR, bp.join(", "));
         let rows = ts.iter().filter(|&&t| t.rem_euclid(DAY) / 3_600_000 % 4 == 3 && t.rem_euclid(3_600_000) / 60_000 == 55).map(|&t| {
