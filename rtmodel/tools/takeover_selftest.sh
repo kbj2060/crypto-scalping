@@ -87,7 +87,7 @@ $TK rt_sr_lean back; upw
 ok "back: Rust 없음 · 파이썬 감독·워커 다시 · crontab 원래대로" '[ -z "$(rsw)" ] && [ -n "$(pys)" ] && [ -n "$(pyw)" ] && cmp -s "$F/crontab.txt" "$F/crontab.orig"'
 echo "5. rt_dirpred go·back(표식 파일 · 대시보드 스위치)"
 cp "$SRC/scripts/ops/supervisor_rt_dirpred.sh" "$R/scripts/ops/"; RB="$R/tmp/rtbin"
-printf '%s\n' '#!/bin/bash' 'while :; do echo "{\"t\": 1}" > "$RT_DIR_OUT/xsec_latest.json.tmp"; mv "$RT_DIR_OUT/xsec_latest.json.tmp" "$RT_DIR_OUT/xsec_latest.json"; sleep 1; done' > "$RB/rt_dirpred"
+printf '%s\n' '#!/bin/bash' 'while :; do [ -n "$FAKE_SLOW" ] || { echo "{\"t\": 1}" > "$RT_DIR_OUT/xsec_latest.json.tmp"; mv "$RT_DIR_OUT/xsec_latest.json.tmp" "$RT_DIR_OUT/xsec_latest.json"; }; sleep 1; done' > "$RB/rt_dirpred"
 chmod +x "$RB/rt_dirpred"; echo '{}' > "$L/rtmodel/dir4h_eth.json"; echo '{}' > "$L/rtmodel/ds_eth.json"
 mkdir -p "$F/shadow/rt_dirpred"; echo "$NOW 칸 9" > "$F/shadow/rt_dirpred/check.ok"
 $TK rt_dirpred go 2>&1 | tail -1
@@ -100,6 +100,9 @@ NOW_S=$(( NOW + 120 )) DIRPRED_WATCH_S=8 $TK rt_dirpred go
 ok "go: 표식 · Rust 워커(RT_DIR_OUT=data/live) · xsec_latest.json 갱신 · @reboot 줄 +1" '[ -f "$L/rtmodel/pred_record_rust.on" ] && [ -n "$(rdp)" ] && [ -f "$L/xsec_latest.json" ] && grep -q "^@reboot sleep 120 && cd .*supervisor_rt_dirpred.sh.*# rt-takeover:rt_dirpred$" "$F/crontab.txt" && [ $(wc -l < "$F/crontab.txt") = $(( $(wc -l < "$F/crontab.orig") + 1 )) ]'
 $TK rt_dirpred back
 ok "back: Rust 없음 · 표식 없음 · crontab 원래대로" '[ -z "$(rdp)" ] && [ ! -f "$L/rtmodel/pred_record_rust.on" ] && cmp -s "$F/crontab.txt" "$F/crontab.orig"'
+out=$(FAKE_SLOW=1 NOW_S=$(( NOW + 120 )) DIRPRED_WATCH_S=3 $TK rt_dirpred go 2>&1); rc=$?; echo "$out" | tail -1 | cut -c1-160
+ok "첫 회차가 한도를 넘겨도 워커가 살아 있으면 «아직 첫 회차 중»(실패 아님 · 11-22 서버 오경보)" '[ "$rc" = 0 ] && [[ "$out" == *"아직 첫 회차 중"* ]]'
+$TK rt_dirpred back > /dev/null 2>&1
 echo "6. export-if-stale: joblib 이 JSON 보다 새것이면 내보내기 시도"
 sleep 1; touch "$L/regime_band_h48_model.joblib"; out=$(PY=/bin/false $TK all export-if-stale 2>&1); echo "$out"
 ok "낡음 감지 → 내보내기 시도 → 실패 문구(옛 값을 내지 않음)" '[[ "$out" == *"[rt_regime] 모델 JSON 낡음"* ]] && [[ "$out" == *"[rt_regime] 🔴내보내기 실패"* ]]'
@@ -136,5 +139,15 @@ out=$($TK rt_sr_lean check 2>&1); echo "$out" | tail -1 | cut -c1-200
 ok "다른 줄 1 → 불통과 · check.ok 없음 · 출력에 사건 수" '[ ! -f "$SR/check.ok" ] && [[ "$out" == *"불통과"*"다른 줄 1"* ]]'
 out=$(FAKE_SR_OK=1 $TK rt_sr_lean check 2>&1); echo "$out" | tail -1 | cut -c1-200
 ok "다른 줄 0 → 통과 · check.ok 한 줄 · 견줌 시작 시각 출력" '[ -f "$SR/check.ok" ] && [ "$(wc -l < "$SR/check.ok")" = 1 ] && [[ "$out" == *"통과"*"견줌 시작"*"다른 줄 0"* ]]'
+echo "11. 레벨 5분 대조기(shadow_sr_lean.py): 실수 끝자리(≤ 1e-12)는 같음 · 1e-9 · 판정 칸 p · 결과 줄은 다름(양성 대조)"
+sr11() {   # $1 = Rust 쪽 s1h · $2 = Rust 쪽 p · $3 = Rust 쪽 결과 y → 종료코드
+  local d="$F/sr11"; rm -rf "$d"; mkdir -p "$d/py" "$d/rs"
+  printf '%s\n%s\n' '{"k": "ev", "id": "x1", "a": 100, "s1h": 0.012392114619389981, "p": 0.49054, "grp": "mid"}' '{"k": "res", "id": "x1", "y": 1}' > "$d/py/ethusdt.jsonl"
+  printf '%s\n%s\n' "{\"k\": \"ev\", \"id\": \"x1\", \"a\": 100, \"s1h\": $1, \"p\": $2, \"grp\": \"mid\"}" "{\"k\": \"res\", \"id\": \"x1\", \"y\": $3}" > "$d/rs/ethusdt.jsonl"
+  python3 "$SRC/rtmodel/tools/shadow_sr_lean.py" "$d/py" "$d/rs" > "$d/out.txt" 2>&1
+}
+sr11 0.012392114619389995 0.49054 1; r1=$?; sr11 0.012392114632 0.49054 1; r2=$?; sr11 0.012392114619389981 0.49055 1; r3=$?; sr11 0.012392114619389981 0.49054 0; r4=$?
+echo "  종료코드: 끝자리 1.1e-15 → $r1 · 1e-9 → $r2 · p 다름 → $r3 · 결과 다름 → $r4"
+ok "끝자리만 = 0(같음) · 1e-9 = 1 · p 다름 = 1 · 결과 다름 = 1" '[ "$r1" = 0 ] && [ "$r2" = 1 ] && [ "$r3" = 1 ] && [ "$r4" = 1 ]'
 echo "== 통과 $PASS · 실패 $FAIL"
 [ "$FAIL" = 0 ]
