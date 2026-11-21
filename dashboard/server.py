@@ -5117,7 +5117,9 @@ CLIENT_TIMING_NUM = {"order_rtt_ms", "order_srv_ms", "order_net_ms", "fp_n", "fp
                      "longtask_n", "px_n", "px_med_ms", "px_max_ms",
                      # 2026-11-21 rtcore /rt 그림자 구독(app.js ensureRtStream · rtReport) -- 지연·SSE 와 값 일치·먼저 받은 쪽·실패 횟수
                      "rt_lat_n", "rt_lat_med_ms", "rt_lat_p99_ms", "rt_lead_n", "rt_lead_med_ms", "rt_cmp_n", "rt_bad_n",
-                     "rt_fail_n", "rt_reconn_n"}
+                     "rt_fail_n", "rt_reconn_n",
+                     # 2026-11-21 rt 로 그리기(app.js rtDrawTick) -- 60초 중 rt 로 그린 초 · 옛 경로로 돌아간 횟수
+                     "rt_draw_s", "rt_back_n"}
 _client_timing_at = [0.0]
 
 
