@@ -3,8 +3,8 @@
 //! 옮긴 것: entry-preview/submit · exit-submit · limit-amend · wait-action · entry-cancel · bracket-disarm/rearm · query_* 검사 · 대기 칸 배정.
 //! 안 옮긴 것(다음): 익절 on/off(`api_manual_bracket_tp`) · 분할 조각(`…_tp_legs`) · 선 추가(`…_add`) · 선 수정(`…_modify`) · 상태 조회(`…_status`) · 접수 기록(G18, server.py).
 //!
-//! 지키는 것(값·동작 그대로): POST 전용(G1 -- 웹 서버가 `POST_ONLY` 표로) · confirm=1(G2) · 실행 스위치 매 요청(G3) · 진입 칸 하나(G5) · 코인별 청산 칸(G6) ·
-//! 조립 뒤 칸 다시 보기(G7) · 주문 잠금 안/밖(G8 -- `LOCKED` 표, 잠금 자체는 `watch::busy_or`) · 대기 칸 규칙(G10–G12) · 대기 중 스위칭 409(G13) · 코인 표(G14) ·
+//! 지키는 것(값·동작 그대로): POST 전용(G1 -- `route::ROUTES` 표 · 405) · confirm=1(G2) · 실행 스위치 매 요청(G3) · 진입 칸 하나(G5) · 코인별 청산 칸(G6) ·
+//! 조립 뒤 칸 다시 보기(G7) · 주문 잠금 안/밖(G8 -- `route::ROUTES` 표 · `route::Front`) · 대기 칸 규칙(G10–G12) · 대기 중 스위칭 409(G13) · 코인 표(G14) ·
 //! 조용히 고치지 않는 400(G15) · 스위칭은 전량+반대(G16).
 //!
 //! 시장가 분기(M13 대기 «지금 시장가» · M6·M7 조립이 낸 시장가 계획)는 원본과 같이 접수한다(2026-11-21 «원본 동작 유지»).
@@ -18,15 +18,6 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 
 pub type Query = HashMap<String, String>;
-
-/// 주문 잠금 안(true)/밖(false) -- 원본 server.py 라우트 등록(규칙 문서 G8). 웹 서버가 이 표대로 `busy_or` 로 감싼다.
-pub const LOCKED: [(&str, bool); 8] = [
-    ("entry_submit", true), ("exit_submit", true), ("limit_amend", true),
-    ("wait_action", false), ("entry_cancel", false), ("bracket_disarm", false), ("bracket_rearm", false),
-    ("entry_preview", false),
-];
-/// 주문을 바꾸는 요청 = POST 만(G1 -- GET 이면 링크 미리보기·프리페치·주소창 재방문이 그대로 주문). 미리보기만 GET.
-pub const POST_ONLY: [&str; 7] = ["entry_submit", "exit_submit", "limit_amend", "wait_action", "entry_cancel", "bracket_disarm", "bracket_rearm"];
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SlotRef {
@@ -220,8 +211,8 @@ impl Desk {
                             limit_usdt: lim, stop: lim.is_some() && g(q, "stop") == Some("1"), skip_wait: None };
         match self.assemble_entry_plan(qs, io, &a).await {
             Err(e) => err_resp(e),
-            Ok((plan, cap)) => resp(200, json!({"ok": true, "recommended_qty": plan.get("recommended_qty"), "recommended_source": plan.get("recommended_source"),
-                                                "plan": plan, "cap": cap, "exec_enabled": io.exec_enabled()})),
+            Ok((plan, cap)) => resp(200, json!({"ok": true, "plan": plan, "cap": cap, "recommended_qty": plan.get("recommended_qty"), "recommended_source": plan.get("recommended_source"),
+                                                "exec_enabled": io.exec_enabled()})),
         }
     }
 
@@ -265,8 +256,8 @@ impl Desk {
         let extra = !bw.is_empty() && limit_px.is_some() && (bw.len() as i64) < WAIT_SLOTS_MAX && bw.iter().all(|(_, w)| add_ok(w) && !dup(w));
         if self.wait_pending(&asset) && !extra {
             let w = Value::Object(self.w.wait_slot(&asset, 1).clone());
-            return resp(409, json!({"ok": false, "error": "wait_pending", "wait": w,
-                "detail": "이 코인에 기다리는 진입 주문이 있습니다 — 취소하거나 체결된 뒤에 넣으세요(청산·다른 코인은 됩니다 · 같은 쪽 추가 진입 지정가·감시는 여러 개 됩니다)"}));
+            return resp(409, json!({"ok": false, "error": "wait_pending",
+                "detail": "이 코인에 기다리는 진입 주문이 있습니다 — 취소하거나 체결된 뒤에 넣으세요(청산·다른 코인은 됩니다 · 같은 쪽 추가 진입 지정가·감시는 여러 개 됩니다)", "wait": w}));
         }
         let lines = query_lines(q);
         if matches!(lines, Lines::Bad) {
@@ -287,8 +278,8 @@ impl Desk {
         if limit_px.is_some() {
             let bw = self.busy_waits(&asset); // 계획 조립(await) 사이에 바뀌었을 수 있어 다시 본다(G7)
             if !bw.is_empty() && (!truthy(plan.get("add_keep")) || bw.len() as i64 >= WAIT_SLOTS_MAX || !bw.iter().all(|(_, w)| add_ok(w) && !dup(w))) {
-                return resp(409, json!({"ok": false, "error": "wait_pending", "wait": bw[0].1,
-                    "detail": format!("이 코인에 기다리는 진입 주문이 있습니다 — 여러 개는 같은 쪽 추가 진입(지정가·감시)끼리만, 같은 선 중복 없이, {WAIT_SLOTS_MAX}개까지 됩니다")}));
+                return resp(409, json!({"ok": false, "error": "wait_pending",
+                    "detail": format!("이 코인에 기다리는 진입 주문이 있습니다 — 여러 개는 같은 쪽 추가 진입(지정가·감시)끼리만, 같은 선 중복 없이, {WAIT_SLOTS_MAX}개까지 됩니다"), "wait": bw[0].1}));
             }
             // 검토 11-18 #2: 끝난 칸도 집행 작업(체결 뒤 익절 다시 걸기)이 아직 돌면 비우지 않는다(G12)
             let mut taken: Vec<i64> = bw.iter().map(|x| x.0).collect();
@@ -651,7 +642,7 @@ impl Desk {
 }
 
 // ── 선 핸들러 4개(2026-11-21 여섯째 조각) -- orders.py 의 api_manual_bracket_tp_legs · _tp · _add · _modify ──────────────
-// 방어 = 진입과 같다(POST + confirm=1 + 게이트 + 주문 잠금 -- LOCKED 표). 손절 = 서버 감시 레벨뿐(거래소 주문 없음) · 익절 = 우리 post-only 지정가.
+// 방어 = 진입과 같다(POST + confirm=1 + 게이트 + 주문 잠금 -- route::ROUTES 표). 손절 = 서버 감시 레벨뿐(거래소 주문 없음) · 익절 = 우리 post-only 지정가.
 
 fn tp_legs_of(b: &Obj) -> Vec<Value> {
     if truthy(b.get("tp_legs")) {

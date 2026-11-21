@@ -14,14 +14,14 @@
 
 | # | 상태 | Rust 위치 · 시험 / 조각 |
 |---|---|---|
-| G1 | 부분 | `intake::POST_ONLY` 표(주문을 바꾸는 8개 핸들러) -- 라우트에 강제하는 것은 웹 서버 조각 |
+| G1 | 옮김 | `route::ROUTES`(원본 등록 14 · 메서드) + `Front::call` -- 다른 메서드 405(aiohttp 글자·Allow `POST`/`GET,HEAD`) · 표에 없는 주소 404(지운 manual-exit/preview·submit-all 포함) · HEAD = GET 본문 버림 · `rf` route_fixture(원본 aiohttp 앱) get_on_post_submit·post_on_get_*·removed_* · mut «Allow 에 HEAD 빠짐» «HEAD 본문» |
 | G2 | 옮김 | 주문을 바꾸는 핸들러 14개 전부 confirm=1(넷째 10 + 여섯째 익절 on/off·분할 조각·선 추가·선 수정) · `dk` *_no_confirm |
 | G3 | 옮김 | `DeskIo::exec_enabled`(매 요청) · 403 = 핸들러 14개 · 미리보기 dry_run · `dk` |
 | G4 | 옮김 | 감시 틱 정지 = `Watcher::bracket_tick`(스위치 꺼짐이면 계좌도 안 읽음 · 무장 파일 그대로) · wf `exec_switch_off`·`exec_switch_off_during_tick_still_fires`(틱 도중 꺼져도 그 틱은 끝까지 = 원본) · wi(퍼즈: 꺼짐이면 호출 0·저장본 불변) · mut «스위치 꺼져도 감시» · 시작 게이트(2026-11-21 계좌 알림 조각): `app::run` 이 원본 기동 훅처럼 시작 정리(wait_cleanup)는 스위치 · 사용자 스트림·갱신기는 스위치+키일 때만 띄움 · `ar` binary(스위치 없는 기동 = 정리·스트림 없음) · mut «실행 스위치 꺼져도 시작 정리» |
 | G5 | 옮김 | `api_entry_submit`(진입 칸 하나 · 같은 코인 청산 칸도 봄) 409 · `dk` sub_entry_busy·sub_side_exit_busy · mut «같은 코인 청산 칸이 바빠도 진입» |
 | G6 | 옮김 | `Watcher::exit_slot`(코인 칸을 만들어 둠 · 같은 코인 사용 중 None) · wf `two_coins_other_entry_busy_uses_side_slot`·`same_coin_entry_busy_skips`·`same_coin_side_slot_busy_skips` · wi(퍼즈: ETH 칸이 바쁘면 ETH 청산 0) · mut «같은 코인 칸이 바빠도» |
-| G7 | 옮김 ⚠시험 없음 | `api_exit_submit`·`api_entry_submit`(대기) 조립 뒤 칸 다시 봄 -- 단일 실행 정답지라 «그 사이 바뀜»을 못 만든다(웹 서버에 붙일 때 동시 요청 시험) |
-| G8 | 부분 | `watch::busy_or`(wi) + `intake::LOCKED` 표(잠금 안 4 · 밖 4 · 미리보기 2) -- 감싸는 것은 웹 서버 |
+| G7 | 옮김 | `api_exit_submit`·`api_entry_submit`(대기) 조립 뒤 칸 다시 봄 · 2026-11-21 `Front::call` 이 요청 하나 동안 `DeskCell` 을 쥐어 «조립 사이 바뀜» 자체가 안 생긴다(원본보다 좁음 -- 다른 요청은 기다린다) · `rc` route_concurrency(청산 접수가 계좌 조회에 멈춘 사이 둘째 청산 = 409 · 손절 해제는 기다렸다 뒤에 · 칸 하나만) · mut «잠긴 동안 409 가 칸을 기다림(교착)» |
+| G8 | 옮김 | `route::ROUTES` 넷째 칸 = 원본 busy_or 로 감싼 7(submit·limit-amend·tp·tp-legs·add·modify·exit) · 잠겨 있으면 409 already_working(진입 칸 · 기다리지 않음 -- `Front::entry_seen`) · 옛 `intake::LOCKED` 표는 tp·tp-legs·add·modify 를 빠뜨려 지움 · `rf` locked_*_409·locked_disarm_not_locked · mut «청산·선 수정이 잠금 밖» |
 | G9 | 옮김 | `bracket_tick` 의 세 자리(선 발동 전 · 조립 뒤 · 분할 손절) -- 원본 그대로 조립(계좌 새로 읽기)은 잠금 중에도 한다(D9) · wf `lock_held_rule_D9`·`lock_held_lines_D9`·`lock_taken_during_plan`·`sl_leg_lock_held_skips` · wi(퍼즈: 잠금 중 청산 0 · 잠금으로 미룬 틱 813) · mut «선 발동 전 잠금 무시»(wf) «조립 뒤 잠금 무시»(wi) |
 | G10 | 옮김 | `api_entry_submit` 추가 진입 대기 여럿(모두 같은 쪽 add_keep 지정가·감시 · 10개 미만) · `dk` sub_wait_pending·sub_limit_second_add_ok·sub_limit_second_not_add |
 | G11 | 옮김 | dup(같은 종류·같은 선 1e-9) · `dk` sub_limit_dup_refused · mut «같은 선 중복 허용» |
@@ -31,7 +31,7 @@
 | G15 | 옮김 | `query_fraction`·`query_leverage`(범위 밖·글자 = None → 모델값 · inf = 원본처럼 500)·`query_rule`·`query_lines`·`query_limit`·`query_wid`·wait_min · `dk` 400 사례 14 · ponytail: «1_000» 밑줄 표기는 파이썬만 |
 | G16 | 제거(사용자 결정 2026-11-21 sltp 만) | 스위칭 전량+반대 검사 -- 스위칭째 지움 · switch_to·sw_* = 400 removed_option |
 | G17 | 제거(사용자 결정 2026-11-21 sltp 만) | 자동 규칙 코인·권장 배수 15분·교차 마진 검사 -- 자동 규칙째 지움 · `rule` 인자 = 400 removed_option · `Quotes::margin_type`·`bracket::margin_type`·`DeskIo::vol_mult` 삭제 |
-| G18 | 범위 아님 | 웹 서버(server.py order_request_log) |
+| G18 | 부분 | `Reply::log` = POST /api/manual-* 의 {path, query(키마다 첫 값), status, error(원본 규칙 -- 2만 바이트 미만 dict 의 ok 거짓 → error 또는 "")} · 404·405 도 적음(원본 미들웨어가 바깥) · `rf` 159사례 + log_error 규칙 10꼴 · 파일 쓰기와 at·ms·ua·ip 는 HTTP 를 쥔 쪽(rtserve) |
 
 ## 2. 계획 조립 P1–P30
 
@@ -152,7 +152,7 @@
 | B30 | 옮김 | `Watcher::partial_exit_rearm_tp`(조각 = place_tp_ladder · 단일 = place_bracket · 서버 감시·fired·tp_off·exiting 제외 · 그 사이 새 무장이면 안 덮음 · 조회 실패면 상태 그대로 · 예외는 tp_rearm 에) · wf `partial_exit_rearm_tp_single`·`…_lookup_fails_keeps_state`·`…_skips`·`…_rearmed_meanwhile`·`sl_leg_tp_ladder_raises`·`exit_then_rearm_partial` · mut «strict 로 몰래 고침(D7)» · D7 원본 그대로(strict=false) |
 | B31 | 옮김 | `Watcher::keep_rearm`(무장 없으면 arm_bracket · 손절 조각 청산 중이면 건너뜀 · 아니면 익절 수량만) · wf `keep_rearm_paths`·`keep_rearm_sl_leg_fired_skips` · ponytail: 포지션별 asyncio.Lock 대신 `&mut self` 가 한 줄로 세운다 |
 | B32 | 옮김 | 청산 진행 중(exiting·fired·청산 칸 없음) 선 수정·익절 on/off·선 추가·조각 조작·추가 진입 거절 · `dk` *_fired |
-| B33 | 범위 아님 | 응답 서버(계좌 응답의 `unprotected` -- with_bracket) |
+| B33 | 옮김 | `route::with_bracket`(/api/binance-account: bracket_armed 화면 15칸 · unprotected · user_stream{connected, error, seq = Hub::acct_seq, last_event_age_s}) · `rf` acct_cached·acct_fresh·acct_not_ok·acct_raises(500 aiohttp 글자) |
 
 ## 6. 청산 C1–C6
 
@@ -199,11 +199,11 @@
 
 | 상태 | 첫 조각 | 둘째 뒤 | 셋째 뒤 | 넷째 뒤 | 다섯째 뒤 | 여섯째 뒤 | 일곱째 뒤 | sltp 정리 뒤(→ 계좌 알림 조각 뒤) |
 |---|---|---|---|---|---|---|---|---|
-| 옮김 | 38 | 47 | 68 | **112** (+30 범위 아님→옮김 · +14 부분→옮김: G5·G15·G17·W2·P1·P6·P12·P14·P17·P20·C1·C2·B21·B22) -- 그중 ⚠시험 없음 G7 · ⚠불확실 C5 | **113** (+C4·E10 · B4·B22·B6 은 «M10 차이» 표시 · −B5 제거) | **135** (선 핸들러·실행기·전송·동시 조회) | **135** | **123** (−12 제거: G13·G16·G17·P17·P18·P19·P20·E20·C3·C4·C5·B6) → **125** (+G4·A10) |
-| 부분 | 22 | 21 | 31 | **23** (+G1·G2·W7·A1·A5·A6 범위 아님→부분 · G3 은 부분 그대로) | **23** (+C3 · −E10) | **5** (G1·G4·G8·R4·A10) | **5** | **5** → 계좌 알림 조각 뒤 **3** (G1·G8·R4 -- 셋 다 웹 서버 접수 몫 · G4·A10 → 옮김) |
+| 옮김 | 38 | 47 | 68 | **112** (+30 범위 아님→옮김 · +14 부분→옮김: G5·G15·G17·W2·P1·P6·P12·P14·P17·P20·C1·C2·B21·B22) -- 그중 ⚠시험 없음 G7 · ⚠불확실 C5 | **113** (+C4·E10 · B4·B22·B6 은 «M10 차이» 표시 · −B5 제거) | **135** (선 핸들러·실행기·전송·동시 조회) | **135** | **123** (−12 제거: G13·G16·G17·P17·P18·P19·P20·E20·C3·C4·C5·B6) → **125** (+G4·A10) → 주소 조각 뒤 **128** (+G1·G8·B33 · G7 은 ⚠ 떼고 그대로) |
+| 부분 | 22 | 21 | 31 | **23** (+G1·G2·W7·A1·A5·A6 범위 아님→부분 · G3 은 부분 그대로) | **23** (+C3 · −E10) | **5** (G1·G4·G8·R4·A10) | **5** | **5** → 계좌 알림 조각 뒤 **3** (G1·G8·R4 -- 셋 다 웹 서버 접수 몫 · G4·A10 → 옮김) → 주소 조각 뒤 **2** (R4 · G18 -- G1·G8 옮김 · G18 범위 아님→부분) |
 | 미정(사용자 결정) | 0 | 0 | 0 | **2** (C3·C4 = 스위칭 M11 -- 접수에서 «미정» 거절) | **0** (질문지 답 -- 시장가 유지 · M10 제거) · 제거 1(B5) | 0 · 제거 1 | 0 · 제거 1 | 0 · 제거 **13**(B5 + 위 12) |
-| 범위 아님 | 85 | 77 | 46 | **8** (G18·R5·R6 웹 서버 · P23·R8 대기 작업 실행기 · B25·B26 안 함 · B33 응답 서버) | **8** | **4** (G18·R5·R6 웹 서버 · B33 응답 서버) | **4** | **4** |
-| 옮긴 몫에 시험 없음(⚠) | 4 | 2 | 1 | 2 (E17 구조 · G7 동시 요청) | 2 + M4 원본 정답지 없음 | 3 (G7 · P23 원본 정답지 없음 · B29 대기열 소비자 없음) | **1** (G7 동시 요청) | **1** (G7 · C5 ⚠불확실은 제거로 사라짐) |
+| 범위 아님 | 85 | 77 | 46 | **8** (G18·R5·R6 웹 서버 · P23·R8 대기 작업 실행기 · B25·B26 안 함 · B33 응답 서버) | **8** | **4** (G18·R5·R6 웹 서버 · B33 응답 서버) | **4** | **4** → 주소 조각 뒤 **2** (R5·R6 종료 훅 -- G18 부분 · B33 옮김) |
+| 옮긴 몫에 시험 없음(⚠) | 4 | 2 | 1 | 2 (E17 구조 · G7 동시 요청) | 2 + M4 원본 정답지 없음 | 3 (G7 · P23 원본 정답지 없음 · B29 대기열 소비자 없음) | **1** (G7 동시 요청) | **1** (G7 · C5 ⚠불확실은 제거로 사라짐) → 주소 조각 뒤 **0** |
 
 이 조각 뒤 남는 일(다음 조각 범위):
 1. **웹 서버에 붙이기** -- `intake::POST_ONLY`·`LOCKED` 표대로 라우트·`busy_or` · 접수 기록(G18) · `server_ms` · NOCACHE · 종료 훅(R5·R6) · 상태 조회(`api_manual_entry_status`) · 동시 요청으로 G7(조립 뒤 칸 다시 보기) 시험.
@@ -380,4 +380,14 @@
   - 정답지: `gen_telegram_fixture.py` -- 원본 두 함수를 소스에서 꺼내(모듈 import 안 함 · ops_watchdog 는 import 때 점-env 를 읽는다) 가짜 urlopen 으로 6호출(같은 칸·같은 종류 중복 1 · `<>&'"` · 줄바꿈·탭·DEL·이모지) → 로그 줄 6 · 보낸 요청 5(경로·메서드·Content-Type·본문 바이트) 일치(`tg` = tests/telegram.rs).
 - 양성 대조 ELEVEN 11/11(스트림 미체결 수량 · BOTH 측면 · 번호 · clear · 상태 사본 · 대조 · 시작 게이트 · html.escape · ensure_ascii · 그림자 전송 · HTTP 오류) · WIRE 첫 항목을 새 자리(wire.rs)로 옮김.
 - 서버 그림자 가동에 필요한 것: `SHADOW.md`.
+
+## 주문·계좌 주소 14개 공개 진입점 (2026-11-21)
+
+- `route::Front::call(desk, hub, quotes, io, method, path, query)` → `Reply{status, content_type, headers, body(글자), task, log}`. 응답 서버는 그대로 내보내고, task 를 띄우고, log 에 at·ms·ua·ip 를 더해 적기만 하면 된다(SHADOW.md 7절).
+- 정답지 `tools/gen_route_fixture.py`: 원본 핸들러를 **진짜 aiohttp 앱**(127.0.0.1)에 원본 등록·`order_request_log` 를 글자 그대로 옮겨 붙이고 요청을 보냈다(server.py 는 import 하지 않음). 사례는 기존 접수 사례 139 전부 + 새 20(계좌 4 · 상태 3 · 405 3 · HEAD · 404 3 · 잠금 409 3 · 잠금 밖 · 같은 키 · 스위치 꺼짐). 상태·Content-Type·Cache-Control·Allow·**본문 글자**(server_ms 숫자만 0)·접수 기록·상태 칸이 159/159 일치.
+- 글자 대조로 새로 잡아 고친 원본과 다른 곳 3가지: 미리보기 200 본문 열쇠 순서(plan·cap 이 먼저) · 409 wait_pending 의 detail·wait 순서(2곳) · 포지션이 없을 때 투영 before.notional_usdt 가 정수 0(원본은 빈 sum()). 값 비교 시험은 이 셋을 못 봤다(수는 값으로만 견줬다).
+- 지운 주소와 새 거절이 지금 원본과 같은지: manual-exit/preview(GET·POST)·submit-all = 404 · 400 removed_option 10사례 · 400 lines_required 2 · 409 add_on_unlined_position 1 -- 본문 글자까지 일치.
+- 본문 글자 = `pyfmt::json_dumps`(파이썬 json.dumps 기본: ", " ": " · ensure_ascii · 실수 repr · 정수/실수 구분) -- 텔레그램과 같은 `pyfmt::json_str`.
+- ponytail: 요청 하나가 `DeskCell` 을 끝까지 쥔다(조립 REST 동안 다른 주문 요청은 기다림) · ?fresh=1 의 «1초 안 받은 값 재사용»은 `DeskIo::account(true)` 구현 몫.
+- 양성 대조 TWELVE 14/14.
 
