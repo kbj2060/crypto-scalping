@@ -478,23 +478,22 @@ function linePreview() {   // 크기는 서버 미리보기(증거금 linePct %)
     if (!t || t.placed) return;   // 대기 주문은 서버가 크기를 이미 정했다
     if (!side) { t.plan = null; t.err = "익절과 손절이 현재가 양쪽에 있어야 합니다"; renderLineTool(); return; }
     try {
-      const d = await manualEntryFetch(side, "entry", { rule: "", pct: linePct, tp: linePx(t.tp), sl: linePx(t.sl), limit: t.entry > 0 ? linePx(t.entry) : "", stop: lineStop(t, p) });
+      const d = await manualEntryFetch(side, { pct: linePct, tp: linePx(t.tp), sl: linePx(t.sl), limit: t.entry > 0 ? linePx(t.entry) : "", stop: lineStop(t, p) });
       if (lineTool !== t || seq !== linePrevSeq) return;
       t.plan = d.ok ? d.plan : null; t.err = d.ok ? (d.plan.blocked || "") : (d.detail || d.error || "미리보기 실패");
+      const st = d.ok && d.plan.leverage_steps; if (st && st.length) lineLevMax = Math.max(5, Math.floor(Math.max(...st) / 5) * 5);   // 배수 슬라이더 상한 = 서버 정책 최대(5단위 내림)
     } catch (e) { if (lineTool === t && seq === linePrevSeq) { t.plan = null; t.err = "미리보기 실패"; } }
     renderLineTool();
   }, 500);
 }
-function lineFire() {   // 미리보기 → 오는 즉시 발주(manualFireOnPreview) -- 진입 버튼과 같은 길(상한·게이트·확인 서버 검사 그대로)
+function lineFire() {   // 바로 발주(manualFireNow) -- 상한·게이트·확인은 서버가 검사한다
   const t = lineTool, p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), side = t && lineSide(t, p);
   if (!side) return;
-  if (manualOrderBusy || manualPreviewInFlight) { t.fail = manualOrderBusy ? "이전 주문 처리 중 -- 끝나면 다시 누르세요" : "미리보기 받는 중 -- 잠시 뒤 다시 누르세요"; renderLineTool(); ofabSay(escapeHtml(manualOrderBusy ? "이전 주문을 처리하는 중이라 이번 누름은 무시됐습니다 — 끝나면 다시 눌러 주세요" : "다른 미리보기를 받는 중이라 이번 누름은 무시됐습니다 — 잠시 뒤 다시 눌러 주세요")); return; }   // 2026-11-05 사용자 «주문 버튼이 씹힌다» -- 조용히 무시하던 자리에 사유를 띄운다
+  if (manualOrderBusy) { t.fail = "이전 주문 처리 중 -- 끝나면 다시 누르세요"; renderLineTool(); return; }   // 2026-11-05 사용자 «주문 버튼이 씹힌다» -- 조용히 무시하던 자리에 사유를 띄운다(상자 손익비 줄 · 진행 중인 주문은 차트 위 상태 줄이 말한다)
   t.fail = ""; const lim = t.entry > 0;   // 지정가 = 접수가 확인될 때까지 선을 둔다(manualEntrySubmit 이 placed 로) · peg = 현행대로 바로 지운다
   const stp = lim && lineStop(t, p);
-  ofabWatchResult(); ofabSay(escapeHtml(`${side === "LONG" ? "롱" : "숏"} ${stp ? "감시 " : lim ? "지정가 " : ""}선 주문 — ${HOLD_FIRE_MS ? "미리보기 받는 중…" : "주문 전송 중…"}`));
-  const ov = { rule: "", pct: linePct, tp: linePx(t.tp), sl: linePx(t.sl), fresh: true, limit: lim ? linePx(t.entry) : "", stop: stp };   // 검증 11-14: 추가 모드도 선을 같이 보낸다(서버는 같은 쪽이면 무장된 조건을 쓴다) -- 비우면 지정가가 400 · 집행이 «기다리기» 드롭다운을 따라갔다
-  if (!HOLD_FIRE_MS) manualFireNow(side, "entry", ov);   // 즉시 모드 -- 미리보기 없이 바로
-  else { manualFireOnPreview = true; manualEntryPreview(side, "entry", ov); }
+  const ov = { pct: linePct, tp: linePx(t.tp), sl: linePx(t.sl), fresh: true, limit: lim ? linePx(t.entry) : "", stop: stp };   // 검증 11-14: 추가 모드도 선을 같이 보낸다(서버는 같은 쪽이면 무장된 조건을 쓴다) -- 비우면 지정가가 400 · 집행이 «기다리기» 드롭다운을 따라갔다
+  manualFireNow(side, "entry", ov);
   renderLineTool();   // peg 도 선은 서버가 받았다고 한 뒤(manualEntrySubmit)에 거둔다 -- 거절되면 사유를 이 팝업에 남긴다
 }
 // 화면 y(clientY) → 차트 가격(USDT). 플롯 밖으로 끌어도 같은 비율로 이어진다. 차트가 아직 없으면 null.
@@ -572,14 +571,11 @@ function lineToolEl(box) {
     try { localStorage.setItem("linePct", String(linePct)); } catch (err) { /* 기억은 편의일 뿐 */ }
     if (lineTool) { lineTool.plan = null; lineTool.arm = 0; renderLineTool(); linePreview(); }
   });
-  // 2026-11-07 사용자 «SLTP 에서 배수도 게이지로 조절»: 배수의 단일 원천은 아래 주문 패널의 레버리지 게이지(#snapLevGauge · manualLevValue)라 그 값을 바꾼다.
+  // 2026-11-07 사용자 «SLTP 에서 배수도 게이지로 조절» · 2026-11-21 값은 lineLev 가 직접 든다(플로팅 패널 게이지 제거).
   //   손으로 밀면 «자동»(고정 10배)을 끈다 · 기존 포지션이 있으면 거래소가 그 배수로 묶으므로(manualLevLocked) 잠근다.
   h.querySelector(".lt-lv-r").addEventListener("input", (e) => {
-    const g = el("snapLevGauge"), a = el("snapLevAuto");
-    if (!g || manualLevLocked()) return;
-    if (a) a.checked = false;
-    g.disabled = false; g.value = e.target.value;
-    g.dispatchEvent(new Event("input", { bubbles: true }));   // 칩·«N배» 글자·크기 재조회는 그쪽 리스너가 한다(칩 클릭과 같은 길)
+    if (manualLevLocked()) return;
+    lineLevAuto = false; lineLev = Math.max(5, Math.round((Number(e.target.value) || 5) / 5) * 5);
     if (lineTool) { lineTool.plan = null; lineTool.arm = 0; renderLineTool(); linePreview(); }
   });
   h.addEventListener("keydown", (e) => { if ((e.key === "Enter" || e.key === " ") && e.target.closest(".lt-unf")) { e.preventDefault(); e.target.click(); } });
@@ -588,8 +584,7 @@ function lineToolEl(box) {
     const tkb = e.target.closest(".lt-tkr"); if (tkb) { lineTakerClick(e, tkb.dataset.a || "market"); return; }
     if (e.target.closest(".lt-fold, .lt-unf")) { lineFold = !!e.target.closest(".lt-fold"); try { localStorage.setItem("ltFold", lineFold ? "1" : "0"); } catch (err) {} renderLineTool(); return; }
     if (e.target.closest(".lt-lv-auto")) {
-      const a = el("snapLevAuto");
-      if (a && lineTool && !lineTool.placed && !manualLevLocked()) { a.checked = !a.checked; a.dispatchEvent(new Event("change", { bubbles: true })); lineTool.plan = null; lineTool.arm = 0; renderLineTool(); linePreview(); }
+      if (lineTool && !lineTool.placed && !manualLevLocked()) { lineLevAuto = !lineLevAuto; lineTool.plan = null; lineTool.arm = 0; renderLineTool(); linePreview(); }
       return;
     }
     if (e.target.closest(".lt-x, .lt-tx")) { if (lineTool?.placed) { lineTool.busy = true; manualWaitAction("cancel", lineTool.wid || 1).then(() => setTimeout(() => { if (lineTool?.busy) { lineTool.busy = false; renderLineTool(); } }, 8000)); renderLineTool(); return; } lineTool = lineParked.pop() || null; renderLineTool(); return; }   // 대기 주문 = 서버 취소(≤3초 뒤 선이 사라진다)
@@ -915,10 +910,10 @@ function renderLineTool() {
   rg.disabled = !!t.placed; h.querySelectorAll("[data-rr]").forEach((b) => { b.disabled = !!t.placed; });
   h.querySelector(".lt-mg-v").innerHTML = `${linePct}%${eq > 0 ? `<small>$${Math.round(eq * linePct / 100).toLocaleString()}</small>` : ""}`;   // 숫자뿐
   const lr = h.querySelector(".lt-lv-r"), la = h.querySelector(".lt-lv-auto"), lk = !!manualLevLocked(), lvE = Number(manualLevEffective()) || MANUAL_LEV_AUTO;
-  lr.max = el("snapLevGauge")?.max || "50"; lr.min = lr.step = lk ? "1" : "5";   // 잠긴 값(예 ×3)은 5단위 눈금 위에 없다 -- 그대로 보이기만 한다
+  lr.max = String(lineLevMax); lr.min = lr.step = lk ? "1" : "5";   // 잠긴 값(예 ×3)은 5단위 눈금 위에 없다 -- 그대로 보이기만 한다
   if (Number(lr.value) !== lvE) lr.value = String(lvE);
   lr.disabled = lk || !!t.placed; syncRangeFill(lr);
-  la.hidden = lk; la.disabled = !!t.placed; la.setAttribute("aria-pressed", String(!lk && manualLevAuto()));
+  la.hidden = lk; la.disabled = !!t.placed; la.setAttribute("aria-pressed", String(!lk && lineLevAuto));
   h.querySelector(".lt-lv-v").innerHTML = `${lvE}×${lk ? "<small>기존 포지션</small>" : ""}`;
   // 2026-11-04 펜 메모: 팝업의 «손절 시 −$ = 순자산 −%» · «레버리지 N× · 명목 N×» 줄은 뺐다(크기 줄 위쪽 «롱 · 10× / 수량» 과 증거금 숫자만 남긴다)
   rrEl.textContent = t.err || t.fail || (t.add ? "기존 익절·손절선 그대로 · 크기만 늘림" : side ? `손익비 ${rr.toFixed(2)} : 1` : "");
@@ -1004,7 +999,7 @@ async function lineDraftSubmit() {
         }
       }
       lineDraft = null;
-      ofabSay(`${name}선 걸림 ${lineFmt(j.level)}${j.warn ? ` — ${escapeHtml(j.warn)}` : ""}`, j.warn ? "bad" : "");
+      ordSay(`${name}선 걸림 ${lineFmt(j.level)}${j.warn ? ` — ${escapeHtml(j.warn)}` : ""}`, j.warn ? "bad" : "");
     } else { d.busy = false; d.err = j.detail || j.error || `HTTP ${r.status}`; }
   } catch (err) {
     d.busy = false; d.err = "네트워크 오류 — 걸렸는지 모릅니다(계좌 확인)";
@@ -1347,12 +1342,17 @@ function renderArmedLines() {
   if (e && e.err && Date.now() - e.errShownAt > 8000) armedEdit = null;
 }
 // 2026-11-01 사용자 «이미 진입한 경우 진입가 라벨을 누르면 팝업 -- 청산 내용»: 차트 오른쪽 주황 «진입» 배지(또는 들어간 선의 진입 꼬리표)를 누르면
-//   평단·미실현 손익·청산가(강제청산) 거리 + 25/50/100% 청산 버튼. 버튼은 **새 경로가 아니라** 기존 청산 미리보기(manualExitPreview)를 열어 주문 패널의
-//   «확인» 두 번을 그대로 거친다(여기서 바로 주문이 나가지 않는다). 가격은 전부 USDT 환산(entryUsdt 의 basis).
+//   평단·미실현 손익·청산가(강제청산) 거리 + 25/50/100% 청산 버튼(누르면 바로 지정가 따라가기 청산 -- 2026-11-21 즉시(시장가) 칩은 플로팅 패널과 함께 지움). 가격은 전부 USDT 환산(entryUsdt 의 basis).
 function entryPopClose() { el("entryPop")?.remove(); el("fpLineBtn")?.querySelector("[data-pm]")?.setAttribute("aria-expanded", "false"); }
 function pmPnl(pos) {   // 지금가 기준 미실현(차트 단위 평단) -- 막대·단추가 같은 값
   const cur = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), en = entryUsdt(pos, cur), sgn = String(pos.side).toUpperCase() === "SHORT" ? -1 : 1;
   return cur > 0 && en > 0 ? (cur - en) * Math.abs(Number(pos.qty)) * sgn : 0;
+}
+// 2026-11-21 «손절 없음» 상시 표시(플로팅 버튼의 #ofabSl 자리를 MANAGE 탭·팝업으로 옮김): 서버 무장 손절(bracket_armed.sl_price)이 없거나 꺼졌으면(sl_off) 손절 없음.
+const NOSL_TIP = "손절 없음 — 이 포지션엔 거래소 스탑도 서버 5분봉 감시도 없습니다. MANAGE 의 «+ 손절»로 손절선을 거세요";
+function posNoSl(pos) {
+  const b = (latestBinanceAccount?.bracket_armed || {})[`${pos.symbol}:${String(pos.side).toUpperCase()}`];
+  return !(b && b.sl_price > 0 && !b.sl_off);
 }
 function pmSync() {   // renderArmedLines 마다 -- 포지션이 없거나 다른 화면이면 숨기고 막대도 닫는다
   const b = el("fpLineBtn")?.querySelector("[data-pm]");
@@ -1361,10 +1361,12 @@ function pmSync() {   // renderArmedLines 마다 -- 포지션이 없거나 다�
   b.hidden = !on; b.previousElementSibling.hidden = !on;
   if (!on) { if (el("entryPop")) entryPopClose(); return; }
   const up = pmPnl(pos), mob = isMobileChartMode(), pc = up >= 0 ? "good" : "bad";
-  if (b._mob !== mob) { b._mob = mob; b.innerHTML = `${mob ? "" : "<span>MANAGE</span>"}<b></b>${mob ? "" : '<i class="pm-w"></i>'}<svg class="pm-car" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`; }   // 뼈대는 한 번 -- 매 틱 innerHTML 을 갈면 누르는 중 대상이 떨어져 click 이 씹힐 수 있다(검증 3)
+  if (b._mob !== mob) { b._mob = mob; b.innerHTML = `${mob ? "" : "<span>MANAGE</span>"}<b></b><em class="pm-nosl" hidden></em>${mob ? "" : '<i class="pm-w"></i>'}<svg class="pm-car" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`; }   // 뼈대는 한 번 -- 매 틱 innerHTML 을 갈면 누르는 중 대상이 떨어져 click 이 씹힐 수 있다(검증 3)
   const bv = b.querySelector("b"), pn = `${up >= 0 ? "+" : "−"}$${Math.abs(up).toFixed(mob ? 0 : 2)}`;
   if (bv.textContent !== pn) bv.textContent = pn;
   if (bv.className !== pc) bv.className = pc;
+  const ns = b.querySelector(".pm-nosl"), noSl = posNoSl(pos);
+  if (ns.hidden === noSl) { ns.hidden = !noSl; ns.textContent = mob ? "무손절" : "손절 없음"; ns.title = NOSL_TIP; }
   // 2026-11-20 펜 메모 «MANAGE 에 보유 비중도»: 손익 옆 흐린 «비중 n%»(머리 포지션 칸의 «증거금 n%»와 같은 값) -- 계좌를 못 읽으면 비움
   const wv = b.querySelector(".pm-w");
   if (wv) { const m = posMarginShare(pos), t = m.pct != null ? `비중 ${m.pct.toFixed(m.pct >= 10 ? 0 : 1)}%` : "";
@@ -1440,9 +1442,9 @@ async function epLegPress(b) {   // 2026-11-11 분할 익절·손절 조각: −
       else Object.assign(ba, { sl_legs: r.sl_legs || null, sl_level: r.sl_level, sl_price: r.sl_price, sl_up: r.sl_up });
       renderArmedLines();
     }
-    if (!r.ok || act === "rm") ofabSay(r.ok ? `${name}선 지움 — 남은 ${name}선이 포지션을 나눕니다` : escapeHtml(`${name} 나눔 못 바꿈: ${r.detail || r.error}`), r.ok ? "" : "bad");
+    if (!r.ok || act === "rm") ordSay(r.ok ? `${name}선 지움 — 남은 ${name}선이 포지션을 나눕니다` : escapeHtml(`${name} 나눔 못 바꿈: ${r.detail || r.error}`), r.ok ? "" : "bad");
   } catch (err) {
-    ofabSay(escapeHtml(`${name} 나눔 — 바뀌었는지 모릅니다(계좌 확인): ${err && err.message ? err.message : err}`), "bad");
+    ordSay(escapeHtml(`${name} 나눔 — 바뀌었는지 모릅니다(계좌 확인): ${err && err.message ? err.message : err}`), "bad");
   } finally {
     epLnBusy = false; redraw(); refreshBinanceAccount(true);
   }
@@ -1468,9 +1470,9 @@ async function epLinePress(b) {
       if (ba) { const f = k === "sl" ? "sl_off" : "tp_off"; if (act === "off") ba[f] = r[f] || r.sl_off || { at: Date.now() / 1000 }; else delete ba[f]; if (k === "tp" && "tp_resting" in r) ba.tp_resting = r.tp_resting; if (k === "tp" && act === "off") ba.tp_legs = null; }
       entryPopClose(); renderArmedLines();
     }
-    ofabSay(r.ok ? `${what} 완료${k === "tp" && act === "on" && r.tp_resting === false ? " — 지정가를 못 걸어 서버가 닿으면 닫습니다" : ""}` : escapeHtml(`${what} 못 함: ${r.detail || r.error}`), r.ok ? "" : "bad");
+    ordSay(r.ok ? `${what} 완료${k === "tp" && act === "on" && r.tp_resting === false ? " — 지정가를 못 걸어 서버가 닿으면 닫습니다" : ""}` : escapeHtml(`${what} 못 함: ${r.detail || r.error}`), r.ok ? "" : "bad");
   } catch (err) {
-    ofabSay(escapeHtml(`${what} — 바뀌었는지 모릅니다(계좌 확인): ${err && err.message ? err.message : err}`), "bad");
+    ordSay(escapeHtml(`${what} — 바뀌었는지 모릅니다(계좌 확인): ${err && err.message ? err.message : err}`), "bad");
   } finally {
     epLnBusy = false; redraw(); refreshBinanceAccount(true);
   }
@@ -1487,11 +1489,12 @@ function entryPopOpen(x, y) {
   // 2026-11-14 펜 메모 시안 C: 팝업 → LONG/SHORT 옆 MANAGE 탭 아래 한 줄 도구막대 [방향·수량·손익 | 청산 25·50·100 | 선 칩]. 단추·처리기(꾹·탭·두 번 지우기)는 예전 그대로.
   d.id = "entryPop"; d.className = "entry-pop pm-strip"; d.setAttribute("role", "dialog"); d.setAttribute("aria-label", "포지션 관리");
   d.dataset.pk = `${pos.symbol}:${String(pos.side).toUpperCase()}`;
-  const holdTip = "마우스 = 꾹 눌러 게이지가 차면 청산 · 터치·키보드 = 누르면 바로 청산 주문";
+  const holdTip = "누르면 바로 청산 주문 — 최우선 호가에 지정가로 걸고 따라갑니다(남은 수량은 변동성 따라 15~120초 뒤 시장가)";
   d.innerHTML = `<div class="pm-g" title="평단 ${lineFmt(en)} · 청산가 ${liq > 0 ? lineFmt(liq) : "없음"}"><span class="pm-lab ${sgn < 0 ? "bad" : "good"}">${sgn < 0 ? "SHORT" : "LONG"}</span><span class="pm-v">${qty} ${coinUnit()}</span>`
     + `<span class="pm-v pm-pn ${up >= 0 ? "good" : "bad"}">${sg(up)}$${Math.abs(up).toFixed(2)}</span>`
+    + (posNoSl(pos) ? `<span class="pm-nosl" title="${NOSL_TIP}">손절 없음</span>` : "")
     + `<span class="pm-sub">평단 ${lineFmt(en)} · 청산가 ${liq > 0 ? `${lineFmt(liq)}${dist != null ? ` (${dist.toFixed(1)}%)` : ""}` : "없음"}</span></div>`
-    + `<div class="pm-g ep-btns" title="${holdTip}"><span class="pm-lab">청산</span>${[25, 50, 100].map((v) => `<button type="button" data-pct="${v}" aria-label="${v}% 청산 — ${holdTip}"><i class="hold-fill" aria-hidden="true"></i><span>${v}%</span></button>`).join("")}</div>`
+    + `<div class="pm-g ep-btns" title="${holdTip}"><span class="pm-lab">청산</span>${[25, 50, 100].map((v) => `<button type="button" data-pct="${v}" aria-label="${v}% 청산 — ${holdTip}"><span>${v}%</span></button>`).join("")}</div>`
     + epLinesHtml(pos);
   document.body.appendChild(d);
   const r = d.getBoundingClientRect(), pb = el("fpLineBtn")?.querySelector("[data-pm]"), ar = pb && !pb.hidden ? pb.getBoundingClientRect() : null;
@@ -1503,20 +1506,16 @@ function entryPopOpen(x, y) {
     d.style.left = Math.max(8, Math.min(innerWidth - r.width - 8, x - r.width - 12)) + "px";
     d.style.top = Math.max(8, Math.min(innerHeight - r.height - 8, y - r.height / 2)) + "px";
   }
-  // 플로팅 청산 버튼과 같은 규약: 마우스 = 꾹(왼쪽→오른쪽 게이지, HOLD_FIRE_MS) · 터치·키보드 = 탭 → 미리보기 → 패널에서 확인
+  // 마우스 = 누르는 순간(pointerdown) · 터치·키보드 = click -- 둘 다 바로 발주, 결과는 차트 위 상태 줄(#ordStat)
   const side = String(pos.side).toUpperCase(), ovOf = (b, pt) => ({ pct: Number(b.dataset.pct), src: `ep-${pt}` });   // src = 2026-11-12 주문 요청 기록(서버 order_requests.jsonl)에 «진입가 팝업·마우스/터치/키보드»
-  let touched = false, released = false;
+  let touched = false;
   d.addEventListener("pointerdown", (e) => {
     const b = e.target.closest("button[data-pct]");
     touched = e.pointerType === "touch";
     if (!b || touched || manualOrderBusy) return;
-    released = false; e.preventDefault(); ofabSetOpen(true); manualHoldStart(b, side, "exit", ovOf(b, "mouse"));
-    setTimeout(() => { if (!released) entryPopClose(); }, HOLD_FIRE_MS + 60);   // 끝까지 눌렀으면(발주) 팝업을 닫는다
+    e.preventDefault(); manualFireNow(side, "exit", ovOf(b, "mouse"));
+    setTimeout(entryPopClose, 60);   // 발주했으면 팝업을 닫는다
   });
-  ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => d.addEventListener(ev, (e) => {
-    const b = e.target.closest?.("button[data-pct]");
-    if (b) { if (e.type === "pointerleave") { if (manualHoldLeave(b, e)) released = true; } else { released = true; manualHoldCancel(b); } }
-  }, true));
   d.addEventListener("click", (e) => {
     const ln = e.target.closest("button[data-ln]");
     if (ln) { e.stopPropagation(); epLinePress(ln); return; }
@@ -1525,9 +1524,9 @@ function entryPopOpen(x, y) {
     const b = e.target.closest("button[data-pct]");
     if (!b || !(touched || e.detail === 0) || manualOrderBusy) return;
     // 2026-11-04 사용자 «모바일에서 청산 50% 가 안 된다(3번 시도)»: 터치는 탭 → 미리보기 → 떠 있는 패널 맨 아래 «확인» 한 번 더였는데 패널이 열리며 가려져 주문이 안 나간 것으로 보였다.
-    //   팝업 버튼 자체가 이미 «진입 라벨 탭 → 퍼센트 탭» 두 번이라 마우스처럼 바로 발주한다(서버 confirm=1·게이트·409 는 그대로). 결과는 열린 패널의 결과 칸이 말한다.
+    //   팝업 버튼 자체가 이미 «진입 라벨 탭 → 퍼센트 탭» 두 번이라 마우스처럼 바로 발주한다(서버 confirm=1·게이트·409 는 그대로). 결과는 차트 위 상태 줄이 말한다.
     const ov = ovOf(b, touched ? "touch" : "key");
-    touched = false; entryPopClose(); ofabSetOpen(true); manualFireNow(side, "exit", ov);
+    touched = false; entryPopClose(); manualFireNow(side, "exit", ov);
   });
 }
 (() => {
@@ -1846,7 +1845,6 @@ async function setActiveSnapshotAsset(asset) {
   try { renderNews(); } catch (e) { console.error("news render:", e); }   // 2026-10-05 뉴스 카드의 «지금 코인» 강조·필터(예외가 코인 전환을 끊지 않게)
   chartPanReset();   // 코인을 바꾸면 실시간으로(관성도 멈춘다 -- 리뷰: 미끄러지던 게 새 코인을 과거로 끌었다)
   renderSnapshotAssetTabs();
-  manualEntryRefreshSize();
   manualWaitPoll();   // 2026-11-10 대기 칸은 코인별 -- 이 코인에 걸린 지정가를 곧바로 다시 잇는다
   // 계좌 payload 는 전 코인의 포지션을 담고 있어 재요청 없이 다시 그리기만 하면 된다.
   renderSnapshotAccount();
@@ -2367,15 +2365,6 @@ function acctWealthHtml(A, W, today, SG, spanLab) {
 //   «청산하려다 신규 진입»이 된다.
 // ⭐심볼은 하드코딩하지 않고 서버가 payload 에 실어 보낸 exec_symbol 을 쓴다 -- 환경변수라
 //   바뀔 수 있고, 두 벌로 적어 두면 언젠가 한쪽만 고쳐진다.
-// 증거금 사용 % = 사용 증거금(initialMargin) / 순자산(지갑+미실현). 계좌 카드 타일과 떠 있는 주문 버튼이 **같은 값**을
-//   말해야 해서 한 곳에 둔다(2026-09-26). 옛 상태파일은 initial_margin 이 없어 순자산−가용으로 되짚는다(바이낸스 정의상 같다).
-function acctMarginUsed(b) {
-  b = b || {};
-  const equity = (Number(b.wallet) || 0) + (Number(b.unrealized) || 0);
-  const used = Number.isFinite(Number(b.initial_margin)) && b.initial_margin != null ? Number(b.initial_margin)
-    : Math.max(0, (Number(b.margin) || 0) - (Number(b.available) || 0));
-  return { used, equity, pct: equity > 0 ? used / equity * 100 : 0 };
-}
 // 2026-09-26 코인별 주문 심볼(서버 MANUAL_EXEC_SYMBOLS: eth→ETHUSDC · sol→SOLUSDC · xrp→XRPUSDC · btc→BTCUSDC). 표에 없는 코인은 ""(주문 불가).
 function execSymbolFor(asset) {
   const acc = latestBinanceAccount || lastGoodAccount || {};
@@ -2432,7 +2421,7 @@ function renderFpPos() {
 
 // ── Account 카드 = 오늘 성과 + 과거 기록 (2026-10-14 사용자 시안 C · «주문은 플로팅 버튼이라 카드에서 주문은 최소화») ──
 //   위 = 포지션 한 줄(+ 진입 미리보기 한 마디) · 오늘 띠(손익 · 0~24시 흐름 · 오늘 닫힌 거래)
-//   아래 = 손익 달력(한 달씩) | 자산 곡선 + 낙폭 + 기간 성적. 주문 조작부(.acct-lanes)는 DOM 에 남아 #ofab 가 옮겨 쓴다(카드 안에서는 CSS 로 숨김).
+//   아래 = 손익 달력(한 달씩) | 자산 곡선 + 낙폭 + 기간 성적. (2026-11-21 주문 조작부 .acct-lanes 는 플로팅 버튼과 함께 지움 -- 주문은 차트 SLTP·진입가 팝업에서만)
 //   원천: 원장(latestBinanceAccount.ledger, 모든 코인 · 서버 꼬리 400왕복) + 잔고·포지션 + 서버 «0시 순자산»(day_start).
 const ACCT_SPANS = [["오늘", 0], ["1주", 7], ["1개월", 30], ["전체", -1]];   // 일수 · 0 = 오늘 0시부터 · -1 = 원장 전체
 const ACCT_DAY = 86400000, ACCT_KST = 9 * 3600000;
@@ -2958,10 +2947,6 @@ function renderBinanceAccount(payload) {
   }
   try { renderSnapshotAccount(); } catch (err) { console.error("계좌 카드 렌더 예외:", err); }   // 한 칸의 예외가 차트·청산 버튼 동기화를 막지 않게
   renderSnapshotChart();
-  // 🔴계좌가 **도착하는 즉시** 청산 버튼을 맞춘다. 예전에는 60초 주기(MANUAL_ENTRY_REFRESH_MS)
-  // 에만 맞춰서, 화면을 열고 **63초 뒤에야** 청산 버튼이 나타났다(2026-09-13 실측).
-  // 급히 닫으려고 연 사람에게 1분을 기다리게 하는 건 이 버튼의 존재 이유와 정면으로 어긋난다.
-  if (typeof manualExitSyncButtons === "function") manualExitSyncButtons();
 }
 
 function fmtUsd(value) {
@@ -2983,7 +2968,6 @@ async function refreshBinanceAccount(force = false, fresh = force) {   // fresh=
     if (seq < accountAppliedSeq) return;   // 더 나중에 보낸 요청의 응답이 이미 반영됐다 -- 늦게 온 옛 응답은 버린다
     accountAppliedSeq = seq;
     renderBinanceAccount(j);
-    if (force) renderOfab();
   } catch (error) {
     console.error("Binance account fetch error:", error);
     if (seq < accountAppliedSeq) return;
@@ -2992,23 +2976,6 @@ async function refreshBinanceAccount(force = false, fresh = force) {   // fresh=
   }
 }
 
-
-// Shared open/closed state for the per-signal "자세히" detail toggles (model indicators AND
-// evidence signals use the same key space, prefixed "model:"/"evidence:" to avoid collisions).
-// Kept outside any render function so it survives every re-render -- these lists are rebuilt via
-// innerHTML replacement on every tick/poll, so without this a user's open detail panel would snap
-// shut a few seconds after they opened it.
-const detailOpenKeys = new Set();
-// 진입/청산 미리보기 카드의 «자세히». 버튼 **바로 다음 형제**를 연다.
-// 열림 상태를 detailOpenKeys 에 남겨, 미리보기를 다시 띄워도 사용자의 선택이 유지된다.
-function toggleEntryDetail(btn) {
-  const detail = btn.nextElementSibling;
-  const open = detailOpenKeys.has("entrycard")
-    ? (detailOpenKeys.delete("entrycard"), false) : (detailOpenKeys.add("entrycard"), true);
-  if (detail) detail.classList.toggle("open", open);
-  btn.textContent = open ? "접기 ▴" : "자세히 ▾";
-  btn.setAttribute("aria-expanded", String(open));
-}
 
 // Renders the Snapshot tab's liquidation-map list as a price ladder: resistance levels (farthest
 // first) above a highlighted current-price row, support levels (nearest first) below -- reads
@@ -4081,7 +4048,7 @@ el("fpWideBtn")?.addEventListener("click", () => { const on = !document.document
 //   열려 있으면 그것만 닫히게 둔다. 🔴검증 11-15: 그 처리기들은 document 에서 먼저 닫아 버려(preventDefault 없음) window 에서 보면 이미 없다 -- 그래서 캡처 단계에서 미리 본다.
 addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || e.defaultPrevented || !document.documentElement.classList.contains("fp-wide")) return;
-  const busy = el("entryPop") || lineDraft || armedEdit?.cfm || fpIndOpen || document.querySelector(".ms-x, .asset-pop:not([hidden]), dialog[open], .dd-open") || el("ofab")?.contains(document.activeElement);
+  const busy = el("entryPop") || lineDraft || armedEdit?.cfm || fpIndOpen || document.querySelector(".ms-x, .asset-pop:not([hidden]), dialog[open], .dd-open");
   if (!busy) { if (fpSideOpen && !el("fpSideTab")?.hidden) fpSideSet(false); else fpWideSet(false); }   // 11-15 시안 B: 열린 오른쪽 칸 서랍부터 닫는다
 }, true);
 // 2026-11-15 펜 메모 시안 B «전체화면이면 화면 오른쪽 끝 손잡이 → 접힌 오른쪽 칸(발표·1초 수급·시장 맥락)을 통째로 팝업»: 차트 폭은 그대로 두고
@@ -11530,7 +11497,6 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
 
   // 그리기는 스냅샷 탭이 보일 때만(아니면 snapshotTabPanel 이 display:none).
   if (activePageTab === "snapshot") {
-    renderOfab();                  // 2026-09-25 떠다니는 주문 버튼 글자(포지션·손익)
 
     // 현재가 선은 SSE 틱마다 바뀌는 latestLivePriceByAsset 을 읽는다 -- 5분 주기 데이터 갱신만
     // 기다리지 않고 여기서도 다시 그린다(chartRenderGateMs() 스로틀, 캐시된 데이터만 다시 그림).
@@ -11634,7 +11600,7 @@ setupCardRail();
 // 캔버스로 만들어 SVG 필터(feDisplacementMap)에 넣고 backdrop-filter 로 건다. 🔴SVG 필터를 backdrop-filter 로 쓰는 건 **Chromium 전용**이라
 // 그 밖의 브라우저·다크 테마·«투명도 줄이기» 설정에서는 아무것도 안 건다(CSS 글래스 그대로). 작은 컨트롤에만 쓴다 -- 큰 카드는 지도 비용이 크고 글자를 해친다.
 const LG_TARGETS = [["#cardRail", { radius: 0, bezel: 14, scale: 22 }], ["#snapshotAssetTabs", { radius: 22, bezel: 16, scale: 30 }],
-  ["#assetMore", { radius: 15, bezel: 11, scale: 22 }], [".push-toggle", { radius: 16, bezel: 12, scale: 24 }], [".ofab-bar", { radius: 24, bezel: 14, scale: 26 }]];
+  ["#assetMore", { radius: 15, bezel: 11, scale: 22 }], [".push-toggle", { radius: 16, bezel: 12, scale: 24 }]];
 const lgState = new Map();   // 요소 -> { svg, ro }
 function lgSupported() {
   try { return /Chrome\/\d+/.test(navigator.userAgent) && !matchMedia("(prefers-reduced-transparency: reduce)").matches; } catch (e) { return false; }
@@ -12124,230 +12090,17 @@ setupNotifyPage();
 // 2026-09-11 청산 위험 패널·칩 모두 제거(사용자 지시). /api/position-sizing 은 아직 살아 있다.
 
 
-// ── 2026-09-12 수동 진입(1단계: 미리보기 전용) ──────────────────────────────────
-// 왜: 실계좌 19왕복에서 손실은 방향이 아니라 **크기**에서 왔다(상관 −0.494). 한 건이
-// 중앙 명목의 5.2배·28.4배 레버리지로 −548.88 을 냈고, 그것만 잘라도 누적이 뒤집힌다.
-// 버튼이 크기를 정하면 진입 순간의 재량이 사라진다.
-// 지금은 주문이 나가지 않는다 -- 서버 게이트(DASHBOARD_MANUAL_EXEC_ENABLED)가 닫혀 있고,
-// 미리보기는 실주문과 **같은 함수**(build_entry_plan)를 통과한다.
-const MANUAL_ENTRY_REFRESH_MS = 60000;
-
-// 숫자가 스스로 뜻을 말하게 쓴다 -- 분모·일상단위·결정연결까지(2026-09-11 사용자 지시).
-// 「6,802 USDT」는 명목이지 내 돈이 아니고, 「30배」는 청산 거리가 아니라 잠기는 증거금이다.
-// 교차 마진이라 청산 거리는 순자산/총명목으로 정해진다 -- 설정 레버리지는 거기 안 들어간다.
-const won = (x) => Number(x).toLocaleString(undefined, { maximumFractionDigits: 0 });
-
-// 2026-09-16 진입 미리보기의 타일 넷을 없애면서 entryTile/entryVal/ENTRY_* 도 함께 나갔다
-// -- 그 블록 전용 헬퍼였다. 같은 숫자는 계좌 카드 포지션 줄의 «넣으면 →» 한 마디가 그린다(2026-10-14 카드 개편).
-
-// 2026-10-10 주문은 ETHUSDC · 화면 시세는 ETHUSDT(같은 시각 USDT 가 중앙 1.93bp 비싸다) -- 숏 진입·롱 청산 지정가가 화면 가격보다
-//   싸 보여 «손해 쪽에 걸렸다»로 읽히던 착시를 막는다. 값은 서버 미리보기가 이미 준 지정가(plan.price/reference_price) -- REST 를 늘리지 않는다.
-function execQuoteBp(px, ref) {
-  return px > 0 && ref > 0 ? (px - ref) / ref * 1e4 : null;
-}
-function execQuoteHtml(plan) {
-  const px = Number(plan?.price ?? plan?.reference_price), sym = String(plan?.symbol || "");
-  const bp = execQuoteBp(px, Number(latestLivePriceByAsset[activeSnapshotAsset] || 0));
-  if (bp == null || !/USDC$/.test(sym)) return "";   // USDT 심볼(옛 포지션 청산)이면 차이가 없다
-  const book = plan.side === "BUY" ? "매수호가" : "매도호가";
-  return `<div class="entry-quote">${escapeHtml(sym)} 최우선 ${book} <b>${escapeHtml(acctPx(px))}</b>`
-    + ` · 화면(USDT) 대비 <b>${bp > 0 ? "+" : "−"}${Math.abs(bp).toFixed(1)}bp</b></div>`;
-}
-// 2026-10-10 주문 심볼의 계정 실수수료율(서버 commissionRate, 1시간 캐시) -- plan.trade_plan.execution.cost.fee.
-//   🔴«이번 주문이 낼 예상 비용» 표시 전용. 크기·손절·판정은 서버가 표준 수수료(2/5bp) 상수로 계산한다(사용자 정책).
-function planFee(plan) {
-  return ((((plan || {}).trade_plan || {}).execution || {}).cost || {}).fee || null;
-}
-function feeLine(plan) {
-  const f = planFee(plan), rt = (((plan.trade_plan || {}).execution || {}).cost || {}).round_trip_bp;
-  if (!f) return "";
-  const bp = (v) => `${+Number(v).toFixed(2)}bp`;
-  return `수수료 ${f.source === "fallback" ? "추정(요율 조회 실패 · 표준)" : f.symbol || ""} 메이커 ${bp(f.maker_bp)} · 테이커 ${bp(f.taker_bp)}`
-    + (rt != null ? ` · 정상 왕복 약 ${bp(rt)}` : "")
-    + (f.source === "stale" ? " · 지난 조회값" : "")
-    + (f.promo ? ` · ${String(f.symbol || "").slice(-4)} 프로모션 요율(기간 한정)` : "");
-}
-function manualEntryPlanHtml(data) {
-  const plan = data.plan || {};
-  const dir = plan.positionSide === "LONG" ? "롱" : "숏";
-  const rl = plan.rule;   // 2026-10-09 권고 규칙 -- 무엇이 크기·손절을 정했는지 머리 바로 아래에 한 줄
-  const ruleNote = rl ? entryNote(`자동 규칙 — 상한 ${won(rl.cap_notional)} USDT(순자산 × ${rl.l}, ${rl.binding}) · 이번 `
-    + `${rl.first ? "첫 진입 = 상한의 1/3" : `물타기 = 남은 여유 ${won(rl.room)} USDT`} · 손절 ${rl.sl_name || ""} ${rl.sl_price ? acctPx(rl.sl_price) : "-"}`
-    + (rl.first && rl.add ? ` · 체결되면 물타기 지정가 ${acctPx(rl.add.price)} × ${rl.add.qty} 자동(첫 진입가 ${plan.positionSide === "LONG" ? "−" : "+"}0.75%)` : "")
-    + ` 거래소 스탑(물타기해도 안 물러남) · 익절 없음 · 교차 마진에서만`) : "";
-  const parts = [`<div class="entry-head"><b>${dir} ${escapeHtml(String(plan.quantity))} ${coinUnit()}</b>
-      <span>@ ${escapeHtml(acctPx(plan.price))}</span>
-      <span>내 돈 ${escapeHtml(won(plan.margin_usdt || 0))} USDT${
-        plan.leverage ? ` = 명목 ${escapeHtml(won(plan.notional_usdt))} ÷ ${plan.leverage}배` : ""}</span>
-    </div>` + execQuoteHtml(plan)];
-  if (ruleNote) parts.push(ruleNote);
-
-  // 2026-09-16 사용자 요청: 「롱 진입을 누르면 드롭다운으로 나오던 내용 제거 -- 이미 모달 안에
-  //   내용이 있어」. 여기 있던 「진입 후 계좌」 타일 넷(청산까지·증거금 사용·계좌 노출·상한
-  //   사용) 중 앞 셋은 바로 위 「지금 넣으면」 블록과 **같은 숫자**였다. 같은 사실을 두 번
-  //   쓰면 어느 쪽이 결정인지 흐려진다. 남는 것은 위가 말하지 않는 것뿐이다 --
-  //   수량·체결가(머리줄) · 막힘 · 손절 · 실주문 경고.
-
-  // 막는 것만 항상 보인다. 나머지 설명은 «자세히» 뒤로 접는다(사용자 요청 2026-09-13) --
-  // 진입 화면은 «얼마를 넣나»와 «왜 못 넣나»만 보이면 되고, 근거는 펼쳐서 읽는 것이다.
-  // 2026-09-26 막힘(상한 여유 없음·최소 수량)은 평상 상태라 흐린 문구다 -- 빨강은 실패에만.
-  if (plan.blocked) parts.push(`<div class="entry-note">진입 불가 — ${escapeHtml(plan.blocked)}</div>`);
-  // 2026-09-25 청산맵 TP/SL(사용자 지시) -- 고정 3% 손절을 대신한다. **접지 않는다**: «어디서 닫히나»는
-  //   행동을 바꾸는 값이다. 못 거는 경우도 반드시 말한다(옛 손절은 조용히 안 걸려 있었다).
-  const br = plan.bracket;
-  if (br && br.disabled) {
-    parts.push(br.unprotected   // 2026-10-20 이 측면에 무장된 손절이 없다 -- 넣으면 거래소 스탑도 서버 감시도 없는 포지션(10-20 XRP)
-      ? entryNote("🔴SL/TP 끔 — 이 포지션엔 손절이 하나도 없습니다(거래소 스탑·서버 5분봉 감시 둘 다 없음). 교차 마진이라 크게 빠지면 다른 코인 증거금까지 깎입니다. 손절을 걸려면 SL/TP 를 켜세요.", "bad")
-      : entryNote("SL/TP 끔 — 이번 진입에 TP·비상 스탑을 걸지 않고 SL 감시도 하지 않습니다. 이미 걸린 SL/TP 는 그대로 둡니다."));
-  } else if (br && br.available) {
-    const f = acctPx;
-    const pc = (v) => { const x = Number(v), t = Math.abs(x).toFixed(1); return (t === "0.0" ? "" : x > 0 ? "+" : "−") + t + "%"; };   // «-0.0%» 대신 0.0% · 유니코드 −
-    parts.push(entryNote(
-      (br.tp_off ? "TP 지운 상태(추가 뒤에도 안 걸림)" : br.tp_price ? `TP ${br.tp_name} ${f(br.tp_price)} (${pc(br.tp_pct)}) 지정가` : `TP 없음(${br.tp_name} 없음)`)
-      + " · "
-      + (br.sl_off ? "🔴SL 지운 상태 — 손절 감시 없음" : br.sl_price ? `SL ${br.sl_name} ${f(br.sl_price)}${br.sl_pct == null ? "" : ` (${pc(br.sl_pct)})`} 5분봉 종가 이탈 시 청산`
-                       + ` · 비상 스탑 ${f(br.backstop_price)}`
-                     : `🔴SL 없음(${br.sl_name} 없음)`),
-      br.sl_price && !br.sl_off ? "" : "bad"));
-  } else if (br) {
-    parts.push(entryNote(`🔴TP/SL 을 못 겁니다 — ${br.reason || "청산맵 레벨 없음"}`, "bad"));
-  }
-  // «자세히» 드롭다운도 같은 요청으로 뺐다. 여기 접혀 있던 위험모델 한 줄·처방 줄은
-  // 모달 위쪽(보유 예정·레버리지·「지금 넣으면」)이 이미 같은 말을 한다.
-  // 🔴plan.notes 만은 버리지 않는다 -- «수량을 왜 깎았나»라서 위가 말해주지 않는다.
-  (plan.notes || []).forEach((n) => parts.push(entryNote(`⚠ ${n}`)));
-  if (feeLine(plan)) parts.push(entryNote(feeLine(plan)));
-  parts.push(`<div class="entry-note${plan.dry_run ? "" : " live"}">${
-    plan.dry_run ? "미리보기 전용 — 주문은 나가지 않습니다."
-                 : "확인 버튼을 누르면 실제 주문이 나갑니다."} · ${(() => {
-    const w = /wait_min=(\d+)/.exec(manualExecQuery());   // 2026-10-10 체결 방식이 «대기»면 그 약속을 말한다
-    return w ? `최우선 호가에 한 번 걸고 따라가지 않음, ${w[1]}분 뒤 남은 수량 시장가(대기 중 취소·지금 시장가)`
-      : `peg 지정가(메이커), 미체결 ${plan.fallback_after_sec}초 후 테이커 전환`;
-  })()}</div>`);
-  return parts.join("");
-}
-
-// 접히는 설명 블록. 줄이 없으면 버튼도 안 만든다(빈 «자세히»는 노이즈다).
-function entryDetailHtml(lines) {
-  const rows = (lines || []).filter(Boolean);
-  if (!rows.length) return "";
-  const open = detailOpenKeys.has("entrycard");
-  return `<button type="button" class="detail-toggle" aria-expanded="${open}"`
-    + ` onclick="toggleEntryDetail(this)">${open ? "접기 ▴" : "자세히 ▾"}</button>`
-    + `<div class="signal-detail${open ? " open" : ""}">`
-    + rows.map((r) => `<div class="entry-cap">${r}</div>`).join("") + `</div>`;
-}
-
 function entryNote(text, tone) {
   return `<div class="entry-note${tone ? " " + tone : ""}">${escapeHtml(text)}</div>`;
 }
-
-// 2026-09-13 «지금 상황» 플랜 한 줄: 보유시간 권고 · 기대 체결 · 예산 사다리. 서버 plan.trade_plan.
-function tradePlanLines(tp, targetLev) {
-  if (!tp) return [];
-  const out = [];
-  // ⭐처방: 세 값을 한 줄로. 이게 «이번 진입을 어떻게 하라»의 전부다.
-  const rx = tp.prescription;
-  if (rx && rx.available) {
-    // 🔴손절이 있으면 청산거리는 **도달 못 하는 선**이다. 위험 지표를 손절 기준으로 바꾼다
-    // (2026-09-13): 손절당 계좌 손실과 «연속 몇 번 견디나»가 실제로 계좌를 정한다.
-    const sr = rx.stop_risk || {};
-    out.push(`처방 ${rx.leverage}배 · ${rx.hold_min}분 · ${rx.tranches}회(일괄)`
-      + (sr.available
-         ? ` — 손절당 계좌 ${sr.per_stop_pct}% · 연속 ${sr.consecutive_to_half}회면 반토막`
-           + ` · 연 ${sr.expected_stops_per_year}회 예상`
-         : ` — 청산거리 ${rx.liq_distance_pct}%`)
-      + ` · 손익분기 실력 ${Math.round(100 * rx.breakeven_acc)}%`);
-    // 🔴«파산»이 아니라 이 값이 배수를 묶는다(2026-09-14). 실측 L=16 은 파산 0% 인데
-    // 1년 중앙 계좌가 0.013배였다. 소수점은 못 믿으니 10%p 밴드로 말한다.
-    if (rx.expected_mdd != null) {
-      const lo = Math.max(0, Math.round(100 * rx.expected_mdd / 10) * 10 - 10);
-      const hi = Math.min(100, lo + 20);
-      out.push(`이 배수로 1년 굴리면 중간에 겪을 최대 낙폭 **약 ${lo}~${hi}%**`
-        + ` (파산은 손절이 막지만 낙폭은 안 막습니다)`);
-    }
-    if (sr.available) {
-      // 🔴«도달 불가»는 **명목 3% 기준** 주장이다. 시장가라 실제 이동은 손절폭+슬리피지이고
-      // 99분위면 5.3% 라, 20배부터는 꼬리에서 **청산이 먼저 온다**(하드캡 25배 안이다).
-      // 중앙값으로 «안전»을 말하고 꼬리를 안 적으면 화면이 낙관을 판다 -- 세 갈래로 말한다.
-      out.push(!sr.liq_unreachable
-        ? `🔴손절이 청산선 ${sr.liq_distance_pct}% 밖입니다 — 보호가 안 됩니다`
-        : sr.liq_unreachable_tail === false
-          ? `청산선 ${sr.liq_distance_pct}% 는 보통 손절(3%)이 먼저 막지만, 🔴**급락 시(99분위 5.3%)`
-            + `에는 청산이 먼저 옵니다** — 이 배수에서는 손절이 끝까지 지켜주지 않습니다`
-          : `청산선 ${sr.liq_distance_pct}% 는 손절이 먼저 와서 **도달 불가** (급락 99분위 5.3% 까지도)`
-            + ` — 위험은 손절 반복에서 옵니다`);
-    }
-    out.push(`크기는 ${rx.size_source} · 분할 ${rx.tranche_reason}`);
-    // 거래소 레버리지 설정. 위험이 아니라 «상한을 거래소에 새기는 값»이라 문구도 그렇게 쓴다.
-    const lv = rx.exchange_leverage;
-    if (lv && lv.available) {
-      // 🔴실제로 거래소에 걸리는 값은 **plan.target_leverage** 다. 2026-09-20 부터 화면이
-      //   물타기에서는 «기존 포지션과 같은 값», 신규에서는 20배로 고정해 보내므로 모델의
-      //   lv.setting 과 다를 수 있다 -- 여기에 모델값을 적으면 «본 숫자»와 «걸리는 숫자»가
-      //   갈린다. 다를 때는 뒤따르는 파생 문구도 떼어낸다: margin_pct_of_equity 와
-      //   enforces_cap 은 둘 다 lv.setting 으로 계산된 값이라 그대로 붙이면 거짓말이 된다.
-      const set = Number(targetLev) || lv.setting;
-      const same = set === lv.setting;
-      out.push(`거래소 레버리지 ${set}배로 설정`
-        + (same ? "" : ` (모델 추천 ${lv.setting}배)`) + ` — ${lv.note}`
-        + (!same ? "" : ` · 증거금 ${lv.margin_pct_of_equity}% 잠김`
-           + (lv.forced_by_position ? "" :
-              lv.enforces_cap ? " · 화면을 우회해도 상한이 걸립니다"
-                              : " · ⚠거래소 천장이 상한보다 큽니다(눈금이 성깁니다)")));
-    }
-  }
-  const h = tp.hold || {};
-  if (h.available) {
-    const cur = (h.table || []).find((r) => r.hold_min === tp.hold_min);
-    const grid = Object.entries(h.best_by_acc || {})
-      .map(([a, m]) => `${Math.round(100 * Number(a))}%→${m}분`).join(" ");
-    out.push(`${h.reason}`
-      + (cur ? ` · 선택 ${tp.hold_min}분: 움직임 ${cur.move_bp}bp · 손익분기 ${Math.round(100 * cur.breakeven_acc)}%` : "")
-      + (grid ? ` · 정확도별 최적 ${grid}` : ""));
-  }
-  const ex = (tp.execution || {}).entry || {};
-  if (ex.expected_fill_sec != null) {
-    out.push(`기대 체결 ${ex.expected_fill_sec}초 (메이커 우선 · 미체결분 테이커) — ${ex.note}`);   // 요율은 feeLine 한 곳에서
-  }
-  const sp = tp.entry_split || {};
-  if (sp.rule) out.push(`${sp.tranches === 1 ? "일괄" : sp.tranches + "분할"} — ${sp.rule}`);
-  const lad = tp.exit_ladder || {};
-  if ((lad.ladder || []).length) {
-    const steps = lad.ladder.filter((r) => r.required_fraction > 0)
-      .map((r) => `${r.hold_min}분 → ${Math.round(100 * r.required_fraction)}% 닫기`);
-    out.push(`${lad.note}${steps.length ? " · " + steps.join(" · ") : ""}`);
-  }
-  return out;
-}
-
-// 청산 비율(%)을 읽는 **유일한** 곳. 미리보기와 실주문이 같은 값을 쓰게 한다.
-// 서버도 같은 값을 다시 검증하고 포지션을 다시 읽는다 -- 여기 값은 «요청»이지 «수량»이 아니다.
-function sliderPct(id) {
-  const el0 = el(id);
-  const v = el0 ? Number(el0.value) : 100;
-  return Number.isFinite(v) && v > 0 && v <= 100 ? v : 100;
-}
-const manualExitPct = () => sliderPct("snapExitFrac");
-const manualEntryPct = () => sliderPct("snapEntryFrac");
-
-// 🔴보유 예정 지평은 **서버가 정한다**(planning_hold, 2026-09-14). 여기 상수를 두면
-// «화면엔 4시간인데 1440분 셀로 크기가 나가는» 일이 생긴다 -- 실제로 그랬다.
-// 서버가 `hold_planned_min` 으로 돌려주는 값만 표시하고, 쿼리로는 안 보낸다.
 
 // ── 2026-09-13 거래소 레버리지 게이지 ────────────────────────────────────────
 // 위험이 아니라 **총 명목의 천장**을 정하는 값이다(교차 마진이라 청산거리는 순자산/총명목).
 // 게이지는 거래소가 받는 눈금 위에서만 움직인다 -- 그 사이 값을 보내면 거래소가 반올림해서
 // 화면과 실제가 어긋난다. 서버가 plan.leverage_steps 로 같은 배열을 내려준다.
-let LEV_STEPS = [1, 2, 3, 5, 8, 10, 15, 20, 25, 30, 50, 75, 100, 125, 150];
-const manualLevAuto = () => el("snapLevAuto")?.checked !== false;
-// 2026-09-20 게이지가 **값 자체**다(5단위, 사용자 지시). 옛 판은 LEV_STEPS 의 인덱스라
-// 1·2·3·5·8·10·15… 처럼 간격이 들쭉날쭉했다. 서버는 1~EXCHANGE_MAX 정수면 받는다.
-function manualLevValue() {
-  const g = el("snapLevGauge");
-  if (!g) return null;
-  return Math.max(5, Math.round((Number(g.value) || 5) / 5) * 5);
-}
+// 2026-11-21 플로팅 주문 패널 제거: 배수의 원천이던 #snapLevGauge·#snapLevAuto 가 사라져 SLTP 선 도구의 배수 슬라이더가 이 값을 직접 든다.
+//   저장 방식은 예전과 같다(브라우저에 기억하지 않음 · 새로고침하면 «자동» 10배). 상한(5단위 내림)은 선 미리보기의 plan.leverage_steps 가 정한다.
+let lineLevAuto = true, lineLev = 10, lineLevMax = 50;
 // 자동이면 서버에 아무것도 안 보낸다 -- 서버가 모델 추천을 쓴다(단일 진실 원천).
 // 2026-09-20 사용자 지시 둘.
 // ① **물타기는 레버리지를 고를 수 없다.** 열린 포지션이 있으면 내리는 쪽은 거래소가 막고
@@ -12367,61 +12120,12 @@ const manualLevLocked = () => {
 function manualLevEffective() {
   const locked = manualLevLocked();
   if (locked) return locked;
-  return manualLevAuto() ? MANUAL_LEV_AUTO : manualLevValue();
+  return lineLevAuto ? MANUAL_LEV_AUTO : lineLev;
 }
-// 2026-10-09 사용자 «주문·물타기·청산 규칙 모두 제거해 수동으로, 규칙 확정되면 다시 적용»: 자동 규칙 칩을 숨기고 보내지 않는다.
-//   되돌리기 = true + server.py MANUAL_RULES_ENABLED = True.
-// 2026-10-24 사용자 «주문 규칙 정리»: SL/TP 끄기 체크를 뺐다 -- 손절은 모든 진입에 첫 진입가 ∓5%(서버가 건다).
-const MANUAL_RULES = true;   // 2026-10-09 사용자 «1번(재생 크기식)으로 배포» -- 자동 칩 복귀
 const manualLevQuery = () => {
   const v = manualLevEffective();
   return v ? `&lev=${v}` : "";
 };
-
-function renderLevGauge(plan) {
-  const g = el("snapLevGauge");
-  const out = el("snapLevVal");
-  if (!g || !out) return;
-  // 🔴이 함수는 값을 **코드로** 바꾼다(자동 추천). input 이벤트가 안 나므로 칩이 안 따라온다
-  //   -- 끝에서 직접 맞춘다. 이벤트를 쏘면 크기 재조회가 돌아 되먹임이 된다.
-  setTimeout(syncChipsets, 0);
-  // 상한은 여전히 서버가 정한다 -- 정책 목록의 최대값을 5단위로 내림해서 게이지 끝에 둔다.
-  if (Array.isArray(plan.leverage_steps) && plan.leverage_steps.length) {
-    LEV_STEPS = plan.leverage_steps;
-    const top = Math.max(5, Math.floor(Math.max(...LEV_STEPS) / 5) * 5);
-    g.max = String(top);
-  }
-  const locked = manualLevLocked();
-  // 물타기면 게이지도 «자동» 체크박스도 **감춘다** -- 고를 수 없는 것을 고를 수 있는 것처럼
-  // 보여주면 안 된다. 기존 레버리지가 5의 배수가 아닐 수도 있어(예 ×3) 5단위 게이지로는
-  // 그 값을 정확히 나타내지도 못한다. 값은 아래 꼬리표가 숫자로 말한다.
-  g.hidden = !!locked;
-  el("snapLevAuto")?.closest(".lev-auto")?.toggleAttribute("hidden", !!locked);
-  // 자동이면 MANUAL_LEV_AUTO(10배)로 스냅한다. 손으로 만지는 중이면 안 건드린다.
-  if (!locked && manualLevAuto()) {
-    g.value = String(MANUAL_LEV_AUTO);
-    syncRangeFill(g);       // 프로그램이 바꾼 값은 input 이벤트가 없다
-  }
-  g.disabled = !!locked || manualLevAuto();
-  const v = manualLevEffective();
-  if (v == null) return;
-  const min = plan.leverage_min_feasible;
-  const floor = plan.leverage_position_floor;
-  // 포지션 바닥 아래는 **거래소가 거부한다**(-2028). 상한 경고보다 이게 먼저다.
-  // 고정된 값은 정의상 바닥 위지만(그 설정으로 이미 열려 있다) 검사는 남긴다 -- 서버가
-  // 주는 값이라 내 가정이 틀리면 조용히 넘어가는 대신 화면이 말하게 한다.
-  const rejected = floor != null && v < floor;
-  const low = !rejected && min != null && v < min;
-  out.textContent = `${v}배`
-    // «자동»은 바로 옆 체크박스가 말한다 -- 값 글자에 또 쓰면 같은 말이 두 번이다(2026-09-25 통일).
-    + (locked ? " (기존 포지션과 동일)" : "")
-    + (rejected ? ` · 🔴거래소가 거부합니다(포지션 때문에 최소 ${Math.ceil(floor)}배)`
-       : low ? ` · ⚠상한만큼 못 엽니다(최소 ${Math.ceil(min)}배)` : "");
-  // 🔴같은 줄을 두 번 쓰고 있었다 -- 뒤 줄이 앞 줄을 덮어 **rejected(거래소 거부)가 색을
-  //   잃었다**. 둘 중 경고가 더 급한 쪽이 지워지던 셈이라 고친다.
-  out.className = (rejected || low) ? "entry-was bad" : "entry-was";
-  syncRangeFill(g);
-}
 
 // 2026-09-26 SOL·XRP 탭이 생기면서 주문 버튼이 다른 코인 탭에도 보인다 -- 그런데 서버 주문 경로는 **exec_symbol 하나**
 //   (ETHUSDC)로만 나간다. SOL 탭에서 누르면 ETH 가 체결된다(데스크톱은 길게 누르면 확인 없이). 탭의 코인이 주문 심볼의
@@ -12434,285 +12138,18 @@ function orderCoinOk() {
 function syncOrderCoinGate() {
   const off = !orderCoinOk();
   document.body.classList.toggle("order-coin-off", off);
-  const lanes = document.querySelector(".acct-lanes");
-  if (lanes) {
-    lanes.dataset.orderNote = off ? `이 탭(${coinUnit()})에서는 주문을 낼 수 없습니다 — 주문은 ETH·SOL·XRP 탭에서만 됩니다` : "";
-  }
 }
 
-// ov(2026-10-05 «스위칭»): 화면 게이지 대신 쓸 값 {pct, lev, sltp, fresh} -- 전량 청산(pct 100)과 반대 진입(그 포지션의 증거금 %·배수).
-// 2026-10-09 자동 규칙(index.html #snapRule "1"): 서버가 재생 크기식으로 크기·손절을 정한다(rule=c). ETH 만 -- 다른 코인은 "직접".
-// 2026-10-16 "h" = «보유 1.5×»(rule=h) -- 같은 식에 상한만 1.5(서버 HOLD_CAP_X). 옛 «권고 1.5/2» 저장값과 겹치지 않게 숫자가 아니다.
-// 2026-10-20 사용자 «XRP 도 ETH 처럼 거래» -- 자동 규칙·권장 배수 코인(서버 orders.RULE_ASSETS 와 같게). 권장 배수는 그 코인 것(vol_mult_by).
-const RULE_ASSETS = new Set(["eth", "xrp"]);
-const volMultNow = () => { const by = latestSituation?.vol_mult_by; return by ? by[activeSnapshotAsset] || null : activeSnapshotAsset === "eth" ? latestSituation?.vol_mult : null; };
-function manualRule() {
-  const v = el("snapRule")?.value || "0";
-  return MANUAL_RULES && RULE_ASSETS.has(activeSnapshotAsset) ? ({ 1: "c", h: "h" }[v] || "") : "";
-}
-const ruleCap = () => (el("snapRule")?.value === "h" ? 1.5 : 2);   // = live_manual_peg_entry HOLD_CAP_X / COMMIT_CAP_X
-// 서버 live_manual_peg_entry.commit_rule_l 과 같은 식(화면 표시용 -- 실제 크기·손절은 누를 때 서버 미리보기가 정한다)
-// 2026-10-10 동일위험: L = min(손절 시 순자산 손실 b ÷ 손절폭, 청산 안전, 10) -- 옛 «12.4 × 권장배수»는 손절 1회에 순자산 69~82%(원장 재생)
-// 2026-10-11 사용자 최종 «×15.2 + −3% 스톱»: L = min(12.4 × 권장배수, 청산 안전(손절 거리 max(3σ24, 3%)), 10) · 손절 첫 진입가 ∓3% 고정
-// 2026-10-14 사용자 «권장 B»: 상한 6 → 3배 · 손절 ∓3% → ∓5%(첫 1/3 · ∓0.75% 물타기 그대로) · 10-25 «크기는 2배로»: 상한 3 → 2배
-const RULE_STOP_PCT = 0.05;       // = live_manual_peg_entry.RULE_STOP_PCT (test_rule_size_parity 가 대조)
-const REC_FIRST_SHARE = 1 / 3;    // = live_manual_peg_entry.REC_FIRST_SHARE -- 첫 진입 = 상한의 1/3(10-14 사용자 «첫 1/3 → −0.75%에 2/3»)
-function commitRuleL(side, sigmaBp4h, vm, cap = 2) {
-  const sd = Math.max(3 * sigmaBp4h * Math.sqrt(6) / 1e4, RULE_STOP_PCT);   // 청산 안전용 거리
-  const den = side === "LONG" ? 1 - 0.98 * (1 - sd) * 0.995 / (1 - 0.0066) : 1.02 * (1 + sd) * 1.005 / 1.0066 - 1;
-  return { l: Math.min(4 * 0.303 * 10.26 * vm, den > 0 ? 1 / den : Infinity, cap), sd: RULE_STOP_PCT };   // 상한 2 = live_manual_peg_entry.COMMIT_CAP_X(10-25, 옛 3 · 6 · 10)
-}
-// «손절 시 순자산 −X%» = 지금 L × 3%(두 방향 중 큰 쪽) -- 권장 배수가 없으면 손절 거리만
-function ruleRiskText() {
-  const v = volMultNow();
-  if (!(v?.mult && v?.sigma_bp)) return `손절 첫 진입가 −${100 * RULE_STOP_PCT}%`;
-  const lev = Number(manualLevEffective()) || 0;   // 2026-10-13 서버 rec_rule_size 와 같은 상한: 실효 L ≤ 0.9 × 거래소 레버리지
-  const l = Math.max(...["LONG", "SHORT"].map((s) => commitRuleL(s, Number(v.sigma_bp), Number(v.mult), ruleCap()).l).map((x) => (lev > 0 ? Math.min(x, 0.9 * lev) : x)));
-  return `손절 시 순자산 −${Math.round(100 * l * RULE_STOP_PCT)}%`;
-}
-function renderRuleBox() {
-  const box = el("snapRuleBox"), r = manualRule();
-  if (box) {
-    box.hidden = !MANUAL_RULES || !RULE_ASSETS.has(activeSnapshotAsset);
-    box.title = activeSnapshotAsset === "eth" ? "" : `🔴자동 규칙 상수(상한 2배 · 첫 1/3 · 물타기 ∓0.75% · 손절 ∓5%)는 ETH 원장으로 검정했습니다 — ${coinUnit()} 는 권장 배수만 ${coinUnit()} 기준으로 맞췄고 규칙 자체는 검정 안 함`;
-  }
-  const t = ruleRiskText();
-  document.querySelectorAll(".rule-risk").forEach((n) => { if (n.textContent !== t) n.textContent = t; });
-  el("snapRuleBox")?.closest(".entry-line")?.classList.toggle("rule-on", !!r);
-}
-el("snapRule")?.addEventListener("input", () => {
-  try { localStorage.setItem("entryRule", el("snapRule").value); } catch (e) { /* 저장 못 해도 동작 */ }
-  renderRuleBox();
-  manualEntryRefreshSize();
-  if (typeof renderOfab === "function") renderOfab();
-});
-(() => {
-  let v = "0";
-  try { v = localStorage.getItem("entryRule") || "0"; } catch (e) { /* 기본 직접 */ }
-  const inp = el("snapRule");
-  if (inp) inp.value = v === "1" || v === "h" ? v : "0";   // 옛 «권고 1.5/2» 저장값은 «직접»으로(모르는 사이 10배 규칙으로 넘어가지 않게)
-  renderRuleBox();
-})();
-
-// 2026-10-10 진입 체결 방식(#snapExec, 칩은 숫자 값만 맞춘다): 0 = 현행 따라가기 · 60/15 = 최우선 호가에 한 번 걸고 그 분 뒤 잔량 시장가(서버 run_entry_wait).
-//   제출에만 붙는다(미리보기 계획은 같다). 선택은 브라우저에 기억한다. 청산·스위칭의 반대 진입은 따라가기 그대로.
-function manualExecQuery() {
-  const m = /^(15|60)$/.exec(el("snapExec")?.value || "");
-  return m ? `&mode=wait&wait_min=${m[1]}` : "";
-}
-el("snapExec")?.addEventListener("input", () => {
-  try { localStorage.setItem("entryExec", el("snapExec").value); } catch (e) { /* 저장 못 해도 동작 */ }
-});
-(() => {
-  let v = "0";
-  try { v = localStorage.getItem("entryExec") || "0"; } catch (e) { /* 기본 따라가기 */ }
-  const inp = el("snapExec");
-  if (inp) inp.value = /^(15|60)$/.test(v) ? v : "0";
-})();
-// 2026-10-10 청산 체결 방식(#snapExitExec): 0 = 지정가(현행 peg, 기본) · 1 = 즉시(시장가). 스위칭은 칩과 무관하게 늘 즉시(서버가 강제).
-//   미리보기·제출 둘 다 &exec=market 을 실어 미리보기 비용(테이커)과 실제 주문이 같다.
-const manualExitMarket = () => el("snapExitExec")?.value === "1";
-const exitExecQuery = (ov) => (ov?.switch || manualExitMarket() ? "&exec=market" : "");
-el("snapExitExec")?.addEventListener("input", () => {
-  try { localStorage.setItem("exitExec", el("snapExitExec").value); } catch (e) { /* 저장 못 해도 동작 */ }
-});
-(() => {
-  let v = "0";
-  try { v = localStorage.getItem("exitExec") || "0"; } catch (e) { /* 기본 지정가 */ }
-  const inp = el("snapExitExec");
-  if (inp) inp.value = v === "1" ? "1" : "0";
-})();
-
-async function manualEntryFetch(side, kind = "entry", ov = null) {
+async function manualEntryFetch(side, ov) {   // SLTP 선 미리보기(크기) 전용
   if (!orderCoinOk()) {
     return { ok: false, error: "order_coin_mismatch",
              detail: `${coinUnit()} 탭에서는 주문하지 않습니다` };
   }
-  const q = `&pct=${ov?.pct ?? (kind === "exit" ? manualExitPct() : manualEntryPct())}`
-    + (kind === "exit" ? "" : (ov?.lev ? `&lev=${ov.lev}` : manualLevQuery()))
-    + (kind === "exit" ? exitExecQuery(ov) : ((ov?.rule ?? manualRule()) ? `&rule=${ov?.rule ?? manualRule()}` : ""))
-    + (ov?.fresh ? "&fresh=1" : "") + (kind !== "exit" && ov?.tp ? `&tp=${ov.tp}&sl=${ov.sl}` : "")
-    + (kind !== "exit" && ov?.limit ? `&limit=${ov.limit}${ov.stop ? "&stop=1" : ""}` : "");   // 2026-10-31 지정가 진입(USDT 차트 가격) · 11-09 stop=1 감시 진입
-  const res = await fetch(`/api/manual-${kind}/preview?side=${side}&asset=${activeSnapshotAsset}${q}`, { cache: "no-cache" });
+  const q = `&pct=${ov.pct}` + manualLevQuery() + (ov.tp ? `&tp=${ov.tp}&sl=${ov.sl}` : "")
+    + (ov.limit ? `&limit=${ov.limit}${ov.stop ? "&stop=1" : ""}` : "");   // 2026-10-31 지정가 진입(USDT 차트 가격) · 11-09 stop=1 감시 진입
+  const res = await fetch(`/api/manual-entry/preview?side=${side}&asset=${activeSnapshotAsset}${q}`, { cache: "no-cache" });
   return res.json();
 }
-
-// 위험 모델이 무엇을 말하는지 한 줄로. 모델이 없으면 그 사실을 그대로 쓴다.
-function riskLine(r) {
-  if (!r) return "";
-  if (!r.available) return `위험모델 없음 (${r.reason || "?"}) — 기존 상한만 적용`;
-  // 🔴«묶은 것»은 **적용된 상한**을 말해야 한다(2026-09-13). r.binding 은 위험 정책 안에서만
-  // 고른 값이라 순자산·원장 상한을 모른다 -- 그대로 쓰면 «최대 25배 · 정책상한»이라고 적히는데
-  // 버튼은 8배까지만 낸다. 실효 배수(effective_x)와 applied_binding 이 진짜다.
-  const NAMES = { survival: "생존(청산거리)", growth: "성장(켈리 하한)", cap: "정책상한",
-                  ledger: "원장 상한", equity: "순자산 상한", model: "위험 모델",
-                  margin: "증거금 상한" };
-  const who = NAMES[r.applied_binding || r.binding] || r.applied_binding || r.binding;
-  const lev = r.effective_x != null ? r.effective_x : r.leverage;
-  // 🔴상한이 꺼져 있으면 «무엇이 묶었나»가 아니라 «아무것도 안 묶었다»가 사실이다.
-  if (r.applied_binding === "override") {
-    return `${r.hold_min}분 보유 기준 각오할 역행 ${r.safe_mae_pct}%`
-      + ` · 🔴사이징 상한 꺼짐 — 최대 ${lev}배 (순자산 × ${lev})`;
-  }
-  // 위험 정책이 허용한 값과 실제로 적용된 값이 다르면 둘 다 보여 준다.
-  const head = r.effective_x != null && r.leverage != null && r.effective_x < r.leverage
-    ? `최대 ${lev}배 (위험 모델은 ${r.leverage}배까지 허용)`
-    : `최대 ${lev}배`;
-  return `${r.hold_min}분 보유 기준 각오할 역행 ${r.safe_mae_pct}% → ${head} · ${who}이 묶음`;
-}
-
-// 2026-09-13 청산 미리보기. 진입 카드는 상한·증거금 타일이 주인공이지만 청산은 «얼마를
-// 어느 가격에 닫는가»와 «지금 닫으면 몇 %인가»가 전부라 따로 그린다.
-function manualExitPlanHtml(plan) {
-  const side = plan.position_side === "LONG" ? "롱" : "숏";
-  const move = plan.exit_move_pct;
-  const pct = Math.round(100 * (plan.fraction ?? 1));
-  const of = pct < 100
-    ? ` <span class="entry-was">${plan.position_qty} 중 ${pct}% · 남김 ${plan.remaining_qty}</span>`
-    : "";
-  const parts = [`<div class="entry-head"><b>${side} ${plan.quantity} ${coinUnit()} 청산</b>${of}`
-    + `<span>${acctPx(plan.price ?? plan.reference_price)}`
-    + `${plan.type === "MARKET" ? " 근처" : ""} · ${Number(plan.notional_usdt).toLocaleString()} USDT</span></div>` + execQuoteHtml(plan)];
-  // 🔴미리보기 카드의 주인공은 «지금 닫으면 순손익 얼마»다(2026-09-14, 사용자 요청).
-  // 여기서는 plan.type 을 알므로 고변동 시장가 전환이면 테이커 요율로 바꿔 계산한다.
-  // 2026-10-10 요율은 청산할 포지션 심볼의 계정 실요율(없으면 표준 2/5bp) -- peg 는 실측 3.0 에서 표준 메이커 2.0 을 실요율로 바꾼 값.
-  const upnl = Number(plan.unrealized_pnl), pf = planFee(plan);
-  const feeBp = +(plan.type === "MARKET" ? (pf ? pf.taker_bp : EXIT_FEE_BP_TAKER)
-    : (pf ? EXIT_FEE_BP_PEG - 2.0 + pf.maker_bp : EXIT_FEE_BP_PEG)).toFixed(2);
-  const fee = (Number(plan.notional_usdt) || 0) * feeBp / 10000;
-  if (Number.isFinite(upnl)) {
-    const gross = upnl * (plan.fraction ?? 1);
-    const net = gross - fee;
-    parts.push(`<div class="entry-note"><span class="entry-cap">지금 닫으면</span> `
-      + `<b class="exit-net ${net >= 0 ? "good" : "bad"}">${usd2(net)}</b>`
-      + `<span class="entry-was"> 순손익 · 미실현 ${usd2(gross)}`
-      + ` − ${plan.type === "MARKET" ? "테이커" : "peg"} 수수료 ≈$${fee.toFixed(2)} (${feeBp}bp)`
-      + (move != null ? ` · 진입가 대비 ${move > 0 ? "+" : ""}${move}%` : "")
-      + ` · 진입 수수료는 이미 나갔습니다</span></div>`);
-  } else if (move != null) {
-    parts.push(entryNote(`이 가격이면 진입가 대비 ${move > 0 ? "+" : ""}${move}% (수수료 전)`,
-      move >= 0 ? null : "bad"));
-  }
-  const r = plan.risk;
-  if (r && r.available && r.required_fraction > 0) {
-    parts.push(entryNote(
-      `${r.hold_min}분 더 들 생각이면 명목 ${Math.round(r.allowed_notional).toLocaleString()} 까지가 한도입니다`
-      + ` (지금 ${Math.round(r.current_notional).toLocaleString()}) — `
-      + `최소 ${Math.round(100 * r.required_fraction)}% 는 닫아야 합니다`, "bad"));
-  }
-  if (plan.blocked) parts.push(entryNote(plan.blocked, "bad"));
-  // 시장가로 전환된 경우엔 이유를 **위쪽에** 띄운다 -- 비용이 더 드는 선택이라 묻히면 안 된다.
-  if (plan.market_reason) parts.push(entryNote(plan.market_reason, "live"));
-  const vol = plan.vol_bpm != null ? ` · 변동성 ${plan.vol_bpm} bp/√분` : "";
-  const how = plan.type === "MARKET"
-    ? "시장가 즉시 체결"
-    : `peg 지정가(메이커), 호가가 달아나면 재호가하고 ${plan.fallback_after_sec}초 뒤에도 `
-      + "남으면 테이커 전환";
-  // 진입 카드와 **같은 규칙**으로 접는다(2026-09-13 병합). 위험모델 한 줄과 처방 줄들이
-  // 대상이고, «최소 N% 는 닫아야 합니다»는 행동을 바꾸는 값이라 위에서 이미 항상 보인다.
-  parts.push(entryDetailHtml([
-    ...(r && !(r.required_fraction > 0) ? [escapeHtml(riskLine(r))] : []),
-    ...tradePlanLines(plan.trade_plan, plan.target_leverage).map(escapeHtml),
-    escapeHtml(feeLine(plan)),
-  ]));
-  parts.push(`<div class="entry-cap">${plan.dry_run
-    ? "미리보기 전용 — 주문은 나가지 않습니다."
-    : "확인 버튼을 누르면 실제 청산 주문이 나갑니다."} · ${how}${vol}</div>`);
-  return parts.join("");
-}
-
-const MANUAL_BTN_IDS = ["snapEntryLong", "snapEntryShort", "snapExitLong", "snapExitShort", "snapSwitch", "ofabLong", "ofabShort"];
-const manualButtonsDisabled = (v) =>
-  MANUAL_BTN_IDS.forEach((id) => { const b = el(id); if (b) b.disabled = v; });
-
-async function manualEntryPreview(side, kind = "entry", ov = null) {
-  const box = el("snapEntryResult");
-  if (!box || manualOrderBusy) { manualPreviewInFlight = false; manualFireOnPreview = false; return; }   // 진행 중인 주문 표시를 덮지 않는다
-  manualPreviewInFlight = true;
-  manualButtonsDisabled(true);
-  box.hidden = false;
-  box.innerHTML = entryNote("확인 중…");
-  manualEntryClearConfirm();   // 다른 방향을 눌렀는데 옛 확인 버튼이 남아 있으면 안 된다
-  try {
-    const asset = activeSnapshotAsset;
-    const data = await manualEntryFetch(side, kind, ov);
-    // 🔴응답 전에 코인 탭을 바꾸면 옛 코인 계획이 새 코인 이름으로 무장됐다(길게 누르기면 바로 발주)
-    if (asset !== activeSnapshotAsset) throw new Error("미리보기 중 코인을 바꿨습니다 — 다시 누르세요(주문 안 나감)");
-    box.innerHTML = data.ok
-      ? (kind === "exit" ? manualExitPlanHtml(data.plan || {}) : manualEntryPlanHtml(data))
-      : entryNote(`실패: ${data.detail || data.error || "알 수 없음"}`, "bad");
-    // 게이트가 꺼져 있으면 확인 버튼을 아예 띄우지 않는다 -- 눌러도 403 이라 헛걸음이다.
-    if (data.ok && data.exec_enabled) manualEntryArmConfirm(side, data.plan || {}, kind, ov);
-  } catch (err) {
-    box.innerHTML = entryNote(`실패: ${err && err.message ? err.message : err}`, "bad");
-  } finally {
-    manualPreviewInFlight = false;
-    manualFireOnPreview = false;   // 실패·막힘으로 발주가 안 됐으면 다음 미리보기로 새지 않게
-    if (!manualOrderBusy) manualButtonsDisabled(false);
-  }
-}
-
-async function manualEntryRefreshSize() {
-  const line = el("snapEntrySize");
-  if (!line) return;
-  renderRuleBox();   // 코인을 바꾸면 규칙 칩도(ETH 만)
-  // 🔴2026-09-13: 실패하면 배지를 **반드시 바꾼다**. 예전엔 조기 return 해서 배지가 HTML
-  //   초기값("미리보기 전용")이나 마지막 성공값에 굳었다 -- 화면이 "게이트가 꺼져 있다"고
-  //   말했지만 실제로는 "사이징 워커가 죽어 미리보기가 503"이었다(재부팅 후 실장애).
-  //   **실패 시 이전 값을 남기는 UI 는 조용히 거짓말한다.**
-  const asset = activeSnapshotAsset;
-  try {
-    // 2026-09-26 양쪽을 본다 -- 위험모델 상한은 방향마다 다르다(롱이 막혀도 숏은 열릴 수 있다).
-    const [data, dataShort] = await Promise.all([manualEntryFetch("LONG"), manualEntryFetch("SHORT")]);
-    // 🔴2026-09-30 응답 도착 전에 코인이 바뀌었으면 버린다 -- 옛 코인의 계획을 새 코인 카드에 얹지 않는다.
-    if (asset !== activeSnapshotAsset) return;
-    if (!data.ok) {
-      line.className = "entry-note bad";
-      const why = data.detail === "worker_stale" ? "크기 워커 정지"
-        : data.error === "sizing_unavailable" ? "크기 데이터 없음"
-        : (data.detail || data.error || "알 수 없음");   // 2026-10-09 자동 규칙의 막힘(격리 마진·변동성 없음)은 서버 문장 그대로
-      line.hidden = false;
-      line.textContent = `크기 확인 실패 — ${why}`;
-      return;
-    }
-    const plan = data.plan || {};
-    const cap = data.cap || {};
-    // 🔴헤드라인은 **실제로 나가는 수량**이다(2026-09-14). 옛 판은 «권고 6.764 · 상한 2.739»
-    //   처럼 둘을 나란히 놨는데, 나가는 건 둘 다 아니라 비율까지 먹인 plan.quantity 였다 --
-    //   큰 숫자가 왼쪽에 먼저 오니 그게 주문량으로 읽혔다. 권고·가능치는 뒤로 내린다.
-    //   (서버가 이 요청에 슬라이더 pct 를 이미 실어 보내므로 plan.quantity 가 그 비율의 값이다.)
-    // 2026-09-16 정상일 때 이 줄은 **비어 있다**(사용자 지시). 수량·명목·권고 사슬은
-    //   위 계좌 카드가 미리보기로 이미 보여준다. 주문 불가만 여기 남는다 -- 왜 못 넣는지는
-    //   카드가 말해주지 않는다.
-    // 🔴사이징 상한이 꺼져 있으면(server.py SIZING_CAP_OVERRIDE_X) **정상일 때도** 이 줄이
-    //   말한다. 크기를 막는 게 아무것도 없는 상태를 화면이 조용히 넘기면 안 된다.
-    //   riskLine 에도 같은 사실을 적지만 그쪽은 위험모델이 살아 있을 때만 그려진다 --
-    //   워커가 죽으면 경고까지 같이 사라지므로 여기 한 곳은 무조건이어야 한다.
-    const ovX = cap.override_x;
-    // 🔴2026-09-26 비평 «상시 빨강은 경보가 아니라 벽지»: 상한에 걸린 건 **평상 상태**라 흐린 문구로 내리고,
-    //   막힌 쪽 버튼만 흐리게 한다. 빨강은 조회 실패·상한 꺼짐 같은 진짜 이상에만 남긴다.
-    const planShort = (dataShort && dataShort.ok && dataShort.plan) || {};
-    const blockedL = plan.blocked, blockedS = planShort.blocked;
-    el("snapEntryLong")?.setAttribute("aria-disabled", String(!!blockedL));
-    el("snapEntryShort")?.setAttribute("aria-disabled", String(!!blockedS));
-    const capNote = (plan.capped || planShort.capped)
-      ? ((plan.capped ? plan : planShort).notes || []).find((n) => n.startsWith("요청 ")) || "" : "";
-    const blockText = blockedL && blockedS
-      ? (blockedL === blockedS ? `진입 불가 — ${blockedL}` : `롱 진입 불가 — ${blockedL} · 숏 진입 불가 — ${blockedS}`)
-      : blockedL ? `롱 진입 불가 — ${blockedL}` : blockedS ? `숏 진입 불가 — ${blockedS}` : "";
-    line.hidden = !blockText && !ovX && !capNote;
-    line.className = "entry-note" + (ovX && !blockText ? " bad" : "");
-    line.textContent = blockText
-      || (ovX ? `🔴사이징 상한 꺼짐 — 크기 기준이 «순자산 × ${ovX}» 하나뿐입니다` : "") || capNote;
-    // 2026-09-25 «보유 N시간 · 역행 · 최대 N배» 줄은 뺐다(사용자 지시). 레버 게이지는 그대로 맞춘다.
-    renderLevGauge(plan);
-  } catch (err) {
-    line.hidden = false;
-    line.className = "entry-note bad";
-    line.textContent = "크기 확인 실패 — 서버 응답 없음";
-  }
-}
-
 
 // ── 2026-09-12 2단계: 실주문 (2단 확인) ────────────────────────────────────────
 // 진입 버튼은 계획을 **보여주기만** 하고, 주문은 확인 버튼에서만 나간다. 오클릭 한 번이
@@ -12724,9 +12161,6 @@ async function manualEntryRefreshSize() {
 // 계획 카드(수량·가격·미실현·위험한도)를 읽는 데 15초가 쉽게 지나간다.
 const CONFIRM_WINDOW_MS = 30000;
 const STATUS_POLL_MS = 3000;
-let manualEntryPending = null;
-let manualEntryTimer = null;
-let manualEntryTick = null;
 // 주문이 나간 뒤 상태를 폴링하는 동안엔 미리보기를 막는다 -- 결과 상자가 하나뿐이라
 // 새 미리보기가 «체결 진행 중» 표시를 덮어쓴다(2026-09-14).
 let manualOrderBusy = false;
@@ -12742,66 +12176,6 @@ const MANUAL_ENTRY_PHASE_KO = {
   error: "🔴 오류",
   idle: "대기",
 };
-
-function manualEntryClearConfirm() {
-  manualEntryPending = null;
-  if (manualEntryTimer) { clearTimeout(manualEntryTimer); manualEntryTimer = null; }
-  if (manualEntryTick) { clearInterval(manualEntryTick); manualEntryTick = null; }
-  const btn = el("snapEntryConfirm");
-  if (btn) { btn.hidden = true; btn.textContent = ""; }
-}
-
-function manualEntryArmConfirm(side, plan, kind = "entry", ov = null) {
-  if (plan.blocked) { manualFireOnPreview = false; return; }
-  const pct = ov?.pct ?? Math.max(1, Math.round(100 * (plan.fraction ?? 1)));   // 규칙 물타기 몫이 0.5% 미만이면 0 → 서버 400(규칙 모드는 pct 를 안 쓴다)
-  manualEntryPending = { side, quantity: plan.quantity, kind, pct, asset: activeSnapshotAsset,
-                         lev: ov?.lev ?? manualLevEffective(),
-                         rule: kind === "exit" ? "" : (ov?.rule ?? manualRule()),
-                         fresh: !!ov?.fresh, sw: ov?.switch || null, tp: ov?.tp || "", sl: ov?.sl || "", limit: ov?.limit || "", src: ov?.src || "",
-                         exec: kind === "exit" ? exitExecQuery(ov) : (ov?.limit ? "&mode=limit" + (ov.stop ? "&stop=1" : "") : ov?.tp ? "" : manualExecQuery()) };   // 2026-10-28 선 주문 = 따라가기(run_entry)만
-  // 🔴2026-09-26 비평 P0 + 사용자 결정 «길게 누르면 바로 발주»: 0.4초를 채운 뒤 미리보기가 **늦게** 오면
-  //   예전엔 확인 버튼이 떴다 -- 네트워크 속도에 따라 한 단계/두 단계가 갈렸다. 채움을 끝낸 사람은 이미
-  //   확인했다. 미리보기가 오는 즉시 발주한다(막혔으면 위에서 이미 멈췄다).
-  if (manualFireOnPreview) { manualFireOnPreview = false; manualEntrySubmit(); return; }
-  // 🔴진입은 «길게 누르기»가 곧 확인이다 -- 확인 버튼을 띄우면 같은 주문이 두 번 나갈 길이
-  //   생긴다(누르고 있는 동안 pending 이 잡히므로). 청산은 그대로 버튼으로 확인한다.
-  const btn = el("snapEntryConfirm");
-  if (manualHoldFire || !btn) return;
-  // 모델이 요구하는 최소 청산 비율보다 적게 닫으려 하면 **확인 버튼에** 적는다.
-  // 미리보기에만 띄우면 슬라이더를 다시 내린 뒤에는 안 보인다.
-  const need = Math.round(100 * ((plan.risk || {}).required_fraction || 0));
-  const short = kind === "exit" && need > pct ? ` ⚠한도 복귀엔 ${need}% 필요` : "";
-  const base = `확인: ${side === "LONG" ? "롱" : "숏"} ${plan.quantity} ${coinUnit()} `
-    + (kind === "exit" ? (pct < 100 ? `청산 (${pct}%)` : "전량 청산") : "주문") + short
-    + (ov?.switch ? ` → ${ov.switch.to === "LONG" ? "롱" : "숏"} 진입(스위칭 · 손절 걸림)` : "")
-    // 2026-10-10 즉시 체결(스위칭은 늘) -- 테이커 요율을 확인 버튼에 적는다(실요율, 못 읽었으면 표준 5bp)
-    + (kind === "exit" && plan.type === "MARKET"
-      ? ` · 즉시 체결(시장가, 테이커 ${+Number(planFee(plan)?.taker_bp ?? EXIT_FEE_BP_TAKER).toFixed(2)}bp)` : "");
-  btn.hidden = false;
-  if (manualEntryTimer) clearTimeout(manualEntryTimer);
-  if (manualEntryTick) clearInterval(manualEntryTick);
-  // 2026-09-14 남은 초를 버튼에 적는다. 창이 조용히 닫히면 «왜 사라졌지»가 되고, 그 다음
-  // 행동은 대개 «버튼을 다시 누른다»라 미리보기를 한 번 더 돌게 된다.
-  let left = Math.round(CONFIRM_WINDOW_MS / 1000);
-  const paint = () => { btn.textContent = `${base} · ${left}초`; };
-  paint();
-  manualEntryTick = setInterval(() => { left -= 1; if (left > 0) paint(); }, 1000);
-  // 🔴만료를 **말한다**. 예전엔 조용히 사라져서 「눌렀는데 안 나갔다」로 보였다 --
-  // 화면에 아무 흔적이 없으니 사람이 고장으로 읽는 게 당연했다.
-  // clearConfirm 자체는 방향 전환·비율 변경에서도 불리므로 메시지는 여기(만료)에만 붙인다.
-  manualEntryTimer = setTimeout(() => {
-    manualEntryClearConfirm();
-    const box = el("snapEntryResult");
-    if (box && !box.hidden) {
-      box.insertAdjacentHTML("beforeend", entryNote(
-        `확인 시간 ${Math.round(CONFIRM_WINDOW_MS / 1000)}초가 지나 확인 버튼이 사라졌습니다 `
-        + `— 주문은 나가지 않았습니다. 다시 누르세요.`, "bad"));
-    }
-  }, CONFIRM_WINDOW_MS);
-  // 미리보기가 길면 확인 버튼이 접힌 화면 밖에 남는다(모바일). 눈앞으로 데려온다 --
-  // 순서를 바꿔 결과 위에 두면 «계획을 읽기 전에» 확인이 먼저 보여서 더 나쁘다.
-  btn.scrollIntoView({ block: "nearest", behavior: "smooth" });
-}
 
 function manualEntryStateText(state) {
   const phase = state?.phase || "idle";
@@ -12851,80 +12225,27 @@ function manualEntryStateText(state) {
   return rows.join("\n");
 }
 
-// 2026-10-15 사용자 «손절 해제 버튼»(10-14 사고: 바이낸스에서 스탑만 지웠는데 서버 5분봉 종가 감시가 청산했다).
-//   서버가 무장한 손절(/api/binance-account 의 bracket_armed)을 **플로팅 버튼**에 보이고(사용자 «계좌카드 말고 플로팅 버튼 안에»),
-//   두 번 눌러(5초 무장) 거래소 스탑 + 서버 감시를 함께 끄고, 꺼진 뒤 다시 두 번 누르면 다시 켠다(/rearm). 데스크탑 = 알약 안 칩(#ofabSl, 시안 B) · 휴대폰 = 패널 맨 위 칸(#ofabSlPanel, 시안 C).
-//   둘 다 같은 data-sl-act 핸들러 -- 어느 쪽을 보일지는 CSS(720px)가 고른다. 자동 물타기 지정가는 남고, 다시 진입·규칙 물타기하면 손절이 다시 걸린다.
-let slOffArmedKey = null, slOffArmT = 0, slOffBusyKey = null;
-const SL_OFF_TIP = "거래소의 손절 스탑과 서버의 5분봉 종가 손절을 함께 끕니다. 자동 물타기 지정가는 남고, 다시 진입·물타기하면 손절이 다시 걸립니다";
-const SL_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>';
-const SL_ICO_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m2 2 20 20"/><path d="M5 5a1 1 0 0 0-1 1v7c0 5 3.5 7.5 7.67 8.94a1 1 0 0 0 .67.01c2.35-.82 4.48-1.97 5.9-3.71"/><path d="M9.309 3.652A12.252 12.252 0 0 0 11.24 2.28a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1v7a9.784 9.784 0 0 1-.08 1.264"/></svg>';
-function renderOfabSl(p) {
-  const chip = el("ofabSl"), box = el("ofabSlPanel");
-  if (!chip || !box) return;
-  const k = p && Number(p.qty) ? `${p.symbol}:${String(p.side).toUpperCase()}` : null;
-  const ba = k ? (latestBinanceAccount?.bracket_armed || {})[k] : null;
-  if (k && !(ba && ba.sl_price)) {   // 2026-10-20 무장 없는 열린 포지션 = «손절 없음»(옛 판은 칩을 숨겨 조용히 무방비였다)
-    chip.hidden = box.hidden = false;
-    chip.className = "ofab-sl off none"; chip.disabled = true; delete chip.dataset.slAct; chip.dataset.slKey = k;
-    chip.title = "손절 없음 — 이 포지션엔 거래소 스탑도 서버 5분봉 감시도 없습니다(SL/TP 를 켜고 진입하거나 바이낸스에서 직접 거세요)";
-    chip.setAttribute("aria-label", chip.title);
-    chip.innerHTML = `${SL_ICO_OFF}<span>손절 없음</span>`;
-    box.className = "ofab-slp off";
-    box.innerHTML = `<div class="ofab-slp-head">${SL_ICO_OFF}<span>손절</span><b>없음</b><em>무장 안 됨</em></div>`
-      + `<div class="ofab-slp-layers"><span><i></i>거래소 스탑 없음</span><span><i></i>서버 5분봉 감시 없음</span></div>`;
-    return;
-  }
-  chip.disabled = false;
-  chip.hidden = box.hidden = !ba || !ba.sl_price;
-  if (chip.hidden) return;
-  // 2026-10-15 사용자 «다시 누르면 다시 손절을 켜도록» -- 꺼진 상태도 같은 두 번 누름으로 켠다(act = 누르면 할 일).
-  const off = !!ba.sl_off, act = off ? "on" : "off", armed = slOffArmedKey === `${act}:${k}`, busy = slOffBusyKey === k, px = acctPx(ba.sl_price);
-  const mk = Number(p.mark_price) || 0, dist = mk > 0 && !off ? Math.abs(mk - ba.sl_price) / mk * 100 : null;
-  const hot = busy || armed;
-  const word = off ? "켜기" : "해제";
-  chip.className = `ofab-sl${hot ? " arm" : off ? " off" : ""}`;
-  chip.disabled = busy;
-  chip.dataset.slAct = act; chip.dataset.slKey = k;
-  chip.title = off ? `손절 없음 — 두 번 누르면 손절 ${px} 를 다시 켭니다(거래소 스탑 + 서버 5분봉 감시)`
-    : `손절 ${px}${ba.sl_name ? ` · ${ba.sl_name}` : ""} — 두 번 누르면 해제. ${SL_OFF_TIP}`;
-  chip.setAttribute("aria-label", armed ? `한 번 더 누르면 손절 ${word}` : off ? `손절 없음 — 다시 켜려면 두 번 누르기` : `손절 ${px} — 해제하려면 두 번 누르기`);
-  chip.innerHTML = busy ? `${off ? SL_ICO_OFF : SL_ICO}<span>${off ? "켜는 중…" : "해제 중…"}</span>`
-    : armed ? `${off ? SL_ICO_OFF : SL_ICO}<span>한 번 더 = ${word}</span>`
-    : off ? `${SL_ICO_OFF}<span>손절 없음</span>` : `${SL_ICO}<span>${px}</span>`;
-  box.className = `ofab-slp${off ? " off" : ""}`;
-  const btn = `<button type="button" class="ofab-slp-btn${hot ? " arm" : ""}" data-sl-act="${act}" data-sl-key="${escapeHtml(k)}"`
-    + ` title="${escapeHtml(off ? "거래소 스탑과 서버 5분봉 감시를 다시 켭니다" : SL_OFF_TIP)}"${busy ? " disabled" : ""}>`
-    + `${busy ? (off ? "켜는 중…" : "해제 중…") : armed ? `한 번 더 누르면 둘 다 ${off ? "켜기" : "해제"}` : off ? `손절 ${px} 다시 켜기` : "손절 해제"}</button>`;
-  box.innerHTML = off
-    ? `<div class="ofab-slp-head">${SL_ICO_OFF}<span>손절</span><b>없음</b><em>해제함</em></div>`
-      + `<div class="ofab-slp-layers"><span><i></i>거래소 스탑 꺼짐</span><span><i></i>서버 5분봉 감시 꺼짐</span></div>` + btn
-    : `<div class="ofab-slp-head">${SL_ICO}<span>손절</span><b>${px}</b>${ba.sl_name ? `<span>${escapeHtml(ba.sl_name)}</span>` : ""}${dist != null ? `<em>지금가 ${ba.sl_price > mk ? "+" : "−"}${dist.toFixed(1)}%</em>` : ""}</div>`
-      + `<div class="ofab-slp-layers"><span><i></i>거래소 스탑</span><span><i></i>서버 5분봉 감시</span></div>` + btn;
+// 2026-11-21 차트 위 상태 줄(#ordStat, index.html 차트 상자 안): 플로팅 버튼을 지우며 그 패널의 결과 칸(#snapEntryResult)·대기 줄(#snapWait)과
+//   말풍선(옛 #ofabSay → #ordSay)을 차트 위 한 상자로 모았다(매매 중 시선은 차트에 있다). 진행이 끝나고 문제가 없으면 10초 뒤 저절로 접히고,
+//   실패(빨강·🔴·⚠)는 ✕ 를 누를 때까지 남는다 -- 놓치면 안 되는 정보다.
+let waitHid = "";   // ✕ 로 닫았거나 저절로 접힌 «끝난 대기»(done_at) -- 다음 조회가 같은 결과를 다시 띄우지 않게
+function ordAutoHide(node, onHide) {
+  clearTimeout(node._ah);
+  if (node.hidden || node.querySelector(".bad") || /🔴|⚠/.test(node.textContent)) return;
+  const h = node.innerHTML;
+  node._ah = setTimeout(() => { if (node.innerHTML === h) { node.hidden = true; onHide?.(); } }, 10000);
 }
-document.addEventListener("click", async (e) => {
-  const b = e.target.closest("[data-sl-act]");
-  if (!b || b.disabled || !b.dataset.slKey) return;
-  const k = b.dataset.slKey, act = b.dataset.slAct, [symbol, side] = k.split(":"), redraw = () => renderOfabSl(snapshotAccountPosition());
-  if (slOffArmedKey !== `${act}:${k}`) {
-    slOffArmedKey = `${act}:${k}`; redraw();
-    clearTimeout(slOffArmT);
-    slOffArmT = setTimeout(() => { slOffArmedKey = null; redraw(); }, 5000);
-    return;
-  }
-  clearTimeout(slOffArmT); slOffArmedKey = null; slOffBusyKey = k; redraw();
-  const what = act === "on" ? "손절 다시 켜기" : "손절 해제";
-  try {
-    const r = await (await fetch(`/api/manual-bracket/${act === "on" ? "rearm" : "disarm"}?side=${encodeURIComponent(side)}&symbol=${encodeURIComponent(symbol)}&confirm=1`,
-      { method: "POST", cache: "no-cache" })).json();
-    ofabSay(r.ok ? (act === "on" ? "손절 다시 켬 — 거래소 스탑·서버 5분봉 감시 둘 다 켜짐" : "손절 해제 — 거래소 스탑·서버 5분봉 감시 둘 다 꺼짐")
-      : escapeHtml(`${what} 못 함: ${r.detail || r.error}`), r.ok ? "" : "bad");
-  } catch (err) {
-    ofabSay(escapeHtml(`${what} 못 함: ${err && err.message ? err.message : err}`), "bad");
-  } finally {
-    slOffBusyKey = null; redraw();   // 계좌를 다시 못 읽어도 «…중»이 남지 않게
-    refreshBinanceAccount(true);
-  }
+function ordSay(html, tone = "") {   // 짧은 안내(«익절선 걸림» 등) -- 옛 플로팅 말풍선 자리
+  const b = el("ordSay");
+  if (!b) return;
+  b.className = `entry-note${tone ? " " + tone : ""}`;
+  b.innerHTML = html; b.hidden = false;
+  ordAutoHide(b);
+}
+el("ordStat")?.addEventListener("click", (e) => {
+  if (!e.target.closest(".ord-x")) return;
+  waitHid = el("snapWait")?.dataset.doneAt || waitHid;
+  ["snapEntryResult", "snapWait", "ordSay"].forEach((id) => { const n = el(id); if (n) { clearTimeout(n._ah); n.hidden = true; } });
 });
 
 // 2026-10-11 «따라가기» 진입이 거래소에 걸려 있는 동안(peg · 120초 뒤 잔량 시장가) «대기 취소» -- 기다리기 상자(#snapWait)와 같은 줄 문법.
@@ -12937,7 +12258,6 @@ function entryResultHtml(st, tone) {
   entryCancelLive = entryCancelableP(st);
   pegOrder = entryCancelLive ? { side: st.side, price: Number(st.limit_price) || 0, qty: Number(st.quantity ?? st.plan?.quantity) || 0, filled: Number(st.filled) || 0, action: st.action || "", asset: st.asset || "eth" } : null;
   renderPegTag();
-  el("ofabWait")?.toggleAttribute("hidden", !(entryCancelLive || manualWaitLive));
   if (!entryCancelLive) { entryCancelArmed = false; return entryNote(manualEntryStateText(st), tone); }
   const label = st.action ? "취소 요청됨 — 3초 안에 처리" : entryCancelArmed ? "한 번 더 = 대기 취소(남은 수량 안 삼)" : "대기 취소";
   return entryNote(manualEntryStateText(st), tone)
@@ -12971,57 +12291,48 @@ async function manualEntryPollStatus() {
     // 2026-10-20 청산만 코인별: 주 칸을 다른 코인이 쓰는 동안 이 코인 청산은 side_exits[코인] 칸으로 나간다 -- 그 칸을 본다
     const sx = (data.side_exits || {})[activeSnapshotAsset];
     if (sx && sx.phase && sx.phase !== "idle" && (data.state?.asset || "eth") !== activeSnapshotAsset) data.state = sx;
-    box.innerHTML = entryResultHtml(data.state,
-      /^(error|taker_failed|rejected)$/.test(data.state?.phase || "") ? "bad" : "live");
+    box.innerHTML = entryResultHtml(data.state,   // 2026-11-21 🔴 줄(TP/SL 못 검·물타기 실패 등)도 빨강 -- 상태 줄에서 저절로 접히지 않는 실패와 색을 맞춘다
+      /^(error|taker_failed|rejected)$/.test(data.state?.phase || "") || /🔴/.test(manualEntryStateText(data.state)) ? "bad" : "live");
     const phase = data.state?.phase;
     // 진입이 끝나도 TP/SL 은 그 **뒤에** 걸린다 -- 체결이 있는데 결과가 아직 없으면 한 번 더 본다.
     const bracketPending = data.state?.kind !== "exit" && Number(data.state?.filled || 0) > 0
       && (!data.state?.bracket || data.state?.add_order?.pending);
     const switching = /^(exit|entry)$/.test(data.state?.switch?.phase || "");   // 2026-10-10 스위칭은 서버가 잇는다 -- 끝날 때까지 본다
     if (phase === "submitting" || phase === "working" || bracketPending || switching) {
+      clearTimeout(box._ah);
       setTimeout(manualEntryPollStatus, 1500);
     } else {
       manualOrderBusy = false;
-      manualButtonsDisabled(false);
-      manualEntryRefreshSize();   // 체결되면 포지션·상한 표시를 갱신한다
-      refreshBinanceAccount(true);   // 떠 있는 버튼·계좌 카드도 바로(서버 캐시 10초를 건너뛴다)
+      ordAutoHide(box);
+      refreshBinanceAccount(true);   // 계좌 카드·차트 선을 바로(서버 캐시 10초를 건너뛴다)
     }
   } catch (err) {
     box.innerHTML = entryNote(`상태 조회 실패: ${err && err.message ? err.message : err}`, "bad");
     // 🔴조회가 실패했다고 버튼을 잠근 채 두면 그 포지션을 **못 닫는다**. 푼다.
     manualOrderBusy = false;
-    manualButtonsDisabled(false);
   }
 }
 
-// 선 주문이 서버에서 거절·실패하면 그 사유를 SLTP 팝업 줄에 남긴다 -- 플로팅 버튼이 접혀 있으면 말풍선·카드 결과 칸이 안 보여 «씹힌 것»처럼 보였다(2026-11-05).
+// 선 주문이 서버에서 거절·실패하면 그 사유를 SLTP 팝업 줄에도 남긴다(2026-11-05 «씹힌 것»처럼 보였다) -- 차트 위 상태 줄과 같은 글.
 function lineSubmitFail(pending, msg) { if (pending?.tp && lineTool) { lineTool.fail = msg.replace(/already_working$/, "이 코인 주문이 진행 중입니다 -- 끝난 뒤 다시"); renderLineTool(); } }
-async function manualEntrySubmit() {
-  const pending = manualEntryPending;
+async function manualEntrySubmit(pending) {
   const box = el("snapEntryResult");
   if (!pending || !box) return;
   if (!orderCoinOk() || (pending.asset && pending.asset !== activeSnapshotAsset)) {   // 미리보기 뒤 탭을 바꿨으면 막는다
-    manualEntryClearConfirm();
     box.hidden = false;
     box.innerHTML = entryNote(`주문 취소 — 지금 탭(${coinUnit()})은 주문 심볼의 코인이 아닙니다`, "bad");
     return;
   }
-  manualEntryClearConfirm();
   manualOrderBusy = true;
-  manualButtonsDisabled(true);
+  clearTimeout(box._ah);
   box.hidden = false;
   box.innerHTML = entryNote("주문 전송 중…", "live");
   try {
     const q = `&pct=${pending.pct ?? 100}`
       + (pending.kind === "exit" ? "" : (pending.lev ? `&lev=${pending.lev}` : ""))
-      + (pending.kind !== "exit" && pending.rule ? `&rule=${pending.rule}` : "")
       + (pending.fresh ? "&fresh=1" : "") + (pending.exec || "") + (pending.src ? `&src=${pending.src}` : "")
       + (pending.kind !== "exit" && pending.tp ? `&tp=${pending.tp}&sl=${pending.sl}` : "")   // 2026-10-28 차트 선 주문
-      + (pending.kind !== "exit" && pending.limit ? `&limit=${pending.limit}` : "")   // 2026-10-31 지정가 대기(mode=limit 은 exec)
-      // 2026-10-10 스위칭 = 서버 한 작업(청산 다 닫히면 서버가 반대 진입) -- 화면이 꺼져도 이어진다
-      + (pending.kind === "exit" && pending.sw ? `&switch_to=${pending.sw.to}&sw_pct=${pending.sw.pct}`
-        + (pending.sw.lev ? `&sw_lev=${pending.sw.lev}` : "")
-        + (pending.sw.rule ? `&sw_rule=${pending.sw.rule}` : "") : "");
+      + (pending.kind !== "exit" && pending.limit ? `&limit=${pending.limit}` : "");   // 2026-10-31 지정가 대기(mode=limit 은 exec)
     const m0t = performance.now();   // M0 주문 전송 왕복
     const res = await fetch(
       `/api/manual-${pending.kind || "entry"}/submit?side=${pending.side}&asset=${pending.asset || "eth"}&confirm=1${q}`,
@@ -13035,38 +12346,34 @@ async function manualEntrySubmit() {
       box.innerHTML = entryNote(`주문 실패: ${data.detail || data.error || res.status}`, "bad");
       lineSubmitFail(pending, `주문 실패: ${data.detail || data.error || res.status}`);
       manualOrderBusy = false;
-      manualButtonsDisabled(false);
       return;
     }
-    if (data.wait) {   // 2026-10-10 기다리기 -- 주문 칸을 잡지 않는다(대기 중에도 청산·다른 버튼). 상태는 아래 #snapWait 가 말한다.
+    if (data.wait) {   // 지정가·감시 대기 -- 주문 칸을 잡지 않는다(대기 중에도 청산). 걸린 동안은 차트 진입선 꼬리표가, 끝나면 #snapWait 가 말한다.
       manualOrderBusy = false;
-      manualButtonsDisabled(false);
       if (pending.limit && lineTool) { lineTool.placed = true; lineTool.wid = data.wid || 1; lineTool.arm = 0; lineTool.err = ""; renderLineTool(); }   // 접수 확인 -- 선이 «대기 주문»이 된다(끌면 수정)
       box.innerHTML = entryNote(pending.limit && /stop=1/.test(pending.exec || "") ? "감시 진입 — 차트가 선에 닿으면 최우선 호가로 따라가며 진입합니다(120초 · 남은 수량 버림 · 시장가 전환 없음). 선을 끌면 수정, «주문 취소»로 거둡니다"
-        : pending.limit ? "지정가 대기 — 선 가격에 걸어 두었습니다. 선을 끌면 주문이 수정되고, «주문 취소»로 거둡니다(시장가 전환 없음)"
-        : "기다리기 — 최우선 호가에 걸어 두었습니다. 아래에서 취소·지금 시장가", "live");
+        : "지정가 대기 — 선 가격에 걸어 두었습니다. 선을 끌면 주문이 수정되고, «주문 취소»로 거둡니다(시장가 전환 없음)", "live");
+      ordAutoHide(box);
       manualWaitPoll();
       return;
     }
     box.innerHTML = entryResultHtml(data.state, "live");
     if (pending.tp && !pending.limit && lineTool) { lineTool = null; renderLineTool(); }   // peg 선 주문 접수 = 선을 거둔다(체결분은 포지션 선이 이어받는다)
-    if (pending.kind === "exit" && pending.sw) ofabWatchResult();   // 말풍선이 서버 스위칭 상태(결과 칸)를 따라 말한다
     setTimeout(manualEntryPollStatus, 800);   // 2026-11-05 첫 상태 조회는 0.8초 뒤(시장가는 보통 1초 안에 끝난다) -- 3초를 통째로 기다리지 않는다. 이후는 STATUS_POLL_MS
   } catch (err) {
     box.innerHTML = entryNote(`주문 실패: ${err && err.message ? err.message : err}`, "bad");
     lineSubmitFail(pending, `주문 실패: ${err && err.message ? err.message : err}`);
     manualOrderBusy = false;
-    manualButtonsDisabled(false);
   }
 }
 
 // ── 2026-10-10 기다리는 진입 ─────────────────────────────────────────────────────────
 // 서버 별도 칸(/api/manual-entry/status 의 wait). 진행 중이면 3초마다 다시 본다 -- 페이지를 새로 열어도 첫 조회가 다시 잇는다.
 // 2026-11-10 사용자 «코인별로»: 대기 칸이 코인마다 하나 -- 지금 탭 코인 칸만 본다(?asset=) · 탭을 바꾸면 그 코인 칸을 곧바로 다시 본다.
-let manualWaitTimer = 0, manualWaitLive = false, manualWaitArmT = 0, manualWaitAsset = "eth", manualWaitWid = 1;   // wid = 아래 상자 버튼(취소·지금 시장가)이 가리키는 대기 칸
+let manualWaitTimer = 0, manualWaitLive = false, manualWaitAsset = "eth", manualWaitWid = 1;   // wid = 지금 상자 주인 대기 칸
 const waitLiveP = (w) => /^(working|submitting)$/.test(w?.phase || "");
 function renderManualWait(list) {
-  const box = el("snapWait"), txt = el("snapWaitText"), acts = el("snapWaitActs");
+  const box = el("snapWait"), txt = el("snapWaitText");
   list = (list || []).filter((x) => x && x.phase && x.phase !== "idle");
   lineSyncWaits(list);
   // 11-18 대기 여럿: 상자 주인 = 살아 있는 첫 칸 · 없으면 가장 최근 끝난 칸 · 나머지는 뒤에 한 줄(살아 있는 것 요약 · 10분 안 끝난 것의 결과·🔴오류·재시작 복구 실패)
@@ -13080,11 +12387,10 @@ function renderManualWait(list) {
   if (!box || !txt) return;
   const live = waitLiveP(w), ph = w?.phase || "idle";
   const recent = Date.now() - Date.parse(w?.done_at || "") < 10 * 60e3;   // 끝난 결과는 10분만 남긴다
-  box.hidden = ph === "idle" || (!live && !recent);
-  el("ofabWait")?.toggleAttribute("hidden", !live && !entryCancelLive);   // 따라가기 진입 대기 중에도(대기 취소 버튼으로 데려간다)
-  if (acts) acts.hidden = !live;
-  el("snapWaitMarket")?.toggleAttribute("hidden", w?.mode === "limit");   // 지정가 대기는 «지금 시장가» 없음(검증 D5)
+  // 2026-11-21 걸려 있는 동안은 차트 진입선 꼬리표(가격·PEG·TAKER·✕)와 선 상자가 말한다 -- 상태 줄엔 끝난 결과만(체결·취소·재시작 정리)
+  box.hidden = ph === "idle" || live || !recent || (!!w.done_at && w.done_at === waitHid);
   if (box.hidden) return;
+  box.dataset.doneAt = w.done_at || "";
   const ko = w.side === "LONG" ? "롱" : "숏", unit = (ASSET_CONFIG[w.asset] || {}).label || coinUnit(), wk = w.mode === "limit" ? (w.stop ? "감시 진입" : "지정가 대기") : "기다리기";
   let t, tone = "live";
   if (ph === "restart_cancelled") {
@@ -13093,14 +12399,6 @@ function renderManualWait(list) {
     const rc = w.recovered;   // 지정가 대기 중 재시작: 그 사이 체결분에 익절·손절을 걸었나
     if (rc) { t += rc.reason ? ` · 🔴${rc.reason}` : rc.armed ? " · 그 사이 체결된 포지션에 익절·손절을 걸었습니다" : " · 체결된 포지션 없음"; }
     tone = errs || rc?.reason ? "bad" : "live";
-  } else if (live) {
-    const left = Math.max(0, Math.ceil((Date.parse(w.wait_until || "") - Date.now()) / 60e3));
-    t = `${wk}${w.stop && w.triggered ? " 닿음 · 따라가는 중" : w.pegged ? " → PEG 따라가는 중" : ""} ${ko} ${Number(w.filled || 0)} / ${Number(w.quantity ?? w.plan?.quantity ?? 0)} ${unit}`
-      + (w.stop ? (w.triggered ? ` · 주문가(USDC) ${w.limit_price} · 최우선 호가를 따라갑니다(120초 · 남은 수량 버림 · 시장가 전환 없음)` : ` · 차트(USDT) ${w.plan?.limit?.usdt} 에 닿으면 peg 따라가기 · 시장가 전환 없음 · 선을 끌면 수정`)
-        : w.pegged ? ` · 주문가(USDC) ${w.limit_price} · 최우선 호가를 따라갑니다(120초 · 남은 수량 버림 · 시장가 전환 없음)`
-        : w.limit_price ? ` · 주문가(USDC) ${w.limit_price}${w.plan?.limit?.usdt ? ` = 차트선(USDT) ${w.plan.limit.usdt}` : ""} (따라가지 않음)` : "")
-      + (w.stop || w.pegged ? "" : w.mode === "limit" ? ` · 시장가 전환 없음 · 선을 끌면 수정${w.reprices ? ` · 자동 재조정 ${w.reprices}회(USDC/USDT 차이)` : ""}` : Number.isFinite(left) && w.wait_until ? ` · ${left}분 뒤 남은 수량 시장가` : "")
-      + (w.action ? ` · ${w.action === "cancel" ? "취소" : "지금 시장가"} 요청됨 — 3초 안에 처리` : "");
   } else {
     t = `${wk} 끝 — ${manualEntryStateText(w).replace(/\n/g, " · ")}`
       + (w.taker_reason ? ` (${w.taker_reason})` : "") + (w.cancel_reason ? ` (${w.cancel_reason})` : "");
@@ -13108,7 +12406,7 @@ function renderManualWait(list) {
   }
   txt.className = `entry-note${tone ? " " + tone : ""}`;
   txt.textContent = t + also;
-  ["snapWaitCancel", "snapWaitMarket"].forEach((id) => { const b = el(id); if (b) b.disabled = !!w.action; });
+  ordAutoHide(box, () => { waitHid = w.done_at || ""; });
 }
 async function manualWaitPoll() {
   clearTimeout(manualWaitTimer);
@@ -13124,32 +12422,17 @@ async function manualWaitPoll() {
   if (a !== activeSnapshotAsset) return;   // 조회 중 탭을 바꿨다 -- 탭 전환이 부른 새 조회가 그린다
   renderManualWait(wl);
   const live = wl.some(waitLiveP);
-  if (manualWaitLive && !live && manualWaitAsset === a) { refreshBinanceAccount(true); manualEntryRefreshSize(); }   // 방금 끝났다 -- 포지션 다시(탭 전환은 끝난 게 아니다)
+  if (manualWaitLive && !live && manualWaitAsset === a) refreshBinanceAccount(true);   // 방금 끝났다 -- 포지션 다시(탭 전환은 끝난 게 아니다)
   manualWaitLive = live; manualWaitAsset = a;
   if (live) manualWaitTimer = setTimeout(manualWaitPoll, STATUS_POLL_MS);
 }
 async function manualWaitAction(action, wid = manualWaitWid) {
-  ["snapWaitCancel", "snapWaitMarket"].forEach((id) => { const b = el(id); if (b) b.disabled = true; });
   try {
     const r = await (await fetch(`/api/manual-entry/wait-action?action=${action}&asset=${manualWaitAsset}&wid=${wid}&confirm=1`, { method: "POST", cache: "no-cache" })).json();
-    if (!r.ok) { const t = el("snapWaitText"); if (t) { t.className = "entry-note bad"; t.textContent = `요청 실패: ${r.detail || r.error}`; } }
+    if (!r.ok) ordSay(escapeHtml(`대기 주문 ${action === "cancel" ? "취소" : action === "peg" ? "peg" : "시장가"} 요청 실패: ${r.detail || r.error}`), "bad");
   } catch (e) { /* 아래 조회가 실제 상태를 다시 그린다 */ }
   manualWaitPoll();
 }
-el("snapWaitCancel")?.addEventListener("click", () => manualWaitAction("cancel"));   // 위험을 줄이는 쪽 -- 한 번에
-// «지금 시장가»는 테이커 주문이라 두 번: 첫 클릭 = 5초 무장(글자가 바뀐다) · 그 안에 한 번 더 = 전송
-el("snapWaitMarket")?.addEventListener("click", () => {
-  const b = el("snapWaitMarket");
-  if (!b.classList.contains("arm")) {
-    b.classList.add("arm"); b.textContent = "한 번 더 = 남은 수량 시장가";
-    clearTimeout(manualWaitArmT);
-    manualWaitArmT = setTimeout(() => { b.classList.remove("arm"); b.textContent = "지금 시장가"; }, 5000);
-    return;
-  }
-  clearTimeout(manualWaitArmT); b.classList.remove("arm"); b.textContent = "지금 시장가";
-  manualWaitAction("market");
-});
-el("ofabWait")?.addEventListener("click", () => { if (!ofab.open) ofabSetOpen(true); el(entryCancelLive ? "snapEntryResult" : "snapWait")?.scrollIntoView({ block: "nearest" }); });
 setTimeout(manualWaitPoll, 1500);   // 새로고침·재접속 뒤에도 걸린 대기 주문을 다시 보인다
 
 // 2026-09-16 애플식 슬라이더(사용자 요청). 트랙을 직접 칠하면 브라우저의 accent-color
@@ -13166,197 +12449,19 @@ document.addEventListener("input", (e) => {
   if (t && t.tagName === "INPUT" && t.type === "range") syncRangeFill(t);
 });
 
-el("snapLevAuto")?.addEventListener("change", () => manualEntryRefreshSize());
-el("snapLevGauge")?.addEventListener("input", () => {
-  const out = el("snapLevVal");
-  if (out) out.textContent = `${manualLevValue()}배`;
-  // 2026-09-20 레버리지도 **크기를 바꾼다** -- 진입 비율과 똑같이 다시 물어서 위 계좌 카드가
-  // 따라 움직이게 한다. 예전엔 라벨만 고쳐서, 게이지를 밀어도 미리보기가 옛 값에 굳어 있었다.
-  if (manualEntryPending?.kind === "entry") manualEntryClearConfirm();
-  clearTimeout(entrySizeDebounce);
-  entrySizeDebounce = setTimeout(manualEntryRefreshSize, 250);
-});
-// input 이벤트 없이 value 가 바뀌는 경로(렌더·모달 열기)를 위한 동기화.
-function syncAllRangeFills(root) {
-  (root || document).querySelectorAll('input[type="range"]').forEach(syncRangeFill);
-}
-// ── 길게 누르기로 진입 (2026-09-20 사용자 선택: 시안 B) ─────────────────────────────
-// 누른 순간 **미리보기부터 보낸다** -- 0.4초 동안 아래 상자가 «이만큼 나갑니다»로 채워지고,
-// 그걸 보고 손을 떼면 주문은 안 나간다. 링이 다 차면 그 미리보기로 바로 발주한다.
-// 🔴확인 클릭을 없앤 대신 «의도적 지속»을 받는다. 오클릭 한 번으로는 아무 일도 없다.
-// pointer 이벤트라 마우스·터치가 한 경로다. touch-action: none 은 styles.css 에서 준다
-// (없으면 모바일에서 누른 채 스크롤하다 발주된다).
-// 2026-11-02 사용자 «꾹 누르면 주문 들어가는 버튼을 모두 플로팅 버튼 방식으로 통일»: **한 곳**에서 정한다 -- 계좌 카드 진입·청산·스위칭(manualHoldStart) · 청산 팝업 25/50/100% ·
-//   떠 있는 LONG·SHORT·«주문» · 선 주문의 진입 버튼 전부 같은 시간(1.5초)·같은 게이지(왼쪽→오른쪽 · 버튼 전체 · 방향색 30% · linear). 시간은 CSS 변수 --hold-ms 로도 내려간다.
-// 2026-11-02 사용자 «꾹 누르는 걸 없애고 누르면 바로 진입·청산» -> 0 = 마우스는 누르는 즉시 발주(미리보기가 오면 바로 나간다). 터치는 원래 꾹 발주가 없고(탭 → 확인 버튼) 그대로다.
-//   게이지·꾹 누르기 코드는 이 값 하나로 «즉시»가 되도록 남겼다 -- 되돌리려면 1500. 서버의 confirm=1·게이트·상한·409(이미 진행 중) 검사는 그대로다.
+// 2026-11-02 사용자 «꾹 누르는 걸 없애고 누르면 바로 진입·청산» -> 0 = 마우스는 누르는 즉시 발주. 지금 이 값을 읽는 곳은 SLTP 선 상자의 진입 버튼뿐이다(2026-11-21 플로팅·카드 주문 버튼 제거).
+//   서버의 confirm=1·게이트·상한·409(이미 진행 중) 검사는 그대로다.
 const HOLD_FIRE_MS = 0;
 document.documentElement.style.setProperty("--hold-ms", `${HOLD_FIRE_MS}ms`);
-let manualPreviewInFlight = false;
-let manualFireOnPreview = false;
-let manualHoldFire = false;
-let manualHoldTimer = null;
-let manualHoldRaf = null;
-let manualHoldBtn = null;
-// 🔴2026-11-02 꾹 누르기 안전 -- 플로팅 버튼과 같은 규칙(누른 자리에서 8px 넘게 움직이면 취소 · 떼면 취소)으로 맞춘다. 이유: 미리보기가 시작되면 ① 이 버튼들이 disabled 가 되고(manualButtonsDisabled)
-//   비활성 버튼은 pointerup 을 못 받으며(실측: 이벤트 없음) ② 결과 상자가 생겨 레이아웃이 밀리면 버튼이 포인터 밑을 벗어나 pointerleave 가 나 게이지가 곧바로 지워졌다.
-//   그래서 손 뗌·취소·움직임은 **창 전체**에서 보고(비활성이어도 취소가 걸린다 -- 0.4초일 땐 묻혔지만 1.5초에서는 «떼도 나간다»가 된다), 포인터가 8px 안이면 pointerleave 는 취소로 안 친다.
-const HOLD_MOVE_PX = 8;
-let manualHoldPt = null;
-window.addEventListener("pointerdown", (e) => { manualHoldPt = { x: e.clientX, y: e.clientY }; }, true);
-function manualHoldLeave(btn, e) {
-  if (e && manualHoldPt && Math.hypot(e.clientX - manualHoldPt.x, e.clientY - manualHoldPt.y) <= HOLD_MOVE_PX) return false;   // 레이아웃·비활성이 일으킨 가짜 leave
-  manualHoldCancel(btn);
-  return true;   // 실제로 취소했는가(청산 팝업이 «떼었다»를 판단하는 데 쓴다)
-}
-window.addEventListener("pointermove", (e) => {
-  if (manualHoldBtn && (manualHoldTimer || manualHoldRaf) && manualHoldPt && Math.hypot(e.clientX - manualHoldPt.x, e.clientY - manualHoldPt.y) > HOLD_MOVE_PX) manualHoldCancel(manualHoldBtn);
-}, true);
-["pointerup", "pointercancel"].forEach((ev) => window.addEventListener(ev, () => { if (manualHoldBtn && (manualHoldTimer || manualHoldRaf)) manualHoldCancel(manualHoldBtn); }, true));
-
-function manualHoldPaint(btn, ratio) {
-  const fill = btn?.querySelector(".hold-fill");
-  if (fill) fill.style.width = `${Math.round(100 * ratio)}%`;
-}
-// 2026-09-20 «0.4초 누르고 있으면…» 안내문을 뺐다(아티팩트 댓글). 동작은 그대로다 --
-// 누르는 동안 차오르는 채움 막대(.hold-fill)가 진행을 계속 보여준다. 문구를 지우면서
-// 그것만 쓰던 헬퍼 둘(manualHoldHint/manualHoldIdle)도 같이 지웠다.
-
-function manualHoldCancel(btn) {
-  if (manualHoldTimer) { clearTimeout(manualHoldTimer); manualHoldTimer = null; }
-  if (manualHoldRaf) { cancelAnimationFrame(manualHoldRaf); manualHoldRaf = null; }
-  manualHoldPaint(btn, 0);
-  if (manualHoldFire) { manualHoldFire = false; manualEntryClearConfirm(); }
-}
 // 2026-11-02 즉시 발주(HOLD_FIRE_MS = 0): 서버가 발주 때 계획을 **처음부터 다시** 조립하므로(assemble_*_plan · 계좌·호가·상한 전부) 미리보기 GET 은 발주에 필요 없다 --
-//   건너뛰고 바로 POST 한다(왕복 한 번·계획 계산 한 번·청산의 계좌 새로고침 한 번이 빠진다). 대기 파라미터는 manualEntryArmConfirm 이 만들던 것과 같다.
+//   건너뛰고 바로 POST 한다(왕복 한 번·계획 계산 한 번·청산의 계좌 새로고침 한 번이 빠진다). 부르는 곳 = SLTP 선 진입(lineFire) · 진입가 팝업 청산(늘 지정가 따라가기).
 //   막힘·게이트 꺼짐·포지션 없음은 서버가 같은 사유로 거절하고 manualEntrySubmit 이 «주문 실패: 사유»로 보여 준다.
-function manualFireNow(side, kind = "entry", ov = null) {
-  if (manualOrderBusy || manualPreviewInFlight) return;
-  manualEntryClearConfirm();
-  manualEntryPending = { side, kind, pct: ov?.pct ?? (kind === "exit" ? manualExitPct() : manualEntryPct()), asset: activeSnapshotAsset,
-                         lev: ov?.lev ?? manualLevEffective(),
-                         rule: kind === "exit" ? "" : (ov?.rule ?? manualRule()),
-                         fresh: !!ov?.fresh, sw: ov?.switch || null, tp: ov?.tp || "", sl: ov?.sl || "", limit: ov?.limit || "", src: ov?.src || "",
-                         exec: kind === "exit" ? exitExecQuery(ov) : (ov?.limit ? "&mode=limit" + (ov.stop ? "&stop=1" : "") : ov?.tp ? "" : manualExecQuery()) };
-  manualEntrySubmit();
+function manualFireNow(side, kind, ov) {
+  if (manualOrderBusy) return;
+  manualEntrySubmit({ side, kind, pct: ov.pct, asset: activeSnapshotAsset, lev: manualLevEffective(), fresh: !!ov.fresh,
+                      tp: ov.tp || "", sl: ov.sl || "", limit: ov.limit || "", src: ov.src || "",
+                      exec: ov.limit ? "&mode=limit" + (ov.stop ? "&stop=1" : "") : "" });
 }
-function manualHoldStart(btn, side, kind, ov = null) {
-  if (manualOrderBusy || btn.disabled) return;
-  manualHoldCancel(btn);
-  manualHoldBtn = btn;
-  if (!HOLD_FIRE_MS) { manualFireNow(side, kind, ov); return; }
-  manualHoldFire = true;
-  // 청산은 **계좌부터 새로 읽는다**(manualExitPreview) -- 닫으려는 수량이 낡으면 안 된다.
-  if (kind === "exit") manualExitPreview(side, ov); else manualEntryPreview(side, "entry");
-  const t0 = performance.now();
-  const step = () => {
-    const r = HOLD_FIRE_MS ? Math.min(1, (performance.now() - t0) / HOLD_FIRE_MS) : 1;
-    manualHoldPaint(btn, r);
-    if (r < 1) manualHoldRaf = requestAnimationFrame(step);
-  };
-  manualHoldRaf = requestAnimationFrame(step);
-  manualHoldTimer = setTimeout(() => {
-    manualHoldTimer = null;
-    if (manualHoldRaf) { cancelAnimationFrame(manualHoldRaf); manualHoldRaf = null; }   // 마지막 프레임이 비운 게이지를 다시 100% 로 칠하던 것
-    manualHoldPaint(btn, 0);
-    manualHoldFire = false;
-    // 미리보기가 막혔거나(blocked) 아직 안 왔으면 pending 이 없다 -- 그때는 안 나간다.
-    if (manualEntryPending) manualEntrySubmit();
-    // 미리보기가 아직 오는 중이면 **오는 즉시** 발주한다(manualEntryArmConfirm) -- 채움을 끝냈으면 확인은 끝났다.
-    // 🔴미리보기가 **왔는데** pending 이 없으면 막혔거나 게이트가 꺼진 것이다 -- 상자에 이미 사유가 있다.
-    else if (manualPreviewInFlight) {
-      manualFireOnPreview = true;
-      const box = el("snapEntryResult");
-      if (box) { box.hidden = false; box.innerHTML = entryNote("미리보기 받는 중 — 오면 바로 나갑니다.", "live"); }
-    }
-  }, HOLD_FIRE_MS);
-}
-[["snapEntryLong", "LONG", "entry"], ["snapEntryShort", "SHORT", "entry"],
- ["snapExitLong", "LONG", "exit"], ["snapExitShort", "SHORT", "exit"]].forEach(([id, side, kind]) => {
-  const btn = el(id);
-  if (!btn) return;
-  // 🔴2026-09-25 사용자 지시: **터치(모바일)는 길게 누르기 발주를 끈다** -- 스크롤하다 버튼 위에서
-  //   0.4초가 지나 주문이 나갈 위험. 터치는 탭 → 미리보기 → 확인 버튼(30초) → 확인, 두 번 눌러야 나간다.
-  //   탭은 click 으로 받는다 -- 브라우저는 스크롤로 끝난 터치에 click 을 안 보낸다. 마우스는 그대로 길게 누르기.
-  //   판정은 **이벤트마다** pointerType 으로 한다(터치 노트북은 마우스·손가락을 둘 다 쓴다).
-  let touched = false;
-  btn.addEventListener("pointerdown", (e) => {
-    touched = e.pointerType === "touch";
-    if (touched) return;
-    e.preventDefault(); manualHoldStart(btn, side, kind);
-  });
-  // 2026-09-26 비평 P1: **키보드**(Enter/Space → detail 0 인 click)도 터치와 같은 «미리보기 → 확인» 경로다.
-  //   예전엔 키보드로 누르면 아무 반응도 없었다(길게 누르기는 포인터 전용). 마우스 click 은 여전히 무시한다.
-  btn.addEventListener("click", (e) => {
-    if (!(touched || e.detail === 0) || manualOrderBusy || btn.disabled) return;
-    touched = false;
-    if (kind === "exit") manualExitPreview(side); else manualEntryPreview(side, "entry");
-  });
-  ["pointerup", "pointerleave", "pointercancel"].forEach((ev) =>
-    btn.addEventListener(ev, (e) => (ev === "pointerleave" ? manualHoldLeave(btn, e) : manualHoldCancel(btn))));
-});
-// 🔴2026-10-10 사용자 결정 «스위칭은 즉시 체결 기본»: 아래 peg 설명은 옛 판 -- 이제 청산·반대 진입 둘 다 시장가(서버 exec=market 강제).
-// 2026-10-05 «스위칭»(사용자 지시, 떠 있는 패널에서만): 게이지와 상관없이 지금 쪽 **100% peg 메이커 청산** → 전량 체결되면
-//   **반대쪽 peg 메이커 진입**. 반대 진입 크기 = 닫은 포지션의 증거금 %(명목 ÷ 배수 ÷ 순자산)·같은 배수 → 거의 같은 수량
-//   (체결가·손익만큼 차이). 증거금 50% 상한은 서버가 그대로 걸고, 반대 진입은 계좌를 새로 읽는다(fresh=1 -- 닫은 포지션이
-//   30초 캐시에 남아 노출로 잡히면 상한이 반대 진입을 깎는다). 청산이 전량 안 채워지면(거부·오류) 반대 진입을 안 낸다.
-//   확인 규칙은 청산과 같다(마우스 0.4초 꾹 = 바로 · 터치/키보드 = 미리보기 → 확인). 120초 뒤 테이커 전환도 청산 그대로.
-// 🔴2026-10-10 청산 → 반대 진입 연결은 **서버**(server.py exit_then_switch)가 한다 -- 브라우저 폴링이 잇던 판은 화면이 꺼지면 반대 진입이 안 나갔다.
-function switchPlan(side) {
-  const p = lastExitPositions.get(side);
-  const qty = Number(p?.qty) || 0, mark = Number(p?.mark_price) || 0, lev = Number(p?.leverage) || manualLevEffective() || 0;
-  const eq = acctMarginUsed(assetBalance()).equity;
-  if (!(qty > 0 && mark > 0 && lev > 0 && eq > 0)) return null;
-  const pct = Math.min(100, Math.max(0.01, Math.round(qty * mark / lev / eq * 10000) / 100));
-  // 2026-10-10 사용자 결정: 반대 진입엔 SL/TP 체크와 무관하게 손절이 걸린다(서버가 강제) -- sltp 를 보내지 않는다
-  return { pct: 100, switch: { to: side === "LONG" ? "SHORT" : "LONG", pct, lev, rule: manualRule() } };
-}
-{
-  const btn = el("snapSwitch");
-  const held = () => (lastExitPositions.has("LONG") ? "LONG" : lastExitPositions.has("SHORT") ? "SHORT" : "");
-  const plan = (s) => {
-    const ov = s && switchPlan(s);
-    if (!ov) ofabSay(escapeHtml("스위칭 안 함 — 포지션·증거금 정보를 아직 못 읽었습니다. 잠시 뒤 다시 누르세요."), "bad");
-    return ov;
-  };
-  let touched = false;
-  btn?.addEventListener("pointerdown", (e) => {
-    touched = e.pointerType === "touch";
-    if (touched) return;
-    e.preventDefault();
-    const s = held(), ov = plan(s);
-    if (ov) manualHoldStart(btn, s, "exit", ov);
-  });
-  btn?.addEventListener("click", (e) => {
-    if (!(touched || e.detail === 0) || manualOrderBusy || btn.disabled) return;
-    touched = false;
-    const s = held(), ov = plan(s);
-    if (ov) manualExitPreview(s, ov);
-  });
-  ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => btn?.addEventListener(ev, (e) => (ev === "pointerleave" ? manualHoldLeave(btn, e) : manualHoldCancel(btn))));
-}
-// 2026-09-14 사용자 요청: **청산은 강제 조회부터**. 화면 숫자가 30초(조회가 끊겼으면 그
-// 이상) 묵어 있을 수 있어서, 미리보기를 그리기 전에 계좌를 다시 받아 카드·아래 줄을 맞춘다.
-// 서버의 청산 미리보기도 같은 이유로 fresh 다(server.py api_manual_exit_preview).
-// 조회가 실패해도 미리보기는 진행한다 -- 급히 닫으려는 사람을 여기서 세우면 안 된다.
-async function manualExitPreview(side, ov = null) {
-  manualEntryClearConfirm();   // 🔴옛 확인(다른 방향·진입)이 계좌 조회 동안 남아 있으면 0.4초 길게 누르기 타이머가 그걸 낸다(10-16 감사)
-  manualButtonsDisabled(true);
-  // 🔴2026-11-02 «청산 100% 꾹 눌렀는데 안 나갔다»: 계좌 조회가 길어 꾹 누르기 타이머(1.5초)가 조회 도중 끝나면
-  //   pending 도 inFlight 도 없어 **아무 일 없이 지나갔고**, 미리보기는 뒤늦게 30초 확인 버튼만 띄웠다. 조회 구간도 «진행 중»이다.
-  manualPreviewInFlight = true;
-  try {
-    binanceAccountLastFetchAt = 0;      // 클라이언트 30초 게이트 우회
-    await refreshBinanceAccount();
-    manualExitSyncButtons();
-  } catch (err) {
-    /* 무시 -- 아래 미리보기가 서버에서 다시 읽는다 */
-  }
-  return manualEntryPreview(side, "exit", ov);
-}
-el("snapEntryConfirm")?.addEventListener("click", manualEntrySubmit);
-// 비율을 바꾸면 화면에 떠 있던 확인 버튼은 **다른 계획**의 것이다. 지운다.
 // 계좌 강제 조회. refreshBinanceAccount 의 30초 자체 게이트를 넘겨야 하므로 시각을 지운다.
 el("snapAcctRefresh")?.addEventListener("click", async () => {
   const btn = el("snapAcctRefresh");
@@ -13365,571 +12470,9 @@ el("snapAcctRefresh")?.addEventListener("click", async () => {
   try {
     binanceAccountLastFetchAt = 0;
     await refreshBinanceAccount();
-    manualExitSyncButtons();      // 포지션이 바뀌었으면 버튼도 바로 맞춘다
-    manualEntryRefreshSize();
   } finally {
     btn.classList.remove("spin");
     setTimeout(() => { btn.disabled = false; }, 3000);   // 연타로 거래소 한도를 때리지 않게
   }
 });
 
-// 2026-09-20 시안 B: 슬라이더를 칩으로 갈았다(사용자 선택). 🔴입력 자체는 **지우지 않고
-//   숨겨 둔다** -- 칩은 그 값을 써 넣고 input 이벤트를 쏘기만 한다. 그래서 값을 읽는 쪽
-//   (sliderPct·manualLevValue)과 아래 input 리스너들을 한 줄도 안 고쳤고, 범위 클램프도
-//   브라우저가 계속 해준다(레버 상한이 서버 정책으로 20 밑이면 20x 칩은 그 상한으로 눌린다 --
-//   그때는 어느 칩도 안 켜지고 옆 숫자가 진짜 값을 말한다).
-function syncChipset(box) {
-  const inp = el(box.dataset.for);
-  if (!inp) return;
-  // 🔴칩은 입력의 **상태까지** 따라가야 한다. renderLevGauge 는 물타기면 게이지를 숨기고
-  //   (기존 레버리지가 ×3 처럼 5의 배수가 아닐 수 있어 5단위로는 나타낼 수도 없다) 자동이면
-  //   비활성화한다 -- 「고를 수 없는 것을 고를 수 있는 것처럼 보여주면 안 된다」는 그 함수의
-  //   주석 그대로다. 이걸 안 따라가면 칩이 «5x 로 나간다»고 적극적으로 거짓말한다
-  //   (2026-09-20 미리보기에서 실제로 그랬다: 칩 5x · 꼬리표 「20배 (기존 포지션과 동일)」).
-  box.hidden = !!inp.hidden;
-  box.classList.toggle("off", !!inp.disabled);
-  let hit = false;
-  box.querySelectorAll(".chip").forEach((c) => {
-    const on = c.dataset.v === inp.value || Number(c.dataset.v) === Number(inp.value);   // 2026-10-16 "h"(보유 1.5×) = 숫자 아님
-    hit = hit || on;
-    c.classList.toggle("on", on);
-    // 2026-09-26 비평: 선택이 색으로만 보였다(스크린리더 무음) · 잠긴(«자동») 칩이 키보드로는 눌렸다.
-    c.setAttribute("aria-pressed", String(on));
-    c.disabled = !!inp.disabled;
-  });
-  // 칩이 맞으면 옆 숫자를 숨긴다(같은 값을 두 번 말하지 않는다). 칩에 없는 값 -- 서버가
-  // 추천한 레버리지 15x 같은 -- 일 때만 숫자가 나타나 진짜 값을 말한다.
-  box.dataset.matched = hit ? "1" : "0";
-}
-function syncChipsets() { document.querySelectorAll(".chipset").forEach(syncChipset); }
-document.querySelectorAll(".chipset").forEach((box) => {
-  const inp = el(box.dataset.for);
-  if (!inp) return;
-  box.addEventListener("click", (e) => {
-    const c = e.target.closest(".chip");
-    if (!c) return;
-    inp.value = c.dataset.v;
-    inp.dispatchEvent(new Event("input", { bubbles: true }));
-    syncChipset(box);
-  });
-  inp.addEventListener("input", () => syncChipset(box));
-  syncChipset(box);
-});
-
-// ── 떠다니는 주문 버튼 (2026-09-25 사용자 지시) ─────────────────────────────────────
-// 차트를 보다가 계좌 카드까지 내려가지 않고 바로 주문하려는 것. 사용자 선택 셋:
-//   ①진입 + 청산 ②안전장치는 카드와 같게(길게 누르기) ③레버·비율은 **게이지**로 버튼 안에서 바꾼다.
-// ⭐새 주문 경로를 만들지 않는다 -- 펼치면 카드의 .acct-lanes 를 **통째로 옮겨 오고** 접으면 되돌린다.
-//   핸들러가 전부 el("id") 기반이라(모달 ↔ 카드 이전 때와 같은 방식) 길게 누르기·미리보기·30초 확인·
-//   진행 중인 확인 버튼까지 그대로 따라온다. 같은 요소라 카드와 값이 어긋날 수도 없다.
-// ⭐게이지는 새로 안 만든다 -- 칩은 숨긴 <input type="range"> 위에 씌운 껍데기라, 패널 안에서만
-//   칩을 감추고 그 range 를 드러낸다(styles.css .ofab-panel). 칩은 range 의 input 을 듣고 있으니
-//   게이지를 밀면 되돌아간 카드의 칩도 이미 맞춰져 있다.
-// 🔴끄는 건 손잡이(⠿)로만 -- 주문 버튼이 «길게 누르기»라 끌기와 한 표면을 쓰면 옮기다 멈춘 순간 발주된다.
-const OFAB_POS_KEY = "ofabPos";
-const ofab = { open: false, home: null, next: null, x: null, y: null, w: 0, h: 0 };
-// 2026-10-30 사용자 «떠 있는 주문 버튼도 숨겼다 꺼냈다» 시안 A: 숨기면 버튼이 있던 높이의 화면 오른쪽 가장자리에 손잡이(#ofabTab · 요약 글자)만.
-let ofabHid = false;
-try { ofabHid = localStorage.getItem("ofabHid") === "1"; } catch (e) { /* 기억은 편의일 뿐 */ }
-function ofabHide(hid) {
-  ofabHid = hid;
-  try { localStorage.setItem("ofabHid", hid ? "1" : "0"); } catch (e) { /* 기억은 편의일 뿐 */ }
-  ofabSync(); renderOfab();
-  el(hid ? "ofabTab" : "ofabGrip")?.focus();
-}
-function ofabTabPlace() {
-  const t = el("ofabTab");
-  if (!t || t.hidden) return;
-  const h = ofab.h || 46;   // 2026-11-02 사용자 펜 메모 «플로팅 버튼을 축소시킬 시 오른쪽에만 요약되서 붙도록» -- 왼쪽 가장자리 손잡이는 없앴다(항상 오른쪽)
-  t.style.top = `${Math.max(8, Math.min((ofab.y ?? innerHeight) + h / 2 - t.offsetHeight / 2, innerHeight - t.offsetHeight - 8))}px`;
-}
-
-function ofabPlace(x, y, save) {
-  const box = el("ofab"), bar = box?.querySelector(".ofab-bar");
-  if (!box || !bar) return;
-  const w = bar.offsetWidth || 120, h = bar.offsetHeight || 44;
-  if (bar.offsetWidth) [ofab.w, ofab.h] = [w, h];   // 숨긴 동안(크기 0) 손잡이 자리를 잡을 때 쓴다
-  ofab.x = Math.max(8, Math.min(x, innerWidth - w - 8));
-  const tabBar = (() => { const r = el("cardRail"); return r && !r.hidden && matchMedia("(max-width: 720px)").matches ? r.offsetHeight : 0; })();   // 모바일 아래 탭바 위로 -- 가리지 않게
-  ofab.y = Math.max(8, Math.min(y, innerHeight - h - 8 - tabBar));
-  box.style.left = `${ofab.x}px`;
-  box.style.top = `${ofab.y}px`;
-  // 패널은 **남은 공간이 넓은 쪽**으로 연다 -- 버튼을 어디에 두든 화면 밖으로 안 나간다.
-  const up = ofab.y + h / 2 > innerHeight / 2;
-  box.classList.toggle("up", up);
-  box.classList.toggle("rightside", ofab.x + w / 2 > innerWidth / 2);
-  // 2026-10-05 말풍선 = 아래가 기본(사용자 지시). 아래 자리가 140px 안 되거나 아래로 펼친 패널과 겹치면 위로.
-  box.classList.toggle("say-up", innerHeight - ofab.y - h < 140 || (ofab.open && !up));
-  ofabClampX(el("ofabPanel"));
-  ofabClampX(el("ofabSay"));
-  const panel = el("ofabPanel");
-  if (panel) panel.style.maxHeight = `${Math.max(160, (up ? ofab.y : innerHeight - ofab.y - h) - 16)}px`;
-  if (save) {
-    try { localStorage.setItem(OFAB_POS_KEY, JSON.stringify([ofab.x, ofab.y])); } catch (e) { /* 위치 기억은 편의일 뿐 */ }
-  }
-}
-
-// 패널·말풍선이 화면 옆으로 넘치면 안쪽으로 민다. 🔴좁은 화면에서 버튼이 가운데보다 약간 왼쪽이면 패널(왼쪽 정렬, 380px)이
-//   오른쪽으로 잘렸다(2026-10-05 시안 캡처에서 발견, 이전 판에도 있던 버그). 위치 규칙(.rightside)은 그대로 두고 넘친 만큼만 옮긴다.
-function ofabClampX(node) {
-  if (!node || node.hidden) return;
-  node.style.transform = "";
-  const r = node.getBoundingClientRect();
-  const dx = r.left < 8 ? 8 - r.left : r.right > innerWidth - 8 ? innerWidth - 8 - r.right : 0;
-  if (dx) node.style.transform = `translateX(${Math.round(dx)}px)`;
-}
-
-function ofabSetOpen(open) {
-  const panel = el("ofabPanel"), lanes = document.querySelector(".acct-lanes");
-  if (!panel || !lanes || open === ofab.open) return;
-  if (open) {
-    ofab.home = lanes.parentNode;
-    ofab.next = lanes.nextSibling;
-    panel.appendChild(lanes);
-  } else if (ofab.home) {
-    ofab.home.insertBefore(lanes, ofab.next);
-  }
-  ofab.open = open;
-  panel.hidden = !open;
-  el("ofabAway").hidden = !open;
-  ["ofabToggle", "ofabMore"].forEach((id) => el(id)?.setAttribute("aria-expanded", String(open)));   // 2026-10-06 LONG·SHORT 는 더 이상 창을 열지 않는다(마우스)
-  // 카드에서는 range 가 칩 뒤에 숨어 있어 탭 순서에서 빠져 있다(tabindex -1). 게이지로 드러나면 넣는다.
-  lanes.querySelectorAll(".chip-input").forEach((i) => { i.tabIndex = open ? 0 : -1; });
-  if (open) ofabApplyDefaults();
-  syncAllRangeFills(lanes);
-  syncChipsets();
-  ofabPlace(ofab.x, ofab.y, false);   // 열리면 위/아래·최대 높이를 다시 정한다
-}
-
-// 2026-09-28 사용자 지시: 펼치면 **진입 비율 5%**가 기본(카드의 기억된 선택은 그대로). 비율은 input 을 쏴서 칩·글자·크기 재조회가 평소 경로로 따라오게 한다.
-//   (10-24 SL/TP 끄기 체크 제거 -- 손절은 서버가 모든 진입에 건다.)
-function ofabApplyDefaults() {
-  const fr = el("snapEntryFrac");
-  if (fr) { fr.value = "5"; fr.dispatchEvent(new Event("input", { bubbles: true })); }
-}
-// 2026-09-28 사용자 지시: 버튼을 2초 꾹 누르면 **지금 포지션 방향으로 바로 추가 진입**(5% · SL/TP 해제). 마우스만 -- 터치(모바일)는 없다.
-//   패널을 펼쳐 결과를 보여 주고, 미리보기가 오는 즉시 발주한다 -- 진입 버튼의 «길게 누르기 = 확인»과 같은 경로
-//   (manualFireOnPreview → manualEntryArmConfirm). 포지션이 없으면 방향을 모르니 안 나간다. 서버 게이트·코인 검사는 그대로.
-// 2026-10-01 꾹 눌러 추가 진입은 **패널을 열지 않는다**(사용자 지시) -- 결과는 버튼 위 말풍선(#ofabSay)이 카드의 결과 칸(snapEntryResult)을 따라 말한다.
-let ofabSayObs = null, ofabSayTimer = 0;
-function ofabSay(html, tone = "") {
-  const b = el("ofabSay");
-  if (!b) return;
-  if (ofabHid) return;   // 2026-11-04 펜 메모 «SLTP 주문 때마다 접혀 있던 플로팅 버튼이 열린다 -- 내가 열지 않는 한 계속 접혀 있게»: 접힌 동안은 말풍선도 안 띄운다(결과는 카드 결과 칸에 그대로)
-  b.className = `ofab-say${tone ? " " + tone : ""}`;
-  b.innerHTML = html; b.hidden = false;
-  ofabClampX(b);
-  clearTimeout(ofabSayTimer);
-  ofabSayTimer = setTimeout(() => { b.hidden = true; ofabSayObs?.disconnect(); ofabSayObs = null; }, 8000);
-}
-// 카드 결과 칸이 바뀌면(미리보기 → 발주 → 체결/거부) 그 글을 말풍선으로
-function ofabWatchResult() {
-  const box = el("snapEntryResult");
-  if (!box) return;
-  ofabSayObs?.disconnect();
-  ofabSayObs = new MutationObserver(() => { const t = ([...box.querySelectorAll(".entry-note")].map((n) => n.textContent).join(" ") || box.textContent || "").trim();   /* 버튼 글자(대기 취소)는 빼고 */ if (t && !box.hidden) ofabSay(escapeHtml(t), box.querySelector(".bad") ? "bad" : ""); });
-  ofabSayObs.observe(box, { childList: true, subtree: true, characterData: true, attributes: true });
-}
-// 꾹 눌러 바로 진입(5% · SL/TP 해제, 미리보기 오는 즉시 발주). add = 지금 포지션 방향 추가 진입(물타기),
-//   아니면 2026-10-05 포지션 없음의 LONG·SHORT 버튼(사용자 지시).
-function ofabQuickEntry(side, add) {
-  const r = manualRule();   // 2026-10-09 자동이면 크기·손절은 서버 규칙(5% 비율·SL/TP 끔은 무시된다)
-  const what = `${side === "LONG" ? "롱" : "숏"} ${r ? "자동" : "5%"} ${add ? "추가 " : ""}진입`;
-  ofabApplyDefaults();
-  if (manualOrderBusy || manualPreviewInFlight) return ofabSay(escapeHtml(`${what} 안 함 — 진행 중인 주문·미리보기가 있습니다.`), "bad");
-  ofabWatchResult();
-  ofabSay(escapeHtml(`${what} — ${HOLD_FIRE_MS ? "미리보기 받는 중…" : "주문 전송 중…"}`));
-  clearTimeout(entrySizeDebounce);   // 기본값이 건 크기 재조회는 필요 없다(미리보기가 같은 값을 받는다)
-  if (!HOLD_FIRE_MS) return manualFireNow(side, "entry");   // 즉시 모드 -- 미리보기 없이 바로
-  manualFireOnPreview = true;
-  manualEntryPreview(side, "entry");
-}
-function ofabQuickAdd() {
-  const p = snapshotAccountPosition();
-  const side = Number(p?.qty) ? String(p.side || "").toUpperCase() : "";
-  if (side !== "LONG" && side !== "SHORT") return ofabSay(escapeHtml("추가 진입 안 함 — 열린 포지션이 없어 방향을 모릅니다."), "bad");
-  ofabQuickEntry(side, true);
-}
-
-// 탭이 스냅샷일 때만 뜬다(주문 조작부가 사는 탭). 다른 탭으로 가면 조작부를 카드로 먼저 돌려놓는다.
-function ofabSync() {
-  const box = el("ofab");
-  if (!box) return;
-  const on = activePageTab === "snapshot", tab = el("ofabTab");
-  if (!on || ofabHid) ofabSetOpen(false);
-  box.hidden = !on || ofabHid;
-  if (tab) tab.hidden = !on || !ofabHid;
-  if (!box.hidden) ofabPlace(ofab.x ?? ofabDefaultX(), ofab.y ?? innerHeight, false);
-  ofabTabPlace();
-}
-// 2026-09-26 비평: 모바일 기본 자리는 **하단 가운데**(엄지 영역) -- 오른쪽 아래는 «지금 닫으면»·미실현 타일을 덮었다.
-function ofabDefaultX() {
-  const w = el("ofab")?.querySelector(".ofab-bar")?.offsetWidth || 220;
-  return matchMedia("(pointer: coarse)").matches ? (innerWidth - w) / 2 : innerWidth;
-}
-
-// 버튼 글자 = 지금 포지션. 펼치지 않아도 «들고 있나·얼마 벌었나»가 보여야 누를지 정한다.
-function renderOfab() {
-  const box = el("ofab");
-  if (!box || (box.hidden && !ofabHid)) return;   // 숨겨도 손잡이 색(방향)·이름표(손익)는 따라간다
-  const p = snapshotAccountPosition();
-  const qty = Number(p?.qty) || 0;
-  const side = qty ? String(p.side || "").toUpperCase() : "";
-  const pnl = ofabLivePnl(p, qty, side);
-  // 센트까지 -- 달러 반올림이면 3초 갱신이 작은 움직임에서 안 보인다(계좌 카드 미실현과 같은 자리수).
-  // 2026-09-26 사용자 지시: 코인 수량 대신 **증거금 사용 %**(계좌 카드 «증거금 사용» 타일과 같은 값).
-  // 🔴2026-10-01 비율도 수익금과 **같은 3초 시세**로(사용자 «업데이트 주기가 비율과 수익금이 안 맞는다») -- 전엔 비율만 30초 계좌 조회값이라
-  //   수익금이 움직이는 동안 비율이 멈춰 있다 조회 때 한꺼번에 튀었다. 교차증거금 사용 = 명목 ÷ 레버리지 → 시세 비율만큼, 순자산 = 지갑 + 미실현(같은 3초 값).
-  //   ponytail: 사용 증거금 전체를 이 코인 시세 비율로 민다 -- 다른 코인 포지션이 같이 열려 있으면 근사(지금은 ETH 하나), 다음 계좌 조회가 오면 거래소 값으로 돌아간다.
-  const bal = assetBalance() || {}, m = acctMarginUsed(bal), live = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
-  const k = qty && live > 0 && ofabPnlRef.price > 0 ? live / ofabPnlRef.price : 1;
-  const eqLive = (Number(bal.wallet) || 0) + (Number(bal.unrealized) || 0) + (pnl - (Number(p?.unrealized_pnl) || 0));
-  // 🔴2026-10-06 사용자 «실제 계좌와 다르다 -- 진입 비율이 23% 가 아니야»: 계좌 전체 사용 증거금(거래소 totalInitialMargin)은 **미체결 주문이 묶은
-  //   증거금까지** 센다(실측 $616.78 = 포지션 $262.73 + 앱에서 건 주문 ~$354 → 23% vs 포지션 10%). 버튼 = **이 포지션의 증거금**(명목 ÷ 레버리지,
-  //   같은 3초 시세로 민다) ÷ 순자산. 계좌 전체(주문 포함)는 호버로.
-  const posIm = Math.abs(Number(p?.notional) || 0) * k / (Number(p?.leverage) || 1);
-  const used = eqLive > 0 ? posIm / eqLive * 100 : m.pct, acctUsed = eqLive > 0 ? (m.used * k) / eqLive * 100 : m.pct;
-  setT("ofabPos", qty ? `${side} ${used.toFixed(0)}% · ${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(2)}` : "주문");
-  const tg0 = el("ofabToggle");
-  if (tg0) tg0.title = qty ? `포지션 증거금 ${used.toFixed(1)}% (명목 ÷ ${Number(p?.leverage) || 1}배 ÷ 순자산) · 계좌 전체 사용 증거금 ${acctUsed.toFixed(1)}%`
-    + (acctUsed - used > 1 ? " — 차이는 미체결 주문이 묶은 증거금" : "") : "";
-  // 2026-10-05 포지션이 없으면 «주문» 대신 LONG·SHORT(꾹 = 그 방향 진입 · 짧게 = 펼치기)
-  const flat = el("ofabFlat"), tg = el("ofabToggle");
-  if (flat && tg) { flat.hidden = !!qty; tg.hidden = !qty; }
-  box.classList.toggle("long", side === "LONG");
-  box.classList.toggle("short", side === "SHORT");
-  const tb = el("ofabTab");
-  if (tb) {
-    tb.classList.toggle("long", side === "LONG"); tb.classList.toggle("short", side === "SHORT");
-    const tl = tb.querySelector("b"); if (tl) tl.textContent = el("ofabPos")?.textContent || "주문";   // 2026-11-02 손잡이 글자 = 요약(«LONG 28% · +$59.76», 포지션 없으면 «주문»)
-    tb.setAttribute("aria-label", `주문 버튼 꺼내기${qty ? ` — ${side} ${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(2)}` : ""}`);
-    tb.title = tb.getAttribute("aria-label");
-  }
-  renderOfabSl(p);
-  renderOfabRule(bal, live);
-}
-// 2026-10-09 B안(사용자 선택) · 2026-10-30 위 띠(#snapRule 과 같은 값 · 펼친 패널에 있다)는 걷었다 · 자동이면 버튼 안에 «첫 $ · 손절 가격».
-//   숫자는 서버 규칙(live_manual_peg_entry rec_rule_size·rec_rule_bracket)과 같은 식으로 여기서 3초마다 -- 첫 = REC_FIRST_SHARE(1/3) × 실효 L × 순자산,
-//   손절 = 지금 가격 ∓RULE_STOP_PCT(10-14 권장 B: L = min(12.4 × 권장배수, 청산 안전, 3) · ∓5%). 실제 크기는 누를 때 서버 미리보기가 다시 정한다(다른 코인 포지션이 있으면 그만큼 줄어든다).
-function renderOfabRule(bal, live) {
-  const r = manualRule(), vmx = volMultNow();
-  const eq = Number(bal?.margin) || 0;
-  for (const [id, side] of [["ofabLong", "LONG"], ["ofabShort", "SHORT"]]) {
-    const b = el(id), sm = b?.querySelector("small");
-    if (!b || !sm) continue;
-    b.classList.toggle("two", !!r);
-    const dir = side === "LONG" ? "롱" : "숏";
-    const cr = r && vmx?.mult && vmx?.sigma_bp ? commitRuleL(side, Number(vmx.sigma_bp), Number(vmx.mult), ruleCap()) : null;
-    if (cr && eq > 0 && live > 0) {
-      const sl = live * (side === "LONG" ? 1 - cr.sd : 1 + cr.sd);
-      // 2026-10-11 두 조각(첫 $ · 손절)을 따로 감싼다 -- 좁은 화면(styles.css ≤480px)은 «·»를 숨기고 두 줄로 쌓아 버튼 줄이 화면 안에 든다
-      const lev = Number(manualLevEffective()) || 0, lEff = lev > 0 ? Math.min(cr.l, 0.9 * lev) : cr.l;   // 서버 rec_rule_size 와 같은 실효 L
-      const first = `첫 $${Math.round(REC_FIRST_SHARE * lEff * eq).toLocaleString()}`, stop = `손절 ${Math.abs(sl) < 10 ? sl.toFixed(4) : Math.round(sl).toLocaleString()}`;
-      if (sm.textContent !== `${first} · ${stop}`) {
-        const part = (t, c) => Object.assign(document.createElement("span"), { textContent: t, className: c || "" });
-        sm.replaceChildren(part(first), part(" · ", "sep"), part(stop));
-      }
-      b.title = `누르면 바로 ${dir} 자동 진입 — 손절 시 순자산 −${Math.round(100 * lEff * cr.sd)}%: 왕복 상한 순자산 × ${lEff.toFixed(2)}(첫 진입 그 1/3 · 물타기 권장 첫 진입가 ${side === "LONG" ? "−" : "+"}0.75%에 나머지), 손절 첫 진입가 ${side === "LONG" ? "−" : "+"}${100 * cr.sd}%(거래소 스탑), 익절 없음`;
-    } else if (r) {
-      setT(sm.id || id + "Frac", "자동 — 변동성 대기");
-      b.title = `${dir} 자동 진입 — 권장 배수(직전 24시간 변동성)나 잔고가 아직 없습니다`;
-    } else {
-      setT(sm.id || id + "Frac", "5%");
-      b.title = `누르면 바로 ${dir} 5% 진입 — 손절 첫 진입가 ${side === "LONG" ? "−" : "+"}5%(거래소 스탑, 물타기해도 안 물러남) · 익절 없음`;
-    }
-  }
-  ofabTrendTags();
-}
-// 2026-10-16 사용자 «같이 해서 시안» → «배포»(시안 ③, ETH 만): 일봉 추세(latestTrend 5표)와 반대 버튼 = 점선 «역추세» ·
-//   추세 쪽 버튼 = 직전 30초 추세 반대 테이커 순흐름이 최근 1시간 30초 창들의 90분위 이상이면 «지정가 자리»(창 10개 미만이면 대기).
-//   근거: 실원장 79왕복 추세 쪽 +898$ · 역추세 −468$(최악 −549$ 포함) · 반대 흐름 뒤 1~5분 되돌림(IC −.03) -- 수익 신호 아님, 지정가 걸 순간 표시.
-function ofabTrendTags() {
-  const t = latestTrend?.ok && RULE_ASSETS.has(activeSnapshotAsset) ? latestTrend : null, up = !!t && t.signal > 0;
-  let now30 = 0, q90 = Infinity, last = 0;
-  if (t) {
-    for (const k of supply1s.keys()) if (k > last) last = k;
-    const net = (e) => { let x = 0; for (let k = e - 29; k <= e; k++) { const r = supply1s.get(k); if (r) x += r[4] - r[5]; } return up ? -x : x; };
-    now30 = net(last);
-    const hist = [];
-    for (let e = last - 30; e > last - 3600; e -= 30) if (supply1s.has(e) && supply1s.has(e - 29)) hist.push(net(e));
-    hist.sort((a, b) => a - b);
-    if (hist.length >= 10) q90 = hist[Math.floor(hist.length * 0.9)];
-  }
-  const on = now30 > 0 && now30 >= q90;
-  for (const [id, side] of [["ofabLong", "LONG"], ["ofabShort", "SHORT"]]) {
-    const b = el(id), tag = b?.querySelector(".ofab-tag");
-    if (!b || !tag) continue;
-    const ct = !!t && up !== (side === "LONG"), mk = !!t && !ct;
-    b.classList.toggle("ct", ct);
-    tag.hidden = !t;
-    tag.className = `ofab-tag ${ct ? "ct" : "mk"}${mk && on ? " on" : ""}`;
-    const txt = ct ? "역추세" : on ? "지정가 자리" : "지정가 대기";
-    if (tag.textContent !== txt) tag.textContent = txt;
-    if (ct) b.title += `\n\n⚠ 역추세 — 일봉 추세 ${up ? "▲ 상승" : "▼ 하락"} ${t.ups}/${t.votes.length}표의 반대. 실원장 79왕복: 추세 쪽 +898$ · 역추세 −468$(최악 −549$ 가 여기서)`;
-    else if (mk) b.title += `\n\n지정가 ${on ? "자리" : "대기"} — 직전 30초 ${up ? "매도" : "매수"} 쏠림 ${now30.toFixed(0)} (최근 1시간 90분위 ${isFinite(q90) ? q90.toFixed(0) : "-"}). 추세 쪽 진입을 지정가로 걸기 좋은 순간 · 1~5분 되돌림(IC −.03) 근거, 수익 신호 아님`;
-  }
-}
-// 🔴2026-09-26 사용자 지시 «미실현손익 3초 갱신». 계좌 조회는 30초라 그 사이 숫자가 멈춰 있었다. 거래소를 3초마다
-//   부르는 대신 **거래소 값 + 그 뒤 시세 변화 × 수량**으로 민다. 기준 시세는 계좌 스냅샷이 바뀐 순간의 실시간 시세라
-//   심볼 차이(주문 ETHUSDC · 시세 ETHUSDT, ~1.7bp)는 변화분에서 지워진다. 다음 계좌 조회가 오면 거래소 값으로 되돌아간다.
-// 🔴2026-09-30 사용자 «플로팅 버튼 미실현이 실제와 안 맞는다»: 기준 시세를 «계좌 스냅샷이 브라우저에 도착한 순간»으로 잡았는데,
-//   거래소 손익은 서버가 조회한 시각(generated_at) 값이고 서버 캐시 때문에 도착까지 30초 넘게 늦다(실측 33.8초).
-//   그 사이 움직임이 통째로 빠져 숏 1.6 ETH 면 $2 움직임에 $3 틀렸다. 기준 = generated_at 초의 시세(1초 수급 칸의 마지막가).
-const ofabPnlRef = { acct: null, price: 0, asset: null };
-function ofabPriceAt(sec) {                     // 그 초(없으면 5초 안 직전 초)의 마지막 체결가 -- 1초 수급 칸 [.., 가격]
-  for (let s = sec; s > sec - 5; s -= 1) { const r = supply1s.get(s); if (r && r[6] > 0) return r[6]; }
-  return 0;
-}
-function ofabLivePnl(p, qty, side) {
-  const base = Number(p?.unrealized_pnl) || 0;
-  const live = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
-  if (!qty || !(live > 0)) return base;
-  if (ofabPnlRef.acct !== latestBinanceAccount || ofabPnlRef.asset !== activeSnapshotAsset) {   // 탭을 바꾸면 다른 코인 기준가로 셈했다
-    ofabPnlRef.acct = latestBinanceAccount;
-    ofabPnlRef.asset = activeSnapshotAsset;
-    const g = Math.floor(Date.parse(latestBinanceAccount?.generated_at || "") / 1000);
-    ofabPnlRef.price = (Number.isFinite(g) && ofabPriceAt(g)) || live;   // 기록이 없는 코인·재연결 직후는 옛 방식
-  }
-  return base + (live - ofabPnlRef.price) * qty * (side === "SHORT" ? -1 : 1);
-}
-setInterval(renderOfab, 3000);
-
-
-(() => {
-  const grip = el("ofabGrip"), tgl = el("ofabToggle");
-  if (!grip || !tgl) return;
-  // 🔴2026-09-26 비평: 버튼 폭은 배치 **뒤에** 바뀐다 -- 글자(«주문» 94px → 포지션 214px)와 웹폰트 로딩(195 → 206px).
-  //   첫 배치 폭으로 clamp 한 자리에서 오른쪽이 최대 112px 화면 밖으로 잘렸다. 크기 변화 자체를 따라가 다시 잡는다.
-  if (window.ResizeObserver) {
-    new ResizeObserver(() => {
-      if (!el("ofab").hidden) ofabPlace(ofab.x ?? ofabDefaultX(), ofab.y ?? innerHeight, false);
-    }).observe(el("ofab").querySelector(".ofab-bar"));
-  }
-  // 2026-09-27 사용자 «주문 움직이는 버튼은 상시 띄워줘» -- 계좌 카드 앞에서 접던 관찰자(09-26)를 걷었다.
-  let saved = null;
-  try { saved = JSON.parse(localStorage.getItem(OFAB_POS_KEY) || "null"); } catch (e) { saved = null; }
-  // 기본 자리 = 오른쪽 아래(엄지가 닿는 곳). ofabPlace 가 화면 안으로 끌어넣는다.
-  [ofab.x, ofab.y] = Array.isArray(saved) ? saved : [innerWidth, innerHeight - 24];
-  // 짧게 = 펼치기/접기 · 1.5초 꾹 = 추가 진입(ofabQuickAdd). 8px 넘게 움직이면(스크롤·끌기) 취소 -- 터치 스크롤은 pointercancel 로도 끊긴다.
-  const OFAB_HOLD_MS = HOLD_FIRE_MS;   // 2026-09-28 0.5 -> 2초 · 2026-09-30 «너무 느리다» -> 1.5초 · 2026-11-02 모든 꾹 누르기 버튼이 이 시간을 쓴다(HOLD_FIRE_MS)
-  // 같은 손짓을 세 버튼이 쓴다: «주문»(포지션 있음 = 추가 진입) · 2026-10-05 LONG·SHORT(포지션 없음 = 그 방향 진입).
-  // onTap = 짧게 눌렀을 때(기본 = 펼치기/접기). 인자 = 그 누름의 pointerType(터치는 꾹 발주가 없으니 호출 측이 갈라 쓴다).
-  const ofabHold = (btn, fire, onTap = () => ofabSetOpen(!ofab.open)) => {
-    if (!btn) return;
-    let hold = null, held = false, ptype = "mouse";
-    const holdEnd = () => { if (hold) { clearTimeout(hold.t); hold = null; } btn.classList.remove("holding"); };
-    btn.addEventListener("pointerdown", (e) => {
-      holdEnd(); held = false; ptype = e.pointerType || "mouse";
-      // 🔴2026-09-28 사용자 지시 «모바일에서는 넣으면 안돼» -- 터치는 꾹 누르기 발주가 없다(짧게 = 펼치기만).
-      //   진입 버튼과 같은 판정(이벤트마다 pointerType) -- 터치 노트북의 마우스는 그대로 된다.
-      if (e.pointerType === "touch" || btn.disabled) return;
-      if (!OFAB_HOLD_MS) { held = true; fire(); return; }   // 즉시 모드(HOLD_FIRE_MS = 0) -- 누르는 순간 발주(click 의 펼치기는 held 로 막는다)
-      hold = { x: e.clientX, y: e.clientY, t: setTimeout(() => { hold = null; held = true; btn.classList.remove("holding"); fire(); }, OFAB_HOLD_MS) };
-      btn.classList.add("holding");
-    });
-    btn.addEventListener("pointermove", (e) => { if (hold && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 8) holdEnd(); });
-    ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => btn.addEventListener(ev, holdEnd));
-    btn.addEventListener("contextmenu", (e) => e.preventDefault());   // 모바일 길게 누르기 메뉴
-    btn.addEventListener("click", () => { if (held) { held = false; return; } onTap(ptype); });
-  };
-  // 2026-10-06 사용자 «LONG 누른 뒤 다른 창이 떠서 또 눌러야 한다»: 실측(주문 차단 하네스) 1.5초 꾹은 이미 창 없이 발주(미리보기 1.51초·제출 1.68초) --
-  //   두 번 누르게 된 건 1.5초 전에 떼서 «짧게 = 펼치기»로 갔을 때다. 마우스는 짧게 눌러도 창을 열지 않고 꾹 누르라고 말한다(상세는 옆 펼치기 버튼).
-  //   🔴터치는 꾹 발주가 없으므로(09-28 «모바일에서는 넣으면 안돼») 짧게 = 펼치기 그대로 -- 안 그러면 휴대폰에서 주문할 길이 없어진다.
-  const dirTap = (side) => (ptype) => (ptype === "touch" ? ofabSetOpen(!ofab.open)
-    : ofabSay(escapeHtml(`${side === "LONG" ? "롱" : "숏"} ${manualRule() ? "자동" : "5%"} 진입은 누르면 바로 나갑니다 — 상세 주문은 옆 펼치기 버튼`)));
-  ofabHold(tgl, ofabQuickAdd);
-  ofabHold(el("ofabLong"), () => ofabQuickEntry("LONG", false), dirTap("LONG"));
-  ofabHold(el("ofabShort"), () => ofabQuickEntry("SHORT", false), dirTap("SHORT"));
-  el("ofabMore")?.addEventListener("click", () => ofabSetOpen(!ofab.open));   // 2026-10-06 상세 펼치기(누르기만 -- 주문 없음)
-  el("ofabHide")?.addEventListener("click", () => ofabHide(true));
-  el("ofabTab")?.addEventListener("click", () => ofabHide(false));
-  el("ofabBack")?.addEventListener("click", () => ofabSetOpen(false));
-  grip.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    grip.setPointerCapture(e.pointerId);
-    const dx = e.clientX - ofab.x, dy = e.clientY - ofab.y;
-    const move = (ev) => ofabPlace(ev.clientX - dx, ev.clientY - dy, false);
-    const end = () => {
-      grip.removeEventListener("pointermove", move);
-      grip.removeEventListener("pointerup", end);
-      grip.removeEventListener("pointercancel", end);
-      ofabPlace(ofab.x, ofab.y, true);
-    };
-    grip.addEventListener("pointermove", move);
-    grip.addEventListener("pointerup", end);
-    grip.addEventListener("pointercancel", end);
-  });
-  // 끌 수 없는 사람도 옮길 수 있게 -- 방향키 10px, Shift 는 40px.
-  grip.addEventListener("keydown", (e) => {
-    const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
-    if (!d) return;
-    e.preventDefault();
-    const s = e.shiftKey ? 40 : 10;
-    ofabPlace(ofab.x + d[0] * s, ofab.y + d[1] * s, true);
-  });
-  // ESC 는 패널 안에 초점이 있을 때만 -- 다른 곳의 ESC(모달 닫기 등)를 가로채지 않는다.
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && ofab.open && el("ofab").contains(document.activeElement)) {
-      ofabSetOpen(false);
-      tgl.focus();
-    }
-  });
-  addEventListener("resize", () => { if (!el("ofab").hidden) ofabPlace(ofab.x, ofab.y, false); ofabTabPlace(); });
-  ofabSync();
-})();
-
-let entrySizeDebounce = null;
-for (const [slider, label, kind] of [["snapExitFrac", "snapExitFracVal", "exit"],
-                                     ["snapEntryFrac", "snapEntryFracVal", "entry"]]) {
-  el(slider)?.addEventListener("input", () => {
-    const lab = el(label);
-    if (lab) lab.textContent = `${sliderPct(slider)}%`;
-    if (manualEntryPending?.kind === kind) manualEntryClearConfirm();
-    // 2026-09-14 비율을 움직이면 «그래서 얼마»가 따라와야 한다. 청산은 계좌 payload 만으로
-    // 되므로 화면이 바로 계산하고, 진입 수량은 **서버가 정하므로**(상한·틱·최소수량) 다시
-    // 묻는다 -- 슬라이더가 멈춘 뒤에. 손가락 한 번에 요청 열 번을 보내지 않는다.
-    if (kind === "exit") renderExitNow();
-    else {
-      clearTimeout(entrySizeDebounce);
-      entrySizeDebounce = setTimeout(manualEntryRefreshSize, 250);
-    }
-  });
-}
-
-// 포지션이 열린 측면의 청산 버튼만 띄운다. latestBinanceAccount 는 계좌 패널이 이미
-// 주기적으로 받아 두는 값이라 여기서 따로 요청하지 않는다(없으면 그냥 숨긴 채 둔다).
-let entryFoldToggleBound = false;
-// 슬라이더를 움직일 때마다 계좌를 다시 받지 않으려고 마지막 포지션을 들고 있는다.
-let lastExitPositions = new Map();
-let lastExitStaleMin = 0;
-
-// peg 청산의 **실측** 왕복비용(2026-09-13 섀도우 23,332legs). 이 계좌 수수료는 메이커 2.0bp ·
-// 테이커 5.0bp 이고, peg 는 vol 5분위 전 구간에서 3.03~3.09bp 로 평평했다(체결률 99.2%).
-// 시장가로 넘어가는 고변동 구간(EXIT_TAKER_VOL_BPM=30)에서는 테이커 5.0bp 다.
-// ponytail: 화면이 vol 을 모르므로 항상 peg 값을 쓴다 -- 미리보기 카드는 plan.type 을 알아서
-// 시장가면 5.0 으로 바꿔 계산한다. 수수료 우대는 가정하지 않는다(표준 요율).
-const EXIT_FEE_BP_PEG = 3.0;
-const EXIT_FEE_BP_TAKER = 5.0;
-// 돈은 센트까지만 쓴다. fmtUsd 는 10달러 미만을 소수 4자리로 그리는데(코인 수량용), 수수료가
-// «≈$2.0831» 로 찍히면 정밀해 보일 뿐 읽기 나쁘다. 부호는 항상 붙인다 -- 색만으로는 부족하다.
-const usd2 = (v) => `${v < 0 ? "-" : "+"}$${Math.abs(Number(v) || 0).toFixed(2)}`;
-
-// 2026-09-22 시안 B: KPI 타일 「지금 닫으면」과 청산 레인이 **같은 식**을 써야 한다.
-//   두 군데서 따로 계산하면 반올림 한 자리만 달라져도 «어느 쪽이 맞나»가 된다.
-function exitNetUsd(pos, pct) {
-  const qty = Number(pos.qty) || 0, mark = Number(pos.mark_price) || 0;
-  const entry = Number(pos.entry_price) || 0, dir = pos.side === "LONG" ? 1 : -1;
-  const close = qty * pct / 100;
-  const full = Number.isFinite(Number(pos.unrealized_pnl)) ? Number(pos.unrealized_pnl)
-    : (entry > 0 && mark > 0 ? qty * (mark - entry) * dir : null);
-  const gross = full === null ? null : full * pct / 100;
-  const fee = mark > 0 ? close * mark * EXIT_FEE_BP_PEG / 10000 : 0;
-  return { close, gross, fee, net: gross === null ? null : gross - fee,
-           move: entry > 0 && mark > 0 ? (mark - entry) / entry * 100 * dir : null };
-}
-
-// 「지금 닫으면 얼마인가」를 미리보기 **전에** 그린다. 손익은 거래소가 준 unrealized_pnl 에
-// 비율을 곱한 것이고(우리가 VWAP 을 다시 계산하지 않는다), 체결가는 모르므로 ≈ 다.
-function renderExitNow() {
-  const box = el("snapExitNow");
-  if (!box) return;
-  const pct = manualExitPct();
-  const rows = [];
-  for (const pos of lastExitPositions.values()) {
-    const qty = Number(pos.qty) || 0;
-    if (!(qty > 0)) continue;
-    // 청산 수수료만 뺀다. 진입 수수료는 **이미 지갑에서 빠져 나갔으므로**, 여기 숫자가
-    // «지금 닫으면 지갑이 얼마 늘어나는가»와 일치하려면 빼면 안 된다(title 에 적어 둔다).
-    const { close, gross, fee, net, move } = exitNetUsd(pos, pct);
-    const head = `${pos.side === "LONG" ? "롱" : "숏"} `
-      + (pct >= 100 ? `전량 <b>${qty.toFixed(3)}</b>`
-                    : `≈<b>${close.toFixed(3)}</b> 닫고 <b>${(qty - close).toFixed(3)}</b> 남김`);
-    if (net === null) { rows.push(head); continue; }
-    rows.push(`${head} · 지금 닫으면 `
-      + `<b class="exit-net ${net >= 0 ? "good" : "bad"}" title="${escapeHtml(
-          `미실현 ${usd2(gross)} − 청산 수수료 ≈$${fee.toFixed(2)} (peg 실측 ${EXIT_FEE_BP_PEG}bp)\n`
-          + "진입 수수료는 이미 지갑에서 빠졌으므로 여기서 다시 빼지 않습니다.\n"
-          + "체결가·고변동 시장가 전환에 따라 달라질 수 있는 추정치입니다.")}">`
-      + `${usd2(net)}</b>`
-      + `<span class="entry-was"> 순손익 · 미실현 ${usd2(gross)}`
-      + ` − 수수료 ≈$${fee.toFixed(2)}`
-      + (move === null ? "" : ` · ${move >= 0 ? "+" : ""}${move.toFixed(2)}%`) + `</span>`);
-  }
-  // 낡음 경고는 버튼 라벨이 아니라 여기 적는다 -- 라벨에 넣으면 「롱 2.754 닫기」가 길어져
-  // 모바일에서 줄바꿈되고, 정작 «무엇이 낡았는지»는 안 보인다.
-  const warn = lastExitStaleMin > 0
-    ? `<span class="bad">⚠조회가 ${lastExitStaleMin}분째 낡음 — ⟳ 로 갱신 (아래는 그때 기준)</span>`
-    : "";
-  box.innerHTML = [warn, ...rows].filter(Boolean).join("<br>");
-}
-
-// 2026-09-20 주문 모달을 없앴다(여는 함수 둘 포함). 진입·청산이 둘 다 카드 안으로 나오면서
-// 열 모달도, 여는 버튼(#tradeOpenEntry / #tradeOpenExit)도 사라졌다. 닫을 때 «확인» 상태를
-// 지우던 dialog close 리스너의 역할은 manualHoldCancel 이 대신한다(손을 떼면 지운다).
-// styles.css 의 .trade-modal* / .trade-actions 규칙도 2026-09-20 에 함께 걷어냈다.
-function manualExitSyncButtons() {
-  const row = el("snapExitRow");
-  if (!row) return;
-  // 서버의 청산 경로는 ETH 전용이다(assemble_exit_plan 이 MARKET_SYMBOLS["eth"] 고정).
-  // 🔴2026-09-20 «청산 버튼이 사라졌다»(사용자). 이 줄이 ETHUSDT 만 봤는데 수동 주문은
-  //   2026-09-19 부터 **ETHUSDC** 로 나간다 -- 그래서 ETHUSDC SHORT 1.659 를 들고 있는데도
-  //   hasPos 가 false 였다. 포지션을 **들고 있을 때** 못 닫는 게 이 버튼의 최악이다.
-  //   서버(live_manual_peg_entry resolve_exit_position)와 같은 규칙을 쓴다: 수동 심볼에
-  //   포지션이 있으면 그것, 없으면 시장 심볼. 심볼은 payload 의 exec_symbol 이 말한다
-  //   (환경변수라 하드코딩하면 또 갈라진다). snapshotAccountPosition 은 이미 이 규칙이다.
-  const market = ASSET_CONFIG[activeSnapshotAsset]?.symbol || `${activeSnapshotAsset.toUpperCase()}USDT`;
-  const execSym = execSymbolFor(activeSnapshotAsset);     // 2026-09-26 탭 코인의 포지션만(SOL·XRP 주문)
-  const base = market.replace(/USDT$/, "");
-  const cand = execSym && execSym !== market && execSym.startsWith(base)
-    ? [execSym, market] : [market];
-  // 🔴낡았다고 **버튼을 치우지 않는다**(2026-09-14). 옛 판은 5분이 지나면 행을 통째로 숨겼다 --
-  //   급히 닫으려고 연 사람에게서 버튼이 사라지는 건 이 버튼의 존재 이유와 정면으로 어긋난다.
-  //   이미 닫힌 포지션을 눌러도 서버가 no_position 으로 막으므로 대가는 헛클릭 한 번이고,
-  //   숨김의 대가는 «못 닫음»이다. 대신 얼마나 낡았는지를 행 아래에 크게 적는다.
-  const src = latestBinanceAccount || lastGoodAccount;
-  const stale = !latestBinanceAccount && !!src;
-  lastExitStaleMin = stale ? Math.max(1, Math.round((Date.now() - lastGoodAccountAt) / 60000)) : 0;
-  // 측면만이 아니라 **포지션 전체**를 들고 간다 -- 수량·진입가·마크가로 아래 줄(renderExitNow)이
-  // 「≈얼마 닫고 얼마 남김 · 지금 닫으면 얼마」를 그린다.
-  // 2026-09-14 버튼 라벨은 「롱 청산 / 숏 청산」 고정이다(사용자 결정). 한때 수량을 박았는데
-  // (「롱 2.754 닫기」) 수량은 바로 아래 줄에 이미 있고, 라벨이 안 변하면 여기서 textContent 를
-  // 쓸 이유도 없다 -- index.html 의 글자가 그대로 남는다.
-  // 한 심볼만 고른다 -- 둘을 섞으면 같은 side 가 겹쳐 아래 줄이 «어느 쪽 수량»인지 흐려진다.
-  const sym = cand.find((c) => (src?.positions || [])
-    .some((p) => p.symbol === c && Number(p.qty) > 0)) || cand[0];
-  lastExitPositions = new Map((src?.positions || [])
-    .filter((p) => p.symbol === sym && Number(p.qty) > 0)
-    .map((p) => [p.side, p]));
-  const bl = el("snapExitLong");
-  if (bl) bl.hidden = !lastExitPositions.has("LONG");
-  const bs = el("snapExitShort");
-  if (bs) bs.hidden = !lastExitPositions.has("SHORT");
-  const hasPos = lastExitPositions.size > 0;
-  row.hidden = !hasPos;
-  // 2026-10-05 스위칭 = 지금 쪽 100% peg 청산 → 반대쪽 peg 진입. 색·라벨 = 갈 쪽.
-  const sw = el("snapSwitch"), held = lastExitPositions.has("LONG") ? "LONG" : lastExitPositions.has("SHORT") ? "SHORT" : "";
-  if (sw) {
-    sw.hidden = !held;
-    sw.classList.toggle("to-short", held === "LONG");
-    sw.classList.toggle("to-long", held === "SHORT");
-    setT("snapSwitchTo", held === "LONG" ? "→ 숏" : "→ 롱");
-  }
-  renderExitNow();
-  // 2026-09-25 사용자 지시 «추가 진입을 드롭다운으로 만들지 말고 상시 표시» -- 09-14 물타기 접힘
-  //   폐지. <details open> 은 그대로 두고(안쪽 CSS·검사가 [open] 에 걸려 있다) 제목 줄 클릭만 막는다.
-  if (!entryFoldToggleBound) {
-    entryFoldToggleBound = true;
-    el("snapEntrySummary")?.addEventListener("click", (e) => e.preventDefault());
-  }
-  const lab = el("snapEntryFoldLabel");
-  if (lab) lab.textContent = hasPos ? "추가 진입 (물타기)" : "진입";
-}
-if (el("snapEntryPlan")) {
-  // 트랙 채움은 input 이벤트에서만 갱신된다. 게이지가 이제 **항상 보이므로** 시작할 때
-  // 한 번 칠해 준다(옛 판은 모달을 열 때 했고, 그 모달이 없어졌다).
-  syncAllRangeFills();
-  manualEntryRefreshSize();
-  manualExitSyncButtons();
-  setInterval(() => { manualEntryRefreshSize(); manualExitSyncButtons(); },
-              MANUAL_ENTRY_REFRESH_MS);
-}

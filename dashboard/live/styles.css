@@ -1152,8 +1152,7 @@ svg {
 }
 
 /* ── 2026-10-14 Account = 오늘 성과 + 과거 기록(사용자 시안 C) ─────────────────────────
-   주문 조작부(.acct-lanes)는 플로팅 버튼(#ofab)이 옮겨 쓰므로 DOM 에 남기고 **카드 안에서만** 숨긴다(펼치면 #ofabPanel 로 옮겨가 보인다). */
-#acctCard > .acct-lanes, #acctCard > #ofabAway { display: none !important; }
+   (2026-11-21 주문 조작부 .acct-lanes 는 플로팅 버튼과 함께 DOM 에서 지웠다.) */
 #snapAcctStats .good, #snapAcctWealth .good, #snapAcctPerf .good, #snapAcctCurve .good { color: var(--good); }   /* 머리 요약 알약(.ops-health-summary.good)은 건드리지 않는다 */
 #snapAcctStats .bad, #snapAcctWealth .bad, #snapAcctPerf .bad, #snapAcctCurve .bad { color: var(--bad); }
 #snapAcctStats .warn, #snapAcctWealth .warn, #snapAcctPerf .warn, #snapAcctCurve .warn { color: var(--warn); }
@@ -1387,16 +1386,6 @@ svg {
 /* 2026-10-10 동일위험 -- 자동이면 크기 칩 옆에 «손절 시 순자산 −7.5%»(크기를 정하는 단 하나의 약속) */
 .rule-risk { font: 600 11px/1 var(--font-sans); font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
 .entry-line:not(.rule-on) .rule-risk, .rule-risk[hidden] { display: none; }
-/* ↑ 2026-10-09 자동이면 진입비율 게이지(떠다니는 패널은 칩 대신 range 를 드러낸다)·SL/TP 체크도 숨긴다 -- 크기·손절·익절을 규칙이 정해 바꿔도 안 먹는다 */
-.ofab-panel #snapRuleBox .chipset { display: flex; }      /* 패널은 칩을 감추고 range 를 쓰지만 이 칩은 range 껍데기가 아니다(숨은 입력) -- 모드가 보여야 한다 */
-.ofab-panel .entry-line > #snapRuleBox { order: 4; flex-basis: 100%; }
-/* 2026-10-10 진입 체결 방식(따라가기 · 60/15분 대기) -- 크기 칩과 같은 숨은 입력 칩. 패널에서도 칩 그대로(맨 아래 줄). */
-.ofab-panel #snapExecBox .chipset { display: flex; }
-.ofab-panel .entry-line > #snapExecBox { order: 7; flex-basis: 100%; }
-.ofab-panel .entry-line > .entry-break:has(+ #snapExecBox) { order: 6; }
-/* 2026-10-10 청산 체결 방식(지정가 · 즉시) -- 같은 숨은 입력 칩. 패널에서도 칩 그대로, 게이지 아래 한 줄. */
-.ofab-panel #snapExitExecBox .chipset { display: flex; }
-.ofab-panel .exit-row > #snapExitExecBox { flex-basis: 100%; justify-content: center; }
 /* 확인 버튼 글자가 길다(스위칭 + «즉시 체결(시장가, 테이커 4bp)») -- 알약 공통 nowrap 이면 390 패널에서 양끝이 잘렸다. 줄을 넘긴다. */
 #snapEntryConfirm { white-space: normal; line-height: 1.35; text-align: center; }
 /* 기다리는 진입 -- 상태 한 줄 + 취소·지금 시장가. 주문이 거래소에 걸려 있다는 사실이 «주의»라 주황 테두리(방향색 아님). */
@@ -1459,65 +1448,6 @@ svg {
    라벨도 그 오른쪽의 슬라이더·값도 같은 x 에서 시작한다(가장 긴 «보유 예정» 기준 54px). */
 .manual-entry-row.fields { justify-content: flex-start; }
 .manual-entry-row.fields .entry-cap { flex: 0 0 54px; }
-/* ── 슬라이더 (2026-09-16 사용자 요청: 「투박한 게이지를 애플 디자인으로」) ──────────
-   iOS 슬라이더의 문법은 셋뿐이다: ①얇은 알약 트랙(4px) ②지나온 구간만 색 ③흰 원형 손잡이
-   + 부드러운 그림자. 기본 렌더러는 트랙이 두껍고 손잡이가 납작해서 «투박»하게 보였다.
-   🔴트랙을 직접 칠하면 accent-color 의 자동 채움이 사라진다 -- 채움 지점은 JS 가 --fill 로
-   넘긴다(app.js syncRangeFill). 색은 --accent 를 쓴다: 녹색은 «롱/이익」이라는 뜻을 이미
-   가진 색이라 **숏 진입 비율**과 **청산 비율**에 붙으면 거짓말을 한다(2026-09-14).
-   손잡이는 두 테마 모두 흰색이다 -- 애플도 다크에서 흰 손잡이를 쓴다. */
-.ofab-panel input[type="range"] {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 132px;
-  height: 22px;          /* 손잡이(20px)가 잘리지 않을 만큼만 */
-  margin: 0;             /* 브라우저 기본 좌우 2px -- 슬라이더 행만 밀려 왼쪽 정렬이 깨진다 */
-  padding: 0;
-  background: transparent;
-  cursor: pointer;
-}
-.ofab-panel input[type="range"]::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: 999px;
-  background: linear-gradient(to right,
-    var(--accent) 0 var(--fill, 50%), rgb(var(--lift) / 0.16) var(--fill, 50%) 100%);
-}
-.ofab-panel input[type="range"]::-moz-range-track {
-  height: 4px; border-radius: 999px; background: rgb(var(--lift) / 0.16);
-}
-.ofab-panel input[type="range"]::-moz-range-progress {
-  height: 4px; border-radius: 999px; background: var(--accent);
-}
-.ofab-panel input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 20px;
-  height: 20px;
-  margin-top: -8px;      /* (트랙 4 - 손잡이 20) / 2 */
-  border-radius: 50%;
-  border: 0.5px solid rgb(var(--shadow) / 0.22);
-  background: #fff;
-  box-shadow: 0 1px 1px rgb(var(--shadow) / 0.18), 0 3px 8px rgb(var(--shadow) / 0.24);
-  transition: transform .14s cubic-bezier(.22,.68,0,1.01), box-shadow .14s ease;
-}
-.ofab-panel input[type="range"]::-moz-range-thumb {
-  width: 20px; height: 20px; border-radius: 50%;
-  border: 0.5px solid rgb(var(--shadow) / 0.22);
-  background: #fff;
-  box-shadow: 0 1px 1px rgb(var(--shadow) / 0.18), 0 3px 8px rgb(var(--shadow) / 0.24);
-}
-/* 누르면 살짝 커진다 -- iOS 의 «잡았다» 피드백. */
-.ofab-panel input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.14); }
-.ofab-panel input[type="range"]:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 28%, transparent);
-}
-.ofab-panel input[type="range"]:focus { outline: none; }
-/* 자동(모델) 일 때 레버리지 슬라이더는 disabled 다 -- 만질 수 없다는 걸 보이게 한다. */
-.ofab-panel input[type="range"]:disabled { cursor: default; opacity: .55; }
-.ofab-panel input[type="range"]:disabled::-webkit-slider-thumb { box-shadow: none; }
-@media (prefers-reduced-motion: reduce) {
-  .ofab-panel input[type="range"]::-webkit-slider-thumb { transition: none; }
-}
 
 /* 계좌 강제 새로고침. 아이콘 하나라 .notify-btn 을 쓰지 않고 최소 스타일만 준다.
    🔴flex-shrink 를 0 으로 **못박는다**(2026-09-14). 기본값 1 이라 좁은 화면에서 지정한
@@ -2133,123 +2063,9 @@ body.not-eth [data-eth-only]::after {
 /* 각주 텍스트를 뺀 뒤(2026-09-22) margin-left:auto 가 «둘 다»에 걸려 WS 점 두 개가 양끝으로
    벌어졌다. 미는 건 첫 번째 하나면 된다 -- 나머지는 gap 으로 붙는다. */
 
-/* ── 떠다니는 주문 버튼 (2026-09-25 사용자 지시) ─────────────────────────────────────
-   접힌 상태 = 알약 하나(손잡이 ⠿ + 지금 포지션). 펼치면 계좌 카드의 .acct-lanes 가 **통째로**
-   패널 안으로 옮겨 온다(app.js ofabSetOpen) -- 여기 규칙은 그 조작부를 좁은 패널에 맞추는 것뿐이다.
-   좌표는 JS 가 left/top 으로 준다. 패널은 남은 공간이 넓은 쪽으로 연다(.up / .rightside).
-   🔴z-index 900: 툴팁(1000)·터치 팁(9999)보다 아래 -- 차트 툴팁이 이 버튼 뒤로 숨으면 안 된다. */
-.ofab { position: fixed; left: 0; top: 0; z-index: 900; transition: opacity .2s ease, transform .2s ease; }
-@media (prefers-reduced-motion: reduce) { .ofab { transition: none; } }
 /* 모바일: 페이지 끝이 떠 있는 버튼 뒤에 묻히지 않게 버튼 높이 + 16px 만큼 여백. */
 @media (pointer: coarse) { main.app { padding-bottom: 76px; } }
-.ofab[hidden] { display: none; }
-.ofab-bar {
-  display: flex; align-items: center; gap: 2px; padding: 4px;
-  border-radius: 999px; background: var(--bg); border: 1px solid var(--line);
-  box-shadow: 0 1px 2px rgb(var(--shadow) / 0.25), 0 8px 24px rgb(var(--shadow) / 0.32);
-}
-/* 손잡이만 끈다 -- touch-action:none 이 없으면 모바일에서 끄는 동안 페이지가 스크롤된다. */
-.ofab-grip {
-  display: grid; place-items: center; width: 36px; height: 36px; padding: 0;
-  border: 0; border-radius: 999px; background: transparent;
-  color: var(--muted); cursor: grab; touch-action: none;
-}
-.ofab-grip svg { width: 18px; height: 18px; }
-.ofab-grip:hover { color: var(--text); }
-.ofab-grip:active { cursor: grabbing; color: var(--text); }
-.ofab-toggle {
-  min-height: 36px; padding: 0 14px 0 8px; border: 0; border-radius: 999px; background: transparent;
-  color: var(--text); font: 700 13px/1 var(--font-mono); white-space: nowrap; cursor: pointer;
-}
-.ofab-toggle { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
-/* 2026-09-28 2초 꾹 = 추가 진입 -- 누르는 동안 바닥에서 채움이 차오른다(진입 버튼 .hold-fill 과 같은 뜻). */
-.ofab-toggle { background-image: linear-gradient(color-mix(in srgb, currentColor 30%, transparent), color-mix(in srgb, currentColor 30%, transparent)); background-repeat: no-repeat;
-  background-position: 0 0; background-size: 0% 100%; }   /* 2026-11-02 아래 3px 막대 -> 버튼 전체(다른 꾹 누르기 버튼과 같은 게이지) */
-.ofab-toggle.holding { background-size: 100% 100%; transition: background-size var(--hold-ms, 1500ms) linear; }
-.ofab.long .ofab-toggle { color: var(--good); }
-.ofab.short .ofab-toggle { color: var(--bad); }
-.ofab-toggle[aria-expanded="true"] { background-color: rgb(var(--lift) / 0.08); }
-.ofab-grip:focus-visible, .ofab-toggle:focus-visible, .ofab-back:focus-visible {
-  outline: 2px solid var(--accent); outline-offset: 2px; }
-/* 손가락은 36px 을 자주 놓친다 -- 거친 포인터에서만 44px 로 키운다(마우스 화면은 그대로). */
-@media (pointer: coarse) {
-  .ofab-grip { width: 44px; height: 44px; }
-  .ofab-toggle { min-height: 44px; }
-}
-.ofab-panel {
-  position: absolute; left: 0; top: calc(100% + 8px);
-  width: min(380px, calc(100vw - 16px)); overflow: auto; overscroll-behavior: contain;
-  background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm);
-  box-shadow: 0 1px 2px rgb(var(--shadow) / 0.25), 0 12px 32px rgb(var(--shadow) / 0.36);
-}
-.ofab-panel[hidden] { display: none; }
-.ofab.up .ofab-panel { top: auto; bottom: calc(100% + 8px); }
-.ofab.rightside .ofab-panel { left: auto; right: 0; }
-/* 카드에서는 두 레인이 나란히다 -- 좁은 패널에서는 세로로 쌓는다(청산이 위, 진입이 아래 그대로). */
-/* 🔴overflow:hidden 은 걸지 않는다 -- 모서리는 바깥 .ofab-panel 이 이미 자르고, 여기서 자르면 안쪽
-   포커스 링·툴팁 같은 위치 지정 요소가 잘린다(2026-09-25 디자인 훅 지적). */
-.ofab-panel .acct-lanes { grid-template-columns: 1fr; margin: 0; }
-/* ⭐레버·비율은 여기서 **게이지**다(사용자 지시). 칩을 감추고 칩이 덮고 있던 range 를 드러낸다 --
-   같은 input 이라 카드의 칩과 값이 어긋날 수 없다. 게이지 모양은 위의 애플식 슬라이더 규칙이다. */
-.ofab-panel .chipset { display: none; }
-.ofab-panel .chip-input {
-  position: static; opacity: 1; pointer-events: auto;
-  flex: 1 1 120px; width: auto; min-width: 96px; height: 28px;
-}
-.ofab-panel .chip-input[hidden] { display: none; }
-.ofab-panel .chip-input:disabled { pointer-events: none; }
-/* 카드에서는 칩과 값이 같으면 숫자를 숨긴다 -- 게이지에는 칩이 없으니 숫자가 늘 보여야 한다. */
-.ofab-panel .chipset[data-matched="1"] + .chip-val { display: inline; }
-.ofab-panel .chip-val { font-size: 12px; color: var(--text); min-width: 40px; text-align: right; }
-/* 모양은 계좌 카드의 빈 상태(.acct-empty)를 그대로 쓴다 -- 여기는 자리 간격만. */
-.ofab-away { margin: 10px 0 0; }
-.ofab-away[hidden] { display: none; }
-.ofab-back {
-  margin-left: 6px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px;
-  background: transparent; color: var(--text); font-family: inherit; font-size: 12px; font-weight: 600;
-  line-height: 1.4; cursor: pointer; transition: border-color .16s ease;
-}
-.ofab-back:hover { border-color: var(--hover-line); }
-/* 🔴버튼은 페이지 폰트를 **물려받지 않는다**(UA 기본) -- 안 적으면 한글 없는 폰트로 떨어져 «□□□»가 된다
-   (2026-09-25 렌더 검사에서 «여기로 되돌리기»가 실제로 그렇게 나왔다).
-   🔴`font: 12px inherit` 처럼 **축약형 안에** inherit 를 넣으면 선언 전체가 무효라 버려진다 -- 따로 쓴다. */
-/* ⭐«버튼과 게이지만»(2026-09-25 사용자 지시). 패널 안에서는 설명 글자를 전부 걷는다 --
-   남기는 것: 주문 버튼(진입·청산·30초 확인) · 게이지와 그 옆 값 · 레버 «자동» 토글(켜져 있으면 게이지가
-   잠기므로 이게 없으면 레버 게이지를 풀 방법이 없다) · **오류·경고 문구**(주문이 안 나갔는데 화면이
-   조용하면 사람은 나간 줄 안다 -- 09-13 실장애의 교훈). */
-.ofab-panel .lane-pact, .ofab-panel .lane-empty, .ofab-panel #snapExitNow,
-.ofab-panel .entry-cap { display: none; }
-/* 포지션이 없으면 청산 레인은 빈 문장뿐이다 -- 레인째 걷는다. */
-.ofab-panel .acct-lanes > .manual-entry:has(#snapExitRow[hidden]) { display: none; }
-/* 진입 블록 제목 줄은 패널에서 걷는다(2026-09-25 접기 폐지 뒤로 항상 [open]). */
-.ofab-panel details[open] > summary { display: none; }
-/* 미리보기 타일은 걷고 **문구(.entry-note)만** 남긴다 -- 청산은 확인 버튼 글자가 수량·비율·남은 초를 말한다. */
-.ofab-panel #snapEntryResult:not(:has(.entry-note)) { display: none; }
-.ofab-panel #snapEntryResult > :not(.entry-note) { display: none; }
-.ofab-panel .acct-lanes > * { padding: 12px 14px; }
-.ofab-panel .manual-entry-row.entry-hold { margin: 6px 0 0; }
-/* 게이지는 한 줄에 하나 -- 두 개가 한 줄에 서면 어느 게 레버인지 값 단위(배/%)로만 가려야 한다. */
-.ofab-panel .entry-line .chip-input, .ofab-panel .exit-row .chip-input { flex: 1 1 200px; }
-/* 🔴레버 값·«자동»은 **레버 게이지 바로 위**에 묶는다. 값 글자(«20배 (자동) · 모델 7배»)가 길어 줄이 넘치면
-   DOM 순서대로는 «자동»이 다음 줄 **비율 게이지 앞**에 붙어, 레버를 푸는 토글이 비율 설정처럼 읽혔다
-   (2026-09-25 렌더 스크린샷에서 발견 -- 겹침·잘림 검사로는 안 잡히는 «뜻의 배치» 결함). */
-.ofab-panel .entry-line > #snapLevVal { order: 1; }
-.ofab-panel .entry-line > .lev-auto { order: 2; }
-.ofab-panel .entry-line > #snapLevGauge { order: 3; flex-basis: 100%; }
-/* 줄바꿈 칸도 순서를 받아야 한다 -- 없으면 order 0 이라 줄 **맨 앞**으로 가서 아무것도 안 가르고, 물타기로
-   레버 게이지가 숨으면 «20배 (기존…)» 과 진입비율 게이지가 한 줄에 붙어 값 «50%» 만 떨어졌다. */
-.ofab-panel .entry-line > .entry-break { order: 3; }
-.ofab-panel .entry-line > #snapEntryFrac { order: 4; }
-.ofab-panel .entry-line > #snapEntryFracVal { order: 5; }
-.ofab-panel .manual-entry-row.exit-row { justify-content: center; }
 
-/* 2026-09-26 주문 심볼의 코인이 아닌 탭(SOL·XRP)에서는 주문 조작부를 막는다 -- app.js syncOrderCoinGate.
-   JS 가드(미리보기·전송 거절)가 본체이고, 이건 «눌러도 안 된다»를 보이게 하고 길게 누르기를 원천 차단한다. */
-body.order-coin-off .acct-lanes > * { opacity: 0.35; pointer-events: none; }
-body.order-coin-off .acct-lanes::before {
-  content: attr(data-order-note); display: block; grid-column: 1 / -1;   /* 2칸 그리드 -- 한 칸을 먹으면 배치가 깨진다 */
-  background: var(--panel); padding: 10px 18px; font-size: 12px; color: var(--muted);
-}
 
 /* 2026-09-27 넓은 화면(가로 ≥1700px) -- 풋프린트 카드 2단(사용자 선택 62:38).
    본문은 전체 폭. 차트 SVG 안에서 왼쪽 62% = 밀도 범례·풋프린트·사분면·누적 CVD·리본,
@@ -2569,136 +2385,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .chart-pan-when { font-variant-numeric: tabular-nums; color: var(--text); min-width: 78px; }
 #candleSvgSnapshot.panning { cursor: grabbing; }
 @media (prefers-reduced-motion: reduce) { .chart-pan-map .pan-win { transition: none; } }
-/* 2026-10-01 꾹 눌러 추가 진입 결과 말풍선(패널을 열지 않는다) */
-.ofab-bar { position: relative; }
-.ofab-say { position: absolute; right: 0; top: calc(100% + 8px); max-width: min(320px, calc(100vw - 16px)); width: max-content; padding: 8px 11px; border-radius: 10px;
-  background: var(--panel-strong); border: 1px solid var(--line); box-shadow: 0 8px 22px rgb(var(--shadow) / .35);
-  font: 600 12px/1.45 var(--font-sans); color: var(--text); }
-.ofab-say.bad { border-color: color-mix(in srgb, var(--bad) 60%, transparent); }
-.ofab-say[hidden] { display: none; }
-/* 2026-10-05 말풍선은 버튼 **아래**가 기본 -- 아래에 자리가 없을 때(화면 바닥)·아래로 펼친 패널과 겹칠 때만 위로(app.js ofabPlace). */
-.ofab.say-up .ofab-say { top: auto; bottom: calc(100% + 8px); }
-
-/* 2026-10-05 포지션 없음 = LONG·SHORT 두 알약(사용자 시안 A -- 글자 세로 가운데). 채우지 않는다(방향색 테두리+글자) -- 누르는 동안 바닥 채움이 차오른다(1.5초). */
-.ofab-flat { display: flex; gap: 4px; }
-.ofab-flat[hidden] { display: none; }
-.ofab-dir {
-  display: inline-flex; align-items: center; line-height: 1; gap: 6px; min-height: 36px; padding: 0 13px;
-  border-radius: 999px; border: 1px solid; background: transparent; cursor: pointer;
-  font-family: var(--font-mono); font-size: 13px; font-weight: 800; letter-spacing: .02em; white-space: nowrap;
-  -webkit-touch-callout: none; user-select: none; -webkit-user-select: none;
-  /* 2026-10-06 누르는 동안 알약 전체가 방향색으로 왼쪽→오른쪽 차오른다(사용자 «버튼 전체가 차오름») -- 다 차면 발주. 떼면 바로 비운다(전이 없음). */
-  background-image: linear-gradient(color-mix(in srgb, currentColor 30%, transparent), color-mix(in srgb, currentColor 30%, transparent));
-  background-repeat: no-repeat; background-position: 0 0; background-size: 0% 100%;
-}
-.ofab-dir small { font-size: 11px; font-weight: 600; color: var(--muted); }
-/* 2026-10-09 B안: 자동이면 버튼 안 두 줄(방향 · «첫 $ · 손절 가격») + 알약 위 띠(직접 · 자동 1.5× · 2×) */
-.ofab-flat { position: relative; }
-.ofab-dir.two { flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; padding-top: 6px; padding-bottom: 6px; }
-.ofab-dir.two small { font: 600 10.5px/1.2 var(--font-sans); font-variant-numeric: tabular-nums; letter-spacing: 0; }
-/* 2026-10-11 휴대폰(≤480px): 자동 «첫 $2,250 · 손절 2,375» 한 줄이면 버튼 줄이 415px 로 390 화면을 넘어 SHORT 가 잘렸다 -- 두 조각을 쌓는다 */
-@media (max-width: 480px) {
-  .ofab-dir.two { padding-left: 11px; padding-right: 11px; }
-  .ofab-dir.two small { display: flex; flex-direction: column; gap: 1px; }
-  .ofab-dir.two small .sep { display: none; }
-}
-/* 2026-10-30 시안 A: 바 끝 «›» = 숨기기 · 숨기면 가장 가까운 화면 가장자리의 손잡이(방향 색 띠·점 + «주문») */
-.ofab-hide { position: relative; display: grid; place-items: center; width: 30px; height: 30px; margin-left: 4px; padding: 0; border: 0; border-radius: 999px;
-  background: transparent; color: var(--muted); cursor: pointer; }
-.ofab-hide::before { content: ""; position: absolute; left: -3px; top: 7px; bottom: 7px; width: 1px; background: var(--line); }
-.ofab-hide:hover { color: var(--text); background: rgb(var(--lift) / .08); }
-.ofab-hide svg { width: 16px; height: 16px; }
-.ofab-hide:focus-visible, .ofab-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-@media (pointer: coarse) { .ofab-hide { width: 40px; height: 40px; } }
-.ofab-tab { position: fixed; right: 0; top: 0; z-index: 900; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px 10px 8px;
-  border: 1px solid var(--line); border-right: 0; border-radius: 12px 0 0 12px; background: var(--bg); color: var(--text); cursor: pointer;
-  box-shadow: 0 8px 24px rgb(var(--shadow) / .32); font: 700 12px/1 var(--font-sans); touch-action: manipulation; }
-.ofab-tab[hidden] { display: none; }
-.ofab-tab svg { width: 14px; height: 14px; color: var(--muted); }
-.ofab-tab b { writing-mode: vertical-rl; letter-spacing: .12em; }
-.ofab-tab i { display: none; width: 7px; height: 7px; border-radius: 50%; }
-.ofab-tab.long i, .ofab-tab.short i { display: block; }
-.ofab-tab.long i { background: var(--good); } .ofab-tab.short i { background: var(--bad); }
-.ofab-tab.long::before, .ofab-tab.short::before { content: ""; position: absolute; left: -1px; top: 10px; bottom: 10px; width: 3px; border-radius: 3px; }
-.ofab-tab.long::before { background: var(--good); } .ofab-tab.short::before { background: var(--bad); }
-.ofab-tab:hover svg { color: var(--text); }
-.ofab-dir.long { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
-/* 2026-10-16 시안 ③(app.js ofabTrendTags): 일봉 추세 반대 버튼 = 주황 점선 + «역추세» · 추세 쪽 = «지정가 자리/대기» 꼬리표(알약 윗변에 걸침) */
-.ofab-dir { position: relative; }
-.ofab-dir.ct { border-style: dashed; border-color: color-mix(in srgb, var(--amber) 75%, transparent); }
-.ofab-tag { position: absolute; top: -9px; display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: 999px;
-  background: var(--bg); font: 700 10px/1.3 var(--font-sans); font-style: normal; letter-spacing: 0; pointer-events: none; white-space: nowrap; }
-.ofab-tag[hidden] { display: none; }
-.ofab-tag.ct { right: 6px; border: 1px solid color-mix(in srgb, var(--amber) 60%, transparent); color: var(--amber); }
-.ofab-tag.mk { left: 8px; border: 1px solid var(--line); color: var(--muted); }
-.ofab-tag.mk::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .6; }
-.ofab-tag.mk.on { color: var(--good); border-color: color-mix(in srgb, var(--good) 60%, transparent); }
-.ofab-tag.mk.on::before { opacity: 1; animation: ofab-mk 1.6s ease-out infinite; }
-@keyframes ofab-mk { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--good) 45%, transparent); } 100% { box-shadow: 0 0 0 6px transparent; } }
-@media (prefers-reduced-motion: reduce) { .ofab-tag.mk.on::before { animation: none; } }
-.ofab-dir.short { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
-.ofab-dir.long:hover { border-color: var(--good); }
-.ofab-dir.short:hover { border-color: var(--bad); }
-.ofab-dir.holding { background-size: 100% 100%; transition: background-size var(--hold-ms, 1500ms) linear; }
-.ofab-dir:focus-visible, .ofab-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-/* 2026-10-06 상세 펼치기 아이콘 -- 손잡이와 같은 무채색·같은 크기(색은 방향이 아니므로). 펼친 동안 밝아지고 옅은 바닥. */
-.ofab-more {
-  display: grid; place-items: center; width: 36px; height: 36px; padding: 0; flex: none;
-  border: 0; border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer;
-}
-.ofab-more svg { width: 18px; height: 18px; transition: transform .18s ease; }
-.ofab-more:hover, .ofab-more[aria-expanded="true"] { color: var(--text); }
-.ofab-more[aria-expanded="true"] { background: rgb(var(--lift) / 0.08); }
-@media (pointer: coarse) { .ofab-more { width: 44px; height: 44px; } }
-/* 2026-10-10 기다리는 진입 표식 -- 접힌 막대에서도 «거래소에 걸린 주문이 있다»가 보이게(60분 동안 잊지 않게) */
-.ofab-wait { min-height: 28px; padding: 0 9px; border: 1px solid color-mix(in srgb, var(--amber) 50%, transparent); border-radius: 999px;
-  background: color-mix(in srgb, var(--amber) 12%, transparent); color: var(--amber); font: 700 11px/1 var(--font-sans); cursor: pointer; white-space: nowrap; }
-.ofab-wait[hidden] { display: none; }
-.ofab-wait:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-@media (pointer: coarse) { .ofab-wait { min-height: 36px; } }
-/* 2026-10-15 서버 무장 손절 -- 데스크탑 = 알약 안 칩(시안 B) · 휴대폰(≤720px) = 패널 맨 위 칸(시안 C). 같은 [data-sl-act] 핸들러(해제 ↔ 다시 켜기). */
-.ofab-sl { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 0 10px 0 8px; margin-right: 2px;
-  border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted);
-  font: 700 11px/1 var(--font-mono); white-space: nowrap; cursor: pointer; }
-.ofab-sl svg, .ofab-slp-head svg { width: 13px; height: 13px; flex: none; }
-.ofab-sl:hover { border-color: var(--hover-line); color: var(--text); }
-.ofab-sl.arm, .ofab-slp-btn.arm { border-color: color-mix(in srgb, var(--amber) 70%, transparent); color: var(--amber);
-  background: color-mix(in srgb, var(--amber) 12%, transparent); }
-.ofab-sl.arm, .ofab-sl.off { font-family: var(--font-sans); }
-.ofab-sl.off { border-style: dashed; border-color: color-mix(in srgb, var(--amber) 60%, transparent); color: var(--amber); }
-.ofab-sl:focus-visible, .ofab-slp-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.ofab-sl[hidden], .ofab-slp[hidden] { display: none; }
-.ofab-slp { padding: 12px 14px; border-bottom: 1px solid var(--soft-line); font: 12px/1.35 var(--font-sans); color: var(--muted); }
-.ofab-slp-head { display: flex; align-items: center; gap: 8px; }
-.ofab-slp-head svg { width: 14px; height: 14px; color: var(--text); }
-.ofab-slp-head b { font: 700 15px/1 var(--font-mono); color: var(--text); }
-.ofab-slp-head em { font: 600 12px/1 var(--font-mono); font-style: normal; margin-left: auto; }
-.ofab-slp-layers { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 10px; }
-.ofab-slp-layers span { display: inline-flex; align-items: center; gap: 6px; }
-.ofab-slp-layers i { width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
-.ofab-slp p { margin: 0; }
-.ofab-slp-btn { width: 100%; min-height: 44px; border-radius: 10px; border: 1px solid var(--line); background: transparent;
-  color: var(--text); font: 600 13px/1 var(--font-sans); cursor: pointer; }
-.ofab-slp.off .ofab-slp-head svg, .ofab-slp.off .ofab-slp-head b { color: var(--amber); }
-.ofab-slp.off .ofab-slp-layers i { background: transparent; border: 1px solid var(--amber); }
-@media (pointer: coarse) { .ofab-sl { min-height: 36px; } }
-@media (max-width: 720px) { .ofab-sl { display: none !important; } }
-@media (min-width: 721px) { .ofab-slp { display: none !important; } }
-/* 화살표 = 패널이 열릴 쪽(사용자 선택 A). 위로 여는 자리(.up)면 위를 보고, 펼친 동안은 뒤집힌다. */
-.ofab.up .ofab-more svg, .ofab-more[aria-expanded="true"] svg { transform: rotate(180deg); }
-.ofab.up .ofab-more[aria-expanded="true"] svg { transform: none; }
-@media (prefers-reduced-motion: reduce) { .ofab-more svg { transition: none; } }
-@media (pointer: coarse) { .ofab-dir { min-height: 44px; } }
-/* 2026-10-07 «움직임 줄이기»에서도 채움은 1.5초에 걸쳐 차오른다(사용자 «주문은 들어가는데 애니메이션이 안 나온다» → «둘 다 적용») -- 장식이 아니라
-   «주문까지 남은 시간» 타이머다. transition: none 이면 누르는 순간 꽉 차 보여 언제 나가는지 알 수 없었다(실측 0.1초에 100%). */
-
-/* 2026-10-05 스위칭 -- 청산(채움)과 모양을 가른다: 아웃라인 + 교차 화살표, 색 = **갈 쪽**. 떠 있는 패널에서만. */
-#snapSwitch { display: none; }
-.ofab-panel #snapSwitch:not([hidden]) { display: inline-flex; align-items: center; gap: 6px; background-color: transparent; }
-#snapSwitch.to-short { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
-#snapSwitch.to-long { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
-#snapSwitch .ofab-ico { width: 15px; height: 15px; position: relative; z-index: 1; }
-#snapSwitch small { position: relative; z-index: 1; font-size: 11px; font-weight: 700; opacity: .85; }
 
 /* 2026-10-01(3) 넓은 화면 시장 맥락 = 왼쪽 단 ①② 위아래 · 오른쪽 단 ④ 한 덩어리 -- 차트에 그리기는 2×2 */
 #mcBody.mc-cmp .mc-switch { display: grid; grid-template-columns: repeat(2, minmax(0, max-content)); gap: 5px 14px; font-size: 11px; }
@@ -3425,7 +3111,6 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
    (주문 패널 칩 지정가/즉시 · 직접/자동/보유 · 따라가기/대기, 자산 곡선 기간 칩, 상단 탭이 24~32px). 같은 무게의 기본 규칙보다 뒤여야 한다. */
 @media (pointer: coarse) {
   .chipset .chip { min-height: 40px; min-width: 44px; }
-  .ofab-panel .notify-btn.hold-fire { min-height: 44px; }   /* 꾹 누르는 진입·청산 버튼 38px → 바 LONG/SHORT(.ofab-dir)와 같은 44px */
   .mc-switch { row-gap: 6px; }
   .mc-chip { min-height: 40px; padding: 0 10px; }   /* «차트에 그리기» 칩 -- 손가락 목표 40px */
   .nw-row { position: relative; }
@@ -3541,7 +3226,6 @@ html.fit1 #mtBody .mt-det { min-height: 0; overflow-y: auto; scrollbar-width: th
 .entry-pop .good { color: var(--good); } .entry-pop .bad { color: var(--bad); }
 .entry-pop .ep-btns { display: flex; gap: 6px; } .entry-pop .ep-btns button { position: relative; overflow: hidden; user-select: none; touch-action: none; flex: 1; padding: 6px 0; border-radius: 7px; border: 1px solid var(--bad); background: none; color: var(--bad); font: 700 12px var(--font-sans); cursor: pointer; }
 .entry-pop .ep-btns button:hover { background: rgb(var(--lift) / .08); } .entry-pop small { color: var(--muted); font-size: 10.5px; }
-.entry-pop .hold-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: currentColor; opacity: .30; pointer-events: none; }
 .entry-pop .ep-btns span { position: relative; z-index: 1; }
 /* 2026-11-11 진입가 팝업의 «손절선·익절선 지우기 / 다시 켜기»: 주문이 아니라 걸린 선을 끄는 단추 -- 중립 테두리 · 무장(한 번 누름) = 빨강 채움 */
 .entry-pop .ep-ln { display: flex; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--soft-line); }
@@ -3677,7 +3361,6 @@ body:has(.card-rail:not([hidden])) header.top { position: sticky; top: 0; z-inde
 /* 굴절 유리(app.js setupLiquidGlass)가 켜진 때만(Chromium · 글래스 테마): 컨트롤은 뒤가 비쳐야 굴절이 보인다 -- 얇은 흰 막만 남긴다. 글자는 막이 아니라 그 위에 있다. */
 html.lg-on #cardRail { background: rgba(255, 255, 255, 0.14); }
 html.lg-on #snapshotAssetTabs, html.lg-on .asset-more, html.lg-on .push-toggle { background: rgba(255, 255, 255, 0.22); }
-html.lg-on .ofab-bar { background: rgba(255, 255, 255, 0.4); }
 
 /* 2026-11-06 순환은 탭으로 한 번에 하나(펜 메모) -- 한 칸 = 전체 폭이라 옛 «한 줄 2칸» 격자는 뺐다 */
 .cy-tabs { margin-bottom: 12px; flex-wrap: wrap; }
@@ -3691,7 +3374,7 @@ html.lg-on .ofab-bar { background: rgba(255, 255, 255, 0.4); }
 .lt-tag.en.lane .lt-en-r::before { content: none; }
 
 /* 2026-11-02 사용자 «글래스 테마에서 모든 팝업창과 드롭다운이 투명해서 안 보인다» -- 떠 있는 면(주문 패널 말풍선·선 도구 주문창·지표 팝업·설명 대화상자·알림 센터·툴팁)은 불투명 바닥 + 흐림 없음. */
-.ofab-say, .lt-tk, .fp-ind-pop, .help-dlg, .ofab-panel, .nc, .chart-tooltip.visible {
+.lt-tk, .fp-ind-pop, .help-dlg, .nc, .chart-tooltip.visible {
   background: var(--pop-bg); backdrop-filter: none; -webkit-backdrop-filter: none;
 }
 [data-theme="light"] .chart-tooltip.visible { background: #2d333d; }
@@ -4131,3 +3814,20 @@ html.fp-lock { overflow: hidden; scrollbar-gutter: stable; }
     padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-strong); color: var(--text); font: 600 13px/1.4 var(--font-sans); text-align: center;
     box-shadow: 0 8px 24px rgb(var(--shadow) / .32); pointer-events: none; }
 }
+
+/* 2026-11-21 주문 상태 줄(#ordStat) -- 플로팅 주문 버튼을 지우며 그 결과 칸·대기 줄·말풍선을 차트 위쪽 가운데 한 상자로(휴대폰은 양옆 8px).
+   진입가 팝업과 같은 불투명 바탕(--pop-bg) · 비어 있으면 자리를 차지하지 않는다. */
+.ord-stat { position: absolute; z-index: 4; top: 10px; left: 50%; transform: translateX(-50%); width: max-content; max-width: min(520px, calc(100% - 16px));
+  display: grid; gap: 6px; padding: 8px 36px 8px 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--pop-bg); box-shadow: 0 8px 22px rgb(var(--shadow) / .35); }
+.ord-stat:not(:has(> [id]:not([hidden]))) { display: none; }
+.ord-stat [hidden] { display: none; }
+.ord-stat .entry-note { white-space: pre-line; font-size: 12px; }
+.ord-stat .manual-entry-result { gap: 6px; }
+.ord-stat .wait-acts { justify-content: flex-start; margin: 0; }
+.ord-x { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; border: 0; border-radius: 7px; background: none; color: var(--muted); font: 600 12px var(--font-sans); cursor: pointer; }
+.ord-x:hover { color: var(--text); background: rgb(var(--lift) / .08); }
+@media (max-width: 720px) { .ord-stat { left: 8px; right: 8px; transform: none; width: auto; max-width: none; } }
+/* 2026-11-21 «손절 없음» -- 옛 플로팅 버튼 #ofabSl 의 상시 경고를 MANAGE 탭(휴대폰 «무손절»)과 진입가 팝업에 */
+.fp-line-btn button.pm-tab .pm-nosl { margin-left: 8px; font: 700 11px var(--font-sans); font-style: normal; color: var(--bad); }
+.fp-line-btn button.pm-tab .pm-nosl[hidden] { display: none; }
+.pm-strip .pm-nosl { color: var(--bad); font: 700 11px var(--font-sans); }
