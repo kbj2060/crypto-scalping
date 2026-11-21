@@ -1282,6 +1282,23 @@ def json_response(request: web.Request, payload: Any, etag: str) -> web.Response
 ASSET_FILES = ("app.js", "styles.css", "fp_daily.js", "liq_profile.js", "bubble_map.js")
 
 
+def asset_compress_ok(method: str, if_none_match: Any, if_modified_since: Any, path: Any) -> bool:
+    """2026-11-21 실서버: 본문이 없어야 하는 응답(304·HEAD)에 압축을 켜면 빈 zlib 흐름(deflate 8B·gzip 20B)이 길이 표시 없이
+    머리 뒤에 붙어 keep-alive 다음 응답 앞에 낀다. FileResponse 는 304 를 prepare 안에서 정해 미들웨어 시점 status 는 아직 200 --
+    aiohttp FileResponse._make_response 의 304 판정(ETag = mtime_ns-size 16진)을 그대로 미리 한다.
+    ponytail: 미들웨어 stat 과 prepare stat 사이에 파일이 바뀌면(배포 순간) 한 번 어긋날 수 있다 -- aiohttp 가 고치면 이 함수를 뺀다."""
+    if method == "HEAD":
+        return False
+    try:
+        st = os.stat(path)
+    except (OSError, TypeError):                 # FileResponse 가 아니면(path None) 예전처럼 켠다
+        return True
+    if if_none_match is not None:
+        etag = f"{st.st_mtime_ns:x}-{st.st_size:x}"
+        return not any(e.value in (etag, "*") for e in if_none_match)
+    return if_modified_since is None or st.st_mtime > if_modified_since.timestamp()
+
+
 def make_app() -> web.Application:
     @web.middleware
     async def static_asset_headers(
@@ -1298,7 +1315,9 @@ def make_app() -> web.Application:
             # no-cache 는 «캐시하지 마라»가 아니라 «쓰기 전에 물어봐라»다 -- 안 바뀌었으면
             # ETag 로 304(본문 0바이트)라 아끼는 건 조건부 요청 한 번뿐이고, 대가가 사고였다.
             response.headers["Cache-Control"] = "no-cache"
-            response.enable_compression()
+            if asset_compress_ok(request.method, request.if_none_match, request.if_modified_since,
+                                 getattr(response, "_path", None)):
+                response.enable_compression()
         elif asset_name.endswith(".ttf"):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         elif asset_name.endswith(".html"):
@@ -5095,7 +5114,10 @@ async def stop_loop_watch(app: web.Application) -> None:
 # 2026-11-20 M0 화면 시간 보고(app.js 가 60초마다 값이 있을 때만). 받으면 client_timing 한 줄 찍고 끝(저장 없음).
 #   공개 터널로 닿는 신뢰 경계다 -- 본문 1KB 상한 · 아는 키만 · 숫자만(유한·|v|≤1e7) · sym/kind 는 허용 목록 · 전체 0.2초에 한 줄.
 CLIENT_TIMING_NUM = {"order_rtt_ms", "order_srv_ms", "order_net_ms", "fp_n", "fp_med_ms", "fp_max_ms",
-                     "longtask_n", "px_n", "px_med_ms", "px_max_ms"}
+                     "longtask_n", "px_n", "px_med_ms", "px_max_ms",
+                     # 2026-11-21 rtcore /rt 그림자 구독(app.js ensureRtStream · rtReport) -- 지연·SSE 와 값 일치·먼저 받은 쪽·실패 횟수
+                     "rt_lat_n", "rt_lat_med_ms", "rt_lat_p99_ms", "rt_lead_n", "rt_lead_med_ms", "rt_cmp_n", "rt_bad_n",
+                     "rt_fail_n", "rt_reconn_n"}
 _client_timing_at = [0.0]
 
 
