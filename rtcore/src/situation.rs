@@ -305,6 +305,7 @@ pub fn micro(
         okx_from: None,
         okx_bars: vec![],
         okx_full: false,
+        streams: None,
     }
 }
 

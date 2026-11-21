@@ -5,7 +5,8 @@
 #                                                         ③ 파이썬 감독 → 수집기 끔 ④ 그림자 감독 → Rust 끔 ⑤ Rust 를 진짜 경로(TAKEOVER=1)로 ⑥ 60초 확인 · 끊긴 초
 #   bash rtcollect/tools/takeover.sh back  <종류> [<종목>]  Rust 끔 → crontab 되돌림(이 종류가 바꾼 줄만) → 매니페스트 되돌림 → 파이썬 감독 다시
 # 종류(상주): binance_tape binance_spot okx_tape okx_ctx bybit_tape bybit_liq binance_ctx xyz hl_ctx depth raster ob5m bookdepth iceberg hl_trades market_data oi_lsratio deribit
-#      (예약): liq_tab seal    · 안 다룸: hl_bt(서버 파이썬 전체 모드가 hl_ctx 와 한 파일 -- 묶음 넘기기 다음) · hl_positions(대조 방법 없음) · news·treasury_futures·macro_5m(그림자 없음) · liqmap_scorer·soxl_weekend·cboe_chain(전진 장부 -- 손으로)
+#      + hl_bt(코인마다 · 전체 모드 = .bt + hl_ctx.sqlite 맥락)
+#      (예약): liq_tab seal raster_archive    · 안 다룸: hl_positions(대조 방법 없음) · news·treasury_futures·macro_5m(그림자 없음) · liqmap_scorer·soxl_weekend·cboe_chain(전진 장부 -- 손으로)
 # 죽이는 것: 명령줄 인자가 그 종류의 러너 파일로 끝나고 environ 의 종목이 맞는 프로세스와 그 부모 _supervise.sh 뿐(PID 마다 /proc/<pid>/cmdline 다시 확인 · 이름으로 한꺼번에 안 죽인다).
 #   SIGTERM 뒤 기다렸다가 살아 있으면 보고만 하고 멈춘다(그때는 `back` 으로 되돌린다). 대시보드·감시·주문은 러너가 달라 걸리지 않는다(걸리면 멈춘다).
 #   bash rtcollect/tools/takeover.sh weight binance_ctx  바이낸스 가중치 머리(x-mbx-used-weight-1m)만 WEIGHT_N 번 읽어 최고를 찍는다(binance_ctx go 가 넘기기 전·뒤에 쓴다)
@@ -73,7 +74,10 @@ case "$KIND" in
                 TENV="DERIBIT_BT_DIR=data/live RTDUCK_REST=1"; CHK="duck:data/live/deribit_options.duckdb:data/live/rtduck/deribit_options.duckdb"; W="data/live/deribit_options.duckdb data/live/deribit_options.duckdb.wal data/live/deribit_block_trades_state.json" ;;
   liq_tab)      ENG=rtduck; CRON=1; PYSUP=live_liq_tab_20261107; PYRUN=live_liq_tab_20261107.py; TENV="LIQ_TAB_LIVE=data/live RTDUCK_REST=1"; CHK="json:data/live:data/live/rtduck" ;;
   seal)         ENG=rtduck; CRON=1; PYSUP=seal_to_lake; PYRUN=seal_to_lake.py; TENV="SEAL_LAKE=data/lake SEAL_STATUS=data/live/ops_watchdog/seal_status.json"; CHK="lake:data/lake:data/rtduck/lake" ;;
-  hl_bt|hl_positions|news|treasury_futures|macro_5m|liqmap_scorer|soxl_weekend|cboe_chain) die "$KIND 는 이 스크립트가 다루지 않는다 -- rtcollect/REMAINING.md «넘겨도 되는가» 표" ;;
+  hl_bt)        PYSUP=supervisor_hyperliquid_book_ticker.sh; PYRUN=live_hyperliquid_book_ticker_collector_20260923.py; SELV=HL_BT_COIN; SELD=ETH; XV=HL_BT_CTX_ONLY; XD=""; XW=""
+                TENV="HL_BT_ROOT=data/live/orderflow/hyperliquid_bookticker HL_CTX_DB_PATH=data/hot/hl_ctx.sqlite"; COVK="hl_bt" ;;   # 경로는 종목을 안 뒤에(아래)
+  raster_archive) ENG=rtduck; CRON=1; PYSUP=""; PYRUN="__none__"; TENV="OF_ROOT=data/live/orderflow/raster OF_ARCHIVE_ROOT=data/live/orderflow/raster_archive" ;;
+  hl_positions|news|treasury_futures|macro_5m|liqmap_scorer|soxl_weekend|cboe_chain) die "$KIND 는 이 스크립트가 다루지 않는다 -- rtcollect/REMAINING.md «넘겨도 되는가» 표" ;;
   *) [ -n "$KIND" ] || { sed -n '2,12p' "$0"; exit 2; }; die "모르는 종류 '$KIND'" ;;
 esac
 case "$MODE" in check|go|back|weight) ;; *) die "check|go|back 중 하나" ;; esac
@@ -99,6 +103,17 @@ starts() { # 그림자 감독 로그(logs/supervisor/<ENG>_<종류>_<목록>_<�
     done
   done | while read -r t; do date -d "$t" +%s 2>/dev/null; done | sort -un | paste -sd,
 }
+reconn() { # 같은 그림자 로그의 «끊김» 줄 수(연결 끊김 -- 재기동 아님) · shadow_tape 가 그만큼의 «Rust 만 빈 곳»을 설명으로 친다
+  local k f pre n=0
+  for k in $COVK; do
+    pre="${ENG}_${k}_"; [ -z "$SELV" ] || [ "$GROUP" = 1 ] || pre="${ENG}_${k}_${SEL//[,:]/_}_"
+    for f in logs/supervisor/${ENG}_${k}_*.log; do [ -f "$f" ] || continue
+      [[ "$(basename "$f" | tr '[:lower:]' '[:upper:]')" == "$(echo "$pre" | tr '[:lower:]' '[:upper:]')"* ]] || continue
+      n=$((n + $(grep -c '끊김' "$f")))
+    done
+  done
+  echo "$n"
+}
 in_list() { local x; for x in ${1//,/ }; do [[ ",$2," == *",$x,"* ]] || return 1; done; }   # 앞 목록이 모두 뒤 목록에 있나
 coverage() { # 그림자 Rust 프로세스들이 파이썬 목록 전부를 덮는가(덮지 않는 종목이 있으면 그 종목은 견준 적이 없다 → 불통과)
   local cv="${SELV:-${COPY%% *}}" pl="" rl="" p k v x miss=""
@@ -117,20 +132,50 @@ coverage() { # 그림자 Rust 프로세스들이 파이썬 목록 전부를 덮�
   if [ -n "$miss" ]; then echo "  🔴목록: 파이썬 $cv=$pl 중 그림자 Rust 가 안 뜨는 종목 $miss (그림자 목록 ${rl:-없음})"; return 1; fi
   echo "  목록: 파이썬 $cv=$pl 전부 그림자가 뜬다"
 }
+replay_check() { # ob5m·bookdepth: 실시간 그림자 대신 «같은 시작점 재생 대조»(replay_book.py) -- 사슬 시작·이력에 달린 칸은 그림자로 못 보인다
+  local s="${SEL:-ETHUSDT}"; local f="logs/supervisor/replay_book_${KIND}_${s}.txt" end
+  if [ -f "$f" ] && [ $(( $(date +%s) - $(stat -c %Y "$f") )) -lt 7200 ] && grep -q '^요약' "$f"; then
+    echo "  재생 대조: 2시간 안 결과를 다시 쓴다($f · $(date -d @"$(stat -c %Y "$f")" '+%T'))"
+  else
+    end="$(date -u -d '1 hour ago' +%Y-%m-%dT%H)"
+    echo "  재생 대조: 끝 시 $end(UTC) · nice · 무겁다(파이썬 수 분)"
+    nice -n 10 "$PYC" "$TOOLS/replay_book.py" "$KIND" --symbol "$s" --end-hour "$end" --bin "${RTCOLLECT_BIN:-$ROOT/tmp/rtbin/rtcollect}" > "$f.part" 2>&1
+    mv "$f.part" "$f"
+  fi
+  sed 's/^/    /' "$f" | tail -12
+  local nm; nm="$(sed -nE 's/^요약: 견준 ([0-9,]+) · 설명 못 함 ([0-9,]+).*/\1 \2/p' "$f" | tr -d ,)"
+  read -r a b <<< "${nm:-0 1}"
+  echo "check $KIND $s (재생): 견준 $a · 설명 못 함 $b · $([ "$b" = 0 ] && [ "$a" -gt 0 ] && echo 통과 || echo '🔴불통과')"
+  [ "$b" = 0 ] && [ "$a" -gt 0 ]
+}
+archive_check() { # raster_archive: 원본은 래스터 수집기 안(매시 _purge_old) -- 래스터를 넘긴 종목만 Rust 보관이 맡는다
+  local syms; syms="$(printf '%s\n' "$($CT -l 2>/dev/null)" | grep -oE ' #takeover:raster_[A-Z0-9]+$' | sed 's/.*raster_//' | sort -u | paste -sd,)"
+  [ -n "$syms" ] || { echo "check raster_archive: 넘긴 래스터가 없다(#takeover:raster_… 표지 0) -- 🔴불통과(넘길 것이 없다)"; return 1; }
+  local log=logs/supervisor/rt_raster_archive.log bad=0
+  [ -f "$log" ] && bad="$(tail -n 200 "$log" | grep -ciE 'panic|error|실패')"
+  echo "  넘긴 래스터 종목 $syms · 그림자 보관 로그 끝 200줄의 오류 $bad · 값 대조 = 정답지(raster_archive_parity · 양방향 읽기)뿐(그림자 보관은 그림자 래스터 파일을 보관해 원본 보관본과 견줄 수 없다)"
+  echo "check raster_archive: $([ "$bad" = 0 ] && echo 통과 || echo '🔴불통과')"
+  OF_SYMS="$syms"
+  [ "$bad" = 0 ]
+}
 check() {
+  [ "$KIND" = raster_archive ] && { archive_check; return $?; }
+  [ "$KIND" = ob5m ] || [ "$KIND" = bookdepth ] && { replay_check; return $?; }
   local n=0 m=0 rc=0 e mode py rs out h f d0 d1
-  ST="$(starts)"
-  echo "  그림자 감독 기동 시각 $(echo "$ST" | tr , '\n' | grep -c .)개(로그) -- 그 앞뒤 Rust 빈 구간은 뺀다"
+  ST="$(starts)"; RC="$(reconn)"
+  echo "  그림자 감독 기동 시각 $(echo "$ST" | tr , '\n' | grep -c .)개 · «끊김» 줄 $RC(로그) -- 그 앞뒤·그만큼의 Rust 빈 구간은 뺀다"
   coverage || rc=1
   for e in $CHK; do
     IFS=: read -r mode py rs <<< "$e"
     [ -n "$rs" ] && [ -z "$(for f in ${rs//+/ }; do [ -e "$f" ] || echo x; done)" ] || { echo "  $e: 그림자 출력 없음 -- 그림자를 먼저 띄운다"; rc=1; continue; }
     [ -e "$py" ] || { echo "  $e: 파이썬 출력 없음"; rc=1; continue; }
     case "$mode" in
-      sq)     out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "$py" "$rs" --starts "$ST" --summary)" ;;
+      sq)     out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "$py" "$rs" --starts "$ST" --reconnects "$RC" --summary)" ;;
       events) out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" --events "$py" "$rs" --summary)" ;;
       json)   out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" --json 'liq_tab_*.json' "$py" "$rs" --summary)" ;;
       duck)   out="$(nice -n 10 "$PYC" "$TOOLS/shadow_duck.py" "$py" "$rs" --starts "$ST" --summary)" ;;
+      bt)     h="$(hours "$rs")" || { echo "  $e: 그림자 시 파일이 3개 미만"; rc=1; continue; }
+              out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" --bt "$py" "$rs" --hours "$h" --starts "$ST" --reconnects "$RC" --summary)" ;;
       depth|raster) h="$(hours "$rs")" || { echo "  $e: 그림자 시 파일이 3개 미만"; rc=1; continue; }
               out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "--$mode" "$py" "$rs" --hours "$h" --starts "$ST" --summary)" ;;
       lake)   d0="$(ls -d "$rs"/*/*/coin=*/date=* 2>/dev/null | sed 's/.*date=//' | sort | head -1)"; d1="$(ls -d "$rs"/*/*/coin=*/date=* 2>/dev/null | sed 's/.*date=//' | sort | tail -1)"
@@ -255,7 +300,7 @@ rollback() {
 cron_lines() { # 이 종류가 주석 처리할 줄 번호: 파이썬 줄 + 그림자 줄
   echo "$1" | awk '{print NR "\t" $0}' | while IFS=$'\t' read -r i l; do
     [[ "$l" =~ ^[[:space:]]*# ]] && continue
-    if [[ "$l" == *"$PYSUP"* ]]; then
+    if [ -n "$PYSUP" ] && [[ "$l" == *"$PYSUP"* ]]; then
       if [ "$CRON" = 1 ]; then [[ "$l" == @reboot* ]] && continue; else [[ "$l" == @reboot* ]] || continue; fi
       if [ "$GROUP" = 1 ]; then [ "$(val "$l" "$XV")" = "$XW" ] || continue
       elif [ -n "$SELV" ]; then
@@ -335,6 +380,8 @@ case "$KIND" in   # 종목마다 경로가 갈리는 종류(이 종류들은 수
   raster)  CHK="raster:data/live/orderflow/raster/$SEL:data/live/rtcollect/orderflow/raster/$SEL"; W="data/live/orderflow/raster/$SEL" ;;
   ob5m)    TENV="OB_DB=data/live/ob5m/$SYML.sqlite"; CHK="sq:data/live/ob5m/$SYML.sqlite:data/live/rtcollect/ob5m/$SYML.sqlite"; W="data/live/ob5m/$SYML.sqlite data/live/ob5m/$SYML.sqlite-wal" ;;
   iceberg) c="${SYML%usdt}"; CHK="events:data/live/iceberg/${c}_events.jsonl:data/live/rtcollect/iceberg/${c}_events.jsonl"; W="data/live/iceberg/${c}_state.json" ;;
+  hl_bt)   CHK="bt:data/live/orderflow/hyperliquid_bookticker/$SEL:data/live/rtcollect/orderflow/hyperliquid_bookticker/$SEL sq:data/hot/hl_ctx.sqlite:$(ls data/hot/rtcollect/hl_ctx.sqlite data/hot/rtcollect/hl_ctx_only.sqlite 2>/dev/null | paste -sd+)"
+           W="data/live/orderflow/hyperliquid_bookticker/$SEL" ;;
   hl_trades) d="${SEL//,/_}"; CHK="duckdir:data/live/orderflow/hyperliquid/$d:data/live/rtduck/orderflow/hyperliquid/$d"; W="data/live/orderflow/hyperliquid/$d" ;;
 esac
 TAG="$KIND"; [ -z "$SELV" ] || [ "$GROUP" = 1 ] || TAG="${KIND}_${SEL//[,:]/_}"
@@ -409,7 +456,7 @@ if [ "$CRON" = 0 ]; then
   if [ "$SHARED" = 1 ] && [ -n "$(comm -13 <(echo "$PY" | sort) <(py_procs any | sort))" ]; then
     die "같은 파일에 쓰는 다른 파이썬 수집기가 있다($(comm -13 <(echo "$PY" | sort) <(py_procs any | sort) | tr '\n' ' ')) -- 단일 writer 를 지키려 멈춤"
   fi
-  [ "$KIND" != hl_ctx ] || { XW=""; o="$(py_procs any)"; XW=1; [ -z "$o" ] || die "CTX_ONLY 가 아닌 HL 호가 수집기(pid $o)도 hl_ctx.sqlite 에 쓴다 -- 멈춤"; }
+  # hl_ctx·hl_bt: data/hot/hl_ctx.sqlite 에는 원본도 코인마다 프로세스 넷이 같이 쓴다(WAL) -- Rust 도 WAL + busy_timeout 30초(store.rs) → 코인 하나씩 넘겨도 된다
 fi
 # Rust 에 넘길 값: 진짜 경로 + 파이썬 environ 에서 그대로(COPY) + 종목
 PY1="$(echo "$PY" | head -1)"
@@ -424,8 +471,17 @@ RENV="$(echo $RENV)"
 B="logs/supervisor/crontab_backup_${TS}_takeover_$TAG.txt"; mkdir -p logs/supervisor; printf '%s\n' "$CUR" > "$B"
 LN="$(cron_lines "$CUR")"
 if [ "$CRON" = 1 ]; then
-  first="$(echo "$LN" | head -1)"; [ -n "$first" ] || die "파이썬 예약 줄($PYSUP)을 못 찾음 -- 시각을 모른다 · 아무것도 안 바꿈"
-  SCHED="$(printf '%s\n' "$CUR" | sed -n "${first}p" | awk '{print $1, $2, $3, $4, $5}')"
+  if [ "$KIND" = raster_archive ]; then SCHED="40 * * * *"; RENV="$RENV OF_SYMBOLS=$OF_SYMS"   # 그림자 보관과 같은 분 · 넘긴 래스터 종목만
+  else
+    first="$(echo "$LN" | head -1)"
+    for i in $LN; do printf '%s\n' "$CUR" | sed -n "${i}p" | grep -qF "$PYSUP" && { first="$i"; break; }; done
+    [ -n "$first" ] || die "파이썬 예약 줄($PYSUP)을 못 찾음 -- 시각을 모른다 · 아무것도 안 바꿈"
+    SCHED="$(printf '%s\n' "$CUR" | sed -n "${first}p" | awk '{print $1, $2, $3, $4, $5}')"
+  fi
+  read -r SM SH _ <<< "$SCHED"   # 회차 시각 앞뒤 3분이면 거부(파이썬 회차와 Rust 회차가 같은 장부·파일에 두 번 쓰지 않게)
+  if [[ "$SM" =~ ^[0-9]+$ ]] && { [ "$SH" = '*' ] || [ "$((10#$SH))" = "$((10#$(date +%H)))" ]; }; then
+    d=$(( ( $((10#$(date +%M))) - SM + 60 ) % 60 )); [ "$d" -le 3 ] || [ "$d" -ge 57 ] && die "회차 시각($SCHED) 앞뒤 3분 -- 지금은 안 바꾼다(${d}분)"
+  fi
   ADD="$SCHED cd $ROOT && $RENV ${ENGU}_KIND=$RK $BIN >> logs/supervisor/rt_$RK.log 2>&1 #takeover:$TAG"
 else
   ADD="@reboot sleep 100 && cd $ROOT && ${ENGU}_BIN=$BIN $RENV bash scripts/ops/supervisor_$ENG.sh $RK >> logs/supervisor/${ENG}_reboot.log 2>&1 & #takeover:$TAG"

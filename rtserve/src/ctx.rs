@@ -578,3 +578,90 @@ pub fn situation_payload(now: &V, computed_at: &V, fo: &V, mp: &V, read: &V, vol
 pub fn sse_situation(payload: &V) -> String {
     format!("event: situation\ndata: {}\n\n", rtserve::py::dumps(payload, (",", ":"), false, None))
 }
+
+/// 코어 수신 상태 → 원본 fo_state(1801)·mp_state(1774) dict 모양(키 차례 그대로). mp 의 next_funding_ms 는 첫 마크 뒤에야 키가 생긴다(1893~1894).
+/// last_error 글자는 Rust 오류(원본 repr(exc)[:120] 과 같을 수 없다 -- 대조에서 뺄 칸).
+pub fn streams_payload(s: &rtcore::proto::Streams) -> (V, V) {
+    let (f, m) = (&s.fo, &s.mp);
+    let fo = json!({"connected": f.connected, "since": f.since, "last_event_ms": f.last_ms, "events": f.events, "errors": f.errors, "last_error": f.last_error});
+    let mut mp = json!({"connected": m.connected, "since": m.since, "last_ms": m.last_ms, "events": m.events, "errors": m.errors, "last_error": m.last_error});
+    if m.events > 0 {
+        mp["next_funding_ms"] = json!(m.next_funding_ms);
+    }
+    (fo, mp)
+}
+
+/// 융합 카드 장부 한 줄(server.py compute_situation 2494~2513 · ETH 만). `read` = 이 회차 관계 읽기 · `mid` = inp["mid"](미시 payload mid) ·
+/// `card_p` = card30["p"](dir·reach) · `feat_bar` = card30["bar"]. outcome 이 없으면(None 또는 빈 dict) None.
+pub fn fused_log_line(now: f64, read: &V, mid: &V, card_p: &V, feat_bar: &V) -> Option<String> {
+    let fu = read.get("fused").filter(|v| v.as_object().is_some_and(|o| !o.is_empty())).cloned().unwrap_or(json!({}));
+    let o3 = fu.get("outcome").filter(|v| v.as_object().is_some_and(|o| !o.is_empty()))?;
+    let bar_now = (now as i64).div_euclid(300) * 300;
+    let cols = o3["cols"].as_array()?;
+    let mut p = Map::new();
+    for c in cols {
+        p.insert(c["key"].as_str()?.to_string(), c["p"].clone());
+    }
+    let g = |k: &str| fu.get(k).cloned().unwrap_or(V::Null);
+    let src = o3.get("dir_src").and_then(V::as_str).unwrap_or("");
+    let line = json!({"ts": now as i64, "bar": bar_now, "side": g("side"), "mid": mid, "votes": g("votes"), "score": g("score"), "gate_pct": g("gate_pct"),
+        "cell": [o3["reg"], o3["a"], o3["g"]], "p": V::Object(p),
+        "dir_p": if src.starts_with("model") { card_p.get("dir").cloned().unwrap_or(V::Null) } else { V::Null },
+        "reach_p": if o3.get("reach_src").and_then(V::as_str) == Some("model") { card_p.get("reach").cloned().unwrap_or(V::Null) } else { V::Null },
+        "feat_bar": feat_bar, "dir_src": o3.get("dir_src").cloned().unwrap_or(V::Null), "up_share": o3.get("up_share").cloned().unwrap_or(V::Null),
+        "up": cols[0].get("target").cloned().unwrap_or(V::Null), "dn": cols[1].get("target").cloned().unwrap_or(V::Null)});
+    Some(rtserve::py::dumps(&line, (", ", ": "), false, None) + "\n")
+}
+
+/// server.py _last_logged_bar(2408~2416): 꼬리 16KB 의 마지막 줄 bar. 못 읽으면 None.
+pub fn last_logged_bar(path: &std::path::Path) -> Option<i64> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).ok()?;
+    let size = f.seek(SeekFrom::End(0)).ok()?;
+    f.seek(SeekFrom::Start(size.saturating_sub(16384))).ok()?;
+    let mut b = vec![];
+    f.read_to_end(&mut b).ok()?;
+    let t = String::from_utf8_lossy(&b).replace('\u{FFFD}', ""); // decode("utf-8", "ignore")
+    let last = t.trim().lines().last()?;
+    let v: V = serde_json::from_str(last).ok()?;
+    match &v["bar"] {
+        V::Number(n) => n.as_i64().or_else(|| n.as_f64().map(|f| f.trunc() as i64)),
+        V::String(s) => s.trim().parse().ok(),
+        V::Bool(b) => Some(*b as i64),
+        _ => None,
+    }
+}
+
+/// 장부 쓰기(server.py 2497~2515): 봉마다 한 줄 · 재기동 뒤 첫 회차는 파일 꼬리에서 «마지막으로 쓴 봉»을 되살린다.
+/// 🔴`RTSERVE_READONLY` 가 "0" 이 아니면(병행 중 기본) 쓰지 않는다 -- 파이썬이 같은 파일에 쓰는 동안 두 번 쓰지 않게. 전환 때 0 으로.
+pub struct FusedLog {
+    pub path: std::path::PathBuf,
+    /// None = 아직 안 되살림(원본 "fused_bar" not in situation_state).
+    bar: Option<Option<i64>>,
+}
+
+impl FusedLog {
+    pub fn new(path: std::path::PathBuf) -> Self {
+        FusedLog { path, bar: None }
+    }
+
+    /// 쓴 줄(안 썼으면 None). 쓰기 실패는 원본처럼 알리고 넘어간다(fused log: …).
+    pub fn tick(&mut self, now: f64, read: &V, mid: &V, card_p: &V, feat_bar: &V) -> Option<String> {
+        if std::env::var("RTSERVE_READONLY").as_deref() != Ok("0") {
+            return None;
+        }
+        let line = fused_log_line(now, read, mid, card_p, feat_bar)?;
+        let bar_now = (now as i64).div_euclid(300) * 300;
+        let last = *self.bar.get_or_insert_with(|| last_logged_bar(&self.path));
+        if last == Some(bar_now) {
+            return None;
+        }
+        self.bar = Some(Some(bar_now));
+        use std::io::Write;
+        let r = std::fs::OpenOptions::new().append(true).create(true).open(&self.path).and_then(|mut f| f.write_all(line.as_bytes()));
+        if let Err(e) = r {
+            println!("fused log: {e}");
+        }
+        Some(line)
+    }
+}

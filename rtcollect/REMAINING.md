@@ -119,7 +119,7 @@ check 는 그림자 감독 로그의 «SUPERVISOR starting» 시각마다 [그 �
 | 차례 | 종류 | 대조(check) | 끊김 예상 | 전진 검정 · 끊긴 구간이 남는 곳 | REST(넘긴 뒤) | 그림자 |
 |---|---|---|---|---|---|---|
 | 1 | `xyz` | shadow_tape 표 셋 · ctx 0.5% 기준 | 수 초 | — · 재접속 때 candleSnapshot 이 1분봉을 메움 | 켬(재접속 때만) | 뜸 |
-| 1 | `hl_ctx` | shadow_tape hl_asset_ctx -- Rust 쪽 = hl_bt 그림자 hl_ctx.sqlite + hl_ctx 그림자 hl_ctx_only.sqlite 를 이어 하나로 | 수 초 | — · 그 초가 빔(gaps 없음) | 없음 | 뜸 · 🔴서버에는 파이썬 전체 모드(hl_bt, 코인별)도 같은 hl_ctx.sqlite 에 쓴다 -- go 는 거부(hl_bt 와 묶어 넘기는 꼴은 다음 조각) |
+| 1 | `hl_ctx` | shadow_tape hl_asset_ctx -- Rust 쪽 = hl_bt 그림자 hl_ctx.sqlite + hl_ctx 그림자 hl_ctx_only.sqlite 를 이어 하나로 | 수 초 | — · 그 초가 빔(gaps 없음) | 없음 | 뜸 · 서버에는 파이썬 전체 모드(hl_bt, 코인별)도 같은 hl_ctx.sqlite 에 쓴다 -- 원본도 프로세스 넷이 한 파일(WAL)이라 코인 하나씩(hl_bt <코인> · hl_ctx = CTX_ONLY 묶음) 넘겨도 된다(11-22) |
 | 2 | `depth <SYM>` | shadow_tape --depth(첫·끝 시 빼고 프레임 글자) | 수 초 | fwd_dirshort(간접) · 시 파일의 `_gap` 줄 · ob5m·bookdepth·iceberg 는 끊긴 자리를 끊김으로 읽음 | 켬(스냅숏 · 시간당 1) | 뜸 |
 | 3 | `ob5m <SYM>` · `bookdepth` · `iceberg <SYM>` | shadow_tape bars·marks / --events | 0(depthdiff 파일을 이어 읽는다 -- 다시 뜨면 따라잡음) | bookdepth = fwd_dirshort 피쳐 · 봉 값이 이어진다 | 없음 | 뜸 |
 | 4 | `raster <SYM>` | shadow_tape --raster(§5 SHADOW 99%·0.95 기준) | 수 초 + 스냅숏 | — · 그 초 행이 무효 | 켬(스냅숏) | 뜸 · 🔴넘긴 종목은 파이썬 `_purge_old` 가 멈춘다 -- 전 종목을 넘긴 뒤 `raster_archive` 예약 줄을 TAKEOVER 로(스크립트 밖 · 손으로) |
@@ -134,10 +134,30 @@ check 는 그림자 감독 로그의 «SUPERVISOR starting» 시각마다 [그 �
 | 11 | `news` | — | — | — | — | 스크립트 밖 -- 그림자 없음(바깥 8곳 ×2) |
 | 12 | `deribit` | shadow_duck option_trades·블록(체인·요약 표는 그림자에서 비어 행 수만) | 수 초 + 20초 플러시 | — · 재기동 REST 백필이 메움(gaps.backfilled) | 켬(백필·10분 체인·매시 대조) | 뜸(체결 WS 만) |
 | 13 | `seal`(예약) | shadow_duck --lake(그림자 lake 의 날짜 범위 · 파일마다 지문) | 0(다음 날 시각부터 Rust) | 🔴lake = 전진 검정 다수 · hot 정리가 켜진다(TAKEOVER) -- 첫 실행은 `--dry-run` 으로 «전부 건너뜀» 확인 권함 | 없음 | 예약 줄 등록 때만 |
-| — | `hl_bt` · `hl_positions` | — | — | — | — | 안 다룸: hl_bt = 서버에도 파이썬 전체 모드가 있다(위 hl_ctx 와 한 파일 -- 묶음 넘기기 다음 조각) · hl_positions = 조회 순간마다 값이 달라 견줄 방법 없음(REST ×2) |
+| — | `hl_positions` | — | — | — | — | 안 다룸: hl_positions = 조회 순간마다 값이 달라 견줄 방법 없음(REST ×2) |
 
 go 가 하는 일(상주): ① crontab 백업 `logs/supervisor/crontab_backup_<날짜시각>_takeover_<태그>.txt` ② 파이썬 @reboot 줄과 그림자 줄 앞에 `#takeover:<태그> ` · 끝에 Rust 줄(` #takeover:<태그>` 로 끝남) · 줄 수 +1·바뀐 줄 수 검증 뒤 적용 ·
 multicoin 매니페스트의 그 항목을 `taken_over` 로(백업 `logs/supervisor/multicoin_backup_*` -- `resume` 이 파이썬을 다시 띄우지 않게) ③ 파이썬 `_supervise.sh` 부모 → 수집기 SIGTERM(10초·30초 안에 안 죽으면 멈춤) · 다시 떴는지 확인
 ④ 그림자 감독 → Rust ⑤ `*_TAKEOVER=1` + 진짜 경로 + (REST 종류) `*_REST=1` + 파이썬 environ 의 종목 값 그대로 ⑥ 60초: 프로세스 · mtime · 새 로그의 panic·crash-looping·exited 수.
 back 은 이 태그가 바꾼 줄만 되돌린다(그 뒤 다른 종류를 넘겼어도 그 줄은 그대로) · 백업과 같은지 찍는다 · 파이썬은 주석 풀린 @reboot 줄의 명령으로 다시 띄운다 · 그림자는 다시 안 띄운다.
 시험: `bash rtcollect/tools/takeover_selftest.sh`(가짜 crontab·가짜 프로세스 · 진짜 crontab 은 안 건드림).
+
+### 6-1. check 가 무엇을 근거로 통과/불통과를 내나 (2026-11-22 열일곱째 조각)
+
+공통: 그림자 감독 로그의 «SUPERVISOR starting» 마다 Rust 가 비어 있던 구간(가장 촘촘한 표의 가장 큰 빈틈 · 첫 기동 앞 전부)과
+«끊김» 줄 수만큼의 «Rust 만 빈 곳»(연결 끊김) · «파이썬만 빈 곳»을 뺀다. 설명으로 치는 것과 그 까닭(둘 다 맞는 이유) 한 줄씩:
+- 같은 줄 두 번(묶음 표): 한쪽이 같은 메시지를 두 번 받아 두 번 적음 -- 값 정보는 같다(okx_oi ZEC 1795273431545 파이썬 두 줄).
+- Rust 재구독 현재값: 다시 붙으면 거래소가 «지금 값»을 한 번 더 보낸다 -- 값이 그 종목 직전 파이썬 줄과 같으면 새 정보가 아니다.
+- depth 다시 붙은 자리: _gap 없이 pu 가 끊긴 곳 = 그 쪽 연결이 끊겼다 붙음(원본도 재접속 때 prev_u 를 비워 _gap 을 안 쓴다 · :136) -- 그 사이 다른 쪽만 받은 프레임.
+- 1분봉: 뺄 구간에 걸친 봉(끊김이 걸친 분은 받은 체결 수가 갈린다).
+
+| 종류 | 근거(통과 = 설명 못 함 0 · 견준 것 > 0) | 견주지 않는 것 |
+|---|---|---|
+| oi_lsratio | DuckDB 열쇠 (ts, symbol) 값 비트 · collected_at 뺌 | 🔴그림자는 REST 기본 꺼짐 → Rust 표가 비어 «한쪽이 비었다» → 견준 0 = 불통과. 넘기려면 그림자를 `RTDUCK_SHADOW_REST=1` 로 잠깐(봉 몇 개) |
+| deribit | option_trades 열쇠 trade_id · block_rfq_trades rfq_id · block_future_legs trade_id 값 비트 · gaps ±5초 분 뺌 | 체인·요약·다른 거래소 OI 표 = 그림자 REST 꺼짐이라 Rust 가 비어 «한쪽이 비었다»(세지 않음) -- 그 몫은 정답지(deribit_gex·recon)뿐 |
+| iceberg | 사건 JSONL 줄 글자 집합(Rust 첫 사건 t_end 부터) | state.json(2초 벽시계) |
+| market_data | microstructure_1m·_btc·_sol · tail_risk_1m 행 수(같은 구간 1% 안) | 칸 값은 진단(같은 분 칸마다 같음 비율·상대차)만 -- 그림자 REST 꺼짐이라 poll 칸이 빈다. 파이썬에만 있는 표(decision_feature_frame 등 6)는 원본 몫이 아님(적기만) |
+| ob5m · bookdepth | **재생 대조**(replay_book.py · 같은 h0·같은 시 파일·같은 «지금») · 결과 파일이 2시간 안이면 다시 안 돌림 | 실시간 그림자(사슬 시작·이력에 달림) |
+| raster_archive | 넘긴 래스터 표지(#takeover:raster_…)가 있고 그림자 보관 로그 끝 200줄에 오류 0 | 값 대조 없음(그림자 보관은 그림자 래스터 파일을 보관한다) -- 정답지 raster_archive_parity 뿐 |
+| hl_bt(새로) | .bt 시 파일 행 바이트 묶음(거래소 ts · 재기동·끊김 빼고) + hl_ctx.sqlite(두 Rust 파일 이음) | — |
+

@@ -163,4 +163,18 @@ echo "$(( $(date +%s) + 600 ))" > data/live/binance_ban_until
 WEIGHT_URL="http://127.0.0.1:$WP/fapi/v1/time" WEIGHT_N=1 bash rtcollect/tools/takeover.sh weight binance_ctx > /dev/null 2>&1; RC=$?
 ok "밴 파일이 살아 있으면 부르지 않고 실패" '[ "$RC" != 0 ]'
 rm -f data/live/binance_ban_until
+echo "== 6. check bookdepth·ob5m = 재생 대조 결과(2시간 안이면 다시 안 돌림)"
+printf '  bars: 비교 38행 · 불일치 0\n요약: 견준 38 · 설명 못 함 0\n' > logs/supervisor/replay_book_bookdepth_ETHUSDT.txt
+OUT="$(bash rtcollect/tools/takeover.sh check bookdepth 2>&1)"; RC=$?
+ok "재생 결과 불일치 0 → 통과 · 다시 안 돌림" '[ "$RC" = 0 ] && echo "$OUT" | grep -q "2시간 안 결과를 다시 쓴다" && echo "$OUT" | grep -q "견준 38 · 설명 못 함 0 · 통과"'
+printf '요약: 견준 38 · 설명 못 함 2\n' > logs/supervisor/replay_book_ob5m_BTCUSDT.txt
+bash rtcollect/tools/takeover.sh check ob5m BTCUSDT > /dev/null 2>&1; RC=$?
+ok "재생 결과 불일치 있으면 불통과" '[ "$RC" != 0 ]'
+echo "== 7. raster_archive: 넘긴 래스터 표지가 있어야 check 통과"
+bash rtcollect/tools/takeover.sh check raster_archive > /dev/null 2>&1; RC=$?
+ok "넘긴 래스터 없으면 불통과" '[ "$RC" != 0 ]'
+cp crontab.txt crontab.keep; echo "@reboot sleep 100 && cd $R && x #takeover:raster_ETHUSDT" >> crontab.txt
+OUT="$(bash rtcollect/tools/takeover.sh check raster_archive 2>&1)"; RC=$?
+ok "넘긴 래스터 ETHUSDT 가 보이면 통과" '[ "$RC" = 0 ] && echo "$OUT" | grep -q "넘긴 래스터 종목 ETHUSDT"'
+mv crontab.keep crontab.txt
 [ "$FAIL" = 0 ] && echo "takeover selftest OK" || { echo "takeover selftest 실패"; exit 1; }

@@ -115,6 +115,31 @@ pub struct Micro {
     pub okx_bars: Vec<(i64, [f64; 6])>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub okx_full: bool,
+    /// 2026-11-22 더함 -- 바이낸스 강제청산·마크 수신 상태(원본 /api/situation 의 streams.fo·mp 재료). 옛 받는 쪽은 모르는 칸이라 건너뛴다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub streams: Option<Streams>,
+}
+
+/// 원본 server.py fo_state(1801)·mp_state(1774). `last_ms` = fo 의 last_event_ms(청산 T) · mp 의 last_ms(마크 E).
+/// `events` = 받은 사건 수(fo 는 이 코어가 받는 종목의 청산만 -- 원본 LIQ_ASSET_BY_SYMBOL 과 같은 거름).
+/// `errors`·`last_error` = 접속 실패·연결 오류(글자는 Rust 오류 -- 원본 repr(exc) 와 같을 수 없다).
+/// `next_funding_ms` = 마크의 T(0 이면 None) -- 원본은 첫 마크 뒤에야 키가 생긴다(events > 0 일 때만 싣는 것은 받는 쪽).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct StreamStat {
+    pub connected: bool,
+    pub since: Option<f64>,
+    pub last_ms: Option<i64>,
+    pub events: u64,
+    pub errors: u64,
+    pub last_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_funding_ms: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct Streams {
+    pub fo: StreamStat,
+    pub mp: StreamStat,
 }
 
 /// 지난 60초 바이낸스 강제청산 USD 합(롱 = 롱 포지션 청산) · 건수.

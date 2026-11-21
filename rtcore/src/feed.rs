@@ -374,6 +374,21 @@ fn parse_any(src: &Src, text: &str, rx: i64) -> Vec<Stamped> {
     }
 }
 
+/// 원본 fo_state·mp_state 를 적을 연결이면 그 열쇠(None = 강제청산 · Some(종목) = 마크).
+fn stream_key(url: &str) -> Option<Option<&str>> {
+    let last = url.rsplit('/').next()?;
+    if last == "!forceOrder@arr" {
+        return Some(None);
+    }
+    last.strip_suffix("@markPrice@1s").map(Some)
+}
+
+fn stream(url: &str, state: &State, up: Option<bool>, err: Option<String>) {
+    if let Some(k) = stream_key(url) {
+        state.stream_status(k, up, err.as_deref(), now_us() as f64 / 1e6);
+    }
+}
+
 fn status(src: &Src, state: &State, up: bool) {
     let venue = match src.kind {
         Kind::Spot => Venue::Spot,
@@ -408,6 +423,7 @@ pub async fn run_src(src: Src, state: Arc<State>, silence: Duration) {
                 };
                 if subscribed {
                     status(&src, &state, true);
+                    stream(url, &state, Some(true), None);
                     let mut last = Instant::now();
                     let mut ping_at = last + PING_EVERY;
                     loop {
@@ -439,15 +455,23 @@ pub async fn run_src(src: Src, state: Arc<State>, silence: Duration) {
                             Ok(Some(Ok(_))) => last = Instant::now(), // ping 은 tungstenite 가 알아서 pong 한다 · pong 도 살아 있다는 뜻
                             Ok(Some(Err(e))) => {
                                 println!("rtcore feed {url}: {e}");
+                                stream(url, &state, None, Some(e.to_string()));
                                 break;
                             }
                         }
                     }
                     status(&src, &state, false);
+                    stream(url, &state, Some(false), None);
                 }
             }
-            Ok(Err(e)) => println!("rtcore feed {url}: 접속 실패 {e}"),
-            Err(_) => println!("rtcore feed {url}: 접속 10초 초과"),
+            Ok(Err(e)) => {
+                println!("rtcore feed {url}: 접속 실패 {e}");
+                stream(url, &state, None, Some(e.to_string()));
+            }
+            Err(_) => {
+                println!("rtcore feed {url}: 접속 10초 초과");
+                stream(url, &state, None, Some("접속 10초 초과".into()));
+            }
         }
         RECONNECTS.fetch_add(1, Relaxed);
         if got {
@@ -455,5 +479,15 @@ pub async fn run_src(src: Src, state: Arc<State>, silence: Duration) {
         }
         sleep(backoff).await;
         backoff = (backoff * 2).clamp(BACKOFF_MIN, BACKOFF_MAX);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn stream_key_picks_force_and_mark() {
+        assert_eq!(super::stream_key("wss://x/market/ws/!forceOrder@arr"), Some(None));
+        assert_eq!(super::stream_key("wss://x/market/ws/ethusdt@markPrice@1s"), Some(Some("ethusdt")));
+        assert_eq!(super::stream_key("wss://x/ws/ethusdt@trade"), None);
     }
 }

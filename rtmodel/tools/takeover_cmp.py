@@ -39,6 +39,20 @@ def walk(a, b, path, skip, rtol, out):
         out[1].append(f"{path}: 파이썬 {a!r} 대 Rust {b!r}")
 
 
+def rows(path):
+    """(줄, 값) 목록 + 깨진 줄 수. 원본 pred_record._tail 처럼 바이트를 utf-8(replace)로 읽고 json 이 안 되는 줄(NUL 낀 줄 등)은 건너뛴다.
+    (서버 실측 11-22: pred_record BTC·SOL·XRP 에 NUL 59~115개 -- grep 은 «binary file matches» 로 줄을 못 냈다)"""
+    out, bad = [], 0
+    for ln in open(path, "rb").read().decode("utf-8", "replace").split("\n"):
+        if not ln.strip():
+            continue
+        try:
+            out.append((ln, json.loads(ln)))
+        except ValueError:
+            bad += 1
+    return out, bad
+
+
 def opts(argv):
     o = {"key": [], "skip": set(), "rtol": 0.0, "text": False}
     i = 0
@@ -106,8 +120,12 @@ def radar(pa, pb, o):
 def main(argv):
     mode = argv[0]
     if mode == "last":
-        rows = [ln for ln in open(argv[1], encoding="utf-8").read().splitlines() if ln.strip()]
-        print(json.loads(rows[-1])[argv[2]])
+        print(rows(argv[1])[0][-1][1][argv[2]])
+        return 0
+    if mode == "maxt":                                                          # maxt <디렉터리> <k> -- *.jsonl 의 그 k 줄 중 가장 큰 t(깨진 줄 건너뜀)
+        import glob
+        ts = [r["t"] for f in sorted(glob.glob(argv[1] + "/*.jsonl")) for _, r in rows(f)[0] if isinstance(r, dict) and r.get("k") == argv[2]]
+        print(max(ts) if ts else "")
         return 0
     if mode == "text":
         a, b = open(argv[1], encoding="utf-8").read(), open(argv[2], encoding="utf-8").read()
@@ -120,15 +138,14 @@ def main(argv):
         walk(json.load(open(argv[1], encoding="utf-8")), json.load(open(argv[2], encoding="utf-8")), "", o["skip"], o["rtol"], out)
         return report(out[0], out[1], 0)
     py = {}
-    for ln in open(argv[1], encoding="utf-8").read().splitlines():
-        if ln.strip():
-            r = json.loads(ln)
-            py[tuple(str(r.get(k)) for k in o["key"])] = (ln, r)
+    pa, bad_a = rows(argv[1])
+    for ln, r in pa:
+        py[tuple(str(r.get(k)) for k in o["key"])] = (ln, r)
     out, nokeys = [0, []], []
-    for ln in open(argv[2], encoding="utf-8").read().splitlines():
-        if not ln.strip():
-            continue
-        r = json.loads(ln)
+    rb, bad_b = rows(argv[2])
+    if bad_a or bad_b:
+        print(f"  깨진 줄(NUL 등 · 원본 _tail 처럼 건너뜀) 파이썬 {bad_a} · Rust {bad_b}")
+    for ln, r in rb:
         k = tuple(str(r.get(x)) for x in o["key"])
         if k not in py:
             nokeys.append(k)

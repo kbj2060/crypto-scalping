@@ -9,7 +9,7 @@
 //!   RT_SR_BAN_FILE    data/live/binance_ban_until   (밴 중이면 보내지 않고 실패)
 //!   RT_REGIME_NOW_MS  (시험만) 고정 시각
 //! 종료코드: 0 정상(출력 JSON 한 줄) · 1 실패(원본처럼 아무것도 안 쓰고 "FAIL …") · 2 설정 거부.
-use rtmodel::ban::{ban_left, ban_note};
+use rtmodel::gate::{Fail, Gate};
 use rtmodel::read_json;
 use rtmodel::regime_band::{cron, Bundle};
 use serde_json::Value;
@@ -28,17 +28,12 @@ fn wall() -> f64 {
 }
 
 /// 원본 rest_klines: urlopen(timeout 20) · json. 밴 중이면 보내지 않는다.
-fn get(agent: &ureq::Agent, base: &str, ban: &Path, path: &str, params: &[(&'static str, String)]) -> Result<Value, String> {
-    let left = ban_left(ban, wall());
-    if left > 0.0 {
-        return Err(format!("binance IP ban: {left:.0}s left -- request not sent"));
-    }
+fn get(gate: &mut Gate, base: &str, path: &str, params: &[(&'static str, String)]) -> Result<Value, String> {
     let q: Vec<String> = params.iter().map(|(k, v)| format!("{k}={v}")).collect();
-    let mut r = agent.get(&format!("{base}{path}?{}", q.join("&"))).call().map_err(|e| format!("{e}"))?;
-    let h = |n: &str| r.headers().get(n).and_then(|v| v.to_str().ok()).map(str::to_string);
-    let (status, retry) = (r.status().as_u16(), h("retry-after"));
-    let body = r.body_mut().read_to_string().map_err(|e| format!("{e}"))?;
-    ban_note(ban, status, &body, retry.as_deref(), wall());
+    let (status, body) = gate.send(&format!("{base}{path}?{}", q.join("&")), true).map_err(|e| match e {
+        Fail::Banned(left) => format!("binance IP ban: {left:.0}s left -- request not sent"),
+        Fail::Conn(e) | Fail::Body(e) => e,
+    })?;
     if status >= 400 {
         return Err(format!("HTTPError {status}"));
     }
@@ -61,8 +56,8 @@ fn main() {
     let b = Bundle::from_json(&mj).unwrap_or_else(|e| die(2, &format!("모델: {e}")));
     let now: i64 = std::env::var("RT_REGIME_NOW_MS").ok().map_or_else(|| (wall() * 1000.0) as i64, |v| v.parse().unwrap_or_else(|_| die(2, "RT_REGIME_NOW_MS")));
     let (base, ban) = (env("RT_REGIME_REST", "https://fapi.binance.com"), PathBuf::from(env("RT_SR_BAN_FILE", "data/live/binance_ban_until")));
-    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(20))).http_status_as_error(false).proxy(None).build().into();
-    let mut g = |path: &str, params: &[(&'static str, String)]| get(&agent, &base, &ban, path, params);
+    let mut gate = Gate::new(Duration::from_secs(20), ban); // 모든 바깥 요청의 한 문(가중치 문턱·간격·밴 파일 -- rtmodel::gate)
+    let mut g = |path: &str, params: &[(&'static str, String)]| get(&mut gate, &base, path, params);
     let f = |n: &str| out.join(n);
     match cron(&mut g, now, &b, &f("regime_band_forward.jsonl"), &f("regime_band_forward_scored.jsonl"), &f("regime_band_forward_summary.json")) {
         Ok(s) => println!("{s}"),

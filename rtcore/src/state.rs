@@ -3,7 +3,7 @@
 //! 번호 매기기와 broadcast 를 같은 락 안에서 해서, 스냅숏(같은 락)과 밀기 사이에 빠짐·겹침이 없다.
 //! 1초 수급·풋프린트는 사건마다 밀지 않고 FLUSH_MS 마다 모아 민다(flush). 스냅숏은 모으던 것까지 이미 반영한 상태라,
 //! 스냅숏 뒤 첫 묶음이 같은 값을 한 번 더 덮어써도 결과가 같다.
-use crate::proto::{Event, Situation, Stamped, Supply1s, Venue};
+use crate::proto::{Event, Situation, Stamped, StreamStat, Streams, Supply1s, Venue};
 use crate::restore;
 use crate::situation;
 use crate::supply::Supply;
@@ -28,6 +28,8 @@ struct Sym {
     sit: Option<Situation>,
     /// 마지막 미시 값(okx_oi5m 은 비움 -- 스냅숏이 전부를 다시 센다).
     micro: Option<crate::proto::Micro>,
+    /// 마크(@markPrice@1s) 수신 상태(원본 mp_state).
+    mp: StreamStat,
 }
 
 /// 1초 수급·풋프린트 밀기 묶음 간격(ms). 화면은 한 프레임(60Hz ≈ 16.7ms)에 한 번 칠한다 -- 더 잘게 보내도 안 보이고
@@ -45,6 +47,8 @@ pub struct State {
     wake: Option<mpsc::UnboundedSender<(String, restore::Wake)>>,
     /// «모든 종목» 메시지(`s = "*"` · Prices)의 번호. 보내기도 이 락 안에서 -- 번호와 보내는 순서가 같다.
     prices_seq: Mutex<u64>,
+    /// 강제청산(전 종목 한 연결) 수신 상태(원본 fo_state -- 코인 공통 하나).
+    fo: Mutex<StreamStat>,
 }
 
 impl State {
@@ -69,11 +73,12 @@ impl State {
                     marks: situation::MarkRing::new(crate::now_us() as f64 / 1e6),
                     sit: None,
                     micro: None,
+                    mp: StreamStat::default(),
                 };
                 (s.clone(), Mutex::new(sym))
             })
             .collect();
-        State { syms, ring_cap, tx: broadcast::channel(queue_cap).0, restore: None, wake: None, prices_seq: Mutex::new(0) }
+        State { syms, ring_cap, tx: broadcast::channel(queue_cap).0, restore: None, wake: None, prices_seq: Mutex::new(0), fo: Mutex::new(StreamStat::default()) }
     }
 
     /// 복원을 켠 상태: 심볼마다 스냅숏 파일을 읽어 되살린다(수신 전 · `now_us` = 지금 벽시계 -- 143봉보다 오래된 봉은 버린다).
@@ -278,7 +283,15 @@ impl State {
                 // 24시간 봉 창은 «수신 시각» 기준(파이썬 time.time()) -- rx_us 가 그 벽시계다.
                 supply = g.supply.trade(px, qty, m.ex_ms, sell, id as i64, m.rx_us);
             }
-            Event::Liq { venue, long, qty, px } => supply = g.supply.liq(venue, long, qty, px, m.ex_ms, m.rx_us),
+            Event::Liq { venue, long, qty, px } => {
+                if venue == Venue::Bn {
+                    // server.py 1853~1854: 대시보드 코인의 청산마다 events += 1 · last_event_ms = T
+                    let mut fo = self.fo.lock().unwrap();
+                    fo.events += 1;
+                    fo.last_ms = Some(m.ex_ms);
+                }
+                supply = g.supply.liq(venue, long, qty, px, m.ex_ms, m.rx_us)
+            }
             Event::Flow { venue, px, qty, sell } => {
                 // 시작 뒤 첫 OKX 체결 -- 그 앞 660초(1초 칸·청산)를 테이프·맥락 DB 에서(쌓기 전에: t0 = 이 체결의 초)
                 if venue == Venue::Okx && g.supply.rs.okx_await && g.supply.begin_okx(m.ex_ms) {
@@ -299,7 +312,11 @@ impl State {
             Event::Kline { open_ms, close, ref mut vol_bpm, ref mut bar5m, .. } => {
                 (*vol_bpm, *bar5m) = g.quote.kline(open_ms, close, m.rx_us); // 실어 보내는 메시지에 이 봉까지의 변동성·5분봉 종가를 채운다
             }
-            Event::Mark { mark, index, funding, .. } => {
+            Event::Mark { mark, index, funding, next_funding_ms } => {
+                // server.py 1893~1894: events += 1 · last_ms = E · next_funding_ms = int(T or 0) or None
+                g.mp.events += 1;
+                g.mp.last_ms = Some(m.ex_ms);
+                g.mp.next_funding_ms = (next_funding_ms != 0).then_some(next_funding_ms);
                 g.marks.push(m.ex_ms, (mark, index, funding), m.rx_us as f64 / 1e6);
                 g.mark = Some(m.clone())
             }
@@ -338,6 +355,30 @@ impl State {
     pub fn reset_orders(&self, s: &str) {
         if let Some(cell) = self.syms.get(s) {
             cell.lock().unwrap().supply.reset_orders();
+        }
+    }
+
+    /// 강제청산·마크 연결 상태(원본 fo_state·mp_state 1843·1865·1869 · 1883). `sym` = None 이면 강제청산(전 종목 연결).
+    /// `up` = Some(true) 붙음(connected · since = 지금) · Some(false) 끊김 · `err` = 오류 한 번(errors += 1 · last_error).
+    pub fn stream_status(&self, sym: Option<&str>, up: Option<bool>, err: Option<&str>, now_s: f64) {
+        let f = |st: &mut StreamStat| {
+            match up {
+                Some(true) => (st.connected, st.since) = (true, Some(now_s)),
+                Some(false) => st.connected = false,
+                None => {}
+            }
+            if let Some(e) = err {
+                st.errors += 1;
+                st.last_error = Some(e.chars().take(120).collect());
+            }
+        };
+        match sym {
+            None => f(&mut self.fo.lock().unwrap()),
+            Some(s) => {
+                if let Some(cell) = self.syms.get(s) {
+                    f(&mut cell.lock().unwrap().mp)
+                }
+            }
         }
     }
 
@@ -422,6 +463,7 @@ impl State {
                 let dirty = std::mem::take(&mut g.supply.okx_sum_dirty);
                 mc.okx_bars = g.supply.okx_sums(if full { None } else { Some(&dirty) });
                 mc.okx_full = full && mc.okx_from.is_some();
+                mc.streams = Some(Streams { fo: self.fo.lock().unwrap().clone(), mp: g.mp.clone() });
                 let fresh = !mc.okx_oi5m.is_empty() || !mc.okx_bars.is_empty() || mc.okx_full || g.micro.as_ref().is_none_or(|o| crate::proto::Micro { ts: mc.ts, ..o.clone() } != mc);
                 if fresh {
                     g.seq += 1;
