@@ -25,6 +25,10 @@ assert.ok(restoreAt > assignAt && assignAt > 0,
 const ui = src.indexOf("function updateSnapshotCandleLive(");
 assert.ok(ui > 0, "updateSnapshotCandleLive 를 못 찾았다");
 const updBody = src.slice(ui, src.indexOf("\n}\n", ui) + 2);
+// 2026-10-29 updateSnapshotCandleLive 가 끝에서 formingVwap(형성 봉 VWAP)을 부른다 -- 그 함수도 실제 것을 같이 뗀다(2026-11-22 · 전엔 미정의로 멈췄다)
+const vi = src.indexOf("function formingVwap(");
+assert.ok(vi > 0, "formingVwap 을 못 찾았다");
+const vwapBody = src.slice(vi, src.indexOf("\n}\n", vi) + 2);
 
 const BAR = 300, MAX = 200, WINDOW = 12;   // 5분봉 · CHART_MAX_CANDLES · 1h 창
 const T0 = 1790085600;                      // 마감봉 200개의 마지막
@@ -42,7 +46,7 @@ const env = {
   CHART_MAX_CANDLES: MAX,
   lastSnapshotHistoryFetchAt: 1,
 };
-const run = new Function(...Object.keys(env), updBody + "\nupdateSnapshotCandleLive();");
+const run = new Function(...Object.keys(env), vwapBody + updBody + "\nupdateSnapshotCandleLive();");
 const call = () => run(...Object.keys(env).map((k) => env[k]));
 
 const right = () => {

@@ -4810,7 +4810,7 @@ function ensureRtStream() {
 //   믿는 조건(rtTrusted) = 연결이 열려 있고 · 최근 3초 안에 받았고 · 이 연결에서 SSE 와 견준 닫힌 초 ≥ 60 · 어긋남 0.
 //   하나라도 깨지면(3초 침묵 · 어긋남 1건 · 끊김 · 처리 실패) 그 즉시 옛 경로(SSE·폴링)로 -- 받아 둔 SSE 를 다시 얹어 빈 초가 없다.
 //   ① 1초 수급: rt supply1s = applySupply1s 가 받는 모양 그대로(proto.rs Supply1s 이름 = 원본 supply_1s_payload). rt 에 없는 칸(바이낸스 OI `oi`)만 SSE 것.
-//   ② 풋프린트: rt Footprint(= 원본 /api/footprint 합산 · 칸 단위 증분)를 봉 객체로 쌓아 footprintBars·latestFootprint 에 넣고 /api/footprint 묻기를 쉰다.
+//   ② 풋프린트: rt Footprint(= 원본 /api/footprint 와 같은 바이낸스 선물만 · server.py 4000~4005 «11-02 바이낸스만» · 칸 단위 증분)를 봉 객체로 쌓아 footprintBars·latestFootprint 에 넣고 /api/footprint 묻기를 쉰다.
 //      `ready`(원본 = 백필 끝남 · 코어 = 144봉 다 참 -- 뜻이 다르다)·봉 `agg` 는 옛 경로가 마지막으로 준 값을 둔다(보이는 «수집 중» 띠가 안 바뀌게).
 //      형성 봉: 화면은 그리기 직전에 footprintMergeLive 로 형성 봉을 브라우저 직결 @trade 칸으로 **갈아 끼운다**(더하지 않는다 · WS 가 봉 시작 전부터
 //      붙어 있었을 때만 = footprintLive.since ≤ 봉 시작). 그 규칙은 latestFootprint 의 형성 봉이 어디서 왔든(응답이든 rt 든) 같게 돈다 -- 전체 렌더(footprintForChart)와
@@ -4858,7 +4858,7 @@ function rtFpToScreen(changed) {
   latestFootprint = {
     ...prev, full: false, bucket: h.bucket, barSeconds: h.barSeconds, barsExpected: h.barsExpected,
     retailMaxUsd: h.retailMaxUsd, whaleMinUsd: h.whaleMinUsd, symbol: ASSET_CONFIG[activeSnapshotAsset].symbol,
-    venues: h.okxFrom ? ["binance-perp", "okx-swap"] : ["binance-perp"], okxLive: null,
+    venues: ["binance-perp"],   // 원본 응답과 같은 칸(4046 · okxLive 칸은 원본에 없다)
     ready: prev.ready != null ? prev.ready : !!h.ready,
     bars: [...footprintBars.values()].sort((a, b) => a.time - b.time),
   };

@@ -17,6 +17,10 @@ for (; end < src.length; end++) {
   else if (src[end] === "}" && --depth === 0) { end++; break; }
 }
 const BLOCK = src.slice(open, end);
+// 2026-10-26·10-29 블록이 «차트에 그리기» 칩(mcLine.veto)과 선 설정(lineSt · LINE_DEF · LS_DASH · LS_COL)을 읽는다 -- 실제 정의를 같이 뗀다(2026-11-22 · 전엔 미정의로 멈췄다)
+const li = src.indexOf("const LINE_DEF = {"), lj = src.indexOf("let lineCfg = null;", li);
+if (li < 0 || lj < 0) { console.log("🔴 선 설정 정의를 못 찾음"); process.exit(1); }
+const LINES = "const mcLine = { st: {}, veto: true };\n" + src.slice(li, lj);
 
 const NS = "http://www.w3.org/2000/svg";
 function run({ n = 8, atr = 2, closeLast = 100, warmup = false, live = false, vk = 1,
@@ -43,7 +47,7 @@ function run({ n = 8, atr = 2, closeLast = 100, warmup = false, live = false, vk
   // els 는 document 스텁의 클로저에 이미 쌓인다 -- 블록 자체는 아무것도 반환하지 않는다.
   // 기하: 플롯은 y ∈ [mt, mt+ch] = [0, 200]. yAt 은 항등이라 «가격 = y» 다.
   new Function("candles", "svg", "NS", "document", "xAt", "yAt", "bw", "ml", "mt", "cw", "ch",
-               "{" + BLOCK + "}")(
+               "{" + LINES + BLOCK + "}")(
     candles, svg, NS, document, (i) => i * 10, (v) => v, 8, 0, 0, 500, 200);
   return { els, svg };
 }
