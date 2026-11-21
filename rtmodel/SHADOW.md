@@ -50,11 +50,13 @@ python rtmodel/tools/shadow_sr_lean.py data/live/sr_lean data/live/rt_sr_lean --
 
 - 빌드: `cd rtmodel && cargo build --release -j 2 --bin rt_dirpred` → `bin/rt_dirpred`(md5 대조).
 - 모델(서버에서 · 매달 재학습 cron 뒤 다시): `python rtmodel/tools/export_dir4h.py data/live data/live/rt_dirpred` · `python rtmodel/tools/export_dirshort.py data/live/rt_dirpred`.
-- 띄우기: `RT_DIR_OUT=data/live/rt_dirpred nice -n 10 bin/rt_dirpred`. 🔴`RT_DIR_OUT=data/live` 는 종료코드 2(파이썬 기록 자리 · 전환 때만 `RT_DIR_TAKEOVER=1`).
-  감독 스크립트는 아직 없다(`supervisor_rt_sr_lean.sh` 를 본떠 만든다).
+- 띄우기: `bash scripts/ops/supervisor_rt_dirpred.sh`(실행 파일 `bin/rt_dirpred` · 모델 없으면 안 켬 · 같은 출력 디렉터리의 rt_dirpred 가 돌면 안 켬 ·
+  로그 logs/supervisor/rt_dirpred_YYYYMMDD.log · @reboot 줄은 그 파일 머리에 적어만 뒀다). 🔴`RT_DIR_OUT=data/live` 는 종료코드 2(파이썬 기록 자리 · 전환 때만 `RT_DIR_TAKEOVER=1`).
 - REST: 원본과 같은 요청 열(대상 5분봉 9,000 + metrics 5종 30.5일 → 다음부터 꼬리 300·0.5일 · 19코인 340 · 1일봉 120)을 **파이썬 서버와 따로 한 벌 더** 보낸다. 공용 밴 파일을 지킨다.
 - 대조: 두 `pred_record/{코인}.jsonl` 의 같은 (k, t) 줄을 글자로 비교한다(시작 시각이 달라 처음 몇 줄은 한쪽에만 있다).
-- 🔴아직 못 하는 것: ETH 15분·1시간(75열판 · 호가 깊이 sqlite) · 상대 강도(xsec.jsonl) -- 이 둘은 파이썬 서버 기록만 있다.
+- 회차 끝 상대 강도: 9코인 5분봉 60개(코인마다 1회 · limit 61) → `pred_record/xsec.jsonl`(원본 xsec_record 와 같은 글자) + `xsec_latest.json`
+  (원본은 서버 프로세스 안 `_xs_latest` -- 화면 «4h 상대 강도» 칸이 읽는 스냅숏). 대조: 두 xsec.jsonl 의 같은 t 줄을 글자로.
+- 🔴아직 못 하는 것: ETH 15분·1시간(75열판 · 호가 깊이 sqlite) -- 파이썬 서버 기록만 있다.
 
 ---
 
@@ -63,7 +65,8 @@ python rtmodel/tools/shadow_sr_lean.py data/live/sr_lean data/live/rt_sr_lean --
 원본 `scripts/live_risk_radar_20261115.py` 처럼 **cron 이 매분 한 번** 부르고 끝나는 실행 파일. 파이썬 cron 은 그대로 두고 한 줄을 더한다.
 
 - 빌드: `cd rtmodel && cargo build --release -j 2 --bin rt_radar` → `bin/rt_radar`(md5 대조).
-- crontab(사람이 등록): `* * * * * cd <저장소> && RT_RADAR_OUT=data/live/rt_risk_radar nice -n 10 bin/rt_radar >> logs/supervisor/rt_radar_$(date +\%Y\%m\%d).log 2>&1`
+- crontab(사람이 등록): `* * * * * cd <저장소> && bash scripts/ops/supervisor_rt_radar.sh` -- 실행 파일·계수 확인 → `flock -n`(첫 회차 31일 백필 1~2분이
+  다음 분 회차와 겹치지 않게 · 겹치면 종료코드 3 으로 건너뜀) → 한 회차(nice 10) · 로그 logs/supervisor/rt_radar_YYYYMMDD.log. 상주가 아니라 재기동 루프는 없다.
 - 쓰는 곳: `data/live/rt_risk_radar/`(risk_radar_latest.json · risk_radar_forward.jsonl · cache/ 의 1분봉·DVOL 이진 캐시). 🔴`RT_RADAR_OUT=data/live` 는 종료코드 2(전환 때만 `RT_RADAR_TAKEOVER=1`).
   `/api/risk-radar` 는 파이썬 파일만 읽으므로 그림자는 화면에 안 나온다. 첫 회차는 31일 백필(코인마다 1분봉 45쪽 · 쪽 사이 0.5초)이라 1~2분 걸린다.
 - 계수: `RT_RADAR_PARAMS`(기본 dashboard/risk_radar_params_20261116.json) · `RT_RADAR_PARAMS_SESS`(SOXL, 기본 dashboard/risk_radar_params_soxl_20261117.json) -- 파이썬과 같은 파일.
@@ -71,6 +74,38 @@ python rtmodel/tools/shadow_sr_lean.py data/live/sr_lean data/live/rt_sr_lean --
 - 대조: 두 latest.json 의 코인 칸을 비교한다 -- 문자열·참거짓·None 은 같아야 하고 숫자는 1e-12 상대 안(X@β 의 BLAS 합 순서 때문에 끝자리는 갈린다 · REMAINING.md «서버 판과의 차이»).
   분이 어긋나 읽으면 다른 회차를 비교하게 되니 `updated` 가 같은 것끼리만.
 - 종료코드: 0 정상 · 1 한 코인이라도 오류(원본과 같음 -- cron 은 다음 분에 다시) · 2 설정 거부.
+
+---
+
+# 띠 안·이탈 그림자 (rt_regime · 2026-11-21)
+
+원본 `scripts/live_regime_band_cron_20261102.py` 처럼 **cron 이 매시 02분 한 번** 부르고 끝나는 실행 파일. 파이썬 cron 은 그대로 두고 한 줄을 더한다.
+
+- 빌드: `cd rtmodel && cargo build --release -j 2 --bin rt_regime` → `bin/rt_regime`(md5 대조).
+- 모델(서버에서): `python rtmodel/tools/export_regime.py data/live/regime_band_h48_model.joblib data/live/rt_regime_band/regime_band.json`(원본 joblib sha256 이 파일 안에 있다).
+- crontab(사람이 등록): `2 * * * * cd <저장소> && flock -n data/live/.rt_regime.lock nice -n 10 bin/rt_regime >> logs/supervisor/rt_regime_$(date +\%Y\%m\%d).log 2>&1`
+- 쓰는 곳: `data/live/rt_regime_band/`(regime_band_forward.jsonl · _scored.jsonl · _summary.json -- 원본과 같은 이름·글자). 🔴`RT_REGIME_OUT=data/live` 는 종료코드 2
+  (전환 때만 `RT_REGIME_TAKEOVER=1`). `/api/regime-band` 는 파이썬 파일만 읽으므로 그림자는 화면에 안 나온다.
+- 종료코드: 0 정상(출력 JSON 한 줄 = 원본 print 와 같은 글자) · 1 실패(`FAIL …` · 아무것도 안 씀 · 묵은 자료 70분 초과 포함) · 2 설정 거부.
+- 대조: 두 regime_band_forward.jsonl 의 같은 (ts, coin) 줄을 글자로. 채점·요약은 기록이 같으면 같다(같은 패널 · 같은 규칙).
+
+---
+
+# 그림자에서 켜면 REST 가 얼마나 느나 (2026-11-21 · 바이낸스 IP 한도 = 가중치 2,400/분 · 서버와 같은 IP)
+
+그림자는 파이썬과 **같은 요청을 한 벌 더** 보낸다(캐시·REST 를 나눠 쓰지 않는다) -- 켠 항목의 몫이 그대로 2배가 된다. 횟수는 정답지(가짜 거래소 요청 열) 실측 · 가중치는 바이낸스 표(klines: limit <100 → 1 · <500 → 2 · ≤1000 → 5 · >1000 → 10).
+
+| 켜는 것 | 파이썬 몫(평소) | 그림자 켜면 | 처음(재기동) 몰림 | 공용 밴 파일 |
+|---|---|---|---|---|
+| rt_sr_lean | 1분봉 klines 시작 1회 + 2분 뒤 1회 · aggTrades 번호 빠질 때만(분당 ≤ 30) | ×2 | 작음 | Rust 만 지킴(파이썬 워커는 aiohttp) |
+| rt_dirpred(4h·15분/1시간) | 5분마다 약 108회(코인·모듈마다 5분봉 301 + metrics 6쪽 + 1일봉 · 19코인 341 은 모듈마다 한 번) ≈ 분당 가중치 ~40 + futures/data 분당 ~10회 | ×2 | 코인·모듈마다 5분봉 9쪽(1000) + metrics 91쪽 ≈ 회차 하나에 ~880회(코인 사이 3초) | 둘 다 |
+| rt_dirpred 상대 강도(xsec) | 5분마다 9회(limit 61 · 가중치 1) | ×2 | 같음 | 둘 다 |
+| rt_radar | 분마다 코인 수만큼 1회(limit 99 · 가중치 1) + Deribit DVOL 시간에 1회 | ×2 | 코인마다 1분봉 45쪽(쪽 사이 0.5초) | 바이낸스만 |
+| rt_regime | 시간마다 8회(코인마다 limit 1500 두 쪽 · 가중치 10) = 시간당 80 | ×2(시간당 160) | 같음 | 둘 다 |
+| rtduck(`RTDUCK_REST=1`) | 분당 36회 | ×2(분당 72) | — | rtcollect/SHADOW.md |
+
+- 다 켜도 평소 몫은 분당 가중치 수백 안(한도 2,400)이다. 위험은 **재기동 몰림**이 겹칠 때 -- rt_dirpred 첫 회차(~880회)·rt_radar 백필을 같은 분에 띄우지 않는다(하나씩 켜고 첫 회차가 끝난 걸 로그로 본 뒤 다음).
+- 418·429 를 받으면 Rust 쪽이 해제 시각을 공용 밴 파일에 적고 그동안 보내지 않는다. 파이썬 대시보드(binance_ban_guard)도 같은 파일을 본다.
 
 ---
 

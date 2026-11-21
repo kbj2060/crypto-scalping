@@ -475,6 +475,11 @@ fn nanarg(x: &[f64], max: bool) -> Option<usize> {
 /// pandas rolling(w, min_periods=minp).std()(ddof 1) 전체 열 -- tools/check_rollvar.py 가 비트 대조한 순서.
 #[doc(hidden)]
 pub fn roll_std(x: &[f64], w: usize, minp: usize) -> Vec<f64> {
+    roll_var(x, w, minp).into_iter().map(|v| if v.is_nan() { NAN } else if v >= 0.0 { v.sqrt() } else { 0.0 }).collect() // zsqrt
+}
+
+/// pandas rolling(w, min_periods=minp).var()(ddof 1).
+pub(crate) fn roll_var(x: &[f64], w: usize, minp: usize) -> Vec<f64> {
     let (mut nobs, mut mean, mut ssq, mut ca, mut cr) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
     let (mut same, mut prev) = (0i64, x[0]);
     let mut out = vec![NAN; x.len()];
@@ -508,8 +513,7 @@ pub fn roll_std(x: &[f64], w: usize, minp: usize) -> Vec<f64> {
             ssq += (v - pm) * (v - mean);
         }
         if nobs >= minp.max(1) as f64 && nobs > 1.0 {
-            let var = if nobs == 1.0 || same as f64 >= nobs { 0.0 } else { ssq / (nobs - 1.0) };
-            out[i] = if var >= 0.0 { var.sqrt() } else { 0.0 }; // zsqrt
+            out[i] = if nobs == 1.0 || same as f64 >= nobs { 0.0 } else { ssq / (nobs - 1.0) };
         }
     }
     out

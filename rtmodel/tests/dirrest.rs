@@ -86,3 +86,35 @@ fn rest_payload_record_parity() {
     }
     assert!(bad.is_empty());
 }
+
+/// 4h 상대 강도(xsec): 서버 tick 의 9코인 `_klines(c, 60, now)` 요청 열 → xsec_record 기록 글자·스냅숏. 정답지 = python rtmodel/tools/gen_xsec_fixture.py
+#[test]
+fn xsec_parity() {
+    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let fx: Value = rtmodel::read_json(&d.join("xsec_fixture.json")).expect("python rtmodel/tools/gen_xsec_fixture.py 먼저");
+    let tmp = std::env::temp_dir().join(format!("rt_xsec_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let mut rec = Record::default();
+    let (mut n_req, mut n_line) = (0, 0);
+    for run in fx["runs"].as_array().unwrap() {
+        let now = run["now"].as_i64().unwrap();
+        let mut want: VecDeque<&Value> = run["requests"].as_array().unwrap().iter().collect();
+        let mut g = |path: &str, q: &[(&'static str, String)]| -> Result<Value, String> {
+            let w = want.pop_front().expect("요청이 더 많다");
+            let wq: Vec<(String, String)> = w[1].as_array().unwrap().iter().map(|p| (p[0].as_str().unwrap().into(), p[1].as_str().unwrap().into())).collect();
+            assert_eq!((path, q.iter().map(|(k, v)| (k.to_string(), v.clone())).collect::<Vec<_>>()), (w[0].as_str().unwrap(), wq), "{now} 요청");
+            n_req += 1;
+            Ok(w[2].clone())
+        };
+        let px = xsec_px(&mut g, now).unwrap();
+        assert!(want.is_empty(), "{now}: 요청이 모자란다");
+        let (n, latest) = rec.xsec(&tmp, &px).unwrap();
+        assert_eq!(n as u64, run["n"].as_u64().unwrap(), "{now} 새 줄");
+        assert_eq!(latest.as_deref(), run["latest"].as_str(), "{now} 스냅숏");
+        let file = std::fs::read_to_string(tmp.join("xsec.jsonl")).ok();
+        assert_eq!(file.as_deref(), run["file"].as_str(), "{now} xsec.jsonl");
+        n_line = file.map_or(0, |f| f.lines().count());
+    }
+    let _ = std::fs::remove_dir_all(&tmp);
+    println!("xsec: 회차 {} · 요청 {n_req} · 기록 줄 {n_line}", fx["runs"].as_array().unwrap().len());
+}

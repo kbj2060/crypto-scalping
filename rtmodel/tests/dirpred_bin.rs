@@ -1,7 +1,7 @@
 //! rt_dirpred 실행 파일 한 회차(RT_DIR_NOW_MS 고정)를 127.0.0.1 가짜 HTTP 로: 요청 열 == 원본 요청 열(tests/dirrest.rs 와 같은 정답지의 첫 회차) ·
 //! 쓴 pred_record/{코인}.jsonl == 원본 함수(라이브러리)로 같은 회차를 돈 기록 · 마지막 payload 파일. 파이썬 기록 자리(data/live)는 종료코드 2.
 //!     (정답지: tests/dirrest.rs 머리말)  cargo test -j 2 --release --test dirpred_bin -- --nocapture
-use rtmodel::dirrest::{closes, daily_closes, Record, Rest};
+use rtmodel::dirrest::{closes, daily_closes, xsec_px, Record, Rest};
 use rtmodel::{dir4h, dirshort};
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -36,6 +36,13 @@ fn one_round_over_fake_http() {
         let qs: Vec<String> = r[1].as_array().unwrap().iter().map(|p| format!("{}={}", p[0].as_str().unwrap(), p[1].as_str().unwrap())).collect();
         (format!("{}?{}", r[0].as_str().unwrap(), qs.join("&")), r[2].clone())
     })).collect()));
+    // 회차 끝 상대 강도: 9코인 _klines(c, 60) -- 응답은 tests/dirrest.rs xsec_parity 정답지 첫 회차(쿼리에 시각이 없어 그대로 맞는다)
+    let xs: Value = rtmodel::read_json(&d.join("xsec_fixture.json")).expect("python rtmodel/tools/gen_xsec_fixture.py 먼저");
+    let xreq: Vec<Value> = xs["runs"][0]["requests"].as_array().unwrap().clone();
+    for r in &xreq {
+        let qs: Vec<String> = r[1].as_array().unwrap().iter().map(|p| format!("{}={}", p[0].as_str().unwrap(), p[1].as_str().unwrap())).collect();
+        q.lock().unwrap().push_back((format!("{}?{}", r[0].as_str().unwrap(), qs.join("&")), r[2].clone()));
+    }
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = l.local_addr().unwrap().port();
     let (qq, bad) = (q.clone(), Arc::new(Mutex::new(vec![])));
@@ -86,6 +93,13 @@ fn one_round_over_fake_http() {
         if kind == "dir4h" { rec.h4(&exp, coin, &pay, &cl).unwrap() } else { rec.short(&exp, coin, &pay, &cl).unwrap() };
         last.insert(format!("{kind}_{}.json", coin.to_lowercase()), pay);
     }
+    let mut xq: VecDeque<&Value> = xreq.iter().collect();
+    let px = xsec_px(&mut |_: &str, _: &[(&'static str, String)]| Ok(xq.pop_front().unwrap()[2].clone()), t0).unwrap();
+    let (xn, latest) = rec.xsec(&exp, &px).unwrap();
+    let rd = |p: PathBuf| std::fs::read_to_string(p).ok();
+    assert_eq!(rd(out.join("pred_record/xsec.jsonl")), rd(exp.join("xsec.jsonl")), "xsec.jsonl");
+    assert_eq!(rd(out.join("xsec_latest.json")), latest, "xsec_latest.json");
+    println!("상대 강도: 새 줄 {xn} · 스냅숏 {}", latest.is_some());
     let mut n = 0;
     for c in ["BTC", "SOL", "XRP"] {
         let (g, w) = (std::fs::read_to_string(out.join("pred_record").join(format!("{c}.jsonl"))).unwrap(), std::fs::read_to_string(exp.join(format!("{c}.jsonl"))).unwrap());

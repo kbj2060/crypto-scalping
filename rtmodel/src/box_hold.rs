@@ -35,6 +35,13 @@ const VOL_STALE_MS: f64 = 15.0 * 60_000.0;
 
 // ── numpy·pandas 와 같은 순서의 기본 연산
 pub(crate) fn npsum(a: &[f64]) -> f64 {
+    // numpy 는 연속 배열도 8,192칸 묶음마다 짝 합을 내고 묶음 합을 차례로 더한다(rtcollect::ob5m::np_sum 과 같은 규칙)
+    if a.len() > 8192 {
+        return a.chunks(8192).fold(0.0, |s, c| s + pw(c));
+    }
+    pw(a)
+}
+fn pw(a: &[f64]) -> f64 {
     let n = a.len();
     if n < 8 {
         let mut s = 0.0;
@@ -60,7 +67,7 @@ pub(crate) fn npsum(a: &[f64]) -> f64 {
     }
     let mut n2 = n / 2;
     n2 -= n2 % 8;
-    npsum(&a[..n2]) + npsum(&a[n2..])
+    pw(&a[..n2]) + pw(&a[n2..])
 }
 fn npmean(a: &[f64]) -> f64 {
     npsum(a) / a.len() as f64

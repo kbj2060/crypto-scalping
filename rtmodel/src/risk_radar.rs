@@ -366,7 +366,7 @@ const HOLIDAYS: [&str; 16] = ["2026-05-25", "2026-06-19", "2026-07-03", "2026-09
 pub const SESS: [&str; 6] = ["정규장", "프리장", "애프터", "야간", "주말", "휴장"];
 const SWIN: [(&str, usize); 4] = [("lrv15", 15), ("lrv60", 60), ("lrv1d", 1440), ("lrv7d", 10080)];
 
-fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+pub(crate) fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = y.div_euclid(400);
     let yoe = y - era * 400;

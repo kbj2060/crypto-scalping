@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 양성 대조: src/lgb.rs · src/dir4h.rs · src/risk_radar.rs 의 규칙을 하나씩 틀리게 바꿔 tests/lgb.rs · tests/dir4h.rs 가 실패하는지. 끝나면(중단돼도) 원본으로 되돌리고 해시로 확인.
+# 양성 대조: src/lgb.rs · src/dir4h.rs · src/risk_radar.rs · src/regime_band.rs(이름 «띠:») 의 규칙을 하나씩 틀리게 바꿔 tests/lgb.rs · tests/dir4h.rs 가 실패하는지. 끝나면(중단돼도) 원본으로 되돌리고 해시로 확인.
 #   bash rtmodel/tools/mutants_lgb_dir4h.sh        (정답지: 각 시험 머리말)
 set -u
 cd "$(dirname "$0")/.."
@@ -46,6 +46,34 @@ M=(
   "dirrest~짧은 봉 공유 안 함~if !self.short.contains_key(&key) {~if true {"
   "dirrest~빈 피쳐 최신 봉 안 뺌~if payload[\"nan_feats\"].as_array().is_some_and(|a| !a.is_empty())~if false"
   "dirrest~중복 결정 다시 씀~.filter(|r| !seen.contains(&r.0))~.filter(|_| true)"
+  "dirrest~xsec 격자 시 %4==3 → 2~/ 3_600_000 % 4 == 3~/ 3_600_000 % 4 == 2"
+  "dirrest~xsec 240분 검사 끔~if n < 49 || ts[n - 1] - ts[n - 49] != 240 * 60_000 {~if n < 49 {"
+  "dirrest~xsec 평균 빼기 안 함~(v - mean) * 1e4~v * 1e4"
+  "dirrest~xsec 스냅숏 반올림 1→2~py_round((v - mean) * 1e4, 1)~py_round((v - mean) * 1e4, 2)"
+  "dirrest~xsec 빈 코인도 씀~if px.len() < X_COINS.len() || px.iter().any(|s| s.is_empty()) {~if px.len() < X_COINS.len() {"
+  "regime_band~띠: 1시간 거래량 Kahan 끔~comp = tt - s - y;~comp = 0.0;"
+  "regime_band~띠: 5분칸 짝 합 → 차례 합~if den > 0.0 { npsum(&ok) / den } else { 1.0 }~if den > 0.0 { ok.iter().sum::<f64>() / den } else { 1.0 }"
+  "regime_band~띠: 칸 번호 짝수 반올림 → 바깥 반올림~.round_ties_even() as i64~.round() as i64"
+  "regime_band~띠: 한쪽 최대 6 → 5~lv.truncate(6);~lv.truncate(5);"
+  "regime_band~띠: 거리 5% → 4%~(p - cp).abs() / cp <= 0.05~(p - cp).abs() / cp <= 0.04"
+  "regime_band~띠: 최소 몫 0.05 → 0.06~w / mx >= 0.05~w / mx >= 0.06"
+  "regime_band~띠: 반감기 240 → 241~/ 240.0).exp()~/ 241.0).exp()"
+  "regime_band~띠: 모자란 5분칸 줄 규칙 끔~if o[1].iter().filter(|x| x.is_finite()).count() < exp {~if false {"
+  "regime_band~띠: 같은 시간 뒤 칸 > → >=~if long { after[j] > liq[i] }~if long { after[j] >= liq[i] }"
+  "regime_band~띠: 창 24 → 23시간~const LOOKBACK_H: usize = 24;~const LOOKBACK_H: usize = 23;"
+  "regime_band~띠: 롱 진입가 (고+저)/2 → 종가~(w.h[i] + w.l[i]) / 2.0~w.c[i]"
+  "regime_band~띠: vr 분모 12 → 11~(12.0 * roll_var~(11.0 * roll_var"
+  "regime_band~띠: since_hi 마지막 최대~if *x > wh[b] { k }~if *x >= wh[b] { k }"
+  "regime_band~띠: 시각 = 결정 전 봉~((df[i].t + 300).rem_euclid~((df[i].t).rem_euclid"
+  "regime_band~띠: BTC 빈 칸을 자기 종가로~m.get(&b.t).copied().unwrap_or(NAN)~m.get(&b.t).copied().unwrap_or(b.c)"
+  "regime_band~띠: sig 48 → 12~let sig = r48;~let sig = r12;"
+  "regime_band~띠: 꼬리 2700 → 2600~const NEED: usize = 2700;~const NEED: usize = 2600;"
+  "regime_band~띠: 채점 48봉 → 47~if w.len() < 48 {~if w.len() < 47 {"
+  "regime_band~띠: 채점 창 235 → 240분~b.t <= t + 235 * 60~b.t <= t + 240 * 60"
+  "regime_band~띠: 같은 결정 다시 적음~if !seen.contains(&(ts.clone(), coin.to_string())) {~if true {"
+  "regime_band~띠: 묵은 자료 70 → 60분~if !(age <= 70.0) {~if !(age <= 60.0) {"
+  "regime_band~띠: 추세 문턱 >= → >~let reg = if o.p >= 0.5~let reg = if o.p > 0.5"
+  "regime_band~띠: 확신도 칸 [) → (]~conf >= BINS[k] && conf < BINS[k + 1]~conf > BINS[k] && conf <= BINS[k + 1]"
 )
 for m in "${M[@]}"; do
   IFS='~' read -r mod name from to <<< "$m"

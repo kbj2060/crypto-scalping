@@ -1,4 +1,4 @@
-"""4h 변동성 QX4 아티팩트(joblib) → rtmodel JSON (2026-11-21). 개발기 사본 tmp/vol4h_qx4/qx4_<끝>.joblib(서버 data/live/vol4h_qx4.joblib 과 같은지 미확인 · 읽기만).
+"""4h 변동성 QX4 아티팩트(joblib) → rtmodel JSON (2026-11-21). 개발기 사본 tmp/vol4h_qx4/qx4_<끝>.joblib(서버 data/live/vol4h_qx4.joblib 과 md5 같음 2fce43f5… -- 2026-11-21 확인 · 읽기만).
     python rtmodel/tools/export_qx4.py [joblib] [출력 json]
 HGB 셋(시드 3) = export_hgb.model · MLP = numpy (W, b) float32 층 + 표준화 mu·sd(f64) + 출력 ym·ys. 실수는 비트(f64 · f32 는 f32 비트).
 """
