@@ -1,0 +1,36 @@
+//! 강제청산·마크 수신 상태(원본 server.py fo_state 1801 · mp_state 1774)가 Micro.streams 로 실리는지.
+use rtcore::proto::{Event, Stamped, StreamStat, Venue};
+use rtcore::state::State;
+
+fn ev(ex_ms: i64, ev: Event) -> Stamped {
+    Stamped { s: "ethusdt".into(), seq: 0, ex_ms, rx_us: ex_ms * 1000, tx_us: 0, ev }
+}
+
+#[test]
+fn streams_follow_python_state() {
+    let st = State::new(&["ethusdt".into()], 16, 1 << 10);
+    let mut rx = st.tx.subscribe();
+    st.stream_status(None, None, Some("접속 실패"), 99.0);
+    st.stream_status(None, Some(true), None, 100.5);
+    st.stream_status(Some("ethusdt"), Some(true), None, 101.25);
+    st.apply(ev(1_000, Event::Book { u: 1, bid: 10.0, bid_qty: 1.0, ask: 11.0, ask_qty: 1.0, bid_s: String::new(), ask_s: String::new() }));
+    st.apply(ev(2_000, Event::Mark { mark: 10.5, index: 10.4, funding: 1e-4, next_funding_ms: 0 }));
+    st.apply(ev(3_000, Event::Mark { mark: 10.5, index: 10.4, funding: 1e-4, next_funding_ms: 28_800_000 }));
+    st.apply(ev(4_000, Event::Liq { venue: Venue::Bn, long: true, qty: 1.0, px: 10.0 }));
+    st.apply(ev(4_500, Event::Liq { venue: Venue::Okx, long: true, qty: 1.0, px: 10.0 })); // OKX 는 fo 가 아니다
+    st.stream_status(Some("ethusdt"), Some(false), None, 102.0);
+    st.situation_tick(5_000_000);
+    let mut got = None;
+    while let Ok(m) = rx.try_recv() {
+        if let Event::Micro(mc) = m.ev {
+            got = mc.streams;
+        }
+    }
+    let s = got.expect("Micro 에 streams");
+    let fo = StreamStat { connected: true, since: Some(100.5), last_ms: Some(4_000), events: 1, errors: 1, last_error: Some("접속 실패".into()), next_funding_ms: None };
+    let mp = StreamStat { connected: false, since: Some(101.25), last_ms: Some(3_000), events: 2, errors: 0, last_error: None, next_funding_ms: Some(28_800_000) };
+    assert_eq!((s.fo, s.mp), (fo, mp));
+    // 옛 받는 쪽: streams 없는 Micro 도 읽힌다
+    let old: rtcore::proto::Micro = serde_json::from_str(r#"{"ts":1,"mid":null,"spread":null,"qi":null,"vol60":0.0,"liq60":{"long":0.0,"short":0.0,"n":0}}"#).unwrap();
+    assert!(old.streams.is_none());
+}
