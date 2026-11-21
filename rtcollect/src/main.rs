@@ -421,8 +421,16 @@ fn run_book_worker(kind: &str) {
     if db.ends_with(format!("data/live/{kind}/{file}")) && env_s("RTCOLLECT_TAKEOVER", "") != "1" {
         die(2, &format!("🔴{} 는 파이썬 워커의 파일이다 -- 그림자는 다른 경로에. 전환이면 RTCOLLECT_TAKEOVER=1", db.display()));
     }
-    let now = wall_s;
-    let sleep = |s: f64| {
+    // RTCOLLECT_FAKE_NOW=<초>: 「같은 시작점 재생 대조」(tools/replay_book.py) 전용 -- 시계를 그 순간에 멈추고, 기다려야 하면(파일 끝) 끝낸다
+    let fake: Option<f64> = std::env::var("RTCOLLECT_FAKE_NOW").ok().map(|v| v.parse().unwrap_or_else(|_| die(2, "RTCOLLECT_FAKE_NOW 는 초(실수)")));
+    if fake.is_some() && db.ends_with(format!("data/live/{kind}/{file}")) {
+        die(2, "🔴RTCOLLECT_FAKE_NOW 는 대조용 -- 진짜 DB 에 쓰지 않는다");
+    }
+    let now = move || fake.unwrap_or_else(wall_s);
+    let sleep = move |s: f64| {
+        if fake.is_some() {
+            return false;
+        }
         std::thread::sleep(Duration::from_secs_f64(s));
         true
     };
