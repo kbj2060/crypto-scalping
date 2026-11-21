@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """rtduck 양성 대조: 변이 하나씩 넣고 시험이 실패하는지. 🔴제자리에서 고치고 되돌린다(사본은 libduckdb 를 다시 빌드한다 -- C++ 11~14분):
-끝나면(예외여도) 원본 바이트로 되돌리고 src·tests 해시가 같은지 본다.   python3 rtduck/tools/mutate_check.py"""
+끝나면(예외여도) 원본 바이트로 되돌리고 src·tests 해시가 같은지 본다.   python3 rtduck/tools/mutate_check.py [이름 조각…]"""
 import hashlib
 import os
+import sys
 import subprocess
 from pathlib import Path
 
@@ -42,6 +43,25 @@ M = [
     ("미시 고래 이탈 문턱 = 진입 문턱", "src/micro.rs", "let exit = self.exit_th.min(entry - 1e-6);", "let exit = entry;"),
     ("미시 깊이 시각 = 호가가 읽힌 뒤에만", "src/micro.rs", "        self.depth_last = now;\n        let side", "        let side"),
     ("HL체결 주소 소문자 안 함", "src/hl_trades.rs", "py_str(&users[0]).to_lowercase()", "py_str(&users[0])"),
+    # 2026-11-21 여덟째 조각 -- 다섯째 칸 = 돌릴 시험만(없으면 전부)
+    ("래스터보관 -0.0 칸도 씀", "src/raster_archive.rs", "if q != 0.0 {", "if q.to_bits() != 0 {", ["raster_archive_parity"]),
+    ("래스터보관 magic 안 봄", "src/raster_archive.rs", "if &raw[..4] != MAGIC {", "if false {", ["raster_archive_parity"]),
+    ("래스터보관 보관본 있어도 다시 씀", "src/raster_archive.rs", "if nonempty(&dst) || nonempty(&gz) {", "if false {", ["raster_archive_parity"]),
+    ("래스터보관 14일 → 13일", "src/raster_archive.rs", "now_s - (retention_days * 86_400) as f64", "now_s - ((retention_days - 1) * 86_400) as f64", ["raster_archive_parity"]),
+    ("래스터보관 mid 행 = 0 아닌 칸만", "src/raster_archive.rs", "            am.append_row(params![ts, mid]).map_err(|e| e.to_string())?;", "            if nb > 0 && raw[o + 16] != 0 { am.append_row(params![ts, mid]).map_err(|e| e.to_string())?; }", ["raster_archive_parity"]),
+    ("청산탭 groupby Kahan → 그냥 합", "src/liq_tab.rs", "kahan(m.entry(k).or_insert((0.0, 0.0)), v);", "m.entry(k).or_insert((0.0, 0.0)).0 += v;", ["liq_tab_parity"]),
+    ("청산탭 8192칸 묶음 없앰", "src/liq_tab.rs", "for c in a.chunks(8192) {", "for c in a.chunks(usize::MAX) {", ["liq_tab_parity"]),
+    ("청산탭 convolve 차례 뒤집음", "src/liq_tab.rs", "for x in &v[j.saturating_sub(5)..(j + 6).min(m)] {", "for x in v[j.saturating_sub(5)..(j + 6).min(m)].iter().rev() {", ["liq_tab_parity"]),
+    # (뺌) «청산탭 np.round → 파이썬 round»: 사실상 같은 변이 -- rint(x·10^d)/10^d 와 정확 반올림은 x·10^d 의 곱셈 반올림이 .5 경계를 넘을 때만 갈린다
+    #   (값 ~1e7·d=2 면 값 하나에 ~1e-7 · share 단위 d=8 은 ~1e-11 확률). 2026-11-21 돌린 결과 «통과»(못 잡음) -- 합성으로 그 경계를 만들 길이 없다.
+    ("청산탭 히트맵 컷 0.1 → 0.05", "src/liq_tab.rs", "const HEAT_CUT: f64 = 0.1;", "const HEAT_CUT: f64 = 0.05;", ["liq_tab_parity"]),
+    ("청산탭 자기 봉도 닿음", "src/liq_tab.rs", "        let mut j = i + 1;\n        while j < n {", "        let mut j = i;\n        while j < n {", ["liq_tab_parity"]),
+    ("청산탭 98 → 97분위", "src/liq_tab.rs", "let q = quantile(&pos, 0.98);", "let q = quantile(&pos, 0.97);", ["liq_tab_parity"]),
+    ("청산탭 짝수 중앙값 = 위 값", "src/liq_tab.rs", "if n % 2 == 1 { s[n / 2] } else { (s[n / 2 - 1] + s[n / 2]) / 2.0 }", "s[n / 2]", ["liq_tab_parity"]),
+    ("청산탭 바이비트 OI 10분 → 100분", "src/liq_tab.rs", "let since = now_ms - 600_000;", "let since = now_ms - 6_000_000;", ["liq_tab_parity"]),
+    ("청산탭 띠 30일 → 29일", "src/liq_tab.rs", "days[days.len().saturating_sub(30)..]", "days[days.len().saturating_sub(29)..]", ["liq_tab_parity"]),
+    ("청산탭 12시간 앞 봉 무게 안 지움", "src/liq_tab.rs", ".take(m.saturating_sub(h))", ".take(0)", ["liq_tab_parity"]),
+    ("청산탭 앞쪽 메움 안 함", "src/liq_tab.rs", "        if mn > need + DAY {", "        if false {", ["liq_tab_parity"]),
 ]
 
 
@@ -55,14 +75,20 @@ def digest():
 def main():
     env = dict(os.environ, PATH=f"{Path.home()}/.cargo/bin:{os.environ.get('PATH', '')}")
     before, caught, missed = digest(), 0, []
-    for name, f, a, b in M:
+    pick = sys.argv[1:]
+    n = 0
+    for name, f, a, b, *t in M:
+        if pick and name != M[0][0] and not any(x in name for x in pick):
+            continue
+        n += 1
+        targs = " ".join(f"--test {x}" for x in t[0]) if t else ""
         p = ROOT / f
         orig = p.read_bytes()
         s = orig.decode()
         assert s.count(a) == 1, (name, s.count(a))
         try:
             p.write_text(s.replace(a, b))
-            r = subprocess.run(["bash", "-c", "ulimit -v 4000000; timeout 600 cargo test -q --release -j 2 --offline"], cwd=ROOT, env=env, capture_output=True, text=True)
+            r = subprocess.run(["bash", "-c", f"ulimit -v 14000000; timeout 900 cargo test -q --release -j 2 --offline {targs}"], cwd=ROOT, env=env, capture_output=True, text=True)
         finally:
             p.write_bytes(orig)
         failed = r.returncode != 0
@@ -75,7 +101,7 @@ def main():
                 missed.append(name)
         print(f"{'실패(잡음)' if failed else '통과'} | {name} | {','.join(fails)}", flush=True)
     assert digest() == before, "원본 src·tests 가 바뀌었다"
-    print(f"잡은 변이 {caught}/{len(M) - 1} · 못 잡은 것 {missed} · 원본 src·tests 바이트 그대로")
+    print(f"잡은 변이 {caught}/{n - 1} · 못 잡은 것 {missed} · 원본 src·tests 바이트 그대로")
 
 
 if __name__ == "__main__":

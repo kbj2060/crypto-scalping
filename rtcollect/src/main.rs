@@ -35,7 +35,7 @@ use std::time::Duration;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::task::JoinSet;
 
-const KINDS: &str = "binance_tape|bybit_liq|bybit_tape|okx_tape|okx_ctx|binance_ctx|xyz|hl_ctx|hl_bt|depth|raster|ob5m|bookdepth|iceberg|treasury_futures|macro_5m|cboe_chain|liqmap_scorer";
+const KINDS: &str = "binance_tape|bybit_liq|bybit_tape|okx_tape|okx_ctx|binance_ctx|xyz|hl_ctx|hl_bt|depth|raster|ob5m|bookdepth|iceberg|treasury_futures|macro_5m|cboe_chain|liqmap_scorer|soxl_weekend";
 
 fn env_f(k: &str, d: f64) -> f64 {
     std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
@@ -102,6 +102,7 @@ fn main() {
             "iceberg" => run_iceberg(),
             "treasury_futures" | "macro_5m" | "cboe_chain" => run_cron(&kind),
             "liqmap_scorer" => run_liqmap(),
+            "soxl_weekend" => run_soxl_weekend(),
             k => die(2, &format!("RTCOLLECT_KIND={k} -- {KINDS}")),
         }
     });
@@ -550,7 +551,7 @@ fn run_cron(kind: &str) -> ! {
                 die(2, &format!("🔴{} 는 파이썬 요약기의 파일이다 -- 전환 때만 RTCOLLECT_TAKEOVER=1", state.display()));
             }
             let cache = PathBuf::from(env_s("CBOE_RV_CACHE", "data/live/rtcollect/cboe_rv7_cache.json"));
-            let mut klines = binance_rest("crypto-scalping-collector/1.0");
+            let mut klines = binance_rest("crypto-scalping-collector/1.0", 20);
             let mut after = |p: &std::path::Path| {
                 let now = rtcollect::rest::wall_s();
                 rtcollect::cboe_summary::write_state(p, &state, now, &mut |sym: &str| rtcollect::cboe_summary::realized_vol_7d(sym, &cache, now, &mut klines))
@@ -561,12 +562,12 @@ fn run_cron(kind: &str) -> ! {
     std::process::exit(code)
 }
 
-/// 바이낸스 선물 REST GET(timeout 20 -- 원본 둘 다 urlopen(timeout=20)). 🔴RTCOLLECT_REST=1 일 때만 · 밴 파일(RTCOLLECT_BAN_FILE) 지킴 ·
+/// 바이낸스 선물 REST GET(timeout = 원본 urlopen 의 timeout). 🔴RTCOLLECT_REST=1 일 때만 · 밴 파일(RTCOLLECT_BAN_FILE) 지킴 ·
 /// RTCOLLECT_BINANCE_BASE = 주소 앞부분(시험 = 127.0.0.1 가짜 서버). 4xx·5xx = Err(원본 HTTPError).
-fn binance_rest(ua: &'static str) -> impl FnMut(&str) -> Result<Vec<u8>, String> {
+fn binance_rest(ua: &'static str, timeout_s: u64) -> impl FnMut(&str) -> Result<Vec<u8>, String> {
     let (rest, ban) = (env_s("RTCOLLECT_REST", "") == "1", PathBuf::from(env_s("RTCOLLECT_BAN_FILE", "data/live/binance_ban_until")));
     let kbase = rtcollect::cron::base("RTCOLLECT_BINANCE_BASE", rtcollect::cboe_summary::BINANCE);
-    let kagent = rtcollect::rest::agent(Duration::from_secs(20));
+    let kagent = rtcollect::rest::agent(Duration::from_secs(timeout_s));
     move |u: &str| -> Result<Vec<u8>, String> {
         if !rest {
             return Err("REST 꺼짐".into());
@@ -598,9 +599,43 @@ fn run_liqmap() -> ! {
         std::process::exit(0)
     }
     let hot = PathBuf::from(env_s("LIQMAP_HOT", "data/hot"));
-    match rtcollect::liqmap_scorer::run(&out, &status, &hot, wall_s(), &mut binance_rest("liqmap-scorer")) {
+    match rtcollect::liqmap_scorer::run(&out, &status, &hot, wall_s(), &mut binance_rest("liqmap-scorer", 20)) {
         Ok(m) => {
             println!("{m}");
+            std::process::exit(0)
+        }
+        Err(e) => die(1, &e),
+    }
+}
+
+/// SOXL 주말 전진(live_soxl_weekend_forward_recorder_20261022 -- cron 매일 21:30 UTC `--record` · `--status`). SOXL_WEEKEND_OUT(기본 data/live/rtcollect/soxl_weekend_forward.jsonl) --
+/// 파이썬 장부(data/live/soxl_weekend_forward.jsonl = 전진 판정 자료)는 RTCOLLECT_TAKEOVER=1 일 때만. 🔴klines·fundingRate REST(새 주말마다 9요청) = RTCOLLECT_REST=1 일 때만.
+/// UA: 원본은 urllib 기본(Python-urllib/3.11) -- Rust 는 "soxl-weekend-forward".
+fn run_soxl_weekend() -> ! {
+    let out = PathBuf::from(env_s("SOXL_WEEKEND_OUT", "data/live/rtcollect/soxl_weekend_forward.jsonl"));
+    if out.ends_with("data/live/soxl_weekend_forward.jsonl") && env_s("RTCOLLECT_TAKEOVER", "") != "1" {
+        die(2, "🔴data/live/soxl_weekend_forward.jsonl 는 파이썬 전진 장부다 -- 전환 때만 RTCOLLECT_TAKEOVER=1");
+    }
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--status") {
+        match rtcollect::soxl_weekend::status(&out) {
+            Ok(m) => println!("{m}"),
+            Err(e) => die(1, &e),
+        }
+        std::process::exit(0)
+    }
+    if !args.iter().any(|a| a == "--record") {
+        die(2, "--record | --status (판정 --look 은 파이썬 원본으로)");
+    }
+    if env_s("RTCOLLECT_REST", "") != "1" {
+        println!("RTCOLLECT_REST 꺼짐 -- klines 없이는 할 일이 없다");
+        std::process::exit(0)
+    }
+    match rtcollect::soxl_weekend::record(&out, wall_s(), &mut binance_rest("soxl-weekend-forward", 15)) {
+        Ok(w) => {
+            for x in w {
+                println!("기록 {x}");
+            }
             std::process::exit(0)
         }
         Err(e) => die(1, &e),

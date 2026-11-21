@@ -3,6 +3,8 @@
 pub mod duckdump;
 pub mod hl_positions;
 pub mod hl_trades;
+pub mod liq_tab;
 pub mod market;
 pub mod micro;
 pub mod oi;
+pub mod raster_archive;

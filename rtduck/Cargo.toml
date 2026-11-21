@@ -8,7 +8,8 @@ publish = false
 # rtcollect 와 나눈 이유 = duckdb 묶음(C++ 전체) 빌드가 무겁다 -- rtcollect 빌드를 가볍게 둔다.
 [dependencies]
 # =1.10501.0 = DuckDB 1.5.1(서버 파이썬 duckdb 판 -- 2026-09-26 기록 기준). bundled = 시스템 libduckdb 없이 같은 판을 묶는다.
-duckdb = { version = "=1.10501.0", features = ["bundled"] }
+# parquet = 묶음에 parquet 확장을 넣는다(래스터 14일 보관 · liq_tab -- 사용자 결정 2026-11-21: 재빌드 감수).
+duckdb = { version = "=1.10501.0", features = ["bundled", "parquet"] }
 # 밴 파일 규칙·REST 연결(rest::agent·ban_left·ban_note)·파이썬 float repr 을 같이 쓴다.
 rtcollect = { path = "../rtcollect" }
 serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }

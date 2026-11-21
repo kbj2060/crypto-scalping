@@ -196,6 +196,7 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
 | 17 | 롱숏비 워커(rtduck oi_lsratio) | 바이낸스 IP 밴 파일을 모른다(밴 중에도 5분마다 20요청) | 밴 중이면 안 보내고(그 원천 실패 = 기존 값 유지) 418·429 는 밴 파일에 | 밴 동안 Rust 에만 그 폴이 없음 | — | 코드(rtduck/src/main.rs) |
 | 18 | 아이스버그 | 시 파일 스냅숏 한쪽이 비면 `np.flatnonzero(...)[0]` IndexError 로 죽는다(ob5m #16 과 같은 자리) | 그 시를 «스냅샷 없음» 처럼 건너뛴다 | 파이썬은 죽고 Rust 는 다음 시부터 | — | 코드(iceberg.rs) |
 | 19 | 예약 수집기 polls.status | 실패 글자 = 파이썬 예외 repr | HTTP 오류는 `<HTTPError 429: 'Too Many Requests'>` 그대로 · 그 밖(연결·JSON·모양)은 이름+글 근사 | 오류 행의 status 글자 | — | 코드(cron.rs) |
+| 20 | 래스터 14일 보관(rtduck raster_archive) | parquet·gzip 쓰기가 성공하면 바로 원본 .f32 를 지운다 | 새로 쓴 보관본을 다시 읽어 행 수(0 아닌 칸·mid 행 / 푼 바이트)가 맞을 때만 지운다 · 안 맞으면 보관본을 지우고 원본 유지 | 정상일 땐 차이 없음 · 보관본이 깨진 경우에만 Rust 쪽에 원본이 남는다 | — (정답지에선 늘 맞다) | 코드(raster_archive.rs `archive_then_unlink`) |
 
 `shadow_tape.py` 는 1·3·8·9·12 의 표에서 «Rust에만» 을 `(의도한 차이 후보 -- 이유)` 로 따로 적는다(«파이썬에만»·값 불일치는 그대로 실패).
 원본 그대로 둔 것(고치지 않음 -- 범위 밖이거나 값이 원본 정의다): depth 의 재접속 사이 구멍이 `_gap` 으로 안 남는 것 · 재시작이 시 경계를 넘으면 지난 시
@@ -203,7 +204,7 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
 
 ## 12. rtduck — DuckDB 로 쓰는 수집기 (사용자 결정 2026-11-21 질문지 19: DuckDB 형식 그대로 · 따로 된 실행 파일)
 
-실행 파일 `rtduck/target/release/rtduck`(DuckDB 1.5.1 묶음 · 51.6MB) → 서버 `bin/rtduck` · 감독 `scripts/ops/supervisor_rtduck.sh <종류>`(🔴실행·등록 안 함).
+실행 파일 `rtduck/target/release/rtduck`(DuckDB 1.5.1 묶음 + parquet 확장(2026-11-21 여덟째 조각 · 54.7 → 59.1MB · 재빌드 17.7분)) → 서버 `bin/rtduck` · 감독 `scripts/ops/supervisor_rtduck.sh <종류>`(🔴실행·등록 안 함).
 
 | 종류(`RTDUCK_KIND`) | 목록 | 쓰는 파일(기본) | 원본 파이썬 파일 |
 |---|---|---|---|
@@ -211,6 +212,8 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
 | `hl_trades` | `HL_COINS` · `HL_ROOT` | `data/live/rtduck/orderflow/hyperliquid/<코인_코인>/<날짜>.duckdb` | `data/live/orderflow/hyperliquid/…` |
 | `hl_positions` | `HL_POS_COINS`(원본과 같다) · `HL_ROOT`(체결 DuckDB 읽기만 -- 그림자는 Rust hl_trades 의 data/live/rtduck/orderflow/hyperliquid) · 🔴`RTDUCK_REST=1` 필수 | `data/hot/rtduck/hl_positions[_코인들].sqlite` | `data/hot/hl_positions[_코인들].sqlite`(가리키면 종료코드 2) |
 | `market_data` | `BOT_SYMBOLS`(미시구조 · 기본 ETHUSDT,BTCUSDT,SOLUSDT) · `TAIL_SYMBOLS`(요격기 · 서버 ETHUSDT) · `COLLECT_MICROSTRUCTURE`·`COLLECT_TAIL_RISK`·`WRITE_DASHBOARD_STATE`(원본과 같다) · 🔴미시구조 REST 는 `RTDUCK_REST=1` 일 때만 | 폴더 `data/live/rtduck/`(`RTDUCK_LIVE_DIR`): `microstructure.duckdb` · `tail_risk.duckdb` · `liq_burst_state.json` · `dashboard_state.json` | `data/live/` 의 같은 이름(가리키면 종료코드 2) |
+| `raster_archive`(예약 · 한 번) | `OF_ROOT`(기본 `data/live/rtcollect/orderflow/raster` = Rust 래스터 그림자) · `OF_ARCHIVE_ROOT` · `OF_RETENTION_DAYS`(14) · `OF_ARCHIVE`(1) · `OF_SYMBOLS`(기본 OF_ROOT 아래 폴더 전부) | `data/live/rtduck/orderflow/raster_archive/<SYM>/<날짜>/<시각>.f32.parquet`·`…_mid.parquet`·`.gz` + `orderbook.duckdb`(뷰 book·book_mid) | `data/live/orderflow/raster(_archive)`(가리키면 종료코드 2) |
+| `liq_tab`(예약 · 한 번) | `LIQ_TAB_LIVE`(기본 `data/live/rtduck`) · `LIQ_TAB_LAKE`(`data/lake` 읽기만) · `LIQ_TAB_HOT`(`data/hot` 읽기만) · `--coin` · 🔴klines 는 `RTDUCK_REST=1` 일 때만(꺼지면 원본 `LIQ_TAB_NO_REST` 처럼 저장된 1h 봉만) | `liq_tab_<코인>.json` · `liq_tab_k1h_<코인>.parquet` · `liq_tab_all.json` | `data/live/liq_tab_*`(LIQ_TAB_LIVE=data/live 면 종료코드 2) |
 
 - 🔧밴 파일(`RTCOLLECT_BAN_FILE`, 기본 `data/live/binance_ban_until`)을 지킨다 -- 원본 롱숏비 워커는 모른다(밴 중에도 보냈다). 의도한 차이 #17.
 - REST 부담 -- 그림자를 켜면 파이썬과 합쳐 **두 배**다(그래서 `tools/shadow_start.sh` 는 REST 종류를 기본으로 안 띄운다 · `RTDUCK_SHADOW_REST=1` 이면 띄움):
@@ -238,8 +241,49 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
 - 둘 다 밴 파일(`RTCOLLECT_BAN_FILE`)을 지키고 `RTCOLLECT_BINANCE_BASE` 로 주소를 바꾼다(시험 = 127.0.0.1 만 -- 아니면 패닉).
 - 🔴liqmap 그림자는 빈 파일에서 시작하면 최근 168시간만 메운다(원본 규칙 그대로) -- 전진 판정 자료(`data/live/liqmap_score.jsonl`)는 파이썬 것이다. 그림자 대조 = 두 파일에서 같은 origin 줄 글자 비교.
 - 값 맞춤의 전제(정답지와 다를 수 있는 곳 -- 결함 고침이 아니라 환경):
-  - 쪽 합 `tot = sum(...)` 은 파이썬 3.11 규칙(차례로 더함). 서버 파이썬이 3.12+ 면 `sum()` 이 Neumaier 보정합이다 -- 정답지에서 보정합으로 바꿔도 `round(v/tot, 6)` 이 갈리는 칸 0(지도 칸 전부 중).
+  - 쪽 합 `tot = sum(...)` 은 파이썬 3.11 규칙(차례로 더함) -- **서버 확인함: 파이썬 3.11.14 · sqlite 3.51.1(2026-11-21)**. 3.12+ 로 올리면 `sum()` 이 Neumaier 보정합이 된다 -- 정답지에서 보정합으로 바꿔도 `round(v/tot, 6)` 이 갈리는 칸 0(지도 칸 전부 중).
   - 원본 `sort_values("ts_ms")` 는 quicksort(안정 아님) -- 같은 ms 청산 여럿이 같은 칸에 들면 더하는 순서만 다를 수 있다(round 2 뒤 차이 0 -- 정답지에 같은 ms 세 거래소 8묶음).
   - `np.exp` = libm(정답지는 `NPY_DISABLE_CPU_FEATURES=X86_V4`). 서버 numpy 가 AVX512 exp 를 쓰면 1ulp 차이가 6자리 반올림을 넘을 수 있다(아주 드묾).
   - 청산 qty 가 NULL 이면 원본은 NaN 을 JSON `NaN` 으로 쓰고 Rust 는 `null`(serde) -- 수집기 셋 다 qty 를 늘 채운다.
 - 요약기가 실패하면(사슬 모양 이상 등) 원본처럼 그 종목 «실패» · 종료코드 1 · 스냅숏 파일은 남는다.
+
+- `soxl_weekend`(rtcollect · 예약 `--record`/`--status`): `SOXL_WEEKEND_OUT`(기본 `data/live/rtcollect/soxl_weekend_forward.jsonl` -- 파이썬 장부 `data/live/soxl_weekend_forward.jsonl` 은 TAKEOVER 때만) ·
+  klines·fundingRate = `RTCOLLECT_REST=1` 일 때만. 판정 `--look`·`--insample` 은 파이썬 원본 그대로(사람이 돌리는 판정 도구 · looks 장부도 파이썬 것). UA 는 원본(urllib 기본)과 다르다(`soxl-weekend-forward`).
+
+## 14. 래스터 보관 · 청산 탭 (2026-11-21 여덟째 조각 -- rtduck, parquet 확장)
+
+- 래스터 보관 = 원본 `_purge_old` 와 같은 파일 이름(`<보관>/<SYM>/<날짜>/<원본 이름>.parquet` · `<원본 이름 줄기>_mid.parquet` · 실패 폴백 `.gz`) · 같은 열·형(ts_ms int64 · bin int32 · qty float · bin_size float / ts_ms · mid) · 같은 행(qty≠0 칸 · -0.0 은 0 · NaN 은 남김) · 같은 뷰 SQL.
+  🔧**의도한 차이 #20**: 새로 쓴 보관본을 다시 읽어 행 수(parquet = 0 아닌 칸 수·mid 행 수 / gzip = 푼 바이트 = 원본)가 맞을 때만 원본을 지운다(원본은 쓰기만 보고 지운다) -- 안 맞으면 보관본을 지우고 원본을 남겨 다음 시간에 다시.
+  이미 보관본이 있을 때는 원본처럼 원본만 지운다(그 보관본은 되읽지 않는다 -- 원본 동작 그대로). 처리 순서: 원본 = 디렉터리 순서(정해지지 않음) · Rust = 이름순(파일마다 따로라 결과는 같다).
+  양방향 확인: Rust duckdb 가 원본(pyarrow)이 쓴 parquet 17개를 같은 행으로 읽음 · 서버 판 파이썬(duckdb 1.5.1 · pyarrow 26.0.1)이 Rust 가 쓴 보관본 20개·orderbook.duckdb 뷰를 같은 값으로 읽음.
+- 청산 탭 = 원본 main() 과 liq_tab_<코인>.json · liq_tab_all.json **글자 일치**(정답지는 서버와 같은 numpy 2.2.5·pandas 2.2.3·OpenBLAS ZEN venv -- `rtmodel/tools/server_env.sh` + duckdb 1.5.1).
+  값 맞춤에서 찾은 것: numpy 합은 8192칸 묶음마다 짝 합(그 묶음 합을 차례로) · `np.convolve(v, ones(11), "same")` = OpenBLAS ddot 꼬리라 창 안 차례 합(길이 < 11 이면 뒤집힌 차례 · 개발기 MKL numpy 는 다른 차례 -- 정답지를 개발기 numpy 로 뜨면 안 된다) ·
+  `np.round(x, d)` = rint(x·10^d)/10^d(파이썬 round 와 다르다) · 서버에 bottleneck 이 없다는 전제(있으면 median 이 bottleneck 경로 -- 값은 같은 식).
+  1h 봉 캐시는 DuckDB 가 쓴 parquet(t int64 · high·low·close·qv double) -- 서버 판 pandas 가 같은 행·형으로 읽음(되돌리기 때 파이썬이 이어 쓸 수 있다).
+  🔴같은 ms 청산이 여럿이면 원본 sort_values(quicksort)와 더하는 순서만 다를 수 있다(정답지엔 없음).
+
+## 15. 예약 종류 그림자 등록 후보 (등록하지 않음 -- 사용자 결정)
+
+`<저장소>` = 서버 저장소 폴더 · 실행 파일 = `bin/rtcollect`·`bin/rtduck`(개발기에서 빌드해 옮긴 것). 로그는 감독 로그와 같은 `logs/supervisor/`. 쓰는 곳은 전부 그림자 기본 경로(원본 파일을 가리키면 종료코드 2).
+
+```
+# rtcollect 예약(한 번 돌고 끝) -- 원본 줄과 같은 시각
+7 * * * *    cd <저장소> && RTCOLLECT_KIND=liqmap_scorer RTCOLLECT_REST=1 bin/rtcollect >> logs/supervisor/rt_liqmap_scorer.log 2>&1
+30 21 * * *  cd <저장소> && RTCOLLECT_KIND=soxl_weekend RTCOLLECT_REST=1 bin/rtcollect --record >> logs/supervisor/rt_soxl_weekend.log 2>&1
+*/10 * * * * cd <저장소> && RTCOLLECT_KIND=cboe_chain RTCOLLECT_REST=1 bin/rtcollect <원본 줄과 같은 종목…> >> logs/supervisor/rt_cboe_chain.log 2>&1
+# (treasury_futures · macro_5m 은 후보에서 뺀다 -- Yahoo 429 위험, 전환 때만)
+# rtduck 예약
+40 * * * *   cd <저장소> && RTDUCK_KIND=raster_archive bin/rtduck >> logs/supervisor/rt_raster_archive.log 2>&1
+<원본 liq_tab 분 + 5> * * * * cd <저장소> && cp -p data/live/liq_tab_k1h_*.parquet data/live/rtduck/ && RTDUCK_KIND=liq_tab bin/rtduck >> logs/supervisor/rt_liq_tab.log 2>&1
+```
+
+| 종류 | 원본이 부르는 REST(한 번) | 그림자 줄대로 켜면 같은 IP 합계 | 메모 |
+|---|---|---|---|
+| liqmap_scorer | 바이낸스 klines 1h×198 1회/시(가중치 2) | ×2 = 2회/시(가중치 4) | REST 를 끄면 할 일이 없다(그래서 켠다 -- 분당 한도 2,400 에 비하면 무시할 양) |
+| soxl_weekend | 새 주말마다 klines 8 + fundingRate 1 = 9요청/주 | ×2 = 18/주 | 끝난 주말이 없으면 0 |
+| cboe_chain(+요약기) | CBOE 체인 종목마다 1/10분 · 바이낸스 klines 1h×169 종목마다 하루 1(캐시) | CBOE ×2 · 바이낸스 ×2(하루 종목 수만큼) | CBOE 한도는 이 저장소에서 실측 안 함 |
+| raster_archive | 없음 | ×1 | 디스크만 · Rust 래스터 그림자 폴더를 보관 -- 그 그림자가 안 돌면 할 일 없음 |
+| liq_tab | klines(코인당 1회/시 · 첫 실행만 몇 쪽) | **×1**(REST 끔) | 파이썬 1h 봉 캐시를 복사해 같은 봉으로 계산 → 두 쪽 liq_tab_<코인>.json 을 글자로 대조. 복사는 파이썬 줄이 끝난 뒤(분 + 5) |
+| treasury_futures · macro_5m | Yahoo 매분·매시 / 5분 | ×2 | 후보에서 뺌(429) |
+
+대조: liqmap = 같은 origin 줄 글자 · soxl = 같은 weekend 줄(recorded_at 빼고) · cboe = cboe_option_state.json 의 종목 칸(generated 시각 빼고) · liq_tab = generated_ms 빼고 글자 · 래스터 보관 = 같은 시각 파일을 두 쪽 duckdb 로 읽은 행.
