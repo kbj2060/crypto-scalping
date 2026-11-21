@@ -21,6 +21,7 @@ const api = new Function("env", "EventSource", "Date", `
   const document = { get hidden() { return env.hidden; } };
   const flowOn = () => ["eth", "btc", "sol", "xrp"].includes(env.activeSnapshotAsset);   // app.js FLOW_ASSETS
   const applySupply1s = () => { env.applied++; }, repaintSupply1sPanel = () => {};
+  const rtSseSupply = (p) => applySupply1s(p);   // 2026-11-21 app.js rtSseSupply 의 «rt 로 안 그리는 중» 갈래(그 갈래는 test_rt_draw_20261121.mjs 가 본다)
   Object.defineProperty(globalThis, "activePageTab", { get: () => env.activePageTab, configurable: true });
   Object.defineProperty(globalThis, "activeSnapshotAsset", { get: () => env.activeSnapshotAsset, configurable: true });
   ${src.slice(i, j)}

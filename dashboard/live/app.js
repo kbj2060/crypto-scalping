@@ -27,6 +27,7 @@ setInterval(() => {
     const b = { ...(m0.order || {}) };
     const mm = (k, a) => { if (!a.length) return; const s = [...a].sort((x, y) => x - y); b[`${k}_n`] = s.length; b[`${k}_med_ms`] = Math.round(s[s.length >> 1]); b[`${k}_max_ms`] = Math.round(s[s.length - 1]); };
     mm("fp", m0.fp); mm("px", m0.px);
+    Object.assign(b, rtReport(rtM, Date.now()), rtDrawReport(Date.now()));   // 2026-11-21 rtcore /rt 그림자(ensureRtStream) · rt 로 그리기(rtDrawTick)
     if (m0.longtask) b.longtask_n = m0.longtask;
     m0.order = null; m0.fp = []; m0.px = []; m0.longtask = 0;
     if (!Object.keys(b).length) return;
@@ -2254,7 +2255,7 @@ function applyDashboardEvent(payload) {
     if (lastAcctSeq != null) refreshBinanceAccount(true, false);
     lastAcctSeq = payload.acct_seq;
   }
-  const tickers = payload?.tickers || {};
+  const tickers = rtD.on ? {} : (payload?.tickers || {});   // 2026-11-21 rt 로 그리는 중이면 rt prices 가 준다(rtDraw)
   Object.entries(tickers).forEach(([asset, ticker]) => {
     const price = Number(ticker?.price || 0);
     if (!(price > 0) || !ASSET_CONFIG[asset]) return;
@@ -4613,7 +4614,15 @@ function resetSupply1sState() {
   supply1sVer += 1;
 }
 
-// 받은 수급 한 덩이를 칸·커서에 얹는다. 폴링과 /api/stream 이 **같은 함수**를 지난다.
+// 바이낸스 OI 1초(rt 에 없는 칸 -- rt 로 그리는 중에도 SSE 가 준다 · rtSseSupply).
+function applyOi1s(rows) {
+  (rows || []).forEach((r) => {
+    oi1s.set(r[0], r[1]);
+    if (r[0] > oi1sSince) oi1sSince = r[0];
+  });
+}
+
+// 받은 수급 한 덩이를 칸·커서에 얹는다. 폴링과 /api/stream(·2026-11-21 rt supply1s)이 **같은 함수**를 지난다.
 function applySupply1s(payload) {
   (payload.seconds || []).forEach((r) => {
     supply1s.set(r[0], r.slice(1));
@@ -4623,10 +4632,7 @@ function applySupply1s(payload) {
     liq1s.set(r[0], [r[1], r[2], r[3], r[4]]);   // [롱수량, 숏수량, 롱USD, 숏USD]
     if (r[0] > liq1sSince) liq1sSince = r[0];
   });
-  (payload.oi || []).forEach((r) => {
-    oi1s.set(r[0], r[1]);
-    if (r[0] > oi1sSince) oi1sSince = r[0];
-  });
+  applyOi1s(payload.oi);
   // OKX 레인. 커서가 각자인 이유는 바이낸스 OI/청산이 각자인 것과 같다 -- 거래소마다
   // 체결 초가 앞서가므로 하나를 공유하면 뒤처진 쪽이 통째로 건너뛰어진다.
   (payload.okx || []).forEach((r) => {
@@ -4710,7 +4716,9 @@ function ensureLiveStream() {
   es.addEventListener("supply", (ev) => {
     if (es !== liveStream) return;                   // 닫힌(옛 코인) 스트림의 늦은 메시지
     liveStreamAt = Date.now();
-    try { applySupply1s(JSON.parse(ev.data)); } catch (e) { console.error("stream supply:", e); return; }
+    let p;
+    try { p = JSON.parse(ev.data); rtSseSupply(p, Date.now()); } catch (e) { console.error("stream supply:", e); return; }   // rt 로 그리는 중이면 oi 만(rtSseSupply)
+    try { rtSse(rtM, p, Date.now()); } catch (e) { /* rt 그림자 재기 -- 실패해도 그리기는 그대로 */ }
     repaintSupply1sPanel();
   });
   es.addEventListener("situation", (ev) => {
@@ -4723,6 +4731,203 @@ function ensureLiveStream() {
   es.onerror = () => {
     if (liveStream === es) { es.close(); liveStream = null; liveStreamRetryAt = Date.now() + 5000; }
   };
+}
+
+// 2026-11-21 rtcore 허브(/rt) «그림자» 구독(docs/rtcore_design_20261120.md §5-4 · M1) -- 받은 것으로 **그리지 않는다**, 재기만 해서 M0 보고에 싣는다:
+//   lat = rt 메시지의 거래소 시각(ex_ms) → 브라우저 받은 시각 · cmp/bad = 같은 닫힌 초의 1초 수급이 SSE(/api/stream supply)와 같은가 ·
+//   lead = 같은 초를 SSE 가 rt 보다 늦게 받은 ms(양수 = rt 가 먼저) · fail/reconn = 붙기 전 실패 · 받다가 끊김.
+//   Cloudflare /rt 규칙이 없으면 404 로 실패한다 -- 5초에서 두 배씩 60초까지 쉬어 콘솔·네트워크를 도배하지 않는다.
+const rtM = { lat: [], cmp: 0, bad: 0, lead: [], fail: 0, reconn: 0, rt: new Map(), sse: new Map(), tcmp: 0, tbad: 0 };   // tcmp·tbad = 이 연결에서 누적(rt 로 그려도 되나 -- rtTrusted)
+let rtWs = null, rtKey = "", rtRetryAt = 0, rtFails = 0;
+function rtSeen(m, src, rows, now) {   // 닫힌 초 [초, 7칸] -- 같은 초가 다시 오면(늦은 체결) 값만 갈고 첫 도착 시각은 둔다
+  const map = m[src];
+  for (const r of rows || []) {
+    if (!Array.isArray(r) || r.length !== 8) continue;
+    const old = map.get(r[0]);
+    map.set(r[0], { v: r.slice(1).join(","), at: old ? old.at : now });
+  }
+  if (map.size > 1500) for (const k of [...map.keys()].sort((a, b) => a - b).slice(0, map.size - 1500)) map.delete(k);
+}
+function rtMeasure(m, msg, now) {
+  if (!msg || typeof msg !== "object") return;
+  if (msg.type !== "snapshot" && msg.ex_ms > 0 && m.lat.length < 2000) m.lat.push(now - msg.ex_ms);
+  rtSeen(m, "rt", msg.type === "snapshot" ? (msg.supply || {}).seconds : msg.type === "supply1s" ? msg.seconds : null, now);
+}
+function rtSse(m, payload, now) { rtSeen(m, "sse", (payload || {}).seconds, now); }
+// 둘 다 받은 지 10초 넘은 초를 견주고 지운다(한쪽만 늦게 온 초를 «어긋남»으로 세지 않게) · 2분 넘게 한쪽에만 있는 초는 버린다.
+//   2026-11-21 틱마다 부른다(rtDrawTick) -- rt 로 그려도 되나(rtTrusted)가 60초 보고 주기를 기다리지 않게. 보고(rtReport)도 먼저 부른다.
+function rtCompare(m, now) {
+  for (const [s, a] of m.rt) {
+    const b = m.sse.get(s);
+    if (b && now - Math.max(a.at, b.at) > 10000) {
+      m.cmp++; m.tcmp++; if (a.v !== b.v) { m.bad++; m.tbad++; }
+      if (m.lead.length < 2000) m.lead.push(b.at - a.at);
+      m.rt.delete(s); m.sse.delete(s);
+    } else if (!b && now - a.at > 120000) m.rt.delete(s);
+  }
+  for (const [s, b] of m.sse) if (!m.rt.has(s) && now - b.at > 120000) m.sse.delete(s);
+}
+// 보고 칸을 돌려주고 비운다.
+function rtReport(m, now) {
+  rtCompare(m, now);
+  const out = {};
+  const q = (k, a, p99) => { if (!a.length) return; const s = [...a].sort((x, y) => x - y); out[`${k}_n`] = s.length; out[`${k}_med_ms`] = Math.round(s[s.length >> 1]); if (p99) out[`${k}_p99_ms`] = Math.round(s[Math.min(s.length - 1, Math.floor(s.length * 0.99))]); };
+  q("rt_lat", m.lat, true); q("rt_lead", m.lead, false);
+  if (m.cmp) { out.rt_cmp_n = m.cmp; out.rt_bad_n = m.bad; }
+  if (m.fail) out.rt_fail_n = m.fail;
+  if (m.reconn) out.rt_reconn_n = m.reconn;
+  m.lat = []; m.lead = []; m.cmp = 0; m.bad = 0; m.fail = 0; m.reconn = 0;
+  return out;
+}
+function ensureRtStream() {
+  const key = activePageTab === "snapshot" && !document.hidden && flowOn() ? activeSnapshotAsset : "";
+  if (rtWs && key !== rtKey) { rtWs.onclose = null; rtWs.close(); rtWs = null; rtM.rt.clear(); rtM.sse.clear(); rtDrawOff(Date.now()); }   // 숨김·코인 바뀜 -- 셈에 안 넣는다 · 그리던 것도 옛 경로로
+  if (!key || rtWs || Date.now() < rtRetryAt || typeof WebSocket !== "function") return;
+  rtKey = key;
+  let ws, got = false;
+  try { ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/rt`); } catch (e) { rtM.fail++; rtRetryAt = Date.now() + 60000; return; }
+  rtWs = ws;
+  rtM.tcmp = 0; rtM.tbad = 0; rtD.fp = null; rtD.at = 0; rtD.rtBuf = [];   // 새 연결은 처음부터 다시 견준다(rtTrusted)
+  ws.onopen = () => { try { ws.send(JSON.stringify({ subscribe: [ASSET_CONFIG[key].symbol.toLowerCase()] })); } catch (e) { /* 닫힘이 뒤따른다 */ } };
+  ws.onmessage = (ev) => {
+    if (ws !== rtWs) return;
+    got = true; rtFails = 0;
+    let msg;
+    try { msg = JSON.parse(ev.data); rtMeasure(rtM, msg, Date.now()); } catch (e) { return; }
+    try { rtDraw(msg, Date.now()); } catch (e) { rtM.tbad++; }   // 처리 실패 = 믿지 않는다(다음 틱에 옛 경로로)
+  };
+  ws.onclose = () => {
+    if (ws !== rtWs) return;
+    rtWs = null;
+    rtDrawOff(Date.now());   // 끊김 -- 그 즉시 옛 경로(다음 틱을 기다리지 않는다)
+    if (got) { rtM.reconn++; rtRetryAt = Date.now() + 5000; return; }
+    rtM.fail++; rtFails++;
+    rtRetryAt = Date.now() + Math.min(60000, 5000 * 2 ** (rtFails - 1));
+  };
+}
+
+// 2026-11-21 «rt 로 그리기»(그림자 다음 단계 · 사용자 «기다리지 말고 바로바로»): 페이지가 **스스로 확인한 일치**일 때만 아래를 rt 자료로 그린다.
+//   믿는 조건(rtTrusted) = 연결이 열려 있고 · 최근 3초 안에 받았고 · 이 연결에서 SSE 와 견준 닫힌 초 ≥ 60 · 어긋남 0.
+//   하나라도 깨지면(3초 침묵 · 어긋남 1건 · 끊김 · 처리 실패) 그 즉시 옛 경로(SSE·폴링)로 -- 받아 둔 SSE 를 다시 얹어 빈 초가 없다.
+//   ① 1초 수급: rt supply1s = applySupply1s 가 받는 모양 그대로(proto.rs Supply1s 이름 = 원본 supply_1s_payload). rt 에 없는 칸(바이낸스 OI `oi`)만 SSE 것.
+//   ② 풋프린트: rt Footprint(= 원본 /api/footprint 합산 · 칸 단위 증분)를 봉 객체로 쌓아 footprintBars·latestFootprint 에 넣고 /api/footprint 묻기를 쉰다.
+//      `ready`(원본 = 백필 끝남 · 코어 = 144봉 다 참 -- 뜻이 다르다)·봉 `agg` 는 옛 경로가 마지막으로 준 값을 둔다(보이는 «수집 중» 띠가 안 바뀌게).
+//      형성 봉: 화면은 그리기 직전에 footprintMergeLive 로 형성 봉을 브라우저 직결 @trade 칸으로 **갈아 끼운다**(더하지 않는다 · WS 가 봉 시작 전부터
+//      붙어 있었을 때만 = footprintLive.since ≤ 봉 시작). 그 규칙은 latestFootprint 의 형성 봉이 어디서 왔든(응답이든 rt 든) 같게 돈다 -- 전체 렌더(footprintForChart)와
+//      형성 봉 부분 칠하기(fpCv.live) 둘 다 fpBarsNow() 위에서 부른다. 그래서 rt 로 그려도 같은 체결이 두 번 세어지지 않는다(test_rt_draw ⑤).
+//   ③ 다른 코인 가격: rt prices(s = "*") → latestLivePriceByAsset (SSE tickers 대신). 지금 코인 현재가는 브라우저 직결 그대로.
+//   Cloudflare /rt 규칙이 없으면 연결이 안 되므로 rtTrusted 가 늘 거짓 -- 지금과 같다.
+const RT_TRUST_N = 60, RT_SILENT_MS = 3000, RT_SSE_KEEP_MS = 10000;
+const rtD = { on: false, since: 0, drawMs: 0, back: 0, at: 0, fp: null, sseBuf: [], rtBuf: [] };   // sseBuf = 켜진 동안 SSE · rtBuf = 꺼진 동안 rt supply1s(둘 다 10초)
+const RT_SYM_ASSET = Object.fromEntries(Object.entries(ASSET_CONFIG).map(([a, c]) => [c.symbol.toLowerCase(), a]));
+const rtTrusted = (now) => !!rtWs && rtWs.readyState === 1 && now - rtD.at < RT_SILENT_MS && rtM.tcmp >= RT_TRUST_N && rtM.tbad === 0 && !!(rtD.fp && rtD.fp.head);
+// rt Footprint 한 건을 봉 객체 Map 에 얹는다(proto.rs Footprint 받는 규칙: full 이면 갈아 끼움 · 칸은 가격으로 덮어씀 · dhl 은 통째로 · drop · 창 넘으면 오래된 것부터).
+//   돌려주는 것 = 바뀐 봉 시각(full 이면 null = 전부).
+function rtFpApply(st, fp) {
+  if (!fp) return [];
+  const { bars, drop, ...head } = fp;
+  st.head = head;
+  if (fp.full) st.bars = new Map();
+  const changed = [];
+  for (const b of bars || []) {
+    const o = st.bars.get(b.time);
+    const lv = new Map((o ? o.levels : []).map((l) => [l[0], l]));
+    for (const l of b.levels || []) lv.set(l[0], l);
+    const nb = { time: b.time, levels: [...lv.values()].sort((x, y) => x[0] - y[0]) };
+    if (b.dhl) nb.dhl = b.dhl;
+    st.bars.set(b.time, nb);
+    changed.push(b.time);
+  }
+  for (const t of drop || []) st.bars.delete(t);
+  const n = Number(head.barsExpected) || 144;
+  if (st.bars.size > n) [...st.bars.keys()].sort((a, b) => a - b).slice(0, st.bars.size - n).forEach((t) => st.bars.delete(t));
+  return fp.full ? null : changed;
+}
+// rt 봉 → 화면 캐시(refreshFootprint 가 쌓는 것과 같은 자리 · 같은 창 자르기 · 창 밖 봉은 1주일로).
+function rtFpToScreen(changed) {
+  const st = rtD.fp;
+  if (!st || !st.head) return;
+  const key = `${activeSnapshotAsset}|${CHART_PAN_BARS}`;
+  if (key !== footprintCacheKey) { footprintBars = new Map(); footprintCacheKey = key; }
+  const keep = (t, b) => { const o = footprintBars.get(t); return o && o.agg && !b.agg ? { ...b, agg: o.agg } : b; };
+  if (changed) { for (const t of changed) { const b = st.bars.get(t); if (b) footprintBars.set(t, keep(t, b)); } }
+  else { const old = footprintBars; footprintBars = new Map(); for (const [t, b] of st.bars) { const o = old.get(t); footprintBars.set(t, o && o.agg && !b.agg ? { ...b, agg: o.agg } : b); } }
+  const wk = fpWeekFor();
+  for (const t of [...footprintBars.keys()]) if (!st.bars.has(t)) { if (wk && st.bars.size && t < Math.min(...st.bars.keys())) wk.bars.set(t, footprintBars.get(t)); footprintBars.delete(t); }
+  const h = st.head, prev = latestFootprint || {};
+  latestFootprint = {
+    ...prev, full: false, bucket: h.bucket, barSeconds: h.barSeconds, barsExpected: h.barsExpected,
+    retailMaxUsd: h.retailMaxUsd, whaleMinUsd: h.whaleMinUsd, symbol: ASSET_CONFIG[activeSnapshotAsset].symbol,
+    venues: h.okxFrom ? ["binance-perp", "okx-swap"] : ["binance-perp"], okxLive: null,
+    ready: prev.ready != null ? prev.ready : !!h.ready,
+    bars: [...footprintBars.values()].sort((a, b) => a.time - b.time),
+  };
+  scheduleSnapshotChartRender();
+}
+// rt 메시지 하나. 풋프린트 rt 상태는 그림자일 때도 쌓는다(믿게 되는 순간 바로 바꿔 그릴 수 있게).
+function rtDraw(msg, now) {
+  if (!msg || typeof msg !== "object") return;
+  rtD.at = now;
+  if (msg.type === "snapshot") {
+    rtD.fp = { head: null, bars: new Map() };
+    rtFpApply(rtD.fp, msg.footprint);
+    if (rtD.on) { rtFpToScreen(null); applySupply1s(msg.supply); repaintSupply1sPanel(); }
+  } else if (msg.type === "footprint") {
+    if (!rtD.fp) return;
+    const ch = rtFpApply(rtD.fp, msg);
+    if (rtD.on) rtFpToScreen(ch);
+  } else if (msg.type === "supply1s") {
+    if (rtD.on) { applySupply1s(msg); repaintSupply1sPanel(); return; }
+    // 그림자 동안 10초를 들고 있다 -- 켜지는 틱에 얹는다(rt 가 SSE 보다 먼저 받으므로 «rt 는 지나갔고 SSE 는 아직» 인 초가 비지 않게).
+    //   applySupply1s 는 칸마다 초 단위 덮어쓰기(닫힌 초·진행 초·청산·OKX·현물·Bybit 전부 Map.set)라 받은 차례대로 다시 얹으면 마지막 값이 남는다.
+    rtD.rtBuf.push({ at: now, m: msg });
+    while (rtD.rtBuf.length && now - rtD.rtBuf[0].at > RT_SSE_KEEP_MS) rtD.rtBuf.shift();
+  } else if (msg.type === "prices") {
+    if (!rtD.on) return;
+    for (const [sym, px, ex] of msg.rows || []) {
+      const a = RT_SYM_ASSET[sym];
+      if (!a || !(px > 0)) continue;
+      latestLivePriceByAsset[a] = px;
+      latestLivePriceTsByAsset[a] = new Date(ex).toISOString();
+    }
+    maybeRenderSnapshotChartNow();
+  }
+}
+// SSE supply 한 덩이: 옛 경로면 그대로 얹고, rt 로 그리는 중이면 rt 에 없는 칸(oi)만 얹고 10초를 들고 있는다(돌아갈 때 다시 얹는다).
+function rtSseSupply(p, now) {
+  if (!rtD.on) { applySupply1s(p); return; }
+  applyOi1s(p.oi);
+  rtD.sseBuf.push({ at: now, p });
+  while (rtD.sseBuf.length && now - rtD.sseBuf[0].at > RT_SSE_KEEP_MS) rtD.sseBuf.shift();
+}
+function rtDrawOff(now) {
+  if (!rtD.on) return;
+  rtD.on = false; rtD.back++; rtD.drawMs += now - rtD.since; rtD.rtBuf = [];
+  // 들고 있던 SSE 를 다시 얹는다 -- 진행 중인 초(partial)는 빼고(rt 가 더 새 값을 이미 그렸다 · 다음 SSE 가 곧 준다)
+  for (const { p } of rtD.sseBuf) applySupply1s({ ...p, partial: {} });
+  rtD.sseBuf = [];
+  footprintLastFetchAt = 0;   // 다음 틱에 바로 /api/footprint(받아 둔 봉 위에 since 로 이어받는다 -- 화면은 그대로)
+  repaintSupply1sPanel();
+}
+// 틱마다: 견주고, 믿을 수 있으면 rt 로 · 아니면 옛 경로로(같은 틱 안에서 바꾼다).
+function rtDrawTick(now) {
+  rtCompare(rtM, now);
+  if (rtTrusted(now)) {
+    if (!rtD.on) {
+      rtD.on = true; rtD.since = now; rtD.sseBuf = [];
+      for (const { m } of rtD.rtBuf) applySupply1s(m);   // 그림자 동안 들고 있던 rt 10초(받은 차례 · 늦은 체결로 다시 온 초도 마지막 값)
+      rtD.rtBuf = [];
+      rtFpToScreen(null); repaintSupply1sPanel();
+    }
+  } else rtDrawOff(now);
+}
+// M0 보고 칸: 60초 중 rt 로 그린 초 · 옛 경로로 돌아간 횟수.
+function rtDrawReport(now) {
+  const ms = rtD.drawMs + (rtD.on ? now - rtD.since : 0), out = {};
+  if (ms > 0) out.rt_draw_s = Math.round(ms / 1000);
+  if (rtD.back) out.rt_back_n = rtD.back;
+  rtD.drawMs = 0; rtD.back = 0; if (rtD.on) rtD.since = now;
+  return out;
 }
 
 // ── 옵션 카드 · 차트 머리 칩 · 가격축 표시 (2026-09-28 사용자 선택 A+C) ───────────────────────────────
@@ -6530,6 +6735,7 @@ let footprintCacheKey = "";             // 코인|창 -- 달라지면 캐시를 
 let footprintInFlight = false;   // 터널이 멎으면 400ms 폴링이 쌓였다가 순서 없이 풀려 옛 응답(전량 포함)이 형성 봉을 되돌렸다
 async function refreshFootprint() {
   if (!flowOn()) return;   // 흐름 엔진이 있는 코인만
+  if (rtD.on) return;      // 2026-11-21 rt 로 그리는 중(rtFpToScreen) -- 묻기를 쉰다
   const now = Date.now();
   if (footprintInFlight || now - footprintLastFetchAt < FOOTPRINT_POLL_MS) return;
   footprintLastFetchAt = now;
@@ -11508,6 +11714,8 @@ async function tick() {
   tickInFlight = true;
   try {
     ensureLiveStream();              // 2026-09-24 수급·상황 밀어주기 (탭/코인/가시성 변화가 여기로 수렴)
+    ensureRtStream();                // 2026-11-21 rtcore /rt 구독(그림자 재기 + 믿을 수 있을 때만 rt 로 그리기 · rtDrawTick)
+    rtDrawTick(Date.now());
     refreshNotifyCenter();           // 2026-10-05 종 옆 점(판정일·새 알림) -- 탭과 무관 (자체 5분 게이트)
     // 2026-11-02 탭이 스냅샷 하나뿐이라 가드는 사실상 항상 참 -- 폴링을 멈추는 건 document.hidden(위)이다.
     if (activePageTab === "snapshot") {
@@ -11569,6 +11777,7 @@ document.addEventListener("visibilitychange", () => {
     disconnectDashboardEvents();
     ensurePriceWs();   // 숨으면 닫는다 -- 백그라운드 탭이 초당 수백 메시지를 받을 이유가 없다
     ensureLiveStream();
+    ensureRtStream();
     return;
   }
   connectDashboardEvents();
