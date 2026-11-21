@@ -91,6 +91,7 @@ def main() -> None:
     msgs, checks = [], []
     empty = {7, 8, 23, 44, 64}                     # 메시지 없는 분(체결 없음) -- 64 는 5분봉 마지막 분(65분 끝)
     reconnect_before = 50                          # 이 분 앞에서 재연결(코어는 모은 종가를 버린다)
+    lost = {48, 49}                                # 끊긴 사이의 분 -- 체결은 있었다(REST 에는 진짜 종가) · 코어는 메시지를 못 받음(2026-11-21 «재연결에도 종가를 안 버림» 대조)
     for i in range(90):
         open_ms = T0 + i * 60_000
         if i in empty:
@@ -99,6 +100,8 @@ def main() -> None:
         px = round(px * (1 + rng.gauss(0, 0.0008)), 2)
         cs = f"{px:.2f}" if rng.random() < 0.8 else f"{px:.3f}"   # 글자 꼴 섞음(종가는 글자 그대로 실린다)
         series.append((open_ms, float(cs), cs))
+        if i in lost:
+            continue
         if i == reconnect_before:
             msgs.append({"kind": "reconnect"})
         for _ in range(rng.randint(0, 2)):          # 형성 중 갱신(x=false) -- 코어는 안 쓴다
@@ -116,7 +119,7 @@ def main() -> None:
         lb = last_bar(closed_5m, rx / 1000)
         checks.append({"after": len(msgs), "minute": i, "vol_py": realized_vol_bpm(closes) if len(series) >= EXIT_VOL_WINDOW + 1 else None,
                        "last_bar": list(lb) if lb else None})
-    out["kline"] = {"symbol": sym.lower(), "msgs": msgs, "checks": checks, "empty": sorted(empty), "reconnect_before": reconnect_before}
+    out["kline"] = {"symbol": sym.lower(), "msgs": msgs, "checks": checks, "empty": sorted(empty), "lost": sorted(lost), "reconnect_before": reconnect_before}
     # ② 호가
     books = []
     for i in range(20):

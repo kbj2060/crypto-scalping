@@ -30,7 +30,7 @@ fn vol_and_bar5m_match_python() {
     let mut rx = st.tx.subscribe();
     let msgs = k["msgs"].as_array().unwrap();
     let checks = k["checks"].as_array().unwrap();
-    let (mut ci, mut since, mut same, mut fallback, mut bars) = (0, 0usize, 0, 0, 0);
+    let (mut ci, mut since, mut same, mut fallback, mut bars, mut stale5) = (0, 0usize, 0, 0, 0, 0);
     for (i, m) in msgs.iter().enumerate() {
         if m["kind"] == "reconnect" {
             st.kline_reset(&sym); // feed 가 @kline_1m 접속마다 부르는 것
@@ -59,8 +59,14 @@ fn vol_and_bar5m_match_python() {
                 }
             }
             let lb = c["last_bar"].as_array().map(|a| (a[0].as_i64().unwrap(), a[1].as_f64().unwrap()));
-            assert_eq!(st.quote(&sym).unwrap().bar5m, lb, "분 {minute}: 마감된 5분봉 종가");
-            bars += lb.is_some() as usize;
+            let got5 = st.quote(&sym).unwrap().bar5m;
+            // 끊긴 사이에 5분봉 마지막 분을 놓쳤으면 코어는 그 5분봉 종가를 모른다 -- 옛 봉에 머문다(지어내지 않는다 · rtorder 는 끝 초로 나이를 안다)
+            let lost_end = |e: i64| k["lost"].as_array().unwrap().iter().any(|m| (fx["t0"].as_i64().unwrap() / 1000 + m.as_i64().unwrap() * 60 + 60) == e);
+            match (got5, lb) {
+                (g, w) if g == w => bars += w.is_some() as usize,
+                (Some(g), Some(w)) if g.0 < w.0 && lost_end(w.0) => stale5 += 1,
+                (g, w) => panic!("분 {minute}: 마감된 5분봉 종가 rust {g:?} != python {w:?}"),
+            }
             ci += 1;
         }
     }
@@ -76,7 +82,8 @@ fn vol_and_bar5m_match_python() {
     let n_closed = msgs.iter().filter(|m| m["text"].as_str().is_some_and(|t| serde_json::from_str::<Value>(t).unwrap()["k"]["x"] == true)).count();
     assert_eq!(pushed, n_closed, "마감 봉마다 Kline 하나(형성 중 갱신은 안 민다)");
     assert!(same > 20 && fallback > 0 && bars > 10, "대조가 얇다: 같음 {same} · 없음 {fallback} · 5분봉 {bars}");
-    println!("1분 변동성: 같음 {same} · 31개 전이라 없음 {fallback} · 5분봉 종가 대조 {bars} · 빈 분 {:?}", k["empty"]);
+    assert!(stale5 > 0, "끊긴 사이 5분봉 끝 분을 놓친 사례가 정답지에 있어야 한다");
+    println!("1분 변동성: 같음 {same} · 31개 전이라 없음 {fallback} · 5분봉 종가 대조 {bars} · 끊겨서 옛 5분봉 {stale5} · 빈 분 {:?} · 끊긴 분 {:?}", k["empty"], k["lost"]);
 }
 
 #[test]
@@ -211,4 +218,21 @@ fn liq5m_matches_python() {
     assert_eq!(pushed, want, "스냅숏 + 밀기로 지은 것");
     println!("5분봉 청산 원: 봉 {} 일치(파이썬 창 {}봉 중 이벤트 있는 봉)", want.len(), l["payload_bars"]);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 가격 0 인 초(2026-11-21 «1초 가격에 0 도 넣음» 대조): 주문 묶음이 열린 채 660초 넘게 체결이 없다가 닫히면, 크기 칸이 주문의 첫 체결 초에
+/// 다시 만들어진다(링이 이미 지운 초 -- supply.rs sec_cell). 그 칸은 가격 칸이 0 이다 -- 파이썬 sec_prices 는 `if c[6]` 로 뺀다.
+#[test]
+fn sec_prices_skip_zero_price_second() {
+    let st = State::new(&["ethusdt".to_string()], 16, 1 << 16);
+    let t0: i64 = 1_763_700_000_000;
+    let tr = |t: i64, id: u64, p: &str, q: &str| serde_json::json!({"e": "trade", "E": t, "T": t, "s": "ETHUSDT", "t": id, "p": p, "q": q, "X": "MARKET", "m": false}).to_string();
+    apply(&st, &tr(t0, 1, "3000.00", "40.000"), t0); // 고래 주문 시작(열린 채)
+    apply(&st, &tr(t0 + 700_000, 2, "3001.00", "0.100"), t0 + 700_000); // 700초 뒤 다른 가격 -- 앞 주문을 닫는다
+    let cells = st.supply_cells("ethusdt").unwrap();
+    let old = cells.iter().find(|c| c.0 == t0 / 1000).expect("닫힌 주문의 크기 칸이 첫 체결 초에 다시 생긴다");
+    assert_eq!(old.1[6], 0.0, "그 초의 가격 칸은 0");
+    assert!(old.1[2] > 0.0, "고래 매수 칸");
+    let got = st.sec_prices("ethusdt").unwrap();
+    assert_eq!(got, vec![((t0 + 700_000) / 1000, 3001.0)], "가격 0 인 초는 뺀다(server.py `if c[6]`)");
 }
