@@ -68,7 +68,7 @@ fn cron_collectors_match_python() {
         std::fs::write(d.join("cboe").join(s).join("last_seqno"), v.as_str().unwrap()).unwrap();
     }
     let args: Vec<String> = inp["cboe_args"].as_array().unwrap().iter().map(|a| a.as_str().unwrap().to_string()).collect();
-    let (rc_c, _) = rtcollect::cron::cboe(&args, &d.join("cboe"), "http://h", &mut get, clock.get());
+    let (rc_c, _) = rtcollect::cron::cboe(&args, &d.join("cboe"), "http://h", &mut get, clock.get(), &mut |_| Ok(())); // 정답지는 요약기를 막았다(cboe_summary_parity 가 따로 본다)
     assert_eq!(serde_json::json!({"treasury_5d": rc_t5, "treasury_1d": rc_t1, "macro": rc_m, "cboe": rc_c}), gold["rc"], "종료코드");
     assert_eq!(Value::from(reqs.borrow().clone()), gold["requests"], "요청 열");
     for (k, f) in [("treasury", "treasury_futures.sqlite"), ("macro", "macro_5m.sqlite")] {
@@ -127,7 +127,8 @@ fn cron_binaries_against_fake_http() {
     let run = |kind: &str, extra: &[(&str, String)], args: &[&str]| {
         let mut c = std::process::Command::new(env!("CARGO_BIN_EXE_rtcollect"));
         c.env("RTCOLLECT_KIND", kind).env("RTCOLLECT_TEST", "1").env("RTCOLLECT_YAHOO_BASE", &base).env("RTCOLLECT_CBOE_BASE", &base)
-            .env("TREASURY_FUTURES_DB", d.join("t.sqlite")).env("MACRO_5M_DB", d.join("m.sqlite")).env("CBOE_OUT", d.join("cboe")).args(args);
+            .env("TREASURY_FUTURES_DB", d.join("t.sqlite")).env("MACRO_5M_DB", d.join("m.sqlite")).env("CBOE_OUT", d.join("cboe"))
+            .env("RTCOLLECT_BINANCE_BASE", &base).env("CBOE_STATE", d.join("cboe_state.json")).env("CBOE_RV_CACHE", d.join("rv.json")).args(args);
         for (k, v) in extra {
             c.env(k, v);
         }
@@ -135,7 +136,10 @@ fn cron_binaries_against_fake_http() {
     };
     assert_eq!(run("treasury_futures", &[], &["--range", "5d"]).status.code(), Some(0));
     assert_eq!(run("macro_5m", &[("RTCOLLECT_MACRO_GAP_S", "0".into())], &[]).status.code(), Some(0));
-    assert_eq!(run("cboe_chain", &[], &["SNDK"]).status.code(), Some(1), "MU 500 = 1");
+    let cb = run("cboe_chain", &[], &["SNDK"]);
+    // 가짜 사슬(cron 정답지)은 요약기에 넣을 모양이 아니라 요약기가 실패를 찍는다 = 실행 파일이 요약기를 부른다는 확인(값은 cboe_summary_parity)
+    assert!(String::from_utf8_lossy(&cb.stdout).contains("SNDK 실패 ValueError"), "{}", String::from_utf8_lossy(&cb.stdout));
+    assert_eq!(cb.status.code(), Some(1), "MU 500 = 1");
     let bad = run("treasury_futures", &[("RTCOLLECT_YAHOO_BASE", "https://query1.finance.yahoo.com".into())], &[]);
     assert!(!bad.status.success() && String::from_utf8_lossy(&bad.stderr).contains("127.0.0.1 만"), "바깥 주소면 멈춘다");
     let s = seen.lock().unwrap().clone();
@@ -144,5 +148,6 @@ fn cron_binaries_against_fake_http() {
     let n: i64 = Connection::open(d.join("t.sqlite")).unwrap().query_row("SELECT count(*) FROM polls", [], |r| r.get(0)).unwrap();
     assert_eq!(n, 4);
     assert!(d.join("cboe/SNDK/last_seqno").exists());
-    let _ = std::fs::remove_dir_all(&d);
+    assert!(!d.join("rv.json").exists(), "REST 꺼짐 → klines 안 부르고 캐시도 안 씀");
+    let _ =std::fs::remove_dir_all(&d);
 }

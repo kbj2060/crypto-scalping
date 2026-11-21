@@ -35,7 +35,7 @@ use std::time::Duration;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::task::JoinSet;
 
-const KINDS: &str = "binance_tape|bybit_liq|bybit_tape|okx_tape|okx_ctx|binance_ctx|xyz|hl_ctx|hl_bt|depth|raster|ob5m|bookdepth|iceberg|treasury_futures|macro_5m|cboe_chain";
+const KINDS: &str = "binance_tape|bybit_liq|bybit_tape|okx_tape|okx_ctx|binance_ctx|xyz|hl_ctx|hl_bt|depth|raster|ob5m|bookdepth|iceberg|treasury_futures|macro_5m|cboe_chain|liqmap_scorer";
 
 fn env_f(k: &str, d: f64) -> f64 {
     std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
@@ -101,6 +101,7 @@ fn main() {
             "ob5m" | "bookdepth" => run_book_worker(&kind),
             "iceberg" => run_iceberg(),
             "treasury_futures" | "macro_5m" | "cboe_chain" => run_cron(&kind),
+            "liqmap_scorer" => run_liqmap(),
             k => die(2, &format!("RTCOLLECT_KIND={k} -- {KINDS}")),
         }
     });
@@ -543,8 +544,65 @@ fn run_cron(kind: &str) -> ! {
                 die(2, &format!("🔴{} 는 파이썬 수집기의 폴더다 -- 전환 때만 RTCOLLECT_TAKEOVER=1", out.display()));
             }
             let b = rtcollect::cron::base("RTCOLLECT_CBOE_BASE", rtcollect::cron::CBOE);
-            rtcollect::cron::cboe(&args, &out, &b, &mut get, rtcollect::rest::wall_s()).0
+            // 요약기 → CBOE_STATE(기본 data/live/rtcollect/cboe_option_state.json) · 실현변동성 캐시 CBOE_RV_CACHE · 바이낸스 klines 는 RTCOLLECT_REST=1 일 때만(밴 파일 지킴)
+            let state = PathBuf::from(env_s("CBOE_STATE", "data/live/rtcollect/cboe_option_state.json"));
+            if state.ends_with("data/live/cboe_option_state.json") && env_s("RTCOLLECT_TAKEOVER", "") != "1" {
+                die(2, &format!("🔴{} 는 파이썬 요약기의 파일이다 -- 전환 때만 RTCOLLECT_TAKEOVER=1", state.display()));
+            }
+            let cache = PathBuf::from(env_s("CBOE_RV_CACHE", "data/live/rtcollect/cboe_rv7_cache.json"));
+            let mut klines = binance_rest("crypto-scalping-collector/1.0");
+            let mut after = |p: &std::path::Path| {
+                let now = rtcollect::rest::wall_s();
+                rtcollect::cboe_summary::write_state(p, &state, now, &mut |sym: &str| rtcollect::cboe_summary::realized_vol_7d(sym, &cache, now, &mut klines))
+            };
+            rtcollect::cron::cboe(&args, &out, &b, &mut get, rtcollect::rest::wall_s(), &mut after).0
         }
     };
     std::process::exit(code)
+}
+
+/// 바이낸스 선물 REST GET(timeout 20 -- 원본 둘 다 urlopen(timeout=20)). 🔴RTCOLLECT_REST=1 일 때만 · 밴 파일(RTCOLLECT_BAN_FILE) 지킴 ·
+/// RTCOLLECT_BINANCE_BASE = 주소 앞부분(시험 = 127.0.0.1 가짜 서버). 4xx·5xx = Err(원본 HTTPError).
+fn binance_rest(ua: &'static str) -> impl FnMut(&str) -> Result<Vec<u8>, String> {
+    let (rest, ban) = (env_s("RTCOLLECT_REST", "") == "1", PathBuf::from(env_s("RTCOLLECT_BAN_FILE", "data/live/binance_ban_until")));
+    let kbase = rtcollect::cron::base("RTCOLLECT_BINANCE_BASE", rtcollect::cboe_summary::BINANCE);
+    let kagent = rtcollect::rest::agent(Duration::from_secs(20));
+    move |u: &str| -> Result<Vec<u8>, String> {
+        if !rest {
+            return Err("REST 꺼짐".into());
+        }
+        let now = rtcollect::rest::wall_s();
+        if rtcollect::rest::ban_left(&ban, now) > 0.0 {
+            return Err("binance IP ban".into());
+        }
+        let u = u.replacen(rtcollect::cboe_summary::BINANCE, &kbase, 1);
+        let mut r = kagent.get(&u).header("User-Agent", ua).call().map_err(|e| e.to_string())?;
+        let st = r.status().as_u16();
+        let body = r.body_mut().read_to_string().map_err(|e| e.to_string())?;
+        rtcollect::rest::ban_note(&ban, st, &body, None, now);
+        if st >= 400 { Err(format!("HTTP {st}")) } else { Ok(body.into_bytes()) }
+    }
+}
+
+/// 청산지도 전진 점수(live_liqmap_scorer_20261008 -- cron 매시 07분 · 한 번 돌고 끝). LIQMAP_OUT(기본 data/live/rtcollect/liqmap_score.jsonl) ·
+/// LIQMAP_STATUS(기본 …/liqmap_score_status.json) · LIQMAP_HOT(기본 data/hot -- 읽기만). 파이썬 파일(data/live/liqmap_score*.json*)은 RTCOLLECT_TAKEOVER=1 일 때만.
+/// 🔴klines REST(시간당 1번 · limit 198) 없이는 할 일이 없다 -- RTCOLLECT_REST=1 이 아니면 그 말만 찍고 0 으로 끝난다.
+fn run_liqmap() -> ! {
+    let out = PathBuf::from(env_s("LIQMAP_OUT", "data/live/rtcollect/liqmap_score.jsonl"));
+    let status = PathBuf::from(env_s("LIQMAP_STATUS", "data/live/rtcollect/liqmap_score_status.json"));
+    if (out.ends_with("data/live/liqmap_score.jsonl") || status.ends_with("data/live/liqmap_score_status.json")) && env_s("RTCOLLECT_TAKEOVER", "") != "1" {
+        die(2, "🔴data/live/liqmap_score* 는 파이썬 기록기의 파일이다(전진 판정 자료) -- 전환 때만 RTCOLLECT_TAKEOVER=1");
+    }
+    if env_s("RTCOLLECT_REST", "") != "1" {
+        println!("RTCOLLECT_REST 꺼짐 -- klines 없이는 할 일이 없다");
+        std::process::exit(0)
+    }
+    let hot = PathBuf::from(env_s("LIQMAP_HOT", "data/hot"));
+    match rtcollect::liqmap_scorer::run(&out, &status, &hot, wall_s(), &mut binance_rest("liqmap-scorer")) {
+        Ok(m) => {
+            println!("{m}");
+            std::process::exit(0)
+        }
+        Err(e) => die(1, &e),
+    }
 }

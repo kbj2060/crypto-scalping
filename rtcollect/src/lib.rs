@@ -17,11 +17,13 @@ pub mod bookdepth;
 pub mod bt;
 pub mod bybit_liq;
 pub mod bybit_tape;
+pub mod cboe_summary;
 pub mod cron;
 pub mod depth;
 pub mod net;
 pub mod hl_ctx;
 pub mod iceberg;
+pub mod liqmap_scorer;
 pub mod ob5m;
 pub mod okx;
 pub mod okx_ctx;
@@ -187,16 +189,21 @@ pub fn py_float_repr(x: f64) -> String {
 
 /// 파이썬 `json.dumps(v, separators=(",", ":"))`(ensure_ascii=True): 열쇠 순서 그대로(serde_json preserve_order) · 비 ASCII 는 \uXXXX(대리쌍).
 pub(crate) fn py_dumps(v: &Value) -> String {
-    dumps_sep(v, (",", ":"))
+    dumps_sep(v, (",", ":"), true)
 }
 
 /// 파이썬 `json.dumps(v)` 기본 모양(", " · ": ") -- 그 밖은 `py_dumps` 와 같다(rtduck 의 상태 JSON).
 pub fn py_dumps_default(v: &Value) -> String {
-    dumps_sep(v, (", ", ": "))
+    dumps_sep(v, (", ", ": "), true)
 }
 
-fn dumps_sep(v: &Value, sep: (&str, &str)) -> String {
-    fn s(out: &mut String, t: &str) {
+/// 파이썬 `json.dumps(v, ensure_ascii=False)` -- 기본 모양 · 비 ASCII 글자는 그대로(제어 문자·따옴표·역빗금만 이스케이프).
+pub fn py_dumps_default_utf8(v: &Value) -> String {
+    dumps_sep(v, (", ", ": "), false)
+}
+
+fn dumps_sep(v: &Value, sep: (&str, &str), ascii: bool) -> String {
+    fn s(out: &mut String, t: &str, ascii: bool) {
         out.push('"');
         for c in t.chars() {
             match c {
@@ -207,7 +214,7 @@ fn dumps_sep(v: &Value, sep: (&str, &str)) -> String {
                 '\t' => out.push_str("\\t"),
                 '\u{08}' => out.push_str("\\b"),
                 '\u{0c}' => out.push_str("\\f"),
-                c if (c as u32) < 0x20 || (c as u32) > 0x7e => {
+                c if (c as u32) < 0x20 || (ascii && (c as u32) > 0x7e) => {
                     let mut b = [0u16; 2];
                     for u in c.encode_utf16(&mut b) {
                         out.push_str(&format!("\\u{u:04x}"));
@@ -218,7 +225,7 @@ fn dumps_sep(v: &Value, sep: (&str, &str)) -> String {
         }
         out.push('"');
     }
-    fn go(out: &mut String, v: &Value, sep: (&str, &str)) {
+    fn go(out: &mut String, v: &Value, sep: (&str, &str), ascii: bool) {
         match v {
             Value::Null => out.push_str("null"),
             Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
@@ -227,14 +234,14 @@ fn dumps_sep(v: &Value, sep: (&str, &str)) -> String {
                 (_, Some(u)) => out.push_str(&u.to_string()),
                 _ => out.push_str(&py_float_repr(n.as_f64().unwrap())),
             },
-            Value::String(t) => s(out, t),
+            Value::String(t) => s(out, t, ascii),
             Value::Array(a) => {
                 out.push('[');
                 for (i, x) in a.iter().enumerate() {
                     if i > 0 {
                         out.push_str(sep.0);
                     }
-                    go(out, x, sep);
+                    go(out, x, sep, ascii);
                 }
                 out.push(']');
             }
@@ -244,16 +251,16 @@ fn dumps_sep(v: &Value, sep: (&str, &str)) -> String {
                     if i > 0 {
                         out.push_str(sep.0);
                     }
-                    s(out, k);
+                    s(out, k, ascii);
                     out.push_str(sep.1);
-                    go(out, x, sep);
+                    go(out, x, sep, ascii);
                 }
                 out.push('}');
             }
         }
     }
     let mut out = String::new();
-    go(&mut out, v, sep);
+    go(&mut out, v, sep, ascii);
     out
 }
 

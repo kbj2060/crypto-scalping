@@ -227,3 +227,19 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
 - 장 달력(market_data 의 dashboard_state 세션 칸): `rtduck/src/sessions.json` = **서버 판 pandas_market_calendars 5.3.1.1** 의 JPX·LSE·NYSE schedule(2024~2035 · 표 `_source` 에 판이 적힌다 · 다시 뜨기 = `rtduck/tools/server_env.sh` venv 로 `tools/gen_sessions.py`). 개발기 5.4.0 판과 비교: JPX 2,931 · LSE 3,035 · NYSE 3,012 거래일이 **날짜·개장·마감·점심까지 하나도 다르지 않다**(2026-11-21). 범위 밖 날짜는 원본 예외 길(UTC 시각 규칙)이라 원본과 다를 수 있다.
 - 🔴묶은 DuckDB(Rust)에는 ICU 가 없다: `TIMESTAMPTZ - INTERVAL` 이 Binder Error 라 부트스트랩(«최근 30분·60분·5분»)을 epoch µs 비교로 썼다(같은 순간 비교). 서버 SQL·seal_to_lake 는 파이썬 duckdb(ICU 있음)로 Rust 파일을 읽으니 상관없다.
 - 분 저장(요격기·미시구조)은 원본이 지역 시각 `datetime.now()` 의 분·초로 정한다 -- 정답지는 TZ=Asia/Seoul(서버와 같다 · 일광절약 없음)로 만들어 Rust(UTC 분·초)와 같음을 고정했다. 오프셋이 분 단위인 시간대(실제 시간대는 모두 그렇다 · +05:45 도)면 «분이 바뀐 첫 15초» 판정과 저장 시각이 같다. 일광절약 전환 시각에는 지역 분이 같아도 순간이 한 시간 건너뛰어 원본 쪽이 한 분을 다르게 볼 수 있다(서버 KST 는 없음).
+
+## 13. 계산 기록기 — CBOE 요약기 · 청산지도 점수 (2026-11-21 일곱째 조각)
+
+| 종류 | 원본 | 쓰는 파일(기본 · 원본 경로는 `RTCOLLECT_TAKEOVER=1` 일 때만) | REST |
+|---|---|---|---|
+| `cboe_chain`(+요약기) | `collect_cboe_option_chain` 저장 직후 `cboe_option_summary_20261101.write_state` | `CBOE_STATE` = `data/live/rtcollect/cboe_option_state.json` · `CBOE_RV_CACHE` = `data/live/rtcollect/cboe_rv7_cache.json` | CBOE 체인(원본과 같다) + 🔴바이낸스 klines 1h×169(실현변동성 · 종목마다 · 캐시 하루) = `RTCOLLECT_REST=1` 일 때만 -- 꺼지면 `rv7: null` |
+| `liqmap_scorer` | `live_liqmap_scorer_20261008`(매시 07분) | `LIQMAP_OUT` = `data/live/rtcollect/liqmap_score.jsonl` · `LIQMAP_STATUS` = `…/liqmap_score_status.json` · `LIQMAP_HOT`(읽기만, 기본 `data/hot`) | 🔴바이낸스 klines 1h×198 시간당 1회 -- `RTCOLLECT_REST=1` 이 아니면 «할 일 없음» 찍고 0 |
+
+- 둘 다 밴 파일(`RTCOLLECT_BAN_FILE`)을 지키고 `RTCOLLECT_BINANCE_BASE` 로 주소를 바꾼다(시험 = 127.0.0.1 만 -- 아니면 패닉).
+- 🔴liqmap 그림자는 빈 파일에서 시작하면 최근 168시간만 메운다(원본 규칙 그대로) -- 전진 판정 자료(`data/live/liqmap_score.jsonl`)는 파이썬 것이다. 그림자 대조 = 두 파일에서 같은 origin 줄 글자 비교.
+- 값 맞춤의 전제(정답지와 다를 수 있는 곳 -- 결함 고침이 아니라 환경):
+  - 쪽 합 `tot = sum(...)` 은 파이썬 3.11 규칙(차례로 더함). 서버 파이썬이 3.12+ 면 `sum()` 이 Neumaier 보정합이다 -- 정답지에서 보정합으로 바꿔도 `round(v/tot, 6)` 이 갈리는 칸 0(지도 칸 전부 중).
+  - 원본 `sort_values("ts_ms")` 는 quicksort(안정 아님) -- 같은 ms 청산 여럿이 같은 칸에 들면 더하는 순서만 다를 수 있다(round 2 뒤 차이 0 -- 정답지에 같은 ms 세 거래소 8묶음).
+  - `np.exp` = libm(정답지는 `NPY_DISABLE_CPU_FEATURES=X86_V4`). 서버 numpy 가 AVX512 exp 를 쓰면 1ulp 차이가 6자리 반올림을 넘을 수 있다(아주 드묾).
+  - 청산 qty 가 NULL 이면 원본은 NaN 을 JSON `NaN` 으로 쓰고 Rust 는 `null`(serde) -- 수집기 셋 다 qty 를 늘 채운다.
+- 요약기가 실패하면(사슬 모양 이상 등) 원본처럼 그 종목 «실패» · 종료코드 1 · 스냅숏 파일은 남는다.

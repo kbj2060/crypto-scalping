@@ -227,8 +227,25 @@ M = [
     ("원본으로: ob5m 빈 스냅숏 = 죽음(IndexError)", "src/ob5m.rs", 'else { return "empty_book" };', 'else { panic!("IndexError") };', ["ob5m_parity"]),
     ("래스터 칸 번호 floor(p / bin)", "src/raster.rs", "pub fn py_floordiv(a: f64, b: f64) -> f64 {\n", "pub fn py_floordiv(a: f64, b: f64) -> f64 {\n    #[allow(unreachable_code)]\n    return (a / b).floor();\n", ["raster_parity"]),
     ("래스터 헤더 bin_size 0.5 고정", "src/raster.rs", "(self.bin as f32).to_le_bytes()", "(0.5f32).to_le_bytes()", ["raster_parity"]),
+    # (뺌) «CBOE 사다리 Kahan → 그냥 합»: 사실상 같은 변이 -- 행사가 하나의 항은 만기 수(≤5)뿐이고 합을 **정수로** 반올림한다(round(c)).
+    #   보정 차는 상대 ~1e-16 이라 참 합이 x.5 에서 그만큼 안쪽일 때만 갈린다 -- 합성 사슬로 그 경계를 만들 길이 없어 2026-11-21 돌린 결과 «통과»(못 잡음).
+    ("CBOE 기울기 끝점 1차 → 0", "src/cboe_summary.rs", "    o[0] = (f[1] - f[0]) / 1.0;", "    o[0] = 0.0;", ["cboe_summary_parity"]),
+    ("CBOE 25델타 → 20델타", "src/cboe_summary.rs", "|r| r.iv).collect::<Vec<_>>(), 0.25);", "|r| r.iv).collect::<Vec<_>>(), 0.20);", ["cboe_summary_parity"]),
+    ("CBOE 감마 플립 창 4.5σ → 4σ", "src/cboe_summary.rs", "(4.5 * sig0 * yrs.sqrt()).max(0.06)", "(4.0 * sig0 * yrs.sqrt()).max(0.06)", ["cboe_summary_parity"]),
+    ("CBOE 실현변동성 연율 365 → 252", "src/cboe_summary.rs", "* 24.0 * 365.0, 0.5)", "* 24.0 * 252.0, 0.5)", ["cboe_summary_parity"]),
+    ("CBOE 동부 서머타임 끝 2시 → 1시", "src/cboe_summary.rs", "nth_sunday(y, 11, 1) * 86_400 + 2 * 3600", "nth_sunday(y, 11, 1) * 86_400 + 1 * 3600", ["cboe_summary_parity"]),
+    ("CBOE state ensure_ascii 켬", "src/cboe_summary.rs", "crate::py_dumps_default_utf8(&body)", "crate::py_dumps_default(&body)", ["cboe_summary_parity"]),
+    ("청산지도 마크 5초 포함 → 미만", "src/liqmap_scorer.rs", "ts - mt <= 5000", "ts - mt < 5000", ["liqmap_parity"]),
+    ("청산지도 F 반감기 48 → 24", "src/liqmap_scorer.rs", "&k.volume, &k.volume, 48.0)", "&k.volume, &k.volume, 24.0)", ["liqmap_parity"]),
+    ("청산지도 자기 봉도 생존 판정에", "src/liqmap_scorer.rs", "fmin[j] = lo[j + 1].min(fmin[j + 1]);", "fmin[j] = lo[j].min(fmin[j + 1]);", ["liqmap_parity"]),
+    ("청산지도 1e-6 미만 → 1e-5 미만 버림", "src/liqmap_scorer.rs", "v / tot >= 1e-6", "v / tot >= 1e-5", ["liqmap_parity"]),
+    ("청산지도 Bybit Buy = 숏", "src/liqmap_scorer.rs", 'Some("long" | "Buy") => true,', 'Some("long") => true,', ["liqmap_parity"]),
+    ("청산지도 유지증거금 더하기 → 빼기", "src/liqmap_scorer.rs", "1.0 - 1.0 / l + MMR", "1.0 - 1.0 / l - MMR", ["liqmap_parity"]),
+    ("청산지도 적힌 기준도 다시", "src/liqmap_scorer.rs", "filter(|&i| !done.contains(&iso(k.t[i])))", "filter(|&i| i < usize::MAX)", ["liqmap_parity"]),
+    ("청산지도 실측 창 끝 포함", "src/liqmap_scorer.rs", "x.ts >= t0 && x.ts < t1", "x.ts >= t0 && x.ts <= t1", ["liqmap_parity"]),
+    ("예약 cboe 요약기 실패도 저장으로", "src/cron.rs", "                    println!(\"{s} 실패 {e}\");\n                    saved.push(p);\n                    rc = 1;", "                    let _ = e;\n                    saved.push(p);", ["cron_parity"]),
 ]
-PARITY = ["tape_parity", "venue_parity", "rest_parity", "ctx_parity", "venue_rest_parity", "depth_parity", "raster_parity", "ob5m_parity", "iceberg_parity", "cron_parity"]
+PARITY = ["tape_parity", "venue_parity", "rest_parity", "ctx_parity", "venue_rest_parity", "depth_parity", "raster_parity", "ob5m_parity", "iceberg_parity", "cron_parity", "cboe_summary_parity", "liqmap_parity"]
 
 
 def digest() -> str:
