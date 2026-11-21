@@ -33,27 +33,50 @@
 
 ## 2. 미시 루프(`collect_micro_ref` payload) — 칸별
 
-| 칸 | 원천 · 주기 | REST/DB | 코어 |
+옮긴 칸은 `Event::Micro` 다(2026-11-21 · situation 과 같은 1초 박자 · 바뀌었을 때만). 스냅숏 `micro` 칸에 실린다.
+- 정답지: `tools/gen_micro_fixture.py` → `tests/micro_parity.rs`. qi 는 import, 나머지는 원본 줄을 옮겨 적었다.
+- 합성 사건 3,500 · 1초 틱 5,411 · OKX 봉 16 을 비트 대조했다 — 어긋남 0.
+- vol60 만 25틱에서 마지막 비트가 다르다(1e-9 상대 허용). 원본은 1초 dict 를 넣은 차례로 더하는데, 늦은 체결이 새 초를 만들면 그 초가 끝에 붙는다. 코어는 초 순서로 더한다.
+
+| 칸 | 원본 원천 · 주기 | 코어 | 남으면 어느 꾸러미 몫인가 |
 |---|---|---|---|
-| mid · spread | REST bookTicker 1초 | REST | 받는 `@bookTicker` 로 바로 셀 수 있다 — 남음(이번 조각은 situation 만) |
-| qi(→ agree) | bookTicker 수량 → `mref.qi` | REST | 셀 수 있다. 다만 agree 는 OFI 가 필요하다 → 남음 |
-| agree · trigger · imb40 · sweep | 호가 래스터 파일 `read_window` 12초 → `raster_flow`·`sweep_depth` | 래스터 파일 | 남음 — 래스터 수집기(rtcollect) 몫 |
-| vol60 | 1초 링 c[4]+c[5] 마지막 60초(진행 초 뺌) | 없음 | 셀 수 있다 |
-| vol60_pct · act | vol60 의 시별 분위(`baseline_from_tape` — 테이프 DB 1시간마다) | 테이프 DB | 남음(기준선 읽기) |
-| sr | 청산맵(`load_liquidation_map`) | 파일·REST | 남음 |
-| liq60 | 바이낸스 청산 사건 60초 합 | 없음 | 셀 수 있다(supply.rs liq 링) |
-| (시장 맥락 flow_scales 등) | 테이프 DB 시별 분모 | 테이프 DB | 남음 |
+| mid · spread · qi | REST bookTicker 1초 · `mref.qi` | **옮김** — `@bookTicker`(Micro.mid·spread·qi) | — |
+| vol60 | 1초 링 c[4]+c[5], [지금−60, 지금) | **옮김** | — |
+| liq60 {long, short, n} | 바이낸스 청산 사건, ts_ms ≥ 지금×1000 − 60,000 | **옮김** | — |
+| OKX OI 5분봉 Δ·끝값(/api/oi-5m 의 OKX 몫) | coin_flow okx_oi_5m(288봉) → api_oi_5m okx_d | **옮김**(Micro.okx_oi5m = 바뀐 봉부터 · 스냅숏은 전부) · 바이낸스 봉과 더하기·round 는 rtserve | 재시작 직후 봉은 원본이 OKX 테이프(okx_footprint_restore)로 되살린다 — 코어는 안 함(아래 §3 남음) |
+| book obi·persist_share(상황 입력) | 호가 래스터 파일 요약(`_heatmap_read`) | 남음 | 래스터 — 래스터 수집기는 rtcollect, 요약 읽기는 rtserve |
+| agree · trigger · imb40 · sweep | 래스터 `read_window` 12초 → `raster_flow`·`agree_state`·`sweep_depth` | 남음 | 래스터(같음). agree 는 코어의 qi 와 래스터 OFI 를 함께 쓴다 → 래스터를 읽는 쪽(rtserve)이 코어 qi 를 받아 센다 |
+| vol60_pct · act | vol60 의 시별 분위(`baseline_from_tape` · 테이프 DB 1시간마다) | 남음 | 테이프 기준선 — 테이프 DB 는 rtcollect 가 쓰고 기준선 읽기는 rtserve(코어 vol60 을 받아 분위만 센다) |
+| sr | 청산맵(`load_liquidation_map`) | 남음 | 청산맵 — rtmodel(청산맵 레벨)·rtserve |
+| flow_scales 등(시장 맥락) | 테이프 DB 시별 분모 | 남음 | rtserve |
+| veto(상황 입력) | REST 5분봉 720개 `trend_veto_rows` | 남음 | 아래 «veto» |
 
 `compute_situation` 의 나머지(카드30 모델·`_flow_read_ctx`·`fr.read` 융합·장부 쓰기·`vol_mult`)는 REST 5분봉 하루치·모델 파일·Bybit DB 가 필요하다 → 남음(rtmodel·rtserve 쪽).
+
+### veto — 결정이 필요하다(2026-11-21 · 안 옮김)
+- 지시는 «restore.rs 가 기동 때 이미 REST 복원을 하니 같은 길로 5분봉 720개를 받자»였다. 그런데 restore.rs 는 **REST 를 쓰지 않는다.** 머리 주석과 RESTORE.md §2(라)에 적혀 있다: 2026-09-26 418 밴 27분 — IP 한도를 봇과 공유한다. 원천은 테이프·맥락 SQLite 뿐이다.
+- REST 길을 열 때:
+  - 비용: 기동 때 흐름 엔진 종목 8개 × klines(limit 1000, 가중치 5) 1회 = 8회 · 가중치 40.
+  - 원본과 값이 같다. 원본도 같은 klines 다.
+  - 대신 «코어는 REST 안 씀» 원칙이 깨진다. 개발기에서 코어를 띄우면 서버와 같은 IP 로 REST 를 부른다(메모 «로컬 바이낸스 REST = IP 밴») → rtcollect 처럼 `RTCORE_REST=1` 일 때만 부르게 해야 한다.
+- REST 없이 갈 때: 테이프 `trade_tape_1s` 의 price_bin(ETH 0.1)으로는 klines 고가·저가·종가를 비트까지 못 만든다. hot 보관이 60시간(720봉)을 덮는지도 모른다.
+- 어느 길이든 원본 식은 pandas `rolling(144).mean()` · `ewm(alpha=1/144, adjust=False)` 이다. 비트 대조하려면 pandas rolling 합의 갱신 규칙(더하고 빼기 · 보정 합)을 그대로 옮겨야 한다.
+- → 어느 길로 갈지 사용자 결정을 기다린다.
 
 ## 3. rtserve 두 엔드포인트의 코어 몫 — 결론
 
 **`/api/oi-5m`(바이낸스 OI 1초): 코어 범위 밖이다.** 바이낸스는 OI 를 웹소켓으로 안 준다. 원본은 REST `/fapi/v1/openInterest` 폴링을 수집기 `live_binance_ctx_collector` 하나만 한다(IP 한도 2,400/분 — coin_flow.py 641~645). 그 수집기가 hot SQLite `oi_1s` 에 쓰고, 서버는 그 표를 0.5초마다 꼬리만 읽는다(`collect_oi_1s`). 5분 봉은 `oi_5m_buckets` 가 같은 표에서 센다.
-→ 쓰기는 rtcollect(수집기)가, 읽기·5분 봉은 rtserve 가 hot SQLite 를 직접 맡는다. OKX 합산 몫(`okx_oi_5m`)은 코어가 이미 받는 OKX OI 사건(`Event::Oi` · supply.rs okx_oi)으로 셀 수 있다 — 필요하면 Liq5m 처럼 5분봉 [처음, 끝]을 밀면 된다(지금은 안 함).
+→ 쓰기는 rtcollect(수집기)가, 읽기·5분 봉은 rtserve 가 hot SQLite 를 직접 맡는다. OKX 합산 몫은 2026-11-21 부터 `Micro.okx_oi5m` 으로 민다(§2). 재시작 직후 봉 복원은 남음이다.
 
 **`/api/liquidation-5m-history`(OKX·Bybit·HL 합산): 둘은 되고 하나는 안 된다.**
 - 바이낸스 몫: 이미 `Liq5m` 이다(원본 메모리 `liq_5m` 과 같은 칸 · quote_parity 대조).
 - OKX: 원본은 메모리 `okx_liq_events` 를 5분봉으로 더한다(`bar > okx_fp["first_bar"]` 인 봉만). 코어는 같은 OKX 청산 사건(`Event::Liq` venue=okx)을 받는다. 다만 지금 링은 660초뿐이다(1초 수급용). liq5m 과 같은 5분 누적 하나와 «첫 봉» 경계를 더하면 된다.
 - Bybit: 원본은 Bybit 청산 DB(`bybit_liq_events` · 수집 시작 bstart 뒤 온전한 봉만)를 읽는다. 코어도 Bybit 청산 사건을 받는다(BYBIT_SYMBOLS 만). 그러나 경계가 «코어가 받기 시작한 뒤»라 재시작 직후 봉이 원본과 다르다. 재시작 복원(restore.rs read_bybit_liq)이 660초만 메우기 때문이다. 같게 하려면 복원 창을 144봉으로 늘려야 한다.
 - HL(Hyperliquid, `_with_hl_liq`): 코어가 받지 않는 원천이다 → rtcollect/rtserve 몫.
-- 결론: rtserve 가 코어 `Liq5m`(바이낸스)에 OKX·Bybit 5분 누적을 코어에서 받고, HL 은 자기가 읽어 합치는 구조가 맞다. 코어에 OKX·Bybit 5분 누적을 더하는 것은 다음 조각이다(지금은 안 함).
+- 결론: rtserve 가 코어 `Liq5m`(바이낸스)에 OKX·Bybit 5분 누적을 코어에서 받고, HL 은 자기가 읽어 합치는 구조가 맞다.
+- 🔴남음(2026-11-21 · 안 함): OKX·Bybit 5분 누적·«첫 봉» 경계·복원 144봉. 재시작 직후까지 원본과 같으려면 OKX 는 `okx_footprint_restore`(coin_flow.py 910~971)를 옮겨야 한다.
+  - 테이프를 15초 뒤부터 5분마다 8번(35분) 다시 읽는다.
+  - `verify_1m` 로 온전한 분만 이어 붙여 `first_bar` 를 앞으로 당긴다. 청산은 덮은 구간만 앞에 넣는다(deque 5,000 자리만큼).
+  - 같은 함수가 `okx_oi_5m` 복원도 한다.
+  - 코어에는 OKX 풋프린트 봉이 없다. 이 «온전한 봉» 판정을 OKX 테이프 `okx_tape_footprint`(129~203)째로 옮겨야 같은 경계가 나온다.
+  - Bybit 은 원본이 요청마다 DB(`bybit_liq_events` · bstart)를 읽는다. 코어 복원 창을 144봉으로 늘리고 bstart 를 «DB 첫 사건»으로 같게 잡으면 된다.
