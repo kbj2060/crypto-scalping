@@ -132,6 +132,7 @@ from scripts.live_liquidation_5m_signal_20260825 import (  # noqa: E402
 from scripts.live_liquidation_map_20260824 import compute_spliced_levels, compute_spliced_heatmap_history_5m, compute_tier_profile, latest_window_5m, RECENCY_HALFLIFE_HOURS  # noqa: E402
 # 2026-09-20 «미시 참고» 카드의 계산부(순수 함수 + 자체점검). 서버는 값을 모아 넣기만 한다.
 from dashboard import micro_ref as mref  # noqa: E402
+from live.execution import order_shadow  # noqa: E402 -- 2026-11-21 주문 경로 그림자 기록(접수 기록 줄에 chain)
 from dashboard import position_profile as pprof  # noqa: E402
 # 2026-09-21 «상황 읽기 · 30분» -- 사용자가 고른 트레이더 읽기를 규칙으로. 순수 함수 + 자체점검.
 from dashboard import situation as sit  # noqa: E402
@@ -1373,6 +1374,8 @@ def make_app() -> web.Application:
         if request.method != "POST" or not request.path.startswith("/api/manual-"):
             return await handler(request)
         t0, status, err = time.time(), 500, None
+        # 2026-11-21 그림자 기록: 접수 하나 = chain 하나(contextvars -- 핸들러가 띄운 집행 작업까지 따라간다 · 이 줄에도 실어 둘을 잇는다)
+        shadow_chain = order_shadow.new_chain("api") if order_shadow.enabled() else None
         try:
             response = await handler(request)
             status = response.status
@@ -1391,6 +1394,8 @@ def make_app() -> web.Application:
                    "query": dict(request.query), "status": status, "error": err, "ms": round(1000 * (time.time() - t0)),
                    "ua": request.headers.get("User-Agent", "")[:200],
                    "ip": request.headers.get("CF-Connecting-IP") or request.headers.get("X-Forwarded-For") or request.remote}
+            if shadow_chain:
+                row["chain"] = shadow_chain
             try:
                 with order_log.open("a", encoding="utf-8") as f:
                     f.write(json.dumps(row, ensure_ascii=False) + "\n")

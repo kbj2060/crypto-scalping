@@ -35,11 +35,23 @@ async def _clock_offset(session) -> int:
     """Binance rejects any request whose timestamp runs even ~1s AHEAD of its own clock, no matter
     how large recvWindow is. WSL2 clocks drift (2026-09-10: measured 1000ms ahead), so anchor every
     signature to /fapi/v1/time instead of the local clock. Unsigned, weight 1."""
+    sent_at = time.time()
     try:
         async with session.get(f"{FAPI}/fapi/v1/time") as response:
-            return int((await response.json())["serverTime"]) - int(time.time() * 1000)
+            body = await response.json()
+            _shadow_wire("GET", f"{FAPI}/fapi/v1/time", sent_at, response)
+            return int(body["serverTime"]) - int(time.time() * 1000)
     except Exception:
         return 0
+
+
+def _shadow_wire(method: str, url: str, sent_at: float, response) -> None:
+    """2026-11-21 주문 경로 그림자 기록(live/execution/order_shadow) -- 주문 맥락(chain) 안에서만 적는다 · 실패는 조용히."""
+    try:
+        from live.execution import order_shadow
+        order_shadow.wire(method, url, sent_at, response, None)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _split_flips(fills: Iterable[dict[str, Any]]) -> Iterable[dict[str, Any]]:
