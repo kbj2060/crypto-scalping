@@ -144,7 +144,6 @@ from dashboard import pred_record  # noqa: E402 -- ⑤ 예측 줄 아래 «적�
 from dashboard.regime_band import regime_band_payload  # noqa: E402 -- ⑤ 예측 줄 «횡보·추세» 칸(2026-11-02, 전진 기록 크론이 쌓은 마지막 행)
 from dashboard.sr_lean import sr_lean_payload  # noqa: E402 -- ETH «레벨 5분» 기울기 표식·칸(2026-11-18, 상시 워커가 쌓은 jsonl 꼬리)
 from dashboard.risk_radar import risk_radar_payload  # noqa: E402 -- ⑤ 예측 줄 «15분 폭»·«앞 1시간» + 꼬리표 «15분 N%»(2026-11-15, 매분 크론이 쓴 파일)
-from dashboard.box_hold import BUNDLES as box_hold_bundles, payload as box_hold_payload, with_qx4i as box_hold_with_qx4i  # noqa: E402 -- 박스 유지 확률(2026-10-16, 방향 아님 · 10-20 XRP)
 from scripts.live_push_notifier_20260904 import PUSH_KINDS  # noqa: E402 -- 알림 센터 «무엇을 보내나»(2026-10-05)
 from scripts.ops_watchdog import send_telegram  # noqa: E402 -- 지지·저항 뚫림 알림(2026-10-25)
 # 2026-09-29 «시장 맥락» 카드(레버리지·교차 시장·호가 유동성·일정) -- 순수 함수 + 자체점검. 값은 전부 서술.
@@ -3068,8 +3067,6 @@ def make_app() -> web.Application:
                     res.update(iv_atm=iv, iv_hour_ms=hour, sig4h_iv_pct=round(100 * s, 3), sig4h_iv_usd=round(res["px"] * s, 2), log_rv_iv=lq)
             except Exception as exc:  # noqa: BLE001
                 print(f"vol4h qx4i 칸 생략({coin}): {type(exc).__name__}: {exc}", flush=True)
-        if asset == "eth":
-            qx4_state["last"] = res   # 2026-10-29 4h 박스 유지(box_hold.with_qx4i, ETH 만)가 읽는다
         return res
 
     async def api_vol_forecast(request: web.Request) -> web.Response:   # 2026-10-15 ⑤ 예측 판 «4h 변동성»(ETH, 표시 전용)
@@ -3123,26 +3120,7 @@ def make_app() -> web.Application:
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
         return web.json_response(payload, headers=NOCACHE)
 
-    async def api_box_hold(request: web.Request) -> web.Response:   # 2026-10-16 박스 유지 확률(ETH, 표시 전용 · 방향 아님)
-        """지금가 ± 지난 30분·1h·4h 고저폭 절반을 다음 같은 시간 안 안 벗어날 확률(dashboard/box_hold.py) -- 닫힌 1분봉 1500개 · 15초 캐시.
-        10-16 리뷰: 60초 캐시 + 60초 폴링이면 박스 중심가가 평균 2~3분 묵었다(30분 박스는 3분 뒤 9%가 이미 깨져 있음) → 15초 · 묵은 값은 1분까지만."""
-        asset = str(request.query.get("asset") or "eth").lower()
-        if asset not in box_hold_bundles:   # 2026-10-20 XRP(30m·1h 통과 · 4h 불통과 = ok False)
-            return web.json_response({"ok": False, "reason": "unsupported_asset"}, headers=NOCACHE)
-
-        async def produce() -> dict[str, Any]:
-            k1m = await liq_klines_df(asset, 1500, interval="1m")
-            try:   # 10-16 HGB: 예정 발표 칸(다음 W분 안 CPI·고용·FOMC 등) = 거시 일정 워커 상태 -- 못 읽으면 «발표 없음»으로
-                events = (await load_macro_calendar()).get("events")
-            except Exception:  # noqa: BLE001
-                events = None
-            out = await asyncio.to_thread(box_hold_payload, k1m, events, asset)
-            return box_hold_with_qx4i(out, qx4_state.get("last")) if asset == "eth" else out   # 2026-10-29 4h = QX4I 등조(묵으면 HGB)
-        try:
-            payload = await swr_cached(f"box_hold:{asset}", 15.0, produce, max_stale=60.0)
-        except Exception as exc:  # noqa: BLE001
-            payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
-        return web.json_response(payload, headers=NOCACHE)
+    # 2026-11-21 사용자 «서빙을 끈다»: /api/box-hold(dashboard/box_hold.py) 제거 -- 11-14 부터 화면에 안 그렸고 LLM 브리핑도 뺐다. 되살리려면 git log.
 
     # 수급 커서 = 목록 키 -> 쿼리 이름. 클라(refreshSupply1s)와 같은 규칙: 받은 행의 최대 초.
     SUPPLY_CURSORS = (("seconds", "since"), ("oi", "sinceOi"), ("liq", "sinceLiq"), ("okx", "sinceOkx"),
@@ -5005,7 +4983,6 @@ def make_app() -> web.Application:
     app.router.add_post("/api/acct-notes", api_acct_notes_save)
     app.router.add_get("/api/acct-wrong", api_acct_wrong)
     app.router.add_post("/api/acct-wrong", api_acct_wrong_save)
-    app.router.add_get("/api/box-hold", api_box_hold)
     app.router.add_get("/api/open-rev", api_open_rev)
     app.router.add_get("/api/iceberg", api_iceberg)
     app.router.add_get("/api/ob5m", api_ob5m)
