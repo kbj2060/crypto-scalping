@@ -1,7 +1,7 @@
 // 계좌 카드 «보유 중» 상태 (2026-09-22). 라이브에 포지션이 없을 때 그 화면을 재현한다.
 // 🔴이 상태가 재현 불가였던 게 문제였다 -- 시안은 보유 중만 그렸는데 검증은 포지션 없음에서만
 //   돌아서, 사용자가 «시안이랑 다른데»를 두 번 말할 때까지 몰랐다.
-// 값은 2026-09-22 실제 라이브에서 뜬 것이다(ETHUSDC 롱 ×20).
+// 값은 2026-09-22 실제 라이브에서 뜬 것이다(ETHUSDC 롱 ×20). 2026-11-21 청산 레인(#snapExitRow 등)은 플로팅 패널과 함께 지워 그 줄들을 뺐다.
 () => {
   for (let i = 1; i < 99999; i++) window.clearInterval(i);   // 폴링이 덮지 않게
   latestBinanceAccount = {
@@ -20,10 +20,5 @@
     after:  { liq_pct: 19.8, margin_used_pct: 25.0, exposure_x: 5.01 },
     __plan: { quantity: 0.856, price: 2739.42, target_leverage: 20 },
   };
-  lastExitPositions = new Map([["ETHUSDC", latestBinanceAccount.positions[0]]]);
   renderSnapshotAccount();
-  document.getElementById("snapExitRow").hidden = false;
-  document.getElementById("snapExitLong").hidden = false;
-  renderExitNow();
-  const d = document.getElementById("snapEntryBox"); if (d) d.open = true;
 }

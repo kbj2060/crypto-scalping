@@ -28,7 +28,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
-  <link rel="stylesheet" href="styles.css?v=20261120-mfs">
+  <link rel="stylesheet" href="styles.css?v=20261121-nofab">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -147,7 +147,7 @@
     </dialog>
 
     <!-- 2026-09-26 비평: 탭 패널 전체의 aria-live 를 걷었다 -- 0.25초마다 바뀌는 화면 전체가 낭독 대상이었다.
-         알릴 것은 주문 결과(#snapEntryResult)와 진입 가부(#snapEntrySize)뿐이다. -->
+         알릴 것은 주문 결과(#ordStat -- 2026-11-21 차트 위 상태 줄)뿐이다. -->
     <section id="snapshotTabPanel" class="ops-tab-panel">
 
       <!-- 2026-09-21 사용자 요청(아티팩트 댓글): 상단 «요약 카드» 제거. 같은 세 지표가
@@ -267,6 +267,14 @@
         <div class="chart-container candle-container">
           <svg id="candleSvgSnapshot" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet" role="img"
             aria-label="ETH 5분봉 차트 — 풋프린트·수급(CVD)·호가 프로파일·청산·사분면"></svg>
+          <!-- 2026-11-21 주문 상태 줄(플로팅 주문 버튼 제거 -- 그 패널의 결과 칸·대기 줄·말풍선을 차트 위 한 상자로). 비어 있으면 안 보인다(styles.css .ord-stat:has).
+               진행·체결은 10초 뒤 접히고 실패는 ✕ 까지 남는다(app.js ordAutoHide). -->
+          <div id="ordStat" class="ord-stat" role="status" aria-live="polite">
+            <div id="snapWait" hidden><div id="snapWaitText" class="entry-note"></div></div>
+            <div id="snapEntryResult" class="manual-entry-result" hidden></div>
+            <div id="ordSay" class="entry-note" hidden></div>
+            <button type="button" class="ord-x" aria-label="주문 알림 닫기" title="닫기">✕</button>
+          </div>
           <!-- 2026-10-08 일봉·청산맵 = 5분 차트 교체 영역(window.fpRegion) 위에만 겹치는 상자(사용자 «풋프린트 차트만 바뀌게») -->
           <!-- 2026-10-13 체결 버블(Bookmap 식) -- bubble_map.js · 청산맵과 같은 자리·크기 -->
           <div id="bubbleMap" class="liq-profile fp-overlay" hidden>
@@ -370,198 +378,6 @@
             <div class="acct-pn"><div id="snapAcctWealth"></div></div>
           </div>
         </div>
-        <!-- 2026-09-12 수동 진입 1단계. **크기를 화면이 정한다** -- 재량 사이징이 실계좌 손실의
-             출처였다(크기–수익 상관 −0.494, 한 건 −548.88 이 이익 합 전부보다 컸다).
-             지금은 미리보기 전용: 서버 게이트 DASHBOARD_MANUAL_EXEC_ENABLED 가 닫혀 있어
-             버튼을 눌러도 주문이 나가지 않는다. -->
-        <!-- 2026-09-16 사용자 요청: 「내 계좌에서 청산/진입을 모달로」.
-             ⭐네이티브 <dialog> 를 쓴다 -- 포커스 트랩·ESC 닫기·backdrop 이 표준이라
-             라이브러리도, 직접 만든 포커스 관리도 필요 없다.
-             🔴안쪽 마크업은 **한 줄도 안 옮겼다**. 핸들러가 전부 el("id") 기반이라
-             DOM 위치가 바뀌어도 그대로 붙고, 2단 확인(미리보기 → 확인)도 그대로다.
-             모달을 닫는 것으로는 아무 주문도 나가지 않는다(닫기는 form method="dialog").
-             2026-09-16 사용자 요청으로 **진입과 청산을 각각 제 모달**로 갈랐다 -- 한 모달에
-             둘을 담으면 «청산하러 열었는데 진입 버튼이 같이 보이는» 상태가 되고, 그건 이
-             화면에서 가장 비싼 오클릭이다. -->
-        <!-- 2026-09-20 청산도 진입과 같은 모양으로(사용자 지시): 모달을 없애고 카드 안에
-             띄운 뒤, 버튼은 «길게 누르기»다. 포지션이 있을 때만 이 행이 보인다.
-             🔴진입 위에 둔다 -- 들고 있을 때 제일 급한 동작이고, 09-14 에 같은 이유로 모달
-               안에서도 맨 위로 올렸던 행이다.
-             🔴버튼 모양은 진입과 계속 가른다(.exit-row 는 채움, 진입은 아웃라인). 색만으로
-               가르면 롱 진입과 롱 청산이 둘 다 녹색이라 오클릭이 실돈 사고가 된다. -->
-        <!-- 2026-09-22 시안 B(사용자 선택): 「닫기」와 「더 넣기」를 **나란히** 세운다.
-             둘은 약속 모델이 다르다 -- 닫기는 꾹 누른 뒤(HOLD_FIRE_MS) 확인 버튼이 30초 뜨고, 넣기는 꾹 누르는 시간이
-             곧 확인이다(manualHoldStart: 진입에 확인 버튼을 띄우면 같은 주문이 두 번 나갈
-             길이 생긴다). 세로로 쌓여 있으면 그 차이가 문구로만 남는데, 나란히 두면 각 레인의
-             발 밑에 제 약속이 적혀 배치가 그걸 말한다.
-             🔴한 줄도 안 옮겼다 -- 감싸기만 했다. 핸들러가 전부 el("id") 기반이다. -->
-        <!-- 2026-09-25 떠다니는 주문 버튼(#ofab)을 펼치면 아래 .acct-lanes 가 **통째로** 그 안으로
-             옮겨간다(복제가 아니다 -- 같은 요소라 레버·비율·확인 버튼이 두 곳에서 어긋날 수 없다).
-             그동안 이 자리를 비워 두지 않고 그 사실을 적는다(빈 상태가 자리를 지킨다, 09-22 규약). -->
-        <p id="ofabAway" class="acct-empty ofab-away" hidden>주문 조작부가 떠 있는 주문 버튼으로 옮겨가 있습니다.
-          <button type="button" id="ofabBack" class="ofab-back">여기로 되돌리기</button></p>
-        <div class="acct-lanes">
-        <div class="manual-entry">
-          <!-- 2026-09-20 시안 B(사용자 선택): 슬라이더를 칩으로 갈고 포지션 타일에 붙였다.
-               «내 상태»와 «할 행동»이 한 줄에 있어야 스캘핑에서 시선이 안 흩어진다.
-               🔴range 입력은 **지우지 않고 숨긴다** -- 값을 읽는 쪽(sliderPct)과 input
-                 리스너를 한 줄도 안 고치고, 클램프·이벤트를 브라우저가 계속 해준다.
-                 칩은 그 위에 씌운 껍데기다(app.js 의 .chipset 블록). -->
-          <div class="manual-entry-row actions exit-row entry-hold" id="snapExitRow" hidden>
-            <span class="entry-cap">닫기</span>
-            <input type="range" id="snapExitFrac" min="5" max="100" step="5" value="100"
-                   aria-label="청산 비율" class="chip-input" tabindex="-1">
-            <div class="chipset" data-for="snapExitFrac" role="group" aria-label="청산 비율">
-              <button type="button" class="chip" data-v="25">25%</button>
-              <button type="button" class="chip" data-v="50">50%</button>
-              <button type="button" class="chip" data-v="100">100%</button>
-            </div>
-            <b id="snapExitFracVal" class="chip-val">100%</b>
-            <!-- 2026-10-10 청산 체결 방식(사용자 «청산은 선택지로»): 지정가(현행 peg -- 호가를 따라 다시 걸고 변동성 연동 15~120초 뒤 잔량 시장가) ·
-                 즉시(시장가). 진입의 «체결» 칩과 같은 숨은 입력 칩, 브라우저에 기억. 스위칭은 이 칩과 무관하게 늘 즉시. -->
-            <span id="snapExitExecBox" class="rule-box exec-box">
-              <span class="entry-cap">체결</span>
-              <input type="hidden" id="snapExitExec" value="0">
-              <div class="chipset" data-for="snapExitExec" role="group" aria-label="청산 체결 방식">
-                <button type="button" class="chip" data-v="0" title="지정가 — 최우선 호가에 메이커로 걸고 호가를 따라 다시 겁니다. 변동성에 따라 15~120초 뒤 남은 수량은 시장가">지정가</button>
-                <button type="button" class="chip" data-v="1" title="즉시 — 지정가를 걸지 않고 바로 시장가로 닫습니다(테이커 수수료)">즉시</button>
-              </div>
-            </span>
-            <button type="button" id="snapExitLong" class="notify-btn long hold-fire" hidden>
-              <i class="hold-fill" aria-hidden="true"></i><span>롱 청산</span></button>
-            <button type="button" id="snapExitShort" class="notify-btn short hold-fire" hidden>
-              <i class="hold-fill" aria-hidden="true"></i><span>숏 청산</span></button>
-            <!-- 2026-10-05 스위칭 = 100% 청산 → 다 닫히면 반대 진입. 떠 있는 패널에서만 보인다. 2026-10-10 두 다리 다 즉시 체결(시장가, 사용자 결정). -->
-            <button type="button" id="snapSwitch" class="notify-btn hold-fire ofab-switch" title="즉시 체결(시장가, 테이커) — 100% 청산 → 다 닫히면 서버가 반대 진입도 시장가로 · 반대 진입엔 SL/TP 체크와 무관하게 손절이 걸립니다" hidden>
-              <i class="hold-fill" aria-hidden="true"></i><svg class="ofab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4 3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 4 4"/><path d="m17 20 4-4-4-4"/><path d="M21 16H8a4 4 0 0 1-4-4"/></svg><span>스위칭</span><small id="snapSwitchTo">→ 숏</small></button>
-            <!-- 2026-09-14 «지금 닫으면 얼마인가»를 누르기 **전에** 보여준다. 계좌 payload 의
-                 진입가·마크가로 화면이 바로 계산한다(≈ 표시: 체결가·수수료는 빠진 근사다). -->
-            <span id="snapExitNow" class="exit-now"></span>
-            <p class="lane-pact"><span class="pact-mouse">누르면 <b>바로 나갑니다</b>.</span><span
-              class="pact-touch">누르면 <b>미리보기</b> → 확인 버튼을 <b>한 번 더</b> 눌러야 나갑니다(30초).</span></p>
-          </div>
-          <!-- 2026-09-22 사용자 «청산과 진입이 한 줄에 같이 있는 거였어 · 포지션이 없어도».
-               전에는 포지션이 없으면 닫기 레인을 통째로 접어 진입만 전폭을 썼다 -- 자리가
-               상황에 따라 움직이면 눈이 매번 다시 찾는다. 이제 레인은 **항상 둘**이고,
-               닫을 게 없을 때는 이 자리에 그 사실이 적힌다(빈 상태가 자리를 지킨다). -->
-          <p class="lane-empty acct-empty">닫을 포지션이 없습니다 — 진입하면 여기에 청산이 뜹니다.</p>
-        </div>
-
-        <!-- 2026-09-20 진입을 모달에서 **카드 안으로** 꺼냈다(사용자 지시, 스캘핑).
-             진입 → 모달 → 미리보기 → 확인 5동작이 «길게 누르기» 1동작이 된다. 청산은 모달을
-             그대로 둔다 -- 급할 때 여는 것이고, 오클릭 비용이 진입과 방향이 반대다.
-             🔴결과 상자(#snapEntryResult)와 확인 버튼(#snapEntryConfirm)이 모달 밖으로
-               나오면서 **청산 흐름도 같이 고쳐진다** -- 둘 다 진입 모달 안에 있어서, 청산
-               모달에서 누른 확인 버튼이 «보이지 않는 곳»에 떠 있었다. -->
-        <div id="snapEntryPlan" class="manual-entry">
-          <!-- 2026-09-14 진입 블록 접기. 포지션을 들고 있으면 여기 있는 건 «신규 진입»이
-               아니라 «물타기»다 -- 예외적 행동이니 한 번 더 펼치게 한다(09-06 물타기 감사).
-               열고 닫는 코드는 <details> 가 대신한다. 여는 초기값만 JS 가 정한다
-               (app.js manualExitSyncButtons: 포지션 유무가 **바뀔 때만** 건드린다). -->
-          <!-- 2026-09-25 접기 폐지(사용자 «상시 표시») -- 항상 열려 있고 제목 줄은 안 눌린다. -->
-          <details id="snapEntryBox" class="entry-fold" open>
-            <!-- 2026-09-15 접혀 있어도 **대가는 보인다**(사용자 요청). 포지션을 들고
-                 있으면 이 블록은 접히는데(09-14, 물타기를 한 번 더 확인시키려고),
-                 그 바람에 «지금 추가하면 청산이 어디까지 오나»가 같이 사라졌다.
-                 접기는 그대로 두고 대가만 요약 줄로 끌어올린다. -->
-            <summary id="snapEntrySummary"><span id="snapEntryFoldLabel">진입</span></summary>
-          <!-- 2026-09-16 크기 줄·모드 배지·권고 사슬을 뺐다(사용자 지시). 같은 내용이 위
-               계좌 카드에 **미리보기로 이미 움직인다**(수량·평단·청산가·세 게이지).
-               🔴실패만은 남긴다 -- 조회가 깨졌는데 화면이 조용하면 옛 숫자가 거짓말을 한다
-               (2026-09-13 실장애). 정상일 때는 이 칸이 비어 있다. 「실주문 활성」 경고는
-               확인 단계 문구가 대신한다(「확인 버튼을 누르면 실제 주문이 나갑니다」). -->
-          <div class="manual-entry-row">
-            <span id="snapEntrySize" class="entry-note bad" role="status" hidden></span>
-          </div>
-          <!-- 2026-09-13 분할 진입. 한 번에 다 넣으면 반대로 갈 때 손쓸 게 없다 --
-               09-06 물타기 감사에서 살아남은 유일한 부품이 «부분 투입»이었다. -->
-          <!-- 2026-09-13 보유시간이 크기를 정한다. 학습된 MAE 분위 모델이 «이 시장에서 이만큼
-               들고 있으면 이 정도 역행을 각오해야 한다»를 주고, 그 역수가 허용 레버리지다.
-               세 상한(원장·순자산·모델)의 **작은 쪽**을 쓰므로 이 선택이 크기를 키우지는 않는다. -->
-          <!-- 2026-09-20 시안 B: 보유예정·레버리지·진입비율 3행을 **한 줄**로 접었다.
-               보유 예정은 값이 고정(서버가 정한 planning_hold)이라 행을 먹을 이유가 없어
-               같은 줄 끝의 작은 글씨로 내렸다. 슬라이더 둘도 위와 같은 방식으로 칩이 된다. -->
-          <div class="manual-entry-row fields entry-line">
-            <span class="entry-cap">레버리지</span>
-            <input type="range" id="snapLevGauge" min="5" max="50" step="5" value="5"
-                   aria-label="거래소 레버리지" class="chip-input" tabindex="-1">
-            <div class="chipset" data-for="snapLevGauge" role="group" aria-label="레버리지">
-              <button type="button" class="chip" data-v="5">5x</button>
-              <button type="button" class="chip" data-v="10">10x</button>
-              <button type="button" class="chip" data-v="20">20x</button>
-            </div>
-            <b id="snapLevVal" class="chip-val">-</b>
-            <label class="lev-auto" for="snapLevAuto">
-              <input type="checkbox" id="snapLevAuto" checked>
-              <span>자동</span>
-            </label>
-            <!-- 2026-09-25 비율 = 순자산 대비 이번 주문 증거금(10% = 순자산의 10%). 상한 넘으면 진입 불가.
-                 사용자 지시: 레버리지 다음 줄에 «진입비율» 이름표로. -->
-            <span class="entry-break" aria-hidden="true"></span>
-            <!-- 2026-10-09 자동 규칙(사용자 «방향만 정하면 크기·레버리지·손절 자동» → «재생 ×15.2 로» → 10-10 동일위험 → 10-11 재생 식 복원 + −3% 스톱 → 10-14 권장 B 상한 3·−5% → 10-25 상한 2): 왕복 최대 명목 = 순자산 × min(12.4 × 권장 배수, 청산 안전, 2) ·
-                 첫 진입 1/3 · 물타기는 남은 여유(손절 시 손실 L×5% 안 · 권장 첫 진입가 ∓0.75%) · 손절 첫 진입가 ∓5%(거래소 스탑, 물타기해도 안 물러남) · 익절 없음. 고르면 진입비율·SL/TP 숨김. ETH 만. -->
-            <span id="snapRuleBox" class="rule-box">
-              <span class="entry-cap">크기</span>
-              <input type="hidden" id="snapRule" value="0">
-              <div class="chipset" data-for="snapRule" role="group" aria-label="진입 크기 규칙">
-                <button type="button" class="chip" data-v="0" title="진입비율 칩으로 직접 고릅니다">직접</button>
-                <button type="button" class="chip" data-v="1" title="자동 규칙(권장 B) — 왕복 최대 명목 = 순자산 × 2배(12.4 × 권장 배수가 2보다 작은 날만 그 값) · 첫 진입 1/3 · 물타기는 남은 여유(손절 시 손실 L×5% 안에서 · 권장 첫 진입가 ∓0.75%) · 손절 첫 진입가 ∓5%(닿으면 거래소 스탑, 물타기해도 안 물러남) → 손절에 닿으면 순자산 약 −9%(최대 L×5% = 10%) · 익절 없음 · 🔴교차 마진에서만(격리면 손절 전에 청산)&#10;메이커(지정가) 진입 권장 — 시장가로는 기대 손익 음수">자동</button>
-                <button type="button" class="chip" data-v="h" title="보유 1.5× — 자동과 같은 규칙에 상한만 1.5배(첫 진입 1/3 · 물타기 권장 첫 진입가 ∓0.75% · 손절 첫 진입가 ∓5% → 손절에 닿으면 순자산 약 −7.5%) · 익절 없음 · 🔴교차 마진에서만&#10;일봉 추세 방향으로 들고 가는 크기 — 4.5년 백테스트: 3×는 2022~24 −58%·낙폭 −87%, 1~1.5×는 같은 샤프(≈1.45)에 낙폭 −28~−40%(사후 권고)">보유 1.5×</button>
-              </div>
-              <span class="rule-risk" aria-live="off">손절 첫 진입가 −5%</span>
-            </span>
-            <span class="entry-cap frac-part">진입비율</span>
-            <input type="range" id="snapEntryFrac" min="5" max="100" step="5" value="25"
-                   aria-label="진입 증거금 (순자산 대비 %)" class="chip-input" tabindex="-1">
-            <div class="chipset frac-part" data-for="snapEntryFrac" role="group" aria-label="진입 비율">
-              <button type="button" class="chip" data-v="10">10%</button>
-              <button type="button" class="chip" data-v="25">25%</button>
-              <button type="button" class="chip" data-v="50">50%</button>
-            </div>
-            <b id="snapEntryFracVal" class="chip-val frac-part">25%</b>
-            <!-- 2026-10-24 사용자 «주문 규칙 정리»: 권장 배수 칩·SL/TP 끄기를 뺐다. 손절은 모든 진입에 첫 진입가 ∓5% 거래소 스탑(서버 orders.py stop_bracket). -->
-            <!-- 2026-10-10 진입 체결 방식: 따라가기(현행 -- 3초마다 호가를 따라 다시 걸고 120초 뒤 잔량 시장가) · 대기(최우선 호가에 한 번 걸고
-                 앞질러도 그대로, 60/15분 뒤 잔량 시장가). 원장 진입 362건 재생: 60분 대기가 +$64[+33,+99] · 명목당 +0.5bp. 청산은 그대로. -->
-            <span class="entry-break" aria-hidden="true"></span>
-            <span id="snapExecBox" class="rule-box exec-box">
-              <span class="entry-cap">체결</span>
-              <input type="hidden" id="snapExec" value="0">
-              <div class="chipset" data-for="snapExec" role="group" aria-label="진입 체결 방식">
-                <button type="button" class="chip" data-v="0" title="따라가기 — 앞지르면 3초마다 새 호가로 다시 걸고, 120초 뒤 남은 수량은 시장가">따라가기</button>
-                <button type="button" class="chip" data-v="60" title="60분 대기 — 최우선 호가에 한 번 걸고 앞질러도 그대로 둡니다. 60분 뒤 남은 수량은 시장가(원장 재생 +0.5bp/명목). 대기 중 취소·지금 시장가 가능, 청산은 막지 않습니다">60분 대기</button>
-                <button type="button" class="chip" data-v="15" title="15분 대기 — 최우선 호가에 한 번 걸고 앞질러도 그대로, 15분 뒤 남은 수량은 시장가">15분 대기</button>
-              </div>
-            </span>
-          </div>
-          <div class="manual-entry-row actions entry-hold">
-            <button type="button" id="snapEntryLong" class="notify-btn long hold-fire">
-              <i class="hold-fill" aria-hidden="true"></i><span>롱 진입</span></button>
-            <button type="button" id="snapEntryShort" class="notify-btn short hold-fire">
-              <i class="hold-fill" aria-hidden="true"></i><span>숏 진입</span></button>
-          </div>
-          <!-- 2026-09-26 비평: 진입 레인에는 약속 문구가 없었다. 청산과 같은 규칙이다(마우스 = 바로, 터치·키보드 = 확인). -->
-          <p class="lane-pact"><span class="pact-mouse">누르면 <b>바로 나갑니다</b>.</span><span
-            class="pact-touch">누르면 <b>미리보기</b> → 확인 버튼을 <b>한 번 더</b> 눌러야 나갑니다(30초).</span></p>
-          </details>
-          <!-- 2026-09-12 계좌 카드와 **같은 타일**로 그린다(사용자 요청) -- 미리보기가 말 그대로
-               «진입 후의 그 카드»가 되도록. 옛 판은 고정폭 텍스트라 계좌 패널과 따로 놀았다. -->
-          <!-- 2026-10-10 기다리는 진입(서버 별도 칸 -- 주문 칸을 잡지 않아 대기 중에도 청산·SL 감시가 돈다) -->
-          <div id="snapWait" class="manual-wait" hidden>
-            <div id="snapWaitText" class="entry-note live" role="status"></div>
-            <div id="snapWaitActs" class="manual-entry-row wait-acts">
-              <button type="button" id="snapWaitCancel" class="notify-btn">대기 취소</button>
-              <button type="button" id="snapWaitMarket" class="notify-btn">지금 시장가</button>
-            </div>
-          </div>
-          <div id="snapEntryResult" class="manual-entry-result" role="status" hidden></div>
-          <!-- 2026-09-12 2단 확인. 진입 버튼은 «보여주기»만 하고, 실제 주문은 이 버튼에서만
-               나간다. 한 번의 오클릭이 주문이 되지 않게 하는 게 목적이라 기본은 숨김이고
-               미리보기를 본 뒤에만 잠깐 나타난다(CONFIRM_WINDOW_MS). -->
-          <div class="manual-entry-row actions">
-            <button type="button" id="snapEntryConfirm" class="notify-btn primary" hidden></button>
-          </div>
-        </div>
-        </div>
         <!-- 2026-09-22 시안 B: 자산 곡선을 레인 **아래 전폭**으로 내렸다(사용자 선택).
              전에는 카드 오른쪽 절반을 먹어 레일이 «척추»가 될 폭이 없었다. 곡선은 «역사»라
              조작보다 아래가 맞다 -- 이 카드의 일은 «지금 무엇을 할까»다. -->
@@ -607,38 +423,7 @@
     <button type="button" data-go="optCard" aria-label="Option 카드로" title="Option"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16"/><path d="M5 15h7l7-9"/></svg><span>옵션</span></button>
     <button type="button" data-go="acctCard" aria-label="계좌 카드로" title="계좌"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8a2 2 0 0 1 2-2h12v2"/><rect x="4" y="8" width="16" height="11" rx="2"/><circle cx="16" cy="13.5" r="1.2"/></svg><span>계좌</span></button>
   </nav>
-  <!-- 2026-09-25 떠다니는 주문 버튼(사용자 지시). 손잡이(⠿)로만 끈다 -- 주문 버튼이 «길게 누르기»라
-       끌기와 한 표면을 쓰면 옮기다 손이 멈춘 순간 주문이 나갈 수 있다. 펼치면 계좌 카드의 주문
-       조작부(.acct-lanes)를 그대로 옮겨 온다(app.js ofabSetOpen) -- 새 주문 경로가 없다. -->
-  <div id="ofab" class="ofab" hidden>
-    <div class="ofab-bar">
-      <button type="button" id="ofabGrip" class="ofab-grip"
-              aria-label="주문 버튼 옮기기 — 끌거나 방향키"><svg viewBox="0 0 24 24" fill="currentColor"
-              aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle
-              cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg></button>
-      <div id="ofabSay" class="ofab-say" role="status" aria-live="polite" hidden></div>   <!-- 2026-10-01 꾹 눌러 추가 진입 결과(패널 안 열고) -->
-      <button type="button" id="ofabWait" class="ofab-wait" aria-controls="ofabPanel" hidden>대기</button>   <!-- 2026-10-10 기다리는 진입이 있으면(누르면 펼침) -->
-      <button type="button" id="ofabToggle" class="ofab-toggle" aria-expanded="false"
-              aria-controls="ofabPanel"><span id="ofabPos">주문</span></button>
-      <!-- 2026-10-15 서버 무장 손절(두 번 누르면 거래소 스탑 + 서버 5분봉 감시 해제 · 꺼진 뒤 두 번 = 다시 켜기) -- 데스크탑 시안 B. 휴대폰은 패널 맨 위 #ofabSlPanel(시안 C). -->
-      <button type="button" id="ofabSl" class="ofab-sl" hidden></button>
-      <!-- 2026-10-05 포지션이 없으면 «주문» 대신 LONG·SHORT 두 개. 1.5초 꾹 = 바로 진입(마우스) · 짧게 = 펼치기. -->
-      <span id="ofabFlat" class="ofab-flat" hidden>
-        <!-- 2026-10-06 상세 펼치기(사용자 지시): LONG 앞 아이콘 = 예전 «주문»을 누르면 나오던 패널(레버·비율·진입 버튼). 주문 경로 없음. -->
-        <button type="button" id="ofabMore" class="ofab-more" aria-controls="ofabPanel" aria-expanded="false" aria-label="주문 상세 펼치기"><svg
-          viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
-        <button type="button" id="ofabLong" class="ofab-dir long" title="누르면 바로 롱 5% 진입"><span>LONG</span><small id="ofabLongFrac">5%</small><i class="ofab-tag" hidden></i></button>
-        <button type="button" id="ofabShort" class="ofab-dir short" title="누르면 바로 숏 5% 진입"><span>SHORT</span><small id="ofabShortFrac">5%</small><i class="ofab-tag" hidden></i></button>
-      </span>
-      <!-- 2026-10-30 사용자 «떠 있는 주문 버튼도 숨겼다 꺼냈다» 시안 A: 숨기면 화면 가장자리 손잡이(#ofabTab)만 남는다 -->
-      <button type="button" id="ofabHide" class="ofab-hide" aria-label="주문 버튼 숨기기 — 화면 가장자리 손잡이로" title="숨기기"><svg viewBox="0 0 24 24"
-        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
-    </div>
-    <div id="ofabPanel" class="ofab-panel" role="region" aria-label="빠른 주문" hidden><div id="ofabSlPanel" class="ofab-slp" hidden></div></div>
-  </div>
-  <button type="button" id="ofabTab" class="ofab-tab" hidden aria-label="주문 버튼 꺼내기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
-    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg><i aria-hidden="true"></i><b>주문</b></button>
-  <script src="./app.js?v=20261121-boxoff"></script>
+  <script src="./app.js?v=20261121-nofab"></script>
   <script src="./fp_daily.js?v=20261120-mfs"></script>
   <script src="./liq_profile.js?v=20261108-liqcurve2"></script>
   <script src="./liq_tab.js?v=20261117-nonow1"></script>
