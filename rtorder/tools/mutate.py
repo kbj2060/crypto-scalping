@@ -211,6 +211,17 @@ ELEVEN = [  # 계좌 알림 → Wired · 번호(acct_seq) · 텔레그램 -- des
     ("telegram", "그림자인데 알림을 보냄", AP, '        if self.shadow(format!("TELEGRAM {msg}")) {\n            return;\n        }', ""),
     ("telegram", "HTTP 오류를 보냄으로 셈", TG, ".and_then(|mut r| r.body_mut().read_to_vec()).is_ok()", ".map(|_| ()).is_ok() || true"),
 ]
+DR = "src/door.rs"
+THIRTEEN = [  # 루프백 문 · 감시와 접수가 같은 DeskCell · 계좌 한 곳 -- door_bin(진짜 실행 파일) · app_run(문으로 들어온 작업) 로 잡혀야 한다
+    ("door_bin", "ip 머리 우선순위 뒤집음(XFF 먼저)", DR, 'header(h, "cf-connecting-ip").or_else(|| header(h, "x-forwarded-for"))', 'header(h, "x-forwarded-for").or_else(|| header(h, "cf-connecting-ip"))'),
+    ("door_bin", "기록 시각을 UTC 로", DR, "    let k = t + 9.0 * 3600.0;", "    let k = t;"),
+    ("door_bin", "기록 줄 ensure_ascii", DR, "let line = json_dumps_as(&Value::Object(o), false)", "let line = json_dumps_as(&Value::Object(o), true)"),
+    ("door_bin", "?fresh=1 1초 재사용 없음", DR, "self.acct.refresh(&mut self.rest, self.stream.as_deref(), true)", "self.acct.refresh(&mut self.rest, self.stream.as_deref(), false)"),
+    ("door_bin", "루프백 아닌 주소도 받음", DR, "    if addr.ip().is_loopback() {", "    if true {"),
+    ("door_bin", "시작 정리를 감시와 다른 Watcher 에서", AP, "            if let Err(e) = d.w.wait_cleanup(&mut io).await {", "            if let Err(e) = Watcher::new(&cfg.dir, &cfg.eth_symbol).wait_cleanup(&mut io).await {"),
+    ("door_bin", "표식 무시(자기 기록 폴더도 거절)", AP, '    if dir.join("order_requests.jsonl").exists() && !dir.join(DIR_MARK).exists() {', '    if dir.join("order_requests.jsonl").exists() {'),
+    ("app_run", "문으로 들어온 작업을 안 돌림", DR, "                            for t in task {\n                                let _ = tx.send(t);\n                            }", "                            let _ = (task, &tx);"),
+]
 RT = "src/route.rs"
 TWELVE = [  # 주문·계좌 주소 14개 -- route_fixture(원본 aiohttp 앱 바이트 158사례) · route_concurrency(동시 요청)
     ("route_fixture", "청산 접수가 주문 잠금 밖", RT, '("POST", "/api/manual-exit/submit", "exit_submit", true)', '("POST", "/api/manual-exit/submit", "exit_submit", false)'),
@@ -262,7 +273,7 @@ def main() -> int:
             ok = r.returncode != 0
             caught, total = caught + ok, total + 1
             print(f"{'잡음' if ok else '🔴못 잡음'} | {test} | {name} | {', '.join(failed)[:110]}", flush=True)
-    for grp, lst in (("six", SIX), ("seven", SEVEN), ("eight", EIGHT), ("nine", NINE), ("ten", TEN), ("eleven", ELEVEN), ("twelve", TWELVE)):
+    for grp, lst in (("six", SIX), ("seven", SEVEN), ("eight", EIGHT), ("nine", NINE), ("ten", TEN), ("eleven", ELEVEN), ("twelve", TWELVE), ("thirteen", THIRTEEN)):
       if not only or only == grp:
         for test, name, f, a, b in lst:
             shutil.rmtree(W, ignore_errors=True)

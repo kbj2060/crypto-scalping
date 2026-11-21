@@ -6,25 +6,23 @@
 //! 5분봉·1초 체결가·잠금·스위치·시계·거래소 손절/익절 함수는 여전히 `ops`(다른 `WatchIo`) 뒤 -- 실시간 코어와 잇는 다음 조각이 준다.
 //! **어디에도 연결하지 않는다**(시험: tests/wire_e2e.rs -- 가짜 REST·가짜 시세·가짜 거래소).
 
-use crate::account::{self, AccountBook, AccountRest, Swr};
+use crate::account::{AccountRest, SharedAccount};
 use crate::assemble::{Desk, DeskIo, Quotes};
 use crate::exec::Exchange;
 use crate::watch::{iso_utc, run_exit_into, Obj, WatchIo, Watcher};
 use crate::userstream::Hub;
 use serde_json::Value;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 pub struct Wired<O: WatchIo, R: AccountRest, Q: Quotes, E: Exchange> {
     pub ops: O,
     pub rest: R,
     pub quotes: Q,
     pub ex: E,
-    pub book: AccountBook,
     /// 청산 조립 전용(상태 칸 없음 -- 주문 심볼 표만 쓴다). ponytail: 감시가 `&mut Watcher` 를 쥔 채 부르므로 같은 Desk 를 못 빌린다 -- 조립은 감시 칸을 안 읽어 따로 둔다.
     pub planner: Desk,
-    /// (받은 시각, 계좌) -- 원본 binance_account_cache. 체결 알림 뒤 계좌 갱신기(app)도 여기에 넣는다(공유).
-    pub cache: Arc<Mutex<Option<(f64, Value)>>>,
-    pub stale_grace: f64,
+    /// 계좌 한 곳(감시·접수·갱신기·화면이 같이) -- `account::SharedAccount`.
+    pub acct: Arc<SharedAccount>,
     /// 스트림으로 유지하는 계좌(사용자 결정 «받아 둔 값» -- Hub.stream_account · Hub.us). None = 늘 REST(원본 그대로).
     pub stream: Option<Arc<Hub>>,
     /// 청산 조립의 계좌가 어디서 왔나("stream" | 못 쓴 이유) -- 시험·로그.
@@ -33,15 +31,15 @@ pub struct Wired<O: WatchIo, R: AccountRest, Q: Quotes, E: Exchange> {
 
 impl<O: WatchIo, R: AccountRest, Q: Quotes, E: Exchange> Wired<O, R, Q, E> {
     pub fn new(ops: O, rest: R, quotes: Q, ex: E, eth_symbol: &str) -> Self {
-        Wired { ops, rest, quotes, ex, book: AccountBook { eth_symbol: eth_symbol.into(), last_good: None },
-                planner: Desk::new(Watcher::new(std::env::temp_dir(), eth_symbol)), cache: Arc::default(), stale_grace: 60.0, stream: None, fresh_source: vec![] }
+        Wired { ops, rest, quotes, ex, acct: Arc::new(SharedAccount::new(eth_symbol)),
+                planner: Desk::new(Watcher::new(std::env::temp_dir(), eth_symbol)), stream: None, fresh_source: vec![] }
     }
 }
 
 /// 조립이 보는 계좌(청산은 fresh 만).
 struct Acct<'a, R: AccountRest, O: WatchIo> {
     rest: &'a mut R,
-    book: &'a mut AccountBook,
+    acct: &'a SharedAccount,
     stream: Option<&'a Hub>,
     ops: &'a mut O,
     source: &'a mut Vec<&'static str>,
@@ -67,14 +65,13 @@ impl<R: AccountRest, O: WatchIo> DeskIo for Acct<'_, R, O> {
                     }
                     Err(why) => why,
                 };
-                let v = self.book.produce(self.rest).await?;
-                hub.reconcile(&v, now);
+                let v = self.acct.produce(self.rest, Some(hub)).await?;
                 self.source.push(why);
                 Ok(v)
             }
             None => {
                 self.source.push("rest");
-                self.book.produce(self.rest).await
+                self.acct.produce(self.rest, None).await
             }
         }
     }
@@ -105,25 +102,12 @@ impl<O: WatchIo, R: AccountRest, Q: Quotes, E: Exchange> WatchIo for Wired<O, R,
     async fn nap(&mut self, sec: f64) -> bool {
         self.ops.nap(sec).await
     }
-    /// swr_cached("binance_account", 10초, max_stale). ponytail: 원본은 묵은 값을 주고 뒤에서 갱신한다 -- 여기는 기다려 새로 읽는다(더 새 값 · 감시 틱이 그만큼 늦다).
+    /// swr_cached("binance_account", 10초, max_stale) -- `SharedAccount::cached`.
     async fn account(&mut self) -> Result<Value, String> {
-        let now = self.rest.now();
-        let cached = self.cache.lock().unwrap().clone();
-        let (ts, has) = cached.as_ref().map_or((0.0, false), |c| (c.0, true));
-        match account::swr_decide(now, ts, has, account::ACCOUNT_CACHE_SEC, self.stale_grace) {
-            Swr::Serve => Ok(cached.unwrap().1),
-            Swr::ServeAndRefresh | Swr::Fetch => {
-                let v = self.book.produce(&mut self.rest).await?;
-                if let Some(hub) = &self.stream {
-                    hub.reconcile(&v, now);
-                }
-                *self.cache.lock().unwrap() = Some((now, v.clone()));
-                Ok(v)
-            }
-        }
+        self.acct.cached(&mut self.rest, self.stream.as_deref()).await
     }
     async fn produce_account(&mut self) -> Result<Value, String> {
-        self.book.produce(&mut self.rest).await
+        self.acct.produce(&mut self.rest, None).await
     }
     async fn bars(&mut self, asset: &str) -> Result<Vec<Value>, String> {
         self.ops.bars(asset).await
@@ -136,7 +120,7 @@ impl<O: WatchIo, R: AccountRest, Q: Quotes, E: Exchange> WatchIo for Wired<O, R,
     }
     /// 감시 발동 청산 = assemble_exit_plan(pside, frac, fresh=True, asset, only_symbol) -- 원본은 for_order 를 넘기지 않아 화면용 펀딩·수수료까지 묻는다(그대로).
     async fn exit_plan(&mut self, pside: &str, fraction: f64, asset: &str, only_symbol: &str) -> Result<Value, Value> {
-        let mut io = Acct { rest: &mut self.rest, book: &mut self.book, stream: self.stream.as_deref(), ops: &mut self.ops, source: &mut self.fresh_source };
+        let mut io = Acct { rest: &mut self.rest, acct: &self.acct, stream: self.stream.as_deref(), ops: &mut self.ops, source: &mut self.fresh_source };
         self.planner.assemble_exit_plan(&mut self.quotes, &mut io, pside, fraction, true, asset, false, Some(only_symbol)).await.map_err(|e| e.0)
     }
     async fn run_exit(&mut self, plan: &Value, slot: &mut Obj) -> Result<(), String> {

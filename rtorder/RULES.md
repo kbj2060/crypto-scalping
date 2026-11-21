@@ -31,7 +31,7 @@
 | G15 | 옮김 | `query_fraction`·`query_leverage`(범위 밖·글자 = None → 모델값 · inf = 원본처럼 500)·`query_rule`·`query_lines`·`query_limit`·`query_wid`·wait_min · `dk` 400 사례 14 · ponytail: «1_000» 밑줄 표기는 파이썬만 |
 | G16 | 제거(사용자 결정 2026-11-21 sltp 만) | 스위칭 전량+반대 검사 -- 스위칭째 지움 · switch_to·sw_* = 400 removed_option |
 | G17 | 제거(사용자 결정 2026-11-21 sltp 만) | 자동 규칙 코인·권장 배수 15분·교차 마진 검사 -- 자동 규칙째 지움 · `rule` 인자 = 400 removed_option · `Quotes::margin_type`·`bracket::margin_type`·`DeskIo::vol_mult` 삭제 |
-| G18 | 부분 | `Reply::log` = POST /api/manual-* 의 {path, query(키마다 첫 값), status, error(원본 규칙 -- 2만 바이트 미만 dict 의 ok 거짓 → error 또는 "")} · 404·405 도 적음(원본 미들웨어가 바깥) · `rf` 159사례 + log_error 규칙 10꼴 · 파일 쓰기와 at·ms·ua·ip 는 HTTP 를 쥔 쪽(rtserve) |
+| G18 | 옮김 | `door.rs` 가 `RTORDER_DIR/order_requests.jsonl` 에 직접 적는다 -- 칸 순서 at·path·query·status·error·ms·ua·ip(원본 order_request_log) · at = KST 밀리초(fromtimestamp·isoformat ms) · ms = 반올림 · ua 200자 · ip = CF-Connecting-IP → X-Forwarded-For → 접속 주소 · json.dumps(ensure_ascii=False) · path·query·status·error = `Reply::log`(route 정답지 159 + error 규칙 10) · `db` door_bin(진짜 실행 파일 42사례 · 머리 셋 꼴) · mut «ip 순서» «UTC» «ensure_ascii» |
 
 ## 2. 계획 조립 P1–P30
 
@@ -172,9 +172,9 @@
 | R1 | 옮김 | `bracket::cancel_wait_orphans`(dbwt·dbpg 만 · rp 2 · mut «dbtp 도») + 재시작 훅 `Watcher::wait_cleanup`(지운 주문은 그 코인 대기 칸 · 정리 실패는 eth 칸 · 예외면 errors 에 · restart_cancelled 기록) · wf `restart_*` 4사례 · wi `restart_mid_exit_keeps_arming_and_next_process_finishes` · 훅을 «스위치 켜진 곳에서만» 띄우는 것은 G4(접수) |
 | R2 | 옮김 | `wait_cleanup` 이 정리 뒤 복구 파일(이름순)마다 `limit_recover` · 결과를 그 칸 recovered 에 · wf `restart_cleanup_and_recover`(6시간 넘은 SOL 파일 지움 + ETH 무장) |
 | R3 | 옮김 | `runner::settle`(진입·대기·청산 작업) + 감시 settle · `re` |
-| R4 | 부분 | 취소 확인 실패·지정가 접수 불명·PEG/감시 진입 호가 실패 → `Phase::Error` · inv03·05·07·d2·e25 · mesh(HTTP 로도 같은 error) · API 키 없음 = `Binance::has_keys`(브래킷 함수들이 원본 문구로) -- 집행 함수(run_*)의 키 검사는 호출부 · 스위칭은 접수 |
-| R5 | 범위 아님 | 웹 서버(종료 훅 · 세션 닫기 전 작업 취소) |
-| R6 | 범위 아님 | 웹 서버(shutdown_timeout 2초) |
+| R4 | 옮김 | 취소 확인 실패·지정가 접수 불명·PEG/감시 진입 호가 실패 → `Phase::Error` · inv03·05·07·d2·e25 · mesh · API 키 없음: 브래킷 함수 = `Binance::has_keys`(원본 문구) · 집행 함수 = `exec::head` → `Exchange::prepare`(Binance·GuardEx: 키 없음 = Err «API 키가 없습니다» → phase error · 요청 0) -- 2026-11-21 원본 run_entry·run_exit·run_entry_limit·run_entry_stop(지금 따라가기 = 호가 1번 뒤 키 검사) 4개를 키 없이 돌린 http 정답지와 상태·요청 열 일치(`hr` «집행 키 없음» 4 · 시험 하네스가 state0 action peg 를 안 넣던 것도 고침) |
+| R5 | 부분 | SIGTERM → `Stop` → 문이 받기를 멈추고 도는 연결·접수 작업을 버린다(원본 종료 훅의 작업 취소와 같은 뜻) · 감시·스트림·갱신기도 멈춤 · `db`·`ar` SIGTERM 종료코드 0 -- 작업 도중 취소의 거래소 쪽 뒷정리(걸린 GTX)는 다음 기동의 시작 정리(wait_cleanup) 몫 · 도는 작업 중 SIGTERM 시험 없음 |
+| R6 | 부분 | 원본 shutdown_timeout 2초(답 중인 요청을 2초 기다림) -- Rust 는 기다리지 않고 바로 닫는다(답 중이던 요청은 응답 서버에서 502) |
 | R7 | 옮김 | `Binance::nap` = tokio select(잠 · 알림) -- future 를 버리면 바로 끝나 «깨움·취소가 같은 틱이면 취소를 삼킴»(gh-86296)이 생길 자리가 없다 · mesh `nap_wakes_early_on_fill_alert` |
 | R8 | 옮김 | `entry_then_bracket`: phase=error 면 복구 파일을 남김(정상 종료에서만 지움) |
 | R9 | 옮김 | 진행 상태(entry·side_exits·waits·exiting)는 `Watcher` 메모리 -- 재시작하면 사라지고 무장 파일이 감시를 잇는다 · wi `restart_mid_exit_keeps_arming_and_next_process_finishes`(청산 도중 죽음 → 새 프로세스: 고아 정리 → fired 래치로 익절 취소 없이 바로 청산 → 닫힘 → 무장 내림) · wf `lines_fired_latch_after_restart` |
@@ -199,10 +199,10 @@
 
 | 상태 | 첫 조각 | 둘째 뒤 | 셋째 뒤 | 넷째 뒤 | 다섯째 뒤 | 여섯째 뒤 | 일곱째 뒤 | sltp 정리 뒤(→ 계좌 알림 조각 뒤) |
 |---|---|---|---|---|---|---|---|---|
-| 옮김 | 38 | 47 | 68 | **112** (+30 범위 아님→옮김 · +14 부분→옮김: G5·G15·G17·W2·P1·P6·P12·P14·P17·P20·C1·C2·B21·B22) -- 그중 ⚠시험 없음 G7 · ⚠불확실 C5 | **113** (+C4·E10 · B4·B22·B6 은 «M10 차이» 표시 · −B5 제거) | **135** (선 핸들러·실행기·전송·동시 조회) | **135** | **123** (−12 제거: G13·G16·G17·P17·P18·P19·P20·E20·C3·C4·C5·B6) → **125** (+G4·A10) → 주소 조각 뒤 **128** (+G1·G8·B33 · G7 은 ⚠ 떼고 그대로) |
-| 부분 | 22 | 21 | 31 | **23** (+G1·G2·W7·A1·A5·A6 범위 아님→부분 · G3 은 부분 그대로) | **23** (+C3 · −E10) | **5** (G1·G4·G8·R4·A10) | **5** | **5** → 계좌 알림 조각 뒤 **3** (G1·G8·R4 -- 셋 다 웹 서버 접수 몫 · G4·A10 → 옮김) → 주소 조각 뒤 **2** (R4 · G18 -- G1·G8 옮김 · G18 범위 아님→부분) |
+| 옮김 | 38 | 47 | 68 | **112** (+30 범위 아님→옮김 · +14 부분→옮김: G5·G15·G17·W2·P1·P6·P12·P14·P17·P20·C1·C2·B21·B22) -- 그중 ⚠시험 없음 G7 · ⚠불확실 C5 | **113** (+C4·E10 · B4·B22·B6 은 «M10 차이» 표시 · −B5 제거) | **135** (선 핸들러·실행기·전송·동시 조회) | **135** | **123** (−12 제거: G13·G16·G17·P17·P18·P19·P20·E20·C3·C4·C5·B6) → **125** (+G4·A10) → 주소 조각 뒤 **128** (+G1·G8·B33 · G7 은 ⚠ 떼고 그대로) → 문 조각 뒤 **130** (+G18·R4) |
+| 부분 | 22 | 21 | 31 | **23** (+G1·G2·W7·A1·A5·A6 범위 아님→부분 · G3 은 부분 그대로) | **23** (+C3 · −E10) | **5** (G1·G4·G8·R4·A10) | **5** | **5** → 계좌 알림 조각 뒤 **3** (G1·G8·R4 -- 셋 다 웹 서버 접수 몫 · G4·A10 → 옮김) → 주소 조각 뒤 **2** (R4 · G18 -- G1·G8 옮김 · G18 범위 아님→부분) → 문 조각 뒤 **2** (R5·R6 종료 -- G18·R4 옮김) |
 | 미정(사용자 결정) | 0 | 0 | 0 | **2** (C3·C4 = 스위칭 M11 -- 접수에서 «미정» 거절) | **0** (질문지 답 -- 시장가 유지 · M10 제거) · 제거 1(B5) | 0 · 제거 1 | 0 · 제거 1 | 0 · 제거 **13**(B5 + 위 12) |
-| 범위 아님 | 85 | 77 | 46 | **8** (G18·R5·R6 웹 서버 · P23·R8 대기 작업 실행기 · B25·B26 안 함 · B33 응답 서버) | **8** | **4** (G18·R5·R6 웹 서버 · B33 응답 서버) | **4** | **4** → 주소 조각 뒤 **2** (R5·R6 종료 훅 -- G18 부분 · B33 옮김) |
+| 범위 아님 | 85 | 77 | 46 | **8** (G18·R5·R6 웹 서버 · P23·R8 대기 작업 실행기 · B25·B26 안 함 · B33 응답 서버) | **8** | **4** (G18·R5·R6 웹 서버 · B33 응답 서버) | **4** | **4** → 주소 조각 뒤 **2** (R5·R6 종료 훅 -- G18 부분 · B33 옮김) → 문 조각 뒤 **0** |
 | 옮긴 몫에 시험 없음(⚠) | 4 | 2 | 1 | 2 (E17 구조 · G7 동시 요청) | 2 + M4 원본 정답지 없음 | 3 (G7 · P23 원본 정답지 없음 · B29 대기열 소비자 없음) | **1** (G7 동시 요청) | **1** (G7 · C5 ⚠불확실은 제거로 사라짐) → 주소 조각 뒤 **0** |
 
 이 조각 뒤 남는 일(다음 조각 범위):
@@ -390,4 +390,12 @@
 - 본문 글자 = `pyfmt::json_dumps`(파이썬 json.dumps 기본: ", " ": " · ensure_ascii · 실수 repr · 정수/실수 구분) -- 텔레그램과 같은 `pyfmt::json_str`.
 - ponytail: 요청 하나가 `DeskCell` 을 끝까지 쥔다(조립 REST 동안 다른 주문 요청은 기다림) · ?fresh=1 의 «1초 안 받은 값 재사용»은 `DeskIo::account(true)` 구현 몫.
 - 양성 대조 TWELVE 14/14.
+
+## 루프백 HTTP 문 · 감시와 접수 합치기 (2026-11-21 · 배치 결정 «따로 둔 프로세스»)
+
+- `app::run(cfg, mk, stop, hub, listener)`: 감시 틱·시작 정리·접수·작업이 **같은 `DeskCell`**(무장·대기 칸이 메모리에서도 하나), 감시 swr·접수 새로 읽기·갱신기·화면 ?fresh=1 이 **같은 `account::SharedAccount`**(캐시·last_good·swr 잠금 하나), 감시의 주문 잠금 = `Front` 의 잠금(D9).
+- `door.rs`: `RTORDER_LISTEN`(기본 127.0.0.1:8791 · 루프백만 · bin 이 묶고 실패면 종료코드 2) · 14주소 = `Front::call` · `GET /internal/acct` = {seq, user_stream{connected, last_event_at, error}} · 그 밖 404 · 접수 기록 G18 · 접수 작업은 같은 줄의 FuturesUnordered.
+- `?fresh=1` = `DeskIo::account_screen` → `SharedAccount::refresh(reuse_1s)`(잠금 안에서 1초 안 받은 값 재사용 · 아니면 새로 읽어 캐시에) · 접수 조립의 새 계좌는 재사용 안 함(원본 produce_account).
+- 시험: `db` = tests/door_bin.rs(진짜 실행 파일 · route 정답지 중 바깥 안 부르는 42사례 바이트 일치 · 기록 줄 · /internal/acct · 404 · 쓰기 0 · SIGTERM · 루프백 아님 거절 · 자기 기록 폴더 재시작 · 클라이언트가 죽어도 틱 · ?fresh=1 재사용) · `ar` door_exit_submit_*(문으로 들어온 청산 → 같은 칸에서 작업 · 둘째 409 · 그림자 GTX 안 보냄).
+- 의도한 차이: 감시 틱이 칸을 쥔 채 손절 청산(최대 ~2분)을 돌면 그동안 접수(상태·계좌 조회 포함)는 5초 뒤 409(`route::DESK_WAIT_SEC`) -- 원본은 await 사이 다른 핸들러가 돌았다. ponytail: 감시의 run_exit 를 칸 잠금 밖으로 빼면 없어진다.
 

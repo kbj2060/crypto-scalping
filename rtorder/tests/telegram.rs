@@ -27,7 +27,7 @@ fn ops(base: &str, shadow: bool, telegram: Telegram) -> Ops {
     if shadow {
         bx.shadow_on();
     }
-    Ops { bx, feed: Default::default(), hub: Default::default(), stop: Default::default(), stopped: Default::default(), would: Arc::new(Mutex::new(vec![])), alerts: vec![], telegram: Some(telegram) }
+    Ops { bx, feed: Default::default(), hub: Default::default(), stop: Default::default(), stopped: Default::default(), would: Arc::new(Mutex::new(vec![])), alerts: vec![], telegram: Some(telegram), front: Default::default() }
 }
 
 #[tokio::test]

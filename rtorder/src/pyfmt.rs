@@ -129,6 +129,11 @@ mod tests {
 
 /// 파이썬 json.dumps(ensure_ascii=True) 의 문자열 한 개.
 pub fn json_str(s: &str) -> String {
+    json_str_as(s, true)
+}
+
+/// `ascii` = ensure_ascii(기본 True) · False = 제어 문자·따옴표·역빗금만 이스케이프(원본 order_request_log 의 json.dumps(row, ensure_ascii=False)).
+pub fn json_str_as(s: &str, ascii: bool) -> String {
     let mut o = String::from("\"");
     for c in s.chars() {
         match c {
@@ -140,6 +145,7 @@ pub fn json_str(s: &str) -> String {
             '\u{8}' => o.push_str("\\b"),
             '\u{c}' => o.push_str("\\f"),
             ' '..='~' => o.push(c),
+            _ if !ascii && c as u32 >= 0x20 => o.push(c),
             _ => {
                 for u in c.encode_utf16(&mut [0; 2]) {
                     o.push_str(&format!("\\u{u:04x}"));
@@ -153,6 +159,10 @@ pub fn json_str(s: &str) -> String {
 
 /// 파이썬 json.dumps(v) 기본 모양(", " · ": " · ensure_ascii · 실수 = repr) -- aiohttp web.json_response 본문 글자.
 pub fn json_dumps(v: &serde_json::Value) -> String {
+    json_dumps_as(v, true)
+}
+/// json.dumps(v, ensure_ascii=ascii).
+pub fn json_dumps_as(v: &serde_json::Value, ascii: bool) -> String {
     use serde_json::Value;
     match v {
         Value::Null => "null".into(),
@@ -162,8 +172,8 @@ pub fn json_dumps(v: &serde_json::Value) -> String {
             (_, Some(u)) => u.to_string(),
             _ => repr(n.as_f64().unwrap()),
         },
-        Value::String(s) => json_str(s),
-        Value::Array(a) => format!("[{}]", a.iter().map(json_dumps).collect::<Vec<_>>().join(", ")),
-        Value::Object(m) => format!("{{{}}}", m.iter().map(|(k, x)| format!("{}: {}", json_str(k), json_dumps(x))).collect::<Vec<_>>().join(", ")),
+        Value::String(s) => json_str_as(s, ascii),
+        Value::Array(a) => format!("[{}]", a.iter().map(|x| json_dumps_as(x, ascii)).collect::<Vec<_>>().join(", ")),
+        Value::Object(m) => format!("{{{}}}", m.iter().map(|(k, x)| format!("{}: {}", json_str_as(k, ascii), json_dumps_as(x, ascii))).collect::<Vec<_>>().join(", ")),
     }
 }

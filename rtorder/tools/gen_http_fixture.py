@@ -436,6 +436,11 @@ scn("집행 M4 지정가 대기 지금 시장가(2번째 조회 뒤)", c("run_en
 scn("집행 M4 부분 체결 뒤 지금 시장가", c("run_entry_limit", plan={**EP, "price": 2490.0, "limit": {"usdt": 2490.0}}, act_at=3, action="market"),
     auto=auto_book(MK("1.5"), fill_get="0.5", fill_status="PARTIALLY_FILLED"))
 scn("집행 M5 감시 진입 지금 시장가", c("run_entry_stop", plan={**EP, "limit": {"usdt": 2600.0}}, state0={"action": "market"}), auto=auto_book(MK("2")))
+# 2026-11-21 R4: 집행 함수 머리의 키 검사(원본 run_entry·run_exit·run_entry_limit 첫 줄 · run_entry_stop 은 닿은 뒤 run_entry 가) -- 요청 0 · phase=error
+scn("집행 키 없음 run_entry", c("run_entry", plan=EP), keys=False)
+scn("집행 키 없음 run_exit", c("run_exit", plan=XP), keys=False)
+scn("집행 키 없음 run_entry_limit", c("run_entry_limit", plan={**EP, "price": 2490.0, "limit": {"usdt": 2490.0}}, act_at=999, action="market"), keys=False)
+scn("집행 키 없음 run_entry_stop 지금 따라가기", c("run_entry_stop", plan={**EP, "limit": {"usdt": 2600.0}}, state0={"action": "peg"}), keys=False, auto=auto_book(MK("2")))
 
 
 async def main():

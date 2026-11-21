@@ -45,6 +45,12 @@ fn exchange(routes: Value) -> (Srv, Arc<Mutex<Ex>>) {
             ("GET", "/fapi/v1/openOrders") => json!(e.open.iter().filter(|o| qm.get("symbol").is_none_or(|s| o["symbol"] == *s)).cloned().collect::<Vec<_>>()),
             ("GET", "/fapi/v1/openAlgoOrders") => json!([]),
             ("POST", "/fapi/v1/listenKey") => json!({"listenKey": "lk1"}),
+            ("GET", "/fapi/v1/ticker/bookTicker") => json!({"symbol": "ETHUSDC", "bidPrice": "2450.10", "askPrice": "2450.20"}),
+            ("GET", "/fapi/v1/exchangeInfo") => json!({"symbols": [{"symbol": "ETHUSDC", "filters": [{"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.001"},
+                                                                     {"filterType": "PRICE_FILTER", "tickSize": "0.01"}, {"filterType": "MIN_NOTIONAL", "notional": "20"}]}]}),
+            ("GET", "/fapi/v1/klines") => json!([]),
+            ("GET", "/fapi/v1/premiumIndex") => json!({"symbol": "ETHUSDC", "lastFundingRate": "0.0001", "markPrice": "2450.15"}),
+            ("GET", "/fapi/v1/commissionRate") => json!({"symbol": "ETHUSDC", "makerCommissionRate": "0.0002", "takerCommissionRate": "0.0005"}),
             ("POST", "/fapi/v1/order") => {
                 e.next += 1;
                 let o = json!({"orderId": e.next, "clientOrderId": qm.get("newClientOrderId").copied().unwrap_or(""), "symbol": qm["symbol"], "side": qm["side"],
@@ -125,7 +131,7 @@ async fn start_recovers_ticks_stops_and_restart_is_idempotent_then_shadow_sends_
     seed(&dir);
     let ban = dir.join("ban");
     // ① 기동 → 복구 → 틱 → 멈춤(실전송 = 루프백 가짜 거래소)
-    let s = app::run(&cfg(&dir, &srv.base), &mk(srv.base.clone(), ban.clone(), false), Stop::default(), Default::default()).await;
+    let s = app::run(&cfg(&dir, &srv.base), &mk(srv.base.clone(), ban.clone(), false), Stop::default(), Default::default(), None).await;
     let log: Vec<String> = std::mem::take(&mut ex.lock().unwrap().log);
     let writes: Vec<&String> = log.iter().filter(|l| !l.starts_with("GET")).collect();
     println!("① 쓰기 {writes:?}\n로그 {:?}", s.logs);
@@ -141,7 +147,7 @@ async fn start_recovers_ticks_stops_and_restart_is_idempotent_then_shadow_sends_
     assert!(s.logs.iter().any(|l| l.starts_with("wait cleanup:")), "{:?}", s.logs);
     // ② 재시작(같은 폴더·같은 거래소) -- 더 할 일 없음: 쓰기 0 · 무장 그대로
     let armed_at = f["ETHUSDC:LONG"]["armed_at"].clone();
-    let s = app::run(&cfg(&dir, &srv.base), &mk(srv.base.clone(), ban.clone(), false), Stop::default(), Default::default()).await;
+    let s = app::run(&cfg(&dir, &srv.base), &mk(srv.base.clone(), ban.clone(), false), Stop::default(), Default::default(), None).await;
     let log: Vec<String> = std::mem::take(&mut ex.lock().unwrap().log);
     assert!(log.iter().all(|l| l.starts_with("GET")), "재시작에서 쓰기가 나갔다 {log:?}");
     assert_eq!(file(&dir)["ETHUSDC:LONG"]["armed_at"], armed_at, "무장을 다시 쓰지 않는다");
@@ -149,7 +155,7 @@ async fn start_recovers_ticks_stops_and_restart_is_idempotent_then_shadow_sends_
     // ③ 그림자: 처음 상황 그대로 · 쓰기 요청 0 · 안 보낸 쓰기가 목록에
     let (srv2, ex2) = exchange(routes());
     seed(&dir);
-    let s = app::run(&cfg(&dir, &srv2.base), &mk(srv2.base.clone(), ban.clone(), true), Stop::default(), Default::default()).await;
+    let s = app::run(&cfg(&dir, &srv2.base), &mk(srv2.base.clone(), ban.clone(), true), Stop::default(), Default::default(), None).await;
     let log = ex2.lock().unwrap().log.clone();
     assert!(log.iter().all(|l| l.starts_with("GET")), "그림자에서 쓰기가 나갔다 {log:?}");
     println!("③ 안 보낸 쓰기 {:?}", s.would);
@@ -204,7 +210,7 @@ async fn stream_fill_refreshes_account_once_bumps_acct_seq_and_shares_stream_sta
         }
         s2.stop();
     });
-    let s = app::run(&cfg, &mk(srv.base.clone(), dir.join("ban"), true), stop, hub.clone()).await;
+    let s = app::run(&cfg, &mk(srv.base.clone(), dir.join("ban"), true), stop, hub.clone(), None).await;
     assert_eq!(hub.acct_seq(), 1, "연결 + 체결 알림이 0.3초 안 = 계좌 다시 읽기 한 번 {:?}", s.logs);
     let us = hub.us.lock().unwrap().clone();
     assert!(us.connected && us.epoch == 1 && us.last_event_at.is_some(), "{us:?}");
@@ -243,7 +249,7 @@ fn binary_starts_stops_on_sigterm_restarts_and_refuses_bad_config() {
     seed(&dir);
     let run = |extra: &[(&str, &str)]| {
         let mut c = std::process::Command::new(bin);
-        c.env_clear().env("PATH", std::env::var("PATH").unwrap_or_default()).env("RTORDER_DIR", &dir).env("RTORDER_BASE", &srv.base).env("RTORDER_PERIOD", "0.05");
+        c.env_clear().env("PATH", std::env::var("PATH").unwrap_or_default()).env("RTORDER_DIR", &dir).env("RTORDER_BASE", &srv.base).env("RTORDER_PERIOD", "0.05").env("RTORDER_LISTEN", "127.0.0.1:0");
         for (k, v) in extra {
             c.env(k, v);
         }
@@ -274,7 +280,64 @@ fn binary_starts_stops_on_sigterm_restarts_and_refuses_bad_config() {
     assert_eq!(code(run(&[("RTORDER_MODE", "live"), ("RTORDER_LIVE_CONFIRM", rtorder::shadow::LIVE_CONFIRM)]).env_remove("RTORDER_X")), Some(2), "기본 빌드에서 live");
     assert_eq!(code(run(&[("RTORDER_MODE", "turbo")]).env_remove("RTORDER_X")), Some(2));
     assert_eq!(code(std::process::Command::new(bin).env_clear()), Some(2), "RTORDER_DIR 없음");
+    let _ = std::fs::remove_file(dir.join(app::DIR_MARK)); // rtorder 표식이 없는 폴더에 접수 기록 = 파이썬 폴더
     std::fs::write(dir.join("order_requests.jsonl"), "").unwrap();
     assert_eq!(code(&mut run(&[])), Some(2), "파이썬 서버 폴더");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn door_exit_submit_runs_task_on_shared_desk_and_shadow_sends_nothing() {
+    // 문으로 들어온 청산 접수 → 작업(run_task)이 감시와 같은 DeskCell 에서 돈다 · 그림자 = GTX 를 «안 보낸 쓰기»로 · 칸은 rejected(«400 [shadow]») ·
+    // 그동안 같은 코인 둘째 청산은 칸이 바빠 409 · 감시 틱도 계속 돈다
+    std::env::set_var("DASHBOARD_MANUAL_EXEC_ENABLED", "1");
+    let (srv, ex) = exchange(routes());
+    let dir = std::env::temp_dir().join(format!("rtorder_app_door_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    let stop = Stop::default();
+    let s2 = stop.clone();
+    let probe = tokio::spawn(async move {
+        let http = |m: &'static str, t: String| async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut c = tokio::net::TcpStream::connect(addr).await.unwrap();
+            c.write_all(format!("{m} {t} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+            let mut b = String::new();
+            c.read_to_string(&mut b).await.unwrap();
+            b
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let r1 = http("POST", "/api/manual-exit/submit?side=LONG&confirm=1&asset=eth".into()).await;
+        let r2 = http("POST", "/api/manual-exit/submit?side=LONG&confirm=1&asset=eth".into()).await;
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        let st = http("GET", "/api/manual-entry/status?asset=eth".into()).await;
+        s2.stop();
+        (r1, r2, st)
+    });
+    let d = dir.to_string_lossy().to_string();
+    let base = srv.base.clone();
+    let get = move |k: &str| match k {
+        "RTORDER_DIR" => Some(d.clone()),
+        "RTORDER_BASE" => Some(base.clone()),
+        "RTORDER_PERIOD" => Some("0.05".into()),
+        _ => None,
+    };
+    let cfg = app::config_from(&get).unwrap();
+    let s = app::run(&cfg, &mk(srv.base.clone(), dir.join("ban"), true), stop, Default::default(), Some(l)).await;
+    let (r1, r2, st) = probe.await.unwrap();
+    assert!(r1.starts_with("HTTP/1.1 200") && r1.contains("\"server_ms\": "), "{r1}");
+    assert!(r2.starts_with("HTTP/1.1 409") && r2.contains("already_working"), "칸이 바쁜 동안 둘째 청산 = 409 {r2}");
+    let body = st.split_once("\r\n\r\n").unwrap().1;
+    let v: Value = serde_json::from_str(body).unwrap();
+    assert_eq!(v["state"]["kind"], "exit", "{body}");
+    assert_eq!(v["state"]["phase"], "rejected", "그림자 = GTX 를 «400 [shadow]» 확정 거부로 → rejected {body}");
+    assert!(s.would.iter().any(|w| w.starts_with("GTX ETHUSDC SELL LONG")), "{:?}", s.would);
+    assert!(s.ticks > 5, "작업이 도는 동안에도 감시 틱 {}", s.ticks);
+    let log = ex.lock().unwrap().log.clone();
+    assert!(log.iter().all(|l| l.starts_with("GET")), "그림자에서 쓰기가 나갔다 {log:?}");
+    let rows = std::fs::read_to_string(dir.join("order_requests.jsonl")).unwrap();
+    assert_eq!(rows.lines().count(), 2, "POST 둘만 기록 {rows}");
     let _ = std::fs::remove_dir_all(&dir);
 }
