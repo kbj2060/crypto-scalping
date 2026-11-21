@@ -23,7 +23,7 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | 아이스버그 `live_eth_iceberg` | JSON 상태 + JSONL 사건 | /api/iceberg · 감시 | — | 안 옮김 | depthdiff + hot 테이프 30초 창 계산(numpy) · 291줄 |
 | HL 포지션 | SQLite hot `hl_positions*.sqlite` | server HL 고래 청산 · 시장 맥락 · seal | — | **옮김** `rtduck hl_positions`(HL info REST 전용 -- `RTDUCK_REST=1` 없으면 안 돈다) | 입력 = HL 체결 DuckDB 를 읽어서 rtduck 에 둠 |
 | HL 체결 | DuckDB 일별 → 3일 뒤 gz | HL 포지션 입력 · 감시 | — | **옮김** `rtduck hl_trades` | — |
-| market_data_worker `duckdb_persist_worker` | DuckDB 둘(microstructure 1분 ETH·BTC·SOL · tail_risk 1분 ETH) + JSON 둘(dashboard_state · liq_burst_state) | 화면 세션 칸·SSE 갱신 신호(dashboard_state) · 감시 check_dashboard·check_data_sources·신선도 4줄 · seal micro_1m·tail_risk_1m | — | **반쯤 옮김** `rtduck market_data` = 청산 요격기(tail_risk_1m · liq_burst_state.json) + dashboard_state.json(장 달력 = pandas_market_calendars 를 뜬 표) | 남은 것 = 미시구조(`microstructure_scanner.py` 884줄: depth20·aggTrade 웹소켓 + OI·premiumIndex 10초 REST + aggTrades 대체 REST · 1분 34칸) -- 전환 때 파이썬은 COLLECT_MICROSTRUCTURE 만 남긴다 |
+| market_data_worker `duckdb_persist_worker` | DuckDB 둘(microstructure 1분 ETH·BTC·SOL · tail_risk 1분 ETH) + JSON 둘(dashboard_state · liq_burst_state) | 화면 세션 칸·SSE 갱신 신호(dashboard_state) · 감시 check_dashboard·check_data_sources·신선도 4줄 · seal micro_1m·tail_risk_1m | — | **옮김** `rtduck market_data` = 미시구조(depth20·aggTrade 웹소켓 + OI·premiumIndex 10초 REST + aggTrades 대체 · 34칸) + 청산 요격기 + dashboard_state(장 달력 = pandas_market_calendars 를 뜬 표) · 미시구조 REST 기본 꺼짐 | 감시 check_data_sources 를 Rust 파일로 돌려 파이썬 파일과 같은 판정(OK) |
 | oi_lsratio 워커 | DuckDB | **server 롱숏비(server.py:2536)** · seal | — | **옮김** `rtduck oi_lsratio`(REST 기본 꺼짐 · 밴 파일) | — |
 | 뉴스 RSS | SQLite hot | /api/news | — | 안 옮김 | XML·HTML 엔티티·RFC822 날짜·정규식 크레이트(사용자 결정) |
 | deribit 블록체결·GEX | JSON 둘 + 옵션 DuckDB | server 옵션 카드 · 감시 | — | 안 옮김 | 옵션 DuckDB 몫(크레이트) · JSON 몫만 떼는 것은 결정 필요 |
@@ -47,9 +47,13 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | 월간 학습(dir4h·vol4h·dir_short·box_hold Platt) | 월간 | joblib | 서빙 | 여럿 | 파이썬 유지(학습) | — |
 | raw_failover · data_quality_monitor · morning_audit · multicoin_collectors · gen_data_map · verdict_ledger_health · backup | 여러 | JSON·보고 | 감시·사용자 | — | 범위 밖(R7 운영) | — |
 
-**요약**: 상주 수집기 중 옮김 16(테이프 셋 · 청산 · 맥락 넷 · depth · 래스터 · ob5m · bookdepth · HL 호가 .bt · rtduck 롱숏비·HL 체결·HL 포지션) · 안 옮김 4(계산 워커 하나 = iceberg · rtduck 몫 하나 = market_data_worker 의 미시구조(청산 요격기·dashboard_state 는 옮김) · XML 하나 · deribit) ·
+**안 옮김 전부(2026-11-21 마지막 조각 뒤)**: 상주 = 아이스버그 `live_eth_iceberg`(depthdiff + hot 테이프 30초 창 numpy 계산) · 뉴스 RSS(XML·HTML 엔티티·RFC822 -- 크레이트 결정) · deribit 블록체결·GEX(옵션 DuckDB) /
+예약 = treasury_futures · macro_5m · cboe 옵션 체인(크레이트 없이 됨) · macro_daily · liqmap_scorer · liq_tab · soxl_weekend_forward · macro_bias_forward(pandas 계산 기록기) · seal_to_lake(parquet) /
+보관 = raster 14일 보관(parquet·duckdb) / 파이썬 유지 = 월간 학습 / 범위 밖 = 운영 감시 묶음(R7) · 알림. «불확실»·«안 쓰임» 은 아래 줄.
+
+**요약**: 상주 수집기 중 옮김 17(테이프 셋 · 청산 · 맥락 넷 · depth · 래스터 · ob5m · bookdepth · HL 호가 .bt · rtduck 롱숏비·HL 체결·HL 포지션·market_data_worker) · 안 옮김 3(계산 워커 iceberg · 뉴스 RSS(XML) · deribit) ·
 rtmodel 1 · 범위 밖 2 / 예약 중 안 옮김 8(크레이트 없이 되는 것 = treasury·macro_5m·cboe · 계산 기록기 다섯) · rtmodel 3 · parquet 1.
-옮기지 않은 «불확실»: HL 호가 .bt · 뉴스 판정·ollaya · prometheus · trend_core_forward · f4c altdata · llm_brief / «안 쓰임»: 돌파 워커 · 신호 워커 · maxpain 기록기 · maker_fill_shadow.
+옮기지 않은 «불확실»: 뉴스 판정·ollaya · prometheus · trend_core_forward · f4c altdata · llm_brief / «안 쓰임»: 돌파 워커 · 신호 워커 · maxpain 기록기 · maker_fill_shadow.
 
 ---
 

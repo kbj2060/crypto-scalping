@@ -7,8 +7,8 @@
 #   oi_lsratio: BOT_SYMBOLS(기본 ETHUSDT,BTCUSDT,SOLUSDT,XRPUSDT -- 서버 supervisor_oi_lsratio_worker.sh 와 같은 목록) · 🔴RTDUCK_REST=1 없으면 아무것도 안 쓴다
 #               · 쓰는 곳 기본 data/live/rtduck/oi_lsratio.duckdb(파이썬 파일 data/live/oi_lsratio.duckdb 는 실행 파일이 거부 -- 전환 때만 RTDUCK_TAKEOVER=1)
 #   hl_trades:  HL_COINS(기본 ETH -- 원본처럼 코인마다 하나) · 쓰는 곳 기본 data/live/rtduck/orderflow/hyperliquid/<코인_코인>/<날짜>.duckdb
-#   market_data: TAIL_SYMBOLS(기본 ETHUSDT -- 서버 supervisor_market_data_worker.sh 와 같다) · 청산 요격기 + dashboard_state.json(웹소켓뿐 · REST 없음)
-#               · 🔴COLLECT_MICROSTRUCTURE=false 를 이 스크립트가 넣는다(미시구조는 아직 파이썬) · 쓰는 곳 data/live/rtduck/{tail_risk.duckdb,liq_burst_state.json,dashboard_state.json}
+#   market_data: TAIL_SYMBOLS(기본 ETHUSDT -- 서버 supervisor_market_data_worker.sh 와 같다) · 청산 요격기 + dashboard_state.json
+#               + 미시구조 BOT_SYMBOLS(기본 ETHUSDT,BTCUSDT,SOLUSDT · 🔴REST 는 RTDUCK_REST=1 일 때만) · 쓰는 곳 data/live/rtduck/{microstructure.duckdb,tail_risk.duckdb,liq_burst_state.json,dashboard_state.json}
 #   hl_positions: HL_POS_COINS(기본 ETH) · HL_ROOT(체결 DuckDB 읽기만) · 🔴RTDUCK_REST=1 없으면 아무것도 안 한다 · 쓰는 곳 data/hot/rtduck/hl_positions[_코인들].sqlite
 # 로그: logs/supervisor/rtduck_<KEY>_YYYYMMDD.log · 락: data/live/.supervisor_rtduck_<KEY>.lock
 # ⚠️같은 종류·같은 목록의 rtduck 가 이미 돌면 켜지 않는다(DuckDB 는 쓰는 프로세스가 하나다 -- 두 벌이면 하나가 «Conflicting lock» 으로 죽는다).
@@ -43,7 +43,6 @@ for pid in $(pgrep -x rtduck); do
 done
 KEY="${KIND}_${SYM//,/_}"
 export RTDUCK_KIND="$KIND" "$VAR=$SYM"
-[ "$KIND" != market_data ] || export COLLECT_MICROSTRUCTURE=false
 exec "$ROOT/scripts/ops/_supervise.sh" \
   "rtduck($KEY)" \
   "$ROOT/data/live/.supervisor_rtduck_$KEY.lock" \

@@ -206,7 +206,7 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
 | `oi_lsratio` | `BOT_SYMBOLS` · `OI_POLL_INTERVAL_SEC` · `OI_FETCH_LIMIT` · `OI_ENABLE`(원본과 같다) · 🔴`RTDUCK_REST=1` 필수 | `data/live/rtduck/oi_lsratio.duckdb` | `data/live/oi_lsratio.duckdb`(가리키면 종료코드 2 · 전환 때만 `RTDUCK_TAKEOVER=1`) |
 | `hl_trades` | `HL_COINS` · `HL_ROOT` | `data/live/rtduck/orderflow/hyperliquid/<코인_코인>/<날짜>.duckdb` | `data/live/orderflow/hyperliquid/…` |
 | `hl_positions` | `HL_POS_COINS`(원본과 같다) · `HL_ROOT`(체결 DuckDB 읽기만 -- 그림자는 Rust hl_trades 의 data/live/rtduck/orderflow/hyperliquid) · 🔴`RTDUCK_REST=1` 필수 | `data/hot/rtduck/hl_positions[_코인들].sqlite` | `data/hot/hl_positions[_코인들].sqlite`(가리키면 종료코드 2) |
-| `market_data` | `TAIL_SYMBOLS`(ETHUSDT) · `WRITE_DASHBOARD_STATE`(기본 true) · 🔴`COLLECT_MICROSTRUCTURE=false` 필수(감독이 넣는다) | 폴더 `data/live/rtduck/`(`RTDUCK_LIVE_DIR`): `tail_risk.duckdb` · `liq_burst_state.json` · `dashboard_state.json` | `data/live/` 의 같은 이름(가리키면 종료코드 2) -- 웹소켓뿐(REST 없음) · 그림자 기본으로 띄운다 |
+| `market_data` | `BOT_SYMBOLS`(미시구조 · 기본 ETHUSDT,BTCUSDT,SOLUSDT) · `TAIL_SYMBOLS`(요격기 · 서버 ETHUSDT) · `COLLECT_MICROSTRUCTURE`·`COLLECT_TAIL_RISK`·`WRITE_DASHBOARD_STATE`(원본과 같다) · 🔴미시구조 REST 는 `RTDUCK_REST=1` 일 때만 | 폴더 `data/live/rtduck/`(`RTDUCK_LIVE_DIR`): `microstructure.duckdb` · `tail_risk.duckdb` · `liq_burst_state.json` · `dashboard_state.json` | `data/live/` 의 같은 이름(가리키면 종료코드 2) |
 
 - 🔧밴 파일(`RTCOLLECT_BAN_FILE`, 기본 `data/live/binance_ban_until`)을 지킨다 -- 원본 롱숏비 워커는 모른다(밴 중에도 보냈다). 의도한 차이 #17.
 - REST 부담 -- 그림자를 켜면 파이썬과 합쳐 **두 배**다(그래서 `tools/shadow_start.sh` 는 REST 종류를 기본으로 안 띄운다 · `RTDUCK_SHADOW_REST=1` 이면 띄움):
@@ -214,8 +214,12 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
   - hl_positions: 원본 = 주소마다 clearinghouseState(가중치 2) 0.4초 간격 = 150회/분 = 가중치 300/분 · 서버 두 프로세스(ETH · 다코인)면 600/분(한도 1,200/분의 50%) →
     그림자 켜면 1,200/분 = **한도 100%**(429 가 나기 시작한다 -- 원본 주석의 «합계 50%» 전제가 깨진다). 켤 거면 파이썬 쪽을 끄는 전환 때만.
   - hl_trades: 웹소켓뿐(REST 없음) -- 그림자 기본으로 띄운다.
-  - market_data(청산 요격기·dashboard_state): 웹소켓 하나(@forceOrder)뿐 -- 그림자 기본으로 띄운다. 🔴미시구조를 옮기면 OI·premiumIndex 10초 폴링(종목 3 × 2 = 분당 36요청) + WS 가 멎었을 때 aggTrades(limit 500) 가 붙어 그림자에서 두 배(72/분)다 -- 그때 기본 꺼짐으로.
+  - market_data: 요격기·dashboard_state 는 웹소켓뿐. 미시구조 REST = 종목마다 10초에 openInterest·premiumIndex 둘(+ 체결 웹소켓이 30초 넘게 조용하면 aggTrades limit 500 -- 시작 첫 바퀴에도 한 번) → 서버 3종목이면 **분당 36요청**,
+    그림자에서 켜면 파이썬과 합쳐 **72/분**(접속 루프 시험의 실측 요청 열: OI → premiumIndex → aggTrades(첫 바퀴) → OI → premiumIndex …, 간격 = MS_POLL_INTERVAL_SEC). 그래서 `shadow_start.sh` 는 `RTDUCK_SHADOW_REST=1` 일 때만 켠다 --
+    꺼 두면 웹소켓 칸은 쌓이고 poll_connected=false · data_stale=true(감시 check_data_sources 는 그 그림자 파일을 보지 않는다 -- 원본 파일만 본다).
 - 매일 대조: 두 파일을 사본으로 떠서(쓰는 쪽이 열 때 다른 프로세스 열기가 막힌다 -- seal_to_lake 방식) 같은 ts 의 14칸·sources_ok 를 비교(collected_at 은 다르다).
 - 🔴DuckDB 파일은 쓰는 프로세스가 하나다: 그림자와 파이썬이 **같은 파일**을 가리키면 하나가 «Conflicting lock» 으로 죽는다(위 기본 경로가 다른 이유).
 
 - 장 달력(market_data 의 dashboard_state 세션 칸): `rtduck/src/sessions.json` = 개발기 pandas_market_calendars 5.4.0 의 JPX·LSE·NYSE schedule(2024~2035). 🔴서버 판이 다르면 휴장·마감 규칙이 다를 수 있다 -- 서버에서 `tools/gen_sessions.py` 로 다시 떠서 비교. 범위 밖 날짜는 원본 예외 길(UTC 시각 규칙)이라 원본과 다를 수 있다.
+- 🔴묶은 DuckDB(Rust)에는 ICU 가 없다: `TIMESTAMPTZ - INTERVAL` 이 Binder Error 라 부트스트랩(«최근 30분·60분·5분»)을 epoch µs 비교로 썼다(같은 순간 비교). 서버 SQL·seal_to_lake 는 파이썬 duckdb(ICU 있음)로 Rust 파일을 읽으니 상관없다.
+- 분 저장(요격기·미시구조)은 원본이 지역 시각 `datetime.now()` 의 분·초로 정한다 -- 정답지는 TZ=Asia/Seoul(서버와 같다 · 일광절약 없음)로 만들어 Rust(UTC 분·초)와 같음을 고정했다. 오프셋이 분 단위인 시간대(실제 시간대는 모두 그렇다 · +05:45 도)면 «분이 바뀐 첫 15초» 판정과 저장 시각이 같다. 일광절약 전환 시각에는 지역 분이 같아도 순간이 한 시간 건너뛰어 원본 쪽이 한 분을 다르게 볼 수 있다(서버 KST 는 없음).

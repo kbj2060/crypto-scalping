@@ -159,7 +159,10 @@ pub fn py_float_repr(x: f64) -> String {
     if !x.is_finite() {
         return if x.is_nan() { "NaN".into() } else if x > 0.0 { "Infinity".into() } else { "-Infinity".into() }; // json.dumps 낱말
     }
-    let e = format!("{x:e}"); // 예: "-1.2345e-5" -- 가장 짧은 왕복 자리
+    // 가장 짧은 왕복 자리 수 L 은 Rust 가 주지만, 그 길이의 후보가 둘 이상일 때(정확한 반값) 고르는 쪽이 파이썬(가장 가까운 것 · 짝수)과 다르다
+    //   -- 2026-11-21 3.13056182861328125 → Rust 813 · 파이썬 812. L 자리로 정확히 반올림(짝수)한 글자를 쓴다(무작위 60만 개 파이썬 repr 과 같음).
+    let l = format!("{x:e}").split_once('e').unwrap().0.chars().filter(|c| c.is_ascii_digit()).count();
+    let e = format!("{x:.*e}", l - 1);
     let (m, exp) = e.split_once('e').unwrap();
     let exp: i32 = exp.parse().unwrap();
     let (neg, m) = m.strip_prefix('-').map_or((false, m), |r| (true, r));
@@ -276,7 +279,8 @@ mod py_tests {
     fn repr_and_dumps_match_python() {
         // 파이썬 3.11 repr 로 확인한 값
         for (x, want) in [(1e16, "1e+16"), (1e15, "1000000000000000.0"), (0.0001, "0.0001"), (0.00001, "1e-05"), (2500.1, "2500.1"),
-                          (-1.5e-7, "-1.5e-07"), (123456789012345680.0, "1.2345678901234568e+17"), (0.0, "0.0"), (5.0, "5.0"), (1.25e-4, "0.000125")] {
+                          (-1.5e-7, "-1.5e-07"), (123456789012345680.0, "1.2345678901234568e+17"), (0.0, "0.0"), (5.0, "5.0"), (1.25e-4, "0.000125"),
+                          (3.13056182861328125, "3.1305618286132812"), (866699652019531.25, "866699652019531.2")] {   // 정확한 반값 = 짝수 쪽
             assert_eq!(py_float_repr(x), want, "{x}");
         }
         let v: Value = serde_json::from_str(r#"{"b":[["1.0","2"]],"a":1,"é":"가\n","f":1.0e16,"n":null,"t":true}"#).unwrap();

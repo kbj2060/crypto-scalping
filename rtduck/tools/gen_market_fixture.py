@@ -6,8 +6,8 @@
 10초 틱 = 경계 + 0.05초(원본 sleep(10 - now%10 + 0.05) 의 이상적 시각). dashboard_state = 원본 `write_dashboard_state()` 그대로(pd.Timestamp.now 만 가짜 시계).
 🔴NPY_DISABLE_CPU_FEATURES=X86_V4 로 돌린다(서버와 같은 np.log). 합성 자료만 · 네트워크 없음.
 
-    NPY_DISABLE_CPU_FEATURES=X86_V4 python3 rtduck/tools/gen_market_fixture.py
-    NPY_DISABLE_CPU_FEATURES=X86_V4 python3 rtduck/tools/gen_market_fixture.py --check   # 감시 check_data_sources·check_dashboard 를 두 쪽 파일에
+    TZ=Asia/Seoul NPY_DISABLE_CPU_FEATURES=X86_V4 python3 rtduck/tools/gen_market_fixture.py
+    TZ=Asia/Seoul NPY_DISABLE_CPU_FEATURES=X86_V4 python3 rtduck/tools/gen_market_fixture.py --check   # 감시 check_data_sources·check_dashboard 를 두 쪽 파일에
 """
 from __future__ import annotations
 
@@ -28,10 +28,13 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "rtcollect" / "tools"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 assert "X86_V4" in os.environ.get("NPY_DISABLE_CPU_FEATURES", ""), "NPY_DISABLE_CPU_FEATURES=X86_V4 로 돌린다"
+assert os.environ.get("TZ") == "Asia/Seoul", "TZ=Asia/Seoul(서버 시간대 -- 분 저장이 지역 시각 datetime.now() 기준이다)"
+time.tzset()
+assert time.localtime().tm_gmtoff == 9 * 3600
 import gen_venue_fixture as gv  # noqa: E402 -- 소켓 막기
 from duckdump import dump  # noqa: E402
 
-T0 = 1_795_312_200.0 - 600.0     # 2026-11-21 UTC 부근(합성) -- 아래 세션 시각들은 따로 고른다
+# T0 = 만들 때의 실제 시각(초 내림) -- 부트스트랩이 DuckDB now() 기준 최근 30분이라(Rust 는 T0 를 주입). 세션 시각들은 따로 고른 고정 시각.
 
 
 def fo(rng, t, side, usd, **over):
@@ -42,7 +45,7 @@ def fo(rng, t, side, usd, **over):
     return json.dumps({"e": "forceOrder", "E": int(t * 1000) + 3, "o": o})
 
 
-def gen(rng) -> dict:
+def gen(rng, T0: float) -> dict:
     """청산이 드문드문(조용한 분 = 0 이 쌓여 σ 붕괴) → 큰 롱 청산 폭발(Hawkes 켜짐·$1만 하한) → 감쇠 → 숏 폭발 → 깨진 메시지·0 · 끊김."""
     ev, t = [], T0
     ev.append([t, "o", ""])
@@ -69,6 +72,10 @@ def gen(rng) -> dict:
     ev.append([round(t + 40, 3), "n", ""])               # 정상 종료(1000) = 곧바로 다시 -- 상태 그대로
     t += 400
     ev.append([round(t, 3), "t", fo(rng, t - 0.1, "SELL", 1234.5)])
+    tz = (int(t + 61) // 60 + 1) * 60 - 1.0
+    ev.append([tz, "z", "3"])                              # 분 정각 1초 전부터 3초 루프가 멎음(쓰기 지연) → 그 분 첫 틱이 10초대 = «15초 안» 규칙이 갈린다
+    t += 32 * 60                                          # 32분 조용 → σ 가 1e-6 으로 무너진다
+    ev.append([round(t + 20.5, 3), "t", fo(rng, t + 20.4, "SELL", 6000)])   # z 는 크지만 $1만 미만 = Hawkes 안 켜짐(하한)
     ev.sort(key=lambda e: e[0])
     # dashboard_state: 10초마다 몇 번 + 세션 경계 시각(JPX 개장·점심 시작·점심 끝·마감 · LSE · NYSE · 주말 · 휴장 · 범위 밖)
     for k in range(5):
@@ -80,7 +87,13 @@ def gen(rng) -> dict:
                 "2026-11-21T03:00:00", "2026-11-23T01:00:00", "2026-11-26T15:00:00", "2026-11-27T17:59:00", "2026-11-27T18:00:00", "2026-12-24T12:29:00",
                 "2026-12-24T12:31:00", "2031-01-06T15:00:00", "2024-12-31T05:59:00"):
         probes.append([dt.datetime.fromisoformat(iso).replace(tzinfo=dt.timezone.utc).timestamp(), "d", ""])
-    return {"symbol": "ethusdt", "t0": T0, "events": ev, "probes": probes}
+    seeds = []                                           # 부트스트랩 씨앗: T0 기준 -40분 ~ -1분(30분 경계에서 20초 넘게 떨어진 분 정각)
+    for k in range(40, 0, -1):
+        ts = (int(T0) // 60 - k) * 60
+        if abs((T0 - ts) - 1800) < 20:
+            continue
+        seeds.append([ts * 1_000_000, rng.choice((0.0, 0.0, rng.uniform(0, 4e5))), rng.choice((0.0, rng.uniform(0, 2e5)))])
+    return {"symbol": "ethusdt", "t0": T0, "events": ev, "probes": probes, "seeds": seeds}
 
 
 def python_reference(inp, d: Path) -> dict:
@@ -110,6 +123,11 @@ def python_reference(inp, d: Path) -> dict:
             return pd.Timestamp(dt.datetime.fromtimestamp(clock[0], tz=dt.timezone.utc)).tz_convert(tz)
 
     pw.pd = gv._ns(pd, Timestamp=FakeTs)
+    tr.TailRiskInterceptor("ethusdt")._db_init()          # 빈 표 → 씨앗 → 새 요격기의 부트스트랩
+    import duckdb
+    con = duckdb.connect(tr._DB_PATH)
+    con.executemany("INSERT INTO tail_risk_1m (ts, long_usd_1m, short_usd_1m) VALUES (make_timestamptz(?),?,?)", inp["seeds"])
+    con.close()
     c = tr.TailRiskInterceptor("ethusdt")
     burst = []
     orig = c._write_liq_burst_state
@@ -120,6 +138,7 @@ def python_reference(inp, d: Path) -> dict:
 
     c._write_liq_burst_state = w
     c._db_init()
+    boot = len(c._history_long)
     st = {"last_saved_minute": -1}
 
     def ws_msg(raw):                                    # _ws_loop 메시지 처리 :393-417 글자 그대로
@@ -168,7 +187,10 @@ def python_reference(inp, d: Path) -> dict:
             tick()
             nxt = (math.floor(nxt / 10) + 1) * 10 + 0.05
         clock[0] = t
-        if kind == "o":
+        if kind == "z":                                  # 루프 멎음: 그동안의 틱은 없고, 깨면 다음 10초 경계 + 0.05초(sleep(10 - now%10 + 0.05))
+            wake = t + float(body)
+            nxt = (math.floor(wake / 10) + 1) * 10 + 0.05
+        elif kind == "o":
             c._ws_connected = True
             c._ws_connected_since = tr.time.time()
         elif kind == "t":
@@ -182,7 +204,7 @@ def python_reference(inp, d: Path) -> dict:
         clock[0] = t
         pw.write_dashboard_state()
         dash.append(pw._STATE_PATH.read_text())
-    return {"burst": burst, "dash": dash}
+    return {"burst": burst, "dash": dash, "boot": boot}
 
 
 def main() -> None:
@@ -191,7 +213,7 @@ def main() -> None:
     a = ap.parse_args()
     if a.check:
         return check()
-    inp = gen(random.Random(20261131))
+    inp = gen(random.Random(20261131), float(int(time.time())))
     with tempfile.TemporaryDirectory() as td:
         ref = python_reference(inp, Path(td))
         golden = dict(ref, tables=dump(Path(td) / "tail_risk.duckdb"))
@@ -207,13 +229,15 @@ def main() -> None:
 
 def check() -> None:
     """감시 ops_watchdog.check_dashboard 의 시각 판정 · check_data_sources 가 읽는 liq_burst 칸을 두 쪽 파일로."""
-    inp = json.loads((FIX / "market_input.json").read_text())
+    # 부트스트랩이 실제 시계(DuckDB now())라 저장된 입력은 다시 못 돈다 -- 지금 시각으로 새 입력을 만들어 두 쪽에 같이 먹인다
+    inp = gen(random.Random(20261131), float(int(time.time())))
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
+        (td / "in.json").write_text(json.dumps(inp))
         python_reference(inp, td / "py")
         env = dict(os.environ, PATH=f"{Path.home()}/.cargo/bin:{os.environ.get('PATH', '')}")
         r = subprocess.run(["bash", "-c", 'ulimit -v 4000000; exec timeout 300 "$@"', "_", "cargo", "run", "-q", "-j", "2", "--release", "--example", "replay_market",
-                            str(FIX / "market_input.json"), str(td / "rs")], cwd=ROOT / "rtduck", env=env, capture_output=True, text=True)
+                            str(td / "in.json"), str(td / "rs")], cwd=ROOT / "rtduck", env=env, capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
         for f in ("dashboard_state.json", "liq_burst_state.json"):
             a, b = (td / "py" / f).read_text(), (td / "rs" / f).read_text()
