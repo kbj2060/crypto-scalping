@@ -164,8 +164,18 @@ go_dirpred() {
   local i r=""; for i in $(seq 1 30); do r=$(pids_env rt_dirpred RT_DIR_OUT data/live); [ -n "$r" ] && break; sleep 1; done
   [ -n "$r" ] || die "Rust 워커가 안 떴다 -- back 을 검토(표식이 있어 지금은 아무도 안 쓴다)" 1
   local x="$LIVE/xsec_latest.json" before; before=$(stat -c %Y "$x" 2>/dev/null || echo 0)
-  say "Rust 워커 pid $r · 다음 5분 회차(최대 ${DIRPRED_WATCH_S:-360}초)에 xsec_latest.json(Rust 만 씀) 갱신을 지켜봄"
-  WATCH_S="${DIRPRED_WATCH_S:-360}" watch_file "$x" "$before" && say "✅Rust 회차가 xsec_latest.json·pred_record 를 갱신 -- 화면 «4h 상대 강도»는 이 파일을 읽는다" || die "다음 회차에 갱신이 없다 -- back 을 검토" 1
+  # 첫 회차가 끝나야 xsec_latest.json 을 쓴다(회차 끝 몫). 첫 회차 = 다음 5분 +20초까지 기다림 + 요청 약 760 × 간격(RT_REST_GAP_MS 기본 200ms) + 코인 사이 3초 × 4
+  #   + 가중치 문턱 쉼(분마다 최대 60초 -- 11-22 서버: 첫 회차가 쉼으로 360초를 넘겼다). 그래서 한도 = 그 예상 + 여유, 넘겨도 워커가 살아 있으면 «아직 첫 회차 중»으로 가른다.
+  local wait=$(( 300 - $(now_s) % 300 + 20 )) gap_ms="${RT_REST_GAP_MS:-200}"
+  local lim="${DIRPRED_WATCH_S:-$(( wait + 760 * gap_ms / 1000 + 12 + 240 ))}"
+  say "Rust 워커 pid $r · 첫 회차(다음 회차까지 ${wait}초 + 요청 약 760 · 최대 ${lim}초)가 끝나 xsec_latest.json(Rust 만 씀)을 쓰는지 지켜봄"
+  if WATCH_S="$lim" watch_file "$x" "$before"; then
+    say "✅Rust 회차가 xsec_latest.json·pred_record 를 갱신 -- 화면 «4h 상대 강도»는 이 파일을 읽는다"
+  elif [ -n "$(pids_env rt_dirpred RT_DIR_OUT data/live)" ]; then
+    say "⏳아직 첫 회차 중(워커 pid $r 살아 있음 · ${lim}초 안에 xsec_latest.json 이 안 바뀜 -- 가중치 문턱 쉼이 길 수 있다) -- 몇 분 뒤 'ls -l data/live/xsec_latest.json'·로그 [gate] 줄로 확인. 실패 아님"
+  else
+    die "워커가 죽었고 xsec_latest.json 도 안 바뀌었다 -- logs/supervisor/rt_dirpred_*.log 를 보고 back 을 검토" 1
+  fi
 }
 back_dirpred() {
   local r
