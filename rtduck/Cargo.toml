@@ -15,5 +15,8 @@ serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
 # HL 포지션의 hot SQLite(rtcollect 와 같은 판·기능 -- 같은 산출물을 다시 쓴다)
 rusqlite = { version = "0.37", features = ["bundled"] }
 tokio = { version = "1", features = ["rt", "macros", "time", "signal"] }
+# 청산 요격기 @forceOrder 웹소켓(market_data). rtcollect 와 글자까지 같은 판·기능 -- 기능 묶음이 바뀌지 않아 DuckDB 를 다시 빌드하지 않는다.
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
 # 시험 쪽 의존성은 두지 않는다: 기능 묶음이 바뀌면 libduckdb-sys(C++ 14분)를 다시 빌드한다(2026-11-21 실측 -- flate2 dev 의존성 하나로 세 번).

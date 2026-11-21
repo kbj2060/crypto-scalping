@@ -9,7 +9,7 @@ Rust `cargo test --test flow_fixture` 가 같은 응답 열을 자기 가짜 서
 
 안전: 키는 test_key/test_secret(가짜) · .env 안 읽음(BINANCE_* 지움) · 주소는 127.0.0.1 만 · 밴 기록·data/live 는 임시 폴더 · 텔레그램 모듈은 가짜.
 실행(저장소 뿌리, 네트워크 없는 이름공간 + loopback 만):
-  ( ulimit -v 4000000; RTORDER_PY_ROOT=<main 판> TZ=UTC timeout 300 unshare -rn sh -c 'ip link set lo up && python3 -I rtorder/tools/gen_flow_fixture.py' )
+  ( ulimit -v 4000000; TZ=UTC timeout 300 unshare -rn sh -c 'ip link set lo up && python3 -I rtorder/tools/gen_flow_fixture.py' )
   → rtorder/tests/fixtures/flow_fixture.json
 """
 from __future__ import annotations

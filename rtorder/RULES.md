@@ -326,3 +326,35 @@
 - 되살린 정리 경로: `cancel_bracket` 이 다시 openAlgoOrders 를 읽어 우리 dbsl 을 지운다(다른 심볼 스탑은 안 지움) · 손절 해제가 clear_bracket(only_sl) 을 부른다(실패 502) · place_bracket 은 backstop_price 가 오면 원본 NO_STOP 칸. dbad 는 원래대로 cancel_bracket 이 지운다.
 - 정답지 전부 PR 61 판으로 다시: plan 1,359건 · http 117시나리오(요청 775 -- 스탑 요청을 빼던 대조 없앰, 통째로 같음) · watch 106 · desk 계획 57 + 접수 139 + 계좌 19 + 스트림 8 · flow 8시나리오(+옛 규칙 무장 닫힘 → dbad·dbsl 정리 · 감시 진입 닿음 → 따라가기 → 무장).
 - `ff` 가 새로 잡아 고친 것: 감시 진입 칸 `triggered` 가 원본은 닿은 시각 문자열(None → iso) -- Rust 는 bool 이었다 → `Option<f64>` → iso.
+
+## 그림자 실행 (2026-11-21 · C)
+
+- **모드**: 기본 = 그림자. `shadow::mode_from` -- `RTORDER_MODE` 가 없거나 shadow = 그림자 · live 는 cargo feature `live` 빌드 + `RTORDER_LIVE_CONFIRM=실주문을-보낸다` 둘 다 있어야(하나만이면 시작 안 함 · 모르는 값도 시작 안 함). 허가증 `LiveProof` 는 모듈 밖에서 못 만든다.
+- **전송 계층 막이**(`http::Binance::guard`): 그림자 모드면 GET·`/fapi/v1/listenKey` 가 아닌 요청(주문 POST·취소 DELETE·레버리지 POST·algo DELETE …)은 **보내기 전에 panic**. 루프백이 아닌 주소로 만든 값은 늘 그림자로 시작 · 끄는 길은 `arm_live(&LiveProof)`(feature `live` 에만 있음). 키를 읽는 `Binance::from_env` 도 feature `live` 에만 있다(기본 빌드 = 키 없음).
+- **재생 도구**(`shadow::replay` · 실행기 `cargo run --example shadow_replay -- <기록.jsonl>`): 작업(chain) 하나의 기록 = start(계획·칸·무장 파일) · wire(왕복) · input(읽은 입력) · end(칸·무장 파일·복구 파일·로그). 127.0.0.1 가짜 서버가 기록된 응답을 차례로 돌려주고 진짜 `Binance`·`runner::entry_then_bracket`·`Watcher::bracket_tick`·`run_exit_into` 가 돈다. 실제 기록 비교는 timestamp·signature 를 빼고 표식 뒤 ms 를 `#` 로(비밀값은 재생에 넣지 않는다) · 가짜 시계 정답지는 글자 그대로.
+- 시험: `ff`(전체 흐름 정답지 15걸음을 재생 도구로 글자 그대로 -- 요청 256 · 서명 URL 172) · `sr` = tests/shadow_replay.rs(합성 실기록 차이 0 · 양성 대조 4 · 쓰기 5종 panic + 대조군 · 읽기·listenKey 는 보냄).
+- ⚠재생이 아직 못 하는 것: 작업 도중 화면이 쓴 대기 칸 action·amend 를 그 시각에 넣기 · 청산 접수(op=exit)는 원본 정답지 없음.
+
+### 그림자 기록 -- 파이썬이 기록해 줘야 하는 칸 (파이썬은 안 고쳤다 · 사용자 결정 필요)
+
+지금 기록으로는 재생할 수 없다: 접수 기록 G18 `data/live/order_requests.jsonl`(대시보드 서버 `order_request_log` 미들웨어) = 시각·경로·인자·상태·오류·걸린 ms·기기·접속 주소뿐(계획·칸·요청 열·응답 없음) · `order_timing` 줄(live_manual_peg_execute `_order_timing` 82행) = 첫 주문 POST 의 단계별 ms 뿐 · 무장 파일은 덮어쓰기라 변화 이력이 없다.
+제안 = 새 파일 `data/live/order_shadow.jsonl`, 한 줄 = `{"rec": ..., "chain": ...}`. chain id 는 접수마다 하나 -- `order_mark`(X 76행)가 만드는 dict 에 `chain` 을 넣으면 `_ORDER_T` 맥락이 create_task 로 집행까지 따라간다 · 감시 틱은 `bracket_tick`(orders.py 1128행) 첫 줄에서 새 id 를 맥락에 넣는다. 🔴키·서명·listenKey 값은 적지 않는다.
+
+| # | 어디(파일:행 · 함수) | 무엇을 | 칸 |
+|---|---|---|---|
+| 1 | orders.py:965 `entry_then_bracket` 첫 줄 | 작업 시작(진입) | rec=start · op="entry" · t=time.time() · mono=time.monotonic() · plan(사본) · limit · slot=state 사본 · file=bracket_load() 원본 · limits=복구 파일 이름들 |
+| 2 | orders.py:2045 청산 접수 create_task 직전 | 작업 시작(청산) | rec=start · op="exit" · plan · rearm(frac<1) · slot · file |
+| 3 | orders.py:1128 `bracket_tick` | 작업 시작(감시 틱) -- 요청이 나가거나 파일이 바뀐 틱만(2초마다 hold 는 안 적음) | rec=start · op="tick" · t · mono · slot(manual_entry_state·side_exit_states) · file |
+| 4 | X:92 `signed` 의 session.request 앞뒤 | 서명 왕복 하나 | rec=wire · t(보내기 직전 time.time) · mono · method · target = `path?` + url 의 `&signature=` 앞까지(timestamp 포함) · status · body = 응답 **원문 글자**(json() 전 `await response.text()`) · error = 예외 문자열(끊김·시간초과) |
+| 5 | X:430 `maker_price`(bookTicker) · 계좌 모듈 `_clock_offset`(34행 · /time) · `load_filters`(live_manual_peg_entry 60행 · exchangeInfo) | 서명 없는 왕복 | 4 와 같은 칸(load_filters 캐시 적중이면 왕복 없음 -- 대신 10 의 filters) |
+| 6 | orders.py:1134 swr_cached("binance_account") | 읽은 입력 | rec=input · what="account" · value=받은 dict 전체(ok·generated_at·positions) · t |
+| 7 | orders.py:1151 load_market_history | 읽은 입력 | what="bars" · args=[asset] · value=받은 목록(마감 봉만이어도 됨) |
+| 8 | orders.py:1002 `stop_touched` · 1160 tick_one 의 sec_prices | 읽은 입력(부를 때마다) | what="sec" · args=[asset] · value=since 뒤 행 [[초, 가격]…](재생은 since 뒤만 쓴다) |
+| 9 | orders.py:1195·1250 assemble_exit_plan | 읽은 입력 | what="exit_plan" · args=[pside, frac, fresh, asset, only_symbol] · value={"plan": …, "err": [본문, 상태] 또는 null} |
+| 10 | orders.py:1005 `limit_reprice` 의 fetch_binance_json·load_filters · 853 `basis_for` 의 기준 호가 | 읽은 입력 | what="book" · args=[symbol] · value=호가 dict · what="filters" · value=필터 dict |
+| 11 | X:49 `wake_fills` | 체결 알림으로 대기가 일찍 깬 시각(조회 횟수가 갈린다) | rec=input · what="wake" · t · mono |
+| 12 | orders.py `api_manual_wait_action`·`api_manual_limit_amend`(대기 칸에 action·amend 를 쓰는 자리) | 화면이 작업 도중 넣은 값 | rec=input · what="slot_write" · chain(그 대기 칸 작업) · t · key · value |
+| 13 | orders.py `entry_then_bracket` 끝 · `settle` 뒤 · `bracket_tick` 끝 | 작업 끝 | rec=end · t · mono · slot(사본) · file(bracket_load) · limits · raised · logs(그 작업의 print 줄 -- 어렵다면 생략, 재생은 칸이 없으면 안 본다) |
+| 14 | G18 `order_request_log` 의 row | 접수 기록과 그림자 기록 잇기 | `chain` 칸 하나 더 |
+
+크기 어림: 따라가기 120초 ≈ 요청 80 · 무장 1회 ≈ 5 · 감시 발동 ≈ 10 -- 하루 접수 수십 건이면 수 MB. 재시작 복구(wait_cleanup·limit_recover)까지 재생하려면 produce_account 결과(what="produce_account")와 고아 정리 왕복(4)도 같은 chain 으로.

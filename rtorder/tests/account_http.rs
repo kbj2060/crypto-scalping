@@ -6,7 +6,7 @@ use rtorder::account::{fetch_account, DEFAULT_TRADE_LIMIT};
 use rtorder::http::Binance;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 fn qmap(q: &str) -> Map<String, Value> {
     q.split('&').filter(|x| !x.is_empty()).filter_map(|kv| kv.split_once('=')).filter(|(k, _)| !["recvWindow", "timestamp", "signature"].contains(k))

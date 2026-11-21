@@ -27,7 +27,7 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
-# 2026-11-21 원본 파이썬 위치 -- 기본 = 이 저장소 · RTORDER_PY_ROOT = 결함 수정본 작업 폴더(읽기만 · 정답지는 이 저장소에 쓴다)
+# 2026-11-21 원본 파이썬 위치 -- 기본 = 이 저장소(main 판 · PR 61 머지 뒤) · RTORDER_PY_ROOT = 다른 판을 볼 때만(읽기만 · 정답지는 이 저장소에 쓴다)
 PY_ROOT = Path(os.environ.get("RTORDER_PY_ROOT") or ROOT)
 sys.path.insert(0, str(PY_ROOT))
 # 감시가 망가진 칸을 알릴 때 텔레그램 모듈을 부른다(진짜는 서버 비밀 설정을 읽고 보낸다) -- 가짜를 먼저 넣는다

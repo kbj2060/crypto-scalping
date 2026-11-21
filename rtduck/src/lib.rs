@@ -2,4 +2,5 @@
 pub mod duckdump;
 pub mod hl_positions;
 pub mod hl_trades;
+pub mod market;
 pub mod oi;

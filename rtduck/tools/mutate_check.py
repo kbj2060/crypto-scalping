@@ -24,6 +24,14 @@ M = [
     ("HL포지션 청산 주소 대소문자 가림", "src/hl_positions.rs", ".to_lowercase() != user.to_lowercase()", " != user"),
     ("HL포지션 순위 거꾸로", "src/hl_positions.rs", "agg.sort_by(|a, b| b.1.partial_cmp(&a.1)", "agg.sort_by(|a, b| a.1.partial_cmp(&b.1)"),
     ("HL포지션 파싱 실패 주소는 응답 수에서 뺌", "src/hl_positions.rs", "                    ok += 1;\n                    let ts", "                    let ts"),
+    ("시장 np.std → 표본 표준편차(n-1)", "src/market.rs", "(rtcollect::ob5m::np_sum(&sq) / a.len() as f64).sqrt()", "(rtcollect::ob5m::np_sum(&sq) / (a.len() as f64 - 1.0).max(1.0)).sqrt()"),
+    ("시장 Hawkes $1만 하한 빼기", "src/market.rs", "if zp >= self.z_threshold && peak_usd >= self.min_trigger {", "if zp >= self.z_threshold {"),
+    ("시장 롱·숏 청산 바꿈", "src/market.rs", "if *sell { l += usd } else { s += usd }", "if *sell { s += usd } else { l += usd }"),
+    ("시장 점심시간 안 뺌", "src/market.rs", "if v.len() == 4 && at(2) <= t_min && t_min < at(3) {", "if false {"),
+    ("시장 마감 분 포함 안 함(<)", "src/market.rs", "at(0) <= t_min && t_min <= at(1)", "at(0) <= t_min && t_min < at(1)"),
+    ("시장 마이크로초 0 이어도 소수부", "src/market.rs", "if us == 0 { format!(\"{base}{tail}\") } else {", "if false { format!(\"{base}{tail}\") } else {"),
+    ("시장 분 저장 15초 → 10초", "src/market.rs", "minute != self.last_saved_minute && second < 15", "minute != self.last_saved_minute && second < 10"),
+    ("시장 깨진 메시지도 마지막 수신 시각", "src/market.rs", "        let Ok(Value::Object(m)) = serde_json::from_str::<Value>(raw) else { return };", "        self.last_msg = now;\n        let Ok(Value::Object(m)) = serde_json::from_str::<Value>(raw) else { return };"),
     ("HL체결 주소 소문자 안 함", "src/hl_trades.rs", "py_str(&users[0]).to_lowercase()", "py_str(&users[0])"),
 ]
 

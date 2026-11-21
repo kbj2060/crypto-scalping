@@ -182,6 +182,15 @@ pub fn py_float_repr(x: f64) -> String {
 
 /// 파이썬 `json.dumps(v, separators=(",", ":"))`(ensure_ascii=True): 열쇠 순서 그대로(serde_json preserve_order) · 비 ASCII 는 \uXXXX(대리쌍).
 pub(crate) fn py_dumps(v: &Value) -> String {
+    dumps_sep(v, (",", ":"))
+}
+
+/// 파이썬 `json.dumps(v)` 기본 모양(", " · ": ") -- 그 밖은 `py_dumps` 와 같다(rtduck 의 상태 JSON).
+pub fn py_dumps_default(v: &Value) -> String {
+    dumps_sep(v, (", ", ": "))
+}
+
+fn dumps_sep(v: &Value, sep: (&str, &str)) -> String {
     fn s(out: &mut String, t: &str) {
         out.push('"');
         for c in t.chars() {
@@ -204,7 +213,7 @@ pub(crate) fn py_dumps(v: &Value) -> String {
         }
         out.push('"');
     }
-    fn go(out: &mut String, v: &Value) {
+    fn go(out: &mut String, v: &Value, sep: (&str, &str)) {
         match v {
             Value::Null => out.push_str("null"),
             Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
@@ -218,9 +227,9 @@ pub(crate) fn py_dumps(v: &Value) -> String {
                 out.push('[');
                 for (i, x) in a.iter().enumerate() {
                     if i > 0 {
-                        out.push(',');
+                        out.push_str(sep.0);
                     }
-                    go(out, x);
+                    go(out, x, sep);
                 }
                 out.push(']');
             }
@@ -228,18 +237,18 @@ pub(crate) fn py_dumps(v: &Value) -> String {
                 out.push('{');
                 for (i, (k, x)) in o.iter().enumerate() {
                     if i > 0 {
-                        out.push(',');
+                        out.push_str(sep.0);
                     }
                     s(out, k);
-                    out.push(':');
-                    go(out, x);
+                    out.push_str(sep.1);
+                    go(out, x, sep);
                 }
                 out.push('}');
             }
         }
     }
     let mut out = String::new();
-    go(&mut out, v);
+    go(&mut out, v, sep);
     out
 }
 

@@ -45,14 +45,15 @@ echo "$CT" | grep -q 'supervisor_bybit_liq.sh' && up bybit_liq
 echo "$CT" | grep -q 'supervisor_binance_ctx.sh' && up binance_ctx
 echo "$CT" | grep -q 'supervisor_xyz100.sh' && up xyz
 # 하이퍼리퀴드 호가: 줄마다 코인 하나. HL_BT_CTX_ONLY=1 줄 = 맥락만(hl_ctx) · 아니면 전체(hl_bt = 호가 .bt + 맥락).
-#   🔴hl_bt 를 하나라도 띄우면 hl_ctx 는 안 띄운다(둘 다 data/hot/rtcollect/hl_ctx.sqlite 에 쓴다 -- 쓰는 프로세스는 하나로). 그때 맥락만 줄의 코인은 그림자에서 빠진다(출력에 적는다).
+#   🔴hl_bt 와 hl_ctx 가 같이 뜨면 hl_ctx 는 data/hot/rtcollect/hl_ctx_only.sqlite 에 쓴다(한 파일에 쓰는 프로세스는 하나 -- hl_bt 가 hl_ctx.sqlite).
+#   대조 때는 두 파일을 합쳐 파이썬 hl_ctx.sqlite 와 비교한다(SHADOW.md §2).
 HLB=0; HLC=""
 while IFS= read -r l; do [ -n "$l" ] || continue
   c="$(val "$l" HL_BT_COIN)"; c="${c:-ETH}"
   if [ "$(val "$l" HL_BT_CTX_ONLY)" = 1 ]; then HLC="${HLC:+$HLC,}$c"; else up hl_bt "HL_BT_COIN=$c"; HLB=$((HLB + 1)); fi
 done <<< "$(echo "$CT" | grep 'supervisor_hyperliquid_book_ticker.sh')"
 if [ -n "$HLC" ]; then
-  if [ "$HLB" -eq 0 ]; then up hl_ctx "HL_BT_COIN=$HLC"; else echo "hl_ctx($HLC) 생략 -- hl_bt 가 같은 hl_ctx.sqlite 에 쓴다"; fi
+  if [ "$HLB" -eq 0 ]; then up hl_ctx "HL_BT_COIN=$HLC"; else up hl_ctx "HL_BT_COIN=$HLC" "HL_CTX_DB_PATH=$ROOT/data/hot/rtcollect/hl_ctx_only.sqlite"; fi
 fi
 # 호가 변화: 스냅숏 REST 필수(없으면 첫 줄이 null 이라 ob5m 이 북을 못 세운다)
 while IFS= read -r l; do [ -n "$l" ] || continue
@@ -94,6 +95,8 @@ if [ -x "$DBIN" ]; then
     while IFS= read -r l; do [ -n "$l" ] || continue
       c="$(val "$l" HL_COINS)"; upd hl_trades "HL_COINS=${c:-ETH}"
     done <<< "$(echo "$CT" | grep 'supervisor_hyperliquid_trades.sh')"
+    # market_data_worker 의 청산 요격기 + dashboard_state(웹소켓뿐) -- 미시구조는 파이썬 몫이라 안 띄운다(감독이 COLLECT_MICROSTRUCTURE=false)
+    echo "$CT" | grep -q 'supervisor_market_data_worker.sh' && upd market_data TAIL_SYMBOLS=ETHUSDT
     if [ "${RTDUCK_SHADOW_REST:-}" = 1 ]; then
       echo "$CT" | grep -q 'supervisor_oi_lsratio_worker.sh' && upd oi_lsratio RTDUCK_REST=1 BOT_SYMBOLS=ETHUSDT,BTCUSDT,SOLUSDT,XRPUSDT
       while IFS= read -r l; do [ -n "$l" ] || continue
