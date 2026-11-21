@@ -215,6 +215,9 @@ pub struct Supply {
     /// okx_fp["first_bar"](이 봉 «뒤»만 OKX 를 더한다 · 0 = 아직 OKX 체결 없음) · okx_fp["t0_ms"](시작 뒤 첫 OKX 체결).
     pub(crate) okx_first_bar: i64,
     pub(crate) okx_t0_ms: i64,
+    /// Micro.okx_bars 로 다시 실을 OKX 봉 · first_bar 가 바뀌었다(통째로).
+    pub(crate) okx_sum_dirty: std::collections::BTreeSet<i64>,
+    pub(crate) okx_sum_full: bool,
     pub(crate) okx_fr: crate::restore::OkxFpRestore,
     /// OKX·Bybit 5분봉 청산(liquidation-5m-history 몫)이 바뀌었다 -- 다음 밀기에 통째로 싣는다.
     pub(crate) okx_liq5m_dirty: bool,
@@ -279,6 +282,8 @@ impl Supply {
             okx_fp: crate::footprint::Bars::new(symbol),
             okx_first_bar: 0,
             okx_t0_ms: 0,
+            okx_sum_dirty: Default::default(),
+            okx_sum_full: false,
             okx_fr: Default::default(),
             okx_liq5m_dirty: false,
             bybit5m: BTreeMap::new(),
@@ -423,10 +428,12 @@ impl Supply {
             if self.okx_first_bar == 0 {
                 (self.okx_first_bar, self.okx_t0_ms) = (bar, ts_ms);
                 self.okx_liq5m_dirty = true;
+                self.okx_sum_full = true;
             }
             if self.okx_fp.keep(bar, now_us.div_euclid(1000)) {
                 self.okx_fp.add(bar, px, qty, sell, false, whale_min, retail_max);
                 self.okx_fp.add(bar, px, qty, sell, true, whale_min, retail_max);
+                self.okx_sum_dirty.insert(bar);
             }
         }
         let lane = match venue {
@@ -630,8 +637,30 @@ pub(crate) fn bybit5m_add(store: &mut BTreeMap<i64, [f64; 3]>, ts_ms: i64, long:
 }
 
 impl Supply {
-    /// liquidation-5m-history 의 OKX·Bybit 몫(server.py api_liquidation_5m_history 3963~3998 · merge_bybit_liq):
+    /// liquidation-5m-history 의 OKX·Bybit 몫(server.py api_liquidation_5m_history 4413~4455 · merge_okx_liq 878~904 의 «메모리» 갈래 · merge_bybit_liq 833~853):
+    /// 🔴OKX 의 first_bar «앞» 봉은 원본이 hot 봉 합(okx_liq_hot_bars)으로 채운다 -- 코어는 안 싣는다(응답 서버가 hot SQLite 에서 · REMAINING.md).
     /// OKX = 링(okx_liq_events) 사건을 봉마다 더한 것 중 first_bar «뒤» 봉 · Bybit = 수집 시작이 걸친 봉 «뒤» 봉. 행 = [봉, 롱USD, 숏USD, 건수].
+    /// OKX 봉 칸 합(Micro.okx_bars): first_bar «뒤» 봉 중 `keys`(None = 전부). 칸 합은 가격 키 순서(원본은 칸이 생긴 순서 -- 마지막 비트만 갈릴 수 있다).
+    pub(crate) fn okx_sums(&self, keys: Option<&std::collections::BTreeSet<i64>>) -> Vec<(i64, [f64; 6])> {
+        if self.okx_first_bar == 0 {
+            return vec![];
+        }
+        let sum = |bar: &crate::footprint::Bar| {
+            let mut t = [0.0; 6];
+            for c in bar.cells.values() {
+                for j in 0..6 {
+                    t[j] += c[j];
+                }
+            }
+            t
+        };
+        let from = self.okx_first_bar + 1;
+        match keys {
+            None => self.okx_fp.bars.range(from..).map(|(&b, bar)| (b, sum(bar))).collect(),
+            Some(ks) => ks.range(from..).filter_map(|b| self.okx_fp.bars.get(b).map(|bar| (*b, sum(bar)))).collect(),
+        }
+    }
+
     fn put_venues(&self, m: &mut crate::proto::Liq5m) {
         let (of, okx, bf, bybit) = self.venue_liq5m();
         m.okx = Some(crate::proto::VenueLiq { from: (of != 0).then_some(of), bars: okx });

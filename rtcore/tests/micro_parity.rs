@@ -17,7 +17,7 @@ fn micro_matches_python() {
     let st = State::new(&["ethusdt".into()], 16, 1 << 16);
     let mut rx = st.tx.subscribe();
     let evs = fx["events"].as_array().unwrap();
-    let (mut ei, mut n, mut order, mut bad) = (0, 0, 0, vec![]);
+    let (mut ei, mut n, mut order, mut n_off, mut bad) = (0, 0, 0, 0, vec![]);
     let mut last: Option<Micro> = None;
     let mut oi_rows: BTreeMap<i64, (f64, f64)> = BTreeMap::new();
     for t in fx["ticks"].as_array().unwrap() {
@@ -43,7 +43,12 @@ fn micro_matches_python() {
                 last = Some(mc);
             }
         }
-        let m = last.as_ref().expect("첫 틱에 밀린다");
+        if t.get("available") == Some(&Value::Bool(false)) {
+            assert!(last.is_none(), "호가를 받기 전에는 미시 값을 안 민다(원본 available=false)");
+            n_off += 1;
+            continue;
+        }
+        let m = last.as_ref().expect("호가를 받은 뒤 첫 틱에 밀린다");
         n += 1;
         let opt = |k: &str| t.get(k).map(f);
         let want_rows: Vec<(i64, f64, f64)> = t["okx_d"].as_array().unwrap().iter().map(|r| (r[0].as_i64().unwrap(), f(&r[1]), f(&r[2]))).collect();
@@ -64,8 +69,9 @@ fn micro_matches_python() {
     }
     let Event::Snapshot { micro, .. } = st.snapshot("ethusdt", 0).unwrap().ev else { panic!() };
     let want: Vec<(i64, f64, f64)> =
-        fx["ticks"].as_array().unwrap().last().unwrap()["okx_d"].as_array().unwrap().iter().map(|r| (r[0].as_i64().unwrap(), f(&r[1]), f(&r[2]))).collect();
-    println!("미시 값 대조: 틱 {n} · OKX 봉 {} · 어긋남 {} · vol60 합 차례만 다름(1e-9 안) {order}", want.len(), bad.len());
+        fx["ticks"].as_array().unwrap().iter().rev().find(|t| t.get("okx_d").is_some()).unwrap()["okx_d"].as_array().unwrap().iter().map(|r| (r[0].as_i64().unwrap(), f(&r[1]), f(&r[2]))).collect();
+    println!("미시 값 대조: 틱 {n} · OKX 봉 {} · 어긋남 {} · vol60 합 차례만 다름(1e-9 안) {order} · 호가 전 틱 {n_off}", want.len(), bad.len());
+    assert!(n_off > 0, "정답지에 호가 전 틱이 있어야 한다");
     assert!(order * 20 < n, "합 차례 차이가 늦은 체결 몫보다 많다");
     assert!(bad.is_empty(), "{}", bad[..bad.len().min(3)].join("\n"));
     assert_eq!(micro.unwrap().okx_oi5m, want, "스냅숏 = 가진 봉 전부");

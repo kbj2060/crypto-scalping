@@ -187,12 +187,9 @@ q2 는 모델 피쳐(rtmodel/src/sr_lean.rs `cq`)라 «정확히 같게»가 안
 
 - 코어에 OKX 풋프린트 봉이 생겼다(`Supply::okx_fp` · 원본 okx_bars 와 같은 칸 · 288봉).
 - 밖으로는 청산 원 `Liq5m.okx`·`Liq5m.bybit` 로 나간다. 둘 다 [봉, 롱USD, 숏USD, 건수]이고, 실리면 통째로 갈아 끼운다. 새 칸은 serde default 다.
-- 원본 /api/liquidation-5m-history 의 바이낸스·OKX·Bybit 몫이 이 값과 같다. HL 은 코어 밖이다.
-- 🔴원본 `/api/footprint` 는 지금도 닫힌 봉에 OKX 칸을 더한다(`_merged`). `bar > first_bar` 인 봉만 내보낸다.
-  - 화면이 2026-11-02 에 뺀 것은 진행 봉의 `okxLive` 더하기뿐이다(app.js 4517).
-  - 코어 풋프린트 메시지(footprint.rs «바이낸스만»)는 그 몫이 빠져 있다.
-  - 풋프린트를 원본과 같게 하려면 Footprint 메시지에 OKX 봉(또는 합산 봉)과 first_bar 를 실어야 한다. **이번 조각은 안 함.**
-- 시장 맥락 `okx30`(_flow_read_ctx)도 이 OKX 봉을 읽는다 → rtserve 몫.
+- 원본 /api/liquidation-5m-history 의 바이낸스·Bybit 몫, OKX 의 first_bar «뒤» 봉(메모리 몫)이 이 값과 같다. 🔴2026-11-22 실제 파일 재확인: 원본은 OKX first_bar «앞» 봉을 hot `okx_liquidations` 봉 합(okx_liq_hot_bars · 2026-11-07 판)으로 채운다 -- 코어는 안 싣는다(응답 서버 몫). HL 도 코어 밖이다.
+- 2026-11-22 정정: 11-21 판의 «원본 /api/footprint 가 닫힌 봉에 OKX 를 더한다(`_merged`)»는 **틀렸다** — graft 색인에 남은 옛 코드를 근거로 썼다. 실제 파일(Read · api_footprint 3990~4056)은 바이낸스 선물만이다(4000~4005 «11-02 바이낸스만»). 코어 풋프린트 메시지도 바이낸스만이라 같다(그 판을 따른 합산 커밋 eb56827a 는 되돌림 · PR 91).
+- 이 OKX 봉이 쓰이는 곳: 시장 맥락 onet·okx30(server.py 2332~2339 · 2374~2376 · 코어는 재료 `Micro.okx_bars` 를 민다) · OI 5분봉 OKX 합산·청산 원 OKX 몫의 first_bar 경계.
 - 1초 수급 OKX 청산 레인은 같은 링이라 이제 원본과 같다(전에는 660초만).
 
 시험:

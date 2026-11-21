@@ -58,6 +58,9 @@ fn one(variant: &str) {
         want["bars"].as_object().unwrap().iter().map(|(b, v)| (b.parse().unwrap(), f(&v[0]), f(&v[1]), v[2].as_i64().unwrap())).collect();
     assert_eq!(by.bars, wb, "Bybit 5분봉");
 
+    // 미시 값(Micro.okx_bars)은 호가를 받은 뒤부터 -- 호가 하나
+    st.apply(rtcore::proto::Stamped { s: sym.clone(), seq: 0, ex_ms: 1, rx_us: r_us, tx_us: 0, ev: rtcore::proto::Event::Book { u: 1, bid: 140.0, bid_qty: 1.0, ask: 140.01, ask_qty: 1.0, bid_s: String::new(), ask_s: String::new() } });
+    let mut n_sum = 0usize;
     let live = fx["live"].as_array().unwrap();
     let (mut li, mut fields) = (0, 0usize);
     for (k, step) in fx["steps"].as_array().unwrap().iter().enumerate() {
@@ -123,8 +126,35 @@ fn one(variant: &str) {
             step["okx5m"].as_object().unwrap().iter().map(|(b, v)| (b.parse().unwrap(), f(&v[0]), f(&v[1]), v[2].as_i64().unwrap())).collect();
         assert_eq!(ok.bars, wo, "걸음 {k} 청산 원 OKX 몫");
         fields += wo.len() * 4;
+        // Micro.okx_bars = 원본 _flow_read_ctx 재료(onet 2332~2339 · okx30 2374~2376): first_bar «뒤» OKX 봉마다 칸 합
+        st.situation_tick((now * 1e6) as i64);
+        let rtcore::proto::Event::Snapshot { micro, .. } = st.snapshot(&sym, (now * 1e6) as i64).unwrap().ev else { panic!() };
+        let mc = micro.expect("호가를 받았으니 미시 값이 있다");
+        let want: Vec<(i64, Vec<f64>)> = wbars
+            .iter()
+            .map(|(b, c)| (b.parse::<i64>().unwrap(), c))
+            .filter(|(b, _)| first_bar != 0 && *b > first_bar)
+            .map(|(b, c)| {
+                let mut t = vec![0.0; 6];
+                for v in c.as_object().unwrap().values() {
+                    for (j, x) in v.as_array().unwrap().iter().enumerate() {
+                        t[j] += f(x);
+                    }
+                }
+                (b, t)
+            })
+            .collect();
+        assert_eq!(mc.okx_from, (first_bar != 0).then_some(first_bar), "걸음 {k} Micro.okx_from");
+        assert_eq!(mc.okx_bars.len(), want.len(), "걸음 {k} OKX 봉 합 봉 수");
+        for ((gb, gv), (wb, wv)) in mc.okx_bars.iter().zip(&want) {
+            assert_eq!(gb, wb, "걸음 {k} OKX 봉 합 봉");
+            for j in 0..6 {
+                assert!((gv[j] - wv[j]).abs() <= 1e-9 * wv[j].abs().max(1.0), "걸음 {k} OKX 봉 {wb} 합[{j}] {} != {}", gv[j], wv[j]);
+                n_sum += 1;
+            }
+        }
     }
     assert!(st.run_restore_okx_fp(&sym, r_us).is_none(), "8회차 뒤에는 더 안 돈다");
-    println!("OKX 풋프린트 복원 걸음별 일치(변형 {variant}): 걸음 {} · 필드 {fields} · Bybit 봉 {}", fx["steps"].as_array().unwrap().len(), wb.len());
+    println!("OKX 풋프린트 복원 걸음별 일치(변형 {variant}): 걸음 {} · 필드 {fields} · OKX 봉 합 {n_sum}칸 · Bybit 봉 {}", fx["steps"].as_array().unwrap().len(), wb.len());
     let _ = std::fs::remove_dir_all(&dir);
 }
