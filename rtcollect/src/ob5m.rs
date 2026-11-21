@@ -152,8 +152,10 @@ pub fn replay(lines: &mut dyn Iterator<Item = Vec<u8>>, tick: f64, ks: [f64; 3],
     }
     let mut last_u = int(&snap["lastUpdateId"]).unwrap();
     let mut synced = false;
-    let mut bb = bid.iter().rposition(|x| *x != 0.0).unwrap() as i64;
-    let mut ba = ask.iter().position(|x| *x != 0.0).unwrap() as i64;
+    // 🔧의도한 차이(SHADOW.md §11 #16): 스냅숏 한쪽이 비면 원본은 IndexError 로 죽는다(np.flatnonzero(bid)[-1] · 얇은 주식 선물에서 실제로
+    // 2026-11-21 SNDKUSDT) -- Rust 는 그 사슬을 «empty_book» 으로 끝낸다(restart 규칙대로 다음 시 파일 스냅숏에서 다시).
+    let (Some(b0), Some(a0)) = (bid.iter().rposition(|x| *x != 0.0), ask.iter().position(|x| *x != 0.0)) else { return "empty_book" };
+    let (mut bb, mut ba) = (b0 as i64, a0 as i64);
     let (mut med, mut dep) = ([f64::NAN; 2], [f64::NAN; 2]);
     let mut tracked: HashMap<(u8, i64), Vec<HistE>> = HashMap::new();
     let mut cur_sec: Option<i64> = None;

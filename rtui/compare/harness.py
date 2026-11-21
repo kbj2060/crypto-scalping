@@ -7,7 +7,13 @@ T_FX = 1795156790   # 하네스 시계(합성 마지막 봉 1795156500 안)
 TZ = "Asia/Seoul"
 LAUNCH = ["--host-resolver-rules=MAP * ~NOTFOUND", "--proxy-server=127.0.0.1:9", "--disable-background-networking"]
 # 지금 화면이 웹 글꼴(jsdelivr Pretendard Variable)을 받는 자리에 같은 글꼴의 Bold 한 벌만 준다(오프라인 -- 굵기 400·800 도 Bold 로 그려진다)
-FONT_CSS = "@font-face{font-family:'Pretendard Variable';src:url(http://fx.invalid/font/p.ttf) format('truetype');font-weight:45 920;}"
+# 2026-11-21 여섯째 조각: 지금 화면이 실제로 받는 글꼴 그대로 -- Pretendard Variable(jsdelivr 가변 · 같은 v1.3.9 공식 PretendardVariable.ttf) · JetBrains Mono(구글 글꼴 400·700 자리 = 공식 v2.304 Regular·Bold)
+# (전에는 Pretendard-Bold 한 벌을 45~920 전부에 줬다 -- 400·800 도 Bold 로 그려졌다. 옛 방식 = RTUI_FONT_OLD=1)
+FONT_CSS = "@font-face{font-family:'Pretendard Variable';src:url(http://fx.invalid/font/PretendardVariable.ttf) format('truetype');font-weight:45 920;}"
+MONO_CSS = "".join(f"@font-face{{font-family:'JetBrains Mono';src:url(http://fx.invalid/font/JetBrainsMono-{n}.ttf) format('truetype');font-weight:{w};}}" for n, w in (("Regular", 400), ("Bold", 700)))
+import os as _os
+if _os.environ.get("RTUI_FONT_OLD"):
+    FONT_CSS, MONO_CSS = "@font-face{font-family:'Pretendard Variable';src:url(http://fx.invalid/font/Pretendard-Bold.ttf) format('truetype');font-weight:45 920;}", ""
 CT = {".js": "application/javascript", ".css": "text/css", ".html": "text/html", ".png": "image/png", ".wasm": "application/wasm", ".json": "application/json"}
 
 INIT = r"""(() => {
@@ -49,11 +55,16 @@ def make_route(wt, api, font=None):
         if u.hostname == "cdn.jsdelivr.net" and "pretendard" in u.path:
             return r.fulfill(body=FONT_CSS, content_type="text/css", headers={"Access-Control-Allow-Origin": "*"})
         if u.hostname == "fonts.googleapis.com":
-            return r.fulfill(body="", content_type="text/css")
+            return r.fulfill(body=MONO_CSS if "JetBrains" in u.query else "", content_type="text/css", headers={"Access-Control-Allow-Origin": "*"})
         if u.hostname != "fx.invalid":
             return r.abort()
         if u.path == "/font/p.ttf":
             return r.fulfill(body=FONT.read_bytes(), content_type="font/ttf")
+        if u.path.startswith("/font/") and "/" not in u.path[6:]:   # rtui/fonts 의 파일 이름 하나만(경로 밖 금지)
+            f = wt / "rtui/fonts" / u.path[6:]
+            if f.suffix == ".ttf" and f.is_file():
+                return r.fulfill(body=f.read_bytes(), content_type="font/ttf", headers={"Access-Control-Allow-Origin": "*"})
+            return r.fulfill(status=404, body="")
         if u.path.startswith("/dashboard/live/"):
             f = LIVE / (u.path[len("/dashboard/live/"):] or "index.html")
             if f.is_file() and f.name != "sw.js":

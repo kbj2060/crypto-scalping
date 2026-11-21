@@ -210,6 +210,9 @@ M = [
     ("ob5m 예열 30→20분", "src/ob5m.rs", "WARM_MS: i64 = 1_800_000;", "WARM_MS: i64 = 1_200_000;", ["ob5m_parity"]),
     ("bookdepth 예열 12→11시간", "src/bookdepth.rs", "WARM_S: i64 = 12 * 3600;", "WARM_S: i64 = 11 * 3600;", ["ob5m_parity"]),
     ("bookdepth 매수 깊이 끝 bb+1 → bb", "src/bookdepth.rs", "bb + 1))", "bb))", ["ob5m_parity"]),
+    ("원본으로: ob5m 빈 스냅숏 = 죽음(IndexError)", "src/ob5m.rs", 'else { return "empty_book" };', 'else { panic!("IndexError") };', ["ob5m_parity"]),
+    ("래스터 칸 번호 floor(p / bin)", "src/raster.rs", "pub fn py_floordiv(a: f64, b: f64) -> f64 {\n", "pub fn py_floordiv(a: f64, b: f64) -> f64 {\n    #[allow(unreachable_code)]\n    return (a / b).floor();\n", ["raster_parity"]),
+    ("래스터 헤더 bin_size 0.5 고정", "src/raster.rs", "(self.bin as f32).to_le_bytes()", "(0.5f32).to_le_bytes()", ["raster_parity"]),
 ]
 PARITY = ["tape_parity", "venue_parity", "rest_parity", "ctx_parity", "venue_rest_parity", "depth_parity", "raster_parity", "ob5m_parity"]
 

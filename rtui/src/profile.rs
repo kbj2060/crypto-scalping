@@ -93,7 +93,7 @@ pub fn draw(g: &Geo, dt: &Dt) -> Vec<Prim> {
     // 9342-9343 델타 0 선 · 9344-9348 기둥 머리(9px 700 · 차트 바탕색 테두리 3px)
     v.push(Prim::Line { pts: vec![[d_mid, p_top], [d_mid, p_bot]], c: Col::SoftLine, a: 1.0, lw: 1.0, dash: None, clip: n });
     for (x, s) in [(g.trade_x0 + 4.0, "청산"), (d_x0, "체결 · 델타"), (t_x0, "TPO")] {
-        v.push(Prim::Text { x, y: p_top - 4.0, s: s.into(), size: 9.0, c: Col::Muted, a: 1.0, anchor: Anchor::Start, halo: true, clip: n });
+        v.push(Prim::Text { x, y: p_top - 4.0, s: s.into(), size: 9.0, wt: 700, c: Col::Muted, a: 1.0, anchor: Anchor::Start, halo: true, clip: n });
     }
     v
 }

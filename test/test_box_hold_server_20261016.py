@@ -1,7 +1,6 @@
-"""/api/box-hold 가 닫힌 1분봉으로 박스 유지 확률을 내는가 (2026-10-16 사용자 «B로 배포»).
+"""2026-11-21 사용자 «서빙을 끈다»: /api/box-hold 는 없다(404 · 바깥 요청 0) · LLM 브리핑 snapshot 은 box_hold 없이 만든다.
 
-진짜 api_box_hold 를 돌리고 거래소 HTTP 세션만 가짜로(합성 1분봉 1500개 = 닫힌 1499 + 형성 1). 🔴바깥 요청 0(klines 가 아니면 실패).
-검사: 200 · ok · 30분·1h·4h 셋 · 값 = dashboard/box_hold.payload(닫힌 봉만) 와 같음 · 형성 봉 제외 · 요청 = ETHUSDT 1m 1500 · 1분 캐시(두 번째 호출은 바깥 요청 없음).
+옛 시험(10-16 «B로 배포» · 값 = dashboard/box_hold.payload 대조)은 라우트와 함께 뺐다 -- 되살리려면 git log.
 실행: python -m pytest -q test/test_box_hold_server_20261016.py
 """
 from __future__ import annotations
@@ -9,13 +8,10 @@ from __future__ import annotations
 import asyncio
 import sys
 import tempfile
-import time
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
-
-import numpy as np
-import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -24,95 +20,31 @@ from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
 from offline_app import offline_app, patch_live_dir  # noqa: E402
 
 from dashboard import server  # noqa: E402
-from dashboard.box_hold import payload  # noqa: E402
+from scripts import live_llm_brief_20261017 as brief  # noqa: E402
 
 
-NOW = time.time()   # 10-16 리뷰: rows() 를 두 번 부를 때 분이 넘어가면 asof 가 갈렸다 -- 한 번만 고정
-
-
-def rows(now: float = NOW) -> list:
-    rng = np.random.default_rng(5)
-    t_form = int(now) // 60 * 60 * 1000                       # 형성 1분봉 시작
-    t = t_form - np.arange(1499, -1, -1) * 60_000
-    c = 2400 * np.exp(np.cumsum(rng.normal(0, 6e-4, 1500)))
-    h, l = c * (1 + rng.uniform(0, 4e-4, 1500)), c * (1 - rng.uniform(0, 4e-4, 1500))
-    v = rng.uniform(5, 50, 1500)
-    out = [[int(t[i]), c[i], h[i], l[i], c[i], v[i], int(t[i]) + 59_999, 0, 0, v[i] * rng.uniform(.3, .7), 0, 0] for i in range(1500)]
-    out[-1][6] = int(now * 1000) + 600_000                       # 형성 봉은 시험이 몇 분 걸려도 늘 «아직 형성 중»
-    return out
-
-
-class FakeResp:
-    def __init__(self, body): self.status, self._b = 200, body
-    async def __aenter__(self): return self
-    async def __aexit__(self, *a): return False
-    async def json(self): return self._b
-
-
-class FakeSession:
-    calls: list = []
-
+class NoNet:
     def __init__(self, *a, **k): self.closed = False
-    def get(self, url, params=None, timeout=None):
-        assert url == "https://fapi.binance.com/fapi/v1/klines", url      # 그 밖의 바깥 요청은 실패
-        FakeSession.calls.append(dict(params))
-        return FakeResp(rows()[-int(params["limit"]):])
+    def get(self, *a, **k): raise AssertionError(f"바깥 요청 {a}")
     async def close(self): self.closed = True
 
 
-class BoxHoldServerTest(unittest.TestCase):
-    def test_box_hold_endpoint(self):
+class BoxHoldOffTest(unittest.TestCase):
+    def test_route_gone(self):
         async def go():
             with tempfile.TemporaryDirectory() as tmp:
                 live, dash = Path(tmp) / "live", Path(tmp) / "dashboard"
                 live.mkdir(); dash.mkdir()
-                with mock.patch.object(server, "ClientSession", FakeSession), patch_live_dir(server, live), \
-                     mock.patch.object(server, "DASHBOARD_DIR", dash), \
-                     mock.patch.object(server, "MACRO_CALENDAR_STATE_PATH", live / "macro_calendar_state.json"):   # 개발 PC 의 진짜 일정 파일을 읽지 않게
+                with mock.patch.object(server, "ClientSession", NoNet), patch_live_dir(server, live), \
+                     mock.patch.object(server, "DASHBOARD_DIR", dash):
                     async with TestClient(TestServer(offline_app(server))) as c:
-                        r1 = await c.get("/api/box-hold")
-                        n1 = len(FakeSession.calls)
-                        r2 = await c.get("/api/box-hold")
-                        return r1.status, await r1.json(), n1, len(FakeSession.calls), await r2.json()
-        FakeSession.calls = []
-        st, p, n1, n2, p2 = asyncio.run(go())
-        self.assertEqual(st, 200, p)
-        self.assertTrue(p["ok"], p)
-        self.assertEqual(p["model"], "hgb-20261016")
-        self.assertEqual(set(p["scales"]), {"30m", "1h", "4h"})
-        self.assertEqual(FakeSession.calls[0], {"symbol": "ETHUSDT", "interval": "1m", "limit": 1500})
-        self.assertEqual((n1, n2), (1, 1), "두 번째 호출은 15초 캐시 안")
-        self.assertEqual(p2, p)
-        raw = rows()[:-1]                                   # 형성 봉 제외 = 서버가 본 봉
-        d = pd.DataFrame({"timestamp": pd.to_datetime([r[0] for r in raw], unit="ms", utc=True),
-                          "high": [r[2] for r in raw], "low": [r[3] for r in raw], "close": [r[4] for r in raw],
-                          "volume": [r[5] for r in raw], "taker_buy_base": [r[9] for r in raw]})
-        want = payload(d, [])                               # 일정 파일 없음 = 발표 칸 0
-        self.assertEqual(p["asof_ms"], want["asof_ms"])
-        for k, s in p["scales"].items():
-            self.assertAlmostEqual(s["p"], want["scales"][k]["p"], places=4)
-            self.assertTrue(0 < s["p"] < 1 and s["dn"] < p["px"] < s["up"])
-            self.assertTrue(0 < s["q20"] < s["base"] < s["q80"] < 1, s)   # 화면 «깨질/머물 쪽» 문턱
+                        return (await c.get("/api/box-hold")).status
+        self.assertEqual(asyncio.run(go()), 404)
 
-    def test_xrp_bundle_and_4h_off(self):
-        """2026-10-20 XRP 전용 모델: ?asset=xrp → XRPUSDT 1m · 30m·1h 값 · 4h = 검정 불통과(ok False) · 지원 안 하는 코인 = ok False."""
-        async def go():
-            with tempfile.TemporaryDirectory() as tmp:
-                live, dash = Path(tmp) / "live", Path(tmp) / "dashboard"
-                live.mkdir(); dash.mkdir()
-                with mock.patch.object(server, "ClientSession", FakeSession), patch_live_dir(server, live), \
-                     mock.patch.object(server, "DASHBOARD_DIR", dash), \
-                     mock.patch.object(server, "MACRO_CALENDAR_STATE_PATH", live / "macro_calendar_state.json"):
-                    async with TestClient(TestServer(offline_app(server))) as c:
-                        return await (await c.get("/api/box-hold?asset=xrp")).json(), await (await c.get("/api/box-hold?asset=hype")).json()
-        FakeSession.calls = []
-        p, hype = asyncio.run(go())
-        self.assertTrue(p["ok"], p)
-        self.assertEqual((p["model"], p["asset"]), ("hgb-xrp-20261020", "xrp"))
-        self.assertEqual(FakeSession.calls[0]["symbol"], "XRPUSDT")
-        self.assertTrue(p["scales"]["30m"]["ok"] and p["scales"]["1h"]["ok"], p["scales"])
-        self.assertFalse(p["scales"]["4h"]["ok"])
-        self.assertFalse(hype["ok"])   # 10-31 BTC·SOL 추가 → 표에 없는 코인 = hype
+    def test_brief_snapshot_without_box_hold(self):
+        s = brief.snapshot({}, {}, {}, {}, datetime.now(timezone.utc))
+        self.assertNotIn("box_hold", s)
+        self.assertIn("scheduled_events_24h", s)
 
 
 if __name__ == "__main__":

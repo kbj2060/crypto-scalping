@@ -46,7 +46,8 @@ pub enum Prim {
     StrokeRect { x: f64, y: f64, w: f64, h: f64, c: Col, a: f64, lw: f64, clip: Clip },
     Line { pts: Vec<[f64; 2]>, c: Col, a: f64, lw: f64, dash: Option<f64>, clip: Clip },
     /// y = 글자 바닥선(캔버스 fillText·svg <text> 와 같은 뜻) · halo = svg paint-order stroke 3px 차트 바탕색(기둥 머리 글자)
-    Text { x: f64, y: f64, s: String, size: f64, c: Col, a: f64, anchor: Anchor, halo: bool, clip: Clip },
+    /// wt = 굵기(400·700·800 -- 지금 화면의 font-weight · draw::fid 가 그 굵기 글꼴을 고른다)
+    Text { x: f64, y: f64, s: String, size: f64, wt: u16, c: Col, a: f64, anchor: Anchor, halo: bool, clip: Clip },
     Circle { x: f64, y: f64, r: f64, c: Col, a: f64, clip: Clip },
 }
 
@@ -134,7 +135,7 @@ fn month_day(days: i64) -> (i64, i64) {
 }
 
 /// measure(글자, 크기px) = 글자 폭(px). app.js 는 캔버스 measureText(textW)·svg getComputedTextLength 로 잰다.
-pub fn prep(inp: &Input, win: &Win, cfg: &Cfg, measure: &dyn Fn(&str, f64) -> f64) -> Option<Scene> {
+pub fn prep(inp: &Input, win: &Win, cfg: &Cfg, measure: &dyn Fn(&str, f64, u16) -> f64) -> Option<Scene> {
     // ── 창 자르기: renderSnapshotChart 8264-8268 ──
     let full = inp.full;
     let len = full.len();
@@ -234,8 +235,8 @@ pub fn prep(inp: &Input, win: &Win, cfg: &Cfg, measure: &dyn Fn(&str, f64) -> f6
             let t = candles[i].time - tz;
             let mut s = format!("{:02}:{:02}", t.rem_euclid(86_400) / 3600, t.rem_euclid(3600) / 60);
             if dated { let (m, d) = month_day(t.div_euclid(86_400)); s = format!("{m}/{d} {s}"); }
-            let tw = measure(&s, 13.0);
-            svg.push(Prim::Text { x: x.max(2.0 + tw / 2.0), y: h - mb - 3.0, s, size: 13.0, c: Col::Muted, a: 1.0, anchor: Anchor::Middle, halo: false, clip: Clip::No });
+            let tw = measure(&s, 13.0, 700);
+            svg.push(Prim::Text { x: x.max(2.0 + tw / 2.0), y: h - mb - 3.0, s, size: 13.0, wt: 700, c: Col::Muted, a: 1.0, anchor: Anchor::Middle, halo: false, clip: Clip::No });
         }
     }
 
@@ -280,7 +281,7 @@ pub fn prep(inp: &Input, win: &Win, cfg: &Cfg, measure: &dyn Fn(&str, f64) -> f6
     let draw_cell = |out: &mut Vec<Prim>, cx: f64, y_top: f64, v: f64, other: f64, col: Col, edge_x: f64| { // 9437-9442
         if half > 0.0 && row_px > 0.0 { out.push(Prim::Rect { x: cx, y: y_top, w: half, h: row_px, c: col, a: shade(v, mx_cell), rx: 0.0, clip: Clip::Plot }); }
         if v > 0.0 && row_px >= 7.0 && show_qty {
-            out.push(Prim::Text { x: cx + half / 2.0, y: y_top + row_px / 2.0 + font_px * 0.36, s: fmt_qty(v), size: font_px, c: Col::Ink, a: 0.82, anchor: Anchor::Middle, halo: false, clip: Clip::Plot });
+            out.push(Prim::Text { x: cx + half / 2.0, y: y_top + row_px / 2.0 + font_px * 0.36, s: fmt_qty(v), size: font_px, wt: 400, c: Col::Ink, a: 0.82, anchor: Anchor::Middle, halo: false, clip: Clip::Plot });
         }
         if v > 0.0 && v > other * 3.0 { // FOOTPRINT_IMBALANCE_RATIO(150)
             out.push(Prim::Rect { x: edge_x, y: y_top + 0.5, w: 2.0, h: (row_px - 1.0).max(1.0), c: col, a: 1.0, rx: 0.0, clip: Clip::Plot });
@@ -369,7 +370,7 @@ pub fn prep(inp: &Input, win: &Win, cfg: &Cfg, measure: &dyn Fn(&str, f64) -> f6
             }
             delta_boxes.push((cxd - half_w, cxd + half_w, dy));
             if dy != dy0 { bumped += 1; }
-            deltas.push(Prim::Text { x: cxd, y: dy, s: label, size: delta_font, c: if delta >= 0.0 { Col::Good } else { Col::Bad }, a: 1.0, anchor: Anchor::Middle, halo: false, clip: Clip::Plot });
+            deltas.push(Prim::Text { x: cxd, y: dy, s: label, size: delta_font, wt: 700, c: if delta >= 0.0 { Col::Good } else { Col::Bad }, a: 1.0, anchor: Anchor::Middle, halo: false, clip: Clip::Plot });
         }
     }
     for (k, [o, h_, l, c]) in dense_col { dense_candle(&mut fg, k as f64 - bw / 2.0, o, h_, l, c, 1.0); } // 9554 합친 캔들 = 그 픽셀 열 한 칸
@@ -397,10 +398,10 @@ pub fn prep(inp: &Input, win: &Win, cfg: &Cfg, measure: &dyn Fn(&str, f64) -> f6
         let label_y = (mt + 9.0).max((plot_bottom - 9.0).min(real_y.max(mt + 9.0).min(plot_bottom - 9.0))); // declutterTagY 10351 + 10408
         let s0 = to_fixed(inp.shown, cfg.dp); // fmtNum(v, pxDp()) · 10499 font-variant-numeric: tabular-nums
         let s = tnum(&s0);
-        let tw = measure(&s, 14.0);
+        let tw = measure(&s, 14.0, 800);
         let bw0 = (inp.pill_w)(tw, s0.len()); // pillW 4418
         pill.push(Prim::Rect { x: g.x_rr - bw0, y: label_y - 9.0, w: bw0, h: 18.0, c: Col::Ink, a: 1.0, rx: 9.0, clip: Clip::No });
-        pill.push(Prim::Text { x: g.x_rr - 9.0, y: label_y + 4.5, s, size: 14.0, c: Col::OnFill, a: 1.0, anchor: Anchor::End, halo: false, clip: Clip::No });
+        pill.push(Prim::Text { x: g.x_rr - 9.0, y: label_y + 4.5, s, size: 14.0, wt: 800, c: Col::OnFill, a: 1.0, anchor: Anchor::End, halo: false, clip: Clip::No });
     }
 
     // 층 순서(app.js 그대로): bg 캔버스 → fg 캔버스(칸·캔들·델타·POC 선 → 스택 9769 → 레인 11158 → 청산 동그라미 11280 → 미완 경매 11332) → svg(시간축 → 프로파일 9299 → 레인 글자 → 알약 post)

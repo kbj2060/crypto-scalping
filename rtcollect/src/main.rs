@@ -364,8 +364,14 @@ async fn run_raster() {
         }
         serde_json::from_str(&body).map_err(|e| e.to_string())
     });
-    let r = Rc::new(RefCell::new(raster::Raster::new(&root, &sym)));
-    println!("raster {sym} → {} (스냅숏 REST {})", root.display(), if rest { "켬" } else { "🔴꺼짐 = 모든 행 무효" });
+    // 원본과 같은 환경변수(:65-66) -- 종목마다 칸 크기가 다르다(crontab: xrp 0.0002 · sol 0.02 · mu 0.2 …)
+    let bin = env_f("OF_BIN_SIZE", raster::BIN_SIZE);
+    let n: usize = env_s("OF_N_BINS", &raster::N_BINS.to_string()).parse().unwrap_or_else(|_| die(2, "OF_N_BINS 는 정수"));
+    if !(bin > 0.0) || n == 0 || n > u16::MAX as usize {
+        die(2, &format!("OF_BIN_SIZE {bin} · OF_N_BINS {n} -- 양수(칸 수 ≤ 65535)여야 한다"));
+    }
+    let r = Rc::new(RefCell::new(raster::Raster::new(&root, &sym, bin, n)));
+    println!("raster {sym} 칸 {bin} × {n} → {} (스냅숏 REST {})", root.display(), if rest { "켬" } else { "🔴꺼짐 = 모든 행 무효" });
     let mut tasks = JoinSet::new();
     tasks.spawn_local(net::run_raster(r.clone(), url, fetch));
     tasks.spawn_local(net::raster_ticks(r.clone()));
