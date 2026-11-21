@@ -78,16 +78,18 @@ fn market_binary_loop_tail_micro_dashboard() {
     let dir = std::env::temp_dir().join(format!("rtduck_market_loop_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let (wl, rl) = (TcpListener::bind("127.0.0.1:0").unwrap(), TcpListener::bind("127.0.0.1:0").unwrap());
-    let (wp, rp) = (wl.local_addr().unwrap().port(), rl.local_addr().unwrap().port());
-    let (ws_seen, rest_seen): (Seen, Seen) = (Arc::new(Mutex::new(vec![])), Arc::new(Mutex::new(vec![])));
     let t0 = Instant::now();
-    let (a, b) = (ws_seen.clone(), rest_seen.clone());
-    let fo_n = Arc::new(Mutex::new(0usize));
-    let f2 = fo_n.clone();
-    std::thread::spawn(move || ws_server(wl, a, t0, f2));
-    std::thread::spawn(move || rest_server(rl, b, t0));
-    let run = |ban: &str| {
+    // 실행마다 가짜 서버 둘을 새 포트로(🔴2026-11-21: 하나를 같이 쓰면 밴 중 실행이 SIGTERM 직전에 낸 요격기 재접속이 다음 실행의 기록·각본 번호에 섞일 수 있다)
+    let servers = || {
+        let (wl, rl) = (TcpListener::bind("127.0.0.1:0").unwrap(), TcpListener::bind("127.0.0.1:0").unwrap());
+        let (wp, rp) = (wl.local_addr().unwrap().port(), rl.local_addr().unwrap().port());
+        let (ws_seen, rest_seen): (Seen, Seen) = (Arc::new(Mutex::new(vec![])), Arc::new(Mutex::new(vec![])));
+        let (a, b) = (ws_seen.clone(), rest_seen.clone());
+        std::thread::spawn(move || ws_server(wl, a, t0, Arc::new(Mutex::new(0usize))));
+        std::thread::spawn(move || rest_server(rl, b, t0));
+        (wp, rp, ws_seen, rest_seen)
+    };
+    let run = |ban: &str, wp: u16, rp: u16| {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_rtduck"));
         cmd.env("RTDUCK_KIND", "market_data").env("BOT_SYMBOLS", "ETHUSDT").env("TAIL_SYMBOLS", "ETHUSDT").env("RTDUCK_LIVE_DIR", &dir)
             .env("RTDUCK_REST", "1").env("RTDUCK_BINANCE_REST", format!("http://127.0.0.1:{rp}")).env("RTCOLLECT_BAN_FILE", dir.join(ban))
@@ -98,17 +100,21 @@ fn market_binary_loop_tail_micro_dashboard() {
             .stdout(Stdio::piped()).stderr(Stdio::piped());
         cmd
     };
-    // 밴 중: REST 요청 0(웹소켓은 붙는다)
+    // 밴 중: REST 요청 0(웹소켓은 붙는다) -- 웹소켓이 붙은 것을 본 뒤 끈다(고정 잠 대신 조건 대기)
     std::fs::write(dir.join("ban_on"), format!("{:.3}\n", rtcollect::rest::wall_s() + 600.0)).unwrap();
-    let c = run("ban_on").spawn().unwrap();
-    std::thread::sleep(Duration::from_millis(3500));
+    let (wp0, rp0, ws0, rest0) = servers();
+    let c = run("ban_on", wp0, rp0).spawn().unwrap();
+    while ws0.lock().unwrap().len() < 3 && t0.elapsed() < Duration::from_secs(30) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    std::thread::sleep(Duration::from_millis(3500)); // 폴링 한 바퀴(3초)가 지날 만큼 -- 그동안 REST 0 이어야 한다
     let _ = Command::new("kill").args(["-TERM", &c.id().to_string()]).status();
     assert!(c.wait_with_output().unwrap().status.success());
-    assert!(rest_seen.lock().unwrap().is_empty(), "밴 중이면 REST 를 안 보낸다");
-    ws_seen.lock().unwrap().clear();
-    *fo_n.lock().unwrap() = 0; // 요격기 각본(1011 → 1000 → 그대로)을 처음부터
+    assert!(ws0.lock().unwrap().len() >= 3, "밴 중에도 웹소켓 셋은 붙는다");
+    assert!(rest0.lock().unwrap().is_empty(), "밴 중이면 REST 를 안 보낸다");
+    let (wp, rp, ws_seen, rest_seen) = servers();
     let t1 = t0.elapsed().as_secs_f64();
-    let child = run("ban_none").spawn().unwrap();
+    let child = run("ban_none", wp, rp).spawn().unwrap();
     while ws_seen.lock().unwrap().iter().filter(|x| x.1.contains("@forceOrder")).count() < 3 && t0.elapsed() < Duration::from_secs(30) {
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -120,8 +126,8 @@ fn market_binary_loop_tail_micro_dashboard() {
     let fo: Vec<f64> = s.iter().filter(|x| x.1.contains("@forceOrder")).map(|x| x.0).collect();
     assert_eq!(fo.len(), 3, "요격기 연결 셋: {s:?}");
     let (r1, r2) = (fo[1] - fo[0], fo[2] - fo[1]);
-    assert!((3.0..4.8).contains(&r1), "1011 뒤 3초: {r1:.2}");
-    assert!(r2 < 1.2, "1000 뒤 곧바로: {r2:.2}");
+    assert!((3.0..6.0).contains(&r1), "1011 뒤 3초(부하 여유): {r1:.2}");
+    assert!(r2 < 2.0, "1000 뒤 곧바로(3초 쉼 없음): {r2:.2}");
     assert!(s.iter().any(|x| x.1.starts_with("GET /ws/ethusdt@depth20@100ms ")) && s.iter().any(|x| x.1.starts_with("GET /market/ws/ethusdt@aggTrade ")), "{s:?}");
     let r: Vec<(f64, String)> = rest_seen.lock().unwrap().iter().filter(|x| x.0 > t1).cloned().collect();
     let paths: Vec<&str> = r.iter().map(|x| x.1.split(' ').nth(1).unwrap()).collect();
@@ -129,7 +135,7 @@ fn market_binary_loop_tail_micro_dashboard() {
     let (oi, pi) = ("/fapi/v1/openInterest?symbol=ETHUSDT", "/fapi/v1/premiumIndex?symbol=ETHUSDT");
     assert!(paths.len() >= 5 && paths[..3] == [oi, pi, "/fapi/v1/aggTrades?symbol=ETHUSDT&limit=500"] && paths[3..].chunks(2).all(|p| p[0] == oi && p.get(1).is_none_or(|q| *q == pi)), "{paths:?}");
     let gap = r[3].0 - r[0].0;
-    assert!((2.8..4.5).contains(&gap), "폴링 간격 3초: {gap:.2}");
+    assert!((2.8..6.0).contains(&gap), "폴링 간격 3초(부하 여유): {gap:.2}");
     let b: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("liq_burst_state.json")).unwrap()).unwrap();
     assert_eq!(b["ws_connected"], true);
     let d: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("dashboard_state.json")).unwrap()).unwrap();

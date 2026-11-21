@@ -14,9 +14,13 @@ pub const KEEP_ON_FAIL: usize = 200_000;
 
 /// 수집기 벽시계. 시험 전용 `RTDUCK_FAKE_START`(epoch 초)가 있으면 «그 시각에 시작한 것처럼» 민다(자정 넘기 시험) -- 운영에서는 비워 둔다.
 pub fn wall() -> f64 {
-    static OFF: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
-    let now = rtcollect::rest::wall_s();
-    now + *OFF.get_or_init(|| std::env::var("RTDUCK_FAKE_START").ok().and_then(|v| v.parse::<f64>().ok()).map_or(0.0, |t| t - now))
+    // 시험(RTDUCK_FAKE_START)이면 «시작 + 단조 경과» -- 벽시계 + 차이로 하면 WSL 벽시계가 1.5~2.4초씩 뒤로 뛸 때 자정 넘기가 밀려
+    //   hl_trades_loop 가 부하 아래 20번 중 2번 공백 줄을 그 전날 파일에 썼다(2026-11-21 아홉째 조각). 실제 실행은 원본처럼 벽시계 그대로.
+    static FAKE: std::sync::OnceLock<Option<(std::time::Instant, f64)>> = std::sync::OnceLock::new();
+    match FAKE.get_or_init(|| std::env::var("RTDUCK_FAKE_START").ok().and_then(|v| v.parse::<f64>().ok()).map(|t| (std::time::Instant::now(), t))) {
+        Some((i0, t)) => t + i0.elapsed().as_secs_f64(),
+        None => rtcollect::rest::wall_s(),
+    }
 }
 
 /// (coin, ts_ms, tid, hash, side, px, sz, buyer, seller)

@@ -27,15 +27,7 @@ const TIER_GROUPS: [(&str, &[i64]); 4] = [("10", &[10]), ("20~25", &[20, 25]), (
 pub const COINS: [(&str, &str); 9] = [("eth", "ETHUSDT"), ("btc", "BTCUSDT"), ("sol", "SOLUSDT"), ("xrp", "XRPUSDT"), ("hype", "HYPEUSDT"),
                                       ("sndk", "SNDKUSDT"), ("soxl", "SOXLUSDT"), ("skhynix", "SKHYNIXUSDT"), ("mu", "MUUSDT")];
 
-/// np.sum / Series.sum: numpy 는 8192칸(버퍼) 묶음마다 짝 합을 내고 묶음 합을 차례로 더한다(2026-11-21 서버 판 venv 실측 -- 9천 칸 넘는 합에서 갈림).
-/// 🔴rtcollect::ob5m::np_sum 은 묶음 없이 짝 합만 -- 8192칸 넘는 배열에선 numpy 와 다르다(그쪽 쓰임은 작은 배열뿐이라 그대로 둠).
-fn np_sum(a: &[f64]) -> f64 {
-    let mut s = 0.0;
-    for c in a.chunks(8192) {
-        s += rtcollect::ob5m::np_sum(c);
-    }
-    s
-}
+use rtcollect::ob5m::np_sum; // numpy 8192칸 묶음 짝 합
 
 fn kahan(acc: &mut (f64, f64), v: f64) {
     let y = v - acc.1;

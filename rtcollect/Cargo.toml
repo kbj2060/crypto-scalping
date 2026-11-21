@@ -20,3 +20,6 @@ futures-util = { version = "0.3", default-features = false, features = ["sink", 
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 # depth_diff 의 시각 파일 gzip(원본 gzip.open(compresslevel=6)) -- 순수 Rust 백엔드(miniz_oxide), C 없음.
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# 뉴스 RSS(src/news.rs) -- 조정자 결정 2026-11-21: XML = quick-xml(이름공간 풀기 NsReader) · 정규식 = regex(원본 re 세 줄 · 공백 칸은 파이썬 str.isspace 로 손으로).
+quick-xml = "0.41"
+regex = "1"

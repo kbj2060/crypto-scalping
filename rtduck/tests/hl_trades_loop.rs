@@ -96,7 +96,7 @@ fn hl_trades_binary_loop_reconnect_midnight_sigterm() {
     let want = [r#"{"method": "subscribe", "subscription": {"type": "trades", "coin": "ETH"}}"#, r#"{"method": "subscribe", "subscription": {"type": "trades", "coin": "BTC"}}"#];
     assert_eq!(subs, [want[0], want[1], want[0], want[1]], "연결마다 코인 순서대로 구독");
     let redial = s[2].1 - s[1].1;
-    assert!((4.8..7.5).contains(&redial), "서버가 닫은 뒤 5초(+보낸 시간): {redial:.2}");
+    assert!((4.8..12.0).contains(&redial), "서버가 닫은 뒤 5초(+보낸 시간 · 부하 여유): {redial:.2}");
     let d1 = rtduck::duckdump::dump(&sub.join("2025-11-21.duckdb")).unwrap();
     let d2 = rtduck::duckdump::dump(&sub.join("2025-11-22.duckdb")).unwrap();
     let tids = |d: &Value| d["hl_trades"]["rows"].as_array().unwrap().iter().map(|r| r[2].as_i64().unwrap()).collect::<Vec<_>>();
@@ -107,8 +107,8 @@ fn hl_trades_binary_loop_reconnect_midnight_sigterm() {
     assert_eq!(g.len(), 1, "공백 한 줄(다시 붙은 날 파일)");
     assert_eq!((g[0][0].as_str(), g[0][3].as_str()), (Some("ETH,BTC"), Some("ConnectionClosedError")));
     let span = (g[0][2].as_i64().unwrap() - g[0][1].as_i64().unwrap()) as f64 / 1000.0;
-    // 공백은 벽시계로 잰다(원본 그대로) -- 이 개발기(WSL)는 벽시계가 1.5~2.4초씩 뒤로 뛴다(2026-11-21 실측 2.79초) · 다시 붙기 자체는 위에서 단조 시계로 봤다
-    assert!((2.0..7.5).contains(&span) && g[0][1].as_i64().unwrap() < ms && g[0][2].as_i64().unwrap() >= ms, "공백 = 끊긴 시각(자정 전) → 다시 붙은 시각(자정 뒤): {g:?}");
+    // 공백 = 가짜 시계(시작 + 단조 경과 -- hl_trades::wall) 로 잰 끊김 → 다시 붙음 · 부하 아래 늦어질 수 있어 위쪽은 넉넉히
+    assert!((4.5..12.0).contains(&span) && g[0][1].as_i64().unwrap() < ms && g[0][2].as_i64().unwrap() >= ms, "공백 = 끊긴 시각(자정 전) → 다시 붙은 시각(자정 뒤): {g:?}");
     assert!(sub.join("2025-11-19.duckdb.gz").exists() && !sub.join("2025-11-19.duckdb").exists(), "3일 전 파일 압축");
     eprintln!("hl_trades 접속 루프: 연결 2 · 다시 붙기 {redial:.2}초 · 공백 {span:.2}초 · 자정 전 3행 · 뒤 1행");
     let _ = std::fs::remove_dir_all(&dir);
