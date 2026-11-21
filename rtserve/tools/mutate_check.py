@@ -144,6 +144,15 @@ M = [
     ("④dir-short 코인 표에서 BTC 빼기", "src/model.rs", 'const DS: [&str; 4] = ["ETH", "BTC", "SOL", "XRP"];', 'const DS: [&str; 4] = ["ETH", "DOGE", "SOL", "XRP"];', "model_parity"),
     ("④vol HGB 바이낸스 밴 문구 None", "src/model.rs", 'reason.map_or(Ok(None), |_| Err("HTTPServiceUnavailable: binance_ip_ban".into()))', "Ok(None)", "model_parity"),
     ("④vol 쪽 대체를 QX4 실패에도 안 함", "src/model.rs", "        Ok(None) => {}", "        Ok(None) => return Ok(json!({\"ok\": false, \"reason\": \"artifact_missing\"})),", "model_parity"),
+    # ── 다섯째 조각(병행 고정 · 풋프린트 라우팅) -- 이름 «⑤» ──
+    ('⑤무변경(대조: 통과해야 함)', 'src/api3.rs', 'fn fpd_of', 'fn fpd_of', 'fpd_http'),
+    ('⑤읽기 전용 스위치 무시', 'src/lib.rs', 'if cfg.readonly && req.method == "POST"', 'if false && req.method == "POST"', 'model_parity'),
+    ('⑤읽기 전용인데 접수 기록 적음', 'src/lib.rs', '&& !r.upstream && !cfg.readonly {', '&& !r.upstream {', 'model_parity'),
+    ('⑤REST 꺼짐 무시', 'src/model.rs', 'if cfg.rest.is_empty() { Err(', 'if false { Err(', 'model_parity'),
+    ('⑤풋프린트 asset 소문자로', 'src/api3.rs', 'let a = req.q("asset").unwrap_or("eth").to_string();', 'let a = req.q("asset").unwrap_or("eth").to_lowercase();', 'fpd_http'),
+    ('⑤풋프린트 빈 since 통과', 'src/api3.rs', 'req.q(k).map(|v| crate::fpd::iso_day(v)', 'req.q(k).filter(|v| !v.is_empty()).map(|v| crate::fpd::iso_day(v)', 'fpd_http'),
+    ('⑤일봉 cells range → 500', 'src/api3.rs', 'Err(PyErr(m)) if m == "range" => crate::http_exc(400, Some("range"), &[]),', '', 'fpd_http'),
+    ('⑤4h cells from_to 를 bad_key 보다 먼저', 'src/api3.rs', 'let (frm, to) = (tri!(iso_h4_q(req, "from")), tri!(iso_h4_q(req, "to")));', 'if req.q("from").is_none() || req.q("to").is_none() { return crate::http_exc(400, Some("from_to"), &[]); }\n    let (frm, to) = (tri!(iso_h4_q(req, "from")), tri!(iso_h4_q(req, "to")));', 'fpd_http'),
 ]
 
 

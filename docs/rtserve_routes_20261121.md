@@ -17,7 +17,10 @@ Rust 판 = `rtserve/`(새 크레이트). 설계 문서 `docs/rtcore_design_20261
 - **넷째 조각(2026-11-22 · 미커밋)**: 주문·계좌 14 프록시(rtorder 문 · 진짜 rtorder 실행 파일로 route 정답지 42건 바이트 일치) + `/api/events` acct_seq(rtorder `/internal/acct` 1초)
   + `/api/oi-5m`(hot oi_1s + 코어 Micro.okx_oi5m · 요청 7) + `/api/liquidation-5m-history`(코어 Liq5m + hot OKX·HL · 요청 12) + 모델 5(dir4h · dir-short · vol-forecast · open-rev · dir-signals = rtmodel::handlers ·
   가짜 REST 녹화본 · dir 5벌 payload 비트 + 요청 545 같은 열 · 본문 글자 4 · QX4 배선 · 밴·낡음). §4 넷째 조각 · §5 #23~#33.
-- **옮김 합계(2026-11-22)**: `/api/*` 78 중 **54**(33 + 넷째 조각 21) + 화면·정적 6 전부 = **60 / 84**. 남은 것 = §7.
+- **다섯째 조각(2026-11-22 · 미커밋)**: 병행 가동 준비(§8: `supervisor_rtserve.sh` · `RTSERVE_READONLY` · REST 기본 꺼짐 · `tools/shadow_http.py`) + 일봉·4시간 풋프린트 4 라우팅
+  (api3.rs → fpd.rs · 요청 42 불일치 0 · 400 갈래 asset·bad_date·bad_key·from_to·range) + flow/heatmap «체결 대조 반올림» 확인(§7 1번 -- 코어 원값 칸은 필요 없음).
+- **옮김 합계(2026-11-22)**: `/api/*` 78 중 **59** + 화면·정적 6 전부 = **65 / 84**. 남은 것 = §7.
+  (다시 셈 -- 묶음별: 파일 21/21 · 쓰기·설정 6/6 · 저장소+계산 6/7 · 메모리 상태 7/10 · 요청 때 REST·모델 5/20 · 주문 14/14 = 59. 앞 조각 보고의 «33 → 54 → 60/84»는 하나 덜 센 값이었다.)
 - 인증·세션: **원본 서버 안에 없다.** 127.0.0.1 에만 묶이고, 공개 경로는 Cloudflare 터널(`dashboard/scripts/start_cloudflare_tunnel.sh`) + Cloudflare Access 가 막는다
   (`dashboard/scripts/supervise_server.sh:31~32` 주석 · `docs/rtcore_browser_route_20261120.md:22`). «인증 없이 열면 `/` 는 302, 그 밖은 404» 로 보인 것은
   원본 라우터 그대로다(`/` = `HTTPFound("/dashboard/live/")`, 모르는 주소 = `404: Not Found`). rtserve 도 인증을 새로 만들지 않고 루프백이 아니면 시작을 거절한다.
@@ -97,8 +100,8 @@ Rust 판 = `rtserve/`(새 크레이트). 설계 문서 `docs/rtcore_design_20261
 
 | 주소 | 핸들러 | 읽는 것 · 계산 | 화면 | rtserve |
 |---|---|---|---|---|
-| `/api/footprint-daily` · `/cells` | 3842·3849 → footprint_daily.py | D/F lake + S hot 테이프·맥락 → DailyFootprint | fp_daily.js 60초·범위 바뀔 때 | 다음(§7 -- 소급본·lake parquet + pandas 654줄 · 모듈 캐시 셋) |
-| `/api/footprint-4h` · `/cells` | 3879·3885 | 같은 원천 h4 | 〃 | 다음(같은 이유) |
+| `/api/footprint-daily` · `/cells` | 3861·3868 → footprint_daily.py | D/F lake + S hot 테이프·맥락 → DailyFootprint | fp_daily.js 60초·범위 바뀔 때 | **옮김**(계산 fpd.rs = 다른 에이전트 d1a40656 · 라우팅 api3.rs · swr 30/600 · 칸 키 800 넘으면 오래된 절반 정리) |
+| `/api/footprint-4h` · `/cells` | 3898·3904 | 같은 원천 h4 | 〃 | **옮김**(4h cells 는 원본처럼 범위 검사 없음) |
 | `/api/liquidation-5m-signal` | 4751 | D tail_risk(rtduck market_data 가 씀) + 신호식 | 60초 | **옮김**(DuckDB 1.5.1 묶음 · swr 1/0) |
 | `/api/flow/heatmap` | 4673 → 4463·4504 | F 호가 래스터(rtcollect `raster`) + numpy 행 집계 + **M** 풋프린트(체결 대조) | 1초 | 다음(§7 -- read_window·row_stats·vol_scores·approach_ratio numpy f32 포팅 + 원본 풋프린트 칸(반올림 전) 이 허브에 없다) |
 | `/api/session-alerts` | 4840 | F 거시 달력 + compute_macro_event_alert | 30초 | **옮김**(달력은 macro-calendar 와 같은 6시간 캐시 · 경보는 매번 계산) |
@@ -239,6 +242,16 @@ bubble-tape 의 «캐시 맞음»은 ttl 1초라 300건 반복 중 만료가 섞
 
 
 
+### 다섯째 조각 (2026-11-22)
+
+- **일봉·4시간 풋프린트 4 라우팅**(`api3.rs` · 원본 3714~3751 손잡이 · 3861~3912 엔드포인트를 Read 로 확인):
+  `?asset=` 은 원본처럼 **소문자로 안 바꾼다**(없으면 eth · fpd::ASSETS 밖 = 400 asset) · since/from/to = `_iso_day`(나쁘면 400 bad_date · 빈 글자도) · 4h = `_iso_h4`(400 bad_key) ·
+  from·to 없음 = 400 from_to(나쁜 키 검사가 먼저 -- 원본 순서) · row = parse_row(행 달러 → 칸) · 일봉 cells 의 ValueError(`Err("range")`) = 400 range · 그 밖 예외 = 500 ·
+  swr 키·시간 원본 그대로(fp_daily_days_ · fp_daily_cells_{a}_{from}_{to}_{row} · fp_4h_days_ · fp_4h_cells_ · 30/600) · 일봉 cells 앞에서 저장 값이 800 넘으면 «fp_daily_cells_·fp_4h_cells_·position_profile:» 중 오래된 절반 지움(`Swr::prune_oldest_half`).
+  원천: lake = `DATA_LAKE` 또는 data/lake · 소급본 data/footprint_daily · hot 테이프 data/hot/binance_tape.sqlite(live_trade_tape_collector:61) · 맥락 binance_ctx.sqlite. Fpd 는 코인마다 처음 요청 때 하나(`Config.fpd`).
+  시험 `tests/fpd_http.rs`: gen_fpd_fixture.py 정답지의 첫 걸음(eth·xrp 각 호출 11 -- 오류 range 포함)을 HTTP 로 + since 1 + 400 갈래 10 = **요청 42 · 불일치 0**.
+  🔴정답지(tests/fixtures/gen/fpd · 59MB)는 커밋 안 하는 생성물이다 -- 없으면 fpd_parity 처럼 이 시험도 «gen_fpd_fixture.py 먼저»로 멈춘다.
+
 ### 넷째 조각 (2026-11-22)
 
 - **주문·계좌 14 프록시**(`src/order.rs`): 시험 `tests/order_proxy.rs` = rtorder/tests/door_bin.rs 방식 그대로 진짜 rtorder 실행 파일(그림자 · 가짜 거래소 `rtorder::fakesrv` · 127.0.0.1:0)을 띄우고
@@ -300,6 +313,9 @@ bubble-tape 의 «캐시 맞음»은 ttl 1초라 300건 반복 중 만료가 섞
 | 30 | 밴 중 상태 코드 | 코디네이터 지시는 «503» 이었으나 원본을 읽어 보니 fetch_binance_json 의 503(HTTPServiceUnavailable)은 핸들러의 except 가 잡아 **200 `{"ok": false, "reason": "HTTPServiceUnavailable: binance_ip_ban"}`** 로 나간다(dir4h·dir-short 은 requests 가드의 BinanceBanned) | 원본 그대로 200 + 그 문구 |
 | 31 | 모델이 낡음 | 원본은 joblib 을 바로 읽어 새 모델 값을 낸다 | rtserve 는 내보낸 JSON 만 읽는다 -- joblib 이 더 새것이거나 없으면 값을 안 내고 `{"ok": false, "reason": "ModelStale: 모델 낡음: …"}` (재학습 cron 뒤 export_*.py 를 다시 돌릴 때까지) |
 | 32 | vol-forecast 의 QX4I 칸(ETH·BTC: iv_atm·sig4h_iv_*·log_rv_iv) | Deribit 옵션 체결로 붙임(실패면 칸만 빠짐) | 늘 빠짐 -- 원본의 «iv_now 실패» 갈래와 같은 모양 |
+| 34 | 🔴REST 기본 | (해당 없음) | 다섯째 조각부터 `RTSERVE_REST` 가 없으면 **꺼짐** -- 모델 주소 5 = `{"ok": false, "reason": "RestOff: RTSERVE_REST unset -- request not sent"}`. 실전 전환 때 원본 FAPI 주소를 준다 |
+| 35 | 병행 중 쓰기 | (해당 없음) | `RTSERVE_READONLY=1`: 메모·오답·푸시 구독·해지 POST = 503 `{"ok": false, "error": "readonly_shadow"}` · 접수 기록 안 적음(§8) |
+| 36 | 풋프린트 lake 자리 | data_store.LAKE = DATA_LAKE 또는 data/lake(**data/lake 가 없으면 ~/backups/… 백업 lake**) | DATA_LAKE 또는 data/lake 만(백업 갈래 안 옮김 · 서버엔 data/lake 가 있다) |
 | 33 | vol-forecast QX4 이어 받기 중 일부 실패 | `refresh_rows` 가 False → HGB | 같음 · 다만 QX4 쪽 «낡음»은 HGB 로 떨어지지 않고 오류(옛 값·다른 모델 값을 안 냄) |
 
 ## 6. 양성 대조
@@ -318,14 +334,49 @@ bubble-tape 의 «캐시 맞음»은 ttl 1초라 300건 반복 중 만료가 섞
 oi 기본 48→24(ETH 는 OKX 가 있어 20봉만 남아 같았다 → SOL 기본 요청을 더함) · «현재 OI = 마지막 봉 끝» 은 동등 변이(hot 마지막 행 = 마지막 봉 끝 행)라 뺐다. 앞 조각 변이 95개는 이번에 다시 돌리지 않았다.
 🔴같은 target 을 쓰니 끝난 뒤 원본 시험 실행 파일이 지운 사본 경로(CARGO_MANIFEST_DIR)를 가리킨 채 남았다(http4_parity 가 정답지 NotFound) -- 도구가 끝에 원본 src/lib.rs·tests/*.rs 수정 시각을 올려 다시 빌드되게 했다.
 
+**다섯째 조각 결과(2026-11-22): 변이 8/8 잡힘**(`⑤` · 읽기 전용 2 · REST 꺼짐 1 · 풋프린트 라우팅 5) · 무변경 통과 · 원본 바이트 그대로(두 번째 판). 첫 판 못 잡음 2:
+읽기 전용 «접수 기록 안 적음»(시험 트리에 data/live 가 없어 적기가 조용히 실패 → 폴더를 만들어 봄) · 4h cells 의 «bad_key 먼저»(from 만 나쁜 사례가 없었다 → 더함).
+
 ## 7. 다음 조각 순서
 
-1. **일봉·4시간 풋프린트 4**(footprint-daily·cells · footprint-4h·cells): 소급본(`data/footprint_daily/*_days|cells.parquet`)·lake(`read_parquet` hive)를 DuckDB(이번에 넣은 parquet 판)로 읽고,
-   pandas 계산(groupby 합 = pandas 보정 합 · np.average · 날·4시간 칸 캐시 셋(_recent·_today 30초·_h4 닫힘/형성/빈칸 10분))을 옮긴다. 정답지는 합성 parquet 트리로.
-2. **flow/heatmap**: 래스터 read_window(.f32 시각 파일)·row_stats·vol_scores·approach_ratio(numpy f32) + 체결 대조(원본은 풋프린트 칸 «반올림 전» 값 -- 허브는 반올림한 칸만 민다:
+1. ~~일봉·4시간 풋프린트 4~~ -- 다섯째 조각에서 옮김.
+2. **flow/heatmap**(다섯째 조각에서 확인만 · 옮기기는 다음):
+   🔴«체결 대조가 풋프린트 칸의 반올림 전 값을 쓴다» 문제 -- **실제로는 갈리지 않는다(코어 원값 칸 필요 없음)**. 원본 `_heatmap_rows`(4523~4627 Read): 체결 대조 값은 `fill_ask[i] += v[0]` · `fill_bid[i] += v[1]`
+   (메모리 풋프린트 칸 = 봉·가격칸별 테이커 매수·매도 **기초자산 수량 합**) → `filled = Σ min(drop, fill)` → 응답에 나가는 것은 `offtouch_leave_share = round(1 − filled/drop, 3)` 하나뿐(fill 배열 자체는 안 나감).
+   수량 단위가 바이낸스 수량 칸(ETH·BTC 0.001 · SOL 0.01 · XRP 0.1)의 배수라 칸 합의 참값은 소수 셋째 자리까지의 십진수다 -- 반올림 전 값과 round(x, 3)의 차는 부동소수 덧셈 잡음뿐.
+   실측(개발기 data/live/footprint_eth.json · 12봉 · 칸 값 472개): **0.001 의 배수가 아닌 값 0/472 · |원값 − round(원값,3)| 최대 3.96e-11 · 합 3.61e-10**.
+   → filled 차이 ≤ 3.6e-10(그 창 전체) · drop(창 안 잔량 감소, 보통 수백~수천 ETH)으로 나누면 비율 차 ~1e-12 이하 -- round(·,3) 경계(±5e-4)에서 그 거리 안에 들 확률은 응답당 ~1e-9 수준.
+   (래스터와 같은 시각 풋프린트가 개발기에 없어 offtouch_leave_share 자체를 두 값으로 나란히 계산하진 못했다 -- 위 상한이 근거.) 수량 칸이 0.001 보다 작은 종목이 생기면 다시 본다(지금 흐름 엔진 종목엔 없음).
+   남은 일: 래스터 read_window(.f32 시각 파일 · 절대 격자 · agg 접기)·row_stats·vol_scores·approach_ratio·heatmap_obi·np.percentile(97)·nanmedian 을 numpy float32 규칙(축 0 줄이기 = 차례 합 · cumsum · argmax 첫 값)으로 옮기고
+   정답지는 원본 함수를 합성 .f32 파일에 돌려 뜬다. 원본 quirk(캐시된 payload 를 제자리에서 update)는 그대로. 래스터 read_window(.f32 시각 파일)·row_stats·vol_scores·approach_ratio(numpy f32) + 체결 대조(원본은 풋프린트 칸 «반올림 전» 값 -- 허브는 반올림한 칸만 민다:
    rtcore 가 칸 원값을 싣거나 대조를 «모름»으로 내는 결정 필요). 원본 quirk: 캐시된 payload 를 제자리에서 `update` 한다(접근·변동 신호가 다음 1초 캐시 값에도 남는다).
 3. 메모리 상태 남은 것: situation · sr-watch · market-context -- rtcore 상황 계산 먼저.
 4. 요청 때 REST 남은 15(§2-5): market-history · footprint-week · footprint-daily/xcvd·heat · footprint-4h/heat · opt-smile · chart-markers(안 옮김) · liquidation-map·tiers · position-profile · cycle-path · trend · swing-lines · macro-trend · push/test.
 
-남은 주소 집계(2026-11-22): 등록부 84 = 옮김 60(화면·정적 6 + `/api/*` 54) · 남음 24(`/api/*`: 저장소+계산 5 · 메모리 상태 3 · 요청 때 REST·모델 15 · 삭제 없음 -- 위 표의 «다음» 칸).
+남은 주소 집계(2026-11-22 · 다섯째 조각 뒤): 등록부 84 = 옮김 65(화면·정적 6 + `/api/*` 59) · 남음 19(`/api/*`: 저장소+계산 1(flow/heatmap) · 메모리 상태 3(situation·sr-watch·market-context -- situation·market-context 는 다른 에이전트 ctx.rs) · 요청 때 REST 15(위 4번 -- xcvd·heat 셋·push/test 포함)).
 4. 계좌·주문 14(rtorder 계좌 알림 뒤) · 5. 요청 때 REST·모델 · 6. 나란히 가동.
+
+## 8. 서버 병행 가동(2026-11-22 · 실행은 코디네이터)
+
+- **래퍼** `scripts/ops/supervisor_rtserve.sh`(_supervise.sh 방식 · 잠금 data/live/.supervisor_rtserve.lock · 로그 logs/supervisor/rtserve_YYYYMMDD.log):
+  실행 파일 tmp/rtbin/rtserve · `RTSERVE_ROOT`=저장소 · `RTSERVE_ADDR`=127.0.0.1:8790(8787 이면 거절) · `RTSERVE_HUB`=ws://127.0.0.1:8788/rt ·
+  점-env 를 프로세스 환경에만(대시보드 감독 스크립트와 같은 줄 · /api/push/config 의 VAPID 공개키가 같아지게).
+- **병행 고정**: `RTSERVE_READONLY=1`(메모·오답·푸시 구독·해지 POST = **503 `{"ok": false, "error": "readonly_shadow"}`** · 접수 기록 order_requests.jsonl 도 안 적음 -- 파이썬과 같은 파일을 둘이 쓰지 않게) ·
+  `RTSERVE_REST` 지움(모델 주소 5 = `{"ok": false, "reason": "RestOff: RTSERVE_REST unset -- request not sent"}` · 밴 파일에도 안 적음) · 주문 14 는 rtorder 문 그대로(안 떠 있으면 502).
+  🔴바뀐 기본: `Config::new` 의 REST 뿌리가 빈 값(= 꺼짐)이 됐다 -- 실전 전환 때는 `RTSERVE_REST=<원본 FAPI 주소>` 를 줘야 모델 주소가 계산한다.
+  시험 `tests/model_parity.rs::shadow_rest_off_readonly`(503 넷 · RestOff · 주문 502 · client-timing 안 막음 · 파일 안 생김).
+- **대조 도구** `rtserve/tools/shadow_http.py`(표준 라이브러리 · 루프백만 · GET 만 · 쪽마다 기본 2요청/초 · `--selftest`):
+  옮긴 주소 35종 × 코인(eth·sol·xrp 중 코인별 주소) · 모델 5는 `--models` 때만 · 주문·계좌 14 는 안 보냄(파이썬 쪽이 계좌 REST 를 부른다) · SSE 2 는 안 봄.
+  주소마다 «같음 n/N · 다른 칸(횟수) · 두 값 예 · 처리 시간(파이썬·rtserve 중앙·상위 1%)» · JSON 은 칸별(키 순서 · 목록 길이 · 값과 형 -- 1.0 대 1 도 다름) · 아니면 바이트.
+
+빼는 칸(이름이 같으면 어느 깊이든):
+
+| 칸 | 왜 |
+|---|---|
+| generated_at · computed_at · fetched_at · updated_at · server_time | 응답·계산을 만든 순간(두 서버가 다른 순간에 만든다) |
+| now · now_sec · now_ms | 요청 순간의 시계 |
+| age · age_s · age_sec · age_ms · tradeAge · oiAge | 지금 − 파일/자료 시각(같은 파일이라도 요청 순간이 달라 끝자리가 다르다) |
+| elapsed_ms | 처리 시간 |
+
+안 빼는 것(일부러): `stale`(나이에서 나오지만 경계에서만 갈린다 -- 갈리면 보고 싶다) · `updated`(파일에 적힌 시각 -- 같아야 한다) · 봉 시각 `ts`.
+매초 움직이는 원천(supply-1s · footprint · bubble-tape · xyz100 · oi-5m 의 진행 봉)은 «거의 같은 순간»이라도 다를 수 있다 -- 다른 칸 이름이 진행 봉·마지막 초에만 몰리면 정상, 닫힌 봉에서 갈리면 결함.

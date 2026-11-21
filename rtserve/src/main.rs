@@ -5,7 +5,8 @@
 //!   RTSERVE_RTORDER  rtorder 문(기본 127.0.0.1:8791 · 루프백만 · 주문·계좌 14개를 넘긴다)
 //!   RTSERVE_HUB   rtcore 허브 주소(예 ws://127.0.0.1:8788/rt · 없으면 메모리 상태 엔드포인트는 빈 모양)
 //!   VAPID_PUBLIC_KEY · VAPID_PRIVATE_KEY  알림 설정(/api/push/config · 원본과 같은 이름)
-//!   RTSERVE_MODELS  모델 JSON 자리(기본 data/live/rtmodel · rtmodel/tools/export_*.py) · RTSERVE_REST 바이낸스 선물 REST 뿌리(기본 원본과 같은 곳) · FRED_API_KEY(원본과 같은 이름)
+//!   RTSERVE_MODELS  모델 JSON 자리(기본 data/live/rtmodel · rtmodel/tools/export_*.py) · RTSERVE_REST 바이낸스 선물 REST 뿌리(🔴기본 꺼짐 -- 켜려면 원본 FAPI 주소를 준다)
+//!   RTSERVE_READONLY=1  병행 가동: 메모·오답·푸시 구독 POST = 503 readonly_shadow · 접수 기록 안 적음 · FRED_API_KEY(원본과 같은 이름)
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -49,9 +50,8 @@ async fn main() {
     }
     // 모델 핸들러(model.rs): 모델 JSON 자리 · REST 뿌리(시험·그림자용 · 기본 원본 FAPI) · FRED 키(원본과 같은 이름 · 값은 들고만 있고 찍지 않는다)
     cfg.models = std::env::var("RTSERVE_MODELS").ok().map(std::path::PathBuf::from);
-    if let Ok(r) = std::env::var("RTSERVE_REST") {
-        cfg.rest = r;
-    }
+    cfg.rest = std::env::var("RTSERVE_REST").unwrap_or_default(); // 없으면 꺼짐(병행 가동 기본)
+    cfg.readonly = std::env::var("RTSERVE_READONLY").as_deref() == Ok("1");
     cfg.fred_key = std::env::var("FRED_API_KEY").ok().filter(|k| !k.is_empty());
     let cfg = Arc::new(cfg);
     // rtcore 허브(예 ws://127.0.0.1:8788/rt) -- 없으면 메모리 상태 엔드포인트는 «아직 없음» 모양만 낸다
