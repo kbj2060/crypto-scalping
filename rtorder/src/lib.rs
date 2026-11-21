@@ -9,6 +9,7 @@
 pub mod account;
 pub mod assemble;
 pub mod bracket;
+pub mod coreval;
 pub mod exec;
 pub mod http;
 pub mod intake;
