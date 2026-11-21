@@ -17,7 +17,7 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | HL 자산 맥락(book ticker CTX_ONLY) | SQLite hot | server 시장 맥락 · seal · dqm | — | **옮김** `hl_ctx` | — |
 | HL 호가 `.bt`(book ticker 전체 · Pi) | 고정폭 `.bt` 시각 파일 → gz | Pi → 서버 전송 · 연구 | — | **옮김** `hl_bt`(rtcollect) | `.bt` 바이트 일치 · supervisor_rtcollect.sh 에 종류 추가 필요 |
 | depth_diff | JSONL → 시각별 gz | ob5m · iceberg · bookdepth_feat | fwd_dirshort(간접) | **옮김** `depth`(스냅숏 REST 기본 꺼짐 · 전환 때 켬) | — |
-| 호가 래스터 | 고정폭 `.f32`(+14일 뒤 parquet·duckdb 보관) | server read_window → 히트맵·시장 맥락 | — | **옮김** `raster`(.f32 쓰기만 · 스냅숏 REST 필수) | 보관·지우기 = 파이썬 cron 으로 남김(parquet·duckdb 크레이트) |
+| 호가 래스터 | 고정폭 `.f32`(+14일 뒤 parquet·duckdb 보관) | server read_window → 히트맵·시장 맥락 | — | **옮김** `raster`(.f32 쓰기만 · 스냅숏 REST 필수) | 🔴보관(14일 뒤 parquet+duckdb 뷰)은 못 옮김: 묶은 DuckDB(rtduck)에 parquet 이 안 들어 있다(`COPY … (FORMAT PARQUET)` = «parquet extension 필요» · 2026-11-21 실측) -- duckdb `parquet` 기능을 켜면 묶음 다시 빌드(13분+) = 결정 필요. 그때까지 파이썬 `_purge_old` 가 보관 |
 | ob5m 실시간 워커 `live_ob5m` | SQLite `data/live/ob5m/<코인>.sqlite` | /api/ob5m(화면) | — | **옮김** `ob5m`(기본 쓰기 자리 data/live/rtcollect/ob5m · 원본 자리는 RTCOLLECT_TAKEOVER=1) | 합성 14시간 depthdiff·테이프 → 봉·사건 벽·live 칸 7,417 비트 일치 · /api/ob5m 읽기 코드 교차 확인 |
 | 호가 깊이 10열 `live_bookdepth_feat` | SQLite `data/live/bookdepth/ethusdt.sqlite` | live_eth_dir_short 피쳐(→ rtmodel) | fwd_dirshort | **옮김** `bookdepth` | 칸 2,110 비트 · 930 은 1e-12 안(최대 3.6e-15 = 원본 `arr @ prices` 가 BLAS ddot · 서버 OpenBLAS·개발기 MKL) · dir_short.book_row float32 161/161 같음 |
 | 아이스버그 `live_eth_iceberg` | JSON 상태 + JSONL 사건 | /api/iceberg · 감시 | — | **옮김** `iceberg`(ETH·XRP · depthdiff·hot 테이프 읽기만) | 사건 글자·2초 state 3,582개 글자 일치 |
@@ -37,8 +37,8 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | treasury_futures | 매분·매시 | SQLite | /api/treasury-futures · 감시 · lake | — | **옮김** `treasury_futures`(한 번 실행 · --range 1d/5d) | 🔴그림자에서 켜면 Yahoo 호출 두 배(429 위험) -- 기본 안 켬 |
 | macro_5m | */5 | SQLite | Macro Trend · /api/macro-today · 감시 | — | **옮김** `macro_5m`(한 번 실행) | 〃 |
 | macro_daily | 매시 | SQLite | macro_trend | macro_bias | 안 옮김 | pandas 계산 · 재무부 REST |
-| cboe 옵션 체인 | */10 | 원본 gz + JSON | /api/gex | soxl_own_iv | **반쯤** `cboe_chain` = 원본 스냅숏 저장·last_seqno 만 | 🔴cboe_option_state.json(요약기 `cboe_option_summary_20261101.py` 361줄 + Deribit 계산 도구 · pandas·블랙숄즈·실현변동성 REST) 남음 -- soxl_own_iv 가 읽는 것은 이 JSON |
-| liqmap_scorer | 매시 | JSONL·JSON | 알림 센터 · 판정 | liqmap_fwd | 안 옮김 | pandas merge_asof 채점 -- 전진 채점기라 값 일치 증명 필수 |
+| cboe 옵션 체인 | */10 | 원본 gz + JSON | /api/gex | soxl_own_iv | **옮김** `cboe_chain` = 스냅숏·last_seqno + 요약기(`cboe_summary.rs` → cboe_option_state.json · 실현변동성 klines 는 `RTCOLLECT_REST=1` 일 때만) | state 글자 5개(두 종목·사흘·서머타임 끝나는 날 01:3x) · klines 요청 4 · rv 캐시 글자 일치 |
+| liqmap_scorer | 매시 | JSONL·JSON | 알림 센터 · 판정 | liqmap_fwd | **옮김** `liqmap_scorer`(klines 는 `RTCOLLECT_REST=1` 일 때만) | 세 번 실행 새 줄 48 · 지도·실측 칸 글자 일치 · status 글자 · merge_asof 5초 경계·마크 구멍·NULL 마크·같은 ms |
 | liq_tab | 매시 | JSON | /api/liq-tab | — | 안 옮김 | numpy·pandas 계산 + 바이낸스 klines REST |
 | soxl_weekend_forward | 매일 | JSONL | 판정 | soxl_wknd1·2 | 안 옮김 | 바이낸스 REST + 규칙 계산 |
 | macro_bias_forward | 주말 | JSONL | 판정 | fwd_macro_regime | 안 옮김 | pandas 계산 |
@@ -47,12 +47,55 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | 월간 학습(dir4h·vol4h·dir_short·box_hold Platt) | 월간 | joblib | 서빙 | 여럿 | 파이썬 유지(학습) | — |
 | raw_failover · data_quality_monitor · morning_audit · multicoin_collectors · gen_data_map · verdict_ledger_health · backup | 여러 | JSON·보고 | 감시·사용자 | — | 범위 밖(R7 운영) | — |
 
-**안 옮김 전부(2026-11-21 마지막 조각 뒤)**: 상주 = 아이스버그 `live_eth_iceberg`(depthdiff + hot 테이프 30초 창 numpy 계산) · 뉴스 RSS(XML·HTML 엔티티·RFC822 -- 크레이트 결정) · deribit 블록체결·GEX(옵션 DuckDB) /
-예약 = treasury_futures · macro_5m · cboe 옵션 체인(크레이트 없이 됨) · macro_daily · liqmap_scorer · liq_tab · soxl_weekend_forward · macro_bias_forward(pandas 계산 기록기) · seal_to_lake(parquet) /
-보관 = raster 14일 보관(parquet·duckdb) / 파이썬 유지 = 월간 학습 / 범위 밖 = 운영 감시 묶음(R7) · 알림. «불확실»·«안 쓰임» 은 아래 줄.
+### pandas 계산 기록기 조사(2026-11-21 일곱째 조각 · liqmap_scorer 먼저 옮김)
 
-**요약**: 상주 수집기 중 옮김 17(테이프 셋 · 청산 · 맥락 넷 · depth · 래스터 · ob5m · bookdepth · HL 호가 .bt · rtduck 롱숏비·HL 체결·HL 포지션·market_data_worker) · 안 옮김 3(계산 워커 iceberg · 뉴스 RSS(XML) · deribit) ·
-rtmodel 1 · 범위 밖 2 / 예약 중 안 옮김 8(크레이트 없이 되는 것 = treasury·macro_5m·cboe · 계산 기록기 다섯) · rtmodel 3 · parquet 1.
+| 기록기 | 계산 | 입력 · REST(원본 한 번 실행) | 기대는 모듈 | 전진 | 막는 것 · 다음 |
+|---|---|---|---|---|---|
+| liqmap_scorer(145줄) | 청산지도 4변형(numpy 원소별 · exp · 삽입 순서 dict) + merge_asof 실측 | 바이낸스 klines 1h×198 1회 · hot SQLite 셋(읽기만) | research_eth_liqmap_venue_leverage_validation(liq_map·realized) · live_liquidation_map(상수 셋) | liqmap_fwd | **옮김** `liqmap_scorer` -- 값 일치(아래 최종 표) |
+| liq_tab(440줄) | 남은 매물 히트맵·first_touch·봉우리·최대 고통·탄력 + compute_tier_profile | 바이낸스 klines(코인당 시간 1회 · 첫 실행 몇 쪽) · OI REST · hot SQLite · 🔴lake parquet 을 duckdb `read_parquet` 로 · 1h 봉 캐시 `to_parquet` | live_liquidation_map(compute_tier_profile 150줄) · coin_config | — | 🔴parquet 읽기·쓰기 둘 다 -- 묶은 DuckDB 에 parquet 이 없다(래스터 보관과 같은 막힘) |
+| soxl_weekend_forward(155줄) | 주말 블록 가격·펀딩 합(표준 라이브러리만 -- statistics·zoneinfo) | 바이낸스 fapi 5분봉·펀딩(끝난 주말마다) | 없음 | soxl_wknd1·2 | 가장 쉽다(크레이트 없이) -- 동부 시각 규칙은 cboe_summary 의 것을 쓰면 된다. 주 1줄이라 값 일치 정답지는 합성 주말 몇 개 |
+| macro_bias_forward(182줄) | 주 Z 점수(sample_week·feats_for·z_combo·z91 -- pandas rolling·rank) | FRED API(🔴키 = 점-env) · Yahoo ^KS11 5년 · 바이낸스 현물 1d | research_macro_regime_bias(443줄) | fwd_macro_regime | pandas rolling·rank 를 비트로 맞출 도구 필요 · 키를 읽는 자리를 Rust 에 새로 두는 것 = 결정 필요 |
+| macro_daily(181줄) | 관측 append-only 병합 + 순유동성(netliq) | FRED(키) · 재무부 DTS · DefiLlama | dashboard/macro_trend(434줄 -- SOURCES·netliq·fetch_stables) | macro_bias(입력) | 계산은 가볍다 · 원천 함수 셋이 대시보드 모듈에 있다(그 모듈을 같이 옮기거나 rtserve 와 나눔 = 결정 필요) · 키 |
+
+## 최종 표 (2026-11-21 일곱째 조각 뒤)
+
+«REST 배수» = 서버에서 그림자로 **켜면**(파이썬이 같은 일을 계속하는 동안) 같은 IP 에서 나가는 그 REST 가 몇 배가 되는가. ×1 = REST 없음(웹소켓·파일만).
+
+| 묶음 | 프로그램 | 상태 | 크레이트 | 그림자에서 켜면 REST |
+|---|---|---|---|---|
+| 상주 | 바이낸스 체결 테이프 `binance_tape` | 옮김 | rtcollect | ×2 -- 기본 꺼짐(`RTCOLLECT_REST`) · 켜면 종목마다 klines 1/분+1/5분 + aggTrades 복구 |
+| 상주 | OKX 체결 테이프 `okx_tape` | 옮김 | rtcollect | ×2 -- 기본 꺼짐 · 공백 없으면 종목당 약 1.2회/분(OKX 한도 20회/2초) |
+| 상주 | Bybit 체결+맥락 `bybit_tape` | 옮김 | rtcollect | ×2 -- 기본 꺼짐 · 1회/분 |
+| 상주 | Bybit 청산 `bybit_liq` | 옮김 | rtcollect | ×1 |
+| 상주 | OKX 맥락 `okx_ctx` | 옮김 | rtcollect | ×2 -- 시작 때 ctVal 1회뿐 |
+| 상주 | 바이낸스 맥락 `binance_ctx` | 옮김 | rtcollect | ×2 -- 🔴OI 약 540회/분 → 합쳐 1,080(IP 한도 45%) · 그림자 동안 끔 |
+| 상주 | xyz100 `xyz` | 옮김 | rtcollect | ×2 -- 재접속 때만(4회/접속) |
+| 상주 | HL 자산 맥락 `hl_ctx` · HL 호가 `.bt` `hl_bt` | 옮김 | rtcollect | ×1 |
+| 상주 | depth_diff `depth` | 옮김 | rtcollect | ×2 -- 시간당 depth(가중치 20) 1회 · 전환 때 반드시 켬 |
+| 상주 | 호가 래스터 `raster`(.f32) | 옮김 | rtcollect | ×2 -- 스냅숏 필수(합쳐 시간당 4회 안팎 · 그림자도 켬) |
+| 상주 | ob5m · bookdepth · 아이스버그 | 옮김 | rtcollect | ×1(파일만 읽음) |
+| 상주 | 롱숏비 `oi_lsratio` | 옮김 | rtduck | ×2 -- 20요청/5분 → 40 |
+| 상주 | HL 체결 `hl_trades` | 옮김 | rtduck | ×1 |
+| 상주 | HL 포지션 `hl_positions` | 옮김 | rtduck | ×2 -- 🔴가중치 600/분 → 1,200 = HL 한도 100%(전환 때만 켬) |
+| 상주 | market_data_worker `market_data` | 옮김 | rtduck | ×2 -- 미시구조 36/분 → 72(기본 꺼짐) |
+| 상주 | 뉴스 RSS | 안 옮김 | — | (XML·HTML 엔티티·RFC822 -- 크레이트 결정) |
+| 상주 | deribit 블록체결·GEX | 안 옮김 | — | (옵션 DuckDB) |
+| 상주 | SR lean | rtmodel | — | — |
+| 상주 | 푸시·SR 근접 알림 | 범위 밖(알림) | — | — |
+| 예약 | treasury_futures · macro_5m | 옮김 | rtcollect | ×2 -- 🔴Yahoo 429 위험 · 기본 안 켬 |
+| 예약 | cboe 옵션 체인 + 요약기 | 옮김 | rtcollect | CBOE ×2(10분마다 종목 셋) · 바이낸스 klines ×2(종목마다 하루 1회 캐시 · 기본 꺼짐) |
+| 예약 | liqmap_scorer | 옮김 | rtcollect | ×2 -- 바이낸스 klines 시간당 1회(limit 198 · 가중치 2) · 기본 꺼짐 |
+| 예약 | 래스터 14일 보관(parquet+duckdb 뷰) | 안 옮김 | — | ×1(REST 없음) · 🔴묶은 DuckDB 에 parquet 없음 |
+| 예약 | liq_tab | 안 옮김 | — | (klines·OI) · 🔴parquet 읽기·쓰기 |
+| 예약 | soxl_weekend_forward | 안 옮김 | — | (바이낸스 5분봉·펀딩 하루 1회) · 크레이트 없이 됨 -- 다음 차례 |
+| 예약 | macro_bias_forward · macro_daily | 안 옮김 | — | (FRED 키·Yahoo·재무부·DefiLlama) · pandas rolling·대시보드 모듈·키 자리 결정 |
+| 예약 | seal_to_lake | 안 옮김 | — | parquet(arrow) |
+| 예약 | risk_radar · regime_band · eth_direction_forward | rtmodel | — | — |
+| 예약 | 월간 학습 | 파이썬 유지 | — | — |
+| 예약 | raw_failover · dqm · morning_audit · multicoin · gen_data_map · verdict_ledger_health · backup | 범위 밖(R7 운영) | — | — |
+
+**요약**: 상주 옮김 18(rtcollect 14 · rtduck 4) · 안 옮김 2(뉴스 RSS · deribit) · rtmodel 1 · 범위 밖 1 /
+예약 옮김 4(treasury · macro_5m · cboe+요약기 · liqmap_scorer) · 안 옮김 6(래스터 보관 · liq_tab · soxl_weekend · macro_bias · macro_daily · seal_to_lake -- 셋은 parquet 막힘) · rtmodel 3.
 옮기지 않은 «불확실»: 뉴스 판정·ollaya · prometheus · trend_core_forward · f4c altdata · llm_brief / «안 쓰임»: 돌파 워커 · 신호 워커 · maxpain 기록기 · maker_fill_shadow.
 
 ---

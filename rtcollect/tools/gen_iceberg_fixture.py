@@ -42,6 +42,7 @@ def gen(rng) -> dict:
     for k in range(6):
         ice[H0 * 120 + 7 + 7 * k] = (1 if k % 2 == 0 else -1, 20.0, 250.0)
         ice[(H0 + 1) * 120 + 3 + 9 * k] = (1 if k % 2 else -1, 20.0, 250.0)
+    WF = H0 * 120 + 7                                    # 양성 대조 «칸 잔량 f32» 를 잡는 창(첫 아이스버그 창)
     for k in range(6):                                   # 경계: 체결 ≈ 최대 표시 × 1.6~1.8(표시 112) · 체결이 90~95분위 사이(185)
         ice[H0 * 120 + 5 + 7 * k] = (1 if k % 2 else -1, 112.0, 210.0)
         ice[(H0 + 1) * 120 + 6 + 9 * k] = (1 if k % 2 == 0 else -1, 20.0, 185.0)
@@ -52,7 +53,7 @@ def gen(rng) -> dict:
         lines.append({"_snapshot": {"lastUpdateId": u, "bids": [[f"{p:.2f}", f"{q:.3f}"] for p, q in sorted(bids.items(), reverse=True)],
                                     "asks": [[f"{p:.2f}", f"{q:.3f}"] for p, q in sorted(asks.items())]}, "at_ms": h * 3_600_000})
         t = h * 3600 + 0.2
-        first = True
+        first, wf_done = True, False
         while t < h * 3600 + (1500 if h == H0 else 1200):   # 시 파일 = 앞 25분 · 20분만(크기) -- 시계는 두 시간을 다 돈다
             w = int(t) // 30
             b, a = [], []
@@ -60,6 +61,11 @@ def gen(rng) -> dict:
                 p = round(mid + rng.choice((-1, 1)) * rng.randint(1, 140) * 0.01, 2)
                 q = round(rng.uniform(0.5, 8), 3)
                 (b if p < mid else a).append([f"{p:.2f}", f"{q:.3f}"])
+            if w == WF:                                  # f32 경계 창: 칸 2499.9(눈금 2499.85~2499.94)에 12.34649996 하나만 -- f32 로 거치면 12.347 · f64 면 12.346
+                b = [x for x in b if not 2499.845 < float(x[0]) < 2499.945]
+                if not wf_done:
+                    b += [[f"{2499.85 + 0.01 * j:.2f}", "0.000"] for j in range(10) if j != 5] + [["2499.90", "12.34649996"]]
+                    wf_done = True
             if w in ice:                                 # 최우선 근처 칸에 표시 잔량을 계속 다시 채운다 · 그 칸에 체결
                 side, disp, _ = ice[w]
                 p = round(mid - 0.01, 2) if side == 1 else round(mid, 2)

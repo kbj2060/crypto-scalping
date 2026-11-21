@@ -2,7 +2,7 @@
 //!   treasury_futures(`live_treasury_futures_collector_20261006.py`): ZT·ZF·ZN·ZB Yahoo 1분봉 → treasury_fut_1m · polls
 //!   macro_5m(`live_macro_5m_collector_20261028.py`): Yahoo 5분봉 16종 → yahoo_5m · polls (마지막 봉 버림 · 4일 넘게 비면 60d 백필)
 //!   cboe_chain(`live_cboe_option_chain_collector_20261101.py`): CBOE 지연 체인 원본 → <SYM>/<UTC날짜>/<HHMMSS>.json.gz · last_seqno(같으면 안 씀)
-//!     🔴원본은 저장 직후 요약기(cboe_option_summary_20261101.write_state → cboe_option_state.json)를 부른다 -- 요약기(pandas·Deribit 계산 도구)는 아직 안 옮겼다.
+//!     저장 직후 요약기(cboe_summary.rs = cboe_option_summary_20261101.write_state → cboe_option_state.json)를 부른다.
 //! HTTP 는 부르는 쪽이 준다(get(url, UA) → (상태, 이유, 본문) · Err = 연결 오류) -- 시험은 127.0.0.1 가짜 서버.
 use rusqlite::params;
 use serde_json::Value;
@@ -198,7 +198,8 @@ pub fn cboe_collect(sym: &str, out: &Path, base: &str, get: Get, now: f64) -> Re
 }
 
 /// cboe main(argv)(:67-79): 인자 + 기본 주식 코인(순서 유지·중복 제거). 반환 = (종료코드, 저장한 경로들).
-pub fn cboe(args: &[String], out: &Path, base: &str, get: Get, now: f64) -> (i32, Vec<PathBuf>) {
+/// after = 저장한 스냅숏마다 요약기(cboe_summary::write_state) -- 실패하면 그 종목 실패(원본: 같은 try 안).
+pub fn cboe(args: &[String], out: &Path, base: &str, get: Get, now: f64, after: &mut dyn FnMut(&Path) -> Result<(), String>) -> (i32, Vec<PathBuf>) {
     let mut syms: Vec<String> = vec![];
     for s in args.iter().map(|a| a.to_uppercase()).chain(CBOE_DEFAULT.iter().map(|s| s.to_string())) {
         if !syms.contains(&s) {
@@ -208,10 +209,17 @@ pub fn cboe(args: &[String], out: &Path, base: &str, get: Get, now: f64) -> (i32
     let (mut rc, mut saved) = (0, vec![]);
     for s in &syms {
         match cboe_collect(s, out, base, get, now) {
-            Ok(Some(p)) => {
-                println!("{s} 저장 {}", p.display());
-                saved.push(p);
-            }
+            Ok(Some(p)) => match after(&p) {
+                Ok(()) => {
+                    println!("{s} 저장 {}", p.display());
+                    saved.push(p);
+                }
+                Err(e) => {
+                    println!("{s} 실패 {e}");
+                    saved.push(p);
+                    rc = 1;
+                }
+            },
             Ok(None) => println!("{s} 변화 없음(휴장·장외)"),
             Err(e) => {
                 println!("{s} 실패 {e}");
