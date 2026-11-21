@@ -19,7 +19,7 @@ CRONTAB_CMD="${CRONTAB_CMD:-crontab}"
 SHADOW_BASE="${SHADOW_BASE:-/mnt/data2/rtcollect_shadow/model}"
 PY="${PY:-${PYTHON_BIN:-$HOME/miniconda3/envs/quant_ai/bin/python}}"
 WATCH_S="${WATCH_S:-75}"
-LIVE="$ROOT/data/live"; MODELS="$LIVE/rtmodel"; BIN="$ROOT/bin"; SH="$SHADOW_BASE/$NAME"
+LIVE="$ROOT/data/live"; MODELS="$LIVE/rtmodel"; BIN="$ROOT/tmp/rtbin"; SH="$SHADOW_BASE/$NAME"
 CMP="$ROOT/rtmodel/tools/takeover_cmp.py"
 TAG="rt-takeover:$NAME"
 now_s() { echo "${NOW_S:-$(date +%s)}"; }
@@ -37,9 +37,9 @@ ban_check() {   # 공용 밴 파일(scripts/binance_ban_guard.py) -- 밴 중이�
 # ── 이름별 설정
 case "$NAME" in
   rt_regime)  PYPAT="scripts/live_regime_band_cron_20261102.py"
-              RUST="cd $ROOT && RT_REGIME_OUT=data/live RT_REGIME_TAKEOVER=1 RT_REGIME_MODEL=data/live/rtmodel/regime_band.json RT_REGIME_SRC_DIR=data/live flock -n data/live/.rt_regime.lock nice -n 10 bin/rt_regime >> logs/supervisor/rt_regime_\$(date +\\%Y\\%m\\%d).log 2>&1" ;;
+              RUST="cd $ROOT && RT_REGIME_OUT=data/live RT_REGIME_TAKEOVER=1 RT_REGIME_MODEL=data/live/rtmodel/regime_band.json RT_REGIME_SRC_DIR=data/live flock -n data/live/.rt_regime.lock nice -n 10 tmp/rtbin/rt_regime >> logs/supervisor/rt_regime_\$(date +\\%Y\\%m\\%d).log 2>&1" ;;
   rt_dirfwd)  PYPAT="live_eth_direction_forward_recorder_20261010.py --record"
-              RUST="cd $ROOT && RT_DIRFWD_OUT=data/live RT_DIRFWD_TAKEOVER=1 nice -n 10 bin/rt_dirfwd >> logs/supervisor/rt_dirfwd_\$(date +\\%Y\\%m\\%d).log 2>&1" ;;
+              RUST="cd $ROOT && RT_DIRFWD_OUT=data/live RT_DIRFWD_TAKEOVER=1 nice -n 10 tmp/rtbin/rt_dirfwd >> logs/supervisor/rt_dirfwd_\$(date +\\%Y\\%m\\%d).log 2>&1" ;;
   rt_radar)   PYPAT="scripts/live_risk_radar_20261115.py"
               RUST="cd $ROOT && RT_RADAR_OUT=data/live RT_RADAR_TAKEOVER=1 bash scripts/ops/supervisor_rt_radar.sh" ;;
   rt_sr_lean) PYPAT="scripts/ops/supervisor_sr_lean.sh"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # rt_sr_lean(Rust «레벨 5분» 워커) 크래시 재기동 래퍼 (2026-11-21). 지금은 **그림자** 전용 -- rtmodel/SHADOW.md.
 #
-# 실행 파일: rtmodel/target/release/rt_sr_lean 을 개발기에서 빌드해 옮긴 것(RT_SR_BIN, 기본 $ROOT/bin/rt_sr_lean).
+# 실행 파일: rtmodel/target/release/rt_sr_lean 을 개발기에서 빌드해 옮긴 것(RT_SR_BIN, 기본 $ROOT/tmp/rtbin/rt_sr_lean).
 # 쓰는 곳: 기본 data/live/rt_sr_lean/(RT_SR_OUT) -- 파이썬 워커의 data/live/sr_lean 은 실행 파일이 거부한다(종료코드 2 · 전환 때만 RT_SR_TAKEOVER=1).
 # 모델: <RT_SR_OUT>/sr_lean.json(RT_SR_MODEL) -- `python rtmodel/tools/export_hgb.py data/live/rt_sr_lean` 이 만든다. 없으면 켜지 않는다.
 # 로그: logs/supervisor/rt_sr_lean_YYYYMMDD.log · 락: data/live/.supervisor_rt_sr_lean.lock
@@ -15,7 +15,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
-BIN="${RT_SR_BIN:-$ROOT/bin/rt_sr_lean}"
+BIN="${RT_SR_BIN:-$ROOT/tmp/rtbin/rt_sr_lean}"
 OUTD="${RT_SR_OUT:-data/live/rt_sr_lean}"
 MODEL="${RT_SR_MODEL:-$OUTD/sr_lean.json}"
 
