@@ -2,6 +2,7 @@
   lines <파이썬.jsonl> <Rust.jsonl> --key a,b [--skip x,y] [--rtol 0]   Rust 줄마다 같은 키의 파이썬 줄(마지막)과 칸별 대조
   json  <파이썬.json>  <Rust.json>  [--skip x,y] [--rtol 0]              한 파일 통째로 칸별 대조
   text  <파이썬>       <Rust>                                            글자 그대로
+  radar <파이썬 latest> <Rust latest> [--skip x] [--rtol r]             위험 레이더(가격 다른 코인은 마지막 봉 칸만 뺌 -- 아래 LASTBAR)
   last  <jsonl> <칸>                                                     마지막 줄의 그 칸(셸용)
 출력 한 줄: «칸 N · 어긋남 M · 짝 없음 K» (+ 처음 어긋난 몇 개). 종료코드 0 = N>0 · M=0 · K=0.
 skip 은 이름으로만 뺀다(시각·실행 시간처럼 달라도 되는 칸). rtol>0 은 실수 칸만(위험 레이더 X@β 의 BLAS 합 순서 끝자리 -- REMAINING.md).
@@ -73,6 +74,35 @@ def first_diff(a, b):
     return "줄 끝 공백·개행 차이"
 
 
+# 위험 레이더: 원본은 «닫힌» 1분봉만 쓰지만 마지막 봉은 닫힌 직후 몇 초 동안 거래소가 값을 고친다 -- 원본도 다음 회차에 그 봉을 다시 받아 덮는다
+#   (live_risk_radar_20261115.update_cache «마지막 봉을 한 번 더 받아 덮는다»). Rust 한 회차는 몇십 초 뒤에 받으니 그 봉의 종가가 다를 수 있다 = 원리상 재현 불가.
+#   그래서 price 가 다른 코인은 마지막 봉에서 나오는 칸만 이름으로 빼고 나머지를 견주고, price 가 같은 코인은 전부 견준다(같은 코인이 하나도 없으면 불통과).
+LASTBAR = ("price", "sigma15_pct", "band80_pct", "band95_pct", "sigma60_pct", "ratio60", "state60", "alert", "valid", "usual60_pct", "baseline7d_sigma15_pct")
+
+
+def radar(pa, pb, o):
+    a, b = json.load(open(pa, encoding="utf-8")), json.load(open(pb, encoding="utf-8"))
+    out = [0, []]
+    walk({k: v for k, v in a.items() if k != "coins"}, {k: v for k, v in b.items() if k != "coins"}, "", o["skip"], o["rtol"], out)
+    ca, cb = a.get("coins", {}), b.get("coins", {})
+    nopair = len(set(ca) ^ set(cb))
+    same, moved = [], []
+    for c in sorted(set(ca) & set(cb)):
+        x, y = ca[c], cb[c]
+        if x.get("price") == y.get("price"):
+            same.append(c)
+            walk(x, y, f".coins.{c}", o["skip"], o["rtol"], out)
+        else:
+            moved.append(f"{c}(파이썬 {x.get('price')} 대 Rust {y.get('price')})")
+            walk(x, y, f".coins.{c}", o["skip"] | set(LASTBAR), o["rtol"], out)
+    if moved and not same:
+        out[1].append("모든 코인 가격이 다름 -- 견줄 코인이 없다(파이썬 회차 직후 다시)")
+    rc = report(out[0], out[1], nopair, [(c,) for c in sorted(set(ca) ^ set(cb))])
+    if moved:
+        print(f"  가격 다른 코인 {', '.join(moved)} → 그 코인만 {'·'.join(LASTBAR)} 뺌: 마지막 1분봉 종가를 받은 순간이 다름(원본도 다음 회차에 덮음) · 가격 같은 코인 {len(same)}개는 전부 견줌")
+    return rc
+
+
 def main(argv):
     mode = argv[0]
     if mode == "last":
@@ -83,6 +113,8 @@ def main(argv):
         a, b = open(argv[1], encoding="utf-8").read(), open(argv[2], encoding="utf-8").read()
         return report(1, [] if a == b else [first_diff(a, b)], 0)
     o = opts(argv[3:])
+    if mode == "radar":
+        return radar(argv[1], argv[2], o)
     if mode == "json":
         out = [0, []]
         walk(json.load(open(argv[1], encoding="utf-8")), json.load(open(argv[2], encoding="utf-8")), "", o["skip"], o["rtol"], out)
