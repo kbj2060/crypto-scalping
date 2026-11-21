@@ -320,7 +320,7 @@ fn limit_paths() {
     let mut fx = Fake { script: vec![(5.0, Cmd::Action(Action::Peg)), (5.0, Cmd::Drift(true))], ..Default::default() };
     let st = go(&mut fx, &lp(), Kind::Limit(600.0, false, false));
     check("PEG", &st, &fx, 2.0);
-    assert!(st.phase == Phase::Cancelled && st.pegged && st.repegs >= 30 && fx.markets.is_empty() && st.cancel_reason.unwrap().contains("시장가 없음"));
+    assert!(st.phase == Phase::Cancelled && st.pegged.is_some() && st.repegs >= 30 && fx.markets.is_empty() && st.cancel_reason.unwrap().contains("시장가 없음"));
     let mut fx = Fake { script: vec![(5.0, Cmd::Action(Action::Peg)), (6.0, Cmd::FillAfter(1))], ..Default::default() };
     let st = go(&mut fx, &lp(), Kind::Limit(600.0, false, false));
     check("PEG 체결", &st, &fx, 2.0);

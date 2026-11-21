@@ -1,7 +1,9 @@
 //! 작업 실행기(2026-11-21 여섯째 조각) -- 접수 문이 내놓은 `intake::Task` 를 돈다. 원본 `dashboard/orders.py` 의
 //! `entry_then_bracket` · `limit_reprice` · `settle`(2026-11-21 스위칭 exit_then_switch·기다리기는 원본 PR 61 처럼 지웠다)(집행 머리 키·시계·레버리지는 `exec` 안 `Exchange::prepare`).
 //! 상태 칸(`Obj` -- 화면·API 가 읽고 action·amend 를 쓴다) ↔ 집행 상태(`exec::ExecState`) 다리 = `slot_to_exec`·`exec_to_slot`.
-//! **어디에도 연결하지 않는다** -- 거래소는 `Exchange`, 손절·익절 함수·시계는 `WatchIo`, 시세는 `Quotes` 뒤. 시험 = tests/runner_e2e.rs(가짜 거래소).
+//! 🔴W12 다리(2026-11-21): 원본은 같은 dict 를 집행 루프가 다시 읽는다 -- 여기는 도는 작업의 집행 상태를 `Desk::live`(칸 이름 → `Shared`)에 올리고,
+//! 접수 핸들러가 칸을 읽기 전 `Desk::pull_live`(집행 → 칸) · 쓴 뒤 `Desk::push_live`(칸 → 집행). 실행기는 집행이 기다리는 동안 Desk 를 잠그지 않는다.
+//! **어디에도 연결하지 않는다** -- 거래소는 `Exchange`, 손절·익절 함수·시계는 `WatchIo`, 시세는 `Quotes` 뒤. 시험 = tests/runner_e2e.rs · flow_fixture(원본 정답지).
 
 use crate::assemble::{Desk, Quotes};
 use crate::exec::{self, Action, Amend, Common, Exchange, ExecState, LimitOrder, OrderRef, Reply, Shared};
@@ -13,7 +15,7 @@ use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 
-/// 상태 칸 → 집행 상태: 화면이 쓴 action(cancel·market·peg)·amend(가격·수량)만 넘긴다(W12 -- 집행 루프는 ≤3초마다 읽는다).
+/// 상태 칸 → 집행 상태: 화면이 쓴 action(cancel·market·peg)·amend(가격·수량)와 감시 진입 선(plan.limit.usdt)을 넘긴다(W12).
 pub fn slot_to_exec(slot: &Obj, s: &Shared) {
     let mut g = s.lock().unwrap();
     if g.action.is_none() {
@@ -32,9 +34,12 @@ pub fn slot_to_exec(slot: &Obj, s: &Shared) {
             g.amend = Some(Amend { price: a.get("price").and_then(|v| py_float(v).ok()).unwrap_or(0.0), qty: a.get("qty").and_then(|v| py_float(v).ok()), auto: false });
         }
     }
+    if let Some(l) = slot.get("plan").and_then(|p| p.get("limit")).and_then(|l| l.get("usdt")).and_then(|v| py_float(v).ok()) {
+        g.stop_level = Some(l); // 원본 stop_touched 는 매번 plan["limit"]["usdt"] 를 읽는다
+    }
 }
 
-/// 집행 상태 → 상태 칸(원본 state dict 의 칸 이름 그대로). 집행이 소비한 amend 는 칸에서도 지운다.
+/// 집행 상태 → 상태 칸(원본 state dict 의 칸 이름 그대로). 집행이 소비한 amend 는 칸에서도 지운다 · 집행이 지운 action(PEG 전환 = 원본 pop)도.
 pub fn exec_to_slot(e: &ExecState, slot: &mut Obj) {
     let f = |x: f64| json!(x);
     for (k, v) in [("phase", json!(phase_name(e.phase))), ("filled", f(e.filled)), ("quantity", f(e.quantity)), ("limit_price", f(e.limit_price)), ("repegs", json!(e.repegs)),
@@ -51,8 +56,8 @@ pub fn exec_to_slot(e: &ExecState, slot: &mut Obj) {
             slot.insert(k.into(), v);
         }
     }
-    if e.pegged {
-        slot.insert("pegged".into(), json!(true));
+    if let Some(t) = e.pegged {
+        slot.insert("pegged".into(), json!(iso_utc(t)));
     }
     if e.mode == "limit" {
         slot.insert("amends".into(), json!(e.amends)); // 원본: 지정가·감시 대기만 amends=0 으로 시작 · reprices 는 재조정이 한 번이라도 있을 때만
@@ -73,17 +78,37 @@ pub fn exec_to_slot(e: &ExecState, slot: &mut Obj) {
     if e.amend.is_none() {
         slot.remove("amend");
     }
+    if e.action.is_none() {
+        slot.remove("action"); // 원본: PEG 전환 때 state.pop("action")
+    }
 }
 
-/// 집행 중 첫 체결 순간(기다리기·지정가 대기의 on_fill) 무장 · 지정가 자동 재조정(reprice) 을 하려고 바깥을 같이 쥐는 거래소 감싸개.
+/// 접수 문과 실행기가 같이 쥐는 Desk(2026-11-21 W12 다리). 실행기는 집행이 기다리는 동안(3초 조회·1초 잠·취소 확인) 잠그지 않는다 --
+/// 그 사이 접수 핸들러(취소·지금 시장가·PEG·선 옮김)가 잠그고 칸에 쓰면 `Desk::push_live` 가 도는 작업의 집행 상태에 바로 넣는다.
+pub type DeskCell = tokio::sync::Mutex<Desk>;
+
+/// 칸 이름(도는 작업 표 `Desk::live` 의 키).
+pub fn slot_key(s: &SlotRef) -> String {
+    match s {
+        SlotRef::Entry => "entry".into(),
+        SlotRef::Side(a) => format!("side:{a}"),
+        SlotRef::Wait(k) => format!("wait:{k}"),
+    }
+}
+
+/// 원본 entry_then_bracket 의 `plan` 은 칸의 plan 과 **같은 dict** -- 선 옮김(limit-amend)이 제자리에서 고친다. 칸에 plan 이 있으면 그것.
+fn cur_plan(d: &mut Desk, sref: &SlotRef, fallback: &Obj) -> Obj {
+    d.slot_obj(sref).get("plan").and_then(Value::as_object).cloned().unwrap_or_else(|| fallback.clone())
+}
+
+/// 집행 중 첫 체결 순간(지정가 대기의 on_fill) 무장 · 지정가 자동 재조정(reprice) 을 하려고 바깥을 같이 쥐는 거래소 감싸개.
 struct RunEx<'a, 'b, E: Exchange, I: WatchIo, Q: Quotes> {
     ex: &'a mut E,
     io: &'a RefCell<&'b mut I>,
-    w: &'a mut crate::watch::Watcher,
-    desk_basis: &'a Desk,
+    desk: &'a DeskCell,
+    sref: &'a SlotRef,
     quotes: &'a mut Q,
     plan: &'a Obj,
-    slot: &'a mut Obj,
     first_fill: bool,
 }
 
@@ -124,28 +149,38 @@ impl<E: Exchange, I: WatchIo, Q: Quotes> Exchange for RunEx<'_, '_, E, I, Q> {
             return;
         }
         let mut io = self.io.borrow_mut();
+        let mut d = self.desk.lock().await;
+        let plan = cur_plan(&mut d, self.sref, self.plan);
+        let mut slot = std::mem::take(d.slot_obj(self.sref)); // 무장이 칸(bracket)에 쓴다 -- 잠금 안이라 접수 문은 빈 칸을 못 본다
         let r: Result<(), String> = async {
-            if truthy(self.plan.get("add_keep")) {
-                return self.w.keep_rearm(&mut **io, self.plan, self.slot).await;
+            if truthy(plan.get("add_keep")) {
+                return d.w.keep_rearm(&mut **io, &plan, &mut slot).await;
             }
-            if let Some(p2) = self.w.plan_from_current(self.plan)? {
-                self.w.arm_bracket(&mut **io, &p2, self.slot).await?;
+            if let Some(p2) = d.w.plan_from_current(&plan)? {
+                d.w.arm_bracket(&mut **io, &p2, &mut slot).await?;
             }
             Ok(())
         }.await;
         if let Err(e) = r {
-            self.slot.insert("bracket".into(), json!({"placed": false, "reason": e}));
+            slot.insert("bracket".into(), json!({"placed": false, "reason": e}));
         }
+        *d.slot_obj(self.sref) = slot;
     }
     /// 원본 limit_reprice(2026-10-31 자동 재조정): 지금 basis 로 다시 잰 목표 주문가 · basis 를 못 읽어 1.0 이면 None(검증 S1) · 호가를 넘으면 None(P23).
+    /// 선(limit.usdt)은 칸의 plan 에서 -- 선 옮김이 바꿨으면 새 선.
     async fn reprice(&mut self) -> Result<Option<f64>, String> {
-        let Some(lim) = self.plan.get("limit").and_then(|l| l.get("usdt")).filter(|v| truthy(Some(v))).and_then(|v| py_float(v).ok()) else { return Ok(None) };
-        let symbol = self.plan.get("symbol").map(py_str).unwrap_or_default();
+        let (plan, asset) = {
+            let mut d = self.desk.lock().await;
+            let p = cur_plan(&mut d, self.sref, self.plan);
+            let a = d.w.exec_asset_of(p.get("symbol")).unwrap_or("eth");
+            (p, a)
+        };
+        let Some(lim) = plan.get("limit").and_then(|l| l.get("usdt")).filter(|v| truthy(Some(v))).and_then(|v| py_float(v).ok()) else { return Ok(None) };
+        let symbol = plan.get("symbol").map(py_str).unwrap_or_default();
         let book = self.quotes.book(&symbol).await?;
         let tick = { let t = self.quotes.filters(&symbol).await?.tick; if t != 0.0 { t } else { 0.01 } };
-        let long = self.plan.get("positionSide").and_then(Value::as_str) == Some("LONG");
-        let asset = self.w.exec_asset_of(Some(&json!(symbol))).unwrap_or("eth");
-        let b = self.desk_basis.basis_for(self.quotes, &book, asset).await;
+        let long = plan.get("positionSide").and_then(Value::as_str) == Some("LONG");
+        let b = crate::assemble::basis_of(self.quotes, &book, asset).await;
         if b == 1.0 {
             return Ok(None);
         }
@@ -166,107 +201,106 @@ fn settle(r: Result<(), String>, slot: &mut Obj, now: f64) {
 }
 
 /// 원본 entry_then_bracket(plan, state, limit): 진입 → 체결이 있으면(부분 포함, 모든 종료 경로) 익절을 걸고 감시를 무장한다(B3).
-/// 키 확인·시계·레버리지는 집행 머리(`Exchange::prepare` -- 원본 run_entry·run_entry_limit 안) · 결과는 칸 leverage 에(P16).
-#[allow(clippy::too_many_arguments)]
-pub async fn entry_then_bracket<E: Exchange, I: WatchIo, Q: Quotes>(desk: &mut Desk, ex: &mut E, io: &mut I, quotes: &mut Q, plan: &Obj, slot: &mut Obj,
-                                                                    limit: bool) {
-    let now = io.now();
-    if limit {
-        let _ = desk.w.limit_save_at(now, plan);
-    }
-    let ep = match exec_plan_of(&Value::Object(plan.clone())) {
-        Ok(p) => p,
-        Err(e) => return settle(Err(e), slot, now),
+/// `state` = `desk` 의 `sref` 칸(접수 문이 쓴 값이 도는 집행에 닿게 -- W12). 키 확인·시계·레버리지는 집행 머리(`Exchange::prepare`) · 결과는 칸 leverage 에(P16).
+pub async fn entry_then_bracket<E: Exchange, I: WatchIo, Q: Quotes>(desk: &DeskCell, sref: &SlotRef, ex: &mut E, io: &mut I, quotes: &mut Q, plan0: &Obj, limit: bool) {
+    let key = slot_key(sref);
+    let s: Shared = Arc::new(Mutex::new(ExecState::default()));
+    let (ep, plan, asset) = {
+        let mut d = desk.lock().await;
+        let now = io.now();
+        let plan = cur_plan(&mut d, sref, plan0);
+        if limit {
+            let _ = d.w.limit_save_at(now, &plan);
+        }
+        let ep = match exec_plan_of(&Value::Object(plan.clone())) {
+            Ok(p) => p,
+            Err(e) => return settle(Err(e), d.slot_obj(sref), now),
+        };
+        {
+            let mut g = s.lock().unwrap();
+            g.stop_level = plan.get("limit").and_then(|l| l.get("usdt")).and_then(|v| py_float(v).ok());
+        }
+        slot_to_exec(d.slot_obj(sref), &s);
+        d.live.insert(key.clone(), s.clone());
+        let asset = d.w.exec_asset_of(Some(&json!(ep.symbol))).unwrap_or("eth");
+        (ep, plan, asset)
     };
     let stop = limit && truthy(plan.get("stop"));
-    let s: Shared = Arc::new(Mutex::new(ExecState::default()));
-    slot_to_exec(slot, &s);
-    let mut w = std::mem::replace(&mut desk.w, crate::watch::Watcher::new(std::env::temp_dir(), "ETHUSDC"));
     {
         let cell = RefCell::new(&mut *io);
-        let mut rx = RunEx { ex, io: &cell, w: &mut w, desk_basis: desk, quotes, plan, slot, first_fill: limit };
+        let mut rx = RunEx { ex, io: &cell, desk, sref, quotes, plan: &plan, first_fill: limit };
         if stop {
-            let lvl = plan.get("limit").and_then(|l| l.get("usdt")).and_then(|v| py_float(v).ok()).unwrap_or(0.0);
-            let asset = rx.w.exec_asset_of(Some(&json!(ep.symbol))).unwrap_or("eth");
             let ps = ep.position_side.clone();
-            let io2 = rx.io;
-            exec::run_entry_stop(&mut rx, &ep, &s, |since| stop_touched(lvl, &ps, io2.borrow_mut().sec_prices(asset).ok().flatten().as_deref(), since), exec::LIMIT_MAX_SEC).await;
+            let (io2, s2) = (rx.io, s.clone());
+            // 닿음 선 = 칸 plan 의 limit.usdt(원본 stop_touched 가 매번 plan 에서 읽는다 -- 선 옮김이 push_live 로 바로 바꾼다)
+            exec::run_entry_stop(&mut rx, &ep, &s, |since| {
+                let lvl = s2.lock().unwrap().stop_level.unwrap_or(0.0);
+                stop_touched(lvl, &ps, io2.borrow_mut().sec_prices(asset).ok().flatten().as_deref(), since)
+            }, exec::LIMIT_MAX_SEC).await;
         } else if limit {
             exec::run_entry_limit(&mut rx, &ep, &s, exec::LIMIT_MAX_SEC, true, true).await;
         } else {
             exec::run_entry(&mut rx, &ep, &s).await;
         }
     }
-    desk.w = w;
-    exec_to_slot(&s.lock().unwrap(), slot);
+    let mut d = desk.lock().await;
+    d.live.remove(&key);
+    let lines = std::mem::take(&mut s.lock().unwrap().logs);
+    for l in lines {
+        d.w.log(l); // ponytail: 원본은 그 순간 print -- 여기는 작업 끝에 모아서(그 사이 다른 로그와 순서가 갈릴 수 있다)
+    }
+    let plan = cur_plan(&mut d, sref, plan0);
+    let mut slot = std::mem::take(d.slot_obj(sref));
+    exec_to_slot(&s.lock().unwrap(), &mut slot);
     slot.insert("done_at".into(), json!(iso_utc(io.now()))); // 원본 now_iso() = 집행이 끝난 시각
     let filled = slot.get("filled").and_then(Value::as_f64).unwrap_or(0.0);
     if filled > 0.0 {
-        let key = bracket_key(&ep.symbol, &ep.position_side);
-        let cur = desk.w.load().get(&key).cloned().unwrap_or(json!({}));
+        let bkey = bracket_key(&ep.symbol, &ep.position_side);
+        let cur = d.w.load().get(&bkey).cloned().unwrap_or(json!({}));
         let r: Result<(), String> = async {
             if truthy(plan.get("add_keep")) {
-                desk.w.keep_rearm(io, plan, slot).await
+                d.w.keep_rearm(io, &plan, &mut slot).await
             } else if truthy(plan.get("bracket").and_then(|b| b.get("lines"))) {
                 // 선 주문 = 지금 저장된 선으로 합친 전량에 다시 -- 대기 중 바뀐 선을 지키면서 TP 크기는 맞춘다
-                match desk.w.plan_from_current(plan)? {
-                    Some(p2) => desk.w.arm_bracket(io, &p2, slot).await,
+                match d.w.plan_from_current(&plan)? {
+                    Some(p2) => d.w.arm_bracket(io, &p2, &mut slot).await,
                     None => Ok(()),
                 }
             } else if limit && ["mod", "sl_off", "tp_off", "fired"].iter().any(|k| truthy(cur.get(*k))) {
                 Ok(()) // 검증 #2: 사용자가 옮긴 선·손절 해제·청산 진행을 옛 계획으로 덮지 않는다
             } else {
-                desk.w.arm_bracket(io, plan, slot).await
+                d.w.arm_bracket(io, &plan, &mut slot).await
             }
         }.await;
-        settle(r, slot, io.now());
+        settle(r, &mut slot, io.now());
     }
     // 정상 종료에서만 복구 파일을 지운다 -- error = 거래소에 주문이 살아 있을 수 있다(검증 #1 · W4·R8)
     if limit && slot.get("phase").and_then(Value::as_str) != Some("error") {
         let wid = plan.get("wid").and_then(Value::as_i64).unwrap_or(1);
-        let _ = std::fs::remove_file(crate::watch::limit_path(&desk.w.dir, &ep.symbol, wid));
+        let _ = std::fs::remove_file(crate::watch::limit_path(&d.w.dir, &ep.symbol, wid));
     }
+    *d.slot_obj(sref) = slot;
 }
 
-
 /// 접수 문의 `Task` 하나를 끝까지 돈다(청산은 감시가 쓰는 run_exit_into · 부분 청산은 exit_then_rearm). 끝나면 `Desk::task_done`.
-pub async fn run_task<E: Exchange, I: WatchIo, Q: Quotes>(desk: &mut Desk, ex: &mut E, io: &mut I, quotes: &mut Q, task: Task) {
+/// 진입 = 칸을 Desk 에 둔 채(접수 문이 «도는 중»을 본다) · 청산 = 칸 사본으로 돌리고 끝에 되돌린다(청산은 화면 입력을 안 받는다 -- C6).
+pub async fn run_task<E: Exchange, I: WatchIo, Q: Quotes>(desk: &DeskCell, ex: &mut E, io: &mut I, quotes: &mut Q, task: Task) {
     match task {
         Task::Entry { key, slot, plan, limit } => {
             let po = plan.as_object().cloned().unwrap_or_default();
-            let mut st = take_slot(desk, &slot);
-            entry_then_bracket(desk, ex, io, quotes, &po, &mut st, limit).await;
-            put_slot(desk, &slot, st);
-            desk.task_done(&key);
+            entry_then_bracket(desk, &slot, ex, io, quotes, &po, limit).await;
+            desk.lock().await.task_done(&key);
         }
         Task::Exit { key, slot, plan, rearm } => {
-            let mut st = take_slot(desk, &slot);
+            let mut st = desk.lock().await.slot_obj(&slot).clone();
             let r = crate::watch::run_exit_into(ex, &plan, &mut st, || iso_utc(io.now())).await;
             settle(r, &mut st, io.now());
+            let mut d = desk.lock().await;
             if rearm {
-                let _ = desk.w.partial_exit_rearm_tp(io, plan.as_object().cloned().unwrap_or_default(), &mut st).await; // 부분 청산 뒤 남은 수량으로 익절(B30 · C2)
+                let _ = d.w.partial_exit_rearm_tp(io, plan.as_object().cloned().unwrap_or_default(), &mut st).await; // 부분 청산 뒤 남은 수량으로 익절(B30 · C2)
             }
-            put_slot(desk, &slot, st);
-            desk.task_done(&key);
-        }
-    }
-}
-
-fn take_slot(desk: &mut Desk, s: &SlotRef) -> Obj {
-    match s {
-        SlotRef::Entry => std::mem::take(&mut desk.w.entry),
-        SlotRef::Side(a) => desk.w.side_exits.get_mut(a).and_then(Value::as_object_mut).map(std::mem::take).unwrap_or_default(),
-        SlotRef::Wait(k) => desk.w.waits.get_mut(k).and_then(Value::as_object_mut).map(std::mem::take).unwrap_or_default(),
-    }
-}
-fn put_slot(desk: &mut Desk, s: &SlotRef, v: Obj) {
-    match s {
-        SlotRef::Entry => desk.w.entry = v,
-        SlotRef::Side(a) => {
-            desk.w.side_exits.insert(a.clone(), Value::Object(v));
-        }
-        SlotRef::Wait(k) => {
-            desk.w.waits.insert(k.clone(), Value::Object(v));
+            *d.slot_obj(&slot) = st;
+            d.task_done(&key);
         }
     }
 }

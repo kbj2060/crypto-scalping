@@ -13,6 +13,7 @@ use crate::exec::{Common, Exchange, LimitOrder, OrderRef, Reply};
 use crate::fakesrv::{serve, Act, Got};
 use crate::http::Binance;
 use crate::plan::Filters;
+use crate::intake::SlotRef;
 use crate::runner::entry_then_bracket;
 use crate::watch::{iso_utc, run_exit_into, Obj, WatchIo, Watcher};
 use serde_json::{json, Value};
@@ -115,9 +116,104 @@ fn take(inp: &Inputs, last: &Mutex<HashMap<String, Value>>, kind: &str) -> Value
     }
 }
 
+/// 작업 도중 화면 입력(원본 기록 what="handler": 접수 핸들러 이름·질의·그때 응답) -- 집행이 기다리다 깨는 자리(nap·sleep)에서 그 시각이 됐으면 부른다.
+/// 원본도 집행이 잠든 사이에만 핸들러가 돈다(한 이벤트 루프) · 핸들러는 진짜 `Desk::api_*` 이고 W12 다리(push_live)로 도는 집행에 닿는다.
+struct Inject {
+    desk: Arc<crate::runner::DeskCell>,
+    handlers: Arc<Mutex<VecDeque<Value>>>,
+    t: Clock,
+    calls: Calls,
+    inputs: Inputs,
+    last: Arc<Mutex<HashMap<String, Value>>>,
+    diffs: Arc<Mutex<Vec<String>>>,
+}
+impl Inject {
+    async fn due(&self) {
+        loop {
+            let now = *self.t.lock().unwrap();
+            let h = {
+                let mut q = self.handlers.lock().unwrap();
+                match q.front() {
+                    Some(h) if h.get("t").and_then(Value::as_f64).is_none_or(|t| t <= now) => q.pop_front().unwrap(),
+                    _ => return,
+                }
+            };
+            let args = h.get("args").and_then(Value::as_array).cloned().unwrap_or_default();
+            let name = args.first().and_then(Value::as_str).unwrap_or("").to_string();
+            let query: crate::intake::Query = args.get(1).and_then(Value::as_object).map(|m| m.iter().map(|(k, v)| (k.clone(), crate::sign::py_str(v))).collect()).unwrap_or_default();
+            note(&self.t, &self.calls, json!(["handler", name, args.get(1).cloned().unwrap_or(Value::Null)]));
+            let mut q = Q { t: self.t.clone(), calls: self.calls.clone(), inputs: self.inputs.clone(), last: self.last.clone() };
+            let mut io = HIo { t: self.t.clone(), calls: self.calls.clone(), inputs: self.inputs.clone(), last: self.last.clone() };
+            let mut d = self.desk.lock().await;
+            let r = match name.as_str() {
+                "api_manual_wait_action" => d.api_wait_action(&mut q, &mut io, &query).await,
+                "api_manual_limit_amend" => d.api_limit_amend(&mut q, &mut io, &query).await,
+                "api_manual_entry_cancel" => d.api_entry_cancel(&io, &query),
+                x => {
+                    self.diffs.lock().unwrap().push(format!("모르는 핸들러 {x}"));
+                    continue;
+                }
+            };
+            drop(d);
+            let want = h.get("value").cloned().unwrap_or(Value::Null);
+            let mut dd = vec![];
+            if want.get("status").and_then(Value::as_u64) != Some(r.status as u64) {
+                dd.push(format!("상태 원본 {} · Rust {}", want["status"], r.status));
+            }
+            // 응답 본문: 칸(wait·state)은 칸 비교 규칙(원본에 없는 빈 칸 허용) · 나머지는 값 그대로
+            let (wb, rb) = (want.get("body").and_then(Value::as_object).cloned().unwrap_or_default(), r.body.as_object().cloned().unwrap_or_default());
+            for k in wb.keys().chain(rb.keys().filter(|k| !wb.contains_key(*k))) {
+                match (wb.get(k), rb.get(k)) {
+                    (Some(a), Some(Value::Object(b))) if ["wait", "state"].contains(&k.as_str()) => slot_diff(a, b, &mut dd),
+                    (a, b) if !same(a.unwrap_or(&Value::Null), b.unwrap_or(&Value::Null)) => dd.push(format!("본문 {k}: 원본 {a:?} · Rust {b:?}")),
+                    _ => {}
+                }
+            }
+            if !dd.is_empty() {
+                self.diffs.lock().unwrap().push(format!("핸들러 {name}: {}", dd.join(" · ")));
+            }
+        }
+    }
+}
+
+/// 핸들러가 닿는 계좌·1초가(기록된 입력) -- 원본 assemble_entry_plan(fresh) 의 produce_account · sec_prices.
+struct HIo {
+    t: Clock,
+    calls: Calls,
+    inputs: Inputs,
+    last: Arc<Mutex<HashMap<String, Value>>>,
+}
+impl crate::assemble::DeskIo for HIo {
+    fn now(&self) -> f64 {
+        *self.t.lock().unwrap()
+    }
+    fn exec_enabled(&self) -> bool {
+        true
+    }
+    async fn account(&mut self, fresh: bool) -> Result<Value, String> {
+        let what = if fresh { "produce_account" } else { "account" };
+        note(&self.t, &self.calls, json!([what]));
+        Ok(take(&self.inputs, &self.last, what))
+    }
+    fn sec_prices(&mut self, a: &str) -> Option<Vec<(f64, f64)>> {
+        note(&self.t, &self.calls, json!(["sec", a]));
+        take(&self.inputs, &self.last, "sec").as_array().map(|r| r.iter().map(|x| (x[0].as_f64().unwrap_or(0.0), x[1].as_f64().unwrap_or(0.0))).collect())
+    }
+    async fn clear_bracket(&mut self, _: &str, _: &str, _: bool, _: bool) -> Result<Value, String> {
+        Err("재생: 이 핸들러는 손절 함수를 안 부른다".into())
+    }
+    async fn place_bracket(&mut self, _: &Value, _: &str, _: &str, _: bool) -> Result<Value, String> {
+        Err("재생: 이 핸들러는 손절 함수를 안 부른다".into())
+    }
+    async fn place_tp_ladder(&mut self, _: &Value, _: &str, _: &str) -> Result<Value, String> {
+        Err("재생: 이 핸들러는 손절 함수를 안 부른다".into())
+    }
+}
+
 struct Vx {
     bx: Binance,
     t: Clock,
+    inj: Option<Arc<Inject>>,
 }
 impl Exchange for Vx {
     async fn place_limit_gtx(&mut self, o: &LimitOrder) -> Reply {
@@ -142,10 +238,16 @@ impl Exchange for Vx {
         self.bx.wall_ms()
     }
     async fn nap(&mut self, s: f64) {
-        *self.t.lock().unwrap() += s
+        *self.t.lock().unwrap() += s;
+        if let Some(i) = &self.inj {
+            i.due().await;
+        }
     }
     async fn sleep(&mut self, s: f64) {
-        *self.t.lock().unwrap() += s
+        *self.t.lock().unwrap() += s;
+        if let Some(i) = &self.inj {
+            i.due().await;
+        }
     }
     async fn prepare(&mut self, symbol: &str, leverage: Option<i64>) -> Result<Option<Value>, String> {
         self.bx.prepare(symbol, leverage).await
@@ -241,14 +343,17 @@ impl Quotes for Q {
         note(&self.t, &self.calls, json!(["filters", s]));
         serde_json::from_value(take(&self.inputs, &self.last, "filters")).map_err(|e| format!("filters 기록: {e}"))
     }
-    async fn vol(&mut self, _: &str) -> Option<f64> {
-        None
+    async fn vol(&mut self, s: &str) -> Option<f64> {
+        note(&self.t, &self.calls, json!(["vol", s]));
+        take(&self.inputs, &self.last, "vol").as_f64()
     }
-    async fn funding(&mut self, _: &str) -> Option<f64> {
-        None
+    async fn funding(&mut self, s: &str) -> Option<f64> {
+        note(&self.t, &self.calls, json!(["funding", s]));
+        take(&self.inputs, &self.last, "funding").as_f64()
     }
-    async fn fees(&mut self, _: &str) -> Value {
-        Value::Null
+    async fn fees(&mut self, s: &str) -> Value {
+        note(&self.t, &self.calls, json!(["fees", s]));
+        take(&self.inputs, &self.last, "fees")
     }
 }
 
@@ -324,9 +429,12 @@ pub async fn replay(chs: &[Chain], symbol: &str, dir: &Path, exact: bool, secret
     let calls: Calls = Arc::new(Mutex::new(vec![]));
     let inputs: Inputs = Arc::new(Mutex::new(HashMap::new()));
     let last = Arc::new(Mutex::new(HashMap::new()));
-    let mut desk = Desk::new(Watcher::new(dir, symbol));
-    let mut ex = Vx { bx: mk(&t), t: t.clone() };
-    let mut io = Io { bx: mk(&t), ex: Vx { bx: mk(&t), t: t.clone() }, t: t.clone(), calls: calls.clone(), inputs: inputs.clone(), last: last.clone() };
+    let desk = Arc::new(crate::runner::DeskCell::new(Desk::new(Watcher::new(dir, symbol))));
+    let handlers: Arc<Mutex<VecDeque<Value>>> = Arc::new(Mutex::new(VecDeque::new()));
+    let hdiffs: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![]));
+    let inj = Arc::new(Inject { desk: desk.clone(), handlers: handlers.clone(), t: t.clone(), calls: calls.clone(), inputs: inputs.clone(), last: last.clone(), diffs: hdiffs.clone() });
+    let mut ex = Vx { bx: mk(&t), t: t.clone(), inj: Some(inj) };
+    let mut io = Io { bx: mk(&t), ex: Vx { bx: mk(&t), t: t.clone(), inj: None }, t: t.clone(), calls: calls.clone(), inputs: inputs.clone(), last: last.clone() };
     let mut quotes = Q { t: t.clone(), calls: calls.clone(), inputs: inputs.clone(), last: last.clone() };
     let fpath: PathBuf = crate::watch::bracket_path(dir);
     let mut out = vec![];
@@ -341,8 +449,19 @@ pub async fn replay(chs: &[Chain], symbol: &str, dir: &Path, exact: bool, secret
             Some(f) => std::fs::write(&fpath, serde_json::to_string(f).unwrap()).unwrap(),
             None => {}
         }
+        // 작업 칸: "entry"(위 칸) | "wait:<코인>"(대기 칸) -- 화면 입력(핸들러)이 그 칸을 본다
+        let sref = match st.get("slot_ref").and_then(Value::as_str) {
+            Some(k) if k.starts_with("wait:") => SlotRef::Wait(k[5..].to_string()),
+            _ => SlotRef::Entry,
+        };
         if let Some(s) = st.get("slot").and_then(Value::as_object) {
-            desk.w.entry = s.clone();
+            *desk.lock().await.slot_obj(&sref) = s.clone();
+        }
+        if let Some(ws) = st.get("waits").and_then(Value::as_object) {
+            desk.lock().await.w.waits = ws.clone(); // 다른 대기 칸(원본 manual_wait_states 사본)
+            if let Some(s) = st.get("slot").and_then(Value::as_object) {
+                *desk.lock().await.slot_obj(&sref) = s.clone();
+            }
         }
         *queue.lock().unwrap() = c.wire.iter().cloned().collect();
         srv.log.lock().unwrap().clear();
@@ -354,36 +473,41 @@ pub async fn replay(chs: &[Chain], symbol: &str, dir: &Path, exact: bool, secret
                 m.entry(i["what"].as_str().unwrap_or("").to_string()).or_default().push_back(i.get("value").cloned().unwrap_or(Value::Null));
             }
         }
+        *handlers.lock().unwrap() = c.inputs.iter().filter(|i| i["what"] == "handler").cloned().collect();
+        hdiffs.lock().unwrap().clear();
         last.lock().unwrap().clear();
-        desk.w.logs.clear();
+        desk.lock().await.w.logs.clear();
         match st.get("op").and_then(Value::as_str) {
             Some("entry") => {
                 let plan = st.get("plan").and_then(Value::as_object).cloned().unwrap_or_default();
-                let mut slot = std::mem::take(&mut desk.w.entry);
-                entry_then_bracket(&mut desk, &mut ex, &mut io, &mut quotes, &plan, &mut slot, st.get("limit").and_then(Value::as_bool).unwrap_or(false)).await;
-                desk.w.entry = slot;
+                entry_then_bracket(&desk, &sref, &mut ex, &mut io, &mut quotes, &plan, st.get("limit").and_then(Value::as_bool).unwrap_or(false)).await;
             }
             Some("exit") => {
                 // 청산 접수(원본 settle(run_exit | exit_then_rearm)) -- `ff` «팝업 청산 50% → 익절 다시 → 100%»
                 let plan = st.get("plan").cloned().unwrap_or(Value::Null);
-                let mut slot = std::mem::take(&mut desk.w.entry);
+                let mut slot = std::mem::take(desk.lock().await.slot_obj(&sref));
                 let tt = t.clone();
                 let r = run_exit_into(&mut ex, &plan, &mut slot, || iso_utc(*tt.lock().unwrap())).await;
                 if let Err(e) = r {
                     slot.insert("phase".into(), json!("error"));
                     slot.insert("error".into(), json!(format!("집행 오류 {e} — 거래소에서 직접 확인하세요")));
                 } else if st.get("rearm").and_then(Value::as_bool).unwrap_or(false) {
-                    let _ = desk.w.partial_exit_rearm_tp(&mut io, plan.as_object().cloned().unwrap_or_default(), &mut slot).await;
+                    let _ = desk.lock().await.w.partial_exit_rearm_tp(&mut io, plan.as_object().cloned().unwrap_or_default(), &mut slot).await;
                 }
-                desk.w.entry = slot;
+                *desk.lock().await.slot_obj(&sref) = slot;
             }
             Some("tick") => {
-                if let Err(e) = desk.w.bracket_tick(&mut io).await {
+                if let Err(e) = desk.lock().await.w.bracket_tick(&mut io).await {
                     d.push(format!("감시 틱 예외 {e} (원본 {})", c.end.get("raised").unwrap_or(&Value::Null)));
                 }
             }
             x => d.push(format!("모르는 op {x:?}")),
         }
+        d.extend(hdiffs.lock().unwrap().drain(..));
+        if !handlers.lock().unwrap().is_empty() {
+            d.push(format!("화면 입력 {}건을 못 넣었다(그 시각까지 집행이 안 잤다)", handlers.lock().unwrap().len()));
+        }
+        let mut dk = desk.lock().await;
         // 요청 열
         let strip = |x: &str| if secret.is_some() { x.to_string() } else { x.split("&signature=").next().unwrap_or(x).to_string() }; // 비밀값을 모르면 서명은 비교 못 한다
         let got: Vec<String> = srv.log.lock().unwrap().iter().map(|g| normalize(&g.method, &strip(&g.target), exact)).collect();
@@ -405,7 +529,8 @@ pub async fn replay(chs: &[Chain], symbol: &str, dir: &Path, exact: bool, secret
         }
         // 끝 상태
         if let Some(es) = c.end.get("slot") {
-            slot_diff(es, &desk.w.entry, &mut d);
+            let rs_slot = dk.slot_obj(&sref).clone();
+            slot_diff(es, &rs_slot, &mut d);
         }
         if let Some(ef) = c.end.get("file") {
             let file = std::fs::read_to_string(&fpath).ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()).unwrap_or(Value::Null);
@@ -422,8 +547,8 @@ pub async fn replay(chs: &[Chain], symbol: &str, dir: &Path, exact: bool, secret
             }
         }
         if let Some(lg) = c.end.get("logs") {
-            if json!(desk.w.logs) != *lg {
-                d.push(format!("로그: 원본 {lg} · Rust {:?}", desk.w.logs));
+            if json!(dk.w.logs) != *lg {
+                d.push(format!("로그: 원본 {lg} · Rust {:?}", dk.w.logs));
             }
         }
         if exact {
@@ -434,6 +559,7 @@ pub async fn replay(chs: &[Chain], symbol: &str, dir: &Path, exact: bool, secret
                 }
             }
         }
+        drop(dk);
         out.push(Report { chain: c.id.clone(), requests: got.len(), diffs: d });
     }
     out

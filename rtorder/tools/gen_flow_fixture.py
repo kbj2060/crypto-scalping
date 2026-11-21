@@ -65,6 +65,18 @@ def now():
 
 async def fsleep(sec, *_a):
     Clock.t += sec
+    # 작업 도중 화면 입력: 집행이 잠든 자리(원본도 한 이벤트 루프 -- 핸들러는 집행이 기다릴 때만 돈다)에서 그 시각이 됐으면 진짜 접수 핸들러를 부른다
+    while Ctl.inject and Ctl.inject[0][0] <= Clock.t:
+        _t, name, query = Ctl.inject.pop(0)
+        note("handler", name, query)
+        i = len(Ctl.vals) - 1   # 핸들러 안에서 읽는 입력이 뒤에 붙는다 -- 이 자리에 응답을
+        r = await getattr(Ctl.api, name)(Req(query))
+        Ctl.vals[i] = {"v": snap({"status": r.status, "body": json.loads(r.text)})}
+
+
+class Req:
+    def __init__(self, query):
+        self.query = query
 
 
 class FakeDT(datetime):
@@ -198,6 +210,9 @@ X.FAPI = A.FAPI = P.FAPI = BASE
 
 
 class Ctl:
+    inject: list = []   # [(시각, 핸들러 이름, 질의)] -- 걸음마다
+    api = None
+    vals: list = []     # 호출마다 돌려준 값({"v": 값} · 재생 입력)
     calls: list = []
     sec: list = []
     exit_plans: list = []
@@ -206,26 +221,54 @@ class Ctl:
 
 def note(*a):
     Ctl.calls.append([Clock.t, *a])
+    Ctl.vals.append(None)
+
+
+def val(v):
+    Ctl.vals[-1] = {"v": snap(v)}
+    return v
 
 
 def account_now():
     return {"ok": True, "generated_at": FakeDT.now(timezone.utc).isoformat(),
-            "positions": [{"symbol": SYM, "side": ps, "qty": q} for ps, q in S.sim.pos.items() if q]}
+            "positions": [{"symbol": SYM, "side": ps, "qty": q, "entry_price": 2500.0, "mark_price": 2500.0, "leverage": 10.0} for ps, q in S.sim.pos.items() if q],
+            "open_orders": [], "leverage_by_symbol": {SYM: 10.0},   # 선 옮김이 진입과 같은 조립을 다시 한다(크기·상한)
+            "balances": {"USDC": {"margin": 1000.0, "available": 800.0, "initial_margin": 0.0}, "USDT": {"margin": 0.0, "available": 0.0, "initial_margin": 0.0}}}
 
 
 async def f_swr(key, ttl, produce, **_kw):
     note("account")
-    return account_now()
+    return val(account_now())
+
+
+async def f_produce():
+    note("produce_account")
+    return val(account_now())
+
+
+async def f_vol(symbol):
+    note("vol", symbol)
+    return val(None)
+
+
+async def f_funding(symbol):
+    note("funding", symbol)
+    return val(None)
+
+
+async def f_fees(_s, symbol):
+    note("fees", symbol)
+    return val({"symbol": symbol, "maker_bp": 2.0, "taker_bp": 5.0, "source": "fallback"})
 
 
 async def f_hist(asset):
     note("bars", asset)
-    return []
+    return val([])
 
 
 def f_sec(asset):
     note("sec", asset)
-    return [tuple(x) for x in Ctl.sec]
+    return [tuple(x) for x in val(Ctl.sec)]
 
 
 def exit_plan_for(pside, qty, **kw):
@@ -237,6 +280,7 @@ async def f_exit_plan(position_side, fraction=1.0, fresh=False, asset="eth", mar
     note("exit_plan", position_side, fraction, fresh, asset, only_symbol)
     p = exit_plan_for(position_side, S.sim.pos[position_side])
     Ctl.exit_plans.append(p)
+    val({"plan": p})
     return p, None
 
 
@@ -244,12 +288,12 @@ async def f_fetch(url, params, error_reason=None, **_kw):
     sym = params["symbol"]
     note("book", sym)
     cur = [b for t, b in Ctl.books if Clock.t >= t][-1]
-    return dict(cur[sym])
+    return dict(val(cur[sym]))
 
 
 async def f_filters(_session, symbol):
     note("filters", symbol)
-    return {"step": 0.001, "tick": 0.01, "min_qty": 0.001, "min_notional": 5.0}
+    return val({"step": 0.001, "tick": 0.01, "min_qty": 0.001, "min_notional": 5.0})
 
 
 class FakeLock:
@@ -332,6 +376,21 @@ SCN = [
     {"name": "팝업 청산 50% → 익절 다시 → 100% → 무장 정리", "sim": lambda: Sim(fill=lambda o: peg_in(o) and o["gets"] >= 1),
      "steps": [{"op": "entry", "plan": ENTRY}, {"op": "exit", "dt": 5.0, "frac": 0.5}, {"op": "exit", "dt": 5.0, "frac": 1.0},
                {"op": "tick", "dt": 10.0, "sec": lambda: []}]},
+    # 9~14. 작업 도중 화면 입력(W12): 원본 접수 핸들러를 집행이 잠든 사이에 실제로 부른다 -- 같은 칸(dict)을 집행이 다시 읽는다
+    {"name": "지정가 대기 중 선 옮김 → 새 가격 → 체결 → 새 선으로 무장", "sim": lambda: Sim(fill=lambda o: o["clientOrderId"].startswith("dbwt") and o["price"] != "2489.0" and o["gets"] >= 2),
+     "steps": [{"op": "entry", "plan": LIMIT, "limit": True, "slot": "wait:eth", "sec": lambda: [[now() - 1.0, 2489.5]],
+                "inject": [(7.0, "api_manual_limit_amend", {"confirm": "1", "asset": "eth", "limit": "2480", "tp": "2600", "sl": "2380"})]}]},
+    {"name": "지정가 대기 중 PEG → 따라가기 체결 → 무장", "sim": lambda: Sim(fill=lambda o: o["clientOrderId"].startswith("dbpg") and o["gets"] >= 1),
+     "steps": [{"op": "entry", "plan": LIMIT, "limit": True, "slot": "wait:eth", "inject": [(7.0, "api_manual_wait_action", {"action": "peg", "confirm": "1", "asset": "eth"})]}]},
+    {"name": "지정가 대기 중 지금 시장가(M4) → 무장", "sim": lambda: Sim(),
+     "steps": [{"op": "entry", "plan": LIMIT, "limit": True, "slot": "wait:eth", "inject": [(7.0, "api_manual_wait_action", {"action": "market", "confirm": "1", "asset": "eth"})]}]},
+    {"name": "지정가 대기 취소", "sim": lambda: Sim(),
+     "steps": [{"op": "entry", "plan": LIMIT, "limit": True, "slot": "wait:eth", "inject": [(7.0, "api_manual_wait_action", {"action": "cancel", "confirm": "1", "asset": "eth"})]}]},
+    {"name": "따라가기 진입 중 취소", "sim": lambda: Sim(),
+     "steps": [{"op": "entry", "plan": ENTRY, "slot": "entry", "inject": [(7.0, "api_manual_entry_cancel", {"confirm": "1"})]}]},
+    {"name": "감시 진입 대기 중 취소", "sim": lambda: Sim(),
+     "steps": [{"op": "entry", "plan": {**ENTRY, "price": 2510.0, "limit": {"usdt": 2510.0}, "stop": True, "wid": 1}, "limit": True, "slot": "wait:eth",
+                "sec": lambda: [[now() - 1.0, 2490.0]], "inject": [(3.0, "api_manual_wait_action", {"action": "cancel", "confirm": "1", "asset": "eth"})]}]},
     # 5. P23 지정가 자동 재조정(20초 각본): basis 가 바뀌면 취소 확인 → 새 가격 → 체결 → 첫 체결 무장 → 끝 무장 → 복구 파일 지움
     {"name": "지정가 대기 자동 재조정(P23) → 체결 → 무장", "books": [(0.0, BOOK0), (15.0, BOOK1)],
      "sim": lambda: Sim(fill=lambda o: o["clientOrderId"].startswith("dbwt") and o["price"] != "2489.0" and o["gets"] >= 2),
@@ -349,13 +408,17 @@ async def run(sc):
     out = []
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2.0)) as session:
         with mock.patch.multiple(orders, LIVE_DIR=tmp, exec_enabled=lambda: True, nap=boom, datetime=FakeDT, time=fake_time, load_filters=f_filters,
-                                 fetch_account=boom, commission_bp=boom):
+                                 fetch_account=boom, commission_bp=f_fees):
             api = orders.register(account_trip_state={"seen": {}}, refresh_tasks={}, swr_locks={}, binance_session=lambda: session,
                                   fetch_binance_json=f_fetch, swr_cached=f_swr, _timed_produce=boom, load_market_history=f_hist,
                                   situation_by={}, NOCACHE={}, STALE_GRACE_SECONDS=60, sec_prices=f_sec)
             cells = closure_map([api.bracket_tick, api.api_manual_entry_submit, api.busy_or, api.api_manual_exit_submit])
             cells["assemble_exit_plan"].cell_contents = f_exit_plan
-            cells["produce_account"].cell_contents = boom
+            cells["produce_account"].cell_contents = f_produce
+            cells["realized_vol_now"].cell_contents = f_vol
+            cells["funding_now"].cell_contents = f_funding
+            Ctl.api = api
+            waits = cells["manual_wait_states"].cell_contents
             cells["manual_order_lock"].cell_contents = FakeLock()
             entry_state = cells["manual_entry_state"].cell_contents
             etb = cells["entry_then_bracket"].cell_contents
@@ -366,21 +429,33 @@ async def run(sc):
             for stp in sc["steps"]:
                 Clock.t += stp.get("dt", 0.0)
                 Ctl.sec = stp["sec"]() if "sec" in stp else []
-                S.log, S.given, Ctl.calls, Ctl.exit_plans = [], [], [], []
+                S.log, S.given, Ctl.calls, Ctl.exit_plans, Ctl.vals = [], [], [], [], []
+                Ctl.inject = [(Clock.t + dt, name, q) for dt, name, q in stp.get("inject") or []]
                 buf, raised = io.StringIO(), None
                 t_start = Clock.t
                 plan_used, rearm = stp.get("plan"), None
+                slot_ref = stp.get("slot", "entry")
+                target = entry_state
+                if stp.get("slot"):   # 접수 문과 같은 칸 차리기: 계획 dict 를 칸 plan 에 **같은 객체**로(선 옮김이 제자리에서 고친다) -- api_manual_entry_submit 그대로
+                    plan_used = json.loads(json.dumps(stp["plan"]))
+                    if slot_ref.startswith("wait:"):
+                        target = waits.setdefault(slot_ref[5:], {})
+                        target.clear()
+                        target.update(phase="submitting", mode="limit", side="LONG", plan=plan_used, asset="eth", wid=1, started_at=FakeDT.now(timezone.utc).isoformat())
+                    else:
+                        entry_state.clear()
+                        entry_state.update(phase="submitting", side="LONG", plan=plan_used, asset="eth", started_at=FakeDT.now(timezone.utc).isoformat())
                 if stp["op"] == "exit":   # 청산 접수(api_manual_exit_submit): 칸을 진입 상태로 바꾼 뒤 settle(exit_then_rearm | run_exit) -- 계획은 조립 대신 모의 거래소 포지션의 frac
                     frac = stp["frac"]
                     plan_used = exit_plan_for("LONG", round(S.sim.pos["LONG"] * frac, 3))
                     rearm = frac < 1.0
                     entry_state.clear()
                     entry_state.update(phase="submitting", kind="exit", side="LONG", plan=plan_used, asset="eth", started_at=FakeDT.now(timezone.utc).isoformat())
-                slot0 = snap(entry_state)
+                slot0 = snap(target)
                 with contextlib.redirect_stdout(buf):
                     try:
                         if stp["op"] == "entry":
-                            await etb(json.loads(json.dumps(stp["plan"])), entry_state, bool(stp.get("limit")))
+                            await etb(plan_used if stp.get("slot") else json.loads(json.dumps(stp["plan"])), target, bool(stp.get("limit")))
                         elif stp["op"] == "exit":
                             await cells["settle"].cell_contents(cells["exit_then_rearm"].cell_contents(plan_used, entry_state) if rearm
                                                                 else X.run_exit(session, plan_used, entry_state), entry_state)
@@ -389,11 +464,12 @@ async def run(sc):
                     except Exception as exc:  # noqa: BLE001
                         raised = f"{type(exc).__name__}: {exc}"
                 p = tmp / "manual_bracket_state.json"
-                out.append({"op": stp["op"], "plan": plan_used, "limit": bool(stp.get("limit")), "rearm": rearm, "slot0": slot0, "t": t_start, "sec": Ctl.sec,
-                            "requests": S.log, "responses": S.given, "calls": snap(Ctl.calls), "exit_plans": snap(Ctl.exit_plans),
-                            "entry": snap(entry_state), "file": json.loads(p.read_text("utf-8")) if p.exists() else None,
+                assert not Ctl.inject, ("화면 입력을 다 못 넣었다", sc["name"], Ctl.inject)
+                out.append({"op": stp["op"], "plan": plan_used, "limit": bool(stp.get("limit")), "rearm": rearm, "slot0": slot0, "slot_ref": slot_ref, "t": t_start, "sec": Ctl.sec,
+                            "requests": S.log, "responses": S.given, "calls": snap(Ctl.calls), "vals": Ctl.vals, "exit_plans": snap(Ctl.exit_plans),
+                            "entry": snap(target), "file": json.loads(p.read_text("utf-8")) if p.exists() else None,
                             "limits": sorted(q.name for q in tmp.glob("manual_limit_wait*.json")),
-                            "logs": buf.getvalue().splitlines(), "raised": raised, "t_end": Clock.t, "pos": dict(S.sim.pos)})
+                            "logs": [l for l in buf.getvalue().splitlines() if not l.startswith("plan_timing")], "raised": raised, "t_end": Clock.t, "pos": dict(S.sim.pos)})
     os.environ.pop("BINANCE_API_KEY", None)
     os.environ.pop("BINANCE_SECRET_KEY", None)
     return out

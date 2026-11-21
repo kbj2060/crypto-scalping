@@ -159,11 +159,33 @@ fn err_resp(e: (Value, u16)) -> Resp {
     resp(e.1, b)
 }
 impl Desk {
-    fn slot_obj(&mut self, s: &SlotRef) -> &mut Obj {
+    pub fn slot_obj(&mut self, s: &SlotRef) -> &mut Obj {
         match s {
             SlotRef::Entry => &mut self.w.entry,
             SlotRef::Side(a) => self.w.slot_mut(&SlotId::Side(a.clone())),
-            SlotRef::Wait(k) => self.w.waits.get_mut(k).and_then(Value::as_object_mut).expect("대기 칸"),
+            SlotRef::Wait(k) => {
+                let v = self.w.waits.entry(k.clone()).or_insert(json!({"phase": "idle"}));
+                if !v.is_object() {
+                    *v = json!({"phase": "idle"});
+                }
+                v.as_object_mut().unwrap()
+            }
+        }
+    }
+    /// W12 다리(읽기): 이 칸에 도는 진입 작업이 있으면 집행 상태를 칸에 옮긴다(원본 = 같은 dict 라 늘 지금 값). 핸들러가 칸을 읽기 전에.
+    pub fn pull_live(&mut self, s: &SlotRef) {
+        if let Some(sh) = self.live.get(&crate::runner::slot_key(s)).cloned() {
+            let e = sh.lock().unwrap().clone();
+            if e.phase != crate::exec::Phase::Idle {
+                crate::runner::exec_to_slot(&e, self.slot_obj(s));
+            }
+        }
+    }
+    /// W12 다리(쓰기): 핸들러가 칸에 쓴 action·amend·선을 도는 집행에 바로 넣는다(집행은 원본과 같은 자리에서 읽는다).
+    pub fn push_live(&mut self, s: &SlotRef) {
+        if let Some(sh) = self.live.get(&crate::runner::slot_key(s)).cloned() {
+            let slot = self.slot_obj(s).clone();
+            crate::runner::slot_to_exec(&slot, &sh);
         }
     }
     fn wait_pending(&self, asset: &str) -> bool {
@@ -358,6 +380,8 @@ impl Desk {
         }
         let qa = query_asset(self, q).unwrap_or_else(|| "eth".into());
         let wid = query_wid(q);
+        let sref = SlotRef::Wait(Watcher::wkey(&qa, wid));
+        self.pull_live(&sref); // W12: 도는 집행의 지금 값(주문 번호·체결·감시 닿음)을 본다
         let st = Value::Object(self.w.wait_slot(&qa, wid).clone());
         let t = |k: &str| truthy(st.get(k));
         let watching = t("stop") && !t("triggered"); // 감시 진입은 닿기 전엔 거래소 주문이 없다
@@ -386,6 +410,7 @@ impl Desk {
         if truthy(plan.get("blocked")) {
             return resp(400, json!({"ok": false, "error": "blocked", "detail": plan["blocked"]}));
         }
+        self.pull_live(&sref); // 조립(await) 사이에 집행이 바꾼 상태
         let ws = self.w.wait_slot(&qa, wid);
         let lp = if truthy(ws.get("limit_price")) { fl(ws.get("limit_price")) } else { fl(old.get("price")) };
         let moved = (fl(plan.get("price")) - lp).abs() > 1e-9; // 걸려 있는 실제 주문가 기준(자동 재조정이 바꿨을 수 있다)
@@ -406,6 +431,7 @@ impl Desk {
             ws.insert("amend".into(), json!({"price": plan["price"], "qty": plan["quantity"], "at": now}));
         }
         let wv = Value::Object(ws.clone());
+        self.push_live(&sref); // 새 가격·수량(amend)·감시 선 → 도는 집행(원본: 같은 dict 를 ≤3초 안에 다시 읽는다)
         let _ = self.w.limit_save_at(now, &saved); // 재시작 복구가 «지금 선»으로 무장하도록(W4) -- 원본은 가격을 고치기 전에 저장한다
         self.w.log(format!("limit entry: 수정(사용자) 지정가 {} · 익절 {} 손절 {}", if moved { format!("→ {}", py_str(&plan["price"])) } else { "그대로".into() },
                            plan["bracket"].get("tp_level").map_or("None".into(), py_str), plan["bracket"].get("sl_level").map_or("None".into(), py_str)));
@@ -423,6 +449,8 @@ impl Desk {
         }
         let qa = query_asset(self, q).unwrap_or_else(|| "eth".into());
         let wid = query_wid(q);
+        let sref = SlotRef::Wait(Watcher::wkey(&qa, wid));
+        self.pull_live(&sref);
         let st = Value::Object(self.w.wait_slot(&qa, wid).clone());
         if !busy(st.as_object().unwrap()) {
             return resp(409, json!({"ok": false, "error": "no_wait", "detail": "기다리는 진입 주문이 없습니다", "wait": st}));
@@ -470,6 +498,7 @@ impl Desk {
                 }
                 Ok(()) => {}
             }
+            self.pull_live(&sref); // 시세(await) 사이에 집행이 바꾼 상태
             let cur = self.w.wait_slot(&qa, wid);
             if cur.get("phase").and_then(Value::as_str) != Some("working") || truthy(cur.get("action")) {
                 return bad(409, "state_changed", "그 사이 주문 상태가 바뀌었습니다 — 다시 확인하세요");
@@ -481,6 +510,7 @@ impl Desk {
         ws.insert("action_at".into(), json!(iso_utc(now)));
         ws.insert("action_reason".into(), if action == "cancel" { json!("사용자 취소") } else { Value::Null });
         let wv = Value::Object(ws.clone());
+        self.push_live(&sref);
         self.w.log(format!("wait-action {action}: 접수 {} {} order_id={}", wv.get("asset").map_or("None".into(), py_str), wv.get("side").map_or("None".into(), py_str),
                            wv.get("order_id").map_or("None".into(), py_str)));
         resp(200, json!({"ok": true, "wait": wv}))
@@ -494,6 +524,7 @@ impl Desk {
         if !io.exec_enabled() {
             return exec_off();
         }
+        self.pull_live(&SlotRef::Entry);
         let st = &mut self.w.entry;
         if !matches!(st.get("phase").and_then(Value::as_str), Some("working" | "submitting")) || st.get("kind").and_then(Value::as_str) == Some("exit")
             || truthy(st.get("switch")) || st.get("plan").and_then(|p| p.get("type")).and_then(Value::as_str) == Some("MARKET") {
@@ -502,7 +533,9 @@ impl Desk {
         st.insert("action".into(), json!("cancel"));
         st.insert("action_at".into(), json!(iso_utc(io.now())));
         st.insert("action_reason".into(), json!("사용자 취소"));
-        resp(200, json!({"ok": true, "state": st}))
+        let body = json!({"ok": true, "state": st});
+        self.push_live(&SlotRef::Entry);
+        resp(200, body)
     }
 
     fn side_symbol(&self, q: &Query) -> Option<(String, String)> {

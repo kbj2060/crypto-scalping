@@ -35,8 +35,8 @@ fn real_like(rows: &[Value]) -> Vec<Value> {
             }).collect();
             r["target"] = json!(t.join("&"));
         }
-        if r["rec"] == "input" {
-            r.as_object_mut().unwrap().remove("t");
+        if r["rec"] == "input" && r["what"] != "handler" {
+            r.as_object_mut().unwrap().remove("t"); // 화면 입력(handler)은 시각이 곧 «언제 넣나» -- 실기록에도 남는다(그림자 기록 표 12)
         }
         r
     }).collect()
