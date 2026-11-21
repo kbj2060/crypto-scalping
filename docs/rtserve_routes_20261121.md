@@ -499,3 +499,4 @@ flow_scales_all(`flow_hour_scales_combos` · binance·okx(okx_tape · ETH-USDT-S
 2. **실시간 체결의 크기 구간**: 원본은 `@trade` 를 총량으로 바로 넣고(369~372) 주문이 닫힐 때 구간을 따로 넣는다(같은 규칙: 가격·방향·ms 로 되묶기 · 343~353) -- rtcore 가 같은 되묶기를 하는지(복원 봉 밖에서도 값이 다르면 여기).
 3. **dhl**(봉 안 누적 델타 저·고·마감): 원본 api_footprint 의 fp_dhl(서버 · 테이프 hot 에서) vs 코어 판(rtcore footprint.rs 머리 주석 «테이프 가지가 파이썬과 다른 봉») -- sol 은 dhl 키가 파이썬에만(코어가 그 봉 dhl 을 안 셈).
 → 전환 전에 정하려면: rtcore 가 재시작 공백을 aggTrades 로 메울지(REST 가중치 · 밴 가드) 아니면 «복원 봉은 다르다»를 받아들일지(사용자 결정).
+- (여덟째 조각 뒤) 결정: rtcore 는 재시작 공백을 REST aggTrades 로 메우지 않고 복원 봉에 `agg: true` 를 싣는다(코어 몫) → `shadow_http.py` 는 /api/footprint 에서 **한쪽이라도 agg 인 봉 시각을 두 쪽에서 빼고** 나머지만 글자 대조 · 뺀 수는 «복원 봉 n»(불일치 아님) · 자체 시험 2(한쪽만 agg 도 뺌 · agg 아닌 봉 차이는 그대로 잡힘).

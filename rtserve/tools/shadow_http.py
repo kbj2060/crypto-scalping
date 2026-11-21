@@ -81,6 +81,16 @@ def stamp(path: str, obj) -> tuple:
     return tuple(sorted(out, key=lambda x: x[0]))
 
 
+def footprint_split(jp, jr) -> tuple:
+    """/api/footprint: 두 쪽 다 agg 가 아닌 봉만 남긴다(2026-11-22 결정 -- 코어 복원 봉 = agg true · 크기 열이 근사).
+    한쪽이라도 agg 인 봉 시각은 두 쪽에서 다 빼고 그 수를 돌려준다(«복원 봉 n» -- 불일치로 안 침)."""
+    if not (isinstance(jp, dict) and isinstance(jr, dict) and isinstance(jp.get("bars"), list) and isinstance(jr.get("bars"), list)):
+        return jp, jr, 0
+    agg = {b.get("time") for x in (jp, jr) for b in x["bars"] if isinstance(b, dict) and b.get("agg")}
+    keep = lambda x: {**x, "bars": [b for b in x["bars"] if not (isinstance(b, dict) and b.get("time") in agg)]}  # noqa: E731
+    return keep(jp), keep(jr), len(agg)
+
+
 def diff(a, b, path: str = "", out: list | None = None) -> list:
     """(칸 경로, 파이썬 값, rtserve 값) 목록 · IGNORE 이름은 뺀다 · 목록은 길이가 다르면 그 자체를 한 칸으로."""
     out = [] if out is None else out
@@ -142,7 +152,7 @@ def main() -> int:
     for p, per_coin in ROUTES + (MODEL_ROUTES if a.models else []):
         paths += [with_asset(p, c) for c in coins] if per_coin else [p]
     paths = [p for p in paths if a.only in p]
-    stats = defaultdict(lambda: {"n": 0, "same": 0, "when": 0, "fields": Counter(), "ex": {}, "tp": [], "tr": []})
+    stats = defaultdict(lambda: {"n": 0, "same": 0, "when": 0, "agg": 0, "fields": Counter(), "ex": {}, "tp": [], "tr": []})
     gap = 1.0 / a.rate
     print(f"대조: {len(paths)} 주소 × {a.rounds} 회 · 쪽마다 {a.rate}/초 · 파이썬 {py} · rtserve {rs}", flush=True)
     for _ in range(a.rounds):
@@ -180,6 +190,9 @@ def main() -> int:
                         s["ex"].setdefault("(원천 시각)", (stamp(p, jp), stamp(p, jr)))
                         time.sleep(max(0.0, gap - (time.monotonic() - t0)))
                         continue
+                    if p.startswith("/api/footprint?") or p == "/api/footprint":
+                        jp, jr, na = footprint_split(jp, jr)
+                        s["agg"] += na
                     d += diff(jp, jr)
             elif bp != br:
                 d.append(("(바이트)", f"{len(bp)}B", f"{len(br)}B"))
@@ -196,6 +209,7 @@ def main() -> int:
         tot_when += s["when"]
         ms = lambda xs, q: f"{pct(xs, q) * 1000:.1f}"  # noqa: E731
         when = f" · 시점 다름 {s['when']}(원천 시각 예 {short(list(s['ex']['(원천 시각)']))})" if s["when"] else ""
+        when += f" · 복원 봉(agg · 견주지 않음) {s['agg']}" if s["agg"] else ""
         print(f"\n{p}\n  같음 {s['same']}/{s['n'] - s['when']}{when} · 시간 ms 파이썬 중앙 {statistics.median(s['tp']) * 1000:.1f}·상위1% {ms(s['tp'], .99)}"
               f" · rtserve 중앙 {statistics.median(s['tr']) * 1000:.1f}·상위1% {ms(s['tr'], .99)}")
         for f, k in s["fields"].most_common(6):
@@ -220,6 +234,11 @@ def selftest() -> int:
     assert stamp("/api/risk-radar", {"updated": "a", "coins": {"eth": {"ts": 1}}, "x": {"generated_at": 5}}) == (("updated", "a"), ("x.generated_at", 5))
     assert stamp("/api/news", {"items": [{"seen_ms": 3}, {"seen_ms": 9}]}) == (9,)
     assert stamp("/api/state", [1]) == ()
+    a, b, n = footprint_split({"bars": [{"time": 1, "agg": True, "levels": [1]}, {"time": 2, "agg": False, "levels": [2]}]},
+                              {"bars": [{"time": 1, "agg": False, "levels": [9]}, {"time": 2, "agg": False, "levels": [2]}]})
+    assert n == 1 and diff(a, b) == [] and a["bars"] == [{"time": 2, "agg": False, "levels": [2]}], "한쪽만 agg 인 봉도 뺀다"
+    a, b, n = footprint_split({"bars": [{"time": 2, "agg": False, "levels": [2]}]}, {"bars": [{"time": 2, "agg": False, "levels": [3]}]})
+    assert n == 0 and diff(a, b) == [(".bars[].levels[]", 2, 3)], "agg 아닌 봉은 그대로 견준다(양성 대조)"
     print("selftest ok")
     return 0
 
