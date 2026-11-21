@@ -210,6 +210,16 @@ M = [
     ("ob5m 예열 30→20분", "src/ob5m.rs", "WARM_MS: i64 = 1_800_000;", "WARM_MS: i64 = 1_200_000;", ["ob5m_parity"]),
     ("bookdepth 예열 12→11시간", "src/bookdepth.rs", "WARM_S: i64 = 12 * 3600;", "WARM_S: i64 = 11 * 3600;", ["ob5m_parity"]),
     ("bookdepth 매수 깊이 끝 bb+1 → bb", "src/bookdepth.rs", "bb + 1))", "bb))", ["ob5m_parity"]),
+    ("아이스버그 체결 ≥ 최대 표시 × 2 → × 1.5", "src/iceberg.rs", "vol >= 2.0 * mx {", "vol >= 1.5 * mx {", ["iceberg_parity"]),
+    ("아이스버그 칸 잔량 f32 안 거침", "src/iceberg.rs", "let f32v = |v: &Vec<f64>| v[k as usize] as f32 as f64;", "let f32v = |v: &Vec<f64>| v[k as usize];", ["iceberg_parity"]),
+    ("아이스버그 끊김에도 valid 1", "src/iceberg.rs", "        } else if m.get(\"pu\").and_then(|v| crate::py_int(v).ok()) != Some(self.last_u) {\n            self.valid = 0;", "        } else if m.get(\"pu\").and_then(|v| crate::py_int(v).ok()) != Some(self.last_u) {\n            self.valid = 1;", ["iceberg_parity"]),
+    ("아이스버그 기준선 95 → 90분위", "src/iceberg.rs", "np_quantile(&hs, 0.95)", "np_quantile(&hs, 0.90)", ["iceberg_parity"]),
+    ("아이스버그 테이프 대기 5 → 0초", "src/iceberg.rs", "pub const SETTLE: i64 = 5;", "pub const SETTLE: i64 = 0;", ["iceberg_parity"]),
+    ("예약 macro 마지막 봉 안 버림", "src/cron.rs", "                r.pop(); // 마지막 봉은", "                // 마지막 봉은", ["cron_parity"]),
+    ("예약 macro 백필 4일 → 5일", "src/cron.rs", "< 4.0 * 86400.0", "< 5.0 * 86400.0", ["cron_parity"]),
+    ("예약 treasury 진행 봉도 씀", "src/cron.rs", "        if t.rem_euclid(step) != 0 {\n            continue;\n        }", "", ["cron_parity"]),
+    ("예약 cboe 같은 seqno 도 저장", "src/cron.rs", "if std::fs::read_to_string(&state).is_ok_and(|s| s.trim() == seq_s) {", "if false {", ["cron_parity"]),
+    ("예약 quote 가 = 도 그대로", "src/cron.rs", "b\"_.-~/\".contains(&b)", "b\"_.-~/=\".contains(&b)", ["cron_parity"]),
     ("HL호가 완전 중복도 씀", "src/hl_ctx.rs", "if b.0 < self.last_ts || Some(b) == self.last_row {", "if b.0 < self.last_ts {", ["ctx_parity"]),
     ("HL호가 같은 시각 다시 열 때도 헤더", "src/bt.rs", "let new = !path.exists();", "let new = true;", ["ctx_parity"]),
     ("HL호가 끊길 때 그 시각 압축", "src/hl_ctx.rs", "b.close(false); // 같은 시각이면", "b.close(true); // 같은 시각이면", ["ctx_parity"]),
@@ -218,7 +228,7 @@ M = [
     ("래스터 칸 번호 floor(p / bin)", "src/raster.rs", "pub fn py_floordiv(a: f64, b: f64) -> f64 {\n", "pub fn py_floordiv(a: f64, b: f64) -> f64 {\n    #[allow(unreachable_code)]\n    return (a / b).floor();\n", ["raster_parity"]),
     ("래스터 헤더 bin_size 0.5 고정", "src/raster.rs", "(self.bin as f32).to_le_bytes()", "(0.5f32).to_le_bytes()", ["raster_parity"]),
 ]
-PARITY = ["tape_parity", "venue_parity", "rest_parity", "ctx_parity", "venue_rest_parity", "depth_parity", "raster_parity", "ob5m_parity"]
+PARITY = ["tape_parity", "venue_parity", "rest_parity", "ctx_parity", "venue_rest_parity", "depth_parity", "raster_parity", "ob5m_parity", "iceberg_parity", "cron_parity"]
 
 
 def digest() -> str:
