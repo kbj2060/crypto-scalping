@@ -313,6 +313,15 @@
 
 **Rust 추가분**: rtduck(새 크레이트 · DuckDB 1.5.1 묶음 · 롱숏비 워커·HL 체결 · 파이썬 duckdb 와 양방향 형식 호환 · 첫 빌드 13분 31초) · rtcollect HL 호가 원본(.bt) · rtui 글꼴(Pretendard 400·700·800 + JetBrains Mono 400·700 추린 판 · 묶음 gzip 2.66 → 1.88MB).
 
+### 진행 기록 10 — 병행 수집기 교체·주문 다리·4h 변동성 (2026-11-21 14:40~17:30)
+
+- **머지**: PR 62~67 (main 02f9eeca). rtorder 실행 파일 뼈대·허브 구독·그림자 모드·재생 도구·W12 다리(도는 주문에 화면 입력이 닿음 · 시험 84) · rtduck 시장 자료 워커·미시구조 34칸 · rtmodel QX4(+QX4I · 시험 21).
+- **서버 병행 수집기 교체**(16:15): 새 실행 파일(`py_float_repr` 반올림 수정판)로 34개 순차 재기동 · hl_ctx(ETH)를 내리고 hl_bt 3(ETH·SOL·XRP) + hl_ctx(BTC) · rtduck 5(hl_trades 4 + market_data 1) 추가 → **rtcollect 38 · rtduck 5 · rtcore 1** · 재부팅 등록 43건 · 패닉·재시작 반복 없음(SNDKUSDT 로그의 반복 줄은 11시대 수정 전 것). REST 종류(oi_lsratio·hl_positions·미시구조 폴링)는 호출이 두 배가 되므로 안 띄움.
+- **못 맞춘 것**: QX4 의 MLP 구성원은 OpenBLAS sgemm 가장자리 합 순서 몫으로 f32 1ulp 갈림(log_rv 상대 최대 5.9e-8 · 화면 반올림 값은 일치). 모델은 개발기 사본(서버 것과 같은지 미확인).
+- **서버 C: 가 차는 원인 조사**(읽기 전용 · 17시): C: 476G 중 여유 27G. Rust 병행 수집기는 6TB 에만 쓴다(열린 파일 전수 확인 · 6TB 밖은 로그 0.8MB). C: 를 쓰는 것은 ① WSL 본체 `C:\wsl\Ubuntu\ext4.vhdx` 219G(안에서 쓰는 양 142G · 차이 77G 는 지워도 윈도로 안 돌아온 자리) ② 파이썬 수집기 저장소 `C:\wsl\fast\fast.vhdx` 70G(안 57G · hot 14G·live 20G·실행 환경 23G · 11-07 결정으로 C: 에 둠). `.wslconfig` 에 sparse 설정 없음. 본체 안 큰 것: 저장소 `tmp` 53G(ob_info_map 29G·obim_srv 14G). 정리는 사용자 결정 대기.
+- **안드로이드 앱 세션 인수인계**: `docs/android_app_handoff_20261121.md`.
+- **진행 중**: 화면이 `/rt` 를 그림자로 구독(별도 브랜치 `claude/rt-screen-subscribe-20261121` · 서빙 코드라 머지는 사용자에게 물음) · rtserve 첫 조각 · 수집기 남은 것(아이스버그·예약 수집기) · 띠 안·이탈 모델 · 주문 계좌 알림·텔레그램.
+
 ## 10. 확인 못 한 것
 
 - 프로세스 멈춤의 원인, 화면 그리기 시간, 브라우저 → 서버 구간 — M0 에서 잰다.
