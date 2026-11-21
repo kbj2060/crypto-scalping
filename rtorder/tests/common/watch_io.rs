@@ -183,10 +183,6 @@ impl WatchIo for ScriptIo {
         self.note(vec![json!("place_tp_ladder"), legs.clone(), json!(symbol), json!(pside)]);
         Ok(self.respond("place_tp_ladder", None)?.get("ret").cloned().unwrap_or(Value::Null))
     }
-    async fn place_add_order(&mut self, symbol: &str, pside: &str, price: f64, qty: f64) -> Result<Value, String> {
-        self.note(vec![json!("place_add_order"), json!(symbol), json!(pside), json!(price), json!(qty)]);
-        Ok(self.respond("place_add_order", None)?.get("ret").cloned().unwrap_or(Value::Null))
-    }
     async fn cancel_wait_orphans(&mut self, symbols: &[String]) -> Result<Value, String> {
         self.note(vec![json!("cancel_wait_orphans"), json!(symbols)]);
         Ok(self.respond("cancel_wait_orphans", None)?.get("ret").cloned().unwrap_or(Value::Null))
@@ -260,7 +256,7 @@ fn run_op(w: &mut Watcher, io: &mut ScriptIo, tk: &Value) -> Value {
             "partial_exit_rearm_tp" => w.partial_exit_rearm_tp(io, plan.clone(), state.as_mut().unwrap()).await,
             "keep_rearm" => w.keep_rearm(io, &plan, state.as_mut().unwrap()).await,
             "exit_then_rearm" => w.exit_then_rearm(io, &plan, state.as_mut().unwrap()).await,
-            "arm_bracket" => w.arm_bracket(io, &plan, state.as_mut().unwrap(), tk.get("add").and_then(Value::as_bool).unwrap_or(true)).await,
+            "arm_bracket" => w.arm_bracket(io, &plan, state.as_mut().unwrap()).await,
             "plan_from_current" => w.plan_from_current(&plan).map(|p| ret = p.map_or(Value::Null, Value::Object)),
             "limit_save" => w.limit_save(io, &plan),
             "wait_cleanup" => w.wait_cleanup(io).await,

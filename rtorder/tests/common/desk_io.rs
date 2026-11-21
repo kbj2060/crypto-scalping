@@ -262,7 +262,6 @@ pub struct FakeQuotes {
     pub vol: Value,
     pub funding: Value,
     pub fees: Value,
-    pub margin: Value,
     pub calls: Vec<Value>,
 }
 pub fn default_books() -> Value {
@@ -281,7 +280,7 @@ impl FakeQuotes {
     pub fn new(c: &Value) -> Self {
         let g = |k: &str| c.get(k).cloned().unwrap_or(json!({}));
         FakeQuotes { books: c.get("books").cloned().unwrap_or_else(default_books), filters: c.get("filters").cloned().unwrap_or_else(default_filters),
-                     vol: g("vol"), funding: g("funding"), fees: g("fees"), margin: g("margin"), calls: vec![] }
+                     vol: g("vol"), funding: g("funding"), fees: g("fees"), calls: vec![] }
     }
 }
 impl Quotes for FakeQuotes {
@@ -311,10 +310,6 @@ impl Quotes for FakeQuotes {
         self.calls.push(json!(["fees", symbol]));
         self.fees.get(symbol).cloned().unwrap_or(json!({"symbol": symbol, "maker_bp": 2.0, "taker_bp": 5.0, "source": "fallback"}))
     }
-    async fn margin_type(&mut self, symbol: &str) -> Option<String> {
-        self.calls.push(json!(["margin_type", symbol]));
-        self.margin.get(symbol).and_then(Value::as_str).map(String::from)
-    }
 }
 
 // ── 계좌·화면 상태 ──
@@ -324,7 +319,6 @@ pub struct FakeDeskIo {
     pub account: Value,
     pub fresh: Option<Value>,
     pub sec: Value,
-    pub situation: Value,
     pub script: Map<String, Value>,
     pub calls: Vec<Value>,
     pub dir: PathBuf,
@@ -334,7 +328,7 @@ pub struct FakeDeskIo {
 impl FakeDeskIo {
     pub fn new(c: &Value, dir: PathBuf) -> Self {
         FakeDeskIo { t: c.get("t").and_then(Value::as_f64).unwrap_or(T0), exec_on: c.get("exec").and_then(Value::as_bool).unwrap_or(true), account: c["account"].clone(),
-                     fresh: c.get("fresh_account").cloned(), sec: c.get("sec").cloned().unwrap_or(json!({})), situation: c.get("situation").cloned().unwrap_or(json!({})),
+                     fresh: c.get("fresh_account").cloned(), sec: c.get("sec").cloned().unwrap_or(json!({})),
                      script: c.get("script").and_then(Value::as_object).cloned().unwrap_or_default(), calls: vec![], dir, stream: None }
     }
     fn respond(&mut self, name: &str) -> Result<Value, String> {
@@ -373,9 +367,6 @@ impl DeskIo for FakeDeskIo {
     }
     fn sec_prices(&mut self, asset: &str) -> Option<Vec<(f64, f64)>> {
         self.sec.get(asset).and_then(Value::as_array).map(|a| a.iter().map(|x| (x[0].as_f64().unwrap(), x[1].as_f64().unwrap())).collect())
-    }
-    fn vol_mult(&self, asset: &str) -> Value {
-        self.situation.get(asset).and_then(|s| s.get("vol_mult")).cloned().unwrap_or(json!({}))
     }
     async fn place_bracket(&mut self, spec: &Value, symbol: &str, pside: &str, strict: bool) -> Result<Value, String> {
         self.calls.push(json!(["place_bracket", spec, symbol, pside, strict]));
@@ -445,9 +436,8 @@ pub fn read_limits(dir: &Path) -> Value {
 
 pub fn task_json(t: &Task) -> Value {
     match t {
-        Task::Entry { plan, wait_sec, limit, .. } => json!({"fn": "entry_then_bracket", "plan": plan, "wait_sec": wait_sec, "limit": limit}),
+        Task::Entry { plan, limit, .. } => json!({"fn": "entry_then_bracket", "plan": plan, "limit": limit}),
         Task::Exit { plan, rearm, .. } => json!({"fn": if *rearm { "settle(exit_then_rearm)" } else { "settle(run_exit)" }, "plan": plan}),
-        Task::Switch { plan, sw, asset, .. } => json!({"fn": "exit_then_switch", "plan": plan, "sw": sw, "asset": asset}),
     }
 }
 
@@ -460,7 +450,7 @@ pub fn dispatch<Q: Quotes>(desk: &mut Desk, q: &mut Q, io: &mut FakeDeskIo, c: &
             let args = EntryArgs {
                 side: a["side"].as_str().unwrap().into(), fraction: a.get("fraction").and_then(Value::as_f64).unwrap_or(1.0), want_lev: a.get("want_lev").and_then(Value::as_i64),
                 asset: a.get("asset").and_then(Value::as_str).unwrap_or("eth").into(), fresh: a.get("fresh").and_then(Value::as_bool).unwrap_or(false),
-                rule_l: a.get("rule_l").and_then(Value::as_str).map(String::from), lines: a.get("lines").and_then(Value::as_array).map(|l| (l[0].as_f64().unwrap(), l[1].as_f64().unwrap())),
+                lines: a.get("lines").and_then(Value::as_array).map(|l| (l[0].as_f64().unwrap(), l[1].as_f64().unwrap())),
                 limit_usdt: a.get("limit_usdt").and_then(Value::as_f64), stop: a.get("stop").and_then(Value::as_bool).unwrap_or(false),
                 skip_wait: a.get("skip_wait").and_then(Value::as_str).map(String::from),
             };
@@ -472,7 +462,7 @@ pub fn dispatch<Q: Quotes>(desk: &mut Desk, q: &mut Q, io: &mut FakeDeskIo, c: &
         "exit" => {
             let a = &c["args"];
             let r = block_on(desk.assemble_exit_plan(q, io, a["side"].as_str().unwrap(), a.get("fraction").and_then(Value::as_f64).unwrap_or(1.0),
-                a.get("fresh").and_then(Value::as_bool).unwrap_or(true), a.get("asset").and_then(Value::as_str).unwrap_or("eth"), a.get("market").and_then(Value::as_bool).unwrap_or(false),
+                a.get("fresh").and_then(Value::as_bool).unwrap_or(true), a.get("asset").and_then(Value::as_str).unwrap_or("eth"),
                 a.get("for_order").and_then(Value::as_bool).unwrap_or(false), a.get("only_symbol").and_then(Value::as_str)));
             match r {
                 Ok(p) => json!({"plan": p, "err": null}),
@@ -485,8 +475,6 @@ pub fn dispatch<Q: Quotes>(desk: &mut Desk, q: &mut Q, io: &mut FakeDeskIo, c: &
                 "api_manual_entry_submit" => block_on(desk.api_entry_submit(q, io, &qy)),
                 "api_manual_entry_preview" => block_on(desk.api_entry_preview(q, io, &qy)),
                 "api_manual_exit_submit" => block_on(desk.api_exit_submit(q, io, &qy)),
-                "api_manual_exit_preview" => block_on(desk.api_exit_preview(q, io, &qy)),
-                "api_manual_exit_all_submit" => block_on(desk.api_exit_all_submit(q, io, &qy)),
                 "api_manual_limit_amend" => block_on(desk.api_limit_amend(q, io, &qy)),
                 "api_manual_wait_action" => block_on(desk.api_wait_action(q, io, &qy)),
                 "api_manual_entry_cancel" => desk.api_entry_cancel(io, &qy),

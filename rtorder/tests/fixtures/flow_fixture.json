@@ -3,6 +3,7 @@
 "scenarios": [
 {
 "name": "선 진입 체결 → 손절선 닿음 → 청산 → 무장 해제",
+"file0": null,
 "books": [
 [
 0.0,
@@ -255,7 +256,6 @@
 "backstop_price": null,
 "rule": false,
 "sl_name": "선 손절 2400.00",
-"auto": false,
 "lines": true,
 "tp_level": 2600.0,
 "sl_up": null,
@@ -274,8 +274,7 @@
 "error": null
 },
 "placed": true
-},
-"add_order": null
+}
 }
 },
 "limits": [],
@@ -536,6 +535,7 @@ true,
 },
 {
 "name": "익절 못 검 → 서버 감시 → 익절선 닿음 → 청산",
+"file0": null,
 "books": [
 [
 0.0,
@@ -780,7 +780,6 @@ true,
 "backstop_price": null,
 "rule": false,
 "sl_name": "선 손절 2400.00",
-"auto": false,
 "lines": true,
 "tp_level": 2600.0,
 "sl_up": null,
@@ -799,8 +798,7 @@ true,
 "error": "400 [-5022] Due to the order could not be executed as maker, the Post Only order will be rejected. The order will not be recorded in the order history"
 },
 "placed": false
-},
-"add_order": null
+}
 }
 },
 "limits": [],
@@ -1024,6 +1022,7 @@ true,
 },
 {
 "name": "청산 취소 확인 실패 → 재발동 전 정리 → 청산",
+"file0": null,
 "books": [
 [
 0.0,
@@ -1276,7 +1275,6 @@ true,
 "backstop_price": null,
 "rule": false,
 "sl_name": "선 손절 2400.00",
-"auto": false,
 "lines": true,
 "tp_level": 2600.0,
 "sl_up": null,
@@ -1295,8 +1293,7 @@ true,
 "error": null
 },
 "placed": true
-},
-"add_order": null
+}
 }
 },
 "limits": [],
@@ -1920,10 +1917,8 @@ true,
 "side": "LONG",
 "backstop_price": null,
 "rule": false,
-"auto": false,
 "lines": true,
 "armed_at": 1800000003.0,
-"add_order": null,
 "fired": true,
 "retry_after": 1800000076.0,
 "last_error": "주문 103 취소를 확인하지 못했습니다 — 거래소에서 직접 확인하세요",
@@ -2099,10 +2094,8 @@ true,
 "side": "LONG",
 "backstop_price": null,
 "rule": false,
-"auto": false,
 "lines": true,
 "armed_at": 1800000003.0,
-"add_order": null,
 "fired": true,
 "retry_after": 1800000110.0,
 "last_error": "앞선 청산 주문 정리 실패: 앞선 청산 주문 [103] 이 아직 살아 있습니다",
@@ -2387,6 +2380,7 @@ true,
 },
 {
 "name": "발동 전 익절 취소 실패 → 10초 뒤 다시 → 청산",
+"file0": null,
 "books": [
 [
 0.0,
@@ -2639,7 +2633,6 @@ true,
 "backstop_price": null,
 "rule": false,
 "sl_name": "선 손절 2400.00",
-"auto": false,
 "lines": true,
 "tp_level": 2600.0,
 "sl_up": null,
@@ -2658,8 +2651,7 @@ true,
 "error": null
 },
 "placed": true
-},
-"add_order": null
+}
 }
 },
 "limits": [],
@@ -2797,10 +2789,8 @@ true,
 "side": "LONG",
 "backstop_price": null,
 "rule": false,
-"auto": false,
 "lines": true,
 "armed_at": 1800000003.0,
-"add_order": null,
 "retry_after": 1800000023.0,
 "last_error": "익절 지정가 취소 실패: 500 [-1000] An unknown error occured while processing the request.",
 "tp_level": 2600.0,
@@ -3104,6 +3094,7 @@ true,
 },
 {
 "name": "따라가기 미체결 → 시장가(M1) → 무장",
+"file0": null,
 "books": [
 [
 0.0,
@@ -4717,7 +4708,6 @@ true,
 "backstop_price": null,
 "rule": false,
 "sl_name": "선 손절 2400.00",
-"auto": false,
 "lines": true,
 "tp_level": 2600.0,
 "sl_up": null,
@@ -4736,8 +4726,7 @@ true,
 "error": null
 },
 "placed": true
-},
-"add_order": null
+}
 }
 },
 "limits": [],
@@ -4752,7 +4741,504 @@ true,
 ]
 },
 {
+"name": "옛 규칙 무장 닫힘 → dbad·dbsl 정리 → 무장 해제",
+"file0": {
+"ETHUSDC:LONG": {
+"symbol": "ETHUSDC",
+"side": "LONG",
+"sl_price": 2375.1,
+"sl_level": 2374.5,
+"tp_price": null,
+"backstop_price": 2375.1,
+"rule": true,
+"auto": true,
+"sl_name": "첫 진입가 −5%",
+"lines": false,
+"tp_level": null,
+"sl_up": null,
+"tp_resting": false,
+"armed_at": 1799999400.0,
+"placed": {
+"placed": true,
+"backstop": {
+"placed": true
+}
+},
+"add_order": null
+}
+},
+"books": [
+[
+0.0,
+{
+"ETHUSDC": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.00",
+"askPrice": "2500.10"
+},
+"ETHUSDT": {
+"symbol": "ETHUSDT",
+"bidPrice": "2501.00",
+"askPrice": "2501.10"
+}
+}
+]
+],
+"steps": [
+{
+"op": "tick",
+"plan": null,
+"limit": false,
+"t": 5.0,
+"sec": [],
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000005037&signature=6f6115e8a6b82de8e180126daf3b572746eeb6fdf1fbbc00cf78d1746574402a",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/order?symbol=ETHUSDC&orderId=50&recvWindow=5000&timestamp=1800000005037&signature=16ce2a2d487d3829b7111f5879c240e8f34448683a6dacdcbe72883e3238c680",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000005037&signature=6f6115e8a6b82de8e180126daf3b572746eeb6fdf1fbbc00cf78d1746574402a",
+"key": "test_key"
+},
+{
+"method": "DELETE",
+"target": "/fapi/v1/algoOrder?algoId=11&recvWindow=5000&timestamp=1800000005037&signature=09e4ecd00b9779d0b25bfd8416178a07dd2a75b98d3d62896ee008c6ea4e02ec",
+"key": "test_key"
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"serverTime": 1800000005037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"orderId": 50,
+"clientOrderId": "dbadL1799990000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2481.25",
+"origQty": "0.5",
+"executedQty": "0",
+"status": "NEW"
+}
+]
+},
+{
+"status": 200,
+"body": {
+"orderId": 50,
+"clientOrderId": "dbadL1799990000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2481.25",
+"origQty": "0.5",
+"executedQty": "0",
+"status": "CANCELED"
+}
+},
+{
+"status": 200,
+"body": [
+{
+"algoId": 11,
+"clientAlgoId": "dbslL1799990000000",
+"symbol": "ETHUSDC"
+},
+{
+"algoId": 12,
+"clientAlgoId": "dbslL1799990000001",
+"symbol": "ETHUSDT"
+},
+{
+"algoId": 13,
+"clientAlgoId": "dbslS1799990000000",
+"symbol": "ETHUSDC"
+}
+]
+},
+{
+"status": 200,
+"body": {
+"algoId": 11,
+"code": "200",
+"msg": "success"
+}
+}
+],
+"calls": [
+[
+5.0,
+"account"
+],
+[
+5.0,
+"bars",
+"eth"
+]
+],
+"exit_plans": [],
+"entry": {
+"phase": "submitting"
+},
+"file": {},
+"limits": [],
+"logs": [
+"bracket LONG: 포지션 없음 -> 정리 {'cancelled': 2, 'errors': []}"
+],
+"raised": null,
+"t_end": 5.0,
+"pos": {
+"LONG": 0.0,
+"SHORT": 0.0
+}
+}
+]
+},
+{
+"name": "감시 진입 닿음 → 따라가기 체결 → 무장",
+"file0": null,
+"books": [
+[
+0.0,
+{
+"ETHUSDC": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.00",
+"askPrice": "2500.10"
+},
+"ETHUSDT": {
+"symbol": "ETHUSDT",
+"bidPrice": "2501.00",
+"askPrice": "2501.10"
+}
+}
+]
+],
+"steps": [
+{
+"op": "entry",
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2510.0,
+"quantity": 0.4,
+"target_leverage": 10,
+"bracket": {
+"available": true,
+"lines": true,
+"rule": false,
+"tp_price": 2600.0,
+"tp_level": 2600.0,
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"sl_name": "선 손절 2400.00",
+"sl_up": null,
+"backstop_price": null
+},
+"limit": {
+"usdt": 2510.0
+},
+"stop": true,
+"wid": 1
+},
+"limit": true,
+"t": 0.0,
+"sec": [
+[
+1800000000.5,
+2511.0
+]
+],
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000000037&signature=d0c47381d5c4d2684ec6c84d6ecef84ad5819e1f735aa467be15b9a15bce0780",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/leverage?symbol=ETHUSDC&leverage=10&recvWindow=5000&timestamp=1800000000037&signature=4af09baa51735d412bc9c480be3ba13f0b59ef15b9106db0a3f4940bbff46154",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2500.0&quantity=0.4&newClientOrderId=dbpgL1800000000000&recvWindow=5000&timestamp=1800000000037&signature=b5b2aa78dcae42dbb33129b9ac918309fd46581a19f2ee426aa89a08d980e184",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=BUY&positionSide=LONG&orderId=101&recvWindow=5000&timestamp=1800000003037&signature=e945d4c78e2bfd698354c017fbeedebf5de3a85418f5f2309b062837d30c115d",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/time",
+"key": null
+},
+{
+"method": "GET",
+"target": "/fapi/v2/positionRisk?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000003037&signature=ba4b27fb6eea8b8538817437579f2403c0e7087142491951efcb9e8a6a0c10d7",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000003037&signature=ba4b27fb6eea8b8538817437579f2403c0e7087142491951efcb9e8a6a0c10d7",
+"key": "test_key"
+},
+{
+"method": "GET",
+"target": "/fapi/v1/openAlgoOrders?symbol=ETHUSDC&recvWindow=5000&timestamp=1800000003037&signature=ba4b27fb6eea8b8538817437579f2403c0e7087142491951efcb9e8a6a0c10d7",
+"key": "test_key"
+},
+{
+"method": "POST",
+"target": "/fapi/v1/order?symbol=ETHUSDC&side=SELL&positionSide=LONG&type=LIMIT&timeInForce=GTX&price=2600.0&quantity=0.4&newClientOrderId=dbtpL1800000003000&recvWindow=5000&timestamp=1800000003037&signature=ac47befd1533857cde178259f1c433c07544b061fd90b1662da0c6fd298dc502",
+"key": "test_key"
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.00",
+"askPrice": "2500.10"
+}
+},
+{
+"status": 200,
+"body": {
+"serverTime": 1800000000037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "0.0",
+"leverage": "5",
+"marginType": "cross"
+},
+{
+"symbol": "ETHUSDC",
+"positionSide": "SHORT",
+"positionAmt": "-0.0",
+"leverage": "5",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"leverage": 10,
+"maxNotionalValue": "1000000"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbpgL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2500.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+},
+{
+"status": 200,
+"body": {
+"orderId": 101,
+"clientOrderId": "dbpgL1800000000000",
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2500.0",
+"origQty": "0.4",
+"executedQty": "0.4",
+"status": "FILLED"
+}
+},
+{
+"status": 200,
+"body": {
+"serverTime": 1800000003037
+}
+},
+{
+"status": 200,
+"body": [
+{
+"symbol": "ETHUSDC",
+"positionSide": "LONG",
+"positionAmt": "0.4",
+"leverage": "10",
+"marginType": "cross"
+},
+{
+"symbol": "ETHUSDC",
+"positionSide": "SHORT",
+"positionAmt": "-0.0",
+"leverage": "10",
+"marginType": "cross"
+}
+]
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": []
+},
+{
+"status": 200,
+"body": {
+"orderId": 102,
+"clientOrderId": "dbtpL1800000003000",
+"symbol": "ETHUSDC",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": "2600.0",
+"origQty": "0.4",
+"executedQty": "0",
+"status": "NEW"
+}
+}
+],
+"calls": [
+[
+0.0,
+"sec",
+"eth"
+]
+],
+"exit_plans": [],
+"entry": {
+"phase": "filled_maker",
+"mode": "limit",
+"stop": true,
+"triggered": "2027-01-15T08:00:00+00:00",
+"filled": 0.4,
+"limit_price": 2500.0,
+"quantity": 0.4,
+"amends": 0,
+"deadline_sec": 120.0,
+"wait_until": "2027-01-15T12:00:00+00:00",
+"leverage": {
+"changed": true,
+"from": 5,
+"to": 10
+},
+"repegs": 0,
+"order_id": 101,
+"taker_qty": 0.0,
+"done_at": "2027-01-15T08:00:03+00:00",
+"bracket": {
+"qty": 0.4,
+"cleared": {
+"cancelled": 0,
+"errors": []
+},
+"tp": {
+"placed": true,
+"price": 2600.0,
+"order_id": 102,
+"error": null
+},
+"placed": true
+}
+},
+"file": {
+"ETHUSDC:LONG": {
+"symbol": "ETHUSDC",
+"side": "LONG",
+"sl_price": 2400.0,
+"sl_level": 2400.0,
+"tp_price": 2600.0,
+"backstop_price": null,
+"rule": false,
+"sl_name": "선 손절 2400.00",
+"lines": true,
+"tp_level": 2600.0,
+"sl_up": null,
+"tp_resting": true,
+"armed_at": 1800000003.0,
+"placed": {
+"qty": 0.4,
+"cleared": {
+"cancelled": 0,
+"errors": []
+},
+"tp": {
+"placed": true,
+"price": 2600.0,
+"order_id": 102,
+"error": null
+},
+"placed": true
+}
+}
+},
+"limits": [],
+"logs": [],
+"raised": null,
+"t_end": 3.0,
+"pos": {
+"LONG": 0.4,
+"SHORT": 0.0
+}
+}
+]
+},
+{
 "name": "지정가 대기 자동 재조정(P23) → 체결 → 무장",
+"file0": null,
 "books": [
 [
 0.0,
@@ -5371,7 +5857,6 @@ true,
 "backstop_price": null,
 "rule": false,
 "sl_name": "선 손절 2400.00",
-"auto": false,
 "lines": true,
 "tp_level": 2600.0,
 "sl_up": null,
@@ -5390,8 +5875,7 @@ true,
 "error": null
 },
 "placed": true
-},
-"add_order": null
+}
 }
 },
 "limits": [],

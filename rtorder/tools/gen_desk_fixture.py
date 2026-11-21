@@ -43,7 +43,7 @@ import scripts.binance_ban_guard as ban_guard  # noqa: E402
 
 # 스위치가 지금 값일 때만 이 정답지가 뜻이 있다(Rust 는 같은 값을 상수로 둔다 -- assemble.rs)
 assert orders.SIZING_RISK_MODEL_ENABLED is False and orders.SIZING_CAP_MODEL_ONLY is True and orders.SIZING_MARGIN_CAP_PCT == 0.0
-assert orders.MANUAL_RULES_ENABLED is True and orders.REC_AUTO_ADD is True and orders.MANUAL_EXEC_SYMBOL == "ETHUSDC"
+assert orders.MANUAL_EXEC_SYMBOL == "ETHUSDC" and not hasattr(orders, "REC_AUTO_ADD")   # 2026-11-21 PR 61 판(자동 규칙·물타기 지움)
 
 OUT = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "desk_fixture.json"
 T0 = 1_800_000_000.0
@@ -479,11 +479,6 @@ async def f_fees(_s, symbol):
     return Ctl.fees.get(symbol) or {"symbol": symbol, "maker_bp": 2.0, "taker_bp": 5.0, "source": "fallback"}
 
 
-async def f_margin(_s, symbol):
-    note("margin_type", symbol)
-    return Ctl.margin.get(symbol)
-
-
 async def f_clear(_s, symbol, pside, *, only_sl=False, only_tp=False):
     note("clear_bracket", symbol, pside, only_sl, only_tp)
     return resp_of("clear_bracket")
@@ -499,17 +494,12 @@ async def f_ladder(_s, legs, symbol, pside):
     return resp_of("place_tp_ladder")
 
 
-async def f_place_stop(_s, symbol, pside, price):
-    note("place_stop", symbol, pside, price)
-    return resp_of("place_stop")
-
-
 async def _noop():
     return None
 
 
-def f_etb(plan, state, wait_sec=None, limit=False):
-    Ctl.started.append({"fn": "entry_then_bracket", "plan": snap(plan), "wait_sec": wait_sec, "limit": limit})
+def f_etb(plan, state, limit=False):
+    Ctl.started.append({"fn": "entry_then_bracket", "plan": snap(plan), "limit": limit})
     return _noop()
 
 
@@ -517,11 +507,6 @@ def f_settle(coro, state):
     name = coro.cr_code.co_name
     coro.close()
     Ctl.started.append({"fn": f"settle({name})", "plan": snap(state.get("plan"))})
-    return _noop()
-
-
-def f_switch(plan, state, sw, asset):
-    Ctl.started.append({"fn": "exit_then_switch", "plan": snap(plan), "sw": snap(sw), "asset": asset})
     return _noop()
 
 
@@ -554,7 +539,7 @@ def setup(c, tmp):
     Ctl.calls, Ctl.started = [], []
     Ctl.account, Ctl.fresh = c.get("account"), c.get("fresh_account")
     Ctl.books, Ctl.filters = c.get("books", BOOKS), c.get("filters", FILTERS)
-    Ctl.vol, Ctl.funding, Ctl.fees, Ctl.margin = c.get("vol", {}), c.get("funding", {}), c.get("fees", {}), c.get("margin", {})
+    Ctl.vol, Ctl.funding, Ctl.fees = c.get("vol", {}), c.get("funding", {}), c.get("fees", {})
     Ctl.sec, Ctl.exec_on = c.get("sec", {}), c.get("exec", True)
     Ctl.script = json.loads(json.dumps(c.get("script") or {}))
     Ctl.live = tmp
@@ -570,19 +555,18 @@ async def run_desk_case(c):
     fa = types.SimpleNamespace(**{**FAKE_ASYNCIO.__dict__, "sleep": asyncio.sleep, "create_task": lambda coro: (coro.close(), FakeTask(False))[1]})
     buf = io.StringIO()
     with mock.patch.multiple(orders, LIVE_DIR=tmp, time=FAKE_TIME, datetime=FakeDT, asyncio=fa, exec_enabled=lambda: Ctl.exec_on,
-                             load_filters=f_filters, commission_bp=f_fees, margin_type=f_margin, clear_bracket=f_clear, place_stop=f_place_stop,
+                             load_filters=f_filters, commission_bp=f_fees, clear_bracket=f_clear,
                              run_exit=run_exit, SIZING_CAP_OVERRIDE_X=c.get("override_x", 0.0),
                              fetch_account=boom, run_entry=boom, place_bracket=f_place_bracket, place_tp_ladder=f_ladder):
         api = register(tmp, tasks=tasks, fetch=f_fetch, swr=f_swr, situation=c.get("situation", {}),
                        sec=lambda a: None if Ctl.sec.get(a) is None else [tuple(x) for x in Ctl.sec[a]])
         cells = closure_map([api.api_manual_entry_submit, api.api_manual_exit_submit, api.api_manual_limit_amend, api.busy_or, api.bracket_tick,
-                             api.api_manual_wait_action, api.api_manual_bracket_rearm, api.api_manual_exit_all_submit, api.start_wait_cleanup])
+                             api.api_manual_wait_action, api.api_manual_bracket_rearm, api.start_wait_cleanup])
         cells["produce_account"].cell_contents = f_produce
         cells["realized_vol_now"].cell_contents = f_vol
         cells["funding_now"].cell_contents = f_funding
         cells["entry_then_bracket"].cell_contents = f_etb
         cells["settle"].cell_contents = f_settle
-        cells["exit_then_switch"].cell_contents = f_switch
         cells["exit_then_rearm"].cell_contents = exit_then_rearm
         sl = {k: cells[k].cell_contents for k in ("manual_entry_state", "side_exit_states", "manual_wait_states", "bracket_exiting")}
         s0 = c.get("slots0") or {}
@@ -596,13 +580,13 @@ async def run_desk_case(c):
             if c["op"] == "entry":
                 a = c["args"]
                 plan, cap, _sz, err = await cells["assemble_entry_plan"].cell_contents(
-                    a["side"], a.get("fraction", 1.0), a.get("want_lev"), a.get("asset", "eth"), fresh=a.get("fresh", False), rule_l=a.get("rule_l"),
+                    a["side"], a.get("fraction", 1.0), a.get("want_lev"), a.get("asset", "eth"), fresh=a.get("fresh", False),
                     lines=tuple(a["lines"]) if a.get("lines") else None, limit_usdt=a.get("limit_usdt"), stop=a.get("stop", False), skip_wait=a.get("skip_wait"))
                 out.update(plan=snap(plan), cap=snap(cap), err=snap(err))
             elif c["op"] == "exit":
                 a = c["args"]
                 plan, err = await cells["assemble_exit_plan"].cell_contents(a["side"], a.get("fraction", 1.0), fresh=a.get("fresh", True), asset=a.get("asset", "eth"),
-                                                                            market=a.get("market", False), for_order=a.get("for_order", False), only_symbol=a.get("only_symbol"))
+                                                                            for_order=a.get("for_order", False), only_symbol=a.get("only_symbol"))
                 out.update(plan=snap(plan), err=snap(err))
             else:
                 h = getattr(api, c["op"])
@@ -648,50 +632,65 @@ def oo(sym, side, px, qty, cid="", ro=False):
     return {"symbol": sym, "side": side, "price": px, "qty": qty, "reduce_only": ro, "cid": cid}
 
 
-VM = {"eth": {"vol_mult": {"sigma_bp": 18.0, "mult": 0.11, "bar": T0 - 60}}, "xrp": {"vol_mult": {"sigma_bp": 30.0, "mult": 0.2, "bar": T0 - 2000}}}
 RULE_ARM = {"ETHUSDC:LONG": {"symbol": "ETHUSDC", "side": "LONG", "sl_price": 2375.1, "sl_level": 2374.5, "backstop_price": 2375.1, "rule": True, "auto": True,
-                             "sl_name": "첫 진입가 −5%", "armed_at": T0 - 500}}
+                             "sl_name": "첫 진입가 −5%", "armed_at": T0 - 500}}   # 배포 전 옛 규칙 무장(5분봉 종가 감시는 계속 · 선은 못 건다)
 LINES_ARM = {"ETHUSDC:LONG": {"symbol": "ETHUSDC", "side": "LONG", "lines": True, "rule": False, "tp_level": 2600.0, "tp_price": 2600.25, "sl_level": 2400.0,
                               "sl_price": 2400.2, "sl_name": "선 손절 2400.00", "sl_up": False, "tp_resting": True, "armed_at": T0 - 500}}
-SEC = {"eth": [[T0 - 1, 2499.6]], "soxl": [[T0 - 1, 30.12]]}
+LINES_ARM_S = {"ETHUSDC:SHORT": {**LINES_ARM["ETHUSDC:LONG"], "side": "SHORT", "tp_level": 2300.0, "tp_price": 2300.2, "sl_level": 2600.0, "sl_price": 2600.3, "sl_name": "선 손절 2600.00"}}
+SEC = {"eth": [[T0 - 1, 2499.6]], "soxl": [[T0 - 1, 30.12]], "sol": [[T0 - 1, 150.11]], "btc": [[T0 - 1, 89990.1]], "xrp": [[T0 - 1, 0.5122]]}
+# 2026-11-21 PR 61: 진입은 선(익절·손절)이 있어야 받는다 -- 크기 조립을 보는 사례는 코인·방향마다 맞는 선을 붙인다
+LN = {("eth", "LONG"): [2600.0, 2400.0], ("eth", "SHORT"): [2400.0, 2600.0], ("sol", "LONG"): [160.0, 140.0], ("soxl", "SHORT"): [28.0, 32.0],
+      ("btc", "LONG"): [95000.0, 85000.0], ("xrp", "LONG"): [0.55, 0.48]}
 
 
 def W(asset_sym_plan, **kw):
     return {"phase": "working", **kw, "plan": asset_sym_plan}
 
 
-E = lambda **kw: {"op": "entry", "args": {"side": "LONG", **kw}}   # noqa: E731
+E0 = lambda **kw: {"op": "entry", "args": {"side": "LONG", **kw}}   # noqa: E731 -- 선 없이(lines_required)
+
+
+def E(**kw):
+    a = {"side": "LONG", **kw}
+    a.setdefault("lines", LN[(a.get("asset", "eth"), a["side"])])
+    return {"op": "entry", "args": a}
 X = lambda **kw: {"op": "exit", "args": {"side": "LONG", **kw}}   # noqa: E731
 P_ETH = [pos("ETHUSDC", "LONG", 0.4, 2400.0, 2450.0, liq=1800.0, up=20.0)]
 ENTRY_CASES = [
-    ("eth_long_lev10", E(want_lev=10), {}),
-    ("eth_short_half_model_lev", E(side="SHORT", fraction=0.5), {}),
-    ("eth_long_no_balances_field", E(want_lev=10), {"account": ACC(balances=False)}),
-    ("sol_long", E(asset="sol", want_lev=5, fraction=0.3), {}),
-    ("soxl_short_usdt_pool", E(side="SHORT", asset="soxl", want_lev=3), {"account": ACC(positions=P_ETH + [pos("SOXLUSDT", "SHORT", 3, 31.0, 30.12, lev=3.0)])}),
-    ("btc_long_tiny_blocked", E(asset="btc", want_lev=1, fraction=0.001), {}),
-    ("other_symbol_orders_and_waits_rule_shared", E(want_lev=10),
-     {"file0": RULE_ARM, "account": ACC(positions=P_ETH, orders=[oo("XRPUSDC", "BUY", 0.5, 1000.0, "dbad1"), oo("SOXLUSDT", "BUY", 29.0, 5.0), oo("ETHUSDC", "BUY", 2300.0, 0.2, "dbwtB1"),
-                                                             oo("XRPUSDC", "SELL", 0.6, 500.0, "dbtpS", ro=True), oo("SOLUSDC", "BUY", 140.0, 2.0, "dbwtB2")]),
+    ("eth_long_lev10", E(want_lev=10), {"sec": SEC}),
+    ("eth_short_half_model_lev", E(side="SHORT", fraction=0.5), {"sec": SEC}),
+    ("eth_long_no_balances_field", E(want_lev=10), {"sec": SEC, "account": ACC(balances=False)}),
+    ("sol_long", E(asset="sol", want_lev=5, fraction=0.3), {"sec": SEC}),
+    ("soxl_short_usdt_pool", E(side="SHORT", asset="soxl", want_lev=3), {"sec": SEC, "account": ACC(positions=P_ETH + [pos("SOXLUSDT", "SHORT", 3, 31.0, 30.12, lev=3.0)]),
+                                                                   "file0": {"SOXLUSDT:SHORT": {**LINES_ARM_S["ETHUSDC:SHORT"], "symbol": "SOXLUSDT", "tp_level": 28.0, "tp_price": 28.01, "sl_level": 32.0, "sl_price": 32.01}}}),
+    ("btc_long_tiny_blocked", E(asset="btc", want_lev=1, fraction=0.001), {"sec": SEC}),
+    ("other_symbol_orders_and_waits", E(want_lev=10),
+     {"sec": SEC, "file0": LINES_ARM, "account": ACC(positions=P_ETH, orders=[oo("XRPUSDC", "BUY", 0.5, 1000.0, "dbad1"), oo("SOXLUSDT", "BUY", 29.0, 5.0), oo("ETHUSDC", "BUY", 2300.0, 0.2, "dbwtB1"),
+                                                                         oo("XRPUSDC", "SELL", 0.6, 500.0, "dbtpS", ro=True), oo("SOLUSDC", "BUY", 140.0, 2.0, "dbwtB2")]),
       "slots0": {"waits": {"sol": W({"quantity": 3.0, "price": 140.0}, filled=0.5), "eth#2": W({"quantity": 0.1, "price": 2300.0}, limit_price=2301.0),
                            "soxl": W({"quantity": 5, "price": 29.0}), "xrp": {"phase": "filled_maker", "plan": {"quantity": 100.0, "price": 0.5}}}}}),
     ("skip_wait_own_order_in_account", E(want_lev=10, skip_wait="eth#2", lines=[2600, 2400], limit_usdt=2450.0),
      {"sec": SEC, "account": ACC(orders=[oo("ETHUSDC", "BUY", 2450.12, 0.3, "dbwtB9")]),
       "slots0": {"waits": {"eth#2": W({"quantity": 0.3, "price": 2450.12}, order_id=55, limit_price=2450.12), "eth": W({"quantity": 0.1, "price": 2440.0}, stop=True)}}}),
-    ("same_side_add_rule_keeps_stop", E(want_lev=10), {"file0": RULE_ARM, "account": ACC(positions=P_ETH)}),
-    ("same_side_add_entry_at_old", E(want_lev=10), {"account": ACC(positions=[pos("ETHUSDC", "LONG", 0.4, 2400.0, 2450.0, entry_at=iso(T0 - 4 * 3600 - 60))])}),
-    ("same_side_add_entry_at_naive", E(want_lev=10), {"account": ACC(positions=[pos("ETHUSDC", "LONG", 0.4, 2400.0, 2450.0, entry_at="2027-01-15T00:00:00")])}),
-    ("hedge_both_short_entry", E(side="SHORT", want_lev=10), {"account": ACC(positions=P_ETH + [pos("ETHUSDC", "SHORT", 0.2, 2480.0, 2450.0, liq=2900.0)])}),
-    ("no_leverage_zero_equity", E(), {"account": ACC(usdc=(0.0, 0.0, 0.0), lev={})}),
-    ("no_leverage_anywhere", E(), {"account": ACC(lev={}, usdc=(1000.0, 800.0, None))}),
+    # 2026-11-21 PR 61 새 거절: 선 없는 진입 400 · 선 없는 포지션(옛 규칙 무장·앱 진입)에 추가 진입 409
+    ("lines_required_no_lines", E0(want_lev=10), {"sec": SEC}),
+    ("lines_required_on_lined_position", E0(want_lev=10), {"sec": SEC, "file0": LINES_ARM, "account": ACC(positions=P_ETH)}),
+    ("add_on_rule_position_409", E(want_lev=10), {"sec": SEC, "file0": RULE_ARM, "account": ACC(positions=P_ETH)}),
+    ("add_on_app_position_409", E(want_lev=10), {"sec": SEC, "account": ACC(positions=P_ETH)}),
+    ("limit_add_on_app_position_409", E(want_lev=10, lines=[2700.0, 2300.0], limit_usdt=2440.0), {"sec": SEC, "account": ACC(positions=P_ETH)}),
+    ("same_side_add_entry_at_old", E(want_lev=10), {"sec": SEC, "file0": LINES_ARM, "account": ACC(positions=[pos("ETHUSDC", "LONG", 0.4, 2400.0, 2450.0, entry_at=iso(T0 - 4 * 3600 - 60))])}),
+    ("same_side_add_entry_at_naive", E(want_lev=10), {"sec": SEC, "file0": LINES_ARM, "account": ACC(positions=[pos("ETHUSDC", "LONG", 0.4, 2400.0, 2450.0, entry_at="2027-01-15T00:00:00")])}),
+    ("hedge_both_short_entry", E(side="SHORT", want_lev=10), {"sec": SEC, "file0": LINES_ARM_S, "account": ACC(positions=P_ETH + [pos("ETHUSDC", "SHORT", 0.2, 2480.0, 2450.0, liq=2900.0)])}),
+    ("no_leverage_zero_equity", E(), {"sec": SEC, "account": ACC(usdc=(0.0, 0.0, 0.0), lev={})}),
+    ("no_leverage_anywhere", E(), {"sec": SEC, "account": ACC(lev={}, usdc=(1000.0, 800.0, None))}),
     ("account_not_ok", E(), {"account": ACC(ok=False)}),
     ("account_raises", E(), {"account": {"__raise__": ["ClientOSError", "boom"]}}),
-    ("book_fails", E(), {"books": {k: v for k, v in BOOKS.items() if k != "ETHUSDC"}}),
-    ("book_missing_ask", E(), {"books": {**BOOKS, "ETHUSDC": {"bidPrice": "2500"}}}),
-    ("filters_fail", E(), {"filters": {}}),
-    ("basis_ref_fails", E(want_lev=10), {"books": {k: v for k, v in BOOKS.items() if k != "ETHUSDT"}}),
-    ("fresh_account", E(want_lev=10, fresh=True), {"fresh_account": ACC(usdc=(500.0, 400.0, 10.0))}),
-    ("override_x", E(want_lev=20), {"override_x": 3.0}),
+    ("book_fails", E(), {"sec": SEC, "books": {k: v for k, v in BOOKS.items() if k != "ETHUSDC"}}),
+    ("book_missing_ask", E(), {"sec": SEC, "books": {**BOOKS, "ETHUSDC": {"bidPrice": "2500"}}}),
+    ("filters_fail", E(), {"sec": SEC, "filters": {}}),
+    ("basis_ref_fails", E(want_lev=10), {"sec": SEC, "books": {k: v for k, v in BOOKS.items() if k != "ETHUSDT"}}),
+    ("fresh_account", E(want_lev=10, fresh=True), {"sec": SEC, "fresh_account": ACC(usdc=(500.0, 400.0, 10.0))}),
+    ("override_x", E(want_lev=20), {"sec": SEC, "override_x": 3.0}),
     ("lines_long", E(want_lev=10, lines=[2600.0, 2400.0]), {"sec": SEC, "vol": {"ETHUSDC": 4.2}, "funding": {"ETHUSDC": 0.8}, "fees": {"ETHUSDC": {"symbol": "ETHUSDC", "maker_bp": 0.0, "taker_bp": 4.0, "source": "live"}}}),
     ("lines_short", E(side="SHORT", want_lev=10, lines=[2400.0, 2600.0]), {"sec": SEC, "vol": {"ETHUSDC": 35.0}}),
     ("lines_no_feed", E(want_lev=10, lines=[2600.0, 2400.0]), {}),
@@ -701,23 +700,13 @@ ENTRY_CASES = [
     ("limit_marketable", E(want_lev=10, lines=[2600.0, 2300.0], limit_usdt=2510.0), {"sec": SEC}),
     ("stop_entry_above", E(want_lev=10, lines=[2700.0, 2500.0], limit_usdt=2560.0, stop=True), {"sec": SEC}),
     ("limit_tiny_blocked", E(want_lev=1, fraction=0.00005, lines=[2600.0, 2300.0], limit_usdt=2450.0), {"sec": SEC}),
-    ("rule_c_eth_first", E(want_lev=10, rule_l="c"), {"situation": VM, "margin": {"ETHUSDC": "cross"}}),
-    ("rule_h_eth_add", E(want_lev=10, rule_l="h"), {"situation": VM, "margin": {"ETHUSDC": "cross"}, "file0": RULE_ARM, "account": ACC(positions=P_ETH)}),
-    ("rule_low_lev_binds", E(want_lev=1, rule_l="c"), {"situation": VM, "margin": {"ETHUSDC": "cross"}}),
-    ("rule_sol_unsupported", E(asset="sol", rule_l="c"), {"situation": VM}),
-    ("rule_vol_stale", E(asset="xrp", rule_l="c"), {"situation": VM}),
-    ("rule_isolated", E(want_lev=10, rule_l="c"), {"situation": VM, "margin": {"ETHUSDC": "isolated"}}),
-    ("rule_margin_unknown", E(want_lev=10, rule_l="c"), {"situation": VM}),
     ("add_on_lines_position", E(want_lev=10, lines=[2700.0, 2300.0]), {"sec": SEC, "file0": LINES_ARM, "account": ACC(positions=P_ETH)}),
     ("add_on_lines_tp_off_sl_off_legs", E(want_lev=10), {"sec": SEC, "account": ACC(positions=P_ETH),
      "file0": {"ETHUSDC:LONG": {**LINES_ARM["ETHUSDC:LONG"], "tp_off": {"at": 1}, "sl_off": {"at": 2}, "tp_legs": [{"level": 2600.0}, {"level": 2650.0}]}}}),
     ("add_on_lines_limit", E(want_lev=10, lines=[2700.0, 2300.0], limit_usdt=2440.0), {"sec": SEC, "file0": LINES_ARM, "account": ACC(positions=P_ETH)}),
-    ("lines_on_plain_position_dropped", E(want_lev=10, lines=[2700.0, 2300.0]), {"sec": SEC, "account": ACC(positions=P_ETH)}),
-    ("limit_on_plain_position_409", E(want_lev=10, lines=[2700.0, 2300.0], limit_usdt=2440.0), {"sec": SEC, "account": ACC(positions=P_ETH)}),
-    ("rule_on_lines_position_409", E(want_lev=10, rule_l="c"), {"sec": SEC, "situation": VM, "margin": {"ETHUSDC": "cross"}, "file0": LINES_ARM, "account": ACC(positions=P_ETH)}),
-    ("exiting_fired_409", E(want_lev=10), {"file0": {"ETHUSDC:LONG": {**RULE_ARM["ETHUSDC:LONG"], "fired": True}}, "account": ACC(positions=P_ETH)}),
-    ("exiting_set_409", E(want_lev=10), {"file0": RULE_ARM, "account": ACC(positions=P_ETH), "slots0": {"exiting": ["ETHUSDC:LONG"]}}),
-    ("multi_assets_pool", E(asset="soxl", side="SHORT", want_lev=3), {"account": ACC(positions=P_ETH, multi=True)}),
+    ("exiting_fired_409", E(want_lev=10), {"sec": SEC, "file0": {"ETHUSDC:LONG": {**LINES_ARM["ETHUSDC:LONG"], "fired": True}}, "account": ACC(positions=P_ETH)}),
+    ("exiting_set_409", E(want_lev=10), {"sec": SEC, "file0": LINES_ARM, "account": ACC(positions=P_ETH), "slots0": {"exiting": ["ETHUSDC:LONG"]}}),
+    ("multi_assets_pool", E(asset="soxl", side="SHORT", want_lev=3), {"sec": SEC, "account": ACC(positions=P_ETH, multi=True)}),
 ]
 EXIT_CASES = [
     ("exit_long_full", X(), {"account": ACC(positions=P_ETH), "vol": {"ETHUSDC": 5.0}, "funding": {"ETHUSDC": -0.3}}),
@@ -729,7 +718,6 @@ EXIT_CASES = [
     ("exit_both_symbols_leftover", X(), {"account": ACC(positions=P_ETH + [pos("ETHUSDT", "LONG", 0.1, 2390.0, 2449.0)])}),
     ("exit_only_symbol_usdt", X(only_symbol="ETHUSDT"), {"account": ACC(positions=P_ETH + [pos("ETHUSDT", "LONG", 0.1, 2390.0, 2449.0)])}),
     ("exit_only_symbol_missing", X(only_symbol="ETHUSDT"), {"account": ACC(positions=P_ETH)}),
-    ("exit_market_now", X(market=True, for_order=True), {"account": ACC(positions=P_ETH)}),
     ("exit_high_vol_m6", X(for_order=True), {"account": ACC(positions=P_ETH), "vol": {"ETHUSDC": 31.0}}),
     ("exit_dust_m7", X(for_order=True), {"account": ACC(positions=[pos("ETHUSDC", "LONG", 0.005, 2400.0, 2450.0)])}),
     ("exit_for_order_skips_display", X(for_order=True), {"account": ACC(positions=P_ETH), "vol": {"ETHUSDC": 3.0}}),
@@ -828,19 +816,23 @@ API_CASES = [
     ("sub_bad_pct", API("api_manual_entry_submit", Q(side="LONG", confirm=1, pct=0))),
     ("sub_bad_pct_text", API("api_manual_entry_submit", Q(side="LONG", confirm=1, pct="abc"))),
     ("sub_limit_without_lines", API("api_manual_entry_submit", Q(side="LONG", confirm=1, mode="limit", limit=2450))),
-    ("sub_bad_wait", API("api_manual_entry_submit", Q(side="LONG", confirm=1, mode="wait", wait_min=30))),
+    ("sub_removed_wait", API("api_manual_entry_submit", Q(side="LONG", confirm=1, mode="wait", wait_min=30))),
+    ("sub_removed_wait_min_only", API("api_manual_entry_submit", Q(side="LONG", confirm=1, wait_min=15, tp=2600, sl=2400))),
+    ("sub_removed_rule_and_mode", API("api_manual_entry_submit", Q(side="LONG", confirm=1, rule="c", mode="peg", tp=2600, sl=2400))),
+    ("sub_mode_limit_not_removed", API("api_manual_entry_submit", Q(side="LONG", confirm=1, mode="limit", limit=2450, rule="", tp=2600, sl=2300), sec=SEC)),
+    ("sub_lines_required", API("api_manual_entry_submit", Q(side="LONG", confirm=1, lev=10, pct=20), sec=SEC)),
+    ("sub_add_on_unlined_409", API("api_manual_entry_submit", Q(side="LONG", confirm=1, lev=10, pct=20, tp=2600, sl=2400), sec=SEC, account=ACC(positions=P_ETH))),
     ("sub_exec_off", API("api_manual_entry_submit", Q(side="LONG", confirm=1), exec=False)),
     ("sub_entry_busy", API("api_manual_entry_submit", Q(side="LONG", confirm=1), slots0={"entry": BUSY_E})),
     ("sub_side_exit_busy", API("api_manual_entry_submit", Q(side="LONG", confirm=1), slots0={"side": {"eth": {"phase": "submitting"}}})),
     ("sub_wait_pending", API("api_manual_entry_submit", Q(side="LONG", confirm=1), slots0={"waits": {"eth": LIMIT_W}})),
     ("sub_bad_lines", API("api_manual_entry_submit", Q(side="LONG", confirm=1, tp=2600))),
-    ("sub_bad_rule", API("api_manual_entry_submit", Q(side="LONG", confirm=1, rule="x"))),
-    ("sub_rule_sol_400", API("api_manual_entry_submit", Q(side="LONG", confirm=1, asset="sol", rule="c"))),
-    ("sub_blocked", API("api_manual_entry_submit", Q(side="LONG", confirm=1, lev=1, pct=0.001))),
-    ("sub_peg_ok", API("api_manual_entry_submit", Q(side="LONG", confirm=1, lev=10, pct=20))),
-    ("sub_lev_text_and_big", API("api_manual_entry_submit", Q(side="SHORT", confirm=1, lev="abc", pct=10))),
-    ("sub_lev_999", API("api_manual_entry_submit", Q(side="SHORT", confirm=1, lev=999, pct=10))),
-    ("sub_wait15_ok", API("api_manual_entry_submit", Q(side="LONG", confirm=1, lev=10, mode="wait", wait_min=15))),
+    ("sub_removed_rule_x", API("api_manual_entry_submit", Q(side="LONG", confirm=1, rule="x"))),
+    ("sub_removed_rule_sol", API("api_manual_entry_submit", Q(side="LONG", confirm=1, asset="sol", rule="c"))),
+    ("sub_blocked", API("api_manual_entry_submit", Q(side="LONG", confirm=1, lev=1, pct=0.001, tp=2600, sl=2400), sec=SEC)),
+    ("sub_peg_ok", API("api_manual_entry_submit", Q(side="LONG", confirm=1, lev=10, pct=20, tp=2600, sl=2400), sec=SEC)),
+    ("sub_lev_text_and_big", API("api_manual_entry_submit", Q(side="SHORT", confirm=1, lev="abc", pct=10, tp=2400, sl=2600), sec=SEC)),
+    ("sub_lev_999", API("api_manual_entry_submit", Q(side="SHORT", confirm=1, lev=999, pct=10, tp=2400, sl=2600), sec=SEC)),
     ("sub_limit_ok", API("api_manual_entry_submit", Q(side="LONG", confirm=1, lev=10, mode="limit", limit=2450, tp=2600, sl=2300), sec=SEC)),
     ("sub_limit_second_add_ok", API("api_manual_entry_submit", Q(side="LONG", confirm=1, lev=10, mode="limit", limit=2440, tp=2700, sl=2300), sec=SEC,
                                     file0=LINES_ARM, account=ACC(positions=P_ETH), slots0={"waits": {"eth": ADD_W}})),
@@ -853,16 +845,20 @@ API_CASES = [
     ("sub_limit_all_slots_running", API("api_manual_entry_submit", Q(side="LONG", confirm=1, lev=10, mode="limit", limit=2450, tp=2600, sl=2300), sec=SEC,
                                         tasks={f"manual_wait_{'eth' if n == 1 else f'eth#{n}'}": False for n in range(1, 11)})),
     ("sub_stop_ok", API("api_manual_entry_submit", Q(side="LONG", confirm=1, lev=10, mode="limit", limit=2560, tp=2700, sl=2500, stop=1), sec=SEC)),
-    ("sub_rule_ok", API("api_manual_entry_submit", Q(side="LONG", confirm=1, lev=10, rule="c"), situation=VM, margin={"ETHUSDC": "cross"})),
-    ("prev_ok", API("api_manual_entry_preview", Q(side="LONG", lev=10, pct=50))),
+    ("prev_ok", API("api_manual_entry_preview", Q(side="LONG", lev=10, pct=50, tp=2600, sl=2400), sec=SEC)),
+    ("prev_lines_required", API("api_manual_entry_preview", Q(side="LONG", lev=10, pct=50), sec=SEC)),
+    ("prev_removed_rule", API("api_manual_entry_preview", Q(side="LONG", rule="c", tp=2600, sl=2400))),
     ("prev_bad_limit", API("api_manual_entry_preview", Q(side="LONG", limit=-1, tp=2600, sl=2300))),
     ("prev_error_503", API("api_manual_entry_preview", Q(side="LONG"), account=ACC(ok=False))),
     # 청산
     ("xs_bad_side", API("api_manual_exit_submit", Q(side="x", confirm=1))),
     ("xs_no_confirm", API("api_manual_exit_submit", Q(side="LONG"))),
-    ("xs_bad_exec", API("api_manual_exit_submit", Q(side="LONG", confirm=1, exec="fast"))),
-    ("xs_switch_partial_bad", API("api_manual_exit_submit", Q(side="LONG", confirm=1, pct=50, switch_to="SHORT"))),
-    ("xs_switch_same_dir_bad", API("api_manual_exit_submit", Q(side="LONG", confirm=1, switch_to="LONG"))),
+    ("xs_removed_exec_fast", API("api_manual_exit_submit", Q(side="LONG", confirm=1, exec="fast"))),
+    ("xs_removed_switch_and_sw", API("api_manual_exit_submit", Q(side="LONG", confirm=1, switch_to="SHORT", sw_pct=50, sw_lev=10))),
+    ("xs_removed_sw_only", API("api_manual_exit_submit", Q(side="LONG", confirm=1, sw_rule="c"))),
+    ("xs_removed_market", API("api_manual_exit_submit", Q(side="LONG", confirm=1, exec="market"), account=ACC(positions=P_ETH))),
+    ("xs_exec_limit_ok", API("api_manual_exit_submit", Q(side="LONG", confirm=1, exec="limit"), account=ACC(positions=P_ETH))),
+    ("xs_exec_empty_ok", API("api_manual_exit_submit", Q(side="LONG", confirm=1, exec=""), account=ACC(positions=P_ETH))),
     ("xs_exec_off", API("api_manual_exit_submit", Q(side="LONG", confirm=1), exec=False)),
     ("xs_same_coin_busy", API("api_manual_exit_submit", Q(side="LONG", confirm=1), slots0={"entry": BUSY_E}, account=ACC(positions=P_ETH))),
     ("xs_other_coin_busy_side_slot", API("api_manual_exit_submit", Q(side="LONG", confirm=1), slots0={"entry": {**BUSY_E, "asset": "sol"}}, account=ACC(positions=P_ETH))),
@@ -870,22 +866,8 @@ API_CASES = [
     ("xs_partial_ok", API("api_manual_exit_submit", Q(side="LONG", confirm=1, pct=50), account=ACC(positions=P_ETH))),
     ("xs_no_position", API("api_manual_exit_submit", Q(side="SHORT", confirm=1), account=ACC(positions=P_ETH))),
     ("xs_blocked", API("api_manual_exit_submit", Q(side="LONG", confirm=1, pct=0.1), account=ACC(positions=P_ETH))),
-    ("xs_switch_m11", API("api_manual_exit_submit", Q(side="LONG", confirm=1, switch_to="SHORT", sw_pct=50), account=ACC(positions=P_ETH)), "M11"),
-    ("xs_switch_wait_pending", API("api_manual_exit_submit", Q(side="LONG", confirm=1, switch_to="SHORT"), account=ACC(positions=P_ETH), slots0={"waits": {"eth": LIMIT_W}})),
-    ("xs_market_m8", API("api_manual_exit_submit", Q(side="LONG", confirm=1, exec="market"), account=ACC(positions=P_ETH)), "M8"),
     ("xs_high_vol_m6", API("api_manual_exit_submit", Q(side="LONG", confirm=1), account=ACC(positions=P_ETH), vol={"ETHUSDC": 40.0}), "M6"),
     ("xs_dust_m7", API("api_manual_exit_submit", Q(side="LONG", confirm=1), account=ACC(positions=[pos("ETHUSDC", "LONG", 0.005, 2400.0, 2450.0)])), "M7"),
-    ("xp_ok", API("api_manual_exit_preview", Q(side="LONG", exec="market"), account=ACC(positions=P_ETH))),
-    ("xp_bad_pct", API("api_manual_exit_preview", Q(side="LONG", pct=150))),
-    # 전량 청산(⚠화면 단추 삭제됨 -- 불확실)
-    ("xall_no_confirm", API("api_manual_exit_all_submit", Q())),
-    ("xall_exec_off", API("api_manual_exit_all_submit", Q(confirm=1), exec=False)),
-    ("xall_account_fail", API("api_manual_exit_all_submit", Q(confirm=1), account=ACC(ok=False))),
-    ("xall_no_positions", API("api_manual_exit_all_submit", Q(confirm=1), account=ACC())),
-    ("xall_many", API("api_manual_exit_all_submit", Q(confirm=1), account=ACC(positions=P_ETH + [pos("ETHUSDT", "LONG", 0.1, 2390.0, 2449.0), pos("SOLUSDC", "SHORT", 2.0, 160.0, 150.1),
-                                                                                               pos("MUUSDT", "LONG", 1.0, 100.0, 101.0), pos("SOXLUSDT", "SHORT", 0.0, 31.0, 30.1)]),
-                      slots0={"side": {"sol": {"phase": "working"}}})),
-    ("xall_market_m8", API("api_manual_exit_all_submit", Q(confirm=1, exec="market"), account=ACC(positions=P_ETH)), "M8"),
     # 지정가 수정
     ("am_no_confirm", API("api_manual_limit_amend", Q())),
     ("am_no_limit", API("api_manual_limit_amend", Q(confirm=1, limit=2440, tp=2600, sl=2300))),
@@ -928,12 +910,10 @@ API_CASES = [
     ("re_lines_ok", API("api_manual_bracket_rearm", Q(confirm=1, side="LONG", symbol="ETHUSDC"), file0={"ETHUSDC:LONG": {**LINES_ARM["ETHUSDC:LONG"], "fired": True, "sl_off": {"at": 1},
                                                                                                    "sl_legs": [{"level": 2400.0, "fired": True, "w": 1}, {"level": 2380.0, "w": 1}]}})),
     ("re_rule_no_price", API("api_manual_bracket_rearm", Q(confirm=1, side="LONG", symbol="ETHUSDC"), file0={"ETHUSDC:LONG": {"symbol": "ETHUSDC", "rule": True, "sl_off": {"at": 1}, "armed_at": 1}})),
-    ("re_rule_place_fails", API("api_manual_bracket_rearm", Q(confirm=1, side="LONG", symbol="ETHUSDC"), file0={"ETHUSDC:LONG": {**RULE_ARM["ETHUSDC:LONG"], "sl_off": {"at": 1}}},
-                                script={"place_stop": [{"ret": {"placed": False, "error": "400 [-2021] Order would immediately trigger."}}]})),
+    ("re_rule_sl_level_only", API("api_manual_bracket_rearm", Q(confirm=1, side="LONG", symbol="ETHUSDC"), file0={"ETHUSDC:LONG": {"symbol": "ETHUSDC", "rule": True, "sl_level": 2374.5, "sl_off": {"at": 1}, "armed_at": 1}})),
     # 2026-11-21 여섯째 조각: 선 핸들러 4개(익절 on/off · 분할 조각 · 선 추가 · 선 수정)
     *LINE_CASES,
-    ("re_rule_ok", API("api_manual_bracket_rearm", Q(confirm=1, side="LONG", symbol="ETHUSDC"), file0={"ETHUSDC:LONG": {**RULE_ARM["ETHUSDC:LONG"], "sl_off": {"at": 1}, "placed": {"tp": None}}},
-                       script={"place_stop": [{"ret": {"placed": True, "algoId": 9}}]})),
+    ("re_rule_ok", API("api_manual_bracket_rearm", Q(confirm=1, side="LONG", symbol="ETHUSDC"), file0={"ETHUSDC:LONG": {**RULE_ARM["ETHUSDC:LONG"], "sl_off": {"at": 1}, "placed": {"tp": None}}})),
 ]
 
 

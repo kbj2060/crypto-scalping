@@ -75,9 +75,6 @@ impl WatchIo for Io {
     async fn place_tp_ladder(&mut self, _: &Value, _: &str, _: &str) -> Result<Value, String> {
         unreachable!()
     }
-    async fn place_add_order(&mut self, _: &str, _: &str, _: f64, _: f64) -> Result<Value, String> {
-        unreachable!("선 진입은 물타기를 안 건다")
-    }
     async fn cancel_wait_orphans(&mut self, _: &[String]) -> Result<Value, String> {
         unreachable!()
     }
@@ -105,7 +102,7 @@ fn enter(name: &str, fx: Fake, tp_fail: bool) -> (Desk, Io, desk_io::TmpDir) {
     assert!(matches!(task, Task::Entry { .. }));
     let mut io = Io { fx: Fake::default(), t: T0, qty: 0.0, sec: vec![(T0 - 1.0, 2499.6)], calls: vec![], tp_fail, exit_vol: Some(5.0) };
     let mut ex = fx;
-    block_on(run_task(&mut desk, &mut ex, &mut io, &mut dio, &mut qs, task));
+    block_on(run_task(&mut desk, &mut ex, &mut io, &mut qs, task));
     io.qty = desk.w.entry.get("filled").and_then(Value::as_f64).unwrap_or(0.0);
     io.fx = Fake { fill_after: 1, ..Default::default() };
     (desk, io, dir)

@@ -16,8 +16,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+PY_ROOT = Path(os.environ.get("RTORDER_PY_ROOT") or ROOT)   # 2026-11-21 원본 파이썬 위치(읽기만 · 정답지는 이 저장소에)
 os.environ.pop("DASHBOARD_MANUAL_EXEC_ENABLED", None)
-_spec = importlib.util.spec_from_file_location("peg_plan", ROOT / "scripts" / "live_manual_peg_entry_20260912.py")
+_spec = importlib.util.spec_from_file_location("peg_plan", PY_ROOT / "scripts" / "live_manual_peg_entry_20260912.py")
 P = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(P)
 
@@ -145,45 +146,9 @@ for i in range(80):
 add("realized_vol_bpm", {"closes": [100.0] * 31}, tag="selfcheck")
 add("realized_vol_bpm", {"closes": [100.0 * (1.001 ** (i % 2)) for i in range(31)]}, tag="selfcheck")
 
-# ── 자동 규칙 ─────────────────────────────────────────────────────────────────
-for side in ("LONG", "SHORT", "X"):
-    for sig in (0.0, -1.0, 20.0, 55.21 * 6 ** 0.5, 250.0, 600.0, 1800.0, 1e6):
-        for vm in (0.0, 0.15, 0.458, 1.0, 3.0, 1e-6):
-            for cap in (2.0, 1.5, 3.0):
-                add("commit_rule_l", dict(position_side=side, sigma24_bp=sig, vol_mult=vm, cap=cap))
-for i in range(200):
-    add("rec_rule_size", dict(rule_l=rng.choice([0.0, -1.0, 0.5, 1.5, 1.8, 2.0, 2.0000000001, rng.uniform(0.01, 2)]),
-                              equity=rng.choice([0.0, -1.0, 2000.0, rng.uniform(10, 1e5)]),
-                              existing_notional=rng.choice([0.0, -1.0, 300.0, rng.uniform(0, 8000)]),
-                              order_leverage=rng.choice([0.0, 1.0, 2.0, 10.0, 20.0]),
-                              first=rng.choice([None, True, False]),
-                              risk_used=rng.choice([0.0, 50.0, rng.uniform(0, 500)]),
-                              add_stop_frac=rng.choice([None, None, -0.01, 0.0, 0.05, rng.uniform(-0.1, 0.2)])))
-for i in range(150):
-    f = rng.choice(FILTERS[:5] + FILTERS[6:])
-    cap = rng.choice([4000.0, 0.0, rng.uniform(10, 50000)])
-    add("rec_rule_add_order", dict(position_side=rng.choice(["LONG", "SHORT"]), sl_price=rng.choice([0.0, 2375.0, 2625.0, on_grid(f["tick"], 2400.0)]),
-                                   stop_pct=rng.choice([0.05, 0.05, 0.0, 1.0, 0.09, 0.03]), l_eff=rng.choice([2.0, 2.0, 1.8, 0.5, 2.5]),
-                                   cap_notional=cap, room_before=cap * rng.choice([1.0, 1 / 3, 0.0, rng.random()]),
-                                   filled_qty=rng.choice([0.0, 4000.0 / 3 / 2500, rng.uniform(0.001, 5)]),
-                                   order_leverage=rng.choice([10.0, 20.0, 2.0, 0.0]), filters=f))
-add("rec_rule_add_order", dict(position_side="LONG", sl_price=2375.0, stop_pct=0.05, l_eff=2.0, cap_notional=4000.0, room_before=4000.0,
-                               filled_qty=4000.0 / 3 / 2500, order_leverage=10.0, filters={"tick": 0.01, "step": 0.001, "min_qty": 0.001, "min_notional": 5.0}), tag="selfcheck")
-PREVS = [None, {}, {"sl_price": 2312.5, "sl_level": 2312.5, "backstop_price": 2312.5, "rule": True},
-         {"sl_price": 2400.0, "backstop_price": 2390.0}, {"sl_price": 0.0, "backstop_price": 2390.0, "rule": True},
-         {"sl_price": 2312.5, "backstop_price": 2312.5, "rule": True, "sl_name": "첫 진입가 −5%"},
-         {"sl_price": 2312.5, "backstop_price": 2312.5, "rule": True, "sl_name": ""}]
-for i in range(120):
-    f = rng.choice(FILTERS)
-    add("rec_rule_bracket", dict(b=rng.choice([{}, {"tp_price": 2600.0}, {"position_side": "LONG", "x": 1}]),
-                                 position_side=rng.choice(["LONG", "SHORT"]), anchor_price=rng.choice([0.0, 2500.0, on_grid(f["tick"], rng.choice([2.5, 2500.0, 98000.0]))]),
-                                 basis=rng.choice([1.0, 0.99951, 1.0004, 0.0]), stop_pct=rng.choice([0.05, 0.03, 0.09, 0.0, 1.0, 0.075]),
-                                 filters=f, prev=rng.choice(PREVS), anchor_kind=rng.choice(["첫 진입가", "평단"])))
+# ── 자동 규칙(commit_rule_l·rec_rule_size·rec_rule_add_order·rec_rule_bracket)은 2026-11-21 원본 PR 61 에서 지워 정답지에서 뺐다 ──
 
 # 동점·부호 있는 0·repr 지수 경계(양성 대조가 처음에 못 잡은 자리를 메운다)
-for cap in (2.0, 1.5):
-    for side in ("LONG", "SHORT"):
-        add("commit_rule_l", dict(position_side=side, sigma24_bp=20.0, vol_mult=cap / P.COMMIT_UNIT_X, cap=cap), tag="tie")
 for kw in (dict(existing_notional=-0.0), dict(recommended_qty=-0.0), dict(available_margin=-0.0, order_leverage=20.0), dict(cap_notional=-0.0),
            dict(best_bid=2.5e16, best_ask=2.5e16), dict(best_bid=9.99e15, best_ask=9.99e15, recommended_qty=1e-5),
            dict(best_bid=1.234e-05, best_ask=1.235e-05, filters=FILTERS[6], recommended_qty=1e6),

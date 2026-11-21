@@ -1,12 +1,12 @@
-//! 손절·익절 걸기와 그 주변 -- `live/execution/live_manual_peg_execute_20260912.py` 의 `current_leverage`·`ensure_leverage`·`margin_type`·
-//! `commission_bp`·`bracket_tag`·`cancel_bracket`·`clear_bracket`·`place_add_order`·`place_bracket`·`place_tp_ladder`·
+//! 손절·익절 걸기와 그 주변 -- `live/execution/live_manual_peg_execute_20260912.py` 의 `current_leverage`·`ensure_leverage`·
+//! `commission_bp`·`bracket_tag`·`cancel_bracket`·`clear_bracket`·`place_bracket`·`place_tp_ladder`·
 //! `cancel_wait_orphans` 를 그대로(2026-11-20 둘째 조각). 돌려주는 값은 원본 dict 와 같은 JSON(호출부 orders.py 가 dict 로 읽는다).
 //! 정답지: tests/fixtures/http_fixture.json 의 «같은 순서로 같은 요청(글자까지) + 같은 결과».
 //! 원본의 «키 없음» 검사는 `Binance::has_keys`, `_clock_offset` 은 `Binance::sync_clock`, 키·시계보정을 인자로 받는 함수(cancel_bracket 등)는 `bx.offset` 을 그대로 쓴다.
 //!
-//! 2026-11-21 결함 수정(파이썬 main 0ecc754a): 익절 GTX · 분할 익절 · 자동 물타기 GTC 의 불명 응답도 `resolve_resting`(= exec::resolve_unknown_post) 을 지난다.
-//! 🔴비상 스탑(STOP_MARKET closePosition · 시장가 분기 M10)은 **옮기지 않는다**(2026-11-21 사용자 결정 «Rust 에서는 제거») --
-//!   place_bracket 은 backstop_price 를 받아도 안 걸고, cancel_bracket 은 스탑 목록·취소 요청을 안 보낸다. 시험(rp)은 «원본 요청 열에서 스탑 요청만 뺀 것».
+//! 2026-11-21 결함 수정(파이썬 main 0ecc754a): 익절 GTX · 분할 익절의 불명 응답도 `resolve_resting`(= exec::resolve_unknown_post) 을 지난다.
+//! 2026-11-21 원본 PR 61(사용자 «sltp 만»)과 같다: 비상 스탑(M10)·자동 물타기(M12)·margin_type 은 없다 -- 새로 거는 것은 없고,
+//!   배포 전에 걸린 우리 스탑(dbsl)·물타기(dbad)는 cancel_bracket 이 계속 지운다(포지션 닫힘·손절 해제). place_bracket 은 backstop_price 가 오면 «안 걸었음» 칸만.
 
 use crate::http::Binance;
 use crate::plan::{split_tp_qty, TpLegIn};
@@ -85,19 +85,6 @@ pub async fn ensure_leverage(bx: &mut Binance, symbol: &str, target: i64) -> Val
     json!({"changed": true, "from": now, "to": to})
 }
 
-/// 심볼의 마진 방식 "cross"·"isolated"(헤지 두 다리가 섞이면 isolated). 못 읽으면 None -- 읽기만(주문 없음).
-/// 2026-10-09 자동 규칙은 교차 전제다(격리 20배는 청산 −4.6% 가 3σ 손절보다 안쪽 -- 실사고: 롱 0.893 청산 2,384 > 손절 2,376).
-pub async fn margin_type(bx: &mut Binance, symbol: &str) -> Option<&'static str> {
-    if !bx.has_keys() {
-        return None;
-    }
-    bx.sync_clock().await;
-    let r = bx.signed("GET", "/fapi/v2/positionRisk", &[("symbol", P::s(symbol))]).await;
-    let a = r.as_array().filter(|a| !a.is_empty())?;
-    let kinds: std::collections::BTreeSet<String> = a.iter().map(|p| str_or_empty(p, "marginType").to_lowercase()).collect();
-    if kinds.len() == 1 && kinds.contains("cross") { Some("cross") } else if kinds.contains("isolated") { Some("isolated") } else { None }
-}
-
 /// 2026-10-10 주문 심볼의 계정 실수수료율. 🔴화면 «예상 비용» 표시 전용 -- 크기·손절·판정은 표준 상수(경제성은 표준 수수료 기준, USDC 0% 는 기간 한정).
 /// source: live(1시간 안 조회) · stale(조회 실패, 마지막 성공값) · fallback(성공 이력 없음, 표준 2/5bp). 캐시는 `Binance` 하나에 하나(원본 모듈 전역).
 pub async fn commission_bp(bx: &mut Binance, symbol: &str) -> Value {
@@ -129,11 +116,8 @@ pub async fn commission_bp(bx: &mut Binance, symbol: &str) -> Value {
 /// 이 측면에 **우리가 건** TP 지정가와 비상 스탑을 지운다. 목록을 못 읽으면 그 사실을 돌려준다(못 지웠는데 «지웠다»로 넘어가면 닫힌 포지션 위에 주문이 남는다).
 /// only_sl(2026-10-15 «손절 해제») = 비상 스탑만 -- 물타기·TP 는 그대로 · only_tp(2026-11-11 «익절선 지우기») = TP 만 -- 물타기·스탑 그대로.
 pub async fn cancel_bracket(bx: &mut Binance, symbol: &str, pside: &str, only_sl: bool, only_tp: bool) -> Value {
-    let (tp_pre, add_pre) = (bracket_tag(TP_TAG, pside), bracket_tag(ADD_TAG, pside));
+    let (tp_pre, sl_pre, add_pre) = (bracket_tag(TP_TAG, pside), bracket_tag(SL_TAG, pside), bracket_tag(ADD_TAG, pside));
     let (mut n, mut errors) = (0i64, Vec::<String>::new());
-    if only_sl {
-        return json!({"cancelled": 0, "errors": []}); // 스탑만 지우기 = 지울 스탑이 없다(M10 제거)
-    }
     let opens = if only_sl { json!([]) } else { bx.signed("GET", "/fapi/v1/openOrders", &[("symbol", P::s(symbol))]).await };
     if !opens.is_array() {
         errors.push(format!("openOrders: {}", why(&opens)));
@@ -156,8 +140,22 @@ pub async fn cancel_bracket(bx: &mut Binance, symbol: &str, pside: &str, only_sl
     if only_tp {
         return json!({"cancelled": n, "errors": errors, "tp_open": tp_open});
     }
-    // 2026-11-21 사용자 결정 «−5% 비상 스탑(STOP_MARKET · M10) Rust 에서 제거»: 비상 스탑(dbsl, Algo)을 걸지 않으므로 목록·취소 요청도 없다.
-    //   ponytail: 파이썬 시절에 걸린 dbsl 스탑이 전환 때 남아 있으면 Rust 는 지우지 않는다 -- 전환 절차에서 한 번 정리한다(보고 «결정 필요»).
+    // 2026-11-21 원본 PR 61 과 같이: 새로 거는 스탑은 없지만 배포 전에 걸린 우리 스탑(dbsl, Algo)은 계속 지운다(전환 때 남아 있을 수 있다)
+    let algos = bx.signed("GET", "/fapi/v1/openAlgoOrders", &[("symbol", P::s(symbol))]).await;
+    if !algos.is_array() {
+        errors.push(format!("openAlgoOrders: {}", why(&algos)));
+    }
+    for a in algos.as_array().cloned().unwrap_or_default() {
+        // 2026-10-20 두 코인 보유: 다른 코인 스탑은 절대 안 지운다(심볼 칸이 없으면 이 심볼로 본다 -- 원본 a.get("symbol", symbol))
+        let same = a.get("symbol").map_or(true, |s| s.as_str() == Some(symbol));
+        if str_or_empty(&a, "clientAlgoId").starts_with(&sl_pre) && same {
+            let r = bx.signed("DELETE", "/fapi/v1/algoOrder", &[("algoId", P::of(a.get("algoId")))]).await;
+            match error_of(&r) {
+                None => n += 1,
+                Some(e) => errors.push(e.into()),
+            }
+        }
+    }
     json!({"cancelled": n, "errors": errors})
 }
 
@@ -214,25 +212,10 @@ pub async fn clear_bracket(bx: &mut Binance, symbol: &str, pside: &str, only_sl:
     cancel_bracket(bx, symbol, pside, only_sl, only_tp).await
 }
 
-/// 자동 물타기 지정가(2026-10-14). 🔴**GTC**(post-only 아님 -- 이미 그 아래면 그 자리에서 테이커 체결, 시장가 분기 M12: 원본 그대로 옮김 · 사용자 결정 목록).
-/// 실패해도 진입·손절은 그대로(결과를 돌려 화면이 말한다). 지우기는 cancel_bracket(ADD_TAG). 불명 응답 조회 없음(남은 위험).
-pub async fn place_add_order(bx: &mut Binance, symbol: &str, pside: &str, price: f64, qty: f64) -> Value {
-    if !bx.has_keys() {
-        return json!({"placed": false, "reason": NO_KEYS});
-    }
-    let cid = format!("{}{}", bracket_tag(ADD_TAG, pside), crate::sign::ms(bx.time())); // 원본: dict(표식 시각)를 먼저 만들고 시계보정을 묻는다
-    bx.sync_clock().await;
-    let side = if pside == "LONG" { "BUY" } else { "SELL" };
-    let r = bx.signed("POST", "/fapi/v1/order", &[("symbol", P::s(symbol)), ("side", P::s(side)), ("positionSide", P::s(pside)), ("type", P::s("LIMIT")),
-        ("timeInForce", P::s("GTC")), ("price", P::F(price)), ("quantity", P::F(qty)), ("newClientOrderId", P::S(cid.clone()))]).await;
-    let r = resolve_resting(bx, symbol, &cid, r).await; // 2026-11-21 결함 수정: 불명 응답이면 표식으로 찾는다(물타기 유령 = 손절 없이 크기만 늘어남)
-    json!({"placed": no_err(&r), "price": price, "qty": qty, "order_id": get(&r, "orderId"), "error": get(&r, "__error__")})
-}
-
 // 2026-11-21 사용자 결정 «−5% 비상 스탑(STOP_MARKET closePosition · 시장가 분기 M10) Rust 에서 제거»: 원본의 _post_stop·place_stop 은 옮기지 않는다
 //   (넷째 조각까지 있던 요청 모양 코드는 지웠다). 손절은 서버 감시(5분봉 종가 · 선 1초 닿음 → run_exit)만.
 
-/// 체결 뒤 TP 지정가(GTX, 포지션 **전량**)와 비상 스탑(Algo STOP_MARKET closePosition)을 건다. 물타기면 우리 옛 주문을 지우고 새 레벨·새 수량으로 다시.
+/// 체결 뒤 TP 지정가(GTX, 포지션 **전량**)를 건다(비상 스탑은 안 건다). 물타기면 우리 옛 주문을 지우고 새 레벨·새 수량으로 다시.
 /// 🔴실패해도 진입을 되돌리지 않는다(이미 체결됐다) -- 결과를 그대로 돌려 화면이 크게 말하게 한다.
 /// strict(2026-10-29 선 수정): 옛 주문을 다 못 지웠으면 새로 걸지 않는다(같은 쪽 전량 익절 둘 방지).
 /// ponytail(원본 주석 그대로): TP 수량은 거는 순간의 포지션이다. 뒤에 일부만 수동 청산하면 TP 가 포지션보다 크게 남는다 -- 감시 루프가 포지션이 사라지면 지운다.
@@ -271,7 +254,11 @@ pub async fn place_bracket(bx: &mut Binance, bracket: &Value, symbol: &str, psid
         let r = resolve_resting(bx, symbol, &format!("{}{stamp}", bracket_tag(TP_TAG, pside)), r).await;
         out.insert("tp".into(), json!({"placed": no_err(&r), "price": tp, "order_id": get(&r, "orderId"), "error": get(&r, "__error__")}));
     }
-    // backstop_price(비상 스탑)는 받아도 걸지 않는다(M10 제거 · 사용자 결정 2026-11-21) -- 결과에 "backstop" 칸이 없다(의도한 차이)
+    // 2026-11-21 비상 스탑은 안 건다(원본 PR 61 NO_STOP 과 같은 칸) -- 옛 규칙 무장의 backstop_price 가 오면 «안 걸었음»을 적는다
+    if truthy(bracket.get("backstop_price")) {
+        out.insert("backstop".into(), json!({"placed": false, "skipped": true, "reason": "거래소 스탑 없음(2026-11-21 사용자 결정) — 손절은 서버 5분봉 종가 감시",
+                                             "price": bracket["backstop_price"]}));
+    }
     // all(...) -- 익절이 없으면 all([]) = True(원본 그대로)
     let placed = ["tp"].iter().filter_map(|k| out.get(*k)).all(|v| truthy(v.get("placed")));
     out.insert("placed".into(), json!(placed));

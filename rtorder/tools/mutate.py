@@ -17,8 +17,6 @@ PLAN = [  # (이름, 파일, 원래, 바꾼 것) -- plan_fixture 로 잡혀야 �
     ("상한 여유 room <= 0 → < 0", P, "if room <= 0.0 {", "if room < 0.0 {"),
     ("가용 잔고 버퍼 (1-2%) → (1+2%)", P, "(1.0 - MARGIN_BUFFER)", "(1.0 + MARGIN_BUFFER)"),
     ("비율을 상한 전 권고에 곱함", P, "qty = available_qty * a.fraction;", "qty = pyfmt::max(0.0, a.recommended_qty) * a.fraction;"),
-    ("규칙 첫 진입 1/3 → 0.75", P, "cap * REC_FIRST_SHARE", "cap * 0.75"),
-    ("실효 L 0.9×레버리지 → 1.0×", P, "RULE_MARGIN_MAX * order_leverage", "1.0 * order_leverage"),
     ("청산 수량 min → max", P, "pyfmt::min(floor_to(want, f.step)?, floor_to(held, f.step)?)", "pyfmt::max(floor_to(want, f.step)?, floor_to(held, f.step)?)"),
     ("청산 시장가 문턱 >= → >", P, "v >= EXIT_TAKER_VOL_BPM", "v > EXIT_TAKER_VOL_BPM"),
     ("clear 여유 무장+5초 → +0초", P, "account_ts > armed.armed_at + 5.0", "account_ts > armed.armed_at + 0.0"),
@@ -26,7 +24,6 @@ PLAN = [  # (이름, 파일, 원래, 바꾼 것) -- plan_fixture 로 잡혀야 �
     ("선 익절가 롱 올림 → 내림", P, "if long { py_ceil(tp / tick - 1e-9)? } else", "if long { py_floor(tp / tick + 1e-9)? } else"),
     ("분할 익절 carry 버림", P, "carry = raw - q;", "carry = 0.0;"),
     ("merge: 쏜 틱의 tp_resting 규칙 뒤집음", P, 'if !(py_truthy(m.get("fired")) && !py_truthy(cur.get("fired"))) {', 'if py_truthy(m.get("fired")) && !py_truthy(cur.get("fired")) {'),
-    ("commit_rule_l 동점이면 뒤의 것", P, "if c.1 < who.1 {", "if c.1 <= who.1 {"),
     ("파이썬 max 동점 → 뒤의 것(-0.0)", F, "if b > a { b } else { a }", "if b >= a { b } else { a }"),
     ("repr 지수 경계 16 → 17", F, "if (-4..16).contains(&exp) {\n        let point", "if (-4..17).contains(&exp) {\n        let point"),
     ("round(x,8) → 7자리", F, 'format!("{:.*}", n, x).parse().unwrap()', 'format!("{:.*}", n.min(7), x).parse().unwrap()'),
@@ -43,10 +40,9 @@ EXEC = [  # exec_invariants 로 잡혀야 한다
     ("잔량 대신 전량 재주문", X, "let remaining = r8(total - done);\n        let cid = format!(\"{PEG_TAG}", "let remaining = total;\n        let cid = format!(\"{PEG_TAG}"),
     ("부분 체결 뒤에도 수정 적용(D4)", X, "if g.action.is_none() && done == 0.0 {", "if g.action.is_none() {"),
     ("감시 진입 maker_only 무시", X, "if plan.maker_only {", "if false {"),
-    ("on_fill 을 매 조회마다", X, "ex.on_fill().await; // 첫 체결을 본 순간 한 번(서버가 손절을 바로 건다 -- 60분 무방비 금지)\n            on_fill = false;", "ex.on_fill().await;"),
+    ("on_fill 을 매 조회마다(지정가 대기)", X, "            if this_filled > 0.0 && on_fill {\n                ex.on_fill().await;\n                on_fill = false;", "            if this_filled > 0.0 && on_fill {\n                ex.on_fill().await;"),
     ("오류 때 마지막 체결량 버림(E9)", X, "None => return (r8(done + this_filled), price, repegs, Some((Phase::Error, cancel_msg(oid)))),", "None => return (r8(done), price, repegs, Some((Phase::Error, cancel_msg(oid)))),"),
     ("지정가 대기 5xx 를 확정 거부로", X, "|| e0.starts_with('5') || e0.contains(\"-1007\")", "|| e0.contains(\"-1007\")"),
-    ("거래소 취소를 취소로 안 봄(기다리기)", X, "let outside_cancel = terminal(&status) && status != \"FILLED\";", "let outside_cancel = false;"),
     ("대기 취소를 무시하고 따라가기 계속", X, "let cancel = |s: &Shared| st(s).action == Some(Action::Cancel);", "let cancel = |_s: &Shared| false;"),
     ("감시 진입: 선 옮겨도 닿음 판정 시작점 그대로", X, "since = ex.wall_ms() as f64 / 1000.0;\n            let Some(q)", "let Some(q)"),
     ("감시 진입: 닿은 뒤 maker_only 빠짐(시장가 전락)", X, "run_entry(ex, &ExecPlan { price, maker_only: true, ..plan }, s).await;", "run_entry(ex, &ExecPlan { price, maker_only: false, ..plan }, s).await;"),
@@ -69,7 +65,6 @@ HTTP = [  # http_replay(원본 파이썬 + aiohttp 정답지)로 잡혀야 한�
     ("레버리지 같아도 다시 보냄", B, "if now == Some(target) {", "if false {"),
     ("수수료 실패 캐시 5분 → 1시간", B, "if src == \"live\" { FEE_TTL_SEC } else { FEE_RETRY_SEC }", "FEE_TTL_SEC"),
     ("수수료 stale 대신 fallback", B, "hit.filter(|h| h.3 != \"fallback\")", "None::<(f64, f64, f64, &str)>"),
-    ("물타기 GTC → GTX", B, "(\"timeInForce\", P::s(\"GTC\"))", "(\"timeInForce\", P::s(\"GTX\"))"),
     ("고아 정리가 dbtp 도 지움", B, "|| cid.starts_with(crate::exec::PEG_TAG) {", "|| cid.starts_with(crate::exec::PEG_TAG) || cid.starts_with(\"dbtp\") {"),
 ]
 
@@ -89,7 +84,6 @@ WATCH = [  # watch_fixture(원본 orders.py 감시 클로저 정답지)로 잡�
     ("분할 손절 비율 분모 무시", W_, "let frac = num / if den != 0.0 { den } else { 1.0 };", "let frac = num;"),
     ("부분 청산 뒤 익절 strict(D7 을 몰래 고침)", W_, "io.place_bracket(&Value::Object(spec), &symbol, &pside, false)", "io.place_bracket(&Value::Object(spec), &symbol, &pside, true)"),
     ("일부 취소 실패를 서버 감시로 안 넘김(B29)", W_, "self.tp_watch_only(io, &key, &b)?;\n                return Ok(());", "return Ok(());"),
-    ("스탑 실패여도 물타기(B6)", W_, "if !truthy(obj_or_empty(obj_or_empty(state.get(\"bracket\")).get(\"backstop\")).get(\"placed\")) {", "if false {"),
     ("고아 정리 실패여도 복구 파일 지움(W5)", W_, "if truthy(Some(orphan_errors)) {", "if false {"),
     ("6시간 넘은 복구 파일도 복구", W_, "> LIMIT_REC_MAX_AGE", "> f64::INFINITY"),
     ("같은 코인 칸이 바빠도 청산 칸 줌(G6)", W_, "if ea == json!(asset) { None } else { Some(SlotId::Side(asset.into())) }", "{ let _ = ea; Some(SlotId::Side(asset.into())) }"),
@@ -115,13 +109,10 @@ DESK = [  # desk_fixture(원본 파이썬 정답지 · (가)=(나) · 스트림 
     ("시간대 없는 entry_at 을 UTC 로", AS, "let Some(t) = parse_iso(s).filter(|_| tz) else", "let Some(t) = parse_iso(s).filter(|_| tz || true) else"),
     ("표시 수수료 왕복 차이 2× → 1×", AS, "(2.0 * (mk - MAKER_BP), (tk - TAKER_BP) - (mk - MAKER_BP))", "(1.0 * (mk - MAKER_BP), (tk - TAKER_BP) - (mk - MAKER_BP))"),
     ("실주문 청산도 펀딩·수수료 조회(P28)", AS, "let (funding, fees) = if for_order { (None, Value::Null) }", "let (funding, fees) = if false { (None, Value::Null) }"),
-    ("«즉시» 청산이 지정가를 남김", AS, "            o.remove(\"price\");\n", ""),
     ("basis 실패 → 1.0 대신 다른 값(P21)", AS, "let Ok(r) = q.book(ms).await else { return 1.0 };", "let Ok(r) = q.book(ms).await else { return 1.0001 };"),
-    ("권장 배수 신선도 15분 → 40분(G17)", AS, "pub const RULE_VOL_MAX_AGE: f64 = 15.0 * 60.0;", "pub const RULE_VOL_MAX_AGE: f64 = 40.0 * 60.0;"),
-    ("마진 방식 모름을 통과(G17)", AS, 'if mt.as_deref() != Some("cross") {', 'if mt.as_deref() == Some("isolated") {'),
     ("받아 둔 호가 2초 → 3초", AS, "pub const MAX_AGE_BOOK: f64 = 2.0;", "pub const MAX_AGE_BOOK: f64 = 3.0;"),
     ("받아 둔 값 나이 무시(조용히 낡은 값)", AS, "Some((v, at)) if self.now - at <= max_age && self.now >= *at => Some(v),", "Some((v, _at)) => Some(v),"),
-    ("진입 confirm 검사 빠짐(G2)", IN, 'if g(q, "confirm") != Some("1") {\n            return resp(400, json!({"ok": false, "error": "confirm=1 required"}));\n        }\n        let Some(asset) = query_asset(self, q) else { return bad(400, "bad_asset", "주문할 수 없는 코인입니다") };\n        let Some(frac) = query_fraction(q, "pct") else { return bad(400, "bad_pct", "진입 비율은 0 초과 100 이하여야 합니다") };\n        // 2026-10-10', 'let Some(asset) = query_asset(self, q) else { return bad(400, "bad_asset", "주문할 수 없는 코인입니다") };\n        let Some(frac) = query_fraction(q, "pct") else { return bad(400, "bad_pct", "진입 비율은 0 초과 100 이하여야 합니다") };\n        // 2026-10-10'),
+    ("진입 confirm 검사 빠짐(G2)", IN, 'if g(q, "confirm") != Some("1") {\n            return resp(400, json!({"ok": false, "error": "confirm=1 required"}));\n        }\n        let Some(asset) = query_asset(self, q) else { return bad(400, "bad_asset", "주문할 수 없는 코인입니다") };\n        let Some(frac) = query_fraction(q, "pct") else { return bad(400, "bad_pct", "진입 비율은 0 초과 100 이하여야 합니다") };\n        if let Some(r) = removed_entry(q) {', 'let Some(asset) = query_asset(self, q) else { return bad(400, "bad_asset", "주문할 수 없는 코인입니다") };\n        let Some(frac) = query_fraction(q, "pct") else { return bad(400, "bad_pct", "진입 비율은 0 초과 100 이하여야 합니다") };\n        if let Some(r) = removed_entry(q) {'),
     ("같은 선 대기 중복 허용(G11)", IN, "- limit_px.unwrap_or(0.0)).abs() < 1e-9", "- limit_px.unwrap_or(0.0)).abs() < 0.0"),
     ("도는 작업이 있는 칸 재사용(G12)", IN, 'if self.running.contains(&format!("manual_wait_{}", Watcher::wkey(&asset, n))) && !taken.contains(&n) {', 'if false {'),
     ("같은 코인 청산 칸이 바빠도 진입(G5)", IN, '|| self.w.side_exits.get(&asset).and_then(Value::as_object).is_some_and(busy)', ''),
@@ -141,7 +132,6 @@ HTTP_NEW = [  # http_replay(원본 파이썬 결함 수정본 + 시장가 다리
     ("M9 잔량 시장가 뒤 filled 를 응답 체결량으로(D3 원본과 다름)", X, "(g.taker_qty, g.filled, g.taker_order_id) = (remaining, total, o.order_id);", "(g.taker_qty, g.filled, g.taker_order_id) = (remaining, done + o.executed_qty, o.order_id);"),
     ("M1 시장가 다리 빠짐(잔량 버림)", X, "    taker(ex, &c, remaining, s, |f, d| r8(f + d), None).await;", "    finish(s, Phase::Cancelled);"),
     ("시장가 ACK(체결 0)를 0 으로 적음", X, "let done = if o.executed_qty != 0.0 { o.executed_qty } else { qty };", "let done = o.executed_qty;"),
-    ("M3 대기 마감 사유 빠짐", X, 'let why = if action == Some(Action::Market) { "지금 시장가(사용자)" } else { "대기 마감" };', 'let why = "지금 시장가(사용자)";'),
     ("시장가에 reduceOnly 를 붙임", H, '("type", P::s("MARKET")), ("quantity", P::F(quantity))];', '("type", P::s("MARKET")), ("quantity", P::F(quantity)), ("reduceOnly", P::s("true"))];'),
     ("익절·물타기 불명 응답 조회 안 함(결함 되살림)", B, "    let Some(e) = error_of(&r).map(String::from) else { return r };", "    let Some(_e) = error_of(&r).map(String::from) else { return r };\n    if true { return r; }\n    let e = _e;"),
     ("200 빈 본문을 정상으로", H, "        if !(payload.is_object() || payload.is_array()) {", "        if false {"),
@@ -163,7 +153,6 @@ SIX = [  # 여섯째 조각: desk_fixture(선 핸들러 51 · 원본 정답지) 
     ("desk_fixture", "선 수정: 익절 레벨 그대로여도 다시 걸음(F3)", IN, "let tp_moved = !tp_off && (fv(nb.get(\"tp_level\")) - fv(b.get(\"tp_level\"))).abs() > 1e-9;", "let tp_moved = !tp_off;"),
     ("desk_fixture", "선 수정 strict 빠짐(F2)", IN, "match io.place_bracket(&json!({\"tp_price\": nb[\"tp_price\"]}), &symbol, &side, true).await", "match io.place_bracket(&json!({\"tp_price\": nb[\"tp_price\"]}), &symbol, &side, false).await"),
     ("desk_fixture", "선 추가 새 무장에 다른 쪽 never 표시 빠짐", IN, "format!(\"{other}_off\"): {\"at\": now, \"never\": true}}));", "\"x\": 0}));"),
-    ("runner_e2e", "진입 전 레버리지 빠짐(P16)", RN, "        slot.insert(\"leverage\".into(), io.ensure_leverage(&ep.symbol, target).await);", ""),
     ("runner_e2e", "체결 뒤 무장 안 함(B3)", RN, "    if filled > 0.0 {\n        let key", "    if filled > 1e9 {\n        let key"),
     ("runner_e2e", "작업 끝나도 칸 이름 남음(G12)", RN, "            put_slot(desk, &slot, st);\n            desk.task_done(&key);\n        }\n        Task::Exit", "            put_slot(desk, &slot, st);\n        }\n        Task::Exit"),
     ("userstream_ws", "웹소켓 주소 /private 빠짐(A4)", US, "let url = url.replacen(USER_STREAM_WS, &self.ws_base, 1);", "let url = url.replacen(USER_STREAM_WS, &self.ws_base.replace(\"/private\", \"\"), 1);"),
@@ -171,9 +160,22 @@ SIX = [  # 여섯째 조각: desk_fixture(선 핸들러 51 · 원본 정답지) 
     ("userstream_ws", "스트림 사건을 계좌에 반영 안 함", US, "        self.hub.stream_account.lock().unwrap().apply(msg);", ""),
     ("account_http", "동시 조회가 openOrders 를 빼먹음", "src/account.rs", "    let all_rows = rest.get_many(&oo, off).await;", "    let all_rows: Vec<Value> = oo.iter().map(|_| serde_json::json!([])).collect();"),
 ]
+SEVEN = [  # 일곱째 조각 뒤 «sltp 만»(원본 PR 61): 새 거절 3종 · 배포 전 dbsl·dbad 정리 경로 · 집행 머리
+    ("flow_fixture", "집행 머리 레버리지 빠짐(P16)", X, "match ex.prepare(&plan.symbol, leverage.then_some(plan.target_leverage)).await {", "match ex.prepare(&plan.symbol, None).await {"),
+    ("desk_fixture", "선 없는 진입 통과(lines_required 빠짐)", AS, "let Some(mut ln) = a.lines else {", "let Some(mut ln) = a.lines.or(Some((0.0, 0.0))) else {"),
+    ("desk_fixture", "선 없는 포지션 추가 진입 통과(add_on_unlined_position 빠짐)", AS, 'if !same.is_empty() && !pt("lines") {', "if false {"),
+    ("desk_fixture", "지운 인자 wait_min 혼자면 통과", IN, '["rule", "mode", "wait_min"]', '["rule", "mode"]'),
+    ("desk_fixture", "지운 청산 인자 sw_* 통과", IN, 'k.starts_with("sw_")', "false"),
+    ("desk_fixture", "exec=limit 도 거절", IN, 'v.as_str() != "limit"', "true"),
+    ("desk_fixture", "손절 해제: dbsl 취소 실패를 무시", IN, '.filter(|e| !e.is_empty()) {\n            let msg', '.filter(|_| false) {\n            let msg'),
+    ("flow_fixture", "dbsl 정리 빠짐", B, 'if str_or_empty(&a, "clientAlgoId").starts_with(&sl_pre) && same {', "if false {"),
+    ("flow_fixture", "다른 심볼 dbsl 까지 지움", B, 'let same = a.get("symbol").map_or(true, |s| s.as_str() == Some(symbol));', "let same = true;"),
+    ("flow_fixture", "dbad 정리 빠짐", B, " || (!only_tp && cid.starts_with(&add_pre))", ""),
+    ("http_replay", "옛 무장 backstop 칸(«안 걸었음») 빠짐", B, '    if truthy(bracket.get("backstop_price")) {\n        out.insert("backstop"', '    if false {\n        out.insert("backstop"'),
+]
 WIRE = [  # wire_e2e(감시 → 계좌 → 조립 → 집행)로 잡혀야 한다
     ("스트림 계좌를 쓸 수 있어도 REST 로 읽음", A_, 'Ok(v) => Ok((v, "stream")),', 'Ok(_) => Ok((book.produce(rest).await?, "stream")),'),
-    ("감시 청산 조립이 for_order=True(원본은 화면 조회까지 함)", "src/wire.rs", "pside, fraction, true, asset, false, false, Some(only_symbol)", "pside, fraction, true, asset, false, true, Some(only_symbol)"),
+    ("감시 청산 조립이 for_order=True(원본은 화면 조회까지 함)", "src/wire.rs", "pside, fraction, true, asset, false, Some(only_symbol)", "pside, fraction, true, asset, true, Some(only_symbol)"),
 ]
 
 
@@ -205,8 +207,9 @@ def main() -> int:
             ok = r.returncode != 0
             caught, total = caught + ok, total + 1
             print(f"{'잡음' if ok else '🔴못 잡음'} | {test} | {name} | {', '.join(failed)[:110]}", flush=True)
-    if not only or only == "six":
-        for test, name, f, a, b in SIX:
+    for grp, lst in (("six", SIX), ("seven", SEVEN)):
+      if not only or only == grp:
+        for test, name, f, a, b in lst:
             shutil.rmtree(W, ignore_errors=True)
             shutil.copytree(SRC, W, ignore=shutil.ignore_patterns("target"))
             p = W / f

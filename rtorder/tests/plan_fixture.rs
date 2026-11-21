@@ -47,19 +47,6 @@ fn run(fname: &str, a: &Value) -> Result<Value, PlanError> {
             let c: Vec<f64> = a["closes"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
             Ok(json!(realized_vol_bpm(&c)))
         }
-        "commit_rule_l" => val(commit_rule_l(s(a, "position_side"), f(a, "sigma24_bp"), f(a, "vol_mult"), f(a, "cap"))),
-        "rec_rule_size" => val(rec_rule_size(f(a, "rule_l"), f(a, "equity"), f(a, "existing_notional"), f(a, "order_leverage"),
-            a.get("first").and_then(Value::as_bool), of(a, "risk_used").unwrap_or(0.0), of(a, "add_stop_frac"))),
-        "rec_rule_add_order" => val(rec_rule_add_order(s(a, "position_side"), f(a, "sl_price"), f(a, "stop_pct"), f(a, "l_eff"), f(a, "cap_notional"),
-            f(a, "room_before"), f(a, "filled_qty"), f(a, "order_leverage"), &filters(a))),
-        "rec_rule_bracket" => {
-            let prev: Option<PrevRule> = a.get("prev").filter(|p| !p.is_null()).map(|p| serde_json::from_value(p.clone()).unwrap());
-            let r = rec_rule_bracket(s(a, "position_side"), f(a, "anchor_price"), f(a, "basis"), f(a, "stop_pct"), &filters(a), prev.as_ref(),
-                a.get("anchor_kind").and_then(Value::as_str).unwrap_or("첫 진입가"))?;
-            let mut m = a["b"].as_object().unwrap().clone(); // {**b, …}: 계산한 칸이 b 의 같은 키를 이긴다
-            m.extend(serde_json::to_value(r).unwrap().as_object().unwrap().clone());
-            Ok(Value::Object(m))
-        }
         "line_bracket" => val(line_bracket(s(a, "position_side"), f(a, "ref_level"), f(a, "tp_level"), f(a, "sl_level"), f(a, "basis"), &filters(a),
             a.get("sl_watch").and_then(Value::as_bool).unwrap_or(false))),
         "split_tp_qty" => {

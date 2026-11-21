@@ -182,14 +182,8 @@ async def call(session, fn, a):
                                       only_sl=a.get("only_sl", False), only_tp=a.get("only_tp", False))
     if fn == "clear_bracket":
         return await X.clear_bracket(session, SYM, a["pside"], only_sl=a.get("only_sl", False), only_tp=a.get("only_tp", False))
-    if fn == "margin_type":
-        return await X.margin_type(session, SYM)
     if fn == "commission_bp":
         return await X.commission_bp(session, SYM)
-    if fn == "place_add_order":
-        return await X.place_add_order(session, SYM, a["pside"], a["price"], a["qty"])
-    if fn == "place_stop":
-        return await X.place_stop(session, SYM, a["pside"], a["price"])
     if fn == "place_bracket":
         return await X.place_bracket(session, a["bracket"], SYM, a["pside"], strict=a.get("strict", False))
     if fn == "place_tp_ladder":
@@ -204,11 +198,9 @@ async def call(session, fn, a):
         await X.run_entry_limit(session, dict(a["plan"]), st, max_sec=a.get("max_sec", 600.0))
         S.hook = None
         return {k: st.get(k) for k in EXEC_KEYS}
-    if fn in ("run_entry", "run_exit", "run_entry_wait", "run_entry_stop"):
+    if fn in ("run_entry", "run_exit", "run_entry_stop"):
         st = dict(a.get("state0") or {})
-        if fn == "run_entry_wait":
-            await X.run_entry_wait(session, dict(a["plan"]), st, a["wait_sec"])
-        elif fn == "run_entry_stop":
+        if fn == "run_entry_stop":
             await X.run_entry_stop(session, dict(a["plan"]), st, lambda since: False, max_sec=a.get("max_sec", 60.0))
         else:
             await getattr(X, fn)(session, dict(a["plan"]), st)
@@ -342,11 +334,6 @@ scn("ensure_leverage 거부", c("ensure_leverage", target=3, offset=37), [POS(("
 scn("ensure_leverage 조회 실패", c("ensure_leverage", target=10, offset=37), [CLOSE, CLOSE, ok({"leverage": "10"})])
 scn("current_leverage 빈 목록", c("current_leverage", offset=0), [ok([])])
 scn("current_leverage 0", c("current_leverage", offset=0), [ok([{"leverage": "0"}])])
-scn("margin_type 키 없음", c("margin_type"), keys=False)
-scn("margin_type cross", c("margin_type"), [TIME, POS(("LONG", "0"), ("SHORT", "0"))])
-scn("margin_type 섞임", c("margin_type"), [TIME, ok([{"marginType": "cross"}, {"marginType": "ISOLATED"}])])
-scn("margin_type 빈칸", c("margin_type"), [TIME, ok([{"marginType": None}])])
-scn("margin_type 실패", c("margin_type"), [TIME, err(401, -2015, "Invalid API-key, IP, or permissions for action.")])
 FEE = ok({"symbol": SYM, "makerCommissionRate": "0.000200", "takerCommissionRate": "0.000500"})
 scn("commission_bp 캐시·TTL", [c("commission_bp"), c("commission_bp", advance=3599.0), c("commission_bp", advance=1.5),
                                c("commission_bp", advance=299.0), c("commission_bp", advance=2.0)],
@@ -379,34 +366,20 @@ scn("cancel_bracket only_tp 목록 실패", c("cancel_bracket", only_tp=True, **
 scn("cancel_bracket 숏", c("cancel_bracket", pside="SHORT", offset=0), [OPENS, ok({}), ALGOS, ok({})])
 scn("clear_bracket 키 없음", c("clear_bracket", pside="LONG"), keys=False)
 scn("clear_bracket", c("clear_bracket", pside="LONG", only_sl=True), [TIME, ok([]), ])
-scn("place_add_order 키 없음", c("place_add_order", pside="LONG", price=2481.25, qty=0.5), keys=False)
-scn("place_add_order 접수", c("place_add_order", pside="LONG", price=2481.25, qty=0.5), [TIME, NEW(201)])
-scn("place_add_order 숏 거부", c("place_add_order", pside="SHORT", price=2518.75, qty=0.123), [TIME, err(400, -2019, "Margin is insufficient.")])
-scn("place_add_order 시간초과", c("place_add_order", pside="LONG", price=2481.25, qty=0.5), [TIME, HANGR])
 # 2026-11-21 결함 수정본: 불명 응답 = 표식으로 3번 찾기 → 찾으면 걸림 · 끝내 못 찾으면 표식 DELETE · 확정 거부는 그대로 · 200 빈 본문 = 불명
-scn("place_add_order 빈 본문 → 찾음", c("place_add_order", pside="LONG", price=2481.25, qty=0.5), [TIME, ok(None), NOTFOUND, ok({"orderId": 77, "status": "NEW", "executedQty": "0"})])
-scn("place_add_order 5xx → 끝내 모름", c("place_add_order", pside="LONG", price=2481.25, qty=0.5), [TIME, err(502, -1001, "x"), NOTFOUND, NOTFOUND, NOTFOUND, UNKNOWN])
-scn("place_add_order -1007 → 찾음", c("place_add_order", pside="LONG", price=2481.25, qty=0.5), [TIME, err(408, -1007, "Timeout waiting for response from backend server."), ok({"orderId": 78, "status": "NEW", "executedQty": "0"})])
-scn("place_add_order 4xx 확정 거부(조회 없음)", c("place_add_order", pside="LONG", price=2481.25, qty=0.5), [TIME, err(400, -2019, "Margin is insufficient.")])
-scn("place_stop 키 없음", c("place_stop", pside="LONG", price=2375.0), keys=False)
-scn("place_stop 조회 실패", c("place_stop", pside="LONG", price=2375.0), [TIME, err(500, -1001, "x")])
-scn("place_stop 포지션 없음", c("place_stop", pside="LONG", price=2375.0), [TIME, POS(("LONG", "0.000"), ("SHORT", "-1.0"))])
-scn("place_stop 정리 실패", c("place_stop", pside="LONG", price=2375.0), [TIME, POS(("LONG", "1.0")), CLOSE, CLOSE])
-scn("place_stop 정상", c("place_stop", pside="LONG", price=2375.0), [TIME, POS(("LONG", "1.0")), ALGOS, ok({}), ok({}), ok({"algoId": 31})])
-scn("place_stop 숏 -2021", c("place_stop", pside="SHORT", price=2625.5), [TIME, POS(("SHORT", "-2.0")), ok([]), err(400, -2021, "Order would immediately trigger.")])
 BR = {"tp_price": 2600.5, "backstop_price": 2375.0}
 scn("place_bracket 키 없음", c("place_bracket", bracket=BR, pside="LONG"), keys=False)
 scn("place_bracket 조회 실패", c("place_bracket", bracket=BR, pside="LONG"), [TIME, CLOSE, CLOSE])
 scn("place_bracket 포지션 없음", c("place_bracket", bracket=BR, pside="LONG"), [TIME, POS(("SHORT", "-1"))])
-scn("place_bracket 정상", c("place_bracket", bracket=BR, pside="LONG"), [TIME, POS(("LONG", "0.7"), ("LONG", "0.3000001")), ok([]), ok([]), NEW(301), ok({"algoId": 41})])
-scn("place_bracket 익절 실패", c("place_bracket", bracket=BR, pside="LONG"), [TIME, POS(("LONG", "1")), ok([]), ok([]), M5022, ok({"algoId": 42})])
+scn("place_bracket 정상", c("place_bracket", bracket=BR, pside="LONG"), [TIME, POS(("LONG", "0.7"), ("LONG", "0.3000001")), ok([]), ok([]), NEW(301)])
+scn("place_bracket 익절 실패", c("place_bracket", bracket=BR, pside="LONG"), [TIME, POS(("LONG", "1")), ok([]), ok([]), M5022])
 scn("place_bracket 익절 불명 → 두 번째 조회에서 찾음", c("place_bracket", bracket=BR, pside="LONG"), [TIME, POS(("LONG", "1")), ok([]), ok([]), CLOSE, NOTFOUND,
-    ok({"orderId": 301, "status": "NEW", "executedQty": "0"}), ok({"algoId": 42})])   # 2026-11-21 결함 수정본(resolve_resting)
-scn("place_bracket 익절 불명 → 끝내 모름 · 표식 취소", c("place_bracket", bracket=BR, pside="LONG"), [TIME, POS(("LONG", "1")), ok([]), ok([]), CLOSE, NOTFOUND, NOTFOUND, NOTFOUND, UNKNOWN, ok({"algoId": 42})])
+    ok({"orderId": 301, "status": "NEW", "executedQty": "0"})])   # 2026-11-21 결함 수정본(resolve_resting)
+scn("place_bracket 익절 불명 → 끝내 모름 · 표식 취소", c("place_bracket", bracket=BR, pside="LONG"), [TIME, POS(("LONG", "1")), ok([]), ok([]), CLOSE, NOTFOUND, NOTFOUND, NOTFOUND, UNKNOWN])
 scn("place_bracket strict 정리 실패", c("place_bracket", bracket=BR, pside="LONG", strict=True), [TIME, POS(("LONG", "1")), OPENS, UNKNOWN, ok({}), ok({}), ok([])])
-scn("place_bracket 정리 실패 그래도 건다", c("place_bracket", bracket=BR, pside="LONG"), [TIME, POS(("LONG", "1")), CLOSE, CLOSE, ok([]), NEW(302), ok({"algoId": 43})])
+scn("place_bracket 정리 실패 그래도 건다", c("place_bracket", bracket=BR, pside="LONG"), [TIME, POS(("LONG", "1")), CLOSE, CLOSE, ok([]), NEW(302)])
 scn("place_bracket 숏 익절만", c("place_bracket", bracket={"tp_price": 2400.25, "backstop_price": None}, pside="SHORT"), [TIME, POS(("SHORT", "-1.5")), ok([]), ok([]), NEW(303)])
-scn("place_bracket 스탑만", c("place_bracket", bracket={"tp_price": 0, "backstop_price": 2375}, pside="LONG"), [TIME, POS(("LONG", "1")), ok([]), ok([]), ok({"algoId": 44})])
+scn("place_bracket 스탑만", c("place_bracket", bracket={"tp_price": 0, "backstop_price": 2375}, pside="LONG"), [TIME, POS(("LONG", "1")), ok([]), ok([])])
 scn("place_bracket 둘 다 없음", c("place_bracket", bracket={}, pside="LONG"), [TIME, POS(("LONG", "1")), ok([]), ok([])])
 LEGS = [{"price": 2600.0, "w": 1.0}, {"price": 2650.0, "w": 1.0}]
 TPL = dict(pside="LONG")
@@ -445,7 +418,7 @@ scn("cancel_exit_orders 숏", c("cancel_exit_orders", pside="SHORT"), [TIME, ok(
 scn("cancel_exit_orders 키 없음", c("cancel_exit_orders", pside="LONG"), keys=False)
 
 
-# ── 집행 시장가 다리(2026-11-21 사용자 결정 «원본 동작 유지» -- M1·M2·M3·M5·M6·M9) ─────────────────────
+# ── 집행 시장가 다리(2026-11-21 사용자 결정 «원본 동작 유지» -- M1·M2·M5·M6·M9 · M3 기다리기는 PR 61 에서 지움) ─────────────────────
 EP = {"symbol": SYM, "side": "BUY", "positionSide": "LONG", "type": "LIMIT", "price": 2500.0, "quantity": 2.0, "target_leverage": 0}
 XP = {"symbol": SYM, "side": "SELL", "positionSide": "LONG", "type": "LIMIT", "price": 2500.1, "quantity": 2.0, "fallback_after_sec": 30.0, "vol_bpm": 9.0}
 MK = lambda q: FILLED(9001, q)   # noqa: E731
@@ -459,8 +432,6 @@ scn("집행 M6 청산 시장가 계획", c("run_exit", plan={k: v for k, v in {*
 scn("집행 M6 청산 시장가 거부", c("run_exit", plan={k: v for k, v in {**XP, "type": "MARKET"}.items() if k != "price"}), auto=auto_book(err(400, -2022, "ReduceOnly Order is rejected.")))
 scn("집행 M9 청산 마감 잔량 시장가", c("run_exit", plan=XP), auto=auto_book(MK("0")))
 scn("집행 M9 부분 뒤 잔량 시장가", c("run_exit", plan=XP), auto=auto_book(MK("1.2"), fill_get="0.8", fill_status="PARTIALLY_FILLED"))
-scn("집행 M3 기다리기 마감 시장가", c("run_entry_wait", plan=EP, wait_sec=60.0), auto=auto_book(MK("2")))
-scn("집행 M3 지금 시장가(사용자)", c("run_entry_wait", plan=EP, wait_sec=60.0, state0={"action": "market"}), auto=auto_book(MK("2")))
 scn("집행 M4 지정가 대기 지금 시장가(2번째 조회 뒤)", c("run_entry_limit", plan={**EP, "price": 2490.0, "limit": {"usdt": 2490.0}}, act_at=2, action="market"), auto=auto_book(MK("2")))
 scn("집행 M4 부분 체결 뒤 지금 시장가", c("run_entry_limit", plan={**EP, "price": 2490.0, "limit": {"usdt": 2490.0}}, act_at=3, action="market"),
     auto=auto_book(MK("1.5"), fill_get="0.5", fill_status="PARTIALLY_FILLED"))

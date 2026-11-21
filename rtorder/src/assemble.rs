@@ -12,7 +12,7 @@
 //! (`SIZING_RISK_MODEL_ENABLED` 를 true 로 바꾸면 컴파일 단언이 막는다).
 
 use crate::exec::FALLBACK_SEC as EXEC_FALLBACK_SEC;
-use crate::plan::{self, Filters, PlanError, PrevRule};
+use crate::plan::{self, Filters, PlanError};
 use crate::pyfmt::{self, fixed, round_n};
 use crate::sign::{py_float, py_str, truthy};
 use crate::watch::{busy, parse_iso, Watcher};
@@ -22,7 +22,6 @@ use std::collections::HashMap;
 pub const SIZING_RISK_MODEL_ENABLED: bool = false; // 2026-09-27 사용자 «변동성 모델이 필요없다고 판명 났으니 제거»
 pub const SIZING_CAP_MODEL_ONLY: bool = true; // 2026-09-25 위험모델 상한만(모델 없으면 정책 천장 HARD_CAP_X)
 pub const SIZING_MARGIN_CAP_PCT: f64 = 0.0; // 2026-10-09 증거금 상한 해제(되돌리기 = 50)
-pub const MANUAL_RULES_ENABLED: bool = true; // 2026-10-09 «재생 크기식으로 배포»
 pub const SIZING_CAP_EQUITY_X: f64 = 6.0;
 pub const HARD_CAP_X: f64 = 25.0; // live_eth_risk_sizing_policy 정책 상한
 pub const HOLD_FIXED_MIN: i64 = 240;
@@ -30,8 +29,6 @@ pub const HOLD_CHOICES: [i64; 5] = [60, 120, 240, 480, 1440];
 pub const EXCHANGE_MAX_LEVERAGE: i64 = 150;
 pub const LEVERAGE_STEPS: [i64; 18] = [1, 2, 3, 4, 5, 6, 7, 8, 10, 15, 20, 25, 30, 50, 75, 100, 125, 150];
 pub const ENFORCE_SLACK: f64 = 1.25;
-pub const RULE_ASSETS: [&str; 2] = ["eth", "xrp"];
-pub const RULE_VOL_MAX_AGE: f64 = 15.0 * 60.0; // 권장 배수 신선도(G17)
 const _: () = assert!(!SIZING_RISK_MODEL_ENABLED, "위험모델 갈래는 옮기지 않았다 -- 켜기 전에 recommend_hold·prescribe 를 옮긴다");
 
 // trade_plan 표시 상수(live_eth_trade_plan_20260913)
@@ -64,8 +61,6 @@ pub trait Quotes {
     async fn funding(&mut self, symbol: &str) -> Option<f64>;
     /// commission_bp dict(표시 전용 · P29).
     async fn fees(&mut self, symbol: &str) -> Value;
-    /// margin_type -- "cross" | "isolated" | None.
-    async fn margin_type(&mut self, symbol: &str) -> Option<String>;
 }
 
 /// 조립이 닿는 계좌·화면 상태.
@@ -77,8 +72,6 @@ pub trait DeskIo {
     async fn account(&mut self, fresh: bool) -> Result<Value, String>;
     /// 1초 마지막 체결가 [(초, 가격)] · 원천 없는 코인 None.
     fn sec_prices(&mut self, asset: &str) -> Option<Vec<(f64, f64)>>;
-    /// situation_by[asset]["vol_mult"] (없으면 {}).
-    fn vol_mult(&self, asset: &str) -> Value;
     /// 손절 해제(접수 문) -- bracket::clear_bracket.
     async fn clear_bracket(&mut self, symbol: &str, pside: &str, only_sl: bool, only_tp: bool) -> Result<Value, String>;
     /// 선 핸들러(익절 켜기·선 추가·선 수정) -- bracket::place_bracket(strict).
@@ -183,9 +176,6 @@ impl<Q: Quotes> Quotes for Cached<Q> {
             None => self.inner.fees(symbol).await,
         }
     }
-    async fn margin_type(&mut self, symbol: &str) -> Option<String> {
-        self.inner.margin_type(symbol).await
-    }
 }
 
 /// (가) 실제 거래소 -- 원본처럼 매번 묻는다.
@@ -210,9 +200,6 @@ impl Quotes for crate::http::Binance {
     }
     async fn fees(&mut self, symbol: &str) -> Value {
         crate::bracket::commission_bp(self, symbol).await
-    }
-    async fn margin_type(&mut self, symbol: &str) -> Option<String> {
-        crate::bracket::margin_type(self, symbol).await.map(String::from)
     }
 }
 
@@ -389,7 +376,6 @@ pub struct EntryArgs {
     pub want_lev: Option<i64>,
     pub asset: String,
     pub fresh: bool,
-    pub rule_l: Option<String>,
     pub lines: Option<(f64, f64)>,
     pub limit_usdt: Option<f64>,
     pub stop: bool,
@@ -398,7 +384,7 @@ pub struct EntryArgs {
 
 impl EntryArgs {
     pub fn new(side: &str, asset: &str) -> Self {
-        EntryArgs { side: side.into(), fraction: 1.0, want_lev: None, asset: asset.into(), fresh: false, rule_l: None, lines: None, limit_usdt: None, stop: false, skip_wait: None }
+        EntryArgs { side: side.into(), fraction: 1.0, want_lev: None, asset: asset.into(), fresh: false, lines: None, limit_usdt: None, stop: false, skip_wait: None }
     }
 }
 
@@ -546,20 +532,13 @@ impl Desk {
         if SIZING_MARGIN_CAP_PCT > 0.0 && equity > 0.0 && margin_lev != 0.0 {
             binding.push((equity * margin_lev * SIZING_MARGIN_CAP_PCT / 100.0, "margin"));
         }
-        // 2026-10-20 사용자 «규칙 상한 공유»: 자동 규칙 손절이 무장된 포지션이 있으면 수동 진입도 계좌 명목 ≤ 순자산 × 규칙 상한(P19)
-        //   ponytail(원본): 무장 파일엔 «보유 1.5×» 인지가 안 남아 늘 COMMIT_CAP_X
-        let armed = self.w.load();
-        // 10-24 전 무장 기록엔 auto 가 없다 -- 그땐 rule 이 곧 자동(v.get("auto", v.get("rule")))
-        if equity > 0.0 && armed.values().any(|v| truthy(if v.get("auto").is_some() { v.get("auto") } else { v.get("rule") }) && truthy(v.get("sl_price"))) {
-            binding.push((equity * plan::COMMIT_CAP_X, "rule_shared"));
-        }
         let mut cap_notional = binding.iter().map(|x| x.0).reduce(pyfmt::min);
         let overridden = self.override_x > 0.0 && equity > 0.0;
         if overridden {
             cap_notional = Some(equity * self.override_x);
         }
         // 🔴키로 값만 비교(튜플 min 동점이 이름순으로 갈리지 않게) -- 처음 최소
-        let mut who: Option<String> = if overridden {
+        let who: Option<String> = if overridden {
             Some("override".into())
         } else {
             binding.iter().fold(None::<(f64, &str)>, |b, x| match b { Some(y) if y.0 <= x.0 => Some(y), _ => Some(*x) }).map(|x| x.1.to_string())
@@ -574,89 +553,22 @@ impl Desk {
         let (bid, ask) = (key_f(&book, "bidPrice").map_err(c)?, key_f(&book, "askPrice").map_err(c)?);
         let _price_ref = if side == "LONG" { ask } else { bid };
         let rec_qty = 0.0; // SIMPLE_SIZING vol_equivalent_qty
-        // 2026-10-24 «손절은 −5% 하나로» · 물타기면 무장된 규칙 손절 그대로(P20)
+        // 🔴2026-11-21 사용자 «sltp(차트 선 주문 + 진입가 팝업 청산)만 쓴다»(원본 PR 61): 진입은 익절·손절 선이 있어야 받는다 -- 선 없는 요청은 주문 없이 거절
+        let Some(mut ln) = a.lines else {
+            return Err(fail("lines_required", "익절·손절 선(tp·sl)이 있어야 진입합니다 — 차트 선 주문으로 넣으세요", 400));
+        };
         let key = plan::bracket_key(symbol, side);
-        let prev: Option<Value> = if same.is_empty() { None } else { armed.get(&key).cloned() };
+        let prev: Option<Value> = if same.is_empty() { None } else { self.w.load().get(&key).cloned() };
         let pt = |k: &str| prev.as_ref().is_some_and(|p| truthy(p.get(k)));
-        let mut lines = a.lines;
-        if pt("lines") && lines.is_none() {
-            lines = Some((0.0, 0.0)); // 2026-11-12 «SOXL 추가 숏이 안 된다»: 막지 않고 선 추가 진입과 같은 길
-        }
-        let mut dropped_lines = false;
-        if !same.is_empty() && lines.is_some() && !pt("lines") {
-            if a.limit_usdt.is_some() {
-                return Err(fail("add_limit_unsupported", "선 주문으로 연 포지션이 아니라 지정가 추가 진입은 아직 안 됩니다 — 진입선 없이(peg) 추가하세요", 409));
-            }
-            lines = None;
-            dropped_lines = true;
+        // 선 없는 포지션(옛 규칙 손절 · 앱 진입)에 선 도구로 추가 진입 = 거절(옛 판은 보낸 선을 버리고 −5% 규칙 손절로 넣었다)
+        if !same.is_empty() && !pt("lines") {
+            return Err(fail("add_on_unlined_position", "선이 걸리지 않은 포지션에는 추가 진입을 받지 않습니다 — 먼저 진입가 팝업에서 손절·익절선을 거세요", 409));
         }
         if !same.is_empty() && prev.is_some() && (pt("fired") || self.w.exiting.contains(&key)
             || prev.as_ref().unwrap().get("sl_legs").and_then(Value::as_array).is_some_and(|l| l.iter().any(|g| truthy(g.get("fired"))))) {
             return Err(fail("exiting", "이 포지션의 청산이 진행 중입니다 — 끝난 뒤 다시", 409));
         }
         let p_in = if side == "LONG" { bid } else { ask }; // 이번 주문 지정가(메이커 쪽)
-        let (anchor, kind) = match same.first() { Some(p) => (fl(p.get("entry_price")).map_err(c)?, "평단"), None => (p_in, "첫 진입가") };
-        let basis1 = self.basis_for(q, &book, &a.asset).await;
-        let prev_rule: Option<PrevRule> = prev.as_ref().map(|p| PrevRule {
-            sl_price: p.get("sl_price").filter(|v| truthy(Some(v))).and_then(|v| py_float(v).ok()),
-            sl_level: p.get("sl_level").and_then(|v| py_float(v).ok()),
-            backstop_price: p.get("backstop_price").filter(|v| truthy(Some(v))).and_then(|v| py_float(v).ok()),
-            sl_name: p.get("sl_name").and_then(Value::as_str).map(String::from),
-            rule: truthy(p.get("rule")),
-        });
-        let rb = plan::rec_rule_bracket(side, if anchor != 0.0 { anchor } else { p_in }, basis1, plan::RULE_STOP_PCT, &filters, prev_rule.as_ref(), kind).map_err(|e| c(pe(e)))?;
-        let mut stop_bracket = json!({"position_side": side});
-        for (k, v) in serde_json::to_value(&rb).unwrap().as_object().unwrap() {
-            stop_bracket[k] = v.clone();
-        }
-        if let (Some(p), true) = (&prev, rb.rule && prev_rule.as_ref().is_some_and(|r| r.sl_price.is_some() && r.backstop_price.is_some() && r.rule)) {
-            // 유지 갈래는 저장본 값을 그대로(형까지) 옮긴다
-            stop_bracket["sl_price"] = p["sl_price"].clone();
-            stop_bracket["backstop_price"] = p["backstop_price"].clone();
-            stop_bracket["sl_level"] = p.get("sl_level").cloned().unwrap_or(Value::Null);
-        }
-        let mut fraction = a.fraction;
-        let (mut rule, mut cr, mut vm) = (None, None, json!({}));
-        if let Some(rl) = &a.rule_l {
-            if !RULE_ASSETS.contains(&a.asset.as_str()) {
-                return Err(fail("rule_asset_unsupported", "자동 규칙은 ETH·XRP 만 켭니다", 400));
-            }
-            vm = io.vol_mult(&a.asset); // 그 코인의 권장 배수(ETH 값을 쓰지 않는다)
-            let bar = fl(vm.get("bar")).map_err(c)?;
-            if !(truthy(vm.get("sigma_bp")) && truthy(vm.get("mult"))) || io.now() - bar > RULE_VOL_MAX_AGE {
-                return Err(fail("rule_vol_unavailable", "권장 배수(직전 24시간 변동성)가 없거나 15분 넘게 묵었습니다 -- 자동 진입을 막습니다", 503));
-            }
-            let mt = q.margin_type(symbol).await; // 교차 전제 -- 격리면 손절 전에 청산된다(10-09 실사고, G17)
-            if mt.as_deref() != Some("cross") {
-                return Err(fail("rule_not_cross", if mt.as_deref() == Some("isolated") {
-                    "격리 마진이라 자동 진입을 막습니다 -- 손절보다 청산이 먼저 옵니다. 포지션·주문을 정리하고 바이낸스에서 교차로 바꾸세요"
-                } else {
-                    "마진 방식을 못 읽어 자동 진입을 막습니다(교차 확인 필요)"
-                }, 409));
-            }
-            let mut r_l = plan::commit_rule_l(side, key_f(&vm, "sigma_bp").map_err(c)? * 6f64.sqrt(), key_f(&vm, "mult").map_err(c)?,
-                                              if rl == "h" { plan::HOLD_CAP_X } else { plan::COMMIT_CAP_X }).map_err(|e| c(pe(e)))?;
-            let sl = rb.sl_price.ok_or_else(|| c("TypeError: float() argument must be a string or a real number, not 'NoneType'".into()))?;
-            let sgn = if side == "LONG" { 1.0 } else { -1.0 };
-            let mut q_same = 0.0;
-            for p in &same {
-                q_same += fl(p.get("qty")).map_err(c)?.abs();
-            }
-            if p_in == 0.0 {
-                return Err(c("ZeroDivisionError: float division by zero".into()));
-            }
-            let rs = plan::rec_rule_size(r_l.l, equity, exposure, margin_lev, Some(same.is_empty()),
-                                         if same.is_empty() { 0.0 } else { q_same * pyfmt::max(0.0, sgn * (anchor - sl)) }, Some(sgn * (p_in - sl) / p_in)).map_err(|e| c(pe(e)))?;
-            if rs.l_eff < r_l.l {
-                // 2026-10-13 레버리지가 L 을 묶음(증거금 90%)
-                r_l = plan::RuleL { l: rs.l_eff, binding: "레버리지 증거금".into(), ..r_l };
-            }
-            cap_notional = Some(rs.cap_notional);
-            who = Some("rule".into());
-            fraction = rs.fraction;
-            rule = Some(rs);
-            cr = Some(r_l);
-        }
         // 2026-11-18 가용 잔고에서 «아직 거래소에 안 걸린» 대기 몫의 증거금을 미리 뺀다(검토 #1·#4 · P6)
         //   ponytail(원본): 주문 id 대조 없이 심볼별 합으로 근사 · 레버리지는 이번 주문 것
         let mut wsum: Vec<(String, f64)> = vec![];
@@ -700,37 +612,25 @@ impl Desk {
         let label = match who.as_deref() {
             Some("margin") => format!("증거금 상한 {}%", pyfmt::g(SIZING_MARGIN_CAP_PCT)),
             Some("model") => "위험모델 상한".into(),
-            Some("rule") => format!("자동 규칙 상한(순자산 {}배)", fixed(cr.as_ref().map_or(0.0, |r| r.l), 2, false)),
-            Some("rule_shared") => format!("자동 규칙 포지션이 있어 계좌 상한(순자산 {}배)", pyfmt::g(plan::COMMIT_CAP_X)),
             _ => "상한".into(),
         };
         let ep = plan::build_entry_plan(&plan::EntryInput {
             side, best_bid: bid, best_ask: ask, recommended_qty: rec_qty, cap_notional, filters, symbol, existing_notional: exposure,
-            equity, leverage, fraction, fraction_of_equity: true, order_leverage: margin_lev, cap_label: &label, available_margin: avail,
+            equity, leverage, fraction: a.fraction, fraction_of_equity: true, order_leverage: margin_lev, cap_label: &label, available_margin: avail,
         }).map_err(|e| c(pe(e)))?;
         let mut plan = serde_json::to_value(&ep).unwrap();
         plan["recommended_source"] = json!("vol_equivalent");
         plan["recommended_qty"] = json!(round_n(rec_qty, 8));
         plan["projection"] = entry_projection(&plan, &bal, &positions, existing, equity).map_err(c)?;
         plan["trade_plan"] = plan_now(side, hold_min, vol, funding, &fees).map_err(c)?;
-        plan["bracket"] = stop_bracket;
         let mut notes: Vec<Value> = plan["notes"].as_array().cloned().unwrap_or_default();
-        if !same.is_empty() && dropped_lines {
-            notes.push(json!("추가 진입 — 선 주문 포지션이 아니라 끌어 놓은 익절·손절선은 쓰지 않습니다(기존 손절 그대로)"));
-        }
-        if let Some(mut ln) = lines {
+        {
             // 2026-10-28 차트 선(익절, 손절 · USDT): 거래소 스탑 없이 익절 = post-only 지정가 · 손절 = 1초 체결가 닿음 → peg 청산
             let mut add_lines = false;
             let pv = prev.clone().unwrap_or(json!({}));
             if !same.is_empty() {
                 // 2026-11-03·11-12·11-13·11-14 같은 쪽 선 포지션이면 크기만 늘린다(보낸 선 무시, 무장된 선 그대로)
-                let (tp_off, sl_off) = (pt("tp_off"), pt("sl_off"));
-                if a.rule_l.is_some() {
-                    return Err(fail("rule_on_lines", "선 주문 포지션에는 자동 규칙 크기를 쓰지 않습니다 — 비율(%)로 추가하세요", 409));
-                }
-                if !pt("lines") {
-                    return Err(fail("lines_has_position", "같은 쪽 포지션이 이미 있어 선 진입을 막습니다 — 선 주문으로 연 포지션만 크기를 늘릴 수 있습니다(익절/손절 나눔·청산 진행 중이면 불가). 닫은 뒤 다시", 409));
-                }
+                let (tp_off, sl_off) = (pt("tp_off"), pt("sl_off")); // 선 없는 포지션은 위에서 거절했다
                 ln = (if tp_off { 0.0 } else { fl(pv.get("tp_level")).map_err(c)? }, if sl_off { 0.0 } else { fl(pv.get("sl_level")).map_err(c)? });
                 add_lines = true;
             }
@@ -787,19 +687,6 @@ impl Desk {
             }
         }
         plan["notes"] = Value::Array(notes);
-        if let (Some(rs), Some(r_l)) = (&rule, &cr) {
-            let fil = json!({"tick": filters.tick, "step": filters.step, "min_qty": filters.min_qty, "min_notional": filters.min_notional});
-            plan["rule"] = json!({"l": round_n(r_l.l, 3), "binding": r_l.binding, "stop_pct": round_n(100.0 * r_l.stop_pct, 2), "vol_mult": round_n(key_f(&vm, "mult").map_err(c)?, 3),
-                "cap_notional": round_n(rs.cap_notional, 2), "first": rs.first, "room": round_n(rs.room, 2), "target_notional": round_n(rs.target_notional, 2),
-                "loss_at_stop_pct": round_n(100.0 * r_l.l * r_l.stop_pct, 2), "sl_price": plan["bracket"].get("sl_price"), "sl_name": plan["bracket"].get("sl_name"),
-                "lev": margin_lev, "filters": fil});
-            let bsl = plan["bracket"].get("sl_price").cloned().unwrap_or(Value::Null);
-            if rs.first && crate::watch::REC_AUTO_ADD && truthy(plan.get("quantity")) && truthy(Some(&bsl)) && lines.is_none() {
-                let ao = plan::rec_rule_add_order(side, py_float(&bsl).map_err(c)?, r_l.stop_pct, r_l.l, rs.cap_notional, rs.room, fl(plan.get("quantity")).map_err(c)?, margin_lev, &filters)
-                    .map_err(|e| c(pe(e)))?;
-                plan["rule"]["add"] = serde_json::to_value(ao).unwrap();
-            }
-        }
         // 게이지 값이 있으면 그것, «자동»이면 모델 추천 -- 처방이 없어(위험모델 끔) 모델 값은 None
         plan["target_leverage"] = a.want_lev.filter(|l| *l != 0).map_or(Value::Null, |l| json!(l));
         plan["leverage_source"] = json!(if a.want_lev.is_some_and(|l| l != 0) { "manual" } else { "model" });
@@ -813,10 +700,10 @@ impl Desk {
     }
 
     /// 원본 `assemble_exit_plan`. 수량은 반드시 **방금 읽은 포지션**에서(헤지 모드 과청산 방어는 수량뿐), 심볼은 실제 열린 포지션에서(P14).
-    /// for_order=true(실주문) = 화면용 펀딩·수수료 조회를 건너뛴다(P28) · market = «즉시»(M8 -- 집행이 시장가로 닫는다).
+    /// for_order=true(실주문) = 화면용 펀딩·수수료 조회를 건너뛴다(P28) · «즉시»(M8 market)는 원본 PR 61 처럼 지웠다.
     #[allow(clippy::too_many_arguments)]
     pub async fn assemble_exit_plan<Q: Quotes, I: DeskIo>(&mut self, q: &mut Q, io: &mut I, position_side: &str, fraction: f64, fresh: bool, asset: &str,
-                                                         market: bool, for_order: bool, only_symbol: Option<&str>) -> Result<Value, Fail> {
+                                                         for_order: bool, only_symbol: Option<&str>) -> Result<Value, Fail> {
         let c = |e: String| crash(e);
         let mut candidates: Vec<String> = vec![];
         let es = self.exec_symbol(asset).ok_or_else(|| c(format!("KeyError: '{asset}'")))?;
@@ -860,15 +747,6 @@ impl Desk {
             filters, symbol: &symbol, entry_price: fl(position.get("entry_price")).map_err(c)?, mark_price: fl(position.get("mark_price")).map_err(c)?, vol_bpm: vol, fraction,
         }).map_err(|e| c(pe(e)))?;
         let mut plan = serde_json::to_value(&xp).unwrap();
-        if market && plan["type"] != json!("MARKET") {
-            // 2026-10-10 «즉시»(청산 칩·스위칭) -- 시장가 분기 M8(집행이 멈춘다)
-            let o = plan.as_object_mut().unwrap();
-            o.remove("timeInForce");
-            o.remove("price");
-            o.insert("type".into(), json!("MARKET"));
-            o.insert("repeg".into(), json!(false));
-            o.insert("market_reason".into(), json!("즉시 체결 — 지정가를 걸지 않고 바로 시장가로 닫습니다(테이커 수수료)"));
-        }
         plan["unrealized_pnl"] = position.get("unrealized_pnl").cloned().unwrap_or(Value::Null);
         if !leftover.is_empty() {
             plan["other_symbol_open"] = Value::Array(leftover);

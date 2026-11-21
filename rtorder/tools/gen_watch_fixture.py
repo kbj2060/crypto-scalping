@@ -4,7 +4,7 @@ arm_bracket · plan_from_current · keep_rearm · limit_recover · wait_cleanup)
 Rust `cargo test --test watch_fixture` 가 같은 각본(같은 응답 열 · 같은 저장본 고치기)으로 Rust 감시를 돌려 다섯을 대조한다.
 
 꺼내는 법: `register(...)` 가 받는 의존성(swr_cached·load_market_history·sec_prices·binance_session)은 가짜로 넣고,
-모듈 전역(clear_bracket·run_exit·place_bracket·place_tp_ladder·place_add_order·cancel_wait_orphans·exec_enabled·nap·time·datetime)은
+모듈 전역(clear_bracket·run_exit·place_bracket·place_tp_ladder·cancel_wait_orphans·exec_enabled·nap·time·datetime)은
 patch, 클로저 안 변수(assemble_exit_plan·produce_account·manual_order_lock)는 셀 내용을 바꾼다(rtcore/tools/gen_supply1s_fixture.py 와 같은 방식).
 각본의 응답 하나 = {"ret" | "raise": [형, 문구], "dt": 시계 전진, "patch": 저장본 고치기, "lock": 주문 잠금, "exec": 실행 스위치, "slot": run_exit 결과 칸}.
 
@@ -185,11 +185,6 @@ async def f_ladder(_s, legs, symbol, pside):
     return respond("place_tp_ladder").get("ret")
 
 
-async def f_add(_s, symbol, pside, price, qty):
-    note("place_add_order", symbol, pside, price, qty)
-    return respond("place_add_order").get("ret")
-
-
 async def f_orphans(_s, symbols):
     note("cancel_wait_orphans", symbols)
     return respond("cancel_wait_orphans").get("ret")
@@ -259,11 +254,11 @@ async def run_scenario(sc: dict) -> dict:
         (tmp / name).write_text(json.dumps(body, ensure_ascii=False), "utf-8")
     extra = {"cancel_exit_orders": f_cxo} if hasattr(orders, "cancel_exit_orders") else {}   # 2026-11-21 결함 수정본만
     with mock.patch.multiple(orders, **extra, LIVE_DIR=tmp, clear_bracket=f_clear, run_exit=f_run_exit, place_bracket=f_place_bracket,
-                             place_tp_ladder=f_ladder, place_add_order=f_add, cancel_wait_orphans=f_orphans,
+                             place_tp_ladder=f_ladder, cancel_wait_orphans=f_orphans,
                              exec_enabled=lambda: Ctl.exec_on, nap=f_nap, datetime=FakeDT,
                              time=types.SimpleNamespace(time=lambda: Clock.t, monotonic=lambda: Clock.t, perf_counter=lambda: Clock.t),
-                             fetch_account=boom, run_entry=boom, run_entry_wait=boom, run_entry_limit=boom, run_entry_stop=boom,
-                             place_stop=boom, commission_bp=boom, load_filters=boom, margin_type=boom):
+                             fetch_account=boom, run_entry=boom, run_entry_limit=boom, run_entry_stop=boom,
+                             commission_bp=boom, load_filters=boom):
         api = orders.register(account_trip_state={"seen": {}}, refresh_tasks={}, swr_locks={}, binance_session=lambda: None,
                               fetch_binance_json=boom, swr_cached=f_swr, _timed_produce=boom, load_market_history=f_hist,
                               situation_by={}, NOCACHE={}, STALE_GRACE_SECONDS=60, sec_prices=f_sec)
@@ -309,7 +304,7 @@ async def run_scenario(sc: dict) -> dict:
                     elif op in ("partial_exit_rearm_tp", "keep_rearm", "exit_then_rearm"):
                         await fn[op](tk["plan"], state)
                     elif op == "arm_bracket":
-                        await fn[op](tk["plan"], state, add=tk.get("add", True))
+                        await fn[op](tk["plan"], state)
                     elif op == "plan_from_current":
                         ret = fn[op](tk["plan"])
                     elif op == "limit_save":
@@ -598,11 +593,11 @@ BR_LINES = {"available": True, "lines": True, "sl_price": 2480.0, "sl_level": 24
 EPLAN = {"symbol": ETH, "positionSide": "LONG", "side": "BUY", "quantity": 0.5}
 PB_OK = {"ret": {"qty": 0.5, "tp": None, "backstop": {"placed": True, "order_id": 7}, "placed": True, "cleared": {"cancelled": 0}}}
 PB_LINES = {"ret": {"qty": 0.5, "tp": {"placed": True, "order_id": 8}, "backstop": None, "placed": True, "cleared": {"cancelled": 0}}}
-add("arm_bracket_rule_first_with_add", {K_S: RULE_S},
+add("arm_bracket_rule_old_plan_no_add", {K_S: RULE_S},   # 2026-11-21 PR 61: 자동 물타기 지움 -- 규칙 계획이 와도 place_add_order 없음
     [tick(op="arm_bracket", plan={**EPLAN, "bracket": BR_RULE, "rule": {"first": True, "stop_pct": 5.0, "l": 2.0, "cap_notional": 3000.0, "room": 3000.0,
                                                                          "lev": 20, "filters": {"tick": 0.01, "step": 0.001, "min_qty": 0.001, "min_notional": 20.0}}},
           state={"phase": "filled_maker", "filled": 0.4})],
-    {"place_bracket": [PB_OK], "place_add_order": [{"ret": {"placed": True, "order_id": 9}}]})
+    {"place_bracket": [PB_OK]})
 add("arm_bracket_rule_stop_failed_no_add", {},
     [tick(op="arm_bracket", plan={**EPLAN, "bracket": BR_RULE, "rule": {"first": True, "stop_pct": 5.0, "l": 2.0, "cap_notional": 3000.0, "room": 3000.0, "lev": 20}},
           state={"filled": 0.4})],
