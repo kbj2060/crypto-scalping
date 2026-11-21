@@ -917,8 +917,60 @@ API_CASES = [
 ]
 
 
+# ── 2026-11-21 스트림 계좌 대 REST: 같은 알림 열 뒤 «거래소가 REST 로 내줄 상태»를 원본 fetch_account 로 만들어, Rust 가 기준 스냅숏 + 같은 알림으로 고친 계좌와 대조 ──
+#   (원본엔 스트림 계좌가 없다 -- 원본이 그 순간 새로 읽었다면 냈을 계좌 칸이 정답 · 합성 값)
+def ev_otu(c, X, x, S, q, z, p, s="ETHUSDC", ps="LONG", R=False):
+    return {"e": "ORDER_TRADE_UPDATE", "o": {"s": s, "c": c, "X": X, "x": x, "S": S, "o": "LIMIT", "q": str(q), "z": str(z), "p": str(p), "R": R, "ps": ps}}
+
+
+def ev_acct(s, ps, pa, ep, up):
+    return {"e": "ACCOUNT_UPDATE", "a": {"P": [{"s": s, "ps": ps, "pa": str(pa), "ep": str(ep), "up": str(up)}]}}
+
+
+def risk_with(**rows):
+    out = [dict(r) for r in RISK]
+    for key, upd in rows.items():
+        sym, ps = key.split("__")
+        hit = [r for r in out if r["symbol"] == sym and r["positionSide"] == ps]
+        if hit:
+            hit[0].update(upd)
+        else:
+            out.append({"symbol": sym, "positionSide": ps, "markPrice": upd.get("entryPrice", "0"), "liquidationPrice": "0", "leverage": "5", "notional": "0",
+                        "unRealizedProfit": "0", "updateTime": 1799999000000, **upd})
+    return out
+
+
+TPO = ORDERS_ETH[0]
+STREAM_REST_CASES = [
+    {"name": "tp_partial", "events": [ev_otu("dbtpL123", "PARTIALLY_FILLED", "TRADE", "SELL", 0.5, 0.3, 2600), ev_acct("ETHUSDC", "LONG", 0.2, 2400.5, 9.95)],
+     "routes1": acct_routes(**{"/fapi/v2/positionRisk": risk_with(ETHUSDC__LONG={"positionAmt": "0.200", "unRealizedProfit": "9.95"}),
+                               "/fapi/v1/openOrders?ETHUSDC": [{**TPO, "executedQty": "0.3"}, ORDERS_ETH[1]]})},
+    {"name": "tp_filled_closes", "events": [ev_otu("dbtpL123", "FILLED", "TRADE", "SELL", 0.5, 0.5, 2600), ev_acct("ETHUSDC", "LONG", 0, 0, 0)],
+     "routes1": acct_routes(**{"/fapi/v2/positionRisk": risk_with(ETHUSDC__LONG={"positionAmt": "0", "entryPrice": "0", "unRealizedProfit": "0"}),
+                               "/fapi/v1/openOrders?ETHUSDC": [ORDERS_ETH[1]]})},
+    {"name": "wait_new_partial_add", "events": [ev_otu("dbwtL5", "NEW", "NEW", "BUY", 0.2, 0, 2450), ev_otu("dbwtL5", "PARTIALLY_FILLED", "TRADE", "BUY", 0.2, 0.05, 2450),
+                                                ev_acct("ETHUSDC", "LONG", 0.55, 2404.5, 25.1)],
+     "routes1": acct_routes(**{"/fapi/v2/positionRisk": risk_with(ETHUSDC__LONG={"positionAmt": "0.550", "entryPrice": "2404.5", "unRealizedProfit": "25.1"}),
+                               "/fapi/v1/openOrders?ETHUSDC": ORDERS_ETH + [{"symbol": "ETHUSDC", "side": "BUY", "type": "LIMIT", "price": "2450", "origQty": "0.2",
+                                                                            "executedQty": "0.05", "reduceOnly": False, "clientOrderId": "dbwtL5"}]})},
+    {"name": "new_short_new_symbol", "events": [ev_acct("SOLUSDC", "SHORT", -2, 150.25, 0)],
+     "routes1": acct_routes(**{"/fapi/v2/positionRisk": risk_with(SOLUSDC__SHORT={"positionAmt": "-2", "entryPrice": "150.25"})})},
+    {"name": "order_gone", "events": [ev_otu("dbtpL123", "CANCELED", "CANCELED", "SELL", 0.5, 0.1, 2600)],
+     "routes1": acct_routes(**{"/fapi/v1/openOrders?ETHUSDC": [ORDERS_ETH[1]]})},
+    {"name": "one_way_both", "events": [ev_acct("XRPUSDC", "BOTH", -10, 0.51, -0.1)],
+     "routes1": acct_routes(**{"/fapi/v2/positionRisk": risk_with(XRPUSDC__BOTH={"positionAmt": "-10", "entryPrice": "0.51", "unRealizedProfit": "-0.1", "leverage": "5"})})},
+]
+
+
+def run_stream_rest(c):
+    a0 = run_account({"name": c["name"] + "_0", "symbols": SYMS, "routes": acct_routes()})
+    a1 = run_account({"name": c["name"] + "_1", "symbols": SYMS, "routes": c["routes1"]})
+    return {"name": c["name"], "events": c["events"], "acct0": a0["out"], "acct1": a1["out"]}
+
+
 def main():
-    out = {"account": [run_account(c) for c in ACCOUNT_CASES], "stream": [run_stream(c) for c in STREAM_CASES]}
+    out = {"account": [run_account(c) for c in ACCOUNT_CASES], "stream": [run_stream(c) for c in STREAM_CASES],
+           "stream_rest": [run_stream_rest(c) for c in STREAM_REST_CASES]}
     desk = []
     for name, spec, extra in ENTRY_CASES + EXIT_CASES:
         c = {"name": name, **spec, **extra}

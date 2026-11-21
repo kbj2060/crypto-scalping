@@ -6,11 +6,12 @@
 //! 감시는 무장을 남기고 30초 뒤 다시). 그래도 어딘가 쓰기 경로가 새면 `http::Binance` 의 그림자 막이가 보내기 전에 panic 한다(마지막 방어).
 //! 상태 폴더는 Rust 전용이어야 한다(파이썬 서버의 data/live 를 같이 쓰면 무장 파일을 서로 덮는다 -- `config_from` 이 막는다).
 
-use crate::account::{user_stream_run, UserStream};
+use crate::account::{account_refresher, user_stream_run, AccountBook, RefreshIo, UserStream};
 use crate::bracket;
 use crate::coreval::{self, Feed};
 use crate::exec::{Common, Exchange, LimitOrder, OrderRef, Reply};
 use crate::http::Binance;
+use crate::telegram::{html_escape, Telegram};
 use crate::userstream::{Hub, LiveStream};
 use crate::watch::{Obj, WatchIo, Watcher};
 use crate::wire::Wired;
@@ -30,6 +31,8 @@ pub struct Config {
     pub stream: bool,
     pub hub_url: Option<String>,
     pub ban_file: PathBuf,
+    /// TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID(둘 다 있어야) · RTORDER_TELEGRAM_BASE(시험용 주소). 그림자에서는 안 보낸다.
+    pub telegram: Option<Telegram>,
 }
 
 /// RTORDER_DIR(필수 · Rust 전용 폴더) · RTORDER_BASE(기본 바이낸스 선물) · RTORDER_WS(사용자 스트림 앞부분) · DASHBOARD_MANUAL_EXEC_SYMBOL(eth 주문 심볼 -- 원본과 같은 이름) ·
@@ -54,6 +57,7 @@ pub fn config_from(get: &dyn Fn(&str) -> Option<String>) -> Result<Config, Strin
         max_ticks: get("RTORDER_MAX_TICKS").and_then(|s| s.parse().ok()),
         stream: get("RTORDER_STREAM").as_deref() == Some("1"),
         hub_url: get("RTORDER_HUB").filter(|s| !s.is_empty()),
+        telegram: Telegram::from_env(get),
     })
 }
 
@@ -133,6 +137,7 @@ pub struct Ops {
     pub stopped: Arc<AtomicBool>,
     pub would: Would,
     pub alerts: Vec<String>,
+    pub telegram: Option<Telegram>,
 }
 impl Ops {
     fn shadow(&self, what: String) -> bool {
@@ -216,7 +221,60 @@ impl WatchIo for Ops {
         Ok(bracket::cancel_exit_orders(&mut self.bx, s, p).await)
     }
     fn alert(&mut self, msg: &str) {
-        self.alerts.push(msg.into()); // ponytail: 텔레그램은 안 보낸다 -- 로그로만(서버에 붙일 때 보내기 구현)
+        self.alerts.push(msg.into());
+        // 원본 bracket_tick_alert: html.escape 해서 뒤에서 보낸다(최대 8초 -- 감시를 기다리게 하지 않는다 · 결과는 안 본다). 그림자 = 보내지 않고 «안 보낸 알림»
+        if self.shadow(format!("TELEGRAM {msg}")) {
+            return;
+        }
+        if let Some(t) = self.telegram.clone() {
+            let text = html_escape(msg);
+            tokio::task::spawn_blocking(move || t.send(&text));
+        }
+    }
+}
+
+/// 원본 `account_refresher` 의 바깥: 체결 알림(Hub.dirty) → 계좌 새로 읽기 → 공유 캐시 · 스트림 계좌 대조 → 번호(Hub.seq)+1 → 감시 깨움.
+struct Refresher {
+    rest: Binance,
+    /// ponytail: 감시(Wired)와 따로 둔 장부 -- 마지막 정상 계좌(last_good)를 서로 모른다. 한쪽이 실패해 묵은 값으로 떨어질 때만 차이 -- 합치려면 Wired.book 을 Arc<Mutex> 로.
+    book: AccountBook,
+    cache: Arc<Mutex<Option<(f64, Value)>>>,
+    hub: Arc<Hub>,
+    stop: Stop,
+}
+impl RefreshIo for Refresher {
+    async fn wait_dirty(&mut self) -> bool {
+        if self.stop.flag.load(Ordering::SeqCst) {
+            return false;
+        }
+        tokio::select! { _ = self.hub.dirty.notified() => {}, _ = self.stop.notify.notified() => {} }
+        !self.stop.flag.load(Ordering::SeqCst)
+    }
+    /// acct_dirty.clear() -- 묶는 0.3초 사이에 온 알림은 이번 조회가 덮는다.
+    fn clear_dirty(&mut self) {
+        use futures_util::FutureExt;
+        let _ = self.hub.dirty.notified().now_or_never();
+    }
+    async fn sleep(&mut self, sec: f64) -> bool {
+        if self.stop.flag.load(Ordering::SeqCst) {
+            return false;
+        }
+        tokio::select! { _ = tokio::time::sleep(std::time::Duration::from_secs_f64(sec)) => {}, _ = self.stop.notify.notified() => {} }
+        !self.stop.flag.load(Ordering::SeqCst)
+    }
+    async fn refresh(&mut self) -> Result<(), String> {
+        let now = crate::account::AccountRest::now(&self.rest);
+        let v = self.book.produce(&mut self.rest).await?;
+        self.hub.reconcile(&v, now);
+        *self.cache.lock().unwrap() = Some((now, v));
+        Ok(())
+    }
+    fn wake(&mut self) {
+        self.hub.seq.fetch_add(1, Ordering::SeqCst); // 원본: seq += 1 바로 뒤 wake_fills.set()
+        self.hub.wake.notify_waiters();
+    }
+    fn log(&mut self, s: String) {
+        self.hub.logs.lock().unwrap().push(s);
     }
 }
 
@@ -240,21 +298,30 @@ impl Stop {
     }
 }
 
-/// 몸통: 시작 복구 → (사용자 스트림 · 허브 구독과 함께) 감시 루프 → 멈춤. `mk` = 같은 설정의 `Binance` 를 하나 더 만든다(계좌·시세·집행·손절 함수가 각자 하나).
-pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop) -> Summary {
+/// 몸통: 시작 복구 → (사용자 스트림 · 계좌 갱신기 · 허브 구독과 함께) 감시 루프 → 멈춤. `mk` = 같은 설정의 `Binance` 를 하나 더 만든다(계좌·시세·집행·손절 함수가 각자 하나).
+/// `hub` = 바깥(응답 서버)과 같이 보는 스트림 상태 -- `hub.acct_seq()` 가 원본 /api/events 의 acct_seq · `hub.us` 가 user_stream 상태.
+pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop, hub: Arc<Hub>) -> Summary {
     let would: Would = Arc::new(Mutex::new(vec![]));
-    let hub = Arc::new(Hub::default());
     let feed = Arc::new(Mutex::new(Feed::default()));
     let shadow = mk().is_shadow();
-    let ops = Ops { bx: mk(), feed: feed.clone(), hub: hub.clone(), stop: stop.notify.clone(), stopped: stop.flag.clone(), would: would.clone(), alerts: vec![] };
+    let ops = Ops { bx: mk(), feed: feed.clone(), hub: hub.clone(), stop: stop.notify.clone(), stopped: stop.flag.clone(), would: would.clone(), alerts: vec![], telegram: cfg.telegram.clone() };
     let mut io = Wired::new(ops, mk(), crate::assemble::Cached::new(mk()), GuardEx { bx: mk(), would: would.clone() }, &cfg.eth_symbol);
+    // 원본 기동 훅 게이트: start_wait_cleanup = 실행 스위치 · start_user_stream = 실행 스위치 + 키(주문이 없는 곳은 알림도 필요 없다)
+    let gate = io.ops.exec_enabled();
+    let streaming = cfg.stream && gate && io.ops.bx.has_keys();
+    if streaming {
+        io.stream = Some(hub.clone()); // 청산 조립의 새 계좌 = 스트림 계좌(쓸 수 있을 때) · 아니면 REST
+    }
     let mut w = Watcher::new(&cfg.dir, &cfg.eth_symbol);
     w.log(format!("rtorder 시작 · {} · 폴더 {} · 주기 {}초", if shadow { "그림자" } else { "실전송" }, cfg.dir.display(), cfg.period));
     // 원본 기동 훅 순서: start_wait_cleanup(남은 대기 주문 정리 → 지정가 대기 복구 파일로 무장) → 감시 시작
     // ponytail: 원본은 정리를 작업으로 띄우고 바로 감시를 시작한다 -- 여기는 정리를 끝낸 뒤 감시(첫 틱이 정리 전 상태를 보지 않게 · 기동이 그만큼 늦다)
-    if let Err(e) = w.wait_cleanup(&mut io).await {
-        w.log(format!("wait cleanup 실패: {e}"));
+    if gate {
+        if let Err(e) = w.wait_cleanup(&mut io).await {
+            w.log(format!("wait cleanup 실패: {e}"));
+        }
     }
+    let cache = io.cache.clone();
     let mut ticks = 0u64;
     let watch = async {
         loop {
@@ -277,10 +344,16 @@ pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop) -> Summary 
         }
     };
     let stream = async {
-        if cfg.stream {
+        if streaming {
             let mut ls = LiveStream::new(mk(), &cfg.ws_base, hub.clone());
             let mut us = UserStream::default();
             tokio::select! { _ = user_stream_run(&mut ls, &mut us) => {}, _ = stop.notify.notified() => {} }
+        }
+    };
+    let refresher = async {
+        if streaming {
+            let mut r = Refresher { rest: mk(), book: AccountBook { eth_symbol: cfg.eth_symbol.clone(), last_good: None }, cache, hub: hub.clone(), stop: stop.clone() };
+            account_refresher(&mut r, &mut UserStream::default()).await;
         }
     };
     let sub = async {
@@ -288,7 +361,7 @@ pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop) -> Summary 
             tokio::select! { _ = coreval::subscribe(url, feed.clone(), stop.flag.clone()) => {}, _ = stop.notify.notified() => {} }
         }
     };
-    tokio::join!(watch, stream, sub);
+    tokio::join!(watch, stream, refresher, sub);
     let mut logs = std::mem::take(&mut w.logs);
     logs.extend(hub.logs.lock().unwrap().drain(..));
     logs.extend(io.ops.alerts.drain(..));

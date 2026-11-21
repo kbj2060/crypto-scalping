@@ -5,7 +5,7 @@
 //! 화면 몫(왕복 원장 파일 기록·income·day_start·추세 칸)은 옮기지 않았다 -- 응답 서버(R6) 몫. 주문 경로는 이 칸들을 안 읽는다.
 //!
 //! «받아 둔 값» 자리(사용자 결정): `StreamAccount` = 마지막 REST 스냅숏 + 사용자 스트림 사건으로 고친 포지션·미체결.
-//! 스트림이 살아 있고 · 그 연결에서 · `STREAM_TRUST_SEC` 안에 REST 와 맞춰 봤고 · 마지막 대조가 어긋나지 않았을 때만 쓴다. 아니면 REST(`fresh_account`).
+//! 스트림이 살아 있고 · 그 연결에서 · `STREAM_TRUST_SEC` 안에 REST 와 맞춰 봤고 · 마지막 대조가 어긋나지 않았을 때만 쓴다. 아니면 REST(`wire::Wired` 의 청산 조립 계좌).
 
 use crate::sign::{err_value, py_float, py_str, truthy, P};
 use crate::watch::iso_utc;
@@ -585,6 +585,8 @@ pub trait StreamIo {
     fn dirty(&mut self);
     /// 계좌 사건(스트림으로 계좌 유지 -- `StreamAccount::apply`). 원본엔 없다(받아 둔 값 자리).
     fn event(&mut self, _msg: &Value) {}
+    /// `us` 가 바뀐 직후(연결·끊김·알림 시각·오류) -- 바깥의 사본을 맞춘다. 원본은 같은 dict 를 같이 본다.
+    fn state(&mut self, _us: &UserStream) {}
     fn tp_leg_filled(&mut self, symbol: &str, ps: &str, cid: &str) -> Result<(), String>;
     fn log(&mut self, s: String);
 }
@@ -607,6 +609,7 @@ pub async fn user_stream_run<S: StreamIo>(io: &mut S, us: &mut UserStream) {
             us.connected = true;
             us.error = None;
             us.epoch += 1;
+            io.state(us);
             io.log("user stream: 체결 알림 연결".into());
             io.dirty(); // 끊긴 동안의 체결은 다시 오지 않는다 -- 붙자마자 계좌를 한 번 읽는다(A8)
             io.wake();
@@ -645,6 +648,7 @@ pub async fn user_stream_run<S: StreamIo>(io: &mut S, us: &mut UserStream) {
                         first = false;
                     }
                     us.last_event_at = Some(io.wall());
+                    io.state(us);
                     io.wake();
                     if kind == "fill" {
                         io.dirty();
@@ -670,6 +674,7 @@ pub async fn user_stream_run<S: StreamIo>(io: &mut S, us: &mut UserStream) {
             Ok(()) => {}
         }
         us.connected = false;
+        io.state(us); // 오류 문구도 함께
         if t_conn.is_some_and(|t| io.mono() - t > RECONNECT_RESET_AFTER_S) {
             wait = RECONNECT_MIN_S; // 5분 넘게 붙어 있었으면 정상 끊김(24시간) -- 바로 다시
         }
@@ -853,19 +858,5 @@ impl StreamAccount {
         v["generated_at"] = json!(iso_utc(now));
         v["source"] = json!("stream");
         Ok(v)
-    }
-}
-
-/// 청산 조립의 «새로 읽은 계좌»: 스트림 계좌를 쓸 수 있으면 그것(REST 왕복 없음) · 아니면 REST(그리고 대조).
-/// 돌려주기 = (계좌, 어디서 왔나: "stream" | 스트림을 못 쓴 이유).
-pub async fn fresh_account<R: AccountRest>(sa: &mut StreamAccount, us: &UserStream, book: &mut AccountBook, rest: &mut R) -> Result<(Value, &'static str), String> {
-    let now = rest.now();
-    match sa.usable(us, now) {
-        Ok(v) => Ok((v, "stream")),
-        Err(why) => {
-            let v = book.produce(rest).await?;
-            sa.reconcile(&v, now, us.epoch);
-            Ok((v, why))
-        }
     }
 }

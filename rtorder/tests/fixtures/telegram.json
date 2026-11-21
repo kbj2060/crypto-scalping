@@ -1,0 +1,104 @@
+{
+ "cases": [
+  {
+   "key": "ETHUSDC:LONG",
+   "why": "KeyError: 'qty'",
+   "printed": [
+    "bracket watch: 🔴 손절 감시: 무장 칸 ETHUSDC:LONG 을 판정하지 못해 건너뜁니다(KeyError: 'qty') — 다른 코인은 계속 봅니다 · 칸은 지우지 않았습니다(manual_bracket_state.json 확인)"
+   ],
+   "sent": [
+    {
+     "url": "https://api.telegram.org/bot123456:test_token/sendMessage",
+     "method": "POST",
+     "ctype": "application/json",
+     "body": "{\"chat_id\": \"-100987\", \"text\": \"\\ud83d\\udd34 \\uc190\\uc808 \\uac10\\uc2dc: \\ubb34\\uc7a5 \\uce78 ETHUSDC:LONG \\uc744 \\ud310\\uc815\\ud558\\uc9c0 \\ubabb\\ud574 \\uac74\\ub108\\ub701\\ub2c8\\ub2e4(KeyError: &#x27;qty&#x27;) \\u2014 \\ub2e4\\ub978 \\ucf54\\uc778\\uc740 \\uacc4\\uc18d \\ubd05\\ub2c8\\ub2e4 \\u00b7 \\uce78\\uc740 \\uc9c0\\uc6b0\\uc9c0 \\uc54a\\uc558\\uc2b5\\ub2c8\\ub2e4(manual_bracket_state.json \\ud655\\uc778)\", \"parse_mode\": \"HTML\"}",
+     "timeout": 8
+    }
+   ]
+  },
+  {
+   "key": "ETHUSDC:LONG",
+   "why": "KeyError: 'other'",
+   "printed": [],
+   "sent": []
+  },
+  {
+   "key": "ETHUSDC:LONG",
+   "why": "ValueError: bad <x> & 'y' \"z\"",
+   "printed": [
+    "bracket watch: 🔴 손절 감시: 무장 칸 ETHUSDC:LONG 을 판정하지 못해 건너뜁니다(ValueError: bad <x> & 'y' \"z\") — 다른 코인은 계속 봅니다 · 칸은 지우지 않았습니다(manual_bracket_state.json 확인)"
+   ],
+   "sent": [
+    {
+     "url": "https://api.telegram.org/bot123456:test_token/sendMessage",
+     "method": "POST",
+     "ctype": "application/json",
+     "body": "{\"chat_id\": \"-100987\", \"text\": \"\\ud83d\\udd34 \\uc190\\uc808 \\uac10\\uc2dc: \\ubb34\\uc7a5 \\uce78 ETHUSDC:LONG \\uc744 \\ud310\\uc815\\ud558\\uc9c0 \\ubabb\\ud574 \\uac74\\ub108\\ub701\\ub2c8\\ub2e4(ValueError: bad &lt;x&gt; &amp; &#x27;y&#x27; &quot;z&quot;) \\u2014 \\ub2e4\\ub978 \\ucf54\\uc778\\uc740 \\uacc4\\uc18d \\ubd05\\ub2c8\\ub2e4 \\u00b7 \\uce78\\uc740 \\uc9c0\\uc6b0\\uc9c0 \\uc54a\\uc558\\uc2b5\\ub2c8\\ub2e4(manual_bracket_state.json \\ud655\\uc778)\", \"parse_mode\": \"HTML\"}",
+     "timeout": 8
+    }
+   ]
+  },
+  {
+   "key": "SOXLUSDT:SHORT",
+   "why": "KeyError: 'qty'",
+   "printed": [
+    "bracket watch: 🔴 손절 감시: 무장 칸 SOXLUSDT:SHORT 을 판정하지 못해 건너뜁니다(KeyError: 'qty') — 다른 코인은 계속 봅니다 · 칸은 지우지 않았습니다(manual_bracket_state.json 확인)"
+   ],
+   "sent": [
+    {
+     "url": "https://api.telegram.org/bot123456:test_token/sendMessage",
+     "method": "POST",
+     "ctype": "application/json",
+     "body": "{\"chat_id\": \"-100987\", \"text\": \"\\ud83d\\udd34 \\uc190\\uc808 \\uac10\\uc2dc: \\ubb34\\uc7a5 \\uce78 SOXLUSDT:SHORT \\uc744 \\ud310\\uc815\\ud558\\uc9c0 \\ubabb\\ud574 \\uac74\\ub108\\ub701\\ub2c8\\ub2e4(KeyError: &#x27;qty&#x27;) \\u2014 \\ub2e4\\ub978 \\ucf54\\uc778\\uc740 \\uacc4\\uc18d \\ubd05\\ub2c8\\ub2e4 \\u00b7 \\uce78\\uc740 \\uc9c0\\uc6b0\\uc9c0 \\uc54a\\uc558\\uc2b5\\ub2c8\\ub2e4(manual_bracket_state.json \\ud655\\uc778)\", \"parse_mode\": \"HTML\"}",
+     "timeout": 8
+    }
+   ]
+  },
+  {
+   "key": "XRPUSDC:LONG",
+   "why": "RuntimeError: 줄\n바꿈\t탭  끝 🔴",
+   "printed": [
+    "bracket watch: 🔴 손절 감시: 무장 칸 XRPUSDC:LONG 을 판정하지 못해 건너뜁니다(RuntimeError: 줄\n바꿈\t탭  끝 🔴) — 다른 코인은 계속 봅니다 · 칸은 지우지 않았습니다(manual_bracket_state.json 확인)"
+   ],
+   "sent": [
+    {
+     "url": "https://api.telegram.org/bot123456:test_token/sendMessage",
+     "method": "POST",
+     "ctype": "application/json",
+     "body": "{\"chat_id\": \"-100987\", \"text\": \"\\ud83d\\udd34 \\uc190\\uc808 \\uac10\\uc2dc: \\ubb34\\uc7a5 \\uce78 XRPUSDC:LONG \\uc744 \\ud310\\uc815\\ud558\\uc9c0 \\ubabb\\ud574 \\uac74\\ub108\\ub701\\ub2c8\\ub2e4(RuntimeError: \\uc904\\n\\ubc14\\uafc8\\t\\ud0ed \\u007f \\ub05d \\ud83d\\udd34) \\u2014 \\ub2e4\\ub978 \\ucf54\\uc778\\uc740 \\uacc4\\uc18d \\ubd05\\ub2c8\\ub2e4 \\u00b7 \\uce78\\uc740 \\uc9c0\\uc6b0\\uc9c0 \\uc54a\\uc558\\uc2b5\\ub2c8\\ub2e4(manual_bracket_state.json \\ud655\\uc778)\", \"parse_mode\": \"HTML\"}",
+     "timeout": 8
+    }
+   ]
+  },
+  {
+   "key": "SOXLUSDT:SHORT",
+   "why": "TypeError: unsupported operand",
+   "printed": [
+    "bracket watch: 🔴 손절 감시: 무장 칸 SOXLUSDT:SHORT 을 판정하지 못해 건너뜁니다(TypeError: unsupported operand) — 다른 코인은 계속 봅니다 · 칸은 지우지 않았습니다(manual_bracket_state.json 확인)"
+   ],
+   "sent": [
+    {
+     "url": "https://api.telegram.org/bot123456:test_token/sendMessage",
+     "method": "POST",
+     "ctype": "application/json",
+     "body": "{\"chat_id\": \"-100987\", \"text\": \"\\ud83d\\udd34 \\uc190\\uc808 \\uac10\\uc2dc: \\ubb34\\uc7a5 \\uce78 SOXLUSDT:SHORT \\uc744 \\ud310\\uc815\\ud558\\uc9c0 \\ubabb\\ud574 \\uac74\\ub108\\ub701\\ub2c8\\ub2e4(TypeError: unsupported operand) \\u2014 \\ub2e4\\ub978 \\ucf54\\uc778\\uc740 \\uacc4\\uc18d \\ubd05\\ub2c8\\ub2e4 \\u00b7 \\uce78\\uc740 \\uc9c0\\uc6b0\\uc9c0 \\uc54a\\uc558\\uc2b5\\ub2c8\\ub2e4(manual_bracket_state.json \\ud655\\uc778)\", \"parse_mode\": \"HTML\"}",
+     "timeout": 8
+    }
+   ]
+  }
+ ],
+ "returns": [
+  true,
+  true,
+  true,
+  true,
+  true
+ ],
+ "fail_request": {
+  "url": "https://api.telegram.org/bot123456:test_token/sendMessage",
+  "method": "POST",
+  "ctype": "application/json",
+  "body": "{\"chat_id\": \"-100987\", \"text\": \"\\uc2e4\\ud328\", \"parse_mode\": \"HTML\"}",
+  "timeout": 8
+ }
+}

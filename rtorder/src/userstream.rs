@@ -3,10 +3,11 @@
 //! 사건은 `Hub` 에 모인다(깨움·계좌 다시 읽기 신호·스트림 계좌·익절 조각 체결 대기열·로그) -- 감시·실행기·계좌 갱신기가 거기서 읽는다.
 //! **어디에도 연결하지 않는다**(시험 = tests/userstream_ws.rs -- 127.0.0.1 가짜 HTTP·웹소켓 서버).
 
-use crate::account::{Recv, StreamAccount, StreamIo, USER_STREAM_WS};
+use crate::account::{Recv, StreamAccount, StreamIo, UserStream, USER_STREAM_WS};
 use crate::http::Binance;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
@@ -19,9 +20,25 @@ pub struct Hub {
     pub wake: tokio::sync::Notify,
     pub dirty: tokio::sync::Notify,
     pub stream_account: Mutex<StreamAccount>,
+    /// 스트림 상태 사본(연결·연결 번호·마지막 알림) -- 스트림 루프가 바꿀 때마다 `StreamIo::state` 로 옮긴다. 청산 조립이 «스트림 계좌를 써도 되나»를 본다.
+    pub us: Mutex<UserStream>,
+    /// 원본 `user_stream["seq"]` -- 체결 알림 뒤 계좌를 새로 읽는 데 성공할 때마다 +1. 읽기는 `acct_seq()`.
+    pub seq: AtomicI64,
     /// (심볼, 포지션 측면, 표식) -- 감시 쪽이 무장에서 그 조각을 뺀다(원본 tp_leg_filled). ponytail: 대기열로 넘김 -- 감시와 같은 줄에서 돌게 되면 바로 부른다.
     pub tp_fills: Mutex<Vec<(String, String, String)>>,
     pub logs: Mutex<Vec<String>>,
+}
+
+impl Hub {
+    /// REST 로 새로 읽은 계좌로 스트림 계좌를 맞춘다(지금 연결 번호로). false = 어긋남(다음 깨끗한 대조까지 REST).
+    pub fn reconcile(&self, rest: &Value, now: f64) -> bool {
+        let epoch = self.us.lock().unwrap().epoch;
+        self.stream_account.lock().unwrap().reconcile(rest, now, epoch)
+    }
+    /// 원본 `acct_seq`(/api/events 의 «계좌가 바뀔 때마다 늘어나는 번호») -- 화면은 이 값이 바뀌면 계좌를 다시 받는다. 0 = 아직 한 번도 안 읽음(원본과 같다).
+    pub fn acct_seq(&self) -> i64 {
+        self.seq.load(Ordering::SeqCst)
+    }
 }
 
 pub struct LiveStream {
@@ -116,6 +133,9 @@ impl StreamIo for LiveStream {
     }
     fn event(&mut self, msg: &Value) {
         self.hub.stream_account.lock().unwrap().apply(msg);
+    }
+    fn state(&mut self, us: &UserStream) {
+        *self.hub.us.lock().unwrap() = us.clone(); // 이 사본의 seq 는 늘 0 -- 번호는 `Hub::acct_seq`
     }
     fn tp_leg_filled(&mut self, s: &str, ps: &str, c: &str) -> Result<(), String> {
         self.hub.tp_fills.lock().unwrap().push((s.into(), ps.into(), c.into()));

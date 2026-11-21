@@ -197,8 +197,22 @@ TEN = [  # W12 다리: 화면 입력이 도는 집행에 닿는다(원본 접수
     ("flow_fixture", "PEG 전환 시각 대신 참값", "src/runner.rs", '        slot.insert("pegged".into(), json!(iso_utc(t)));', '        let _ = t;\n        slot.insert("pegged".into(), json!(true));'),
     ("flow_fixture", "선 옮김 뒤 첫 체결 무장이 옛 계획으로", "src/runner.rs", "        let plan = cur_plan(&mut d, self.sref, self.plan);\n        let mut slot", "        let plan = self.plan.clone();\n        let mut slot"),
 ]
+AP, TG = "src/app.rs", "src/telegram.rs"
+ELEVEN = [  # 계좌 알림 → Wired · 번호(acct_seq) · 텔레그램 -- desk_fixture(원본 fetch_account 정답지) · app_run · telegram(원본 바이트) 로 잡혀야 한다
+    ("desk_fixture", "스트림 계좌가 미체결 수량을 안 줄임(q - z → q)", "src/account.rs", '"qty": num("q") - num("z")', '"qty": num("q")'),
+    ("desk_fixture", "한 방향(BOTH) 포지션 측면을 늘 LONG", "src/account.rs", 'else if amt > 0.0 { "LONG".into() } else { "SHORT".into() }', 'else { "LONG".into() }'),
+    ("app_run", "갱신기가 번호를 안 올림", AP, "        self.hub.seq.fetch_add(1, Ordering::SeqCst);", ""),
+    ("app_run", "0.3초 묶기 없음(연결·체결 알림마다 따로 조회)", AP, "        let _ = self.hub.dirty.notified().now_or_never();", ""),
+    ("app_run", "스트림 상태 사본을 안 맞춤", US, "        *self.hub.us.lock().unwrap() = us.clone();", ""),
+    ("app_run", "갱신기가 스트림 계좌를 안 맞춤", AP, "        self.hub.reconcile(&v, now);\n        *self.cache", "        *self.cache"),
+    ("app_run", "실행 스위치 꺼져도 시작 정리(원본 기동 훅 게이트)", AP, "    if gate {\n        if let Err(e) = w.wait_cleanup", "    if true {\n        if let Err(e) = w.wait_cleanup"),
+    ("telegram", "html.escape 빠짐", AP, "            let text = html_escape(msg);", "            let text = msg.to_string();"),
+    ("telegram", "ensure_ascii 빠짐(한글 그대로)", TG, "            ' '..='~' => o.push(c),", "            _ if (c as u32) >= 0x20 && c != '\\u{7f}' => o.push(c),"),
+    ("telegram", "그림자인데 알림을 보냄", AP, '        if self.shadow(format!("TELEGRAM {msg}")) {\n            return;\n        }', ""),
+    ("telegram", "HTTP 오류를 보냄으로 셈", TG, ".and_then(|mut r| r.body_mut().read_to_vec()).is_ok()", ".map(|_| ()).is_ok() || true"),
+]
 WIRE = [  # wire_e2e(감시 → 계좌 → 조립 → 집행)로 잡혀야 한다
-    ("스트림 계좌를 쓸 수 있어도 REST 로 읽음", A_, 'Ok(v) => Ok((v, "stream")),', 'Ok(_) => Ok((book.produce(rest).await?, "stream")),'),
+    ("스트림 계좌를 쓸 수 있어도 REST 로 읽음", "src/wire.rs", '                    Ok(v) => {\n                        self.source.push("stream");\n                        return Ok(v);', '                    Ok(_) => {\n                        self.source.push("stream");\n                        return self.book.produce(self.rest).await;'),
     ("감시 청산 조립이 for_order=True(원본은 화면 조회까지 함)", "src/wire.rs", "pside, fraction, true, asset, false, Some(only_symbol)", "pside, fraction, true, asset, true, Some(only_symbol)"),
 ]
 
@@ -231,7 +245,7 @@ def main() -> int:
             ok = r.returncode != 0
             caught, total = caught + ok, total + 1
             print(f"{'잡음' if ok else '🔴못 잡음'} | {test} | {name} | {', '.join(failed)[:110]}", flush=True)
-    for grp, lst in (("six", SIX), ("seven", SEVEN), ("eight", EIGHT), ("nine", NINE), ("ten", TEN)):
+    for grp, lst in (("six", SIX), ("seven", SEVEN), ("eight", EIGHT), ("nine", NINE), ("ten", TEN), ("eleven", ELEVEN)):
       if not only or only == grp:
         for test, name, f, a, b in lst:
             shutil.rmtree(W, ignore_errors=True)

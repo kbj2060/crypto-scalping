@@ -44,6 +44,7 @@ fn exchange(routes: Value) -> (Srv, Arc<Mutex<Ex>>) {
             ("GET", "/fapi/v1/userTrades") => json!([]),
             ("GET", "/fapi/v1/openOrders") => json!(e.open.iter().filter(|o| qm.get("symbol").is_none_or(|s| o["symbol"] == *s)).cloned().collect::<Vec<_>>()),
             ("GET", "/fapi/v1/openAlgoOrders") => json!([]),
+            ("POST", "/fapi/v1/listenKey") => json!({"listenKey": "lk1"}),
             ("POST", "/fapi/v1/order") => {
                 e.next += 1;
                 let o = json!({"orderId": e.next, "clientOrderId": qm.get("newClientOrderId").copied().unwrap_or(""), "symbol": qm["symbol"], "side": qm["side"],
@@ -124,7 +125,7 @@ async fn start_recovers_ticks_stops_and_restart_is_idempotent_then_shadow_sends_
     seed(&dir);
     let ban = dir.join("ban");
     // ① 기동 → 복구 → 틱 → 멈춤(실전송 = 루프백 가짜 거래소)
-    let s = app::run(&cfg(&dir, &srv.base), &mk(srv.base.clone(), ban.clone(), false), Stop::default()).await;
+    let s = app::run(&cfg(&dir, &srv.base), &mk(srv.base.clone(), ban.clone(), false), Stop::default(), Default::default()).await;
     let log: Vec<String> = std::mem::take(&mut ex.lock().unwrap().log);
     let writes: Vec<&String> = log.iter().filter(|l| !l.starts_with("GET")).collect();
     println!("① 쓰기 {writes:?}\n로그 {:?}", s.logs);
@@ -140,7 +141,7 @@ async fn start_recovers_ticks_stops_and_restart_is_idempotent_then_shadow_sends_
     assert!(s.logs.iter().any(|l| l.starts_with("wait cleanup:")), "{:?}", s.logs);
     // ② 재시작(같은 폴더·같은 거래소) -- 더 할 일 없음: 쓰기 0 · 무장 그대로
     let armed_at = f["ETHUSDC:LONG"]["armed_at"].clone();
-    let s = app::run(&cfg(&dir, &srv.base), &mk(srv.base.clone(), ban.clone(), false), Stop::default()).await;
+    let s = app::run(&cfg(&dir, &srv.base), &mk(srv.base.clone(), ban.clone(), false), Stop::default(), Default::default()).await;
     let log: Vec<String> = std::mem::take(&mut ex.lock().unwrap().log);
     assert!(log.iter().all(|l| l.starts_with("GET")), "재시작에서 쓰기가 나갔다 {log:?}");
     assert_eq!(file(&dir)["ETHUSDC:LONG"]["armed_at"], armed_at, "무장을 다시 쓰지 않는다");
@@ -148,7 +149,7 @@ async fn start_recovers_ticks_stops_and_restart_is_idempotent_then_shadow_sends_
     // ③ 그림자: 처음 상황 그대로 · 쓰기 요청 0 · 안 보낸 쓰기가 목록에
     let (srv2, ex2) = exchange(routes());
     seed(&dir);
-    let s = app::run(&cfg(&dir, &srv2.base), &mk(srv2.base.clone(), ban.clone(), true), Stop::default()).await;
+    let s = app::run(&cfg(&dir, &srv2.base), &mk(srv2.base.clone(), ban.clone(), true), Stop::default(), Default::default()).await;
     let log = ex2.lock().unwrap().log.clone();
     assert!(log.iter().all(|l| l.starts_with("GET")), "그림자에서 쓰기가 나갔다 {log:?}");
     println!("③ 안 보낸 쓰기 {:?}", s.would);
@@ -158,6 +159,61 @@ async fn start_recovers_ticks_stops_and_restart_is_idempotent_then_shadow_sends_
     }
     assert_eq!(ex2.lock().unwrap().open.len(), 2, "거래소 주문 그대로");
     assert!(dir.join("manual_limit_wait_ETHUSDC.json").exists(), "못 걸었으니 복구 파일을 남긴다(다음 기동에 다시)");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn stream_fill_refreshes_account_once_bumps_acct_seq_and_shares_stream_state() {
+    // 알림 연결(붙자마자 계좌 한 번 · A8) + 곧이은 체결 알림 = 0.3초 안 → 계좌 REST 한 번 · 번호 1 · 감시 캐시가 그 값 · 스트림 계좌 대조 깨끗
+    std::env::set_var("DASHBOARD_MANUAL_EXEC_ENABLED", "1");
+    let (srv, ex) = exchange(routes());
+    let lis = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let ws = format!("ws://{}/private/ws/", lis.local_addr().unwrap());
+    tokio::spawn(async move {
+        use futures_util::SinkExt;
+        let (s, _) = lis.accept().await.unwrap();
+        let mut w = tokio_tungstenite::accept_async(s).await.unwrap();
+        let ev = json!({"e": "ACCOUNT_UPDATE", "a": {"P": [{"s": "ETHUSDC", "ps": "LONG", "pa": "0.5", "ep": "2400.5", "up": "24.875"}]}});
+        w.send(tokio_tungstenite::tungstenite::Message::Text(ev.to_string().into())).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await; // 끊지 않는다
+    });
+    let dir = std::env::temp_dir().join(format!("rtorder_app_stream_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let d = dir.to_string_lossy().to_string();
+    let base = srv.base.clone();
+    let get = move |k: &str| match k {
+        "RTORDER_DIR" => Some(d.clone()),
+        "RTORDER_BASE" => Some(base.clone()),
+        "RTORDER_WS" => Some(ws.clone()),
+        "RTORDER_STREAM" => Some("1".into()),
+        "RTORDER_PERIOD" => Some("0.05".into()),
+        _ => None,
+    };
+    let cfg = app::config_from(&get).unwrap();
+    let hub: Arc<rtorder::userstream::Hub> = Default::default();
+    let stop = Stop::default();
+    let (h2, s2) = (hub.clone(), stop.clone());
+    tokio::spawn(async move {
+        for _ in 0..200 {
+            if h2.acct_seq() >= 1 {
+                tokio::time::sleep(std::time::Duration::from_millis(3600)).await; // 3초 간격 뒤에도 둘째 조회가 없는지(묶는 0.3초 안의 알림은 clear 로 지워짐)
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        s2.stop();
+    });
+    let s = app::run(&cfg, &mk(srv.base.clone(), dir.join("ban"), true), stop, hub.clone()).await;
+    assert_eq!(hub.acct_seq(), 1, "연결 + 체결 알림이 0.3초 안 = 계좌 다시 읽기 한 번 {:?}", s.logs);
+    let us = hub.us.lock().unwrap().clone();
+    assert!(us.connected && us.epoch == 1 && us.last_event_at.is_some(), "{us:?}");
+    let sa = hub.stream_account.lock().unwrap().clone();
+    assert_eq!(sa.mismatches, 0);
+    assert_eq!(sa.usable(&us, sa.base_at + 1.0).unwrap()["positions"][0]["qty"], json!(0.5));
+    let log = ex.lock().unwrap().log.clone();
+    assert!(log.iter().filter(|l| *l != "POST /fapi/v1/listenKey").all(|l| l.starts_with("GET")), "{log:?}");
+    assert_eq!(log.iter().filter(|l| *l == "GET /fapi/v2/account").count(), 1, "계좌 REST 한 번(갱신기) {log:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -206,6 +262,13 @@ fn binary_starts_stops_on_sigterm_restarts_and_refuses_bad_config() {
     }
     let log = ex.lock().unwrap().log.clone();
     assert!(log.iter().all(|l| l.starts_with("GET")), "실행 파일(기본 빌드 = 그림자·키 없음)이 쓰기를 보냈다 {log:?}");
+    // 실행 스위치(DASHBOARD_MANUAL_EXEC_ENABLED)가 없는 기동 = 원본 기동 훅처럼 시작 정리·사용자 스트림을 안 띄운다
+    let child = run(&[("RTORDER_STREAM", "1")]).spawn().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    std::process::Command::new("kill").args(["-TERM", &child.id().to_string()]).status().unwrap();
+    let (_, so) = finish(child, 10.0).unwrap();
+    assert!(!so.contains("CANCEL_WAIT_ORPHANS") && !so.contains("wait cleanup") && !so.contains("user stream"), "{so}");
+    assert!(ex.lock().unwrap().log.iter().all(|l| !l.contains("listenKey")));
     // 설정 오류 = 시작 안 함(종료코드 2)
     let code = |c: &mut std::process::Command| finish(c.spawn().unwrap(), 10.0).and_then(|x| x.0);
     assert_eq!(code(run(&[("RTORDER_MODE", "live"), ("RTORDER_LIVE_CONFIRM", rtorder::shadow::LIVE_CONFIRM)]).env_remove("RTORDER_X")), Some(2), "기본 빌드에서 live");

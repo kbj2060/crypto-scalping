@@ -17,7 +17,7 @@
 | G1 | 부분 | `intake::POST_ONLY` 표(주문을 바꾸는 8개 핸들러) -- 라우트에 강제하는 것은 웹 서버 조각 |
 | G2 | 옮김 | 주문을 바꾸는 핸들러 14개 전부 confirm=1(넷째 10 + 여섯째 익절 on/off·분할 조각·선 추가·선 수정) · `dk` *_no_confirm |
 | G3 | 옮김 | `DeskIo::exec_enabled`(매 요청) · 403 = 핸들러 14개 · 미리보기 dry_run · `dk` |
-| G4 | 부분 | 감시 틱 정지 = `Watcher::bracket_tick`(스위치 꺼짐이면 계좌도 안 읽음 · 무장 파일 그대로) · wf `exec_switch_off`·`exec_switch_off_during_tick_still_fires`(틱 도중 꺼져도 그 틱은 끝까지 = 원본) · wi(퍼즈: 꺼짐이면 호출 0·저장본 불변) · mut «스위치 꺼져도 감시» · 고아 정리 시작 게이트(start_wait_cleanup)·사용자 스트림은 접수·계좌·알림 |
+| G4 | 옮김 | 감시 틱 정지 = `Watcher::bracket_tick`(스위치 꺼짐이면 계좌도 안 읽음 · 무장 파일 그대로) · wf `exec_switch_off`·`exec_switch_off_during_tick_still_fires`(틱 도중 꺼져도 그 틱은 끝까지 = 원본) · wi(퍼즈: 꺼짐이면 호출 0·저장본 불변) · mut «스위치 꺼져도 감시» · 시작 게이트(2026-11-21 계좌 알림 조각): `app::run` 이 원본 기동 훅처럼 시작 정리(wait_cleanup)는 스위치 · 사용자 스트림·갱신기는 스위치+키일 때만 띄움 · `ar` binary(스위치 없는 기동 = 정리·스트림 없음) · mut «실행 스위치 꺼져도 시작 정리» |
 | G5 | 옮김 | `api_entry_submit`(진입 칸 하나 · 같은 코인 청산 칸도 봄) 409 · `dk` sub_entry_busy·sub_side_exit_busy · mut «같은 코인 청산 칸이 바빠도 진입» |
 | G6 | 옮김 | `Watcher::exit_slot`(코인 칸을 만들어 둠 · 같은 코인 사용 중 None) · wf `two_coins_other_entry_busy_uses_side_slot`·`same_coin_entry_busy_skips`·`same_coin_side_slot_busy_skips` · wi(퍼즈: ETH 칸이 바쁘면 ETH 청산 0) · mut «같은 코인 칸이 바빠도» |
 | G7 | 옮김 ⚠시험 없음 | `api_exit_submit`·`api_entry_submit`(대기) 조립 뒤 칸 다시 봄 -- 단일 실행 정답지라 «그 사이 바뀜»을 못 만든다(웹 서버에 붙일 때 동시 요청 시험) |
@@ -192,15 +192,15 @@
 | A7 | 옮김 | 재연결 5초 ×2 최대 300 · 5분 넘게 붙었으면 5초 · 밴이면 남은+1초 · `dk` expired_reconnect_backoff·keepalive_* · mut «5분 → 50분» «+1 → +0» |
 | A8 | 옮김 | 연결되자마자 dirty + wake · `dk` |
 | A9 | 옮김 | `account::user_event_kind`(+ «o» 가 dict 아니면 원본처럼 예외 → 다시 연결) · `dk` connect_events_close·tp_leg_filled_raises_keeps_stream · mut «체결에 계좌 다시 읽기 빠짐» |
-| A10 | 부분 | 알림은 앞당기기만: `nap` 으로 일찍 깨도 3초 판단 그대로(inv `e16_…`) · 감시 루프도 알림에 일찍 깨되 주기는 그대로(wf `watch_loop_period_and_wake` · wi) · `Binance::wake`(Notify) · mesh `nap_wakes_early_on_fill_alert` · 알림 수신은 계좌·알림 |
-| A11 | 옮김 | `account::account_refresher`(0.3초 묶고 clear → 다시 읽기 → seq+1 → wake → 3초) · `dk` refresher_coalesce_and_gap · mut «0.3 → 0» |
+| A10 | 옮김 | 알림은 앞당기기만: `nap` 으로 일찍 깨도 3초 판단 그대로(inv `e16_…`) · 감시 루프도 알림에 일찍 깨되 주기는 그대로(wf `watch_loop_period_and_wake` · wi) · `Binance::wake`(Notify) · mesh `nap_wakes_early_on_fill_alert` · 알림 수신(2026-11-21): `app::run` 이 `LiveStream`(Hub.wake → 감시 nap 깸) + 계좌 갱신기를 함께 돌림 · 끊기면 감시·조회는 그대로(스트림 계좌만 못 씀 → REST) · `ar` stream_fill_* |
+| A11 | 옮김 | `account::account_refresher`(0.3초 묶고 clear → 다시 읽기 → seq+1 → wake → 3초) · `dk` refresher_coalesce_and_gap · mut «0.3 → 0» · 실행 파일 자리 = `app::Refresher`(새 계좌 → 감시와 같은 캐시 `Wired.cache` · 스트림 계좌 대조 · `Hub.seq`) · `ar` stream_fill_*(연결+체결 0.3초 안 = 조회 1 · 3.6초 뒤에도 1) · mut «번호 안 올림» «clear 빠짐» «대조 빠짐» · 원본의 income_cache 비우기는 화면 몫(안 옮김) |
 
 ## 집계
 
-| 상태 | 첫 조각 | 둘째 뒤 | 셋째 뒤 | 넷째 뒤 | 다섯째 뒤 | 여섯째 뒤 | 일곱째 뒤 | sltp 정리 뒤 |
+| 상태 | 첫 조각 | 둘째 뒤 | 셋째 뒤 | 넷째 뒤 | 다섯째 뒤 | 여섯째 뒤 | 일곱째 뒤 | sltp 정리 뒤(→ 계좌 알림 조각 뒤) |
 |---|---|---|---|---|---|---|---|---|
-| 옮김 | 38 | 47 | 68 | **112** (+30 범위 아님→옮김 · +14 부분→옮김: G5·G15·G17·W2·P1·P6·P12·P14·P17·P20·C1·C2·B21·B22) -- 그중 ⚠시험 없음 G7 · ⚠불확실 C5 | **113** (+C4·E10 · B4·B22·B6 은 «M10 차이» 표시 · −B5 제거) | **135** (선 핸들러·실행기·전송·동시 조회) | **135** | **123** (−12 제거: G13·G16·G17·P17·P18·P19·P20·E20·C3·C4·C5·B6) |
-| 부분 | 22 | 21 | 31 | **23** (+G1·G2·W7·A1·A5·A6 범위 아님→부분 · G3 은 부분 그대로) | **23** (+C3 · −E10) | **5** (G1·G4·G8·R4·A10) | **5** | **5** |
+| 옮김 | 38 | 47 | 68 | **112** (+30 범위 아님→옮김 · +14 부분→옮김: G5·G15·G17·W2·P1·P6·P12·P14·P17·P20·C1·C2·B21·B22) -- 그중 ⚠시험 없음 G7 · ⚠불확실 C5 | **113** (+C4·E10 · B4·B22·B6 은 «M10 차이» 표시 · −B5 제거) | **135** (선 핸들러·실행기·전송·동시 조회) | **135** | **123** (−12 제거: G13·G16·G17·P17·P18·P19·P20·E20·C3·C4·C5·B6) → **125** (+G4·A10) |
+| 부분 | 22 | 21 | 31 | **23** (+G1·G2·W7·A1·A5·A6 범위 아님→부분 · G3 은 부분 그대로) | **23** (+C3 · −E10) | **5** (G1·G4·G8·R4·A10) | **5** | **5** → 계좌 알림 조각 뒤 **3** (G1·G8·R4 -- 셋 다 웹 서버 접수 몫 · G4·A10 → 옮김) |
 | 미정(사용자 결정) | 0 | 0 | 0 | **2** (C3·C4 = 스위칭 M11 -- 접수에서 «미정» 거절) | **0** (질문지 답 -- 시장가 유지 · M10 제거) · 제거 1(B5) | 0 · 제거 1 | 0 · 제거 1 | 0 · 제거 **13**(B5 + 위 12) |
 | 범위 아님 | 85 | 77 | 46 | **8** (G18·R5·R6 웹 서버 · P23·R8 대기 작업 실행기 · B25·B26 안 함 · B33 응답 서버) | **8** | **4** (G18·R5·R6 웹 서버 · B33 응답 서버) | **4** | **4** |
 | 옮긴 몫에 시험 없음(⚠) | 4 | 2 | 1 | 2 (E17 구조 · G7 동시 요청) | 2 + M4 원본 정답지 없음 | 3 (G7 · P23 원본 정답지 없음 · B29 대기열 소비자 없음) | **1** (G7 동시 요청) | **1** (G7 · C5 ⚠불확실은 제거로 사라짐) |
@@ -339,11 +339,11 @@
 
 - `src/app.rs` + `src/bin/rtorder.rs`: 설정(RTORDER_DIR 필수 -- 파이썬 서버 폴더(order_requests.jsonl 있음)는 거절 · RTORDER_BASE · RTORDER_WS · DASHBOARD_MANUAL_EXEC_SYMBOL · RTORDER_PERIOD · RTORDER_STREAM=1 · RTORDER_HUB · RTORDER_BAN_FILE · RTORDER_MAX_TICKS) → 모드 → 시작 복구(원본 순서: wait_cleanup = 남은 대기 주문 정리 → 지정가 대기 복구 파일로 무장) → 감시 루프(nap → 허브 값을 Cached 로 → drain_tp_fills → bracket_tick) + 사용자 스트림(켜면) + 허브 구독(켜면) → SIGTERM/SIGINT 로 멈춤(종료코드 0 · 설정·모드 오류 2).
   - 그림자: 손절 함수(정리·익절·분할 익절·고아 정리·재발동 정리)와 집행(GTX·시장가·취소·레버리지)은 보내지 않고 «안 보낸 쓰기» 목록에 적은 뒤 «못 함»을 돌려준다(원본 «키 없음»과 같은 모양 -- 무장은 남고 30초 뒤 다시). 그래도 새면 전송 막이가 panic.
-  - ponytail: 원본은 정리를 작업으로 띄우고 바로 감시 -- 여기는 정리를 끝낸 뒤 감시 · 알림(텔레그램)은 로그로만 · 주문 잠금 없음(접수 문이 없다 -- R6).
+  - ponytail: 원본은 정리를 작업으로 띄우고 바로 감시 -- 여기는 정리를 끝낸 뒤 감시 · 주문 잠금 없음(접수 문이 없다 -- R6). (알림(텔레그램)은 2026-11-21 계좌 알림 조각에서 보냄 -- 아래 절)
 - `coreval::subscribe`(E): rtcore 허브에 붙어 `{"subscribe":[..]}` → 스냅숏(book bid_s·ask_s · quote vol_bpm·bar5m·kline_rx_us · supply seconds) · 밀기(book·kline·supply1s)를 `Feed` 에 · 모르는 칸·type 무시 · 글자 칸 없는 옛 book 은 안 받아 둠 · 끊기면 1·2·4…30초 뒤 다시. 감시 5분봉·1초가 = 화면 심볼(USDT) 몫 · 호가·변동성 = `sync_cached`(나이는 rx_us → 한도 넘으면 REST).
 - 시험: `ar` = tests/app_run.rs(가짜 거래소로 기동 → 남은 dbwt 정리 · 복구 파일로 롱 무장 · 포지션 없는 숏 정리 → 멈춤 · 재시작 쓰기 0 · 그림자 쓰기 0·목록 3 · 진짜 실행 파일 SIGTERM 두 번 · 설정 오류 4) · `hf` = tests/hub_feed.rs(붙음 → 받아 둔 값 REST 0 → 끊김 → 3초 뒤 REST → 재연결 스냅숏 → 다시 받아 둔 값 · 변동성 None = REST).
 - ✅~~실행기 ↔ 접수 다리 결함~~ → 2026-11-21 고침(W12 행): `Desk::live` + `pull_live`·`push_live` + `runner::DeskCell`. 같이 잡은 원본과 다른 곳 4: 선 옮김 뒤 옛 계획으로 무장하던 것(원본은 같은 dict) · 감시 선을 시작 때 한 번만 읽던 것 · 칸 `pegged` 가 참값(원본 = 시각) · PEG 시작·끝 로그 없음. ponytail: 집행 로그는 작업 끝에 모아 감시 로그로(원본은 그 순간 print -- 사이에 다른 로그가 끼면 순서가 갈린다).
-- ⚠시험 없는 것: `drain_tp_fills` 를 틱 앞에서 부르는 자리(Hub 가 run 안에 있어 밖에서 넣을 수 없다 -- 함수 자체는 wi 시험) · 사용자 스트림을 켠 실행(전송은 us 시험).
+- ⚠시험 없는 것: `drain_tp_fills` 를 틱 앞에서 부르는 자리(Hub 가 run 안에 있어 밖에서 넣을 수 없다 -- 함수 자체는 wi 시험) · ~~사용자 스트림을 켠 실행~~ → `ar` stream_fill_*(2026-11-21).
 
 ### 그림자 기록 -- 파이썬이 기록해 줘야 하는 칸 (파이썬은 안 고쳤다 · 사용자 결정 필요)
 
@@ -368,3 +368,16 @@
 | 14 | G18 `order_request_log` 의 row | 접수 기록과 그림자 기록 잇기 | `chain` 칸 하나 더 |
 
 크기 어림: 따라가기 120초 ≈ 요청 80 · 무장 1회 ≈ 5 · 감시 발동 ≈ 10 -- 하루 접수 수십 건이면 수 MB. 재시작 복구(wait_cleanup·limit_recover)까지 재생하려면 produce_account 결과(what="produce_account")와 고아 정리 왕복(4)도 같은 chain 으로.
+
+## 계좌 알림 → Wired · 텔레그램 (2026-11-21)
+
+- **스트림 계좌를 청산 조립의 «새 계좌»로**(설계 §4-2): `Wired.stream = Arc<Hub>`(Hub.stream_account · Hub.us). 쓸 수 있으면(연결됨 · 같은 연결 번호 · 60초 안 REST 대조 · 마지막 대조 어긋남 없음) REST 왕복 없이 그것, 아니면 REST 로 읽고 대조(이유를 `fresh_source` 에). 나이 = 마지막 REST 대조 시각(`STREAM_TRUST_SEC` 60초) -- 넘으면 REST. 감시 틱 캐시(10초)와 갱신기가 읽을 때마다 대조한다.
+  - 정답지: `gen_desk_fixture.py` stream_rest 6사례(익절 부분 체결 · 익절 다 체결로 닫힘 · 대기 주문 부분 체결 추가 · 새 심볼 숏 · 주문 사라짐 · 한 방향 BOTH) -- 원본 `fetch_account` 를 사건 전·후 거래소 상태로 각각 돌린 계좌와, 사건 전 계좌 위에 같은 알림 열을 반영한 스트림 계좌가 포지션(심볼·측면·수량·진입가·미실현)·미체결(심볼·방향·가격·남은 수량·reduce_only·표식) 일치 · 대조 어긋남 0(`dk` stream_account_matches_python_rest_after_same_events).
+  - `StreamIo::state` -- 스트림 루프가 연결·끊김·알림 시각·오류를 바꿀 때마다 Hub.us 사본을 맞춘다(원본은 같은 dict 를 같이 본다).
+  - **번호(원본 acct_seq)** = `Hub::acct_seq()`(체결 알림 뒤 계좌 다시 읽기 성공마다 +1 · 처음 0) -- rtserve /api/events 가 쓸 공개 함수. `app::run(cfg, mk, stop, hub)` 에 바깥에서 Hub 를 넘겨 같이 쥔다.
+  - ponytail: 갱신기와 감시(Wired)는 계좌 장부(last_good 30분)를 따로 쥔다 -- 한쪽이 실패해 묵은 값으로 떨어질 때만 다르다(합치려면 Wired.book 을 Arc<Mutex>).
+- **텔레그램**: 원본 주문 경로가 보내는 자리는 `bracket_tick_alert` 하나(감시가 건너뛴 칸 · 칸·예외 종류마다 한 번 · html.escape · 뒤에서 최대 8초). `telegram::Telegram`(TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID 둘 다 있어야 · 원본 json.dumps ensure_ascii 바이트 · HTTP 오류·연결 실패 = false) · `app::Ops::alert` 가 spawn_blocking 으로 보냄(결과는 원본처럼 안 봄) · **그림자 = 안 보내고 `TELEGRAM <문구>` 를 «안 보낸 쓰기» 목록에**. 토큰은 Debug 에 안 나온다.
+  - 정답지: `gen_telegram_fixture.py` -- 원본 두 함수를 소스에서 꺼내(모듈 import 안 함 · ops_watchdog 는 import 때 점-env 를 읽는다) 가짜 urlopen 으로 6호출(같은 칸·같은 종류 중복 1 · `<>&'"` · 줄바꿈·탭·DEL·이모지) → 로그 줄 6 · 보낸 요청 5(경로·메서드·Content-Type·본문 바이트) 일치(`tg` = tests/telegram.rs).
+- 양성 대조 ELEVEN 11/11(스트림 미체결 수량 · BOTH 측면 · 번호 · clear · 상태 사본 · 대조 · 시작 게이트 · html.escape · ensure_ascii · 그림자 전송 · HTTP 오류) · WIRE 첫 항목을 새 자리(wire.rs)로 옮김.
+- 서버 그림자 가동에 필요한 것: `SHADOW.md`.
+
