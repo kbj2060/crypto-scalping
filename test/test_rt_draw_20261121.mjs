@@ -55,7 +55,7 @@ const mapObj = (m, floor) => JSON.stringify([...m].filter(([k]) => k >= floor).s
 
 // ── ② 풋프린트 + ③ 다른 코인 가격 ──
 {
-  const F = fx.footprint, rt = load("sol");
+  const F = fx.footprint, rt = load("eth");
   rt.rtD.on = true;
   rt.rtDraw(F.snapshot, 1);
   let n = 0, bars = 0;
@@ -64,15 +64,15 @@ const mapObj = (m, floor) => JSON.stringify([...m].filter(([k]) => k >= floor).s
     const lf = rt.st().latestFootprint;
     assert.deepEqual(fpRows(lf), step.full, `대조 ${n}: rt 로 쌓은 봉·칸 = 원본 /api/footprint since=0`);
     assert.deepEqual(fpRows(lf).filter((r) => r[0] >= step.since), step.inc, `대조 ${n}: 이어받기(since=${step.since})`);
-    assert.equal(rt.st().latestLivePriceByAsset.sol, step.last_px, `대조 ${n}: 가격(rt prices) = 마지막 체결가`);
+    assert.equal(rt.st().latestLivePriceByAsset.eth, step.last_px, `대조 ${n}: 가격(rt prices) = 마지막 체결가`);
     n++; bars += step.full.length;
   }
   // 옛 경로(refreshFootprint)가 같은 응답으로 만드는 캐시와 같은 모양: footprintBars = 봉시각 → {time, levels(, dhl)}
   const last = F.steps[F.steps.length - 1];
   assert.deepEqual([...rt.st().footprintBars.keys()].sort((a, b) => a - b), last.full.map((r) => r[0]), "화면 캐시 봉 = 원본 봉");
-  assert.deepEqual(rt.st().latestFootprint.venues, ["binance-perp", "okx-swap"], "OKX 가 붙은 뒤 venues");
+  assert.deepEqual(rt.st().latestFootprint.venues, ["binance-perp"], "원본 /api/footprint venues = 바이낸스만(server.py 4046)");
   // 양성 대조: 칸 하나 값이 다른 메시지
-  const bad = load("sol"); bad.rtD.on = true; bad.rtDraw(F.snapshot, 1);
+  const bad = load("eth"); bad.rtD.on = true; bad.rtDraw(F.snapshot, 1);
   // 마지막 풋프린트 메시지의 첫 칸(뒤에서 덮어써 «낫지» 않게)
   const all = F.steps.flatMap((st) => st.msgs);
   const k = all.map((m, i) => (m.type === "footprint" && !m.full && m.bars.length && m.bars[0].levels.length ? i : -1)).filter((i) => i >= 0).pop();
@@ -80,10 +80,11 @@ const mapObj = (m, floor) => JSON.stringify([...m].filter(([k]) => k >= floor).s
   all.forEach((m, i) => bad.rtDraw(i !== k ? m : { ...m, bars: [{ ...m.bars[0], levels: [[m.bars[0].levels[0][0], m.bars[0].levels[0][1] + 1, ...m.bars[0].levels[0].slice(2)], ...m.bars[0].levels.slice(1)] }, ...m.bars.slice(1)] }, 1));
   assert.ok(hit);
   assert.notDeepEqual(fpRows(bad.st().latestFootprint), last.full, "양성 대조: 칸 값 하나 다름을 잡는다");
-  // 양성 대조: drop·full 을 무시하면(첫 OKX 체결 때 전량) 숨겨야 할 봉이 남는다
-  const nofull = load("sol"); nofull.rtD.on = true; nofull.rtDraw(F.snapshot, 1);
-  for (const step of F.steps) for (const m of step.msgs) nofull.rtDraw(m.type === "footprint" ? { ...m, full: false } : m, 1);
-  assert.notDeepEqual(fpRows(nofull.st().latestFootprint), last.full, "양성 대조: full(갈아 끼움) 무시를 잡는다");
+  // 양성 대조: «창(barsExpected = 144)을 넘으면 오래된 봉부터 버린다»를 무시하면 원본에 없는 옛 봉이 남는다
+  const notrim = load("eth"); notrim.rtD.on = true; notrim.rtDraw(F.snapshot, 1);
+  for (const step of F.steps) for (const m of step.msgs) notrim.rtDraw(m.type === "footprint" ? { ...m, barsExpected: 1e9 } : m, 1);
+  assert.ok(notrim.st().latestFootprint.bars.length > last.full.length, "정답지가 창(144봉)을 넘는다");
+  assert.notDeepEqual(fpRows(notrim.st().latestFootprint), last.full, "양성 대조: 창 넘은 오래된 봉 버리기 무시를 잡는다");
   console.log(`② 풋프린트 ok -- 대조 ${n} 시점 · 봉 ${bars} · ③ 가격 ${n} 시점 · 양성 대조 2/2`);
 }
 
@@ -171,33 +172,35 @@ const mapObj = (m, floor) => JSON.stringify([...m].filter(([k]) => k >= floor).s
 {
   const F = fx.footprint, last = F.steps[F.steps.length - 1];
   const bar = last.full[last.full.length - 1][0];                         // 형성 봉(정답지 끝 봉)
-  const evs = JSON.parse(readFileSync(new URL("../rtcore/tests/fixtures/fp_okx_sol.json", import.meta.url), "utf8")).events;
-  const bnBar = evs.filter((e) => e[0] === "bn" && Math.floor(e[1] / 300000) * 300 === bar);
+  // 형성 봉 체결 = 같은 정답지(footprint_eth.json · 원본 collect_footprint 입력) 행: [접속, 종류(0 체결 · 1 마크), T−t0, 체결ID, 가격 글자, 수량 글자, m(매수자 메이커 = 매도 공격), E−t0]
+  const ffx = JSON.parse(readFileSync(new URL("../rtcore/tests/fixtures/footprint_eth.json", import.meta.url), "utf8"));
+  const bnBar = ffx.rows.filter((r) => r[1] === 0 && r[4] !== "0" && Math.floor((r[2] + ffx.t0) / 300000) * 300 === bar)
+    .map((r) => [null, r[2] + ffx.t0, r[3], Number(r[4]), Number(r[5]), r[6]]);   // [_, ms, tid, 가격, 수량, 매도]
   assert.ok(bnBar.length >= 2, "형성 봉 체결");
   const formingOf = (x, byTime, since) => {
-    const fl = x.fl(); fl.since = since; fl.bucket = 0.02;
+    const fl = x.fl(); fl.since = since; fl.bucket = 0.5;
     for (const e of bnBar) x.footprintLiveAdd(e[3], e[4], e[1], e[5], e[2]);
-    x.footprintMergeLive(byTime, 0.02);
+    x.footprintMergeLive(byTime, 0.5);
     return JSON.stringify(byTime.get(bar));
   };
   // (가) 옛 경로: 응답(원본 /api/footprint 의 그 봉) + 직결 누적 · (나) rt 경로: rt 로 쌓은 latestFootprint 의 그 봉 + 같은 직결 누적
-  const oldP = load("sol"), rtP = load("sol");
+  const oldP = load("eth"), rtP = load("eth");
   rtP.rtD.on = true; rtP.rtDraw(F.snapshot, 1); for (const st of F.steps) for (const m of st.msgs) rtP.rtDraw(m, 1);
   const byOld = () => new Map(last.full.map((r) => [r[0], r[1]]));
   const byRt = () => new Map(rtP.st().latestFootprint.bars.map((b) => [b.time, b.levels]));
   for (const [name, since] of [["봉 시작 전부터 붙음(직결로 갈아 끼움)", bar * 1000 - 1], ["봉 중간에 붙음(서버·rt 값 유지)", bar * 1000 + 1]]) {
-    const a = formingOf(load("sol"), byOld(), since), b = formingOf(load("sol"), byRt(), since);
+    const a = formingOf(load("eth"), byOld(), since), b = formingOf(load("eth"), byRt(), since);
     assert.equal(b, a, `형성 봉 칸(${name}): rt 경로 = 옛 경로`);
   }
   // 양성 대조: rt 칸 위에 직결 칸을 «더하면»(이중 합산) 다르다
   const dbl = (() => {
-    const x = load("sol"), m = byRt(), fl = x.fl(); fl.since = bar * 1000 - 1; fl.bucket = 0.02;
+    const x = load("eth"), m = byRt(), fl = x.fl(); fl.since = bar * 1000 - 1; fl.bucket = 0.5;
     for (const e of bnBar) x.footprintLiveAdd(e[3], e[4], e[1], e[5], e[2]);
     const lv = new Map(m.get(bar).map((l) => [l[0], l.slice()]));
-    for (const [k, c] of fl.cells) { const p = Math.round(k * 0.02 * 100) / 100, t = lv.get(p) || [p, 0, 0, 0, 0, 0, 0]; for (let j = 0; j < 6; j++) t[j + 1] += c[j]; lv.set(p, t); }
+    for (const [k, c] of fl.cells) { const p = k * 0.5, t = lv.get(p) || [p, 0, 0, 0, 0, 0, 0]; for (let j = 0; j < 6; j++) t[j + 1] += c[j]; lv.set(p, t); }
     return JSON.stringify([...lv.values()].sort((u, v) => u[0] - v[0]));
   })();
-  assert.notEqual(dbl, formingOf(load("sol"), byOld(), bar * 1000 - 1), "양성 대조: 직결 칸을 rt 칸에 더하면(이중 합산) 잡는다");
+  assert.notEqual(dbl, formingOf(load("eth"), byOld(), bar * 1000 - 1), "양성 대조: 직결 칸을 rt 칸에 더하면(이중 합산) 잡는다");
   // ⑥ 꺼지는 순간: rt 로 받은 봉 위에 refreshFootprint 가 since = 최신 봉 − 300 으로 이어받는다(봉 객체 통째로 갈아 끼움 -- 같은 봉이 겹쳐 더해지지 않음)
   const since = Math.max(...rtP.st().footprintBars.keys()) - 300;
   const inc = last.full.filter((r) => r[0] >= since);

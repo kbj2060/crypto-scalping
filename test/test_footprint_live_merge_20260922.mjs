@@ -49,18 +49,17 @@ assert.ok(same(run({ barStart: 0, since: 0, cells: cells(3) })), "barStart 0 인
 assert.match(src, /footprintLive\.since = Infinity;/,
              "새 연결에서 since 를 되돌리는 줄이 없다 — 재연결 뒤 가드가 죽는다");
 
-// ── OKX 몫 (2026-09-24): 같은 봉이면 실시간 바이낸스 셀에 **더한다** ──
+// ── OKX 몫: 2026-11-02 사용자 «체결 데이터는 그냥 바이낸스만»으로 화면이 okxLive 더하기를 뺐다(app.js footprintMergeLive 주석 ·
+//   서버 /api/footprint 도 바이낸스만 -- server.py api_footprint 4000~4005). 이 시험의 옛 기대(«같은 봉이면 OKX 몫을 더한다»)는
+//   그때 낡았다(2026-11-22 고침). 지금 계약: latestFootprint.okxLive 가 있어도 **안 더한다** -- 형성 봉 = 실시간 바이낸스 셀 그대로.
 const live = { barStart: BAR, since: (BAR - 10) * 1000, cells: cells(3) };   // 2740·2740.5·2741 각 [1,2]
 const okxLv = { time: BAR, levels: [[2740, 1, 1, 0, 0, 0, 0], [2745, 5, 0, 5, 0, 0, 0]] };
-const summed = run(live, okxLv);
-assert.deepEqual(summed.find((l) => l[0] === 2740), [2740, 2, 3, 0, 0, 0, 0], "같은 가격 칸에 안 더했다");
-assert.deepEqual(summed.find((l) => l[0] === 2745), [2745, 5, 0, 5, 0, 0, 0], "OKX 에만 있는 칸이 빠졌다");
-assert.equal(summed.length, 4);
-// 렌더마다 불린다 -- 실시간 셀을 고쳐 쓰면 OKX 몫이 렌더 횟수만큼 쌓인다
-assert.deepEqual(run(live, okxLv), summed, "두 번째 렌더에서 값이 불었다 — 실시간 셀을 변형했다");
+const onlyBn = run(live, okxLv);
+assert.deepEqual(onlyBn, run(live), "okxLive 가 있어도 형성 봉은 바이낸스 실시간 셀 그대로(11-02)");
+assert.deepEqual(onlyBn.find((l) => l[0] === 2740), [2740, 1, 2, 0, 0, 0, 0], "바이낸스 셀 값");
+assert.equal(onlyBn.find((l) => l[0] === 2745), undefined, "OKX 에만 있는 칸이 생겼다");
+// 렌더마다 불린다 -- 실시간 셀을 고쳐 쓰면 안 된다
+assert.deepEqual(run(live, okxLv), onlyBn, "두 번째 렌더에서 값이 바뀌었다 — 실시간 셀을 변형했다");
 assert.deepEqual(live.cells.get(5480), [1, 2, 0, 0, 0, 0], "실시간 셀이 바뀌었다");
-// 다른 봉의 OKX 몫(롤오버 직후 서버가 아직 옛 봉을 줄 때)은 더하지 않는다
-assert.equal(run(live, { time: BAR - 300, levels: [[2740, 99, 99, 0, 0, 0, 0]] })
-  .find((l) => l[0] === 2740)[1], 1, "다른 봉의 OKX 몫을 더했다");
 
-console.log("모두 통과 (가드 3 + 재연결 리셋 + OKX 합산 3)");
+console.log("모두 통과 (가드 3 + 재연결 리셋 + 바이낸스만 3)");
