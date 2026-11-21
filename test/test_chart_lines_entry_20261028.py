@@ -42,7 +42,7 @@ class ChartLinesTest(unittest.TestCase):
             return acct
 
         async def exercise() -> None:
-            base = {"place_bracket": _boom, "place_add_order": _boom, "run_entry": _boom, "run_exit": _boom, "clear_bracket": _boom, "place_stop": _boom, "place_tp_ladder": _boom}
+            base = {"place_bracket": _boom, "place_add_order": _boom, "run_entry": _boom, "run_exit": _boom, "clear_bracket": _boom, "place_tp_ladder": _boom}   # place_stop 은 2026-11-21 지웠다(비상 스탑 제거)
             base.update(patches)
             with mock.patch.object(orders, "fetch_account", fake_account), \
                  mock.patch.object(orders, "produce_account", fake_account, create=True), \
@@ -158,7 +158,7 @@ class LinesArmedGuardTest(ChartLinesTest):
             b = json.loads((server.LIVE_DIR / "manual_bracket_state.json").read_text("utf-8"))[f"{SYM}:LONG"]
             self.assertNotIn("sl_off", b); self.assertNotIn("fired", b)
             self.assertGreaterEqual(b["watch_from"], t0)
-        self._run(fn, acct=POS)   # place_stop = _boom -- 거래소 스탑을 걸려 하면 실패
+        self._run(fn, acct=POS)   # clear_bracket·place_bracket = _boom -- 거래소를 부르면 실패(place_stop 은 2026-11-21 지웠다)
 
 
 class LinesAddSizeTest(LinesArmedGuardTest):

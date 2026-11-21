@@ -38,7 +38,7 @@ from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position, sl_up_of,
     COMMIT_CAP_X, HOLD_CAP_X, RULE_STOP_PCT, TP_LEGS_MAX, commit_rule_l, line_bracket, rec_rule_add_order, rec_rule_bracket, rec_rule_size)   # 2026-10-09 자동 규칙 진입(재생 ×15.2 크기식) · 10-14 자동 물타기 지정가
 from live.execution.live_manual_peg_execute_20260912 import (  # noqa: E402
-    FALLBACK_SEC, WAIT_CHOICES_MIN, cancel_exit_orders, cancel_wait_orphans, clear_bracket, commission_bp, margin_type, nap, order_mark, place_add_order, place_bracket, place_stop, place_tp_ladder, run_entry, run_entry_limit, run_entry_stop, run_entry_wait, run_exit, wake_fills)
+    FALLBACK_SEC, WAIT_CHOICES_MIN, cancel_exit_orders, cancel_wait_orphans, clear_bracket, commission_bp, margin_type, nap, order_mark, place_add_order, place_bracket, place_tp_ladder, run_entry, run_entry_limit, run_entry_stop, run_entry_wait, run_exit, wake_fills)
 import scripts.binance_ban_guard as ban_guard  # noqa: E402
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
 # 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).
@@ -474,7 +474,8 @@ SIZING_MARGIN_CAP_PCT = 0.0
 # 🔴2026-10-09 사용자 «1번(재생 크기식)으로 배포»: 다시 켬. 증거금 50% 상한은 꺼진 채(자동 모드는 원래 규칙 상한 하나 · 직접 모드는 게이지만).
 MANUAL_RULES_ENABLED = True
 # 2026-10-14 사용자 «−0.75% 물타기 지정가도 자동으로»: 자동 규칙 첫 진입이 체결되면 첫 진입가 ∓0.75% 에 남은 여유 지정가를 건다. 되돌리기 = False.
-REC_AUTO_ADD = True
+# 🔴2026-11-21 사용자 질문지 «자동 물타기 — 안 건다»(비상 스탑 제거와 같이): 끔. 미리보기 plan["rule"]["add"] 도 안 실린다.
+REC_AUTO_ADD = False
 # 🔴상한 무시 스위치 (2026-09-20 사용자 지시 «우리 사이징 코드는 잠깐 꺼줘»).
 # 세 상한(원장·순자산·위험모델)을 **전부 건너뛰고** 「순자산 × 이 배수」 하나만 기준으로 쓴다.
 # 🔴상한을 «없애는» 게 아니다. 진입 비율 슬라이더의 100% 가 **상한 명목에 대한 비율**이라
@@ -2347,9 +2348,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         return web.json_response({"ok": True, "sl_off": st[key]["sl_off"]}, headers=NOCACHE)
 
     async def api_manual_bracket_rearm(request: web.Request) -> web.Response:
-        """2026-10-15 사용자 «손절 버튼은 다시 누르면 다시 손절을 켜도록». «손절 해제»의 반대: 거래소 비상 스탑(backstop_price)을 다시 걸고
-        sl_off 를 지워 5분봉 종가 감시를 다시 켠다. 🔴거래소 스탑을 못 걸면 아무것도 안 바꾼다(감시만 켜진 반쪽 상태를 만들지 않는다).
-        마크가가 이미 스탑 너머면 거래소가 거부한다(-2021) -- 그대로 실패로 돌려준다. 방어는 해제와 같다."""
+        """2026-10-15 사용자 «손절 버튼은 다시 누르면 다시 손절을 켜도록». «손절 해제»의 반대: sl_off 를 지워 5분봉 종가 감시(선 = 1초 닿음)를 다시 켠다.
+        2026-11-21 부터 거래소 스탑은 다시 걸지 않는다(비상 스탑 제거) -- 이미 손절선 너머면 다음 마감봉 판정에서 바로 청산된다. 방어는 해제와 같다."""
         if request.query.get("confirm") != "1":
             return web.json_response({"ok": False, "error": "confirm_required", "detail": "confirm=1 이 필요합니다"}, status=400)
         if not exec_enabled():
@@ -2379,22 +2379,17 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             st[key]["watch_from"] = time.time()   # 해제 중에 지나간 가격으로 바로 닫지 않게
             bracket_save(st)
             return web.json_response({"ok": True, "lines": True}, headers=NOCACHE)
-        price = b.get("backstop_price") or b.get("sl_price")
-        if not price:
+        # 🔴2026-11-21 비상 스탑 제거: 규칙 무장도 거래소 스탑 없이 sl_off 만 지워 5분봉 종가 감시를 다시 켠다(손절 레벨이 없으면 «켜짐»을 만들지 않는다)
+        if not (b.get("sl_level") or b.get("sl_price")):
             return web.json_response({"ok": False, "error": "no_price", "detail": "다시 걸 손절가가 기록에 없습니다"}, status=409)
-        r = await place_stop(binance_session(), symbol, side, float(price))
-        if not r.get("placed"):
-            return web.json_response({"ok": False, "error": "place_failed",
-                                      "detail": f"손절 다시 켜기 실패 — 손절은 꺼진 그대로입니다: {r.get('error')}"}, status=502)
         st = bracket_load()
         if key not in st or st[key].get("armed_at") != b.get("armed_at"):
             return web.json_response({"ok": False, "error": "rearmed",
                                       "detail": "그 사이 새로 무장됐습니다 — 다시 확인하세요"}, status=409)
         st[key].pop("sl_off", None)
-        st[key]["placed"] = {**(st[key].get("placed") or {}), "backstop": r}
         bracket_save(st)
-        print(f"bracket {side}: 손절 다시 켬(사용자) 거래소 스탑 {price} · 5분봉 감시 켬", flush=True)
-        return web.json_response({"ok": True, "backstop": r}, headers=NOCACHE)
+        print(f"bracket {side}: 손절 다시 켬(사용자) 5분봉 감시 켬 · 거래소 스탑 없음", flush=True)
+        return web.json_response({"ok": True, "backstop": None}, headers=NOCACHE)
 
     def tp_legs_of(b: dict) -> list[dict]:
         """2026-11-11 분할 익절 조각 목록 -- 옛 단일 익절은 무게 1 조각 하나로 읽는다(없으면 [])."""

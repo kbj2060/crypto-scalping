@@ -273,38 +273,13 @@ async def resolve_resting(session, symbol: str, cid: str, r: dict, key: str, sec
     return got if got is not None else {"__error__": f"주문 접수 여부를 확인하지 못했습니다({r['__error__']}) — 표식으로 취소를 보냈습니다"}
 
 
-async def _post_stop(session, symbol: str, pside: str, price: float, key: str, secret: str, offset: int, stamp: int) -> dict:
-    """비상 스탑 = Algo STOP_MARKET closePosition(마크가 기준). place_bracket · place_stop 이 같이 쓴다."""
-    r = await signed(session, "POST", "/fapi/v1/algoOrder",
-                     {"algoType": "CONDITIONAL", "symbol": symbol, "side": "SELL" if pside == "LONG" else "BUY",
-                      "positionSide": pside, "type": "STOP_MARKET",
-                      "triggerPrice": price, "closePosition": "true",
-                      "workingType": "MARK_PRICE",
-                      "clientAlgoId": f"{bracket_tag(SL_TAG, pside)}{stamp}"},
-                     key, secret, offset)
-    return {"placed": "__error__" not in r, "price": price, "algo_id": r.get("algoId"), "error": r.get("__error__")}
-
-
-async def place_stop(session, symbol: str, pside: str, price: float) -> dict:
-    """2026-10-15 «손절 다시 켜기» -- 비상 스탑만 다시 건다. place_bracket 은 TP·자동 물타기까지 지우고 다시 걸어서 못 쓴다.
-    남아 있는 우리 스탑은 먼저 지운다(두 개 걸리지 않게). 포지션이 없거나 스탑을 못 걸면 placed=False -- 🔴호출 쪽은 그때 아무것도 안 바꾼다."""
-    key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
-    if not (key and secret):
-        return {"placed": False, "error": "API 키가 없습니다"}
-    offset = await _clock_offset(session)
-    pos = await signed(session, "GET", "/fapi/v2/positionRisk", {"symbol": symbol}, key, secret, offset)
-    if not isinstance(pos, list):
-        return {"placed": False, "error": f"포지션 조회 실패: {pos.get('__error__') if isinstance(pos, dict) else pos}"}
-    if not any(p.get("positionSide") == pside and abs(float(p.get("positionAmt") or 0.0)) > 0 for p in pos):
-        return {"placed": False, "error": "포지션 없음"}
-    cl = await cancel_bracket(session, symbol, pside, key, secret, offset, only_sl=True)
-    if cl.get("errors"):
-        return {"placed": False, "error": f"남은 스탑 정리 실패: {'; '.join(map(str, cl['errors']))}"}
-    return await _post_stop(session, symbol, pside, price, key, secret, offset, int(time.time() * 1000))
+# 🔴2026-11-21 사용자 결정 «−5% 비상 스탑 전부 뺀다»: 거래소 STOP_MARKET(Algo) 을 거는 코드(_post_stop·place_stop)를 지웠다.
+#   규칙 손절 = 서버 5분봉 종가 감시(bracket_sl_hit)만 -- 서버가 꺼지면 손절이 없다. 배포 전에 걸린 우리 스탑(SL_TAG)은 cancel_bracket 이 계속 지운다.
+NO_STOP = {"placed": False, "skipped": True, "reason": "거래소 스탑 없음(2026-11-21 사용자 결정) — 손절은 서버 5분봉 종가 감시"}
 
 
 async def place_bracket(session, bracket: dict, symbol: str, pside: str, *, strict: bool = False) -> dict:
-    """체결 뒤 TP 지정가(GTX, 포지션 **전량**)와 비상 스탑(Algo STOP_MARKET, closePosition)을 건다.
+    """체결 뒤 TP 지정가(GTX, 포지션 **전량**)를 건다. 비상 스탑은 2026-11-21 부터 안 건다(backstop = NO_STOP · 남은 우리 스탑은 아래 정리가 지운다).
     물타기면 우리 옛 주문을 지우고 새 레벨·새 수량으로 다시 건다.
 
     🔴실패해도 진입을 되돌리지 않는다(이미 체결됐다) -- 결과를 그대로 돌려 화면이 크게 말하게 한다.
@@ -340,8 +315,8 @@ async def place_bracket(session, bracket: dict, symbol: str, pside: str, *, stri
         out["tp"] = {"placed": "__error__" not in r, "price": bracket["tp_price"],
                      "order_id": r.get("orderId"), "error": r.get("__error__")}
     if bracket.get("backstop_price"):
-        out["backstop"] = await _post_stop(session, symbol, pside, bracket["backstop_price"], key, secret, offset, stamp)
-    out["placed"] = all(v.get("placed") for k, v in out.items() if k in ("tp", "backstop"))
+        out["backstop"] = {**NO_STOP, "price": bracket["backstop_price"]}
+    out["placed"] = all(v.get("placed") for k, v in out.items() if k == "tp")
     return out
 
 
@@ -1021,7 +996,7 @@ def _self_check() -> None:
     # 🔴옛 3% 손절 경로는 -4120 으로 죽어 있었다 -- /fapi/v1/order 로 조건부 주문을 다시 보내지 않는다.
     import inspect as _i
     assert "STOP_MARKET" not in _i.getsource(run_entry)
-    assert "/fapi/v1/algoOrder" in _i.getsource(_post_stop) and "_post_stop(" in _i.getsource(place_bracket)   # 스탑 POST 는 _post_stop 으로 옮겨졌다
+    assert "STOP_MARKET" not in _i.getsource(place_bracket)   # 2026-11-21 비상 스탑 제거 -- 스탑 POST 가 되살아나지 않게
 
     # ── 리페그 루프 공유 (2026-09-15) ────────────────────────────────────────
     # 진입과 청산이 **같은 함수**를 쓴다. 한쪽만 고쳐지는 걸 막는 검사다.
