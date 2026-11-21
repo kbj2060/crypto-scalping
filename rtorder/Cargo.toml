@@ -19,6 +19,11 @@ tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 ureq = { version = "3", default-features = false, features = ["rustls"] }
+# 2026-11-21 루프백 HTTP 문(src/door.rs) -- rtserve 와 같은 판(hyper 1 · hyper-util tokio 어댑터 · 개발기 cargo 캐시에 있던 것)
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
 
 [features]
 # 🔴실전송·키 읽기(Binance::from_env · arm_live)는 이 기능을 켠 빌드에만 있다. 기본 = 꺼짐(그림자 전용).

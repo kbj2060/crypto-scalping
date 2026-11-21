@@ -166,7 +166,7 @@ fn high_vol_exit_plan_is_market_and_closes_with_one_market_order() {
 fn account_read_failure_in_exit_plan_keeps_stop_and_retries() {
     let (mut w, mut io, dir) = setup("503", Some(5.0), false);
     // 틱의 계좌는 캐시(정상) -- 청산 조립의 새로 읽기에서 positionRisk 418 → 503 «못 읽음 = 모름»(P2·B17)
-    *io.cache.lock().unwrap() = Some((T0, json!({"ok": true, "generated_at": iso_utc(T0), "positions": [{"symbol": "ETHUSDC", "side": "LONG", "qty": 0.4}]})));
+    *io.acct.cache.lock().unwrap() = Some((T0, json!({"ok": true, "generated_at": iso_utc(T0), "positions": [{"symbol": "ETHUSDC", "side": "LONG", "qty": 0.4}]})));
     block_on(w.bracket_tick(&mut io)).unwrap();
     let b = &bracket_load(&dir)["ETHUSDC:LONG"];
     assert!(b["last_error"].as_str().unwrap().contains("계좌 조회 실패"), "{b}");

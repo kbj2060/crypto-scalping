@@ -11,6 +11,7 @@ pub mod app;
 pub mod assemble;
 pub mod bracket;
 pub mod coreval;
+pub mod door;
 pub mod exec;
 pub mod fakesrv;
 pub mod http;

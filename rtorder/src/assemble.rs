@@ -78,6 +78,10 @@ pub trait DeskIo {
     async fn place_bracket(&mut self, spec: &Value, symbol: &str, pside: &str, strict: bool) -> Result<Value, String>;
     /// 분할 익절(조각 조작·선 추가) -- bracket::place_tp_ladder. Err = 원본에서 새던 예외(→ 500).
     async fn place_tp_ladder(&mut self, legs: &Value, symbol: &str, pside: &str) -> Result<Value, String>;
+    /// 화면 /api/binance-account(원본 api_binance_account): fresh = 잠금 안에서 1초 안 받은 값이면 그것 · 아니면 새로 읽어 캐시에(A3) · 아니면 swr 캐시. 기본 = account(fresh).
+    async fn account_screen(&mut self, fresh: bool) -> Result<Value, String> {
+        self.account(fresh).await
+    }
 }
 
 // ── (나) 받아 둔 값 ────────────────────────────────────────────────────────────

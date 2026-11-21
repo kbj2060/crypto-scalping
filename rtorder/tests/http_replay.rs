@@ -194,8 +194,10 @@ async fn run(v: &mut Virt, fn_: &str, a: &Value) -> Value {
             // 원본 run_* 는 시작에 _clock_offset(시계 요청 1)을 한다 -- Rust 는 exec 머리(Exchange::prepare)
             let plan = rtorder::watch::exec_plan_of(&a["plan"]).unwrap();
             let st: Shared = Arc::new(Mutex::new(ExecState::default()));
-            if a.get("state0").and_then(|s| s.get("action")) == Some(&json!("market")) {
-                st.lock().unwrap().action = Some(exec::Action::Market);
+            match a.get("state0").and_then(|s| s.get("action")).and_then(Value::as_str) {
+                Some("market") => st.lock().unwrap().action = Some(exec::Action::Market),
+                Some("peg") => st.lock().unwrap().action = Some(exec::Action::Peg),
+                _ => {}
             }
             match fn_ {
                 "run_entry" => exec::run_entry(v, &plan, &st).await,
@@ -358,7 +360,7 @@ async fn http_fixture_replay_matches_python() {
     }
     let _ = std::fs::remove_dir_all(&ban_dir);
     println!("집행 시장가 다리 시나리오 {nexec}");
-    assert_eq!(nexec, 13, "집행 시나리오 수(M4 2 포함 · M3 2 는 PR 61 에서 지움)");
+    assert_eq!(nexec, 17, "집행 시나리오 수(M4 2 포함 · M3 2 는 PR 61 에서 지움 · R4 키 없음 4)");
     println!("시나리오 {} · 호출 {ncalls} · 가짜 서버가 받은 요청 {nreq} · 글자까지 비교한 서명 URL {nurl} · 연결 {} · 연결 수 대조 시나리오 {nconn_eq}", scns.len(), srv.conns.load(Ordering::SeqCst));
     for b in &bad {
         println!("불일치 {b}");

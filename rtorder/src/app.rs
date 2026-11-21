@@ -6,13 +6,16 @@
 //! 감시는 무장을 남기고 30초 뒤 다시). 그래도 어딘가 쓰기 경로가 새면 `http::Binance` 의 그림자 막이가 보내기 전에 panic 한다(마지막 방어).
 //! 상태 폴더는 Rust 전용이어야 한다(파이썬 서버의 data/live 를 같이 쓰면 무장 파일을 서로 덮는다 -- `config_from` 이 막는다).
 
-use crate::account::{account_refresher, user_stream_run, AccountBook, RefreshIo, UserStream};
+use crate::account::{account_refresher, user_stream_run, RefreshIo, SharedAccount, UserStream};
 use crate::bracket;
 use crate::coreval::{self, Feed};
 use crate::exec::{Common, Exchange, LimitOrder, OrderRef, Reply};
 use crate::http::Binance;
 use crate::telegram::{html_escape, Telegram};
 use crate::userstream::{Hub, LiveStream};
+use crate::assemble::{Cached, Desk};
+use crate::route::Front;
+use crate::runner::DeskCell;
 use crate::watch::{Obj, WatchIo, Watcher};
 use crate::wire::Wired;
 use serde_json::{json, Value};
@@ -33,13 +36,20 @@ pub struct Config {
     pub ban_file: PathBuf,
     /// TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID(둘 다 있어야) · RTORDER_TELEGRAM_BASE(시험용 주소). 그림자에서는 안 보낸다.
     pub telegram: Option<Telegram>,
+    /// 루프백 HTTP 문(RTORDER_LISTEN · 기본 127.0.0.1:8791 · 루프백이 아니면 설정 오류). 실제로 여는 것은 bin(묶기 실패 = 시작 안 함 -- 같은 주소로 둘째 rtorder 가 뜨지 않게).
+    pub listen: std::net::SocketAddr,
+    /// 로그를 그때그때 표준출력으로(bin) · false = 끝에 Summary 로(시험).
+    pub echo: bool,
 }
+
+/// RTORDER_DIR 안 표식 -- rtorder 가 쓰는 폴더라는 뜻(접수 기록 order_requests.jsonl 이 있어도 파이썬 폴더가 아니다).
+pub const DIR_MARK: &str = ".rtorder";
 
 /// RTORDER_DIR(필수 · Rust 전용 폴더) · RTORDER_BASE(기본 바이낸스 선물) · RTORDER_WS(사용자 스트림 앞부분) · DASHBOARD_MANUAL_EXEC_SYMBOL(eth 주문 심볼 -- 원본과 같은 이름) ·
 /// RTORDER_PERIOD(감시 주기 초, 기본 2) · RTORDER_MAX_TICKS(시험용) · RTORDER_STREAM=1(사용자 스트림) · RTORDER_HUB(rtcore 허브 ws 주소) · RTORDER_BAN_FILE(기본 폴더/binance_ban_until).
 pub fn config_from(get: &dyn Fn(&str) -> Option<String>) -> Result<Config, String> {
     let dir = PathBuf::from(get("RTORDER_DIR").filter(|s| !s.is_empty()).ok_or("RTORDER_DIR 가 필요합니다(Rust 전용 상태 폴더)")?);
-    if dir.join("order_requests.jsonl").exists() {
+    if dir.join("order_requests.jsonl").exists() && !dir.join(DIR_MARK).exists() {
         return Err(format!("{} 는 파이썬 서버 폴더로 보입니다(order_requests.jsonl) -- 무장 파일을 서로 덮지 않게 Rust 전용 폴더를 쓰세요", dir.display()));
     }
     let num = |k: &str, d: f64| get(k).filter(|s| !s.is_empty()).map_or(Ok(d), |s| s.parse::<f64>().map_err(|e| format!("{k}: {e}")));
@@ -58,6 +68,13 @@ pub fn config_from(get: &dyn Fn(&str) -> Option<String>) -> Result<Config, Strin
         stream: get("RTORDER_STREAM").as_deref() == Some("1"),
         hub_url: get("RTORDER_HUB").filter(|s| !s.is_empty()),
         telegram: Telegram::from_env(get),
+        listen: {
+            let raw = get("RTORDER_LISTEN").filter(|s| !s.is_empty()).unwrap_or_else(|| "127.0.0.1:8791".into());
+            let a: std::net::SocketAddr = raw.parse().map_err(|e| format!("RTORDER_LISTEN {raw:?}: {e}"))?;
+            crate::door::loopback_only(&a)?;
+            a
+        },
+        echo: false,
     })
 }
 
@@ -138,6 +155,8 @@ pub struct Ops {
     pub would: Would,
     pub alerts: Vec<String>,
     pub telegram: Option<Telegram>,
+    /// 주문 잠금(원본 manual_order_lock) -- 감시가 손절 발동을 미룬다(D9 · G9).
+    pub front: Arc<Front>,
 }
 impl Ops {
     fn shadow(&self, what: String) -> bool {
@@ -156,7 +175,7 @@ impl WatchIo for Ops {
         crate::plan::exec_enabled()
     }
     fn order_locked(&self) -> bool {
-        false // ponytail: 접수 문이 없다(R6) -- 웹 서버를 붙이면 그 잠금을 여기로
+        self.front.order_lock.try_lock().is_err()
     }
     /// 감시 주기 잠 -- 체결 알림(Hub.wake)이면 일찍 깨고, 멈춤 신호면 false(원본 CancelledError).
     async fn nap(&mut self, sec: f64) -> bool {
@@ -236,9 +255,7 @@ impl WatchIo for Ops {
 /// 원본 `account_refresher` 의 바깥: 체결 알림(Hub.dirty) → 계좌 새로 읽기 → 공유 캐시 · 스트림 계좌 대조 → 번호(Hub.seq)+1 → 감시 깨움.
 struct Refresher {
     rest: Binance,
-    /// ponytail: 감시(Wired)와 따로 둔 장부 -- 마지막 정상 계좌(last_good)를 서로 모른다. 한쪽이 실패해 묵은 값으로 떨어질 때만 차이 -- 합치려면 Wired.book 을 Arc<Mutex> 로.
-    book: AccountBook,
-    cache: Arc<Mutex<Option<(f64, Value)>>>,
+    acct: Arc<SharedAccount>,
     hub: Arc<Hub>,
     stop: Stop,
 }
@@ -263,11 +280,7 @@ impl RefreshIo for Refresher {
         !self.stop.flag.load(Ordering::SeqCst)
     }
     async fn refresh(&mut self) -> Result<(), String> {
-        let now = crate::account::AccountRest::now(&self.rest);
-        let v = self.book.produce(&mut self.rest).await?;
-        self.hub.reconcile(&v, now);
-        *self.cache.lock().unwrap() = Some((now, v));
-        Ok(())
+        self.acct.refresh(&mut self.rest, Some(&self.hub), false).await.map(|_| ())
     }
     fn wake(&mut self) {
         self.hub.seq.fetch_add(1, Ordering::SeqCst); // 원본: seq += 1 바로 뒤 wake_fills.set()
@@ -298,30 +311,53 @@ impl Stop {
     }
 }
 
-/// 몸통: 시작 복구 → (사용자 스트림 · 계좌 갱신기 · 허브 구독과 함께) 감시 루프 → 멈춤. `mk` = 같은 설정의 `Binance` 를 하나 더 만든다(계좌·시세·집행·손절 함수가 각자 하나).
-/// `hub` = 바깥(응답 서버)과 같이 보는 스트림 상태 -- `hub.acct_seq()` 가 원본 /api/events 의 acct_seq · `hub.us` 가 user_stream 상태.
-pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop, hub: Arc<Hub>) -> Summary {
+/// 몸통: 시작 복구 → (사용자 스트림 · 계좌 갱신기 · 허브 구독 · 루프백 HTTP 문과 함께) 감시 루프 → 멈춤. `mk` = 같은 설정의 `Binance` 를 하나 더 만든다(계좌·시세·집행·손절 함수가 각자 하나).
+/// `hub` = 스트림 상태(`hub.acct_seq()` · `hub.us` -- 문의 /internal/acct 가 낸다) · `listener` = bin 이 묶어 둔 루프백 문(None = 문 없음 · 시험).
+/// 감시·접수·작업이 **같은 `DeskCell`**(무장·대기 칸이 메모리에서도 하나 -- 원본 같은 dict) 과 **같은 계좌 한 곳**(`SharedAccount`)을 쓴다.
+pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop, hub: Arc<Hub>, listener: Option<tokio::net::TcpListener>) -> Summary {
     let would: Would = Arc::new(Mutex::new(vec![]));
     let feed = Arc::new(Mutex::new(Feed::default()));
     let shadow = mk().is_shadow();
-    let ops = Ops { bx: mk(), feed: feed.clone(), hub: hub.clone(), stop: stop.notify.clone(), stopped: stop.flag.clone(), would: would.clone(), alerts: vec![], telegram: cfg.telegram.clone() };
-    let mut io = Wired::new(ops, mk(), crate::assemble::Cached::new(mk()), GuardEx { bx: mk(), would: would.clone() }, &cfg.eth_symbol);
+    let front = Arc::new(Front::default());
+    let acct = Arc::new(SharedAccount::new(&cfg.eth_symbol));
+    let desk = Arc::new(DeskCell::new(Desk::new(Watcher::new(&cfg.dir, &cfg.eth_symbol))));
+    let ops = |front: &Arc<Front>| Ops { bx: mk(), feed: feed.clone(), hub: hub.clone(), stop: stop.notify.clone(), stopped: stop.flag.clone(), would: would.clone(), alerts: vec![],
+                                         telegram: cfg.telegram.clone(), front: front.clone() };
     // 원본 기동 훅 게이트: start_wait_cleanup = 실행 스위치 · start_user_stream = 실행 스위치 + 키(주문이 없는 곳은 알림도 필요 없다)
-    let gate = io.ops.exec_enabled();
-    let streaming = cfg.stream && gate && io.ops.bx.has_keys();
-    if streaming {
-        io.stream = Some(hub.clone()); // 청산 조립의 새 계좌 = 스트림 계좌(쓸 수 있을 때) · 아니면 REST
-    }
-    let mut w = Watcher::new(&cfg.dir, &cfg.eth_symbol);
-    w.log(format!("rtorder 시작 · {} · 폴더 {} · 주기 {}초", if shadow { "그림자" } else { "실전송" }, cfg.dir.display(), cfg.period));
-    // 원본 기동 훅 순서: start_wait_cleanup(남은 대기 주문 정리 → 지정가 대기 복구 파일로 무장) → 감시 시작
-    // ponytail: 원본은 정리를 작업으로 띄우고 바로 감시를 시작한다 -- 여기는 정리를 끝낸 뒤 감시(첫 틱이 정리 전 상태를 보지 않게 · 기동이 그만큼 늦다)
-    if gate {
-        if let Err(e) = w.wait_cleanup(&mut io).await {
-            w.log(format!("wait cleanup 실패: {e}"));
+    let gate = crate::plan::exec_enabled();
+    let streaming = cfg.stream && gate && mk().has_keys();
+    let wired = || {
+        let mut w = Wired::new(ops(&front), mk(), Cached::new(mk()), GuardEx { bx: mk(), would: would.clone() }, &cfg.eth_symbol);
+        w.acct = acct.clone();
+        if streaming {
+            w.stream = Some(hub.clone()); // 청산 조립의 새 계좌 = 스트림 계좌(쓸 수 있을 때) · 아니면 REST
         }
+        w
+    };
+    let mut io = wired();
+    let mut logs: Vec<String> = vec![];
+    let echo = |logs: &mut Vec<String>, more: Vec<String>| {
+        if cfg.echo {
+            for l in &more {
+                println!("{l}");
+            }
+        } else {
+            logs.extend(more);
+        }
+    };
+    {
+        let mut d = desk.lock().await;
+        d.w.log(format!("rtorder 시작 · {} · 폴더 {} · 주기 {}초", if shadow { "그림자" } else { "실전송" }, cfg.dir.display(), cfg.period));
+        // 원본 기동 훅 순서: start_wait_cleanup(남은 대기 주문 정리 → 지정가 대기 복구 파일로 무장) → 감시 시작
+        // ponytail: 원본은 정리를 작업으로 띄우고 바로 감시를 시작한다 -- 여기는 정리를 끝낸 뒤 감시(첫 틱이 정리 전 상태를 보지 않게 · 기동이 그만큼 늦다)
+        if gate {
+            if let Err(e) = d.w.wait_cleanup(&mut io).await {
+                d.w.log(format!("wait cleanup 실패: {e}"));
+            }
+        }
+        let l = std::mem::take(&mut d.w.logs);
+        echo(&mut logs, l);
     }
-    let cache = io.cache.clone();
     let mut ticks = 0u64;
     let watch = async {
         loop {
@@ -330,11 +366,19 @@ pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop, hub: Arc<Hu
             }
             io.quotes.now = io.ops.bx.time();
             coreval::sync_cached(&feed.lock().unwrap(), &mut io.quotes); // 받아 둔 호가·변동성(허브) -- 낡으면 Cached 가 REST 로
-            if let Err(e) = w.drain_tp_fills(&hub.tp_fills) {
-                w.log(format!("tp_leg_filled: {e}"));
-            }
-            if let Err(e) = w.bracket_tick(&mut io).await {
-                w.log(format!("bracket watch: {e}"));
+            {
+                // 🔴틱 하나 동안 칸을 쥔다 -- 손절 청산(최대 ~2분)이면 그동안 접수는 기다리다 5초 뒤 409(route::DESK_WAIT_SEC · 의도한 차이)
+                let mut d = desk.lock().await;
+                if let Err(e) = d.w.drain_tp_fills(&hub.tp_fills) {
+                    d.w.log(format!("tp_leg_filled: {e}"));
+                }
+                if let Err(e) = d.w.bracket_tick(&mut io).await {
+                    d.w.log(format!("bracket watch: {e}"));
+                }
+                let mut l = std::mem::take(&mut d.w.logs);
+                l.extend(hub.logs.lock().unwrap().drain(..));
+                l.extend(io.ops.alerts.drain(..));
+                echo(&mut logs, l);
             }
             ticks += 1;
             if cfg.max_ticks.is_some_and(|m| ticks >= m) {
@@ -352,7 +396,7 @@ pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop, hub: Arc<Hu
     };
     let refresher = async {
         if streaming {
-            let mut r = Refresher { rest: mk(), book: AccountBook { eth_symbol: cfg.eth_symbol.clone(), last_good: None }, cache, hub: hub.clone(), stop: stop.clone() };
+            let mut r = Refresher { rest: mk(), acct: acct.clone(), hub: hub.clone(), stop: stop.clone() };
             account_refresher(&mut r, &mut UserStream::default()).await;
         }
     };
@@ -361,8 +405,18 @@ pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop, hub: Arc<Hu
             tokio::select! { _ = coreval::subscribe(url, feed.clone(), stop.flag.clone()) => {}, _ = stop.notify.notified() => {} }
         }
     };
-    tokio::join!(watch, stream, refresher, sub);
-    let mut logs = std::mem::take(&mut w.logs);
+    let door = async {
+        if let Some(l) = listener {
+            let dio = crate::door::DoorIo { ops: ops(&front), rest: mk(), acct: acct.clone(), stream: streaming.then(|| hub.clone()) };
+            let d = crate::door::Door { desk: desk.clone(), hub: hub.clone(), front: front.clone(), feed: feed.clone(), dir: cfg.dir.clone(),
+                                        io: tokio::sync::Mutex::new((dio, Cached::new(mk()))),
+                                        make_task_io: Box::new(|| (wired(), GuardEx { bx: mk(), would: would.clone() }, Cached::new(mk()))) };
+            d.serve(l, &stop).await;
+        }
+    };
+    tokio::join!(watch, stream, refresher, sub, door);
+    let mut d = desk.lock().await;
+    logs.extend(std::mem::take(&mut d.w.logs));
     logs.extend(hub.logs.lock().unwrap().drain(..));
     logs.extend(io.ops.alerts.drain(..));
     let would = would.lock().unwrap().clone();

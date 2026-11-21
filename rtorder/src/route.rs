@@ -47,6 +47,8 @@ pub struct Reply {
     pub log: Option<Value>,
 }
 
+/// 칸(DeskCell)을 기다리는 최대 초 -- 넘으면 409 already_working(원본은 await 사이 다른 핸들러가 돌아 기다리지 않는다 · 의도한 차이).
+pub const DESK_WAIT_SEC: f64 = 5.0;
 const JSON: &str = "application/json; charset=utf-8";
 const TEXT: &str = "text/plain; charset=utf-8";
 
@@ -95,11 +97,16 @@ pub fn with_bracket(payload: &Value, armed_file: &serde_json::Map<String, Value>
 }
 
 /// 주문 잠금(원본 manual_order_lock) -- 응답 서버가 하나 만들어 모든 요청에 같이 넘긴다.
-#[derive(Default)]
 pub struct Front {
     pub order_lock: tokio::sync::Mutex<()>,
     /// 진입 칸 사본(칸을 쥘 때마다 갱신) -- 409 already_working 본문용. 잠금을 쥔 요청이 칸(DeskCell)을 쥐고 있으니 기다리지 않고 이것을 싣는다.
     pub entry_seen: std::sync::Mutex<Value>,
+}
+
+impl Default for Front {
+    fn default() -> Self {
+        Front { order_lock: Default::default(), entry_seen: std::sync::Mutex::new(json!({"phase": "idle"})) }
+    }
 }
 
 impl Front {
@@ -135,7 +142,17 @@ impl Front {
                 } else {
                     None
                 };
-                let mut d = desk.lock().await;
+                // 칸을 쥔 쪽(감시 틱의 손절 청산은 최대 ~2분)이 놓지 않으면 5초 뒤 409 -- 화면·응답 서버가 끝없이 매달리지 않게
+                let mut d = match desk.try_lock() {
+                    Ok(d) => d,
+                    Err(_) => match tokio::time::timeout(std::time::Duration::from_secs_f64(DESK_WAIT_SEC), desk.lock()).await {
+                        Ok(d) => d,
+                        Err(_) => {
+                            let e = self.entry_seen.lock().unwrap().clone();
+                            return self.finish(json_reply(409, &json!({"ok": false, "error": "already_working", "state": e}), vec![]), method, path, first);
+                        }
+                    },
+                };
                 *self.entry_seen.lock().unwrap() = Value::Object(d.w.entry.clone());
                 let (status, mut body, task) = handle(&mut d, hub, qs, io, name, &q).await;
                 *self.entry_seen.lock().unwrap() = Value::Object(d.w.entry.clone());
@@ -162,8 +179,8 @@ impl Front {
 async fn handle<Q: Quotes, I: DeskIo>(d: &mut Desk, hub: &Hub, qs: &mut Q, io: &mut I, name: &str, q: &Query) -> (u16, Value, Vec<Task>) {
     let r = match name {
         "binance_account" => {
-            // 원본 ?fresh=1 = 새로 읽기(1초 안에 받은 값이면 그것 -- DeskIo 구현 몫) · 아니면 swr 캐시
-            return match io.account(q.get("fresh").map(String::as_str) == Some("1")).await {
+            // 원본 ?fresh=1 = 새로 읽기(1초 안에 받은 값이면 그것) · 아니면 swr 캐시 -- `DeskIo::account_screen`
+            return match io.account_screen(q.get("fresh").map(String::as_str) == Some("1")).await {
                 Ok(p) => (200, with_bracket(&p, &bracket_load(&d.w.dir), hub, io.now()), vec![]),
                 Err(e) => (500, json!({"error": "500 Internal Server Error", "exception": e}), vec![]),
             };

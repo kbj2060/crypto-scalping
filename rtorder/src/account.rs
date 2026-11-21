@@ -511,6 +511,64 @@ impl AccountBook {
     }
 }
 
+/// 계좌 한 곳(2026-11-21 · 원본 `binance_account_cache` + `swr_locks["binance_account"]`): 감시 틱(swr 10초)·접수(새로 읽기)·체결 뒤 갱신기·화면(/api/binance-account)이 같이 쓴다.
+/// `book` 잠금 = 원본 swr 잠금(새로 읽기가 겹치지 않는다 · 마지막 정상값 last_good 도 하나).
+pub struct SharedAccount {
+    /// (받은 시각, 계좌)
+    pub cache: std::sync::Mutex<Option<(f64, Value)>>,
+    pub book: tokio::sync::Mutex<AccountBook>,
+    pub stale_grace: f64,
+}
+
+impl SharedAccount {
+    pub fn new(eth_symbol: &str) -> Self {
+        SharedAccount { cache: Default::default(), book: tokio::sync::Mutex::new(AccountBook { eth_symbol: eth_symbol.into(), last_good: None }), stale_grace: 60.0 }
+    }
+    /// 원본 produce_account(새로 읽기 · 캐시에 안 넣음) + 스트림 계좌 대조.
+    pub async fn produce<R: AccountRest>(&self, rest: &mut R, hub: Option<&crate::userstream::Hub>) -> Result<Value, String> {
+        let now = rest.now();
+        let v = self.book.lock().await.produce(rest).await?;
+        if let Some(h) = hub {
+            h.reconcile(&v, now);
+        }
+        Ok(v)
+    }
+    /// swr_cached("binance_account", 10초, max_stale). ponytail: 원본은 묵은 값을 주고 뒤에서 갱신한다 -- 여기는 기다려 새로 읽는다(더 새 값 · 그만큼 늦다).
+    pub async fn cached<R: AccountRest>(&self, rest: &mut R, hub: Option<&crate::userstream::Hub>) -> Result<Value, String> {
+        let now = rest.now();
+        let c = self.cache.lock().unwrap().clone();
+        let (ts, has) = c.as_ref().map_or((0.0, false), |c| (c.0, true));
+        match swr_decide(now, ts, has, ACCOUNT_CACHE_SEC, self.stale_grace) {
+            Swr::Serve => Ok(c.unwrap().1),
+            Swr::ServeAndRefresh | Swr::Fetch => self.store(rest, hub, now).await,
+        }
+    }
+    /// 새로 읽어 캐시에 넣는다. `reuse_1s` = 화면 ?fresh=1(원본: 잠금 안에서 1초 안 받은 값이면 그것 -- 연타에도 거래소는 한 번 · A3) · 갱신기 = false.
+    pub async fn refresh<R: AccountRest>(&self, rest: &mut R, hub: Option<&crate::userstream::Hub>, reuse_1s: bool) -> Result<Value, String> {
+        let mut book = self.book.lock().await;
+        let now = rest.now();
+        if reuse_1s {
+            if let Some((ts, v)) = self.cache.lock().unwrap().clone() {
+                if !fresh_needs_fetch(now, ts) {
+                    return Ok(v);
+                }
+            }
+        }
+        let v = book.produce(rest).await?;
+        drop(book);
+        if let Some(h) = hub {
+            h.reconcile(&v, now);
+        }
+        *self.cache.lock().unwrap() = Some((now, v.clone()));
+        Ok(v)
+    }
+    async fn store<R: AccountRest>(&self, rest: &mut R, hub: Option<&crate::userstream::Hub>, now: f64) -> Result<Value, String> {
+        let v = self.produce(rest, hub).await?;
+        *self.cache.lock().unwrap() = Some((now, v.clone()));
+        Ok(v)
+    }
+}
+
 /// `swr_cached` 의 결정(server.py): 새것이면 그대로 · ttl+max_stale 안이면 묵은 값 주고 뒤에서 갱신 · 그 밖은 기다려 새로 읽기.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Swr {

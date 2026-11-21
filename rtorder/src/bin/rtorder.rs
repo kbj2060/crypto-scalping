@@ -1,6 +1,6 @@
 //! rtorder 실행 파일(2026-11-21 D 뼈대): 설정 → 모드 → 시작 복구 → 감시 루프(+사용자 스트림·rtcore 허브 구독) → SIGTERM/SIGINT 로 멈춤.
 //! 🔴기본 = 그림자(쓰기를 보내지 않는다). 기본 빌드에는 키를 읽는 코드도 실전송도 없다 -- `cargo build --features live` + RTORDER_MODE=live + RTORDER_LIVE_CONFIRM 셋이 있어야 실전송.
-//! 접수 HTTP(웹 서버)는 아직 없다(R6). 종료코드: 0 = 정상 멈춤 · 2 = 설정·모드 오류(시작 안 함).
+//! 접수 = 루프백 HTTP 문(RTORDER_LISTEN · 기본 127.0.0.1:8791 · `door.rs`) -- 응답 서버가 주문·계좌 주소 14개를 넘긴다. 종료코드: 0 = 정상 멈춤 · 2 = 설정·모드 오류(시작 안 함).
 
 use rtorder::app::{self, Stop};
 use rtorder::http::Binance;
@@ -8,7 +8,7 @@ use rtorder::shadow::{self, Mode};
 
 fn main() {
     let get = |k: &str| std::env::var(k).ok();
-    let cfg = app::config_from(&get).unwrap_or_else(|e| {
+    let mut cfg = app::config_from(&get).unwrap_or_else(|e| {
         eprintln!("rtorder: 설정 오류 -- {e}");
         std::process::exit(2)
     });
@@ -20,19 +20,33 @@ fn main() {
         eprintln!("rtorder: 폴더 {}: {e}", cfg.dir.display());
         std::process::exit(2)
     });
+    let _ = std::fs::write(cfg.dir.join(app::DIR_MARK), "rtorder 상태 폴더\n");
+    cfg.echo = true;
+    // 루프백 문: 묶기 실패(이미 다른 rtorder 가 이 주소를 쥠 등) = 시작 안 함 -- 같은 계좌를 감시하는 둘째 프로세스가 뜨지 않게
+    let std_l = std::net::TcpListener::bind(cfg.listen).and_then(|l| l.set_nonblocking(true).map(|_| l)).unwrap_or_else(|e| {
+        eprintln!("rtorder: 문 {} 을 열 수 없습니다 -- {e}", cfg.listen);
+        std::process::exit(2)
+    });
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     let stop = Stop::default();
     let (c2, s2) = (cfg.clone(), stop.clone());
     let mk = move || make(&c2, &mode);
     let s = rt.block_on(async move {
         let sig = s2.clone();
+        // 신호 받기를 먼저 건다 -- 문 주소 줄(= «떴다»)을 본 쪽이 곧바로 SIGTERM 을 보내도 기본 동작(즉사)으로 죽지 않게
+        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
+        let mut int = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()).unwrap();
         tokio::spawn(async move {
-            let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
-            let mut int = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()).unwrap();
             tokio::select! { _ = term.recv() => {}, _ = int.recv() => {} }
             sig.stop();
         });
-        app::run(&cfg, &mk, s2, Default::default()).await
+        {
+            use std::io::Write;
+            println!("rtorder 문 http://{}", std_l.local_addr().unwrap());
+            let _ = std::io::stdout().flush();
+        }
+        let l = tokio::net::TcpListener::from_std(std_l).unwrap();
+        app::run(&cfg, &mk, s2, Default::default(), Some(l)).await
     });
     for l in &s.logs {
         println!("{l}");

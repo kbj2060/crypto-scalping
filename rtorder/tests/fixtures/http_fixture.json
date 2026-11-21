@@ -1264,7 +1264,7 @@ false
 "__error__": "429 [-1003] Too many requests."
 }
 ],
-"ban": "1795238956.417\n",
+"ban": "1795266433.873\n",
 "conns": 1,
 "post_only": [
 false
@@ -1315,7 +1315,7 @@ false
 "__error__": "429 [-1003] Too many requests."
 }
 ],
-"ban": "1795238981.419\n",
+"ban": "1795266458.876\n",
 "conns": 1,
 "post_only": [
 false
@@ -14626,6 +14626,197 @@ false
 "taker_reason": null,
 "error": null,
 "repegs": 0,
+"cancel_reason": null
+}
+],
+"ban": null,
+"conns": 1,
+"post_only": [
+false
+]
+},
+{
+"name": "집행 키 없음 run_entry",
+"calls": [
+{
+"fn": "run_entry",
+"args": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": 2500.0,
+"quantity": 2.0,
+"target_leverage": 0
+}
+},
+"advance": 0.0
+}
+],
+"responses": [],
+"keys": false,
+"requests": [],
+"results": [
+{
+"phase": "error",
+"filled": null,
+"quantity": null,
+"taker_qty": null,
+"taker_order_id": null,
+"taker_reason": null,
+"error": "API 키가 없습니다",
+"repegs": null,
+"cancel_reason": null
+}
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "집행 키 없음 run_exit",
+"calls": [
+{
+"fn": "run_exit",
+"args": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "SELL",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": 2500.1,
+"quantity": 2.0,
+"fallback_after_sec": 30.0,
+"vol_bpm": 9.0
+}
+},
+"advance": 0.0
+}
+],
+"responses": [],
+"keys": false,
+"requests": [],
+"results": [
+{
+"phase": "error",
+"filled": null,
+"quantity": null,
+"taker_qty": null,
+"taker_order_id": null,
+"taker_reason": null,
+"error": "API 키가 없습니다",
+"repegs": null,
+"cancel_reason": null
+}
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "집행 키 없음 run_entry_limit",
+"calls": [
+{
+"fn": "run_entry_limit",
+"args": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": 2490.0,
+"quantity": 2.0,
+"target_leverage": 0,
+"limit": {
+"usdt": 2490.0
+}
+},
+"act_at": 999,
+"action": "market"
+},
+"advance": 0.0
+}
+],
+"responses": [],
+"keys": false,
+"requests": [],
+"results": [
+{
+"phase": "error",
+"filled": null,
+"quantity": null,
+"taker_qty": null,
+"taker_order_id": null,
+"taker_reason": null,
+"error": "API 키가 없습니다",
+"repegs": null,
+"cancel_reason": null
+}
+],
+"ban": null,
+"conns": 0,
+"post_only": [
+false
+]
+},
+{
+"name": "집행 키 없음 run_entry_stop 지금 따라가기",
+"calls": [
+{
+"fn": "run_entry_stop",
+"args": {
+"plan": {
+"symbol": "ETHUSDC",
+"side": "BUY",
+"positionSide": "LONG",
+"type": "LIMIT",
+"price": 2500.0,
+"quantity": 2.0,
+"target_leverage": 0,
+"limit": {
+"usdt": 2600.0
+}
+},
+"state0": {
+"action": "peg"
+}
+},
+"advance": 0.0
+}
+],
+"responses": [
+{
+"status": 200,
+"body": {
+"symbol": "ETHUSDC",
+"bidPrice": "2500.0",
+"askPrice": "2500.1"
+}
+}
+],
+"keys": false,
+"requests": [
+{
+"method": "GET",
+"target": "/fapi/v1/ticker/bookTicker?symbol=ETHUSDC",
+"key": null
+}
+],
+"results": [
+{
+"phase": "error",
+"filled": 0.0,
+"quantity": 2.0,
+"taker_qty": null,
+"taker_order_id": null,
+"taker_reason": null,
+"error": "API 키가 없습니다",
+"repegs": null,
 "cancel_reason": null
 }
 ],
