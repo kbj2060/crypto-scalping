@@ -114,6 +114,12 @@ impl State {
             };
             println!("rtcore 복원 {s}: 강제청산 {}건 · Bybit 청산 {}건(DB)", bn.len(), by.len());
             sup.load_liqs(bn, by, now_us as f64 / 1000.0);
+            if crate::supply::BYBIT_SYMBOLS.contains(&s.as_str()) {
+                match restore::read_bybit_liq_5m(&cfg.bybit_liq, s, now_us.div_euclid(1000)) {
+                    Ok(got) => sup.load_bybit5m(got, now_us),
+                    Err(e) => println!("rtcore 복원 {s}: 🔴Bybit 5분봉 청산 못 읽음({e}) -- 재시작 앞 봉은 Bybit «모름»"),
+                }
+            }
         }
         st.restore = Some(cfg);
         st.wake = Some(wake);
@@ -161,13 +167,42 @@ impl State {
             Some(tb) => restore::read_okx_secs(&cfg.okx_tape, &inst, t0, tb, cfg.tries, cfg.wait),
             None => Err("OKX 테이프 칸 폭 표에 없는 종목".into()),
         };
-        let liq = restore::read_okx_liq(&cfg.okx_ctx, &inst, t0_ms - crate::supply::SUPPLY_1S_SECONDS * 1000, t0_ms);
         let now = crate::now_us();
         let mut g = cell.lock().unwrap();
-        let (line, up) = g.supply.merge_okx(secs, liq, now);
+        let (line, up) = g.supply.merge_okx(secs, now);
         Self::queue(&mut g, up, now);
         println!("rtcore 복원 {s}: {line}");
         Some(line)
+    }
+
+    /// OKX 풋프린트 봉 복원 회차 하나(restore.rs «OKX 풋프린트 봉 복원»). 읽기는 락 밖. `now_us` = 원본 time.time()(최근 15분 판정).
+    /// None = 할 일 없음(복원 끔 · 첫 OKX 체결 전 · 이미 끝남). 돌려주는 둘째 값 = 끝났나(더 부르지 않는다).
+    pub fn run_restore_okx_fp(&self, s: &str, now_us: i64) -> Option<(String, bool)> {
+        let cfg = self.restore.as_ref()?;
+        let cell = self.syms.get(s)?;
+        let (t0, inst, bucket) = {
+            let g = cell.lock().unwrap();
+            if g.supply.okx_t0_ms == 0 || g.supply.okx_fr.done || g.supply.okx_fr.attempts >= restore::OKX_FP_ATTEMPTS {
+                return None;
+            }
+            (g.supply.okx_t0_ms, g.supply.okx_inst.clone(), g.supply.okx_fp.spec?.0)
+        };
+        let lo = crate::footprint::bar_of(t0) - (crate::footprint::WINDOW_BARS as i64 - 1) * 300;
+        let got = match restore::okx_tape_bucket(&inst) {
+            Some(tb) => restore::read_okx_fp(&cfg.okx_tape, &cfg.okx_ctx, &inst, lo, t0, bucket, tb, now_us.div_euclid(1_000_000)),
+            None => Err("OKX 테이프 칸 폭 표에 없는 종목".into()),
+        };
+        let mut g = cell.lock().unwrap();
+        let line = g.supply.okx_fp_attempt(got);
+        let done = g.supply.okx_fr.done || g.supply.okx_fr.attempts >= restore::OKX_FP_ATTEMPTS;
+        println!("rtcore 복원 {s}: {line}");
+        Some((line, done))
+    }
+
+    /// 시험용: OKX 풋프린트 봉(반올림 전) · first_bar · OKX OI 5분봉.
+    pub fn okx_fp(&self, s: &str) -> Option<(Vec<(i64, Vec<(i64, [f64; 6])>)>, i64, Vec<(i64, [f64; 2])>)> {
+        let g = self.syms.get(s)?.lock().unwrap();
+        Some((g.supply.okx_fp.raw(), g.supply.okx_first_bar, g.supply.okx_oi5m.iter().map(|(&b, &v)| (b, v)).collect()))
     }
 
     /// OKX 미결제약정을 메운다.

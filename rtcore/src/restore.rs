@@ -612,7 +612,8 @@ impl Supply {
     }
 
     /// OKX 1초 칸 · OKX 청산 합치기(락 안). 돌려주는 것 = 로그 한 줄 · 밀기.
-    pub(crate) fn merge_okx(&mut self, secs: Result<(BTreeMap<i64, [f64; 7]>, i64), String>, liq: Result<Vec<LiqRowDb>, String>, now_us: i64) -> (String, Option<Supply1s>) {
+    /// OKX 1초 칸 합치기(락 안). 청산은 여기서 안 넣는다 -- 원본도 OKX 청산은 풋프린트 봉 복원(`okx_fp_attempt`)이 «덮은 구간만» 넣는다(2026-11-21).
+    pub(crate) fn merge_okx(&mut self, secs: Result<(BTreeMap<i64, [f64; 7]>, i64), String>, now_us: i64) -> (String, Option<Supply1s>) {
         let Some(t0_ms) = self.rs.okx_job.take() else { return ("메울 OKX 일감 없음".into(), None) };
         let t0 = t0_ms.div_euclid(1000);
         let mut restored = vec![];
@@ -629,24 +630,11 @@ impl Supply {
             }
             Err(e) => format!("🔴1초 칸 테이프 못 읽음({e}) -- [{}, {t0}) 비어 있음", t0 - SUPPLY_1S_SECONDS),
         };
-        let line_liq = match liq {
-            Ok(ev) => {
-                // 링 앞에 -- 남은 자리만, 가장 새 것부터(deque appendleft 가 차면 가장 최신이 밀려나는 것을 피한 원본 958~963)
-                let room = crate::supply::LIQ_RING.saturating_sub(self.okx_liq.len());
-                let n = ev.len().min(room);
-                for &(ts_ms, long, qty, px) in ev[ev.len() - n..].iter().rev() {
-                    self.okx_liq.push_front(crate::supply::LiqEv { ts_ms, long, qty, usd: qty * px });
-                }
-                format!("청산 {n}건")
-            }
-            Err(e) => format!("🔴청산 못 읽음({e})"),
-        };
         let top = crate::supply::newest(&self.okx.sec);
         let mut m = self.base(now_us);
         m.okx = restored.into_iter().filter(|&s| top - SUPPLY_1S_SECONDS < s && s < top).filter_map(|s| sec_row(&self.okx.sec, s)).collect();
-        m.okx_liq = crate::supply::liq_rows(&self.okx_liq, |s| top - SUPPLY_1S_SECONDS < s && s < top);
-        let up = (!m.okx.is_empty() || !m.okx_liq.is_empty()).then_some(m);
-        (format!("OKX t0 {t0}: {line_secs} · {line_liq}"), up)
+        let up = (!m.okx.is_empty()).then_some(m);
+        (format!("OKX t0 {t0}: {line_secs}"), up)
     }
 
     /// OKX 미결제약정 합치기(락 안).
@@ -670,5 +658,200 @@ impl Supply {
             }
             Err(e) => (format!("OKX OI t0 {t0}: 🔴못 읽음({e}) -- [{}, {t0}) 비어 있음", t0 - SUPPLY_1S_SECONDS), None),
         }
+    }
+}
+
+// ── OKX 풋프린트 봉 복원(2026-11-21 · coin_flow.py okx_footprint_restore 910~971 · okx_tape_footprint 129~203) ─────────
+// 원본: 첫 OKX 체결(t0) 뒤 15초, 그다음 5분마다 최대 8번 OKX 테이프를 다시 읽는다. 1분봉 대조로 «온전한 분»만 이어 붙여
+// 진행 봉(t0 앞 몫만 더함) → 앞 봉들(통째로 교체)을 창(144봉) 끝까지 당기고, 같은 구간의 OKX OI 5분봉·청산을 채운다.
+// first_bar = 가장 이른 온전한 봉 − 300 -- 청산 원·OI 5분봉·합산 풋프린트가 이 봉 «뒤»만 OKX 를 더한다.
+// 코어: 읽기(`read_okx_fp`)는 락 밖, 합치기(`Supply::okx_fp_attempt`)는 락 안. 박자(15초 · 300초 × 7)는 lib.rs.
+// 정답지: tools/gen_okx_fp_fixture.py(원본 함수를 가짜 시계·바뀌는 DB 위에서 돌림) → tests/okx_fp_restore.rs.
+
+/// okx_tape_footprint 의 반환(`ctx_ok` 는 복원이 안 쓴다 -- 못 읽은 원천은 빈 채).
+pub struct OkxTapeFp {
+    pub bars: BTreeMap<i64, BTreeMap<i64, [f64; 6]>>,
+    pub ok_min: std::collections::BTreeSet<i64>,
+    pub oi: BTreeMap<i64, (f64, f64)>,
+    pub liq: Vec<LiqRowDb>,
+    pub tape_max: i64,
+}
+
+/// 파이썬 round(x, 10) -- 테이프 칸 가격의 십진값(supply.rs r3 와 같은 방식).
+fn r10(x: f64) -> f64 {
+    format!("{x:.10}").parse().unwrap_or(x)
+}
+
+/// okx_tape_footprint(tape, ctx, inst, lo, t0_ms, 300, bucket, tape_bucket, liq_db = ctx). `now_s` = 원본 time.time() 의 정수 초.
+/// 테이프를 못 읽으면 Err(원본은 그 회차를 건너뛴다) · OI·청산을 못 읽으면 빈 채(원본 ctx_ok=False).
+pub fn read_okx_fp(tape: &Path, ctx: &Path, inst: &str, lo_sec: i64, t0_ms: i64, bucket: f64, tape_bucket: f64, now_s: i64) -> Result<OkxTapeFp, String> {
+    let t0_sec = t0_ms.div_euclid(1000);
+    let con = open_ro(tape)?;
+    let err = |e: rusqlite::Error| format!("{}: {e}", tape.display());
+    let mut bars: BTreeMap<i64, BTreeMap<i64, [f64; 6]>> = BTreeMap::new();
+    let mut keys: std::collections::HashMap<i64, i64> = Default::default();
+    {
+        let mut st = con.prepare(SQL_BARS).map_err(err)?;
+        let mut rows = st.query(rusqlite::params![300, inst, lo_sec, t0_sec]).map_err(err)?;
+        while let Some(r) = rows.next().map_err(err)? {
+            let (bar, pb): (i64, i64) = (r.get(0).map_err(err)?, r.get(1).map_err(err)?);
+            let k = *keys.entry(pb).or_insert_with(|| (r10(pb as f64 * tape_bucket) / bucket).round_ties_even() as i64);
+            let t = bars.entry(bar).or_default().entry(k).or_insert([0.0; 6]);
+            for j in 0..6 {
+                t[j] += r.get::<_, Option<f64>>(2 + j).map_err(err)?.unwrap_or(0.0);
+            }
+        }
+    }
+    let mut good = std::collections::BTreeSet::new();
+    let mut seen = std::collections::BTreeSet::new();
+    {
+        let mut st = con.prepare("SELECT ts_min, rel_err FROM verify_1m WHERE symbol = ? AND ts_min >= ?").map_err(err)?;
+        let mut rows = st.query(rusqlite::params![inst, lo_sec]).map_err(err)?;
+        while let Some(r) = rows.next().map_err(err)? {
+            let m: i64 = r.get(0).map_err(err)?;
+            if f(r, 1).map_err(err)?.abs() <= 1e-4 {
+                good.insert(m);
+            }
+            seen.insert(m);
+        }
+    }
+    let mut gaps = vec![];
+    {
+        let mut st = con.prepare("SELECT from_ms, to_ms FROM gaps WHERE symbol = ? AND to_ms > ?").map_err(err)?;
+        let mut rows = st.query(rusqlite::params![inst, lo_sec * 1000]).map_err(err)?;
+        while let Some(r) = rows.next().map_err(err)? {
+            gaps.push((r.get::<_, i64>(0).map_err(err)?, r.get::<_, i64>(1).map_err(err)?));
+        }
+    }
+    let mut ok_min = good;
+    // 원본 range(lo, t0 + 60, 60): lo 부터 60초 걸음(lo 는 봉 경계라 분 경계)
+    let mut m = lo_sec;
+    while m < t0_sec + 60 {
+        if !seen.contains(&m) && m >= now_s - 900 && !gaps.iter().any(|&(a, b)| a < (m + 60) * 1000 && b > m * 1000) {
+            ok_min.insert(m);
+        }
+        m += 60;
+    }
+    let mut oi: BTreeMap<i64, (f64, f64)> = BTreeMap::new();
+    let oi_rows = (|| -> Result<(), String> {
+        let c = open_ro(ctx)?;
+        let e2 = |e: rusqlite::Error| format!("{}: {e}", ctx.display());
+        let mut st = c.prepare("SELECT ts_ms, oi_base FROM okx_oi WHERE inst = ? AND ts_ms >= ? AND ts_ms < ? ORDER BY ts_ms").map_err(e2)?;
+        let mut rows = st.query(rusqlite::params![inst, lo_sec * 1000, t0_ms]).map_err(e2)?;
+        while let Some(r) = rows.next().map_err(e2)? {
+            let bar = r.get::<_, i64>(0).map_err(e2)?.div_euclid(1000).div_euclid(300) * 300;
+            let v = f(r, 1).map_err(e2)?;
+            oi.entry(bar).and_modify(|x| x.1 = v).or_insert((v, v));
+        }
+        Ok(())
+    })();
+    if oi_rows.is_err() {
+        oi.clear(); // 원본은 예외면 그때까지 모은 것을 그대로 둔다 -- 행 도중 실패는 시험 밖(ponytail: 실서버에서 본 적 없음)
+    }
+    let liq = read_okx_liq(ctx, inst, lo_sec * 1000, t0_ms).unwrap_or_default();
+    let tape_max = con.query_row(SQL_TOP, [inst], |r| r.get::<_, Option<i64>>(0)).map_err(err)?.unwrap_or(0);
+    Ok(OkxTapeFp { bars, ok_min, oi, liq, tape_max })
+}
+
+/// 원본 okx_footprint_restore 의 회차 사이 상태.
+#[derive(Default)]
+pub struct OkxFpRestore {
+    pub(crate) start_filled: bool,
+    pub(crate) restored: std::collections::BTreeSet<i64>,
+    /// 청산을 이미 채운 구간의 앞끝(ms). 첫 회차 전 = t0.
+    pub(crate) liq_upto: Option<i64>,
+    pub(crate) done: bool,
+    pub(crate) attempts: u32,
+}
+
+/// 원본 회차 수 · 첫 기다림 · 다음 기다림.
+pub const OKX_FP_ATTEMPTS: u32 = 8;
+pub const OKX_FP_FIRST: Duration = Duration::from_secs(15);
+pub const OKX_FP_NEXT: Duration = Duration::from_secs(300);
+
+impl Supply {
+    /// 회차 하나 합치기(원본 934~971). 돌려주는 것 = 로그 한 줄.
+    pub(crate) fn okx_fp_attempt(&mut self, got: Result<OkxTapeFp, String>) -> String {
+        let t0 = self.okx_t0_ms;
+        self.okx_fr.attempts += 1;
+        let got = match got {
+            Ok(g) => g,
+            Err(e) => return format!("OKX 풋프린트 복원 실패({}회): {e}", self.okx_fr.attempts),
+        };
+        if got.tape_max < t0.div_euclid(1000) {
+            return "OKX 풋프린트: 테이프가 아직 t0 를 안 지남".into();
+        }
+        let start_bar = crate::footprint::bar_of(t0);
+        let lo = start_bar - (crate::footprint::WINDOW_BARS as i64 - 1) * 300;
+        let t0_min = t0.div_euclid(1000).div_euclid(60) * 60;
+        let covered = |a: i64, b: i64| (a..b).step_by(60).all(|m| got.ok_min.contains(&m));
+        if !self.okx_fr.start_filled {
+            if !covered(start_bar, t0_min + 60) {
+                return "OKX 풋프린트: 진행 봉이 아직 온전하지 않음".into();
+            }
+            let cells = &mut self.okx_fp.bars.entry(start_bar).or_default().cells;
+            for (k, v) in got.bars.get(&start_bar).into_iter().flatten() {
+                let t = cells.entry(*k).or_insert([0.0; 6]);
+                for j in 0..6 {
+                    t[j] += v[j];
+                }
+            }
+            self.okx_fr.start_filled = true;
+        }
+        let (mut earliest, mut b) = (start_bar, start_bar - 300);
+        while b >= lo && covered(b, b + 300) {
+            if self.okx_fr.restored.insert(b) {
+                let cells = got.bars.get(&b).cloned().unwrap_or_default();
+                self.okx_fp.bars.insert(b, crate::footprint::Bar { cells, dhl: None });
+            }
+            earliest = b;
+            b -= 300;
+        }
+        for (&ob, &(o, c)) in &got.oi {
+            if earliest <= ob && ob < start_bar {
+                self.okx_oi5m.insert(ob, [o, c]);
+                self.okx_oi5m_dirty.insert(ob);
+            } else if ob == start_bar {
+                self.okx_oi5m.entry(ob).or_insert([o, c])[0] = o;
+                self.okx_oi5m_dirty.insert(ob);
+            }
+        }
+        let upto = self.okx_fr.liq_upto.unwrap_or(t0);
+        let add: Vec<&LiqRowDb> = got.liq.iter().filter(|e| earliest * 1000 <= e.0 && e.0 < upto).collect();
+        let room = crate::supply::LIQ_RING.saturating_sub(self.okx_liq.len());
+        let n = add.len().min(room);
+        for &&(ts_ms, long, qty, px) in add[add.len() - n..].iter().rev() {
+            self.okx_liq.push_front(crate::supply::LiqEv { ts_ms, long, qty, usd: qty * px });
+        }
+        self.okx_fr.liq_upto = Some(earliest * 1000);
+        self.okx_first_bar = earliest - 300;
+        self.okx_liq5m_dirty = true;
+        if earliest <= lo {
+            self.okx_fr.done = true;
+        }
+        format!("OKX 풋프린트: 테이프에서 {}봉 + 진행 봉 앞부분 복원(창 {}/{}봉) · 청산 {n}건", self.okx_fr.restored.len(), (start_bar - earliest) / 300 + 1, crate::footprint::WINDOW_BARS)
+    }
+}
+
+/// Bybit 5분봉 몫(server.py bybit_liq_events): 수집 시작 = 표 전체 첫 청산 시각 · 사건 = 지금 − 288봉 이후(지금보다 늦은 행은 시험 DB 몫이라 막는다).
+pub fn read_bybit_liq_5m(path: &Path, symbol: &str, now_ms: i64) -> Result<(Option<i64>, Vec<LiqRowDb>), String> {
+    let start = open_ro(path)?.query_row("SELECT min(ts_ms) FROM bybit_liquidations", [], |r| r.get::<_, Option<i64>>(0)).map_err(|e| format!("{}: {e}", path.display()))?;
+    let since = now_ms - 288 * 300 * 1000;
+    let rows = liq_query(
+        path,
+        "SELECT ts_ms, side, qty, price FROM bybit_liquidations WHERE symbol = ? AND ts_ms >= ? AND ts_ms <= ? ORDER BY ts_ms",
+        rusqlite::params![symbol.to_uppercase(), since, now_ms],
+        "Buy",
+    )?;
+    Ok((start, rows))
+}
+
+impl Supply {
+    pub(crate) fn load_bybit5m(&mut self, got: (Option<i64>, Vec<LiqRowDb>), now_us: i64) {
+        self.bybit_start_ms = got.0;
+        for (ts_ms, long, qty, px) in got.1 {
+            crate::supply::bybit5m_add(&mut self.bybit5m, ts_ms, long, qty * px, now_us);
+        }
+        self.okx_liq5m_dirty = true;
     }
 }

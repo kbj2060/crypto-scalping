@@ -139,7 +139,17 @@ pub fn start(cfg: &Cfg, listener: TcpListener) -> (Arc<state::State>, tokio::tas
                 // 심볼·일감마다 따로(기다림 최대 60초가 서로 안 막게)
                 tokio::task::spawn_blocking(move || match w {
                     restore::Wake::Bn => s3.run_restore(&sym),
-                    restore::Wake::Okx => s3.run_restore_okx(&sym),
+                    restore::Wake::Okx => {
+                        let line = s3.run_restore_okx(&sym);
+                        // 풋프린트 봉 복원: 15초 뒤, 그다음 5분마다 최대 8번(원본 okx_footprint_restore · 이 스레드가 35분 산다)
+                        for i in 0..restore::OKX_FP_ATTEMPTS {
+                            std::thread::sleep(if i == 0 { restore::OKX_FP_FIRST } else { restore::OKX_FP_NEXT });
+                            if s3.run_restore_okx_fp(&sym, now_us()).is_none_or(|(_, done)| done) {
+                                break;
+                            }
+                        }
+                        line
+                    }
                     restore::Wake::OkxOi => s3.run_restore_okx_oi(&sym),
                 });
             }

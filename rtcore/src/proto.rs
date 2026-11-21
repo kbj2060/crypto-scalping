@@ -192,6 +192,23 @@ pub type Liq5mRow = (i64, f64, f64, i64, Option<f64>, Option<f64>);
 pub struct Liq5m {
     pub from_s: f64,
     pub bars: Vec<Liq5mRow>,
+    /// 2026-11-21 더함 -- OKX·Bybit 몫(server.py api_liquidation_5m_history 의 OKX 더하기 · merge_bybit_liq). 실리면 **통째로 갈아 끼운다**
+    /// (없으면 그대로). `okx_from` = OKX first_bar(이 봉 «뒤» 봉만 OKX 를 안다 · 0 = 모름) · `bybit_from` = Bybit 수집 시작이 걸친 봉(그 «뒤»만).
+    /// 바이낸스 봉과 더하기·round 는 받는 쪽(원본 응답의 long_usd 합·okx_detail·bybit 칸). HL 은 코어 밖.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub okx: Option<VenueLiq>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bybit: Option<VenueLiq>,
+}
+
+/// `[봉 시작 초, 롱USD, 숏USD, 건수]`(반올림 전).
+pub type VenueLiqRow = (i64, f64, f64, i64);
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct VenueLiq {
+    /// 이 봉 «뒤» 봉만 그 거래소를 안다(None = 모름 → 원본은 그 거래소를 안 더한다).
+    pub from: Option<i64>,
+    pub bars: Vec<VenueLiqRow>,
 }
 
 /// `bn` = 바이낸스 선물. 현물은 `spot`.

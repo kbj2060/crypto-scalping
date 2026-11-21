@@ -92,6 +92,16 @@ fn venues_restore_matches_python() {
     }
     assert!(st.run_restore_okx(&sym).is_some() && st.run_restore_okx_oi(&sym).is_some(), "첫 OKX 체결·OI 가 일감을 만든다");
     assert!(st.run_restore_okx(&sym).is_none() && st.run_restore_okx_oi(&sym).is_none(), "한 번만");
+    // OKX 청산 = 풋프린트 봉 복원 회차(원본 okx_footprint_restore -- 정답지는 시계를 R + 20 에 둔 채 회차를 몰아 돌렸다)
+    let now_fp = ((fx["restart_s"].as_f64().unwrap() + 20.0) * 1e6) as i64;
+    let mut n_fp = 0;
+    while let Some((_, done)) = st.run_restore_okx_fp(&sym, now_fp) {
+        n_fp += 1;
+        if done {
+            break;
+        }
+    }
+    assert!(n_fp >= 1, "풋프린트 봉 복원 회차가 돌았다");
     let (t0_ms, t0_oi) = (fx["t0_ms"].as_i64().unwrap(), fx["t0_oi"].as_i64().unwrap());
     let t0 = t0_ms.div_euclid(1000);
     // 1초 칸: t0 앞은 전부 파이썬이 테이프로 되살린 값과 같다(키까지)
@@ -115,13 +125,13 @@ fn venues_restore_matches_python() {
         assert_eq!(v.to_bits(), want[&s.to_string()].as_f64().unwrap().to_bits(), "OKX OI {s}");
         fields += 1;
     }
-    // OKX 청산: 링 앞 = 파이썬이 되살린 것 중 코어 창(t0 − 660초 ~ t0)에 드는 것(파이썬은 12시간까지 앞에 넣지만 창 밖은 화면에 안 나온다)
-    let want: Vec<_> = fx["okx_liq"].as_array().unwrap().iter().map(ev4).filter(|e| e.0 >= t0_ms - 660_000).collect();
+    // OKX 청산: 링 앞 = 파이썬이 되살린 것 전부(2026-11-21 부터 원본과 같은 «덮은 구간»)
+    let want: Vec<_> = fx["okx_liq"].as_array().unwrap().iter().map(ev4).collect();
     // 링 = [되살린 것(앞에 넣음) …, 실시간 …] -- 앞 want.len() 건이 되살린 몫, 그 뒤 t0 앞 시각은 전부 실시간으로 받은 것이어야 한다
     let ring = st.liq_events(&sym, Venue::Okx).unwrap();
     let (got, rest) = ring.split_at(want.len().min(ring.len()));
     assert!(rest.iter().filter(|e| e.0 < t0_ms).all(|e| live_liq.contains(&(e.0, e.2))), "되살린 몫 뒤에 t0 앞 사건이 더 있다(건수 다름)");
-    assert_eq!(got.len(), want.len(), "OKX 청산 건수(t0 앞 660초)");
+    assert_eq!(got.len(), want.len(), "OKX 청산 건수(되살린 것 전부)");
     for (g, w) in got.iter().zip(&want) {
         assert!(g.0 == w.0 && g.1 == w.1 && close(g.2, w.2) && close(g.3, w.3), "OKX 청산 {g:?} != {w:?}");
         fields += 4;
