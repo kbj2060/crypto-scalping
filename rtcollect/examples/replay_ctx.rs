@@ -19,7 +19,8 @@ fn main() {
             bc::replay_ws(i["ws"].as_array().unwrap(), &strs(&i["slow"]), &p);
             bc::flush(&con, &p);
         }
-        "hl_ctx" => drop(rtcollect::hl_ctx::replay(i.as_array().unwrap(), &dir.join("hl_ctx.sqlite")).unwrap()),
+        "hl_ctx" => drop(rtcollect::hl_ctx::replay(i.as_array().unwrap(), &dir.join("hl_ctx.sqlite"), None).unwrap()),
+        "hl_bt" => drop(rtcollect::hl_ctx::replay(i.as_array().unwrap(), &dir.join("hl_ctx.sqlite"), Some(&dir.join("bt"))).unwrap()),
         "xyz" => drop(rtcollect::xyz::replay(i["events"].as_array().unwrap(), &strs(&i["coins"]), &dir.join("hl_xyz.sqlite")).unwrap()),
         k => panic!("모르는 종류 {k}"),
     }

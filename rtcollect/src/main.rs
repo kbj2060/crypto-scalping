@@ -35,7 +35,7 @@ use std::time::Duration;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::task::JoinSet;
 
-const KINDS: &str = "binance_tape|bybit_liq|bybit_tape|okx_tape|okx_ctx|binance_ctx|xyz|hl_ctx|depth|raster|ob5m|bookdepth";
+const KINDS: &str = "binance_tape|bybit_liq|bybit_tape|okx_tape|okx_ctx|binance_ctx|xyz|hl_ctx|hl_bt|depth|raster|ob5m|bookdepth";
 
 fn env_f(k: &str, d: f64) -> f64 {
     std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
@@ -95,6 +95,7 @@ fn main() {
             "binance_ctx" => run_binance_ctx().await,
             "xyz" => run_xyz().await,
             "hl_ctx" => run_hl_ctx().await,
+            "hl_bt" => run_hl_bt().await,
             "depth" => run_depth().await,
             "raster" => run_raster().await,
             "ob5m" | "bookdepth" => run_book_worker(&kind),
@@ -292,6 +293,29 @@ async fn run_hl_ctx() {
     wait_term(&mut tasks, || println!("rtcollect hl_ctx 60s · 재연결 {} (누적)", net::RECONNECTS.load(Relaxed))).await;
     let n: usize = cs.iter().map(|c| c.borrow_mut().write()).sum();
     println!("종료 신호 -- 남은 {n}행 쓰고 끝낸다");
+}
+
+/// 하이퍼리퀴드 호가 + 맥락 전체(live_hyperliquid_book_ticker_collector_20260923.py 기본 형태 -- Pi 에서 도는 것). 코인 하나(원본과 같다).
+/// bbo → HL_BT_ROOT/<COIN>/<UTC 시>.bt(기본 data/live/rtcollect/orderflow/hyperliquid_bookticker -- 파이썬 폴더면 RTCOLLECT_TAKEOVER=1 없이는 안 켠다) · 맥락 → HL_CTX_DB_PATH.
+async fn run_hl_bt() {
+    let coin = env_s("HL_BT_COIN", "ETH").to_uppercase();
+    let root = PathBuf::from(env_s("HL_BT_ROOT", "data/live/rtcollect/orderflow/hyperliquid_bookticker"));
+    if root.ends_with("data/live/orderflow/hyperliquid_bookticker") && env_s("RTCOLLECT_TAKEOVER", "") != "1" {
+        die(2, &format!("🔴{} 는 파이썬 수집기의 폴더다 -- 그림자는 다른 경로에. 전환이면 RTCOLLECT_TAKEOVER=1", root.display()));
+    }
+    let db = db_path("HL_CTX_DB_PATH", "hl_ctx.sqlite");
+    let url = env_s("RTCOLLECT_WS_URL", hl_ctx::WS_URL);
+    let con = hl_ctx::open_db(&db).expect("DB 열기");
+    let mut h = hl_ctx::HlCtx::new(con, &coin, net::mono_s());
+    h.bt = Some(rtcollect::bt::HourFile::new(&root, &coin, net::mono_s()).expect(".bt 폴더"));
+    let c = Rc::new(RefCell::new(h));
+    let mut tasks = JoinSet::new();
+    tasks.spawn_local(net::run_hl(c.clone(), url, || {}));
+    println!("hl_bt {coin} → {} · ctx → {}", root.display(), db.display());
+    wait_term(&mut tasks, || { let c = c.borrow(); println!("rtcollect hl_bt 60s · bbo {} · 버림 {} · 재연결 {}", c.n_bbo, c.dropped, net::RECONNECTS.load(Relaxed)) }).await;
+    let mut c = c.borrow_mut();
+    c.on_disconnect();
+    println!("종료 신호 -- .bt 닫고 남은 맥락 행 쓰고 끝낸다");
 }
 
 /// depth_diff(live_depth_diff_collector_20260915.py `run()`). 종목 하나(원본과 같다 -- DD_SYMBOL). 정지 감시 없음(원본 그대로).
