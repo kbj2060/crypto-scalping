@@ -1,4 +1,6 @@
-//! rtduck: DuckDB 로 쓰는 수집기. RTDUCK_KIND = oi_lsratio | hl_trades.
+//! rtduck: DuckDB 로 쓰는 수집기. RTDUCK_KIND = oi_lsratio | hl_trades | hl_positions.
+//!   hl_positions HL_POS_COINS(기본 ETH -- 원본과 같다 · HL_POS_COIN 도) · HL_ROOT(체결 DuckDB 를 읽기만) · HL_POS_DB(기본 data/hot/rtduck/<원본과 같은 이름> --
+//!               data/hot/<그 이름> 은 RTDUCK_TAKEOVER=1 일 때만) · 🔴HL info REST 전용이라 RTDUCK_REST=1 없으면 아무것도 안 한다
 //!   hl_trades   HL_COINS(기본 ETH) · HL_ROOT(기본 data/live/rtduck/orderflow/hyperliquid -- 원본 폴더 data/live/orderflow/hyperliquid 는 RTDUCK_TAKEOVER=1 일 때만)
 //!   oi_lsratio  BOT_SYMBOLS(기본 ETHUSDT,BTCUSDT,SOLUSDT -- 원본 기본값) · QUANT_OI_LSRATIO_DB_PATH(기본 data/live/rtduck/oi_lsratio.duckdb --
 //!               원본 파일 data/live/oi_lsratio.duckdb 는 RTDUCK_TAKEOVER=1 일 때만) · OI_ENABLE · OI_POLL_INTERVAL_SEC · OI_FETCH_LIMIT(원본과 같다)
@@ -22,7 +24,8 @@ fn main() {
     match env_s("RTDUCK_KIND", "oi_lsratio").as_str() {
         "oi_lsratio" => run_oi(),
         "hl_trades" => run_hl_trades(),
-        k => die(2, &format!("모르는 종류 {k:?} -- oi_lsratio|hl_trades")),
+        "hl_positions" => run_hl_positions(),
+        k => die(2, &format!("모르는 종류 {k:?} -- oi_lsratio|hl_trades|hl_positions")),
     }
 }
 
@@ -113,8 +116,8 @@ fn run_hl_trades() {
         die(2, &format!("🔴{} 는 파이썬 수집기의 폴더다 -- 그림자는 다른 경로에. 전환이면 RTDUCK_TAKEOVER=1", root.display()));
     }
     let url = env_s("RTDUCK_WS_URL", rtduck::hl_trades::WS);
-    let h = Rc::new(RefCell::new(rtduck::hl_trades::HlTrades::new(&root, &coins, rtcollect::rest::wall_s())));
-    println!("rtduck hl_trades {coins:?} → {}", h.borrow().db_path(rtcollect::rest::wall_s()).display());
+    let h = Rc::new(RefCell::new(rtduck::hl_trades::HlTrades::new(&root, &coins, rtduck::hl_trades::wall())));
+    println!("rtduck hl_trades {coins:?} → {}", h.borrow().db_path(rtduck::hl_trades::wall()).display());
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     tokio::task::LocalSet::new().block_on(&rt, async {
         let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
@@ -126,8 +129,60 @@ fn run_hl_trades() {
     });
     let mut h = h.borrow_mut();
     let b = std::mem::take(&mut h.buf);
-    if let Err(e) = h.write(&b, None, rtcollect::rest::wall_s()) {
+    if let Err(e) = h.write(&b, None, rtduck::hl_trades::wall()) {
         eprintln!("종료 때 {}행 쓰기 실패: {e}", b.len());
     }
     println!("종료 신호 -- 남은 {}행 쓰고 끝낸다", b.len());
+}
+
+/// 진짜 바깥: HL info POST(시한 15초 · aiohttp ClientTimeout(total=15)) · 벽시계 · 잠.
+type Post = Box<dyn FnMut(&str) -> Result<(u16, serde_json::Value), String>>;
+
+struct RealEnv {
+    post: Post,
+}
+
+impl rtduck::hl_positions::Env for RealEnv {
+    fn post(&mut self, body: &str) -> Result<(u16, serde_json::Value), String> {
+        (self.post)(body)
+    }
+    fn now(&mut self) -> f64 {
+        rtcollect::rest::wall_s()
+    }
+    fn sleep(&mut self, s: f64) {
+        std::thread::sleep(Duration::from_secs_f64(s.max(0.0)));
+    }
+}
+
+/// HL 고래 포지션(live_hyperliquid_positions_collector_20260924.py run()). 바퀴를 쉬지 않고 돈다(원본 그대로 -- 간격은 요청 사이 0.4초).
+fn run_hl_positions() {
+    let coins: Vec<String> = std::env::var("HL_POS_COINS").or_else(|_| std::env::var("HL_POS_COIN")).unwrap_or_else(|_| "ETH".into())
+        .split(',').map(|c| c.trim().to_uppercase()).filter(|c| !c.is_empty()).collect();
+    let name = rtduck::hl_positions::default_db(&coins);
+    let db = PathBuf::from(env_s("HL_POS_DB", &format!("data/hot/rtduck/{name}")));
+    if db.ends_with(format!("data/hot/{name}")) && env_s("RTDUCK_TAKEOVER", "") != "1" {
+        die(2, &format!("🔴{} 는 파이썬 수집기의 파일이다 -- 그림자는 다른 경로에. 전환이면 RTDUCK_TAKEOVER=1", db.display()));
+    }
+    let trades = PathBuf::from(env_s("HL_ROOT", "data/live/orderflow/hyperliquid")); // 읽기만(파이썬 체결 수집기 파일도 그대로 읽어도 된다)
+    if env_s("RTDUCK_REST", "") != "1" {
+        println!("hl_positions {coins:?}: 🔴RTDUCK_REST=1 이 아니라 아무것도 안 한다(HL info 요청이 파이썬과 합쳐 두 배가 된다 -- SHADOW.md §12)");
+        loop {
+            std::thread::sleep(Duration::from_secs(3600));
+        }
+    }
+    let mut c = rtduck::hl_positions::Collector::new(&db, &coins, &trades).unwrap_or_else(|e| die(1, &format!("DB 준비 실패: {e}")));
+    let (agent, url) = (rtcollect::rest::agent(Duration::from_secs(15)), env_s("RTDUCK_HL_INFO_URL", rtduck::hl_positions::INFO_URL));
+    let mut env = RealEnv { post: Box::new(move |body: &str| {
+        let mut r = agent.post(&url).header("Content-Type", "application/json").send(body).map_err(|e| format!("ClientConnectorError: {e}"))?;
+        let st = r.status().as_u16();
+        let text = r.body_mut().read_to_string().map_err(|e| format!("ClientPayloadError: {e}"))?;
+        if st >= 400 {
+            return Ok((st, serde_json::Value::Null));
+        }
+        serde_json::from_str(&text).map(|v| (st, v)).map_err(|e| format!("ContentTypeError: {e}"))
+    }) };
+    println!("{} 포지션 수집 시작 (코인별 상위 {}주소 · {}초 간격 · db {} · 체결 {})", coins.join(","), c.universe_n, rtduck::hl_positions::REQ_GAP_S, db.display(), trades.display());
+    loop {
+        c.cycle(&mut env);
+    }
 }

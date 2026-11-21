@@ -12,6 +12,8 @@ duckdb = { version = "=1.10501.0", features = ["bundled"] }
 # 밴 파일 규칙·REST 연결(rest::agent·ban_left·ban_note)·파이썬 float repr 을 같이 쓴다.
 rtcollect = { path = "../rtcollect" }
 serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
+# HL 포지션의 hot SQLite(rtcollect 와 같은 판·기능 -- 같은 산출물을 다시 쓴다)
+rusqlite = { version = "0.37", features = ["bundled"] }
 tokio = { version = "1", features = ["rt", "macros", "time", "signal"] }
 
 # 시험 쪽 의존성은 두지 않는다: 기능 묶음이 바뀌면 libduckdb-sys(C++ 14분)를 다시 빌드한다(2026-11-21 실측 -- flate2 dev 의존성 하나로 세 번).

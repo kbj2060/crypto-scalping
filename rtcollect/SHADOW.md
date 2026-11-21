@@ -205,8 +205,13 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
 |---|---|---|---|
 | `oi_lsratio` | `BOT_SYMBOLS` · `OI_POLL_INTERVAL_SEC` · `OI_FETCH_LIMIT` · `OI_ENABLE`(원본과 같다) · 🔴`RTDUCK_REST=1` 필수 | `data/live/rtduck/oi_lsratio.duckdb` | `data/live/oi_lsratio.duckdb`(가리키면 종료코드 2 · 전환 때만 `RTDUCK_TAKEOVER=1`) |
 | `hl_trades` | `HL_COINS` · `HL_ROOT` | `data/live/rtduck/orderflow/hyperliquid/<코인_코인>/<날짜>.duckdb` | `data/live/orderflow/hyperliquid/…` |
+| `hl_positions` | `HL_POS_COINS`(원본과 같다) · `HL_ROOT`(체결 DuckDB 읽기만 -- 그림자는 Rust hl_trades 의 data/live/rtduck/orderflow/hyperliquid) · 🔴`RTDUCK_REST=1` 필수 | `data/hot/rtduck/hl_positions[_코인들].sqlite` | `data/hot/hl_positions[_코인들].sqlite`(가리키면 종료코드 2) |
 
 - 🔧밴 파일(`RTCOLLECT_BAN_FILE`, 기본 `data/live/binance_ban_until`)을 지킨다 -- 원본 롱숏비 워커는 모른다(밴 중에도 보냈다). 의도한 차이 #17.
-- REST 부담(oi_lsratio): 5분마다 종목 × 원천 5 = 서버 목록 4종목이면 20요청(/futures/data 는 IP 가중치 0 -- 원본과 같은 양). 그림자를 켜면 두 배.
+- REST 부담 -- 그림자를 켜면 파이썬과 합쳐 **두 배**다(그래서 `tools/shadow_start.sh` 는 REST 종류를 기본으로 안 띄운다 · `RTDUCK_SHADOW_REST=1` 이면 띄움):
+  - oi_lsratio: 5분마다 종목 × 원천 5 = 서버 4종목이면 20요청/5분 → 그림자 켜면 40요청/5분(바이낸스 /futures/data 가중치는 이 저장소에서 실측 안 함 · 밴 파일은 지킨다).
+  - hl_positions: 원본 = 주소마다 clearinghouseState(가중치 2) 0.4초 간격 = 150회/분 = 가중치 300/분 · 서버 두 프로세스(ETH · 다코인)면 600/분(한도 1,200/분의 50%) →
+    그림자 켜면 1,200/분 = **한도 100%**(429 가 나기 시작한다 -- 원본 주석의 «합계 50%» 전제가 깨진다). 켤 거면 파이썬 쪽을 끄는 전환 때만.
+  - hl_trades: 웹소켓뿐(REST 없음) -- 그림자 기본으로 띄운다.
 - 매일 대조: 두 파일을 사본으로 떠서(쓰는 쪽이 열 때 다른 프로세스 열기가 막힌다 -- seal_to_lake 방식) 같은 ts 의 14칸·sources_ok 를 비교(collected_at 은 다르다).
 - 🔴DuckDB 파일은 쓰는 프로세스가 하나다: 그림자와 파이썬이 **같은 파일**을 가리키면 하나가 «Conflicting lock» 으로 죽는다(위 기본 경로가 다른 이유).
