@@ -136,7 +136,7 @@ impl Chart {
 
         let p = ui.painter();
         if self.bg.a() > 0 { p.rect_filled(p.clip_rect(), 0.0, self.bg); }
-        let measure = |s: &str, z: f64| draw::measure(p, s, z);
+        let measure = |s: &str, z: f64, wt: u16| draw::measure(p, s, z, wt);
         let sc = fp::prep(&inp, &win, &self.cfg, &measure)?;
         let g = &sc.g;
         self.view.y_per_px = g.y_span / g.ch.max(1.0); // 8690 chartYPerPx
@@ -203,7 +203,7 @@ pub fn prims_json(prims: &[fp::Prim], groups: &[(&str, usize, usize)]) -> Vec<se
         Rect { x, y, w, h, c, a, rx, clip } => serde_json::json!({"g": g, "k": "rect", "x": x, "y": y, "w": w, "h": h, "c": format!("{c:?}"), "a": a, "rx": rx, "clip": format!("{clip:?}")}),
         StrokeRect { x, y, w, h, c, a, lw, .. } => serde_json::json!({"g": g, "k": "srect", "x": x, "y": y, "w": w, "h": h, "c": format!("{c:?}"), "a": a, "lw": lw}),
         Line { pts, c, a, lw, dash, .. } => serde_json::json!({"g": g, "k": "line", "pts": pts, "c": format!("{c:?}"), "a": a, "lw": lw, "dash": dash}),
-        Text { x, y, s, size, c, a, anchor, halo, .. } => serde_json::json!({"g": g, "k": "text", "x": x, "y": y, "s": s, "size": size, "c": format!("{c:?}"), "a": a, "anchor": format!("{anchor:?}"), "halo": halo}),
+        Text { x, y, s, size, wt, c, a, anchor, halo, .. } => serde_json::json!({"g": g, "k": "text", "x": x, "y": y, "s": s, "size": size, "wt": wt, "c": format!("{c:?}"), "a": a, "anchor": format!("{anchor:?}"), "halo": halo}),
         Circle { x, y, r, c, a, .. } => serde_json::json!({"g": g, "k": "circle", "x": x, "y": y, "r": r, "c": format!("{c:?}"), "a": a}),
     }}).collect()
 }

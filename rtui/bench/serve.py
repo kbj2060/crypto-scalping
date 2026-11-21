@@ -16,7 +16,9 @@ API = {"/api/footprint": "footprint.json", "/api/market-history": "market-histor
        "/api/liquidation-5m-signal": "liquidation-5m-signal.json", "/api/liquidation-5m-history": "liquidation-5m-history.json"}
 CT = {".js": "application/javascript", ".css": "text/css", ".html": "text/html", ".png": "image/png", ".wasm": "application/wasm",
       ".json": "application/json", ".ttf": "font/ttf", ".webmanifest": "application/manifest+json", ".svg": "image/svg+xml"}
-FONT_CSS = "@font-face{font-family:'Pretendard Variable';src:url(/rtui/fonts/Pretendard-Bold.ttf) format('truetype');font-weight:45 920;}"
+# 지금 화면이 실제로 받는 글꼴(rtui/fonts/README.md): Pretendard Variable(jsdelivr 가변 = 공식 PretendardVariable.ttf) · JetBrains Mono 400·700(구글 글꼴 자리 = 공식 Regular·Bold)
+FONT_CSS = ("@font-face{font-family:'Pretendard Variable';src:url(/rtui/fonts/PretendardVariable.ttf) format('truetype');font-weight:45 920;}"
+            + "".join(f"@font-face{{font-family:'JetBrains Mono';src:url(/rtui/fonts/JetBrainsMono-{n}.ttf) format('truetype');font-weight:{w};}}" for n, w in (("Regular", 400), ("Bold", 700))))
 NOCACHE = {"Cache-Control": "no-store"}
 
 

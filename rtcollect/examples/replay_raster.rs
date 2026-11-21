@@ -6,6 +6,7 @@ fn main() {
     let i = &inp["input"];
     for run in i["runs"].as_array().unwrap() {
         rtcollect::raster::replay(run["t0"].as_f64().unwrap(), run["events"].as_array().unwrap(), i["symbol"].as_str().unwrap(),
-                                  std::path::Path::new(&a[2]), run["snaps"].as_array().unwrap()).unwrap();
+                                  std::path::Path::new(&a[2]), run["snaps"].as_array().unwrap(),
+                                  i["bin_size"].as_f64().unwrap_or(0.5), i["n_bins"].as_u64().unwrap_or(240) as usize).unwrap();
     }
 }

@@ -223,12 +223,70 @@ def cargo_replay(out: Path) -> None:
         raise SystemExit(f"cargo replay_ob5m 실패:\n{r.stderr}")
 
 
+def empty_cases() -> list:
+    """빈 북 사례(2026-11-21 그림자 SNDKUSDT 패닉): 사슬 = 줄 목록, 사례 = 사슬 목록(main 이 «스냅숏에서 다시» 하듯 차례로).
+    스냅숏 한쪽이 빈 사슬은 원본이 IndexError 로 죽는다(np.flatnonzero(bid)[-1]) -- Rust 는 «empty_book» 으로 사슬을 끝낸다(의도한 차이)."""
+    def snap(lu, bids, asks):
+        return {"_snapshot": {"lastUpdateId": lu, "E": 1, "T": 1, "bids": [[f"{p:.2f}", f"{q:.3f}"] for p, q in bids],
+                              "asks": [[f"{p:.2f}", f"{q:.3f}"] for p, q in asks]}}
+
+    def diffs(lu, t0, steps):     # steps = [(b, a)…] 1초 간격 · 첫 diff 가 lu 를 덮는다
+        out, u = [], lu
+        for k, (b, a) in enumerate(steps):
+            uu, u = u - 1 if k == 0 else u + 1, u + 3
+            out.append({"e": "depthUpdate", "E": 0, "T": t0 + k * 1000 + 7, "s": "X", "U": uu, "u": u, "pu": out[-1]["u"] if out else uu - 1,
+                        "b": [[f"{p:.2f}", f"{q:.3f}"] for p, q in b], "a": [[f"{p:.2f}", f"{q:.3f}"] for p, q in a]})
+        return out
+
+    B = [(2499.9 - 0.5 * k, 3.0 + k % 7) for k in range(40)]
+    A = [(2500.1 + 0.5 * k, 2.0 + k % 5) for k in range(40)]
+    wobble = [([(2499.9, 4.0 + k)], [(2500.1, 5.0 + k)]) for k in range(6)]
+    T0 = 1_790_000_000_000
+    zero_a, zero_b = [(p, 0.0) for p, _ in A], [(p, 0.0) for p, _ in B]
+    cases = {
+        "ask_side_empties": [[snap(100, B, A)] + diffs(100, T0, wobble + [([], zero_a)] + wobble)],
+        "bid_side_empties": [[snap(100, B, A)] + diffs(100, T0, wobble + [(zero_b, [])])],
+        "both_sides_empty": [[snap(100, B, A)] + diffs(100, T0, wobble + [(zero_b, zero_a)])],
+        # 가까운 매도 전부 빠지고 +4% 한 칸만 -- best 의 ±2% 창 밖 → 전체 찾기 · 매도쪽 ±50bp 비영 없음 → 중앙값 NaN
+        "ask_only_far_level": [[snap(100, B, A)] + diffs(100, T0, wobble + [([], zero_a + [(2600.0, 1.5)])] + wobble + [([(2499.4, 900.0)], [])] * 4 + [([(2499.4, 0.0)], [])] + wobble)],
+        "snapshot_ask_empty": [[snap(100, B, [])] + diffs(100, T0, wobble)],
+        "snapshot_bid_empty": [[snap(100, [], A)] + diffs(100, T0, wobble)],
+        "snapshot_both_empty": [[snap(100, [], [])] + diffs(100, T0, wobble)],
+        # main 의 흐름: 한쪽이 비어 끝 → 다음 시 스냅숏도 한쪽 빔 → 그다음 시 온전한 스냅숏에서 다시
+        "rebuild_after_empty": [[snap(100, B, A)] + diffs(100, T0, wobble + [([], zero_a)]),
+                                [snap(500, B, [])] + diffs(500, T0 + 3_600_000, wobble),
+                                [snap(900, B, A)] + diffs(900, T0 + 7_200_000, wobble + [([(2499.4, 900.0)], [])] * 4 + [([(2499.4, 0.0)], [])] + wobble)],
+    }
+    import numpy as np
+    ob = __import__("scripts.live_ob5m_20261026", fromlist=["x"])
+    rep = lambda x: repr(float(x)) if isinstance(x, (float, np.floating)) else int(x)     # noqa: E731
+    out = []
+    for name, chains in cases.items():
+        res = []
+        for ch in chains:
+            secs, evs = [], []
+            try:
+                st = ob.replay(iter([json.dumps(m).encode() for m in ch]),
+                               lambda t, bid, ask, bb, ba: secs.append([rep(x) for x in ob.sec_row(t, bid, ask, bb, ba)]),
+                               lambda e: evs.append([rep(e[k]) for k in ("t", "side", "px", "qref", "q", "share", "dist_bp", "age20")]))
+            except IndexError:
+                st = "IndexError"
+            res.append({"lines": [json.dumps(m) for m in ch], "status": st, "secs": secs, "events": evs})
+        out.append({"name": name, "chains": res})
+        print(name, [(r["status"], len(r["secs"]), len(r["events"])) for r in res])
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--check-readers", action="store_true")
+    ap.add_argument("--empty", action="store_true", help="빈 북 사례만 다시 만든다(tests/fixtures/ob5m_empty.json)")
     a = ap.parse_args()
     if a.check_readers:
         return check_readers()
+    if a.empty:
+        (FIX / "ob5m_empty.json").write_text(json.dumps(empty_cases(), separators=(",", ":")))
+        return
     gen(random.Random(SEED))
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)

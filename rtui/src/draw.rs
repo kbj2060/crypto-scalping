@@ -23,14 +23,31 @@ pub fn rgba(c: Col, a: f64) -> Color32 {
     Color32::from_rgba_unmultiplied(r, g, b, (255.0 * a0 * a).round().clamp(0.0, 255.0) as u8)
 }
 
-/// 글꼴: Pretendard 를 맨 앞에(egui 기본 글꼴은 Pretendard 에 없는 글자만). 굵기는 한 벌(Bold) -- 지금 화면의 400·800 도 Bold 로 그린다.
-/// fonts/Pretendard-Bold.ttf (SIL OFL, fonts/Pretendard-LICENSE.txt) -- 저장소에는 라이선스만, ttf 는 orioncactus/pretendard v1.3.9 배포본.
+/// 글꼴(지금 화면이 실제로 쓰는 것 · fonts/README.md): 본문 = Pretendard(--font-sans 첫 글꼴 · 400·700·800 세 굵기) ·
+/// 툴팁 = JetBrains Mono(--font-mono · 400·700 -- 한글·없는 글자는 같은 굵기 Pretendard 로 떨어짐, 브라우저 글꼴 대체와 같은 순서).
+/// 굵기마다 이름 붙은 패밀리 하나(egui 는 한 패밀리에 굵기 축이 없다): "w400"·"w700"·"w800" · "m400"·"m700". 뒤에 egui 기본 글꼴(▮ 같은 없는 글자).
+/// 파일 = 공식 배포본을 화면 글자만 남겨 추린 것(fonts/subset.sh · *.sub.ttf -- ttf 는 저장소에 안 넣는다, 받는 주소·해시는 README).
 pub fn fonts() -> FontDefinitions {
     let mut f = FontDefinitions::default();
-    f.font_data.insert("pretendard".into(), Arc::new(FontData::from_static(include_bytes!("../fonts/Pretendard-Bold.ttf"))));
-    for fam in [FontFamily::Proportional, FontFamily::Monospace] { f.families.get_mut(&fam).unwrap().insert(0, "pretendard".into()); }
+    let base = f.families[&FontFamily::Proportional].clone();
+    for (k, b) in [
+        ("p400", &include_bytes!("../fonts/Pretendard-Regular.sub.ttf")[..]),
+        ("p700", &include_bytes!("../fonts/Pretendard-Bold.sub.ttf")[..]),
+        ("p800", &include_bytes!("../fonts/Pretendard-ExtraBold.sub.ttf")[..]),
+        ("j400", &include_bytes!("../fonts/JetBrainsMono-Regular.sub.ttf")[..]),
+        ("j700", &include_bytes!("../fonts/JetBrainsMono-Bold.sub.ttf")[..]),
+    ] { f.font_data.insert(k.into(), Arc::new(FontData::from_static(b))); }
+    let fam = |v: &[&str]| v.iter().map(|s| s.to_string()).chain(base.iter().cloned()).collect::<Vec<_>>();
+    for (n, v) in [("w400", fam(&["p400"])), ("w700", fam(&["p700"])), ("w800", fam(&["p800"])), ("m400", fam(&["j400", "p400"])), ("m700", fam(&["j700", "p700"]))] {
+        f.families.insert(FontFamily::Name(n.into()), v);
+    }
+    for fam in [FontFamily::Proportional, FontFamily::Monospace] { f.families.get_mut(&fam).unwrap().insert(0, "p700".into()); } // 이름 없이 부르는 곳(없어야 한다)은 옛 Bold
     f
 }
+/// 본문 글꼴(--font-sans) 굵기 → 패밀리 · 450 미만 = 400 · 750 미만 = 700 · 그 위 = 800(카드가 쓰는 굵기는 셋뿐)
+pub fn fid(size: f32, wt: u16) -> FontId { FontId::new(size, FontFamily::Name(if wt < 450 { "w400" } else if wt < 750 { "w700" } else { "w800" }.into())) }
+/// 툴팁 글꼴(--font-mono) · 700 이상 = Bold
+pub fn mono(size: f32, wt: u16) -> FontId { FontId::new(size, FontFamily::Name(if wt >= 600 { "m700" } else { "m400" }.into())) }
 
 /// 캔버스·svg 처럼 반 픽셀 좌표를 그대로(egui 기본은 사각형·직각 선을 픽셀에 붙인다) · 글꼴 힌팅 끔(크로미움 리눅스 글자 폭에 더 가깝다 -- compare/coords_36.md)
 pub fn canvas_like(ctx: &egui::Context) {
@@ -38,8 +55,8 @@ pub fn canvas_like(ctx: &egui::Context) {
     ctx.all_styles_mut(|s| s.visuals.text_options.font_hinting = false);
 }
 
-pub fn measure(p: &Painter, s: &str, size: f64) -> f64 {
-    p.layout_no_wrap(s.to_owned(), FontId::proportional(size as f32), Color32::WHITE).size().x as f64
+pub fn measure(p: &Painter, s: &str, size: f64, wt: u16) -> f64 {
+    p.layout_no_wrap(s.to_owned(), fid(size as f32, wt), Color32::WHITE).size().x as f64
 }
 
 /// 캔버스 roundRect(반지름 = min(rx, 폭/2, 높이/2)) -- egui 모서리 반지름은 정수(u8)라 1.5 같은 값은 볼록 다각형으로 직접(모서리당 6조각)
@@ -53,20 +70,20 @@ fn round_rect(p: &Painter, r: Rect, rx: f32, c: Color32) {
     p.add(Shape::convex_polygon(v, c, Stroke::NONE));
 }
 
-pub fn text(p: &Painter, at: Pos2, s: &str, size: f32, c: Color32, anchor: Anchor, halo: bool) {
-    let g = p.layout_no_wrap(s.to_owned(), FontId::proportional(size), c);
+pub fn text(p: &Painter, at: Pos2, s: &str, size: f32, wt: u16, c: Color32, anchor: Anchor, halo: bool) {
+    let g = p.layout_no_wrap(s.to_owned(), fid(size, wt), c);
     let base = g.rows.first().and_then(|r| r.row.glyphs.first().map(|gl| r.pos.y + gl.pos.y)).unwrap_or(0.0);
     let dx = match anchor { Anchor::Start => 0.0, Anchor::Middle => g.size().x / 2.0, Anchor::End => g.size().x };
     let at = at - vec2(dx, base);
     if halo { // svg paint-order: stroke 3px(바깥 1.5px) 차트 바탕색 -- 여덟 방향으로 1.5px 밀어 깐다
-        let hg = p.layout_no_wrap(s.to_owned(), FontId::proportional(size), rgba(Col::ChartBg, 1.0));
+        let hg = p.layout_no_wrap(s.to_owned(), fid(size, wt), rgba(Col::ChartBg, 1.0));
         for k in 0..8 { let a = (45.0 * k as f32).to_radians(); p.galley(at + vec2(1.5 * a.cos(), 1.5 * a.sin()), hg.clone(), Color32::WHITE); }
     }
     p.galley(at, g, Color32::WHITE);
 }
 
 /// 툴팁(#chartTooltip): styles.css 741-776 · 3694 (배경 --pop-bg #1b212b 불투명 · 안쪽 여백 8/12 · 테두리 1px 흰 .1 · 둥근 6 · 그림자 0 4 12 검정 .2)
-/// 자리 = app.js 11692 showTooltip(커서 +8/+15 · 오른쪽 넘치면 왼쪽으로 · 아래 넘치면 위로). 글꼴: --font-mono 첫 글꼴(JetBrains Mono)이 없을 때처럼 Pretendard.
+/// 자리 = app.js 11692 showTooltip(커서 +8/+15 · 오른쪽 넘치면 왼쪽으로 · 아래 넘치면 위로). 글꼴: --font-mono(JetBrains Mono · 한글은 Pretendard -- mono).
 /// wrap = 델타·TPO 풀이(div white-space:normal · max-width 360): 접히면 폭이 360 그대로.
 pub fn tip(p: &Painter, t: &mut crate::hover::Tip, vw: f32, vh: f32) {
     use crate::hover::Tc;
@@ -76,9 +93,12 @@ pub fn tip(p: &Painter, t: &mut crate::hover::Tip, vw: f32, vh: f32) {
     for l in &t.lines {
         let mut job = LayoutJob::default();
         if let Some(m) = t.wrap { job.wrap.max_width = m; }
-        let fmt = |c| TextFormat { font_id: FontId::proportional(l.size), color: c, ..Default::default() };
-        if l.runs.is_empty() { job.append(" ", 0.0, fmt(Color32::TRANSPARENT)); } // <br> 만 있는 줄 = 글자 한 줄 높이
-        for (s, c) in &l.runs { job.append(s, 0.0, fmt(col(*c))); }
+        // 줄 높이 = 크로미움의 line-height:normal = round(ascent) + round(descent)(JetBrains Mono hhea 1020/−300 · 줄 간격 0) -- 11px 14 · 12px 16.
+        // egui 는 (ascent − descent) 를 한 번에 픽셀로 올려 15·16 이 돼 줄마다 1px 씩 늘었다(툴팁 10줄 +10px · 2026-11-21)
+        let lh = (1.02 * l.size).round() + (0.30 * l.size).round();
+        let fmt = |c, wt| TextFormat { font_id: mono(l.size, wt), color: c, line_height: Some(lh), ..Default::default() };
+        if l.runs.is_empty() { job.append(" ", 0.0, fmt(Color32::TRANSPARENT, 400)); } // <br> 만 있는 줄 = 글자 한 줄 높이
+        for (s, c, wt) in &l.runs { job.append(s, 0.0, fmt(col(*c), *wt)); }
         let g = p.layout_job(job);
         wrapped |= g.rows.len() > 1;
         w = w.max(g.size().x);
@@ -140,7 +160,7 @@ pub fn paint_prims(p: &Painter, prims: &[Prim], sc: &Scene, origin: Pos2) {
                     None => { pa.add(Shape::line(v, s)); }
                 }
             }
-            Prim::Text { x, y, s, size, c, a, anchor, halo, .. } => text(pa, pt(*x, *y), s, *size as f32, rgba(*c, *a), *anchor, *halo),
+            Prim::Text { x, y, s, size, wt, c, a, anchor, halo, .. } => text(pa, pt(*x, *y), s, *size as f32, *wt, rgba(*c, *a), *anchor, *halo),
         }
     }
 }
