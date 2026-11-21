@@ -211,7 +211,8 @@ declare -A UNITS_TO_RESTART=()
 # trading_bot.py·trading_bot_modules/ 를 누가 고치는 순간 워처가 은퇴한 봇을 되살린다.
 # 봇이 하던 수집은 scripts/ops/supervisor_market_data_worker.sh 가 맡는다.
 affects '^scripts/ops_watchdog\.py$' && UNITS_TO_RESTART[ops-watchdog]=1
-affects '^scripts/ops/prometheus_exporter\.py$' && UNITS_TO_RESTART[prometheus-exporter]=1
+# 2026-11-21 prometheus-exporter 재시작 배선 제거(사용자 «모니터링 안 봄 — 정리 대상» · Prometheus·Grafana·Alertmanager 묶음을 내린다).
+# 아래 섀도우와 같은 이유 -- 배선이 남으면 prometheus_exporter.py 를 누가 고치는 순간 워처가 꺼 둔 유닛을 되살린다.
 # tau1-shadow / eth-jmlam4-shadow 재시작 배선은 2026-09-04에 제거했다. 둘 다 inactive+disabled
 # 이지만 **유닛 파일은 남아 있다** -- `systemctl restart`는 disabled 유닛도 시작시키므로(disabled는
 # 부팅 자동시작만 막는다), 배선을 남겨두면 해당 스크립트를 누가 수정하는 순간 워처가 은퇴한
