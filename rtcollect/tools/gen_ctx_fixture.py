@@ -743,6 +743,108 @@ def run_hl_ctx(runs, d: Path) -> list:
     return sent
 
 
+# ── ⑤ 하이퍼리퀴드 호가 + 맥락 전체(hl_bt -- bbo → .bt · Pi 형태) ─────────────────
+def gen_hl_bt(rng):
+    """bbo: 시각 경계(자정) 넘기 · 같은 ms 다른 값(정상) · 역행·완전 중복·한쪽 null·교차·못 읽는 칸(버림) · 재연결 뒤 같은 시각(헤더 없이 이어 씀)
+    · data 가 참인 비사전(연결 접음) · 맥락은 hl_ctx 와 같은 길."""
+    e = gv.Ev(rng, W0 - 20)
+    px = [2747.4]
+
+    def bbo(dt, ts=None, **over):
+        px[0] = round(px[0] + rng.choice((-0.1, 0, 0.1)), 1)
+        d = {"coin": "ETH", "time": e.ms(0.05) if ts is None else ts,
+             "bbo": [{"px": f"{px[0]:.1f}", "sz": f"{rng.uniform(0.01, 300):.4f}", "n": rng.randint(1, 30)},
+                     {"px": f"{px[0] + 0.1:.1f}", "sz": f"{rng.uniform(0.01, 300):.4f}", "n": rng.randint(1, 30)}]}
+        d.update(over)
+        e.msg(dt, {"channel": "bbo", "data": d})
+        return d
+
+    def ctx(dt):
+        e.msg(dt, {"channel": "activeAssetCtx", "data": {"coin": "ETH", "ctx": {"funding": f"{rng.gauss(1.25e-5, 3e-6):.10f}",
+              "openInterest": f"{1144067.9 + rng.gauss(0, 50):.4f}", "markPx": f"{px[0]:.1f}", "midPx": f"{px[0] + 0.05:.2f}"}}})
+
+    e.add(0.2, "o")
+    for k in range(60):
+        last = bbo(rng.uniform(0.1, 0.6))
+        if k % 10 == 0:
+            ctx(0.01)
+        if k == 20:
+            e.msg(0.01, {"channel": "bbo", "data": last})                                   # 완전 중복 = 버림
+            e.msg(0.01, {"channel": "bbo", "data": dict(last, time=last["time"] - 5)})       # 역행 = 버림
+            same = dict(last, bbo=[dict(last["bbo"][0], sz="9.9999"), last["bbo"][1]])
+            e.msg(0.01, {"channel": "bbo", "data": same})                                   # 같은 ms 다른 값 = 정상
+        if k == 30:
+            for bad in ({"bbo": [None, last["bbo"][1]]}, {"bbo": [last["bbo"][1], last["bbo"][0]]}, {"bbo": []}, {"bbo": "x"},
+                        {"bbo": [{"px": "x", "sz": "1"}, last["bbo"][1]]}, {"bbo": [{"px": "1"}, last["bbo"][1]]}, {"time": None}, {"time": "12.5"},
+                        {"bbo": ["a", "b"]}, {"bbo": [{"px": "2747.0", "sz": "0"}, last["bbo"][1]]},
+                        {"bbo": [{"px": "2747.0", "sz": "1"}, {"px": "2747.0", "sz": "2"}]}):     # 매수 = 매도(붙음)도 버린다
+                e.msg(0.01, {"channel": "bbo", "data": {**last, "time": last["time"] + 1, **bad}})
+            e.msg(0.01, {"channel": "bbo", "data": dict(last, time=str(last["time"] + 2), bbo=[{"px": 2747.0, "sz": 1.5}, {"px": 2747.2, "sz": 3}])})   # 숫자·글자 시각
+            e.msg(0.01, {"channel": "bbo", "data": {}})
+            e.msg(0.01, {"channel": "bbo"})
+    e.msg(0.1, {"channel": "bbo", "data": [1]})       # 참인 비사전 → .get 예외 → 끊고 다시(같은 시각 파일에 헤더 없이 이어 쓴다)
+    e.add(3.0, "o")
+    for k in range(30):
+        bbo(rng.uniform(0.2, 0.6))
+        if k % 10 == 0:
+            ctx(0.01)
+    e.add(31.0, "w")                                   # 30초 시한 = ping
+    for k in range(10):
+        bbo(rng.uniform(0.2, 0.6))
+    e.add(0.3, "c")
+    e.add(3.0, "f", "OSError: 가짜")
+    e.add(3.0, "o")
+    for k in range(20):
+        bbo(rng.uniform(0.2, 0.6))
+    e.add(0.3, "c")
+    return [{"coin": "ETH", "t0": e.ev[0][0] - 0.2, "events": e.ev}]
+
+
+def run_hl_bt(runs, d: Path) -> dict:
+    """원본 run() 을 전체 모드(CTX_ONLY False)로. 압축 스레드는 그 자리에서 돈다(바이트는 같다 -- 언제 도느냐만 다르다)."""
+    import gzip
+    import logging
+    logging.disable(logging.CRITICAL)
+    m = _mod("live_hyperliquid_book_ticker_collector_20260923")
+    clock = [0.0]
+    m.time = gv._ns(time, time=lambda: clock[0], monotonic=lambda: clock[0])
+    m.asyncio = gv._ns(asyncio, sleep=gv._fast_sleep)
+    m.CTX_ONLY = False
+    bn = m._bn
+
+    class SyncThread:
+        def __init__(self, target, args=(), daemon=None):
+            self.t, self.a = target, args
+
+        def start(self):
+            self.t(*self.a)
+
+    real_threading = bn.threading
+    bn.threading = gv._ns(real_threading, Thread=SyncThread)     # 그 모듈 이름만 바꾼다(전역 threading 은 그대로)
+    sent, feed = [], {"f": None}
+    try:
+        with gv._fake_modules(aiohttp=fake_aiohttp(lambda url: feed["f"])), gv._quiet():
+            for run in runs:
+                feed["f"] = _Feed(run["events"], clock)
+                clock[0] = run["t0"]
+                try:
+                    asyncio.run(m.run(run["coin"], d / "bt", d / "hl_ctx.sqlite"))
+                except asyncio.CancelledError:
+                    pass
+                import gc
+                gc.collect()      # 끝난 HourFile 의 파일이 닫히며 버퍼가 비워진다
+                assert feed["f"].i == len(run["events"]), "사건을 다 먹지 못했다"
+                sent += feed["f"].sent
+    finally:
+        bn.threading = real_threading
+    bt = {}
+    for f in sorted((d / "bt").rglob("*")):
+        if f.is_file():
+            raw = f.read_bytes()
+            bt[str(f.relative_to(d / "bt"))] = (gzip.decompress(raw) if f.suffix == ".gz" else raw).hex()
+    return {"sent": sent, "bt": bt}
+
+
 # ── 의도한 차이(결함은 Rust 에서만 고친다 -- gv.FixedSrc · rtcollect/SHADOW.md §11) ──────────
 def _gap_sym(url):
     tail = url.rsplit("/", 1)[-1]
@@ -791,6 +893,7 @@ KINDS = {
     "binance_ctx": (gen_binance_ctx, run_binance_ctx, {"binance_ctx.sqlite": BINANCE_CTX_TABLES}),
     "xyz": (gen_xyz, run_xyz, {"hl_xyz.sqlite": XYZ_TABLES, **{f"rest_{k}.sqlite": XYZ_TABLES for k in range(4)}}),
     "hl_ctx": (gen_hl_ctx, run_hl_ctx, {"hl_ctx.sqlite": {"hl_asset_ctx": "rowid", "meta": "rowid"}}),
+    "hl_bt": (gen_hl_bt, run_hl_bt, {"hl_ctx.sqlite": {"hl_asset_ctx": "rowid", "meta": "rowid"}}),
 }
 
 

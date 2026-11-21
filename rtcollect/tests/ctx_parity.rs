@@ -107,10 +107,45 @@ fn xyz_rows_match_python_collector() {
 fn hl_ctx_rows_match_python_collector() {
     let (inp, gold) = load(include_str!("fixtures/hl_ctx_input.json"), include_str!("fixtures/hl_ctx_golden.json"));
     let dir = common::tmpdir("hl_ctx");
-    let sent = rtcollect::hl_ctx::replay(inp["input"].as_array().unwrap(), &dir.join("hl_ctx.sqlite")).unwrap();
+    let sent = rtcollect::hl_ctx::replay(inp["input"].as_array().unwrap(), &dir.join("hl_ctx.sqlite"), None).unwrap();
     let want: Vec<&str> = gold["extra"].as_array().unwrap().iter().map(|s| s.as_str().unwrap()).filter(|s| !s.starts_with("<connect")).collect();
     assert_eq!(sent, want, "보낸 글자");
     let (t, r, c) = common::compare(&dir, &gold["db"], &[], None);
     eprintln!("hl_ctx 일치: 표 {t} · 행 {r} · 칸 {c} · 보낸 글자 {}", sent.len());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 하이퍼리퀴드 호가 + 맥락 전체(hl_bt): 구독·ping 글자 · 맥락 행 · `.bt` 시각 파일 바이트(지난 시각은 .gz -- 푼 내용)가 원본 run() 과 같다.
+#[test]
+fn hl_bt_files_match_python_collector() {
+    let (inp, gold) = load(include_str!("fixtures/hl_bt_input.json"), include_str!("fixtures/hl_bt_golden.json"));
+    let dir = common::tmpdir("hl_bt");
+    let sent = rtcollect::hl_ctx::replay(inp["input"].as_array().unwrap(), &dir.join("hl_ctx.sqlite"), Some(&dir.join("bt"))).unwrap();
+    let want: Vec<&str> = gold["extra"]["sent"].as_array().unwrap().iter().map(|s| s.as_str().unwrap()).filter(|s| !s.starts_with("<connect")).collect();
+    assert_eq!(sent, want, "보낸 글자");
+    let (t, r, c) = common::compare(&dir, &gold["db"], &[], None);
+    let mut got = std::collections::BTreeMap::new();
+    for e in std::fs::read_dir(dir.join("bt/ETH")).unwrap() {
+        let p = e.unwrap().path();
+        let raw = std::fs::read(&p).unwrap();
+        let b = if p.extension().is_some_and(|x| x == "gz") {
+            let mut v = vec![];
+            std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&raw[..]), &mut v).unwrap();
+            v
+        } else {
+            raw
+        };
+        got.insert(format!("ETH/{}", p.file_name().unwrap().to_string_lossy()), b.iter().map(|x| format!("{x:02x}")).collect::<String>());
+    }
+    let want_bt: std::collections::BTreeMap<String, String> = gold["extra"]["bt"].as_object().unwrap().iter().map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string())).collect();
+    assert_eq!(got.keys().collect::<Vec<_>>(), want_bt.keys().collect::<Vec<_>>(), ".bt 파일 이름");
+    for (k, v) in &want_bt {
+        assert_eq!(got[k].len(), v.len(), "{k} 길이");
+        if let Some(i) = (0..v.len() / 64).find(|i| got[k][i * 64..(i + 1) * 64] != v[i * 64..(i + 1) * 64]) {
+            panic!("{k} 행 {} 다름(0 = 헤더):\n rust {}\n py   {}", i, &got[k][i * 64..(i + 1) * 64], &v[i * 64..(i + 1) * 64]);
+        }
+    }
+    let n_rows: usize = want_bt.values().map(|v| v.len() / 64 - 1).sum();
+    eprintln!("hl_bt 일치: .bt 파일 {} · 행 {n_rows} · 맥락 표 {t} · 행 {r} · 칸 {c} · 보낸 글자 {}", want_bt.len(), sent.len());
     let _ = std::fs::remove_dir_all(&dir);
 }

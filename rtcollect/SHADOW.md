@@ -25,6 +25,7 @@ Rust 수집기(`rtcollect`)를 서버에서 **파이썬 수집기 옆에 나란�
 | `xyz` | `HL_XYZ_COINS`(글자 그대로) | `data/hot/rtcollect/hl_xyz.sqlite` | `data/hot/hl_xyz.sqlite` |
 | `hl_ctx` | `HL_BT_COIN`(쉼표 -- 원본은 코인마다 프로세스·`HL_BT_CTX_ONLY=1`) | `data/hot/rtcollect/hl_ctx.sqlite` | `data/hot/hl_ctx.sqlite` |
 | `raster` | `OF_SYMBOL`(한 종목) · `OF_BIN_SIZE`·`OF_N_BINS`(원본과 같은 이름 · 기본 0.5·240 -- 종목마다 crontab 줄 값 그대로, `tools/shadow_start.sh` 가 읽는다) · 🔴`RTCOLLECT_REST=1` 필수(스냅숏 없이는 북을 못 세운다) | 폴더 `data/live/rtcollect/orderflow/raster/<SYM>/` | `data/live/orderflow/raster/<SYM>/`(폴더를 가리키면 종료코드 2) |
+| `hl_bt` | `HL_BT_COIN`(한 코인 -- 원본과 같다) · `HL_BT_ROOT` | 폴더 `data/live/rtcollect/orderflow/hyperliquid_bookticker/<COIN>/<UTC 시>.bt` + 맥락 `data/hot/rtcollect/hl_ctx.sqlite` | `data/live/orderflow/hyperliquid_bookticker/`(폴더를 가리키면 종료코드 2) -- 원본 전체 모드는 Pi 에서 돈다 · 🔴`scripts/ops/supervisor_rtcollect.sh` 에 아직 종류가 없다(이번 조각은 그 파일을 못 고침) |
 | `ob5m` · `bookdepth` | `OB_SYMBOL`(ETHUSDT) · `DD_ROOT`(depthdiff 폴더 · 읽기만) · ob5m 은 `TAPE_DB_PATH`(hot 테이프 · 읽기만) | `data/live/rtcollect/<종류>/<SYM>.sqlite` | `data/live/ob5m/`·`data/live/bookdepth/` 파일(`RTCOLLECT_TAKEOVER=1` 없으면 종료) -- 대조는 같은 시각의 닫힌 봉 행을 두 DB 에서 비교(bookdepth dm·dp 계열은 1e-12 · BLAS 내적 차) |
 | `depth` | `DD_SYMBOL`(한 종목 -- 원본과 같다) | 폴더 `data/live/rtcollect/orderflow/depthdiff/<SYM>/` | `data/live/orderflow/depthdiff/<SYM>/`(폴더를 가리키면 종료코드 2) |
 
@@ -190,7 +191,22 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
 | 14 | 호가 래스터 | 스냅숏 REST 가 공용 밴 파일을 모른다 | 밴 중이면 안 보내고 418·429 를 밴 파일에 | 밴 중엔 Rust 는 동기 못 함(행 무효) | — | 코드(main.rs) |
 | 15 | OKX 맥락 · 바이낸스 맥락(gaps) | 재연결 공백 «1.5초 미만은 안 적음» 을 벽시계로 쟀다 -- WSL 벽시계가 뒤로 뛰면(실측 −1.5~−2.4초) 3초 공백이 짧게 재여 gaps 행이 빠졌다 | 판단만 단조 시계 · 적는 from/to 는 벽시계 그대로 | 벽시계가 뛴 재연결에서 Rust 에만 gaps 행 | — | 코드(okx_ctx.rs·binance_ctx.rs·net.rs) |
 | 16 | ob5m · bookdepth(북 재구성 `replay`) | 시 파일 스냅숏의 한쪽(또는 양쪽)이 비면 `np.flatnonzero(bid)[-1]` IndexError 로 프로세스가 죽는다(얇은 주식 선물 -- 2026-11-21 그림자 SNDKUSDT 에서 Rust 가 같은 자리에서 패닉) | 그 사슬을 «empty_book» 으로 끝내고 restart 규칙대로 다음 시 파일 스냅숏에서 다시 | 파이썬은 죽고(감독이 다시 띄움) Rust 는 다음 시부터 봉을 잇는다 | — | 코드(ob5m.rs `replay`) |
+| 17 | 롱숏비 워커(rtduck oi_lsratio) | 바이낸스 IP 밴 파일을 모른다(밴 중에도 5분마다 20요청) | 밴 중이면 안 보내고(그 원천 실패 = 기존 값 유지) 418·429 는 밴 파일에 | 밴 동안 Rust 에만 그 폴이 없음 | — | 코드(rtduck/src/main.rs) |
 
 `shadow_tape.py` 는 1·3·8·9·12 의 표에서 «Rust에만» 을 `(의도한 차이 후보 -- 이유)` 로 따로 적는다(«파이썬에만»·값 불일치는 그대로 실패).
 원본 그대로 둔 것(고치지 않음 -- 범위 밖이거나 값이 원본 정의다): depth 의 재접속 사이 구멍이 `_gap` 으로 안 남는 것 · 재시작이 시 경계를 넘으면 지난 시
 `.jsonl` 이 압축되지 않는 것 · 압축 중인 파일을 다시 열어 이어 쓴 줄이 사라질 수 있는 경쟁(보고 «이상한 점»).
+
+## 12. rtduck — DuckDB 로 쓰는 수집기 (사용자 결정 2026-11-21 질문지 19: DuckDB 형식 그대로 · 따로 된 실행 파일)
+
+실행 파일 `rtduck/target/release/rtduck`(DuckDB 1.5.1 묶음 · 51.6MB) → 서버 `bin/rtduck` · 감독 `scripts/ops/supervisor_rtduck.sh <종류>`(🔴실행·등록 안 함).
+
+| 종류(`RTDUCK_KIND`) | 목록 | 쓰는 파일(기본) | 원본 파이썬 파일 |
+|---|---|---|---|
+| `oi_lsratio` | `BOT_SYMBOLS` · `OI_POLL_INTERVAL_SEC` · `OI_FETCH_LIMIT` · `OI_ENABLE`(원본과 같다) · 🔴`RTDUCK_REST=1` 필수 | `data/live/rtduck/oi_lsratio.duckdb` | `data/live/oi_lsratio.duckdb`(가리키면 종료코드 2 · 전환 때만 `RTDUCK_TAKEOVER=1`) |
+| `hl_trades` | `HL_COINS` · `HL_ROOT` | `data/live/rtduck/orderflow/hyperliquid/<코인_코인>/<날짜>.duckdb` | `data/live/orderflow/hyperliquid/…` |
+
+- 🔧밴 파일(`RTCOLLECT_BAN_FILE`, 기본 `data/live/binance_ban_until`)을 지킨다 -- 원본 롱숏비 워커는 모른다(밴 중에도 보냈다). 의도한 차이 #17.
+- REST 부담(oi_lsratio): 5분마다 종목 × 원천 5 = 서버 목록 4종목이면 20요청(/futures/data 는 IP 가중치 0 -- 원본과 같은 양). 그림자를 켜면 두 배.
+- 매일 대조: 두 파일을 사본으로 떠서(쓰는 쪽이 열 때 다른 프로세스 열기가 막힌다 -- seal_to_lake 방식) 같은 ts 의 14칸·sources_ok 를 비교(collected_at 은 다르다).
+- 🔴DuckDB 파일은 쓰는 프로세스가 하나다: 그림자와 파이썬이 **같은 파일**을 가리키면 하나가 «Conflicting lock» 으로 죽는다(위 기본 경로가 다른 이유).

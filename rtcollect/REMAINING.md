@@ -14,16 +14,17 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | OKX 맥락 | SQLite hot | server · coin_flow · liq_tab · liqmap_scorer | liqmap_fwd | **옮김** `okx_ctx` | — |
 | 바이낸스 맥락 | SQLite hot | server · liq_tab · liqmap_scorer · dqm · 감시 | liqmap_fwd | **옮김** `binance_ctx`(OI REST 기본 꺼짐) | — |
 | xyz100 | SQLite hot | /api/xyz100 · 감시 · seal | — | **옮김** `xyz` | — |
-| HL 자산 맥락(book ticker CTX_ONLY) | SQLite hot | server 시장 맥락 · seal · dqm | — | **옮김** `hl_ctx` | HL 호가 `.bt` 몫은 «불확실»(질문 4) |
+| HL 자산 맥락(book ticker CTX_ONLY) | SQLite hot | server 시장 맥락 · seal · dqm | — | **옮김** `hl_ctx` | — |
+| HL 호가 `.bt`(book ticker 전체 · Pi) | 고정폭 `.bt` 시각 파일 → gz | Pi → 서버 전송 · 연구 | — | **옮김** `hl_bt`(rtcollect) | `.bt` 바이트 일치 · supervisor_rtcollect.sh 에 종류 추가 필요 |
 | depth_diff | JSONL → 시각별 gz | ob5m · iceberg · bookdepth_feat | fwd_dirshort(간접) | **옮김** `depth`(스냅숏 REST 기본 꺼짐 · 전환 때 켬) | — |
 | 호가 래스터 | 고정폭 `.f32`(+14일 뒤 parquet·duckdb 보관) | server read_window → 히트맵·시장 맥락 | — | **옮김** `raster`(.f32 쓰기만 · 스냅숏 REST 필수) | 보관·지우기 = 파이썬 cron 으로 남김(parquet·duckdb 크레이트) |
 | ob5m 실시간 워커 `live_ob5m` | SQLite `data/live/ob5m/<코인>.sqlite` | /api/ob5m(화면) | — | **옮김** `ob5m`(기본 쓰기 자리 data/live/rtcollect/ob5m · 원본 자리는 RTCOLLECT_TAKEOVER=1) | 합성 14시간 depthdiff·테이프 → 봉·사건 벽·live 칸 7,417 비트 일치 · /api/ob5m 읽기 코드 교차 확인 |
 | 호가 깊이 10열 `live_bookdepth_feat` | SQLite `data/live/bookdepth/ethusdt.sqlite` | live_eth_dir_short 피쳐(→ rtmodel) | fwd_dirshort | **옮김** `bookdepth` | 칸 2,110 비트 · 930 은 1e-12 안(최대 3.6e-15 = 원본 `arr @ prices` 가 BLAS ddot · 서버 OpenBLAS·개발기 MKL) · dir_short.book_row float32 161/161 같음 |
 | 아이스버그 `live_eth_iceberg` | JSON 상태 + JSONL 사건 | /api/iceberg · 감시 | — | 안 옮김 | depthdiff + hot 테이프 30초 창 계산(numpy) · 291줄 |
-| HL 포지션 | SQLite hot `hl_positions*.sqlite` | server HL 고래 청산 · 시장 맥락 · seal | — | 안 옮김 | **입력이 HL 체결 DuckDB**(duckdb 크레이트 결정 전) |
-| HL 체결 | DuckDB 일별 → 3일 뒤 gz | HL 포지션 입력 · 감시 | — | 안 옮김 | duckdb 크레이트 |
+| HL 포지션 | SQLite hot `hl_positions*.sqlite` | server HL 고래 청산 · 시장 맥락 · seal | — | 안 옮김 | 입력이 HL 체결 DuckDB → **rtduck 에 둔다**(rtcollect 에 두면 duckdb 를 rtcollect 가 묶어야 한다) · 396줄 |
+| HL 체결 | DuckDB 일별 → 3일 뒤 gz | HL 포지션 입력 · 감시 | — | **옮김** `rtduck hl_trades` | — |
 | market_data_worker `duckdb_persist_worker` | DuckDB 셋 + JSON 둘(dashboard_state · liq_burst_state) | server 세션·청산 배지(JSON) · 청산 5분 폴백(tail_risk) | — | 안 옮김 | duckdb + 장 달력(pandas_market_calendars) + 미시구조 884줄 재작성 |
-| oi_lsratio 워커 | DuckDB | **server 롱숏비(server.py:2536)** · seal | — | 안 옮김 | duckdb (범위 문서 «불확실» → 서버가 읽어 «쓰임») |
+| oi_lsratio 워커 | DuckDB | **server 롱숏비(server.py:2536)** · seal | — | **옮김** `rtduck oi_lsratio`(REST 기본 꺼짐 · 밴 파일) | — |
 | 뉴스 RSS | SQLite hot | /api/news | — | 안 옮김 | XML·HTML 엔티티·RFC822 날짜·정규식 크레이트(사용자 결정) |
 | deribit 블록체결·GEX | JSON 둘 + 옵션 DuckDB | server 옵션 카드 · 감시 | — | 안 옮김 | 옵션 DuckDB 몫(크레이트) · JSON 몫만 떼는 것은 결정 필요 |
 | SR lean `live_sr_lean` | JSONL | /api/sr-lean | sr_ml_5m_forward | **rtmodel** | 모델 서빙 |
@@ -46,7 +47,7 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | 월간 학습(dir4h·vol4h·dir_short·box_hold Platt) | 월간 | joblib | 서빙 | 여럿 | 파이썬 유지(학습) | — |
 | raw_failover · data_quality_monitor · morning_audit · multicoin_collectors · gen_data_map · verdict_ledger_health · backup | 여러 | JSON·보고 | 감시·사용자 | — | 범위 밖(R7 운영) | — |
 
-**요약**: 상주 수집기 중 옮김 12(테이프 셋 · 청산 · 맥락 넷 · depth · 래스터 · ob5m · bookdepth) · 안 옮김 7(계산 워커 하나 = iceberg · duckdb 넷 · XML 하나 · deribit) ·
+**요약**: 상주 수집기 중 옮김 15(테이프 셋 · 청산 · 맥락 넷 · depth · 래스터 · ob5m · bookdepth · HL 호가 .bt · rtduck 롱숏비·HL 체결) · 안 옮김 5(계산 워커 하나 = iceberg · rtduck 몫 둘 = HL 포지션·market_data_worker · XML 하나 · deribit) ·
 rtmodel 1 · 범위 밖 2 / 예약 중 안 옮김 8(크레이트 없이 되는 것 = treasury·macro_5m·cboe · 계산 기록기 다섯) · rtmodel 3 · parquet 1.
 옮기지 않은 «불확실»: HL 호가 .bt · 뉴스 판정·ollaya · prometheus · trend_core_forward · f4c altdata · llm_brief / «안 쓰임»: 돌파 워커 · 신호 워커 · maxpain 기록기 · maker_fill_shadow.
 

@@ -14,6 +14,7 @@
 pub mod binance;
 pub mod binance_ctx;
 pub mod bookdepth;
+pub mod bt;
 pub mod bybit_liq;
 pub mod bybit_tape;
 pub mod depth;
