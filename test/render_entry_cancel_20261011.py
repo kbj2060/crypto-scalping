@@ -5,7 +5,7 @@
 
 🔴주문 0: 페이지 출처가 가짜 호스트(http://dash.local) · 모든 요청을 조건식으로 가로채 가짜 응답 · 바깥 호스트 abort · WebSocket 가짜 ·
   누르기 전 가짜 POST 로 가로채기 선검사(아니면 즉시 중단).
-검사(1920·390): 따라가기 진입 working → 결과 칸에 «대기 취소» · 떠 있는 «대기» 표식 · 첫 클릭 = 무장(요청 0) · 둘째 클릭 = POST
+검사(1920·390): 따라가기 진입 working → 결과 칸(2026-11-21 차트 위 상태 줄 #ordStat 안)에 «대기 취소»가 보임 · 첫 클릭 = 무장(요청 0) · 둘째 클릭 = POST
   /api/manual-entry/cancel?confirm=1 한 번 · 서버가 cancelled 를 주면 버튼이 사라지고 «대기 취소 — 남은 수량은 사지 않았습니다» ·
   청산 working 엔 버튼 없음 · 가로 스크롤 0 · JS 오류 0.
 """
@@ -50,7 +50,7 @@ def handle(route):
 
 
 posts = lambda n0, frag: [u for m, u in log[n0:] if m != "GET" and frag in u]   # noqa: E731
-BOX = "() => { const b = document.getElementById('snapEntryResult'), c = b.querySelector('[data-entry-cancel]'); return { text: b.textContent, btn: c && c.textContent, dis: c && c.disabled, pill: !document.getElementById('ofabWait').hidden, sw: document.documentElement.scrollWidth, vw: innerWidth }; }"
+BOX = "() => { const b = document.getElementById('snapEntryResult'), c = b.querySelector('[data-entry-cancel]'); return { text: b.textContent, btn: c && c.textContent, dis: c && c.disabled, pill: !!b.closest('#ordStat') && getComputedStyle(document.getElementById('ordStat')).display !== 'none', sw: document.documentElement.scrollWidth, vw: innerWidth }; }"
 
 with sync_playwright() as p:
     b = p.chromium.launch()
@@ -72,12 +72,10 @@ with sync_playwright() as p:
         S["state"] = {"phase": "working", "side": "LONG", "asset": "eth", "plan": PLAN, "quantity": 0.37, "filled": 0.1, "limit_price": 2499.9, "repegs": 0}
         pg.evaluate("() => { const b = document.getElementById('snapEntryResult'); b.hidden = false; manualEntryPollStatus(); }"); pg.wait_for_timeout(700)
         s1 = pg.evaluate(BOX); print(w, "working", s1)
-        if s1["btn"] != "대기 취소" or not s1["pill"]: fails.append(f"[{w}] working 인데 대기 취소 버튼·떠 있는 표식 {s1}")
+        if s1["btn"] != "대기 취소" or not s1["pill"]: fails.append(f"[{w}] working 인데 대기 취소 버튼·상태 줄이 안 보임 {s1}")
         if s1["sw"] > s1["vw"]: fails.append(f"[{w}] 가로 스크롤 {s1}")
         pg.locator("#snapEntryResult").scroll_into_view_if_needed()
         pg.locator("#snapEntryResult").screenshot(path=str(OUT / f"entry_cancel_{w}.png"))
-        pg.screenshot(path=str(OUT / f"ofab_pill_{w}.png"), clip=pg.evaluate(
-            "() => { const r = document.getElementById('ofab').getBoundingClientRect(); return {x: Math.max(0, r.x - 20), y: Math.max(0, r.y - 20), width: Math.min(innerWidth - Math.max(0, r.x - 20), r.width + 40), height: r.height + 40}; }"))
         n1 = len(log)
         pg.click("#snapEntryResult [data-entry-cancel]"); pg.wait_for_timeout(200)
         s2 = pg.evaluate(BOX); print(w, "첫 클릭", s2["btn"])
@@ -93,7 +91,7 @@ with sync_playwright() as p:
         S["state"] = {**S["state"], "phase": "cancelled", "done_at": "2099-01-01T00:00:00+00:00", "cancel_reason": "사용자 취소"}
         pg.wait_for_timeout(3300)
         s4 = pg.evaluate(BOX); print(w, "끝", s4["text"][:60], s4["btn"], s4["pill"])
-        if s4["btn"] is not None or s4["pill"] or "대기 취소 — 남은 수량은 사지 않았습니다" not in s4["text"]: fails.append(f"[{w}] 끝난 뒤 {s4}")
+        if s4["btn"] is not None or "대기 취소 — 남은 수량은 사지 않았습니다" not in s4["text"]: fails.append(f"[{w}] 끝난 뒤 {s4}")
         pg.locator("#snapEntryResult").screenshot(path=str(OUT / f"entry_cancelled_{w}.png"))
         # 청산 working 엔 버튼 없음(서버도 409)
         S["state"] = {"phase": "working", "kind": "exit", "side": "LONG", "asset": "eth", "plan": PLAN, "quantity": 0.37, "filled": 0.0}

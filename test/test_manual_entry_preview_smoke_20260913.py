@@ -153,6 +153,20 @@ def _isolated_dirs():
             yield
 
 
+# 2026-11-21 사용자 «sltp 만 쓴다»: 진입은 익절·손절 선이 있어야 받고, 선 없는 포지션엔 추가 진입이 409 다.
+#   픽스처의 열린 ETHUSDT 롱에 선 무장을 심고(추가 진입 = 무장된 선 그대로) 진입 미리보기마다 선을 보낸다 -- 크기·상한·처방 계약은 그대로 본다.
+LINES_ARM = {"ETHUSDT:LONG": {"symbol": "ETHUSDT", "side": "LONG", "lines": True, "tp_level": 2550.0, "sl_level": 2450.0,
+                              "tp_price": 2550.0, "sl_price": 2450.0, "tp_resting": True, "backstop_price": None, "armed_at": 1000.0}}
+
+
+@contextlib.contextmanager
+def _isolated_lines():
+    with _isolated_dirs():
+        import json as _json
+        (orders.LIVE_DIR / "manual_bracket_state.json").write_text(_json.dumps(LINES_ARM), encoding="utf-8")
+        yield
+
+
 class ManualPreviewSmokeTest(unittest.TestCase):
     def _get_all(self, checks) -> None:
         """checks: [(path, expected_status|None)]. status 가 None 이면 아무 값이나 좋다."""
@@ -171,7 +185,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
             finally:
                 await client.close()
 
-        with _isolated_dirs():
+        with _isolated_lines():
             asyncio.run(exercise())
 
     def _run(self, paths: list[str]) -> None:
@@ -180,17 +194,14 @@ class ManualPreviewSmokeTest(unittest.TestCase):
     def test_entry_preview_handler_completes(self) -> None:
         """보유시간·비율을 바꿔가며 진입 미리보기가 예외 없이 끝난다."""
         self._run([
-            "/api/manual-entry/preview?side=LONG",
-            "/api/manual-entry/preview?side=SHORT",
-            "/api/manual-entry/preview?side=LONG&hold=60&pct=30",
-            "/api/manual-entry/preview?side=LONG&hold=1440&pct=100",
+            "/api/manual-entry/preview?side=LONG&tp=2550&sl=2450",
+            "/api/manual-entry/preview?side=SHORT&tp=2450&sl=2550",
+            "/api/manual-entry/preview?side=LONG&tp=2550&sl=2450&hold=60&pct=30",
+            "/api/manual-entry/preview?side=LONG&tp=2550&sl=2450&hold=1440&pct=100",
         ])
 
-    def test_exit_preview_handler_completes(self) -> None:
-        self._run([
-            "/api/manual-exit/preview?side=LONG",
-            "/api/manual-exit/preview?side=SHORT&hold=240&pct=50",
-        ])
+    def test_exit_preview_route_removed(self) -> None:   # 2026-11-21 청산 미리보기는 지웠다(진입가 팝업이 바로 청산 · 새 화면은 안 부른다)
+        self._get_all([("/api/manual-exit/preview?side=LONG", 404), ("/api/manual-exit/submit-all?confirm=1", 404)])
 
     def test_trade_plan_is_attached(self) -> None:
         """2026-09-13 «지금 상황» 플랜이 진입·청산 미리보기에 실려 온다(보유 권고·사다리)."""
@@ -198,8 +209,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
             client = TestClient(TestServer(offline_app(server)))
             await client.start_server()
             try:
-                for path in ("/api/manual-entry/preview?side=LONG&hold=240",
-                             "/api/manual-exit/preview?side=LONG&hold=240"):
+                for path in ("/api/manual-entry/preview?side=LONG&tp=2550&sl=2450&hold=240",):   # 청산 미리보기는 2026-11-21 지웠다
                     body = await (await client.get(path)).json()
                     tp = (body.get("plan") or {}).get("trade_plan") or {}
                     self.assertEqual(tp.get("hold_min"), 240, path)
@@ -210,7 +220,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
             finally:
                 await client.close()
 
-        with _isolated_dirs():
+        with _isolated_lines():
             asyncio.run(exercise())
 
     def test_unrealized_loss_does_not_block_entry(self) -> None:
@@ -243,13 +253,13 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                 await client.start_server()
                 try:
                     prev = await (await client.get(
-                        "/api/manual-entry/preview?side=LONG&hold=240&pct=50")).json()
+                        "/api/manual-entry/preview?side=LONG&tp=2550&sl=2450&hold=240&pct=50")).json()
                     self.assertTrue(prev.get("ok"), prev)
                     self.assertNotIn("averaging_down", prev["plan"],
                                      "철회한 물타기 판정이 계획에 다시 붙었다")
                     self.assertNotIn("add_allowed", prev["plan"]["trade_plan"]["entry_split"])
                     resp = await client.post(
-                        "/api/manual-entry/submit?side=LONG&confirm=1&hold=240&pct=50")
+                        "/api/manual-entry/submit?side=LONG&tp=2550&sl=2450&confirm=1&hold=240&pct=50")
                     body = await resp.json()
                     self.assertTrue(body.get("ok"),
                                     f"평가손실 중 진입이 막혔다(철회한 규칙이 살아있다): {body}")
@@ -257,45 +267,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                 finally:
                     await client.close()
 
-        with _isolated_dirs():
-            asyncio.run(exercise())
-
-    def test_entry_and_exit_use_the_same_cap(self) -> None:
-        """🔴진입과 청산이 **같은 상한**을 본다(2026-09-13).
-
-        예전에는 진입만 세 상한(원장·순자산·모델)의 최솟값을 쓰고 청산의 «최소 청산 비율»은
-        정책상한 25배 기준이었다. 그래서 20배 포지션에서 같은 카드가 «최소 청산 0%»와
-        «예산 사다리 60%»를 나란히 띄웠다. 두 숫자가 같은 상한에서 나오는지 고정한다.
-        """
-        big = dict(FAKE_ACCOUNT)
-        # 순자산 1,000 · 명목 20,000 = 20배. 순자산 상한 8배를 크게 넘는다.
-        big["positions"] = [{**FAKE_ACCOUNT["positions"][0], "qty": 8.0, "notional": 20000.0}]
-
-        async def fake_account(*_a, **_k):
-            return big
-
-        async def exercise() -> None:
-            with mock.patch.object(orders, "fetch_account", fake_account):
-                client = TestClient(TestServer(offline_app(server)))
-                await client.start_server()
-                try:
-                    body = await (await client.get(
-                        "/api/manual-exit/preview?side=LONG&hold=60")).json()
-                    plan = body["plan"]
-                    risk = plan["risk"]
-                    ladder = plan["trade_plan"]["exit_ladder"]["ladder"]
-                    same = [r for r in ladder if r["hold_min"] == risk["hold_min"]][0]
-                    self.assertGreater(risk["required_fraction"], 0.0,
-                                       "20배 포지션인데 닫을 필요가 없다고 한다")
-                    self.assertAlmostEqual(risk["required_fraction"],
-                                           same["required_fraction"], places=3,
-                                           msg=f"최소 청산과 사다리가 다른 상한을 쓴다: {risk} / {same}")
-                    self.assertIn(risk.get("applied_binding"),
-                                  ("ledger", "equity", "model"), risk)
-                finally:
-                    await client.close()
-
-        with _isolated_dirs():
+        with _isolated_lines():
             asyncio.run(exercise())
 
     def test_prescription_is_attached_and_always_lump(self) -> None:
@@ -308,8 +280,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
             client = TestClient(TestServer(offline_app(server)))
             await client.start_server()
             try:
-                for path in ("/api/manual-entry/preview?side=LONG&hold=240",
-                             "/api/manual-exit/preview?side=LONG&hold=240"):
+                for path in ("/api/manual-entry/preview?side=LONG&tp=2550&sl=2450&hold=240",):   # 청산 미리보기는 2026-11-21 지웠다
                     body = await (await client.get(path)).json()
                     rx = (body.get("plan") or {}).get("trade_plan", {}).get("prescription") or {}
                     self.assertTrue(rx.get("available"), f"{path}: {rx}")
@@ -334,7 +305,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
             finally:
                 await client.close()
 
-        with _isolated_dirs():
+        with _isolated_lines():
             asyncio.run(exercise())
 
     def test_exchange_leverage_is_stable_across_hold(self) -> None:
@@ -350,7 +321,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                 seen = set()
                 for h in HOLDS:
                     body = await (await client.get(
-                        f"/api/manual-entry/preview?side=LONG&hold={h}")).json()
+                        f"/api/manual-entry/preview?side=LONG&tp=2550&sl=2450&hold={h}")).json()
                     rx = body["plan"]["trade_plan"]["prescription"]
                     seen.add(rx["exchange_leverage"]["setting"])
                 self.assertEqual(len(seen), 1,
@@ -358,7 +329,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
             finally:
                 await client.close()
 
-        with _isolated_dirs():
+        with _isolated_lines():
             asyncio.run(exercise())
 
     def test_leverage_gauge_overrides_model(self) -> None:
@@ -372,14 +343,14 @@ class ManualPreviewSmokeTest(unittest.TestCase):
             await client.start_server()
             try:
                 base = await (await client.get(
-                    "/api/manual-entry/preview?side=LONG&hold=240")).json()
+                    "/api/manual-entry/preview?side=LONG&tp=2550&sl=2450&hold=240")).json()
                 p0 = base["plan"]
                 self.assertEqual(p0["leverage_source"], "model", p0)
                 self.assertEqual(p0["target_leverage"], p0["leverage_model"], p0)
                 self.assertTrue(p0["leverage_steps"], p0)
 
                 man = await (await client.get(
-                    "/api/manual-entry/preview?side=LONG&hold=240&lev=25")).json()
+                    "/api/manual-entry/preview?side=LONG&tp=2550&sl=2450&hold=240&lev=25")).json()
                 p1 = man["plan"]
                 self.assertEqual(p1["target_leverage"], 25, p1)
                 self.assertEqual(p1["leverage_source"], "manual", p1)
@@ -388,13 +359,13 @@ class ManualPreviewSmokeTest(unittest.TestCase):
 
                 for bad in ("0", "999", "abc", "-3"):
                     r = await (await client.get(
-                        f"/api/manual-entry/preview?side=LONG&hold=240&lev={bad}")).json()
+                        f"/api/manual-entry/preview?side=LONG&tp=2550&sl=2450&hold=240&lev={bad}")).json()
                     self.assertEqual(r["plan"]["leverage_source"], "model",
                                      f"lev={bad} 가 조용히 먹혔다: {r['plan']}")
             finally:
                 await client.close()
 
-        with _isolated_dirs():
+        with _isolated_lines():
             asyncio.run(exercise())
 
     def test_leverage_floor_respects_open_position(self) -> None:
@@ -417,7 +388,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                 await client.start_server()
                 try:
                     body = await (await client.get(
-                        "/api/manual-entry/preview?side=LONG&hold=240")).json()
+                        "/api/manual-entry/preview?side=LONG&tp=2550&sl=2450&hold=240")).json()
                     p = body["plan"]
                     lv = p["trade_plan"]["prescription"]["exchange_leverage"]
                     self.assertTrue(lv["forced_by_position"], lv)
@@ -428,7 +399,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                 finally:
                     await client.close()
 
-        with _isolated_dirs():
+        with _isolated_lines():
             asyncio.run(exercise())
 
     def test_hold_ignores_query_and_does_not_extend_on_scale_in(self) -> None:
@@ -455,40 +426,16 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                 try:
                     for q in ("", "&hold=60", "&hold=1440", "&hold=abc"):
                         b = await (await client.get(
-                            f"/api/manual-entry/preview?side=LONG{q}")).json()
+                            f"/api/manual-entry/preview?side=LONG&tp=2550&sl=2450{q}")).json()
                         p = b["plan"]
                         self.assertEqual(p["hold_planned_min"], 240, f"{q}: {p['hold_planned_min']}")
                         # 125분 묵었으니 남은 115분 -> 모델 지평으로 올림하면 120
                         self.assertEqual(p["hold_remaining_min"], 120,
                                          f"{q}: 물타기로 시계가 늘어났다 {p['hold_remaining_min']}")
-                    x = await (await client.get("/api/manual-exit/preview?side=LONG")).json()
-                    self.assertEqual(x["plan"]["hold_remaining_min"], 120, x["plan"])
                 finally:
                     await client.close()
 
-        with _isolated_dirs():
-            asyncio.run(exercise())
-
-    def test_bracket_is_minus5_stop_without_liquidation_levels(self) -> None:
-        """2026-10-24 사용자 «손절은 −5% 하나로»: 직접 모드도 첫 진입가(이번 지정가) ∓5% 거래소 스탑 · 익절 없음 · 비상 스탑 = 손절선.
-        옛 청산맵 TP/SL(저항3·지지2)은 지웠다 -- 청산맵 레벨이 없어도 손절은 걸린다."""
-        async def exercise() -> None:
-            client = TestClient(TestServer(offline_app(server)))
-            await client.start_server()
-            try:
-                for side, k in (("LONG", 0.95), ("SHORT", 1.05)):
-                    plan = (await (await client.get(f"/api/manual-entry/preview?side={side}&pct=5")).json())["plan"]
-                    b = plan["bracket"]
-                    self.assertTrue(b["available"] and b["rule"], b)
-                    self.assertIsNone(b["tp_price"], b)
-                    self.assertEqual(b["backstop_price"], b["sl_price"], b)
-                    self.assertAlmostEqual(b["sl_price"] / plan["price"], k, delta=2e-4)   # 이번 주문 지정가(메이커 쪽) 기준 ∓5% · 틱 반올림 여유
-                    self.assertTrue(b["sl_name"].endswith(f"{'−' if side == 'LONG' else '+'}5%"), b)   # 픽스처의 열린 롱이면 «평단», 아니면 «첫 진입가»
-            finally:
-                await client.close()
-
-        with _isolated_dirs(), mock.patch.object(server, "compute_spliced_levels", lambda _d, _p, *_a: {"warmed_up": True}), \
-             mock.patch.object(orders, "MANUAL_RULES_ENABLED", True):
+        with _isolated_lines():
             asyncio.run(exercise())
 
     def test_entry_and_exit_share_one_horizon_and_one_cap(self) -> None:
@@ -530,29 +477,18 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                 await client.start_server()
                 try:
                     e = (await (await client.get(
-                        "/api/manual-entry/preview?side=LONG")).json())["plan"]
-                    x = (await (await client.get(
-                        "/api/manual-exit/preview?side=LONG")).json())["plan"]
-
-                    # ② 지평 단일 출처: 두 카드가 같은 계획 지평을 말한다.
+                        "/api/manual-entry/preview?side=LONG&tp=2550&sl=2450")).json())["plan"]
+                    # 2026-11-21 청산 미리보기를 지워 청산 쪽 대조는 뺐다 -- 진입 쪽 지평·상한만 본다.
                     self.assertEqual(e["hold_planned_min"], 1440, e["hold_planned_min"])
-                    self.assertEqual(x["hold_planned_min"], e["hold_planned_min"],
-                                     f"진입 {e['hold_planned_min']} vs 청산 {x['hold_planned_min']}")
-                    # 125분 묵었고 계획이 1440분이면 남은 1315 -> 모델 지평으로 올림하면 1440.
-                    # 240분 상수를 쓰던 시절에는 120 이 나왔다.
-                    self.assertEqual(x["hold_remaining_min"], 1440,
-                                     f"청산 시계가 계획 지평을 안 따른다: {x['hold_remaining_min']}")
-
-                    # ① 상한 단일 출처: 원장 4.0배가 묶었으니 양쪽 다 4.0 이어야 한다.
-                    self.assertEqual(x["risk"]["effective_x"], 4.0, x["risk"])
-                    for who, p in (("진입", e), ("청산", x)):
+                    self.assertEqual(e["hold_remaining_min"], 1440, e["hold_remaining_min"])   # 125분 묵었고 계획 1440 -> 남은 1315 -> 올림 1440
+                    for who, p in (("진입", e),):
                         lev = p["trade_plan"]["size"]["leverage"]
                         self.assertEqual(lev, 4.0,
                                          f"{who} trade_plan 이 실효 상한을 안 쓴다: {lev}")
                 finally:
                     await client.close()
 
-        with _isolated_dirs():
+        with _isolated_lines():
             asyncio.run(exercise())
 
     def test_sol_order_uses_solusdc_margin_cap_only_and_never_touches_eth(self) -> None:
@@ -563,24 +499,19 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                 client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
-                    b = await (await client.get("/api/manual-entry/preview?side=LONG&asset=sol&lev=20")).json()
+                    b = await (await client.get("/api/manual-entry/preview?side=LONG&tp=2550&sl=2450&asset=sol&lev=20")).json()
                     self.assertTrue(b.get("ok"), b)
                     plan, cap = b["plan"], b["cap"]
                     self.assertEqual(plan["symbol"], "SOLUSDC", plan)
                     self.assertEqual(cap["binding"], "margin", cap)
                     self.assertAlmostEqual(cap["cap_notional_usdt"], 1000.0 * 20 * 0.5, places=2)
                     self.assertIsNone(cap.get("cap_model_usdt"), "SOL 에 ETH 위험 모델 상한이 들어갔다")
-                    bad = await client.get("/api/manual-entry/preview?side=LONG&asset=hype")   # 주문 심볼이 없는 코인(2026-11-04 BTC 는 열렸다)
+                    bad = await client.get("/api/manual-entry/preview?side=LONG&tp=2550&sl=2450&asset=hype")   # 주문 심볼이 없는 코인(2026-11-04 BTC 는 열렸다)
                     self.assertEqual(bad.status, 400)
-                    x = await client.get("/api/manual-exit/preview?side=LONG&asset=sol")
-                    self.assertEqual(x.status, 400)
-                    self.assertEqual((await x.json())["error"], "no_position", "SOL 청산이 ETH 포지션을 잡았다")
-                    e = await (await client.get("/api/manual-exit/preview?side=LONG&asset=eth")).json()
-                    self.assertTrue(e.get("ok"), e)     # 대조군: ETH 탭은 그 포지션을 닫는다
                 finally:
                     await client.close()
 
-        with _isolated_dirs():
+        with _isolated_lines():
             asyncio.run(exercise())
 
     def test_btc_order_uses_btcusdc_margin_cap_only(self) -> None:
@@ -591,19 +522,17 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                 client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
-                    b = await (await client.get("/api/manual-entry/preview?side=LONG&asset=btc&lev=20")).json()
+                    b = await (await client.get("/api/manual-entry/preview?side=LONG&tp=2550&sl=2450&asset=btc&lev=20")).json()
                     self.assertTrue(b.get("ok"), b)
                     plan, cap = b["plan"], b["cap"]
                     self.assertEqual((plan["symbol"], plan["positionSide"]), ("BTCUSDC", "LONG"), plan)
                     self.assertEqual(cap["binding"], "margin", cap)
                     self.assertAlmostEqual(cap["cap_notional_usdt"], 1000.0 * 20 * 0.5, places=2)
                     self.assertIsNone(cap.get("cap_model_usdt"), "BTC 에 ETH 위험 모델 상한이 들어갔다")
-                    x = await client.get("/api/manual-exit/preview?side=LONG&asset=btc")
-                    self.assertEqual((x.status, (await x.json())["error"]), (400, "no_position"), "BTC 청산이 ETH 포지션을 잡았다")
                 finally:
                     await client.close()
 
-        with _isolated_dirs():
+        with _isolated_lines():
             asyncio.run(exercise())
 
     def test_risk_model_off_eth_uses_simple_rule(self) -> None:
@@ -616,20 +545,18 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                 client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
-                    b = await (await client.get("/api/manual-entry/preview?side=LONG&lev=10")).json()
+                    b = await (await client.get("/api/manual-entry/preview?side=LONG&tp=2550&sl=2450&lev=10")).json()
                     cap, plan = b["cap"], b["plan"]
                     self.assertEqual(cap["binding"], "margin", cap)
                     self.assertIsNone(cap.get("cap_model_usdt"), cap)
                     self.assertAlmostEqual(cap["cap_notional_usdt"], FAKE_ACCOUNT["balance"]["margin"] * 10 * 0.5, delta=1.0)
                     self.assertEqual(plan["recommended_source"], "vol_equivalent", plan)
                     self.assertEqual(plan["hold_planned_min"], 240, plan)   # = server 의 HOLD_FIXED_MIN(앱 함수 안 상수)
-                    x = (await (await client.get("/api/manual-exit/preview?side=LONG")).json())["plan"]
-                    self.assertFalse(x["risk"]["available"], x["risk"])
                     self.assertEqual((await client.get("/api/position-sizing")).status, 404)
                 finally:
                     await client.close()
 
-        with _isolated_dirs():
+        with _isolated_lines():
             asyncio.run(exercise())
 
     def test_model_only_cap_drops_ledger_and_equity(self) -> None:
@@ -653,15 +580,13 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                 client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
-                    b = await (await client.get("/api/manual-entry/preview?side=LONG")).json()
+                    b = await (await client.get("/api/manual-entry/preview?side=LONG&tp=2550&sl=2450")).json()
                     cap, plan = b["cap"], b["plan"]
                     self.assertEqual(cap["binding"], "model", cap)
                     self.assertEqual(cap["cap_notional_usdt"], cap["cap_model_usdt"], cap)
                     self.assertGreater(cap["cap_notional_usdt"], 4000.0, "원장 4.0배가 아직 묶는다")
                     lv = plan["trade_plan"]["prescription"]["exchange_leverage"]
                     self.assertGreaterEqual(lv["setting"] * 1000.0, cap["cap_notional_usdt"], lv)
-                    x = (await (await client.get("/api/manual-exit/preview?side=LONG")).json())["plan"]
-                    self.assertEqual(x["risk"]["applied_binding"], "model", x["risk"])
                 finally:
                     await client.close()
             with mock.patch.object(orders, "SIZING_CAP_MODEL_ONLY", True), \
@@ -669,13 +594,13 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                 client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
-                    b = await (await client.get("/api/manual-entry/preview?side=LONG")).json()
+                    b = await (await client.get("/api/manual-entry/preview?side=LONG&tp=2550&sl=2450")).json()
                     self.assertEqual(b["cap"]["binding"], "ledger",
                                      f"모델이 없으면 옛 상한으로 떨어져야 한다: {b['cap']}")
                 finally:
                     await client.close()
 
-        with _isolated_dirs():
+        with _isolated_lines():
             asyncio.run(exercise())
 
     def test_margin_cap_50pct_follows_order_leverage(self) -> None:
@@ -689,7 +614,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                  mock.patch.object(orders, "SIZING_MARGIN_CAP_PCT", 50.0):
                 client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
-                get = lambda q: client.get("/api/manual-entry/preview?side=LONG" + q)
+                get = lambda q: client.get("/api/manual-entry/preview?side=LONG&tp=2550&sl=2450" + q)
                 try:
                     b = await (await get("&lev=6&pct=5")).json()
                     cap, plan = b["cap"], b["plan"]
@@ -711,15 +636,15 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                 finally:
                     await client.close()
 
-        with _isolated_dirs():
+        with _isolated_lines():
             asyncio.run(exercise())
 
     def test_bad_inputs_are_rejected_not_crashed(self) -> None:
         """잘못된 입력은 **검증**으로 막혀야지 예외로 죽으면 안 된다."""
         self._get_all([("/api/manual-entry/preview?side=NOPE", 400),
-                       ("/api/manual-entry/preview?side=LONG&pct=0", 400),
-                       ("/api/manual-entry/preview?side=LONG&pct=abc", 400),
-                       ("/api/manual-exit/preview?side=LONG&pct=101", 400)])
+                       ("/api/manual-entry/preview?side=LONG&tp=2550&sl=2450&pct=0", 400),
+                       ("/api/manual-entry/preview?side=LONG&tp=2550&sl=2450&pct=abc", 400),
+                       ("/api/manual-entry/preview?side=LONG", 400)])   # 2026-11-21 선 없는 진입은 400(lines_required)
 
 
 if __name__ == "__main__":

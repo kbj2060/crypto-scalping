@@ -163,7 +163,8 @@ def facts_account() -> dict:
     pos = [p for p in a.get("positions") or [] if abs(float(p.get("qty") or 0)) > 0]
     algos = asyncio.run(_algos(sorted({p["symbol"] for p in pos}))) if pos else {}
     rows = [position_flags(p, equity, algos.get(p["symbol"]) if isinstance(algos.get(p["symbol"]), list) else []) for p in pos]
-    return {"equity": round(equity, 2), "positions": rows, "algo_errors": {k: v for k, v in algos.items() if isinstance(v, dict)}}
+    return {"equity": round(equity, 2), "positions": rows, "algo_errors": {k: v for k, v in algos.items() if isinstance(v, dict)},
+            "unprotected": a.get("unprotected", [])}   # 2026-11-21 거래소 스탑 제거 -- 손절 유무 = 서버 손절 감시 무장(심볼:측면 목록 = 무장 없음)
 
 
 def facts_cron() -> dict:
@@ -203,7 +204,7 @@ PROMPT = """너는 개인 크립토 트레이딩 서버의 아침 운영 감사�
 형식: 첫 줄 = 한 줄 결론(이상 없음/확인 필요/즉시 조치). 그다음 «🔴 즉시» «🟠 확인» «🟢 정상(한 줄 요약)» 순서로, 해당 없는 칸은 생략.
 특히 볼 것: 감시기 not_ok·24h 사고 반복 · origin_main≠head · tracked_dirty · 디스크(D_drive free_gb<30 위험) · apt 의 nvidia 갱신 ·
 data_quality.not_ok(빈 구간·거래소 마크 차·forward:* = 전진 검정 입력에 구멍 난 날) ·
-포지션: stop_count=0(스톱 없음) · stop_beyond_liq · loss_at_stop_pct_equity>20 · notional_x_equity>6 · cron missing · outputs stale · paper stale · 판정 7일 안/지난 판정.
+포지션: account.unprotected(서버 손절 감시 무장 없음 = 손절 없음 · stop_count=0 은 2026-11-21 부터 정상 -- 거래소 스톱을 안 건다 · stop_count>0 = 배포 전에 남은 스톱) · stop_beyond_liq · loss_at_stop_pct_equity>20 · notional_x_equity>6 · cron missing · outputs stale · paper stale · 판정 7일 안/지난 판정.
 각 항목에 «무엇을 보면 되는지»를 짧게 붙여라.
 
 사실(JSON):

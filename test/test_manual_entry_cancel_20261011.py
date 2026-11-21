@@ -168,7 +168,7 @@ class EntryCancelServerTest(unittest.TestCase):
 
         async def body(c, server):
             self.assertEqual((await c.post("/api/manual-entry/cancel?confirm=1")).status, 409)   # (d) 진입 없음
-            b = await (await c.post("/api/manual-entry/submit?side=LONG&confirm=1&pct=5&lev=20")).json()
+            b = await (await c.post("/api/manual-entry/submit?side=SHORT&confirm=1&pct=5&lev=20&tp=2450&sl=2550")).json()   # 2026-11-21 선 주문만 · 픽스처의 열린 롱(선 없음)엔 추가 진입이 409 라 숏으로
             self.assertTrue(b.get("ok"), b)
             await asyncio.sleep(0.1)
             self.assertEqual((await c.post("/api/manual-entry/cancel")).status, 400)              # confirm 없음
@@ -186,7 +186,7 @@ class EntryCancelServerTest(unittest.TestCase):
         fx = Fake()
 
         async def body(c, server):
-            b = await (await c.post("/api/manual-entry/submit?side=LONG&confirm=1&pct=5&lev=20")).json()
+            b = await (await c.post("/api/manual-entry/submit?side=SHORT&confirm=1&pct=5&lev=20&tp=2450&sl=2550")).json()   # 2026-11-21 선 주문만 · 픽스처의 열린 롱(선 없음)엔 추가 진입이 409 라 숏으로
             self.assertTrue(b.get("ok"), b)
             await asyncio.sleep(0.1)
             self.assertEqual((await c.post("/api/manual-entry/cancel?confirm=1")).status, 200)
