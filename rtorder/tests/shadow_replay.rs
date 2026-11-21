@@ -238,3 +238,22 @@ fn python_shadow_record_replays_with_zero_diff_and_catches_mutations() {
     });
     assert!(shadow::report_text(&replay_text(&file)).contains("무장 파일"), "무장 파일 차이를 못 잡았다");
 }
+
+/// 2026-11-21 그림자 막이: listenKey 는 만들기(POST)·연장(PUT)만 -- 지우기(DELETE)는 같은 계좌의 파이썬 체결 알림까지 끊으므로 보내기 전에 panic.
+#[test]
+fn shadow_guard_allows_listen_key_post_put_but_panics_on_delete() {
+    let n = Arc::new(Mutex::new(Vec::<String>::new()));
+    let n2 = n.clone();
+    let srv = rtorder::fakesrv::serve(Arc::new(move |g: &rtorder::fakesrv::Got| {
+        n2.lock().unwrap().push(g.method.clone());
+        rtorder::fakesrv::Act::Send { status: 200, ctype: "application/json".into(), body: r#"{"listenKey":"lk-test"}"#.into(), headers: vec![] }
+    }));
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let mut bx = Binance::new(&srv.base, "test_key", "test_secret", std::time::Duration::from_secs(3), std::env::temp_dir().join("rtorder_guard_lk_ban"));
+    bx.shadow_on();
+    assert_eq!(rt.block_on(bx.listen_key("POST")).unwrap(), "lk-test");
+    assert!(rt.block_on(bx.listen_key("PUT")).is_ok());
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rt.block_on(bx.listen_key("DELETE"))));
+    assert!(r.is_err(), "그림자에서 listenKey 지우기가 나갔다");
+    assert_eq!(*n.lock().unwrap(), ["POST", "PUT"], "DELETE 는 보내기 전에 막힌다");
+}

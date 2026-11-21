@@ -27,6 +27,67 @@ struct Resp {
     ctype: String,
     retry_after: Option<String>,
     body: String,
+    /// 거래소 응답 머리 X-MBX-USED-WEIGHT-1M(이 IP 의 이번 분 사용 가중치)
+    used_weight: Option<u64>,
+}
+
+/// 2026-11-21 요청 계량(프로세스 전체 · 모든 `Binance` 가 같이): 보낸 요청 수 · 추정 가중치 · 거래소가 알려 준 이번 분 사용 가중치.
+/// 🔴그림자 모드만: 응답 머리 사용 가중치가 `SHADOW_PAUSE_ABOVE` 를 넘으면 그 분이 끝날 때까지 REST 를 보내지 않는다(같은 IP 의 파이썬 주문 경로가 429·밴을 맞지 않게).
+/// 실전송 모드에는 쉼을 걸지 않는다(손절 청산을 막으면 안 된다).
+pub mod meter {
+    use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
+    pub static REQS: AtomicU64 = AtomicU64::new(0);
+    pub static WEIGHT: AtomicU64 = AtomicU64::new(0);
+    pub static USED: AtomicU64 = AtomicU64::new(0);
+    pub static SKIPPED: AtomicU64 = AtomicU64::new(0);
+    pub static PAUSE_UNTIL_MS: AtomicU64 = AtomicU64::new(0);
+    pub const SHADOW_PAUSE_ABOVE: u64 = 1800;
+
+    /// 바이낸스 선물 공개 문서의 요청 가중치(모르는 것 = 1).
+    pub fn weight_of(url: &str) -> u64 {
+        let path = url.split("://").nth(1).and_then(|r| r.split_once('/')).map_or(url, |x| x.1);
+        let (path, q) = path.split_once('?').unwrap_or((path, ""));
+        let has = |k: &str| q.split('&').any(|kv| kv.starts_with(&format!("{k}=")));
+        match path {
+            "fapi/v2/account" | "fapi/v2/positionRisk" | "fapi/v1/userTrades" => 5,
+            "fapi/v1/openOrders" => if has("symbol") { 1 } else { 40 },
+            "fapi/v1/ticker/bookTicker" => if has("symbol") { 2 } else { 5 },
+            "fapi/v1/commissionRate" => 20,
+            "fapi/v1/klines" => {
+                let n: u64 = q.split('&').find_map(|kv| kv.strip_prefix("limit=")).and_then(|v| v.parse().ok()).unwrap_or(500);
+                if n < 100 { 1 } else if n < 500 { 2 } else if n <= 1000 { 5 } else { 10 }
+            }
+            _ => 1,
+        }
+    }
+    pub fn sent(url: &str) {
+        REQS.fetch_add(1, SeqCst);
+        WEIGHT.fetch_add(weight_of(url), SeqCst);
+    }
+    /// 응답 머리를 받아 둔다 · 그림자면 넘었을 때 다음 분 경계(UTC)까지 쉼.
+    pub fn seen(used: Option<u64>, shadow: bool, now_ms: u64) {
+        let Some(u) = used else { return };
+        USED.store(u, SeqCst);
+        if shadow && u > SHADOW_PAUSE_ABOVE {
+            PAUSE_UNTIL_MS.store((now_ms / 60_000 + 1) * 60_000, SeqCst);
+        }
+    }
+    /// 쉬는 중이면 보내지 않을 오류 문구.
+    pub fn paused(now_ms: u64) -> Option<String> {
+        if now_ms < PAUSE_UNTIL_MS.load(SeqCst) {
+            SKIPPED.fetch_add(1, SeqCst);
+            return Some(format!("RateLimitPause: 그림자 -- 이번 분 거래소 사용 가중치가 {SHADOW_PAUSE_ABOVE} 를 넘어 쉰다"));
+        }
+        None
+    }
+    /// 지난 구간 (요청 · 추정 가중치 · 마지막 사용 가중치 · 쉰 요청) -- 읽고 0 으로.
+    pub fn take() -> (u64, u64, u64, u64) {
+        (REQS.swap(0, SeqCst), WEIGHT.swap(0, SeqCst), USED.load(SeqCst), SKIPPED.swap(0, SeqCst))
+    }
+}
+
+fn wall_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
 enum Fail {
@@ -65,8 +126,9 @@ fn once(agent: &ureq::Agent, method: &str, url: &str, key: Option<&str>) -> Resu
     let mut r = call(method).map_err(classify)?;
     let h = |n: &str| r.headers().get(n).and_then(|v| v.to_str().ok()).map(str::to_string);
     let (status, ctype, retry_after) = (r.status().as_u16(), h("content-type").unwrap_or_default(), h("retry-after"));
+    let used_weight = h("x-mbx-used-weight-1m").and_then(|v| v.trim().parse().ok());
     let body = r.body_mut().read_to_string().map_err(classify)?;
-    Ok(Resp { status, ctype, retry_after, body })
+    Ok(Resp { status, ctype, retry_after, body, used_weight })
 }
 
 fn connect_err(url: &str, why: &str) -> String {
@@ -152,7 +214,8 @@ impl Binance {
     fn guard(&self, method: &str, url: &str) {
         if self.shadow && method != "GET" {
             let path = url.split('?').next().unwrap_or("").trim_start_matches(&self.base);
-            if path != "/fapi/v1/listenKey" {
+            // listenKey 는 만들기(POST)·연장(PUT)만 -- 같은 계좌의 listenKey 는 하나라(바이낸스가 같은 값을 돌려준다) DELETE 하면 파이썬 서버의 체결 알림까지 끊긴다
+            if path != "/fapi/v1/listenKey" || !(method == "POST" || method == "PUT") {
                 panic!("그림자 모드: 쓰기 요청 금지 {method} {path}");
             }
         }
@@ -183,10 +246,19 @@ impl Binance {
 
     async fn send(&self, method: &'static str, url: &str, signed: bool) -> Result<Resp, String> {
         self.guard(method, url);
+        if self.shadow {
+            if let Some(e) = meter::paused(wall_ms()) {
+                return Err(e);
+            }
+        }
         let mut retry = IDEMPOTENT.contains(&method);
         loop {
             let (agent, u, k) = (self.agent.clone(), url.to_string(), signed.then(|| self.key.clone()));
+            meter::sent(url);
             let r = tokio::task::spawn_blocking(move || once(&agent, method, &u, k.as_deref())).await.map_err(|e| format!("JoinError: {e}"))?;
+            if let Ok(x) = &r {
+                meter::seen(x.used_weight, self.shadow, wall_ms());
+            }
             match r {
                 Ok(x) => return Ok(x),
                 Err(Fail::Retryable(_)) if retry => retry = false,
@@ -212,6 +284,14 @@ impl Binance {
             let ts = sign::ms(self.time()) + self.offset;
             let p: Vec<(&str, P)> = params.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
             let url = format!("{}{}?{}", self.base, path, sign_query(&p, &self.secret, ts));
+            if self.shadow {
+                if let Some(e) = meter::paused(wall_ms()) {
+                    hs.push(tokio::task::spawn_blocking(move || Err(e)));
+                    urls.push(url);
+                    continue;
+                }
+            }
+            meter::sent(&url);
             let (agent, u, k) = (self.agent.clone(), url.clone(), self.key.clone());
             hs.push(tokio::task::spawn_blocking(move || {
                 // aiohttp 처럼 GET 은 끊기면 한 번 더
@@ -225,6 +305,9 @@ impl Binance {
         let mut out = vec![];
         for (h, url) in hs.into_iter().zip(urls) {
             let r = h.await.map_err(|e| format!("JoinError: {e}")).and_then(|r| r);
+            if let Ok(x) = &r {
+                meter::seen(x.used_weight, self.shadow, wall_ms());
+            }
             out.push(self.finish(r, &url));
         }
         out

@@ -40,7 +40,14 @@ pub struct Config {
     pub listen: std::net::SocketAddr,
     /// 로그를 그때그때 표준출력으로(bin) · false = 끝에 Summary 로(시험).
     pub echo: bool,
+    /// 그림자 모드의 감시 틱 계좌 캐시 수명(RTORDER_SHADOW_ACCOUNT_TTL · 기본 60초 · 실전송은 원본 10초 그대로).
+    pub shadow_account_ttl: f64,
+    /// 요청 계량 한 줄 주기(초 · RTORDER_METER_SEC · 기본 60 -- 시험이 줄인다).
+    pub meter_sec: f64,
 }
+
+/// 그림자 모드의 체결 뒤 계좌 다시 읽기 최소 간격(원본 3초 · 몰려도 분당 2회 = 가중치 44 이하).
+pub const SHADOW_PUSH_GAP_S: f64 = 30.0;
 
 /// RTORDER_DIR 안 표식 -- rtorder 가 쓰는 폴더라는 뜻(접수 기록 order_requests.jsonl 이 있어도 파이썬 폴더가 아니다).
 pub const DIR_MARK: &str = ".rtorder";
@@ -68,6 +75,8 @@ pub fn config_from(get: &dyn Fn(&str) -> Option<String>) -> Result<Config, Strin
         stream: get("RTORDER_STREAM").as_deref() == Some("1"),
         hub_url: get("RTORDER_HUB").filter(|s| !s.is_empty()),
         telegram: Telegram::from_env(get),
+        shadow_account_ttl: num("RTORDER_SHADOW_ACCOUNT_TTL", 60.0)?,
+        meter_sec: num("RTORDER_METER_SEC", 60.0)?,
         listen: {
             let raw = get("RTORDER_LISTEN").filter(|s| !s.is_empty()).unwrap_or_else(|| "127.0.0.1:8791".into());
             let a: std::net::SocketAddr = raw.parse().map_err(|e| format!("RTORDER_LISTEN {raw:?}: {e}"))?;
@@ -255,6 +264,7 @@ impl WatchIo for Ops {
 /// 원본 `account_refresher` 의 바깥: 체결 알림(Hub.dirty) → 계좌 새로 읽기 → 공유 캐시 · 스트림 계좌 대조 → 번호(Hub.seq)+1 → 감시 깨움.
 struct Refresher {
     rest: Binance,
+    gap: f64,
     acct: Arc<SharedAccount>,
     hub: Arc<Hub>,
     stop: Stop,
@@ -271,6 +281,9 @@ impl RefreshIo for Refresher {
     fn clear_dirty(&mut self) {
         use futures_util::FutureExt;
         let _ = self.hub.dirty.notified().now_or_never();
+    }
+    fn gap(&self) -> f64 {
+        self.gap
     }
     async fn sleep(&mut self, sec: f64) -> bool {
         if self.stop.flag.load(Ordering::SeqCst) {
@@ -320,7 +333,16 @@ pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop, hub: Arc<Hu
     let feed = Arc::new(Mutex::new(Feed::default()));
     let shadow = mk().is_shadow();
     let front = Arc::new(Front::default());
-    let acct = Arc::new(SharedAccount::new(&cfg.eth_symbol));
+    // 🔴그림자 = 같은 IP 의 파이썬 주문 경로 가중치를 지킨다: 감시 틱 계좌 캐시 60초 · 체결 뒤 다시 읽기 최소 30초 · userTrades 건너뜀(한 번 읽기 가중치 77 → 22)
+    //   실전송은 원본 그대로(10초 · 3초 · userTrades 포함)
+    let acct = Arc::new({
+        let mut a = SharedAccount::new(&cfg.eth_symbol);
+        if shadow {
+            a.ttl = cfg.shadow_account_ttl;
+            a.book.get_mut().trades = false;
+        }
+        a
+    });
     let desk = Arc::new(DeskCell::new(Desk::new(Watcher::new(&cfg.dir, &cfg.eth_symbol))));
     let ops = |front: &Arc<Front>| Ops { bx: mk(), feed: feed.clone(), hub: hub.clone(), stop: stop.notify.clone(), stopped: stop.flag.clone(), would: would.clone(), alerts: vec![],
                                          telegram: cfg.telegram.clone(), front: front.clone() };
@@ -423,7 +445,7 @@ pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop, hub: Arc<Hu
     };
     let refresher = async {
         if streaming {
-            let mut r = Refresher { rest: mk(), acct: acct.clone(), hub: hub.clone(), stop: stop.clone() };
+            let mut r = Refresher { rest: mk(), gap: if shadow { SHADOW_PUSH_GAP_S } else { crate::account::ACCOUNT_PUSH_GAP_S }, acct: acct.clone(), hub: hub.clone(), stop: stop.clone() };
             account_refresher(&mut r, &mut UserStream::default()).await;
         }
     };
@@ -441,7 +463,25 @@ pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop, hub: Arc<Hu
             d.serve(l, &stop).await;
         }
     };
-    tokio::join!(watch, stream, refresher, sub, door);
+    // 요청 계량 한 줄(서버에서 그림자가 더하는 가중치를 본다) -- 실전송도 찍는다(쉼은 그림자만)
+    let meter = async {
+        let _ = crate::http::meter::take();
+        loop {
+            tokio::select! { _ = tokio::time::sleep(std::time::Duration::from_secs_f64(cfg.meter_sec)) => {}, _ = stop.notify.notified() => break }
+            if stop.flag.load(Ordering::SeqCst) {
+                break;
+            }
+            let (n, w, used, skipped) = crate::http::meter::take();
+            let line = format!("rtorder 요청 계량 · 지난 {}초 · 요청 {n} · 가중치 {w}(추정) · 거래소 사용 가중치(마지막 응답) {used} · 쉰 요청 {skipped}{}",
+                               cfg.meter_sec, if shadow { " · 그림자" } else { "" });
+            if cfg.echo {
+                println!("{line}");
+            } else {
+                hub.logs.lock().unwrap().push(line);
+            }
+        }
+    };
+    tokio::join!(watch, stream, refresher, sub, door, meter);
     let mut d = desk.lock().await;
     logs.extend(std::mem::take(&mut d.w.logs));
     logs.extend(hub.logs.lock().unwrap().drain(..));
