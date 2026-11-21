@@ -32,14 +32,26 @@ pub fn dir_short_body(rest: &mut Rest, get: &mut Get, now_ms: i64, wall_ms: f64,
 
 /// GET /api/vol-forecast 의 QX4 쪽(server.py qx4_payload): 4코인 행 이어 받기(rows = 부르는 쪽이 들고 있는 상태) → qx4_from_klines.
 /// None = HGB 대체로(이어 받기 실패·ok 아님). 반환 Value 에 "asset" 을 붙이는 것도 여기서({**q4, "asset": asset}).
-/// 🔴QX4I(ETH·BTC 옵션 ATM IV 칸)는 Deribit 옵션 체결 받기(iv_now)를 안 옮겨 빠진다 -- `qx4::atm_iv`·`add_iv` 는 있다(체결 목록을 받으면 붙일 수 있음).
+/// QX4I 칸 없이(옛 5인자 모양 그대로). = `vol_forecast_qx4i(…, None)`.
 pub fn vol_forecast_qx4(fetch: &mut dyn FnMut(&[(&'static str, String)]) -> Vec<Value>, rows: &mut HashMap<String, Vec<Value>>, art: &qx4::Art, now_ms: f64, asset: &str) -> Option<Value> {
+    vol_forecast_qx4i(fetch, rows, art, now_ms, asset, None)
+}
+
+/// QX4 + QX4I(ETH·BTC): iv = (코인별 시간 칸 기억, Deribit get) 이면 원본처럼 `qx4::iv_now` → 있으면 `add_iv`(실패·없음 = 그 칸만 빠짐 -- 원본 try/except).
+pub fn vol_forecast_qx4i(fetch: &mut dyn FnMut(&[(&'static str, String)]) -> Vec<Value>, rows: &mut HashMap<String, Vec<Value>>, art: &qx4::Art, now_ms: f64, asset: &str,
+                         iv: Option<(&mut std::collections::BTreeMap<i64, Option<f64>>, &mut dyn FnMut(&str) -> Option<Value>)>) -> Option<Value> {
     if !qx4::refresh(fetch, rows) {
         return None;
     }
     let mut res = qx4::payload(rows, art, now_ms, &asset.to_uppercase());
     if res.get("ok") != Some(&Value::Bool(true)) {
         return None;
+    }
+    let coin = asset.to_uppercase();
+    if let (true, Some((st, get))) = (qx4::has_iv(&coin), iv) {
+        if let (Some(v), Some(h)) = qx4::iv_now(st, now_ms, get, &coin) {
+            qx4::add_iv(&mut res, &coin, v, h);
+        }
     }
     res.as_object_mut()?.insert("asset".into(), Value::String(asset.into()));
     Some(res)

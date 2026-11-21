@@ -16,7 +16,7 @@
 | 15분·1시간 방향 payload(65열판 BTC·SOL·XRP) | `dirshort.rs` | 9벌 payload 비트 · 반올림 전 예측 비트 · np.quantile 1,500개 비트(분위 씨앗은 ETH 대역) |
 | 위험 레이더 SOXL(주식 세션 HAR-S · `compute_session`) | `risk_radar::session_out` (서머타임·NYSE 휴장 표 포함) | 18벌 문자열 같음·숫자 1e-12 상대 · 세션 시계 7,920칸 같음(서머타임 전환·휴장·개장/마감 경계) |
 | 위험 레이더 cron 한 회차(`update_cache`·`update_dvol`·`main`) | `bin/rt_radar` (캐시 = 자기 이진 형식 · 그림자 디렉터리) | 가짜 HTTP 5회차(백필→꼬리→DVOL 500→다시) 요청 253개 순서·쿼리 같음 · latest·forward 숫자 최대 1.9e-15 상대 |
-| 4h 변동성 QX4(+QX4I · `live_vol4h_qx4_20261025.py` · `/api/vol-forecast` 5분) | `qx4.rs` (피쳐 41열 · HGB 셋 · numpy f32 MLP · 4코인 평균 · payload · QX4I 덧붙이기 · atm_iv · REST 이어 받기) | 개발기 사본 qx4_2026-10-23(서버 모델과 md5 같음 2fce43f5… · 11-21 확인) · 8벌 × 4코인 payload 비트 · 피쳐 41열 × 끝 40봉 비트 · HGB 구성원 비트 · 🔴MLP 구성원 1ulp(f32 · 상대 2.4e-7 -- OpenBLAS sgemm 가장자리 타일 순서) → log_rv 상대 6e-8 · atm_iv 40칸 · 이어 받기 4회차 요청 83개 순서 같음 · Deribit 옵션 체결 받기(iv_now·fetch_option_trades)는 아직 |
+| 4h 변동성 QX4(+QX4I · `live_vol4h_qx4_20261025.py` · `/api/vol-forecast` 5분) | `qx4.rs` (피쳐 41열 · HGB 셋 · numpy f32 MLP · 4코인 평균 · payload · QX4I 덧붙이기 · atm_iv · REST 이어 받기) | 개발기 사본 qx4_2026-10-23(서버 모델과 md5 같음 2fce43f5… · 11-21 확인) · 8벌 × 4코인 payload 비트 · 피쳐 41열 × 끝 40봉 비트 · HGB 구성원 비트 · 🔴MLP 구성원 1ulp(f32 · 상대 2.4e-7 -- OpenBLAS sgemm 가장자리 타일 순서) → log_rv 상대 6e-8 · atm_iv 40칸 · 이어 받기 4회차 요청 83개 순서 같음 · QX4I 옵션 체결 받기(`qx4::iv_now`·`option_trades` · 2026-11-22) = 원본을 가짜 deribit_get 으로 12회차(쪽 나눔·같은 trade_id 겹침·블록·청산·빈 시간 → 앞 시간·받기 실패) 요청 URL 30개·(iv, 정시)·기억 칸 같음 · `handlers::vol_forecast_qx4` 가 붙임 |
 | 4h·15분/1시간 REST 조립 + 적중 기록 + 5분 루프 | `dirrest.rs` · `bin/rt_dirpred` | 가짜 거래소 25단계 요청 1,330개 순서·쿼리 같음 · pred_record 410줄 글자 · 실행 파일 한 회차 요청 545개·기록 135줄 |
 | 띠 안·이탈(regime band · `live_regime_band_*_20261102.py` · cron 매시) | `regime_band.rs` (청산맵 레벨 compute_spliced_levels 계열 · 피쳐 27열 · HGB 분류 · 기록·채점·요약 · 크론 한 회차) · `bin/rt_regime` | 모델 = 개발기 사본(서버와 md5 같음 f62774c6) · 합성 4코인 11회차(빈 봉·같은 값 구간·3시간 건너뜀·자료 지연·묵은 자료 FAIL) 출력·기록·채점·요약 파일 글자 · 요청 순서 · 레벨 가격 14,389칸 · 청산 칸 번호·무게 30,454칸(넣은 순서까지) · 피쳐 29,916칸 · 확률 1,108개 비트 · 실행 파일 가짜 HTTP |
 | 상대 강도(xsec · `pred_record.xsec_record` · 서버 5분 루프 끝) | `dirrest::xsec_px`·`Record::xsec` · `bin/rt_dirpred` 회차 끝 | 12회차 요청 108개·기록 글자·스냅숏(rel_bp) 같음 · 실행 파일 한 회차 |
@@ -31,6 +31,28 @@
 |---|---|---|---|---|---|---|---|---|---|
 | 10 | 사이징 변동성·MAE 분위 | `live_eth_sizing_vol_model_20260912.py` · `live_eth_mae_quantile_model_20260913.py` | — | — | — | — | — | — | **안 옮김(꺼짐)** -- 서버 `SIZING_RISK_MODEL_ENABLED=False` · 주문 범위가 sltp 만(2026-11-21) |
 | 11 | 차트 표식(극값 탐지) | `live_eth_chart_markers_20260909.py` · `live_eth_extreme_detector_20260909.py` | — | — | — | — | — | — | **안 옮김** -- 사용자 결정(2026-11-21) |
+| 12 | 4h 방향 **ETH 판** | `live_eth_dir4h_20261015.py`(SOL·XRP 와 같은 코드 · 팔 S) | 5분(서버 루프)·요청 때 | HGB 회귀(65피쳐) | REST(rest_frames) | `/api/dir4h?asset=eth` · pred_record ETH «4» 줄 | ⑤ 예측 판 «4h 방향» | **없음 → 모델 파일을 개발기로 가져와야 함**(서버 `data/live/eth_dir4h_model.joblib` · 개발기엔 oos 씨앗만) | dir4h_p2 2027-03-14 |
+
+### 2026-11-22 서빙 쪽 파이썬 모델 코드 전수(재학습 스크립트 = 연구 몫이라 뺌)
+근거 = `scripts/live_*.py` 중 모델을 읽는 것(joblib·pickle·TabPFN·LightGBM·torch 글자) 10개 + 대시보드가 import 하는 모듈(dashboard/server.py 머리 import 줄을 Read 로) + 대시보드 안 모델 읽기(dashboard/*.py).
+서버 crontab 사본은 저장소에 없다 -- cron 몫은 SHADOW.md 의 넘긴 목록(regime·radar·dirfwd)과 스크립트 머리말 기준.
+
+| 파이썬 | 쓰임(서빙 경로) | Rust |
+|---|---|---|
+| live_eth_dir4h_20261015 | 대시보드 루프·`/api/dir4h` | dir4h.rs · dirrest.rs -- ETH 판은 #12(모델 필요) |
+| live_eth_dir_short_20261028 | 대시보드 루프·`/api/dir-short` | dirshort.rs(65열판 + ETH 75열판·sqlite) · 핸들러 정답지 ETH 2회차 요청 147개·payload 비트 |
+| live_vol4h_qx4_20261025 | `/api/vol-forecast` 먼저 | qx4.rs(+ QX4I iv_now) |
+| live_eth_sizing_vol_model_20260912 | `/api/vol-forecast` 대체(HGB) · 사이징은 꺼짐 | signals.rs vol4h(서버 사본 eth·xrp) · 사이징 #10 안 옮김 |
+| live_regime_band_20261102(+cron·recorder) | cron 매시 | regime_band.rs · rt_regime -- **넘김(11-21 23:46)** |
+| live_sr_lean_20261118 | 상주 워커 | sr_lean.rs·sr_live.rs · rt_sr_lean -- 그림자 준비 중 |
+| live_risk_radar_20261115 | cron 매분(계수 JSON · 모델 파일 없음) | risk_radar.rs · rt_radar -- **넘김(11-22 00:27)** |
+| live_eth_direction_forward_recorder_20261010 | cron 하루 3회(규칙) | signals.rs · rt_dirfwd -- **넘김(11-22)** |
+| live_eth_extreme_detector_20260909 · chart_markers | 대시보드 차트 표식 | #11 사용자 결정으로 안 옮김 |
+| live_eth_mae_quantile_model_20260913 | 사이징(꺼짐) | #10 |
+| live_eth_sweep_v_rebound_signal_20260829 · live_eth_vol_forecast_20260910 | 읽는 곳 0 · 연구만 | 범위 밖 |
+| 대시보드 안: card30(_card30_pred) · box_hold | 상황 카드 dir_p·reach_p · 박스(서빙 꺼짐) | card30.rs · box_hold.rs |
+| 대시보드 안: dir_signals(7일·4~13주·개장 되돌림) | `/api/dir-signals`·`/api/open-rev` | signals.rs · handlers.rs |
+남은 서빙 모델 코드 = **#12 ETH 4h 모델 파일**뿐. 나머지는 붙이기(rtserve 핸들러 · rt_dirpred·rt_sr_lean 넘기기) 몫.
 
 **안 옮김(안 쓰임 판정 · 범위 문서)**: `live_eth_sweep_v_rebound_signal_20260829.py`(610, 읽는 곳 0) · `live_eth_vol_forecast_20260910.py`(168, 연구만 import) ·
 `live_eth_breakout_detector_*`(화면 0) · `live_eth_maxpain_oos_ledger`(판정 닫힘).
@@ -52,7 +74,7 @@
 |---|---|---|---|
 | /api/dir4h | dir4h_cached → d4.live_payload | `handlers::dir4h_body` | Rest 캐시 + Get → Value(키 = 원본 순서 · preserve_order 크레이트에서 직렬화) |
 | /api/dir-short | dir_short_cached → ds.live_payload | `handlers::dir_short_body` | Rest(4h 와 따로) + Get + 표본 밖 분위 + (ETH) 호가 깊이 한 봉 콜백 → Value |
-| /api/vol-forecast | qx4_payload → 실패면 HGB | `handlers::vol_forecast_qx4` → None 이면 `handlers::vol_forecast_hgb` | QX4 행 상태 + fetch → Value(+asset) · HGB = fetch → 글자(+asset) · 🔴QX4I(Deribit 옵션 체결 받기) 없음 |
+| /api/vol-forecast | qx4_payload → 실패면 HGB | `handlers::vol_forecast_qx4` → None 이면 `handlers::vol_forecast_hgb` | QX4 행 상태 + fetch → Value(+asset) · HGB = fetch → 글자(+asset) · QX4I = (시간 칸 기억, Deribit get) 을 넘기면 iv_now → add_iv |
 | /api/open-rev | api_open_rev | `handlers::open_rev_body` | fetch(1일봉 93 · 5분봉 600) + 실수 시계 → 글자 |
 | /api/dir-signals | dir_signals_payload | `handlers::dir_signals_body`(= `signals::dir_signals`) | fetch + FRED 키 → 글자 |
 | /api/regime-band · /api/risk-radar · /api/sr-lean · /api/pred-record | 파일 읽기만 | rtserve/src/api.rs 에 이미 있음 | — |
