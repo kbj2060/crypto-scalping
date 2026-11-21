@@ -52,8 +52,8 @@ TABLES = {  # 표 → (시각 열, 시각 단위 ms 인가, 열쇠 열 또는 No
     "hl_xyz_1m": ("ts_sec", False, ("coin", "ts_sec"), ()),
     "hl_xyz_ctx_1s": ("recv_sec", False, None, ("recv_sec",)),
     "hl_asset_ctx": ("recv_ms", True, None, ("recv_ms",)),
-    "bars": ("t", False, ("t",), ("written_ms",)),
-    "marks": ("t", False, ("t", "side", "px"), ()),
+    "bars": ("t", True, ("t",), ("written_ms", "chain_age_s")),   # chain_age_s = 사슬 시작부터 초(각자 띄운 때에 달렸다 -- 진단 칸)
+    "marks": ("t", True, ("t", "side", "px"), ()),
 }
 # 🔧의도한 차이(rtcollect/SHADOW.md §11 -- 결함은 Rust 에서만 고쳤다): 이 표들의 «Rust에만» 행은 원본이 잃는 행일 수 있다 -- 불일치로 세지 않고 따로 적는다.
 #   «파이썬에만»·값 불일치는 그대로 실패다(고친 Rust 가 원본보다 적게 쓸 까닭은 없다).
@@ -74,11 +74,61 @@ SYM_COL = {"trade_tape_1s": "symbol", "bybit_liquidations": "symbol", "bybit_oi"
 
 
 def ro(p: Path) -> sqlite3.Connection:
-    return sqlite3.connect(f"file:{p}?mode=ro", uri=True, timeout=10)
+    """읽기 전용. 경로에 «+» 가 있으면 여러 Rust 파일을 이어 붙인 하나로(hl_bt 그림자의 hl_ctx.sqlite + hl_ctx 그림자의 hl_ctx_only.sqlite)."""
+    parts = str(p).split("+")
+    if len(parts) == 1:
+        return sqlite3.connect(f"file:{p}?mode=ro", uri=True, timeout=10)
+    con = sqlite3.connect("file::memory:", uri=True, timeout=10)
+    have: dict = {}
+    for i, f in enumerate(parts):
+        con.execute(f"ATTACH DATABASE ? AS r{i}", [f"file:{f}?mode=ro"])
+        for (t,) in con.execute(f"SELECT name FROM r{i}.sqlite_master WHERE type = 'table'"):
+            have.setdefault(t, []).append(i)
+    for t, ix in have.items():
+        con.execute(f"CREATE TEMP VIEW {t} AS " + " UNION ALL ".join(f"SELECT * FROM r{i}.{t}" for i in ix))
+    return con
 
 
 def tables(con) -> set[str]:
-    return {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view')")}
+    return {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view') "
+                                      "UNION SELECT name FROM sqlite_temp_master WHERE type = 'view'")}
+
+
+def down_intervals(times, starts: list[int], margin: int) -> list[tuple[float, float]]:
+    """그림자 Rust 가 꺼져 있던 구간(초): 감독 로그의 «SUPERVISOR starting» 시각 T 마다 [T 전 Rust 마지막 자료, T 뒤 Rust 첫 자료] ± margin.
+    times(T) = (T 전 마지막 초 또는 None, T 뒤 첫 초 또는 None). 첫 기동 전은 -inf 부터(그림자가 뜨기 전 자료는 견주지 않는다)."""
+    out = []
+    for t in sorted(starts):
+        a, b = times(t)
+        out.append((a - margin if a is not None else float("-inf"), b + margin if b is not None else float("inf")))
+    merged: list = []
+    for a, b in out:
+        if merged and a <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], b))
+        else:
+            merged.append((a, b))
+    return merged
+
+
+def down_note(d: list, n: int) -> str:
+    if not d:
+        return ""
+    fin = sum(b - a for a, b in d if a > float("-inf") and b < float("inf"))
+    return f" · 그림자 꺼진 구간 {len(d)}개(첫 기동 전 포함 · 유한 합 {fin:.0f}초)에서 뺀 행 {n:,}"
+
+
+def sql_times(con, starts_tables):
+    """sqlite 꼴: 표마다 시각 열에서 T 앞·뒤 Rust 자료(초)."""
+    def times(T):
+        lo = hi = None
+        for t, tcol, ms in starts_tables:
+            f = 1000 if ms else 1
+            a = con.execute(f"SELECT max({tcol}) FROM {t} WHERE {tcol} < ?", [T * f]).fetchone()[0]
+            b = con.execute(f"SELECT min({tcol}) FROM {t} WHERE {tcol} >= ?", [T * f]).fetchone()[0]
+            lo = a // f if a is not None and (lo is None or a // f > lo) else lo
+            hi = b // f if b is not None and (hi is None or b // f < hi) else hi
+        return lo, hi
+    return times
 
 
 def cols(con, t: str) -> list[str]:
@@ -114,7 +164,7 @@ def span(con, t: str, tcol: str, ms: bool) -> tuple[int, int] | None:
     return (lo // 1000, hi // 1000) if ms else (lo, hi)
 
 
-def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, window: int, show: int, excl: dict) -> str:
+def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, window: int, show: int, excl: dict, down: list = ()) -> str:
     tcol, ms, key, drop = TABLES[t]
     a, b = span(py, t, tcol, ms), span(rs, t, tcol, ms)
     if not a or not b:
@@ -129,13 +179,18 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
     kidx = [names.index(k) for k in key] if key else None
     keepcols = [i for i, c in enumerate(names) if c not in drop]   # 비교에서 빼는 열(받은 시각) -- 창·종목 거르기에는 쓴다
     allsym = excl.get(None, set())
-    n_cmp = n_bad = only_py = only_rs = 0
+    n_cmp = n_bad = only_py = only_rs = n_down = n_warm = 0
     skipped: set = set()
+    wi = names.index("warm") if "warm" in names else None   # 준비 구간 봉(warm=1)은 한쪽이라도 그러면 견주지 않는다(사슬 시작에 달렸다)
     first: list = []
     carry: tuple = (Counter(), Counter())
 
     def keep(r) -> bool:
+        nonlocal n_down
         sec = r[ti] // 1000 if ms else r[ti]
+        if any(a <= sec < b for a, b in down):
+            n_down += 1
+            return False
         m = sec // 60
         sym = r[si] if si is not None else None
         if m in allsym or m in excl.get(sym, ()):
@@ -152,6 +207,10 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
         if not kidx:
             rp, rr = [tuple(r[i] for i in keepcols) for r in rp], [tuple(r[i] for i in keepcols) for r in rr]
         if kidx:
+            if wi is not None:
+                wp, wr = {tuple(r[i] for i in kidx) for r in rp if r[wi] == 1}, {tuple(r[i] for i in kidx) for r in rr if r[wi] == 1}
+                n_warm += len(wp | wr)
+                rp, rr = [r for r in rp if tuple(r[i] for i in kidx) not in wp | wr], [r for r in rr if tuple(r[i] for i in kidx) not in wp | wr]
             dp = {tuple(r[i] for i in kidx): tuple(r[i] for i in keepcols) for r in rp}
             dr = {tuple(r[i] for i in kidx): tuple(r[i] for i in keepcols) for r in rr}
             for k in dp.keys() & dr.keys():
@@ -184,22 +243,33 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
     TALLY[0] += n_cmp
     TALLY[1] += bad
     line = (f"{t}: 비교 {n_cmp:,}행 · 불일치 {n_bad:,} · 파이썬에만 {only_py:,} · Rust에만 {only_rs:,}{rs_note} · 범위 [{s0}, {s1}) 초 · "
-            f"뺀 (종목,분) {len(skipped):,}")
+            f"뺀 (종목,분) {len(skipped):,}{down_note(down, n_down)}{f' · 준비 구간(warm) 봉 {n_warm:,} 뺌' if n_warm else ''}")
     return line + "".join(f"\n    {x}" for x in first)
 
 
-def run(py_path: Path, rs_path: Path, lo=None, hi=None, margin=5, window=3600, show=3) -> list[str]:
+def run(py_path: Path, rs_path: Path, lo=None, hi=None, margin=5, window=3600, show=3, starts=()) -> list[str]:
     py, rs = ro(py_path), ro(rs_path)
     try:
         excl = excluded_minutes(py, rs, margin)
         common = sorted(tables(py) & tables(rs) & TABLES.keys())
-        return [compare_table(py, rs, t, lo, hi, margin, window, show, excl) for t in common] or ["비교할 표가 없다"]
+        down = down_intervals(sql_times(rs, [(t, TABLES[t][0], TABLES[t][1]) for t in common]), list(starts), margin) if starts else []
+        return [compare_table(py, rs, t, lo, hi, margin, window, show, excl, down) for t in common] or ["비교할 표가 없다"]
     finally:
         py.close()
         rs.close()
 
 
-def compare_depth(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~") -> list[str]:
+def bisect_times(ts: list):
+    """정렬된 Rust 시각(초) 목록 → down_intervals 의 times(T)."""
+    import bisect
+
+    def times(T):
+        i = bisect.bisect_left(ts, T)
+        return (ts[i - 1] if i else None), (ts[i] if i < len(ts) else None)
+    return times
+
+
+def compare_depth(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", starts=(), margin: int = 5) -> list[str]:
     """depth_diff 시 파일(<폴더>/<SYM>/<UTC 시>.jsonl[.gz]) 대조: 시마다 거래소 프레임 줄(첫 줄 스냅숏·_gap 줄 빼고)을 글자 그대로 집합 비교.
     스냅숏은 두 쪽이 다른 순간에 REST 를 불러 원래 다르다(Rust 는 기본 꺼짐 = null) · _gap 은 각자 연결 시각에 달렸다 -- 둘 다 센 수만 적는다."""
     import gzip
@@ -214,28 +284,50 @@ def compare_depth(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~") -> li
             lines = [ln for ln in raw.decode("utf-8", "replace").split("\n") if ln]
             out.setdefault(h, []).extend(lines)
         return out
+    import re
+    ev = re.compile(r'"E":(\d+)')
+
+    def sec(x: str):
+        m = ev.search(x)
+        return int(m.group(1)) // 1000 if m else None
     a, b = read(py_dir), read(rs_dir)
+    down = down_intervals(bisect_times(sorted(t for h in b for x in b[h] if (t := sec(x)) is not None)), list(starts), margin) if starts else []
+    n_down = 0
+
+    def frames(lines):
+        nonlocal n_down
+        out = Counter()
+        for x in lines:
+            if x.startswith('{"_'):
+                continue
+            t = sec(x)
+            if t is not None and any(lo_ <= t < hi_ for lo_, hi_ in down):
+                n_down += 1
+                continue
+            out[x] += 1
+        return out
     res = []
     for h in sorted(a.keys() & b.keys()):
-        fa, fb = Counter(x for x in a[h] if not x.startswith('{"_')), Counter(x for x in b[h] if not x.startswith('{"_'))
+        fa, fb = frames(a[h]), frames(b[h])
         ga, gb = sum(x.startswith('{"_gap"') for x in a[h]), sum(x.startswith('{"_gap"') for x in b[h])
         sa, sb = sum(x.startswith('{"_snapshot":{') for x in a[h]), sum(x.startswith('{"_snapshot":{') for x in b[h])
         TALLY[0] += sum((fa & fb).values())
         TALLY[1] += sum((fa - fb).values()) + sum((fb - fa).values())
         res.append(f"depth {h}: 같은 프레임 {sum((fa & fb).values()):,} · 파이썬에만 {sum((fa - fb).values()):,} · Rust에만 {sum((fb - fa).values()):,} · "
                    f"_gap 파이썬 {ga}·Rust {gb} · 스냅숏 있음 파이썬 {sa}·Rust {sb}")
-    return res or ["depth: 두 쪽에 같은 시 파일이 없다"]
+    return (res + [f"depth:{down_note(down, n_down)}"] if down else res) or ["depth: 두 쪽에 같은 시 파일이 없다"]
 
 
-def compare_raster(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~") -> list[str]:
+def compare_raster(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", starts=(), margin: int = 5) -> list[str]:
     """호가 래스터 시 파일(<폴더>/<SYM>/<UTC 시>.f32) 대조: 같은 초에 두 쪽 다 유효한 행의 bin_lo·mid 같음 · 잔량 칸 같음 비율.
     🔴바이트 일치는 기대하지 않는다 -- 두 프로세스가 스냅숏을 다른 순간에 받고(병합 범위가 다르다) 틱이 각자 벽시계라 같은 초의 북이 몇 이벤트 갈린다.
     통과 기준(제안): 두 쪽 유효 초의 99% 이상에서 bin_lo·mid 같음 · 칸 같음 비율 중앙 0.95 이상. 무효 초 수는 따로 적는다."""
     import struct
-    row = 976
 
     def rows(p: Path) -> dict:
         b = p.read_bytes()
+        n = struct.unpack_from("<H", b, 6)[0]   # 머리 "FLWR" u16 판 · u16 칸 수
+        row = 16 + 4 * n
         out = {}
         for k in range((len(b) - 32) // row):
             r = b[32 + k * row:32 + (k + 1) * row]
@@ -243,20 +335,29 @@ def compare_raster(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~") -> l
             if ts and mid == mid:
                 out[ts] = (bl, mid, r[16:])
         return out
-    res = []
-    for pp in sorted(py_dir.glob("*.f32")):
-        h, rp = pp.stem, rs_dir / pp.name
-        if not (lo <= h <= hi) or not rp.exists():
-            continue
-        a, b = rows(pp), rows(rp)
-        both = sorted(a.keys() & b.keys())
+    hours = [(pp.stem, pp, rs_dir / pp.name) for pp in sorted(py_dir.glob("*.f32")) if lo <= pp.stem <= hi and (rs_dir / pp.name).exists()]
+    data = [(h, rows(pp), rows(rp)) for h, pp, rp in hours]
+    down = down_intervals(bisect_times(sorted(t // 1000 for _, _, b in data for t in b)), list(starts), margin) if starts else []
+    res, n_down = [], 0
+    for h, a, b in data:
+        both = [t for t in sorted(a.keys() & b.keys()) if not any(x <= t // 1000 < y for x, y in down)]
+        n_down += len(a.keys() & b.keys()) - len(both)
         same_hdr = sum(a[t][:2] == b[t][:2] for t in both)
-        fr = sorted(sum(x == y for x, y in zip(struct.iter_unpack("<f", a[t][2]), struct.iter_unpack("<f", b[t][2]))) / 240 for t in both if a[t][:2] == b[t][:2])
-        med = fr[len(fr) // 2] if fr else None
+        fr, near, l1 = [], [], []
+        for t in both:
+            if a[t][:2] != b[t][:2]:
+                continue
+            qa, qb = [x[0] for x in struct.iter_unpack("<f", a[t][2])], [x[0] for x in struct.iter_unpack("<f", b[t][2])]
+            n, c = len(qa), len(qa) // 2
+            fr.append(sum(x == y for x, y in zip(qa, qb)) / n)
+            near.append(sum(qa[j] == qb[j] for j in range(c - 20, c + 20)) / 40)   # mid 칸 = n/2(raster.rs _row) · ±20칸 = diff 가 늘 갱신하는 곳
+            l1.append(sum(abs(x - y) for x, y in zip(qa, qb)) / (sum(abs(x) + abs(y) for x, y in zip(qa, qb)) or 1))
+        med = lambda v: sorted(v)[len(v) // 2] if v else None   # noqa: E731
         TALLY[0] += len(both)
-        TALLY[1] += int(bool(both) and (same_hdr < 0.99 * len(both) or med is None or med < 0.95))   # §5 제안 기준을 못 넘은 시 하나 = 1
-        res.append(f"raster {h}: 두 쪽 유효 초 {len(both):,} · bin_lo·mid 같음 {same_hdr:,} · 칸 같음 비율 중앙 {med} · 파이썬만 유효 {len(a.keys() - b.keys()):,} · Rust만 유효 {len(b.keys() - a.keys()):,}")
-    return res or ["raster: 두 쪽에 같은 시 파일이 없다"]
+        TALLY[1] += int(bool(both) and (same_hdr < 0.99 * len(both) or med(near) is None or med(near) < 0.95))   # 기준(제안): bin_lo·mid 99% · mid ±20칸 같음 중앙 0.95
+        res.append(f"raster {h}: 두 쪽 유효 초 {len(both):,} · bin_lo·mid 같음 {same_hdr:,} · 칸 같음 비율 중앙 전체 {med(fr)} · mid ±20칸 {med(near)} · "
+                   f"잔량 상대차(L1) 중앙 {med(l1)} · 파이썬만 유효 {len(a.keys() - b.keys()):,} · Rust만 유효 {len(b.keys() - a.keys()):,}")
+    return (res + [f"raster:{down_note(down, n_down)}"] if down else res) or ["raster: 두 쪽에 같은 시 파일이 없다"]
 
 
 def compare_events(py: Path, rs: Path, lo=None, hi=None, show: int = 3) -> list[str]:
@@ -360,12 +461,57 @@ def selftest() -> None:
         assert "불일치 0 · 파이썬에만 0 · Rust에만 1(의도한 차이 후보" in xyz_line and "비교 107행" in xyz_line, xyz_line
         for f, w in ((p, 1), (r, 2)):
             con = sqlite3.connect(f)
-            con.execute("CREATE TABLE bars(t INTEGER PRIMARY KEY, dimb1 REAL, written_ms INTEGER)")
-            con.executemany("INSERT INTO bars VALUES (?,?,?)", [(T + 300 * k, 0.5 if (f == r and k == 2) else 0.25, w) for k in range(4)])
+            con.execute("CREATE TABLE bars(t INTEGER PRIMARY KEY, dimb1 REAL, chain_age_s REAL, warm REAL, written_ms INTEGER)")
+            # 봉 0 = Rust 만 준비 구간(warm=1, 값 다름) → 뺀다 · 봉 2 값 다름 · chain_age_s 는 두 쪽이 늘 다르다(안 본다)
+            con.executemany("INSERT INTO bars VALUES (?,?,?,?,?)", [(1000 * (T + 300 * k), 0.5 if (f == r and k in (0, 2)) else 0.25,
+                                                                   300.0 * k + (99 if f == r else 7), 1.0 if (f == r and k == 0) else 0.0, w) for k in range(5)])
             con.commit()
             con.close()
         bars_line = next(x for x in run(p, r) if x.startswith("bars"))
-        assert "비교 3행 · 불일치 1 · 파이썬에만 0 · Rust에만 0" in bars_line, bars_line   # 마지막 봉 = 끝 10초 안이라 뺀다 · written_ms 는 안 본다
+        # 봉 1·2·3 견줌(봉 4 = 끝 10초 안) · 봉 0 = warm
+        assert "비교 3행 · 불일치 1 · 파이썬에만 0 · Rust에만 0" in bars_line and "준비 구간(warm) 봉 1 뺌" in bars_line, bars_line
+        # 그림자 꺼진 구간: Rust 가 T+400~T+560 에 비었고(지움) 감독 로그 기동 T+500 → 그 사이 파이썬에만 행은 뺀다 · T+700 의 파이썬에만 행은 그대로 실패
+        con = sqlite3.connect(r)
+        con.execute("DELETE FROM trade_tape_1s WHERE ts_sec BETWEEN ? AND ?", [T + 400, T + 560])   # 꺼진 프로세스는 어느 표에도 안 쓴다
+        con.execute("DELETE FROM bybit_liquidations WHERE ts_ms BETWEEN ? AND ?", [1000 * (T + 400), 1000 * (T + 560)])
+        con.execute("DELETE FROM hl_xyz_ctx_1s WHERE recv_sec BETWEEN ? AND ?", [T + 400, T + 560])
+        con.commit()
+        con.close()
+        con = sqlite3.connect(p)
+        con.execute("DELETE FROM trade_tape_1s WHERE ts_sec = ? AND price_bin = 25000", [T + 700])
+        con.commit()
+        con.close()
+        TALLY[:] = [0, 0]
+        dl = next(x for x in run(p, r, window=250, show=5, starts=[T + 500]) if x.startswith("trade_tape_1s"))
+        assert "그림자 꺼진 구간 1개" in dl and "Rust에만 2" in dl and "파이썬에만 0" in dl, dl   # T+700 은 Rust 에만(파이썬에서 지움) + 분 2 의 그것
+        dl0 = next(x for x in run(p, r, window=250, show=5) if x.startswith("trade_tape_1s"))
+        assert "파이썬에만 " in dl0 and "파이썬에만 0" not in dl0, dl0   # 기동 시각을 안 주면 빈 구간이 «파이썬에만»
+        # depth: Rust 가 T+100~T+130 초에 프레임이 없고 기동 T+120 → 그 사이 파이썬 프레임은 뺀다 · 바깥의 파이썬에만 프레임은 실패
+        import gzip
+        import struct
+        for side in ("dp", "dr"):
+            (Path(d) / side).mkdir()
+            fr = [f'{{"e":"depthUpdate","E":{1000 * (T + i)},"u":{i}}}' for i in range(200) if not (side == "dr" and (100 <= i <= 130 or i == 170))]
+            (Path(d) / side / "2026-11-21T07.jsonl.gz").write_bytes(gzip.compress(("\n".join(['{"_snapshot":null}'] + fr) + "\n").encode()))
+        dd = compare_depth(Path(d) / "dp", Path(d) / "dr", starts=[T + 120])
+        assert dd[0].startswith("depth 2026-11-21T07: 같은 프레임 157 · 파이썬에만 1 · Rust에만 0") and "뺀 행 53" in dd[1], dd   # 뺀 구간 = [99-5, 131+5) 초 · 파이썬 42 + Rust 11
+        # raster: 머리 n 을 읽는다 · mid ±20칸만 같으면 통과 쪽
+        def f32(path, vals):
+            n = 60
+            h = b"FLWR" + struct.pack("<HHfIqII", 1, n, 0.5, 0, 0, 1000, 0)
+            rows_ = b"".join(struct.pack("<qif", 1000 * (T + k), 100, 50.0) + struct.pack(f"<{n}f", *v) for k, v in enumerate(vals))
+            path.write_bytes(h + rows_)
+        (Path(d) / "rp").mkdir()
+        (Path(d) / "rr").mkdir()
+        base = [float(j) for j in range(60)]
+        far = [9.0 if (j < 5) else float(j) for j in range(60)]   # 먼 칸 5개만 다름
+        f32(Path(d) / "rp/2026-11-21T07.f32", [base] * 10)
+        f32(Path(d) / "rr/2026-11-21T07.f32", [far] * 10)
+        TALLY[:] = [0, 0]
+        rz = compare_raster(Path(d) / "rp", Path(d) / "rr")
+        assert "mid ±20칸 1.0" in rz[0] and TALLY == [10, 0], (rz, TALLY)
+        # 첫 기동 전(-inf)은 뺀다: 기동 T+600 하나면 그 앞 Rust 자료가 있어도 첫 기동 = 로그의 가장 이른 것
+        assert down_intervals(lambda t: (None, t + 3), [t0 := T + 600], 5) == [(float("-inf"), t0 + 8)]
         (Path(d) / "a.jsonl").write_text('{"t_end":60,"side":1}\n{"t_end":90,"side":-1}\n{"t_end":120,"side":1}\n')
         (Path(d) / "b.jsonl").write_text('{"t_end":60,"side":1}\n{"t_end":120,"side":1}\n')
         ev = compare_events(Path(d) / "a.jsonl", Path(d) / "b.jsonl", lo=60, hi=120)[0]
@@ -405,6 +551,7 @@ def main() -> None:
     ap.add_argument("--raster", action="store_true", help="두 경로 = 호가 래스터 종목 폴더(<root>/<SYM>) · --hours 시작,끝")
     ap.add_argument("--json", default="", help="두 경로 = 폴더 · 값 = glob(예: 'liq_tab_*.json') · --drop 열쇠를 빼고 비교")
     ap.add_argument("--drop", default="generated_ms")
+    ap.add_argument("--starts", default="", help="그림자 Rust 감독 «SUPERVISOR starting» 시각(초, 쉼표) -- 그 앞뒤 Rust 가 비어 있던 구간을 뺀다(takeover.sh 가 로그에서 읽어 넘긴다)")
     ap.add_argument("--summary", action="store_true", help="끝에 «요약: 견준 N · 설명 못 함 M» · M>0 이거나 N=0 이면 종료코드 1(takeover.sh check)")
     ap.add_argument("--events", action="store_true", help="두 경로 = 아이스버그 <sym>_events.jsonl · --from/--to = t_end 초")
     a = ap.parse_args()
@@ -413,16 +560,17 @@ def main() -> None:
     if not (a.py and a.rs):
         ap.error("파이썬 DB 와 Rust DB 경로가 필요하다")
     lo, _, hi = a.hours.partition(",")
+    st = [int(x) for x in a.starts.split(",") if x.strip()]
     if a.json:
         out = compare_json(a.py, a.rs, a.json, a.drop)
     elif a.events:
         out = compare_events(a.py, a.rs, a.lo, a.hi, a.show)
     elif a.raster:
-        out = compare_raster(a.py, a.rs, lo, hi or "~")
+        out = compare_raster(a.py, a.rs, lo, hi or "~", st, a.margin)
     elif a.depth:
-        out = compare_depth(a.py, a.rs, lo, hi or "~")
+        out = compare_depth(a.py, a.rs, lo, hi or "~", st, a.margin)
     else:
-        out = run(a.py, a.rs, a.lo, a.hi, a.margin, a.window, a.show)
+        out = run(a.py, a.rs, a.lo, a.hi, a.margin, a.window, a.show, st)
     print("\n".join(out))
     if a.summary:
         print(f"요약: 견준 {TALLY[0]:,} · 설명 못 함 {TALLY[1]:,}")

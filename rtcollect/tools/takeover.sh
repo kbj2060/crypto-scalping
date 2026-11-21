@@ -5,7 +5,7 @@
 #                                                         ③ 파이썬 감독 → 수집기 끔 ④ 그림자 감독 → Rust 끔 ⑤ Rust 를 진짜 경로(TAKEOVER=1)로 ⑥ 60초 확인 · 끊긴 초
 #   bash rtcollect/tools/takeover.sh back  <종류> [<종목>]  Rust 끔 → crontab 되돌림(이 종류가 바꾼 줄만) → 매니페스트 되돌림 → 파이썬 감독 다시
 # 종류(상주): binance_tape binance_spot okx_tape okx_ctx bybit_tape bybit_liq binance_ctx xyz hl_ctx depth raster ob5m bookdepth iceberg hl_trades market_data oi_lsratio deribit
-#      (예약): liq_tab seal    · 안 다룸: hl_bt(파이썬 짝이 Pi) · hl_positions(대조 방법 없음) · news·treasury_futures·macro_5m(그림자 없음) · liqmap_scorer·soxl_weekend·cboe_chain(전진 장부 -- 손으로)
+#      (예약): liq_tab seal    · 안 다룸: hl_bt(서버 파이썬 전체 모드가 hl_ctx 와 한 파일 -- 묶음 넘기기 다음) · hl_positions(대조 방법 없음) · news·treasury_futures·macro_5m(그림자 없음) · liqmap_scorer·soxl_weekend·cboe_chain(전진 장부 -- 손으로)
 # 죽이는 것: 명령줄 인자가 그 종류의 러너 파일로 끝나고 environ 의 종목이 맞는 프로세스와 그 부모 _supervise.sh 뿐(PID 마다 /proc/<pid>/cmdline 다시 확인 · 이름으로 한꺼번에 안 죽인다).
 #   SIGTERM 뒤 기다렸다가 살아 있으면 보고만 하고 멈춘다(그때는 `back` 으로 되돌린다). 대시보드·감시·주문은 러너가 달라 걸리지 않는다(걸리면 멈춘다).
 # 바꿔 끼우기(시험용): CRONTAB_CMD(기본 crontab) · TAKEOVER_ROOT · WATCH_S(60) · TERM_WAIT_S(30) · CHECK_PY · RTCOLLECT_BIN · RTDUCK_BIN
@@ -29,7 +29,7 @@ is_sup() { argv "$1" | grep -qE '(^|/)_supervise\.sh$'; }
 # ── 종류 표 ── ENG(rtcollect|rtduck) RK(Rust 종류) PYSUP(crontab 의 파이썬 줄 글자) PYRUN(파이썬 러너 파일) SELV·SELD(종목 변수·기본)
 #   XV·XD·XW(파이썬 environ 에서 XV(기본 XD) 가 XW 여야 -- 같은 러너의 다른 스트림 가르기) XR(Rust·crontab 줄에도 X 를 적용) RVAR(Rust 종목 변수)
 #   COPY(파이썬 environ 에서 그대로 넘길 변수) TENV(진짜 경로·REST) CHK(대조 목록 «모드:파이썬:Rust») W(끊긴 초를 재는 파일·폴더) CRON(예약 종류) SHARED(여러 종목이 한 파일)
-ENG=rtcollect; RK="$KIND"; PYSUP=""; PYRUN=""; SELV=""; SELD=""; XV=""; XD=""; XW=""; XR=0; RVAR=""; COPY=""; TENV=""; CHK=""; W=""; CRON=0; SHARED=0; GROUP=0
+ENG=rtcollect; RK="$KIND"; COVK=""; PYSUP=""; PYRUN=""; SELV=""; SELD=""; XV=""; XD=""; XW=""; XR=0; RVAR=""; COPY=""; TENV=""; CHK=""; W=""; CRON=0; SHARED=0; GROUP=0
 case "$KIND" in
   binance_tape) PYSUP=supervisor_trade_tape.sh; PYRUN=live_trade_tape_collector_20260916.py; SELV=TAPE_SYMBOL; SELD=ethusdt; XV=TAPE_MARKET; XD=futures; XW=futures; XR=1; SHARED=1
                 TENV="TAPE_MARKET=futures TAPE_DB_PATH=data/hot/binance_tape.sqlite RTCOLLECT_REST=1"; CHK="sq:data/hot/binance_tape.sqlite:data/hot/rtcollect/binance_tape.sqlite"; W="data/hot/binance_tape.sqlite data/hot/binance_tape.sqlite-wal" ;;
@@ -50,7 +50,8 @@ case "$KIND" in
                 TENV="HL_XYZ_DB=data/hot/hl_xyz.sqlite RTCOLLECT_REST=1"; CHK="sq:data/hot/hl_xyz.sqlite:data/hot/rtcollect/hl_xyz.sqlite"; W="data/hot/hl_xyz.sqlite data/hot/hl_xyz.sqlite-wal" ;;
   hl_ctx)       PYSUP=supervisor_hyperliquid_book_ticker.sh; PYRUN=live_hyperliquid_book_ticker_collector_20260923.py; SELV=HL_BT_COIN; SELD=ETH; XV=HL_BT_CTX_ONLY; XD=""; XW=1; GROUP=1; RVAR=HL_BT_COIN
                 TENV="HL_CTX_DB_PATH=data/hot/hl_ctx.sqlite"; W="data/hot/hl_ctx.sqlite data/hot/hl_ctx.sqlite-wal"
-                CHK="sq:data/hot/hl_ctx.sqlite:data/hot/rtcollect/$( [ -e data/hot/rtcollect/hl_ctx_only.sqlite ] && echo hl_ctx_only || echo hl_ctx).sqlite" ;;
+                CHK="sq:data/hot/hl_ctx.sqlite:$(ls data/hot/rtcollect/hl_ctx.sqlite data/hot/rtcollect/hl_ctx_only.sqlite 2>/dev/null | paste -sd+)"   # hl_bt 그림자(전체 모드 코인) + hl_ctx 그림자(CTX_ONLY 코인)를 이어 하나로
+                COVK="hl_ctx hl_bt" ;;
   depth)        PYSUP=supervisor_depth_diff.sh; PYRUN=live_depth_diff_collector_20260915.py; SELV=DD_SYMBOL; SELD=ethusdt; TENV="DD_ROOT=data/live/orderflow/depthdiff RTCOLLECT_REST=1" ;;
   raster)       PYSUP=supervisor_orderflow_raster.sh; PYRUN=live_orderflow_raster_collector_20260914.py; SELV=OF_SYMBOL; SELD=ethusdt; COPY="OF_BIN_SIZE OF_N_BINS"; TENV="OF_ROOT=data/live/orderflow/raster RTCOLLECT_REST=1" ;;
   ob5m)         PYSUP=supervisor_ob5m.sh; PYRUN=live_ob5m_20261026.py; SELV=OB_SYMBOL; SELD=ETHUSDT; RVAR=OB_SYMBOL ;;
@@ -73,16 +74,8 @@ esac
 case "$MODE" in check|go|back) ;; *) die "check|go|back 중 하나" ;; esac
 ENGU="$(echo "$ENG" | tr '[:lower:]' '[:upper:]')"
 BIN="$(eval echo "\${${ENGU}_BIN:-$ROOT/tmp/rtbin/$ENG}")"
-SEL="$(nrm "${ARG:-$SELD}")"
-SYML="$(echo "$SEL" | tr '[:upper:]' '[:lower:]')"
-case "$KIND" in   # 종목마다 경로가 갈리는 종류
-  depth)   CHK="depth:data/live/orderflow/depthdiff/$SEL:data/live/rtcollect/orderflow/depthdiff/$SEL"; W="data/live/orderflow/depthdiff/$SEL" ;;
-  raster)  CHK="raster:data/live/orderflow/raster/$SEL:data/live/rtcollect/orderflow/raster/$SEL"; W="data/live/orderflow/raster/$SEL" ;;
-  ob5m)    TENV="OB_DB=data/live/ob5m/$SYML.sqlite"; CHK="sq:data/live/ob5m/$SYML.sqlite:data/live/rtcollect/ob5m/$SYML.sqlite"; W="data/live/ob5m/$SYML.sqlite data/live/ob5m/$SYML.sqlite-wal" ;;
-  iceberg) c="${SYML%usdt}"; CHK="events:data/live/iceberg/${c}_events.jsonl:data/live/rtcollect/iceberg/${c}_events.jsonl"; W="data/live/iceberg/${c}_state.json" ;;
-  hl_trades) d="${SEL//,/_}"; CHK="duckdir:data/live/orderflow/hyperliquid/$d:data/live/rtduck/orderflow/hyperliquid/$d"; W="data/live/orderflow/hyperliquid/$d" ;;
-esac
-TAG="$KIND"; [ -z "$SELV" ] || [ "$GROUP" = 1 ] || TAG="${KIND}_${SEL//[,:]/_}"
+COVK="${COVK:-$RK}"
+SEL="$(nrm "${ARG:-$SELD}")"   # 아래 resolve 가 도는 파이썬 수집기의 목록 통째로 바꾼다
 TS="$(date +%Y%m%d_%H%M%S)"
 
 # ── check ── 그림자가 떠 있던 창 전체(도구가 두 쪽 자료가 함께 있는 구간을 고른다)
@@ -91,25 +84,56 @@ hours() { # 그림자 폴더의 시 파일 -- 첫 시(그림자가 중간에 떴
   [ "$(echo "$h" | grep -c .)" -ge 3 ] || return 1
   echo "$(echo "$h" | sed -n 2p),$(echo "$h" | tail -2 | head -1)"
 }
+starts() { # 그림자 감독 로그(logs/supervisor/<ENG>_<종류>_<목록>_<날짜>.log)의 «SUPERVISOR starting» 시각(초, 쉼표) -- 도구가 그 앞뒤 Rust 빈 구간을 뺀다
+  local k f pre
+  for k in $COVK; do
+    pre="${ENG}_${k}_"; [ -z "$SELV" ] || [ "$GROUP" = 1 ] || pre="${ENG}_${k}_${SEL//[,:]/_}_"
+    for f in logs/supervisor/${ENG}_${k}_*.log; do [ -f "$f" ] || continue
+      [[ "$(basename "$f" | tr '[:lower:]' '[:upper:]')" == "$(echo "$pre" | tr '[:lower:]' '[:upper:]')"* ]] || continue
+      grep -h 'SUPERVISOR starting' "$f" | sed -nE 's/^\[([^]]+)\].*/\1/p'
+    done
+  done | while read -r t; do date -d "$t" +%s 2>/dev/null; done | sort -un | paste -sd,
+}
+in_list() { local x; for x in ${1//,/ }; do [[ ",$2," == *",$x,"* ]] || return 1; done; }   # 앞 목록이 모두 뒤 목록에 있나
+coverage() { # 그림자 Rust 프로세스들이 파이썬 목록 전부를 덮는가(덮지 않는 종목이 있으면 그 종목은 견준 적이 없다 → 불통과)
+  local cv="${SELV:-${COPY%% *}}" pl="" rl="" p k v x miss=""
+  [ -n "$cv" ] || return 0
+  for p in $( [ "$KIND" = hl_ctx ] && { XV=""; py_procs any; } || py_procs); do   # hl_ctx 는 CTX_ONLY·전체 모드 둘 다 hl_ctx.sqlite 에 쓴다
+    v="$( [ -n "$SELV" ] && py_sel "$p" || envof "$p" "$cv")"; pl="${pl:+$pl,}$(nrm "$v")"
+  done
+  [ -n "$pl" ] || { echo "  목록: 파이썬 $cv 를 못 읽음(수집기가 안 돌거나 기본값) -- 덮음 확인 건너뜀"; return 0; }
+  for p in $(pgrep -x "$ENG"); do
+    k="$(envof "$p" "${ENGU}_KIND")"; [[ " $COVK " == *" $k "* ]] || continue
+    [ "$(envof "$p" "${ENGU}_TAKEOVER")" = 1 ] && continue
+    [ "$XR" = 0 ] || { x="$(envof "$p" "$XV")"; [ "${x:-$XD}" = "$XW" ] || continue; }
+    v="$(envof "$p" "${RVAR:-$cv}")"; [ -z "$v" ] || rl="${rl:+$rl,}$(nrm "$v")"
+  done
+  for x in ${pl//,/ }; do in_list "$x" "$rl" || miss="${miss:+$miss,}$x"; done
+  if [ -n "$miss" ]; then echo "  🔴목록: 파이썬 $cv=$pl 중 그림자 Rust 가 안 뜨는 종목 $miss (그림자 목록 ${rl:-없음})"; return 1; fi
+  echo "  목록: 파이썬 $cv=$pl 전부 그림자가 뜬다"
+}
 check() {
   local n=0 m=0 rc=0 e mode py rs out h f d0 d1
+  ST="$(starts)"
+  echo "  그림자 감독 기동 시각 $(echo "$ST" | tr , '\n' | grep -c .)개(로그) -- 그 앞뒤 Rust 빈 구간은 뺀다"
+  coverage || rc=1
   for e in $CHK; do
     IFS=: read -r mode py rs <<< "$e"
-    [ -e "$rs" ] || { echo "  $e: 그림자 출력 없음 -- 그림자를 먼저 띄운다"; rc=1; continue; }
+    [ -n "$rs" ] && [ -z "$(for f in ${rs//+/ }; do [ -e "$f" ] || echo x; done)" ] || { echo "  $e: 그림자 출력 없음 -- 그림자를 먼저 띄운다"; rc=1; continue; }
     [ -e "$py" ] || { echo "  $e: 파이썬 출력 없음"; rc=1; continue; }
     case "$mode" in
-      sq)     out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "$py" "$rs" --summary)" ;;
+      sq)     out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "$py" "$rs" --starts "$ST" --summary)" ;;
       events) out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" --events "$py" "$rs" --summary)" ;;
       json)   out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" --json 'liq_tab_*.json' "$py" "$rs" --summary)" ;;
-      duck)   out="$(nice -n 10 "$PYC" "$TOOLS/shadow_duck.py" "$py" "$rs" --summary)" ;;
+      duck)   out="$(nice -n 10 "$PYC" "$TOOLS/shadow_duck.py" "$py" "$rs" --starts "$ST" --summary)" ;;
       depth|raster) h="$(hours "$rs")" || { echo "  $e: 그림자 시 파일이 3개 미만"; rc=1; continue; }
-              out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "--$mode" "$py" "$rs" --hours "$h" --summary)" ;;
+              out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "--$mode" "$py" "$rs" --hours "$h" --starts "$ST" --summary)" ;;
       lake)   d0="$(ls -d "$rs"/*/*/coin=*/date=* 2>/dev/null | sed 's/.*date=//' | sort | head -1)"; d1="$(ls -d "$rs"/*/*/coin=*/date=* 2>/dev/null | sed 's/.*date=//' | sort | tail -1)"
               [ -n "$d0" ] || { echo "  $e: 그림자 lake 가 비었다"; rc=1; continue; }
               out="$(nice -n 10 "$PYC" "$TOOLS/shadow_duck.py" --lake "$py" "$rs" --days "$d0,$d1" --summary)" ;;
       duckdir) out=""
               for f in "$rs"/*.duckdb; do [ -e "$py/$(basename "$f")" ] || continue
-                out+="$(nice -n 10 "$PYC" "$TOOLS/shadow_duck.py" "$py/$(basename "$f")" "$f" --summary)"$'\n' || rc=1; done; true ;;
+                out+="$(nice -n 10 "$PYC" "$TOOLS/shadow_duck.py" "$py/$(basename "$f")" "$f" --starts "$ST" --summary)"$'\n' || rc=1; done; true ;;
     esac
     [ "$?" = 0 ] || rc=1
     echo "$out" | grep -v '^요약' | sed 's/^/  /' | head -40
@@ -136,13 +160,13 @@ py_procs() { # [any] -- any 면 종목을 안 본다
     echo "$pid"
   done
 }
-rs_procs() { # shadow|takeover
+rs_procs() { # shadow|takeover [any]
   local pid t
   for pid in $(pgrep -x "$ENG"); do
     [ "$(envof "$pid" "${ENGU}_KIND")" = "$RK" ] || continue
     t="$(envof "$pid" "${ENGU}_TAKEOVER")"; if [ "$1" = takeover ]; then [ "$t" = 1 ] || continue; else [ "$t" = 1 ] && continue; fi
     [ "$XR" = 0 ] || { local x; x="$(envof "$pid" "$XV")"; [ "${x:-$XD}" = "$XW" ] || continue; }
-    if [ -n "$SELV" ] && [ "$GROUP" = 0 ]; then local v; v="$(envof "$pid" "${RVAR:-$SELV}")"; [ "$(nrm "${v:-$SELD}")" = "$SEL" ] || continue; fi
+    if [ -n "$SELV" ] && [ "$GROUP" = 0 ] && [ "${2:-}" != any ]; then local v; v="$(envof "$pid" "${RVAR:-$SELV}")"; [ "$(nrm "${v:-$SELD}")" = "$SEL" ] || continue; fi
     echo "$pid"
   done
 }
@@ -214,6 +238,38 @@ PY
 }
 mt() { find $W -maxdepth 1 -type f -printf '%T@\n' 2>/dev/null | sort -n | tail -1 | cut -d. -f1; }
 logs_glob() { ls logs/supervisor/${ENG}_${RK}_*.log 2>/dev/null; }
+
+# ── 종목 = 도는 파이썬 수집기의 목록 통째로 ── 인자가 없으면 그 종류(XV 조건)의 수집기 하나 · 있으면 그 종목이 든 수집기(인자가 목록이면 모두 든 것)
+resolve() {
+  [ -n "$SELV" ] && [ "$GROUP" = 0 ] || return 0
+  local want hit=() p l
+  want="$(nrm "$ARG")"
+  for p in $(py_procs any); do
+    l="$(nrm "$(py_sel "$p")")"
+    { [ -z "$want" ] || in_list "$want" "$l"; } && hit+=("$p:$l")
+  done
+  if [ ${#hit[@]} = 0 ] && [ "$MODE" = back ]; then   # 되돌릴 때는 파이썬이 꺼져 있다 -- 진짜 경로 Rust 의 목록으로
+    for p in $(rs_procs takeover any); do
+      l="$(nrm "$(envof "$p" "${RVAR:-$SELV}")")"
+      { [ -z "$want" ] || in_list "$want" "$l"; } && hit+=("$p:$l")
+    done
+  fi
+  case ${#hit[@]} in
+    0) ;;
+    1) SEL="${hit[0]#*:}" ;;
+    *) die "맞는 파이썬 수집기가 여럿 -- 종목을 좁힌다(pid:목록): ${hit[*]}" ;;
+  esac
+}
+resolve
+SYML="$(echo "$SEL" | tr '[:upper:]' '[:lower:]')"
+case "$KIND" in   # 종목마다 경로가 갈리는 종류(이 종류들은 수집기 하나 = 종목 하나)
+  depth)   CHK="depth:data/live/orderflow/depthdiff/$SEL:data/live/rtcollect/orderflow/depthdiff/$SEL"; W="data/live/orderflow/depthdiff/$SEL" ;;
+  raster)  CHK="raster:data/live/orderflow/raster/$SEL:data/live/rtcollect/orderflow/raster/$SEL"; W="data/live/orderflow/raster/$SEL" ;;
+  ob5m)    TENV="OB_DB=data/live/ob5m/$SYML.sqlite"; CHK="sq:data/live/ob5m/$SYML.sqlite:data/live/rtcollect/ob5m/$SYML.sqlite"; W="data/live/ob5m/$SYML.sqlite data/live/ob5m/$SYML.sqlite-wal" ;;
+  iceberg) c="${SYML%usdt}"; CHK="events:data/live/iceberg/${c}_events.jsonl:data/live/rtcollect/iceberg/${c}_events.jsonl"; W="data/live/iceberg/${c}_state.json" ;;
+  hl_trades) d="${SEL//,/_}"; CHK="duckdir:data/live/orderflow/hyperliquid/$d:data/live/rtduck/orderflow/hyperliquid/$d"; W="data/live/orderflow/hyperliquid/$d" ;;
+esac
+TAG="$KIND"; [ -z "$SELV" ] || [ "$GROUP" = 1 ] || TAG="${KIND}_${SEL//[,:]/_}"
 
 # ── 실행 ──
 [ "$MODE" = check ] && { check; exit $?; }
