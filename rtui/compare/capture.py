@@ -134,6 +134,14 @@ def open_rt(br, g):
     pr.on("requestfailed", lambda r: print("rtui reqfail", r.url))
     pr.goto(f"http://fx.invalid/rtui/index.html?mode=shot&{q}{os.environ.get('RTUI_Q', '')}")   # RTUI_Q='&aa=0' 처럼 컨텍스트 속성(rtui/bench/README.md)
     pr.wait_for_function("window.RESULT", timeout=20_000, polling=100)
+    # 청산 동그라미는 신호 → 이력 두 번 물은 뒤에 온다 -- 첫 장면이 그보다 먼저 찍히면 원이 없다(2026-11-21 한 번 실제로 0/10). 올 때까지 기다렸다 장면을 다시 받는다
+    if (FX / "liquidation-5m-history.json").is_file():
+        try:
+            pr.wait_for_function("() => { const s = window.rtui_scene && window.rtui_scene(); return s && JSON.parse(s).prims.some((p) => p.g === 'liq'); }", timeout=8_000, polling=100)
+        except Exception:
+            print("rtui: 청산 동그라미가 8초 안에 안 옴")
+        pr.wait_for_timeout(300)
+        pr.evaluate("() => { window.RESULT = { ...window.RESULT, ...JSON.parse(window.rtui_scene()) }; }")
     return pr
 
 

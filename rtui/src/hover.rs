@@ -10,17 +10,18 @@ use crate::profile;
 #[derive(Clone, Copy, Debug)]
 pub enum Tc { White, Dim, C(Col, f32) }
 
-/// 한 줄 = 글자 조각들 · 크기 · 아래 여백(b 블록 margin-bottom 4px) · 빈 줄 = <br> 만 있는 줄
-pub struct TipLine { pub runs: Vec<(String, Tc)>, pub size: f32, pub mb: f32 }
+/// 한 줄 = 글자 조각들(글자 · 색 · 굵기 400|700 -- <b>·font-weight:700 조각) · 크기 · 아래 여백(b 블록 margin-bottom 4px) · 빈 줄 = <br> 만 있는 줄
+/// 글꼴 = --font-mono(JetBrains Mono · 한글은 Pretendard 로 떨어짐 -- draw::mono)
+pub struct TipLine { pub runs: Vec<(String, Tc, u16)>, pub size: f32, pub mb: f32 }
 
 /// 툴팁: 줄 · 줄바꿈 폭(white-space:normal + max-width 360 -- 델타·TPO 풀이) · 마우스(화면 px) · 그린 상자(draw::tip 이 채운다)
 pub struct Tip { pub lines: Vec<TipLine>, pub wrap: Option<f32>, pub at: [f64; 2], pub x: f64, pub y: f64, pub w: f64, pub h: f64 }
 
 pub struct Hover { pub prims: Vec<Prim>, pub tip: Option<Tip> }
 
-fn line(runs: Vec<(String, Tc)>) -> TipLine { TipLine { runs, size: 11.0, mb: 0.0 } }
-fn b(s: String, c: Tc) -> TipLine { TipLine { runs: vec![(s, c)], size: 12.0, mb: 4.0 } }
-fn w(s: impl Into<String>) -> (String, Tc) { (s.into(), Tc::White) }
+fn line(runs: Vec<(String, Tc, u16)>) -> TipLine { TipLine { runs, size: 11.0, mb: 0.0 } }
+fn b(s: String, c: Tc) -> TipLine { TipLine { runs: vec![(s, c, 700)], size: 12.0, mb: 4.0 } } // <b> = bold
+fn w(s: impl Into<String>) -> (String, Tc, u16) { (s.into(), Tc::White, 400) }
 fn round(v: f64) -> f64 { (v + 0.5).floor() } // JS Math.round
 fn sgn_q(v: f64) -> String { format!("{}{}", if v >= 0.0 { "+" } else { "−" }, fmt_qty(v.abs())) } // 11132 sgnQ
 fn usd(v: f64) -> String { // 2064 fmtUsdCompact
@@ -28,7 +29,7 @@ fn usd(v: f64) -> String { // 2064 fmtUsdCompact
 }
 
 /// (mx, my) = svg 좌표 · at = 마우스 화면 px(툴팁 자리) · measure = 글자 폭
-pub fn hover(sc: &Scene, mx: f64, my: f64, at: [f64; 2], tz_off_min: i64, measure: &dyn Fn(&str, f64) -> f64) -> Hover {
+pub fn hover(sc: &Scene, mx: f64, my: f64, at: [f64; 2], tz_off_min: i64, measure: &dyn Fn(&str, f64, u16) -> f64) -> Hover {
     let g = &sc.g;
     let (mut prims, mut tip) = (vec![], None);
     let n = Clip::No;
@@ -39,9 +40,9 @@ pub fn hover(sc: &Scene, mx: f64, my: f64, at: [f64; 2], tz_off_min: i64, measur
         prims.push(dash(vec![[g.ml, my], [g.w - g.mr, my]]));
         let by = g.mt.max((g.plot_bottom - 18.0).min(my - 9.0));
         let s = tnum(&to_fixed(price_at, sc.dp));
-        let bw = measure(&s, 12.0) + 18.0;
+        let bw = measure(&s, 12.0, 700) + 18.0;
         prims.push(Prim::Rect { x: g.x_rr - bw, y: by, w: bw, h: 18.0, c: Col::Accent, a: 1.0, rx: 9.0, clip: n });
-        prims.push(Prim::Text { x: g.x_rr - 9.0, y: by + 13.0, s, size: 12.0, c: Col::OnFill, a: 1.0, anchor: Anchor::End, halo: false, clip: n });
+        prims.push(Prim::Text { x: g.x_rr - 9.0, y: by + 13.0, s, size: 12.0, wt: 700, c: Col::OnFill, a: 1.0, anchor: Anchor::End, halo: false, clip: n });
     }
     let (d_x0, _, t_x0) = profile::cols(g);
     if let Some(dt) = sc.dt.as_ref().filter(|_| mx > d_x0 && mx < t_x0 + g.dt_w) {
@@ -52,18 +53,18 @@ pub fn hover(sc: &Scene, mx: f64, my: f64, at: [f64; 2], tz_off_min: i64, measur
             let dp = 1.max(format!("{}", g.off).split('.').nth(1).map_or(0, str::len));
             let pct = |v: f64| format!("{}%", round(100.0 * v / a[2].max(1e-9)));
             let up = a[0] >= 0.0;
-            let mut l4 = vec![(format!("TPO {}/{}봉", a[1], dt.n_bars), Tc::C(Col::Muted, 1.0)), w(" — 이 가격에 체결이 있던 봉 수")];
+            let mut l4 = vec![(format!("TPO {}/{}봉", a[1], dt.n_bars), Tc::C(Col::Muted, 1.0), 700), w(" — 이 가격에 체결이 있던 봉 수")];
             if k == dt.t_k { l4.push(w(" · 최다(POC)")); }
             l4.push(w(if k >= dt.va_lo && k <= dt.va_hi { " · 가치 영역(70%) 안" } else { " · 가치 영역 밖" }));
             if a[1] == 1.0 { l4.push(w(" · 한 번만 지난 가격")); }
             tip = Some(vec![
                 line(vec![w(format!("{}–{}", to_fixed(k as f64 * g.row_size - g.off, dp), to_fixed((k + 1) as f64 * g.row_size - g.off, dp)))]),
-                line(vec![(format!("델타 {}{} {}", if up { "+" } else { "−" }, fq(a[0].abs()), sc.unit), Tc::C(if up { Col::Good } else { Col::Bad }, 1.0)),
+                line(vec![(format!("델타 {}{} {}", if up { "+" } else { "−" }, fq(a[0].abs()), sc.unit), Tc::C(if up { Col::Good } else { Col::Bad }, 1.0), 700),
                           w(format!(" (오른쪽 막대 · {} 우위 · 테이커 기준)", if up { "매수" } else { "매도" }))]),
-                line(vec![(format!("체결 {} {}", fq(a[2]), sc.unit), Tc::C(Col::Amber, 1.0)),
+                line(vec![(format!("체결 {} {}", fq(a[2]), sc.unit), Tc::C(Col::Amber, 1.0), 700),
                           w(format!(" (왼쪽 막대) · 고래 {} · 리테일 {}{}", pct(a[3]), pct(a[4]), if Some(k) == dt.tot_k { " · 최다 체결" } else { "" }))]),
                 line(l4),
-                line(vec![(format!("보이는 봉 {}개 합 · 30분 문자표 TPO 가 아니라 5분봉 수 · 참고, 신호 아님", dt.n_bars), Tc::C(Col::Muted, 0.7))]),
+                line(vec![(format!("보이는 봉 {}개 합 · 30분 문자표 TPO 가 아니라 5분봉 수 · 참고, 신호 아님", dt.n_bars), Tc::C(Col::Muted, 0.7), 400)]),
             ]).map(|lines| Tip { lines, wrap: Some(360.0), at, x: 0.0, y: 0.0, w: 0.0, h: 0.0 });
         }
     } else if !(mx < g.ml || mx > g.w - g.mr || mx > g.ml + g.cw) { // 10870 기둥 칸 빈 곳 = 봉 툴팁 아님
@@ -98,7 +99,7 @@ pub fn hover(sc: &Scene, mx: f64, my: f64, at: [f64; 2], tz_off_min: i64, measur
                 lines.push(line(vec![]));
                 lines.push(b(qname(r.delta).into(), Tc::C(col, 1.0)));
                 lines.push(line(vec![w(format!("· 델타 {} · 신규계약 모름 {}", sgn_q(r.delta), sc.unit))]));
-                lines.push(line(vec![(format!("거래대금 {}", usd(r.turn)), Tc::C(Col::Turnover, 1.0))]));
+                lines.push(line(vec![(format!("거래대금 {}", usd(r.turn)), Tc::C(Col::Turnover, 1.0), 400)]));
                 if let Some(d) = r.dhl { lines.push(line(vec![w(format!("봉 안 델타 최고 {} · 최저 {} · 마감 {} {}", sgn_q(d[1]), sgn_q(d[0]), sgn_q(d[2]), sc.unit))])); }
             }
         }

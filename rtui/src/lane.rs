@@ -30,7 +30,7 @@ fn union(v: Vec<(Col, f64, [f64; 4])>, l: Clip) -> Vec<Prim> {
 pub fn qname(d: f64) -> &'static str { if d >= 0.0 { "매수 우위" } else { "매도 우위" } }
 
 /// (fg 캔버스 칠하기, svg 글자)
-pub fn draw(g: &Geo, rows: &[Option<Row>], measure: &dyn Fn(&str, f64) -> f64) -> (Vec<Prim>, Vec<Prim>) {
+pub fn draw(g: &Geo, rows: &[Option<Row>], measure: &dyn Fn(&str, f64, u16) -> f64) -> (Vec<Prim>, Vec<Prim>) {
     let (mut fg, mut svg) = (vec![], vec![]);
     if !rows.iter().any(Option::is_some) { return (fg, svg); } // 11160
     let l = Clip::Lane;
@@ -56,7 +56,7 @@ pub fn draw(g: &Geo, rows: &[Option<Row>], measure: &dyn Fn(&str, f64) -> f64) -
         let (x, wd) = (g.x_at(i) + 1.0, (g.slot - 2.0).max(1.0));
         fg.push(rect(x, top, wd, rib, col, 0.12, 3.0));
         if g.slot >= 52.0 {
-            svg.push(Prim::Text { x: x + wd / 2.0, y: top + rib / 2.0 + 4.5, s: qname(r.delta).into(), size: 12.0, c: col, a: 1.0, anchor: Anchor::Middle, halo: false, clip: l });
+            svg.push(Prim::Text { x: x + wd / 2.0, y: top + rib / 2.0 + 4.5, s: qname(r.delta).into(), size: 12.0, wt: 700, c: col, a: 1.0, anchor: Anchor::Middle, halo: false, clip: l });
         }
     }
     for (k, i) in rib_col { let r = rows[i].as_ref().unwrap(); un.push((if r.delta >= 0.0 { Col::Good } else { Col::Bad }, 0.12, [k as f64, top, 1.0, rib])); }
@@ -102,8 +102,8 @@ pub fn draw(g: &Geo, rows: &[Option<Row>], measure: &dyn Fn(&str, f64) -> f64) -
     }
     // 11215-11216 범례(svg 10px · 두 tspan -- 겹 빈칸은 하나로 접힌다)
     let (lx, ly, t1) = (g.ml + 4.0, chart_top + 9.0, "▮ 봉 안 델타 (몸통 = 마감 · 꼬리 = 봉 안 최고·최저 · √ 눈금)");
-    svg.push(Prim::Text { x: lx, y: ly, s: t1.into(), size: 10.0, c: Col::Muted, a: 1.0, anchor: Anchor::Start, halo: false, clip: Clip::No });
-    svg.push(Prim::Text { x: lx + measure(t1, 10.0), y: ly, s: " ─ 거래대금".into(), size: 10.0, c: Col::Turnover, a: 1.0, anchor: Anchor::Start, halo: false, clip: Clip::No });
+    svg.push(Prim::Text { x: lx, y: ly, s: t1.into(), size: 10.0, wt: 400, c: Col::Muted, a: 1.0, anchor: Anchor::Start, halo: false, clip: Clip::No });
+    svg.push(Prim::Text { x: lx + measure(t1, 10.0, 400), y: ly, s: " ─ 거래대금".into(), size: 10.0, wt: 400, c: Col::Turnover, a: 1.0, anchor: Anchor::Start, halo: false, clip: Clip::No });
     (fg, svg)
 }
 
