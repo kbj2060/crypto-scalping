@@ -74,6 +74,15 @@ M = [
     ("deribit 창 24 → 25시간", "src/deribit.rs", "pub const STATE_WINDOW_MS: i64 = 24 * 3600 * 1000;", "pub const STATE_WINDOW_MS: i64 = 25 * 3600 * 1000;", ["deribit_parity"]),
     ("deribit USDC 선형 헤지도 ÷가격", "src/deribit.rs", "let d = if f.instrument_name.contains(\"_USDC\") {", "let d = if false {", ["deribit_parity"]),
     ("deribit 하트비트 답 안 함", "src/main.rs", "                    if p[\"type\"] == \"test_request\" {", "                    if false {", ["deribit_loop"]),
+    ("GEX 실현7일 캐시 6시간 → 0", "src/deribit_gex.rs", "hit.filter(|h| now - h.0 < 6.0 * 3600.0)", "hit.filter(|h| now - h.0 < 0.0)", ["deribit_gex_parity"]),
+    ("GEX USDC 목록 캐시 60초 → 0", "src/deribit_gex.rs", "filter(|h| now - h.0 < 60.0)", "filter(|h| now - h.0 < 0.0)", ["deribit_gex_parity"]),
+    ("GEX 지수 실패 = 0(중앙값 대신)", "src/deribit_gex.rs", ".unwrap_or_else(|| median(&mut chain.iter().map(|c| c.und).collect::<Vec<_>>()))", ".unwrap_or(0.0)", ["deribit_gex_parity"]),
+    ("GEX vov24 12시간 → 40", "src/deribit_gex.rs", "if v.len() >= 12 {", "if v.len() >= 40 {", ["deribit_gex_parity"]),
+    ("GEX ATM 미결제 07시 → 08시", "src/deribit_gex.rs", "s / 3600 == 7 && s / 60 % 60 < 10", "s / 3600 == 8 && s / 60 % 60 < 10", ["deribit_gex_parity"]),
+    # (뺌) «GEX 보험 12시간 → 0»: 이 정답지에선 같은 변이 -- 정답지 시각 = 진짜 시계(DuckDB now() 때문)라 뜰 때 가장 가까운 만기(내일 08:00 UTC)가 12시간 넘게 남아 두 규칙이 같은 만기 둘을 고른다(2026-11-21 «통과»).
+    ("deribit ΔOI 다음 시각 = +2", "src/deribit.rs", "AND b.h = a.h + 1", "AND b.h = a.h + 2", ["deribit_recon_parity"]),
+    ("deribit 대조 강제청산 표시 안 함", "src/deribit.rs", "            for (l, id) in &liq {", "            for (l, id) in liq.iter().take(0) {", ["deribit_recon_parity"]),
+    ("deribit RFQ 다음 쪽 안 따라감", "src/deribit.rs", "if cont.is_none() || got.is_empty() ||", "if true ||", ["deribit_recon_parity"]),
     ("청산탭 앞쪽 메움 안 함", "src/liq_tab.rs", "        if mn > need + DAY {", "        if false {", ["liq_tab_parity"]),
 ]
 

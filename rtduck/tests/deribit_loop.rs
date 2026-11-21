@@ -74,7 +74,7 @@ fn deribit_binary_loop() {
         }
     });
     let child = std::process::Command::new(env!("CARGO_BIN_EXE_rtduck"))
-        .env("RTDUCK_KIND", "deribit").env("DERIBIT_BT_DIR", &dir).env("RTDUCK_REST", "1").env("RTDUCK_DERIBIT_FLUSH_S", "0.5")
+        .env("RTDUCK_KIND", "deribit").env("DERIBIT_BT_DIR", &dir).env("RTDUCK_REST", "1").env("RTDUCK_DERIBIT_CHAIN", "0").env("RTCOLLECT_TEST", "1").env("RTDUCK_DERIBIT_FLUSH_S", "0.5")
         .env("RTDUCK_DERIBIT_WS", format!("ws://127.0.0.1:{wp}/ws/api/v2")).env("RTDUCK_DERIBIT_REST", format!("http://127.0.0.1:{rp}/api/v2/public/get_last_trades_by_currency_and_time"))
         .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
     while seen.lock().unwrap().iter().filter(|x| x.0 == 1).count() < 2 && t0.elapsed() < Duration::from_secs(30) {

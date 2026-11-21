@@ -43,7 +43,7 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | soxl_weekend_forward | 매일 | JSONL | 판정 | soxl_wknd1·2 | 안 옮김 | 바이낸스 REST + 규칙 계산 |
 | macro_bias_forward | 주말 | JSONL | 판정 | fwd_macro_regime | 안 옮김 | pandas 계산 |
 | risk_radar · regime_band · eth_direction_forward_recorder | 매분·매시·매일 | JSON·JSONL | 화면·판정 | regime: fwd_band · dir: dir4h_p2·dir3asset | **rtmodel** | 모델 예측 기록 |
-| seal_to_lake | 매일 | Parquet | 전진 다수 · 감시 | 여럿 | **옮김** `rtduck seal`(30 스트림 · hot 정리 · seal_status) | 원본도 DuckDB COPY · SQLite 는 rusqlite → 임시 DuckDB(sqlite_scanner 형 규칙) · 스트림별 «원본 dry-run = 전부 건너뜀» · 🔴서버 1.5.1 sqlite 확장 확인 대기 |
+| seal_to_lake | 매일 | Parquet | 전진 다수 · 감시 | 여럿 | **옮김** `rtduck seal`(30 스트림 · hot 정리 · seal_status) | 원본도 DuckDB COPY · SQLite 는 rusqlite → 임시 DuckDB(sqlite_scanner 형 규칙) · 스트림별 «원본 dry-run = 전부 건너뜀» · 서버 1.5.1 sqlite 확장 확인함(실자료 4 스트림) |
 | 월간 학습(dir4h·vol4h·dir_short·box_hold Platt) | 월간 | joblib | 서빙 | 여럿 | 파이썬 유지(학습) | — |
 | raw_failover · data_quality_monitor · morning_audit · multicoin_collectors · gen_data_map · verdict_ledger_health · backup | 여러 | JSON·보고 | 감시·사용자 | — | 범위 밖(R7 운영) | — |
 
@@ -79,7 +79,7 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | 상주 | HL 포지션 `hl_positions` | 옮김 | rtduck | ×2 -- 🔴가중치 600/분 → 1,200 = HL 한도 100%(전환 때만 켬) |
 | 상주 | market_data_worker `market_data` | 옮김 | rtduck | ×2 -- 미시구조 36/분 → 72(기본 꺼짐) |
 | 상주 | 뉴스 RSS `news` | 옮김 | rtcollect(quick-xml · regex) | ×2 -- 바깥 8곳(429 본 피드 있음) · 그림자 등록 후보에서 뺌 |
-| 상주 | deribit 블록체결·GEX | **반쯤** `rtduck deribit` = 체결 WS·백필·블록 구조·상태 JSON(①) · 체인·요약(②)·대조(③) 남음 | rtduck | Deribit REST 백필 ×2(재접속 때만 · 기본 꺼짐) |
+| 상주 | deribit 블록체결·GEX | **옮김** `rtduck deribit` = 체결 WS·백필·블록 구조·상태 JSON(①) · 10분 체인·요약·deribit_gex_state(②) · 매시 대조(③) | rtduck | REST 켜면 ×2: 체인 4코인 10분마다(목록 3 + 지수·DVOL·실현7일) · OKX·Bybit 옵션 · 매시 history(목록 3 × 쪽) · 기본 꺼짐 |
 | 상주 | SR lean | rtmodel | — | — |
 | 상주 | 푸시·SR 근접 알림 | 범위 밖(알림) | — | — |
 | 예약 | treasury_futures · macro_5m | 옮김 | rtcollect | ×2 -- 🔴Yahoo 429 위험 · 기본 안 켬 |
@@ -89,12 +89,12 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 | 예약 | liq_tab | 옮김 `liq_tab` | rtduck | ×1(그림자 = REST 끄고 파이썬 1h 봉 캐시 복사) · 켜면 ×2(코인당 1회/시) |
 | 예약 | soxl_weekend_forward | 옮김 `soxl_weekend`(`--record`·`--status`) | rtcollect | ×2 -- 새 주말마다 9요청 → 18/주 |
 | 예약 | macro_bias_forward · macro_daily | 안 옮김(조정자 결정) | — | (FRED 키·Yahoo·재무부·DefiLlama) · 막는 것 = 위 조사 표 |
-| 예약 | seal_to_lake | **옮김** `rtduck seal` -- 30 스트림 · hot 정리(TAKEOVER 때만) · seal_status · 스트림별 지문 같음(SQLite 13 + 섞임 2 + DuckDB 1) -- 🔴1.5.1 sqlite 확장 형 대응은 서버 확인 대기 | rtduck | ×1(REST 없음) |
+| 예약 | seal_to_lake | **옮김** `rtduck seal` -- 30 스트림 · hot 정리(TAKEOVER 때만) · seal_status · 스트림별 지문 같음(SQLite 13 + 섞임 2 + DuckDB 1) -- 1.5.1 sqlite 확장 형 대응 서버 확인함(실자료 4 스트림 전부 건너뜀) | rtduck | ×1(REST 없음) |
 | 예약 | risk_radar · regime_band · eth_direction_forward | rtmodel | — | — |
 | 예약 | 월간 학습 | 파이썬 유지 | — | — |
 | 예약 | raw_failover · dqm · morning_audit · multicoin · gen_data_map · verdict_ledger_health · backup | 범위 밖(R7 운영) | — | — |
 
-**요약**: 상주 옮김 19(rtcollect 15 · rtduck 4) · 반쯤 1(deribit -- 체결·블록·상태 JSON 까지 · 체인·요약·대조 남음) · rtmodel 1 · 범위 밖 1 /
+**요약**: 상주 옮김 20(rtcollect 15 · rtduck 5) · deribit 옮김 · rtmodel 1 · 범위 밖 1 /
 예약 옮김 8(treasury · macro_5m · cboe+요약기 · liqmap_scorer · soxl_weekend · 래스터 보관 · liq_tab · seal_to_lake) · 안 옮김 2(macro_bias · macro_daily -- 조정자 결정) · seal_to_lake 옮김(예약 옮김 8) · rtmodel 3.
 옮기지 않은 «불확실»: 뉴스 판정·ollaya · prometheus · trend_core_forward · f4c altdata · llm_brief / «안 쓰임»: 돌파 워커 · 신호 워커 · maxpain 기록기 · maker_fill_shadow.
 
@@ -147,4 +147,39 @@ f4c altdata · llm_brief)은 빼고 끝에 따로 적었다. 모델을 서빙하
 순서 제안: ① 체결 WS + 블록 묶음 + 상태 JSON(블록 몫) → ② 체인·요약(pandas 450줄) → ③ 시간당 대조. 🔴단일 writer: 그림자는 다른 duckdb 파일에(원본과 같은 파일이면 하나가 죽는다).
 
 **deribit 진행(2026-11-21 열째 조각)**: ① 체결 WS + 블록 구조 13종(+single·other·future_only) + 상태 JSON = 옮김(원본 write() 세 번·backfill 과 글자 일치 · GEX 함수는 `_parse_instrument`·`_bs_delta` 만 값 보존으로) ·
-② 체인·GEX·옵션 요약(pandas 450줄 · deribit_gex_state.json) · ③ 시간당 history 대조 -- 남음.
+② 체인·GEX·옵션 요약 · ③ 시간당 history 대조 = 옮김(열한째 조각 -- SHADOW.md §17).
+
+
+## 서버에서 옮겨 켤 때 순서 (초안 · 2026-11-21 열한째 조각 · 실행하지 않음 -- 사용자 승인 뒤 하나씩)
+
+**원칙**: 한 번에 하나 · 옮긴 뒤 최소 24시간 지켜보고 다음 · 위(원천)부터 아래(읽는 것)로 · 전진 검정이 읽는 것은 맨 끝에 따로 승인.
+쓰는 쪽은 경로를 안 바꾼다(읽는 쪽 server.py·감시·seal 은 그대로) -- Rust 가 원래 파일을 이어 쓴다(이어 써도 같은 행 · 각 조각에서 확인).
+
+**한 스트림의 걸음**
+1. 그림자: Rust 를 그림자 경로(기본값)로 띄운다(상주 = `supervisor_rtcollect.sh`·`supervisor_rtduck.sh` · 예약 = SHADOW.md §15 줄). REST 는 원칙적으로 끈다(SHADOW.md 배수 표).
+2. 대조 통과 기준: 그림자 N 일(상주 3일 · 예약 = 그 주기 셋 이상) 동안 매일 두 파일을 사본으로 떠서 대조 -- **설명 못 하는 차이 0** 이 연속 2일.
+   설명되는 차이 = SHADOW.md §11 의도한 차이 #1~#22 · 재연결 공백(gaps 끼리 빼고) · REST 를 끈 그림자에서만 빈 몫. 도구: `shadow_tape.py`(테이프·맥락) · 표 덤프 비교(나머지) · seal 은 `seal(dry_run=True)` 전부 건너뜀.
+3. 옮김: (가) 그 Rust 그림자 감독 → 프로세스 끄기 (나) 파이썬 감독 bash → 파이썬 수집기 끄기 · crontab 줄 주석 (다) Rust 를 `RTCOLLECT_TAKEOVER=1`/`RTDUCK_TAKEOVER=1` + 원래 경로 변수로 띄움(REST 쓰는 종류는 `*_REST=1`) ·
+   crontab 줄 바꿈 (라) 첫 쓰기·신선도(감시 `ops_watchdog`)·대시보드 카드 눈 확인 · 매니페스트 `multicoin_collectors.json` 의 runner 를 rtcollect/rtduck 로(SHADOW.md §9 «감시에 넣을 때»).
+4. 되돌리기: Rust 감독 → Rust 끄기 · crontab 되돌림 · 파이썬 감독 다시 · 끈 사이는 gaps 로 남는다(바이낸스 테이프는 REST 복구가 메움). 파일 형식이 같아 파이썬이 Rust 가 쓴 파일을 그대로 이어 쓴다.
+   🔴DuckDB 파일(oi_lsratio·hl_trades·market_data 둘·deribit·seal lake)은 단일 writer -- 반드시 한쪽을 끈 **뒤** 다른 쪽을 켠다.
+
+**순서(위가 먼저)**
+
+| 차례 | 종류 | 왜 이 차례 | 옮길 때 특이 |
+|---|---|---|---|
+| 1 | rtcollect `hl_ctx` · `xyz` · `hl_bt` | 화면만 읽음 · 전진 없음 | xyz 는 재접속 candleSnapshot REST(×1 로 돌아감) |
+| 2 | rtcollect `depth` | ob5m·bookdepth·iceberg 의 원천 · 간접 전진(fwd_dirshort) | 스냅숏 REST 반드시 켬 |
+| 3 | rtcollect `ob5m` · `bookdepth` · `iceberg` | depth 를 읽기만 | bookdepth = fwd_dirshort 피쳐 -- 대조 기준을 칸 비트로 |
+| 4 | rtcollect `raster` → rtduck `raster_archive` | 화면 히트맵 · 보관은 래스터 뒤 | 보관을 옮기면 파이썬 래스터 수집기의 `_purge_old` 를 끄는 것과 같이(`OF_ARCHIVE=0` 대신 파이썬 쪽 정지) |
+| 5 | rtduck `hl_trades` → `hl_positions` | 포지션이 체결 DuckDB 를 읽음 | hl_positions 는 HL REST 한도 100% 문제 -- 파이썬을 끈 뒤에만 `RTDUCK_REST=1` |
+| 6 | rtduck `oi_lsratio` · `market_data` | 화면 롱숏비·세션·SSE · seal 원천 | 단일 writer · market_data 미시구조 REST 켬 |
+| 7 | rtcollect `bybit_tape`·`okx_tape`·`binance_tape` | 🔴whale_duel1 전진(바이낸스+OKX 테이프) | 사용자 승인 뒤 · 바이낸스 `RTCOLLECT_REST=1`(복구) |
+| 8 | rtcollect `bybit_liq`·`okx_ctx`·`binance_ctx` | 🔴liqmap_fwd 전진(청산·마크) | 사용자 승인 뒤 · binance_ctx OI REST 540/분 -- 파이썬을 끈 뒤에만 켬 |
+| 9 | 예약 rtcollect `liqmap_scorer` · `soxl_weekend` · `cboe_chain`(+요약기) | 🔴전진 장부(liqmap_fwd·soxl_wknd·soxl_own_iv) | 장부 파일을 이어 씀 · 옮기는 날 두 쪽이 같은 줄을 썼는지 확인(이중 줄 금지 -- 파이썬 cron 을 먼저 주석) |
+| 10 | 예약 rtduck `liq_tab` · rtcollect `treasury_futures`·`macro_5m` | 화면 | Yahoo 는 그림자 없이 바로 옮김(×2 를 피하려고 -- 하루 대조는 옮긴 뒤 파이썬 단발 실행과) |
+| 11 | rtcollect `news` | 화면 | 바깥 8곳 -- 그림자 없이 옮김(같은 이유) |
+| 12 | rtduck `deribit` | 옵션 카드 · seal 원천 | 단일 writer · `DERIBIT_BT_DIR=data/live RTDUCK_TAKEOVER=1 RTDUCK_REST=1` · 파이썬 GEX 매시 cron 이 꺼져 있는지 확인 |
+| 13 | rtduck `seal` | 🔴lake = 전진 검정 다수의 원천 · hot 정리 | 맨 끝 · 원천이 모두 안정된 뒤 · `SEAL_LAKE=data/lake SEAL_STATUS=data/live/ops_watchdog/seal_status.json RTDUCK_TAKEOVER=1`(hot 정리가 켜진다) · 첫 날은 `--dry-run` 으로 «전부 건너뜀» 확인 뒤 |
+
+남는 파이썬(옮기지 않음): macro_bias_forward · macro_daily(키 자리 결정 대기) · 월간 학습 · 감시 묶음(R7) · 모델 서빙(rtmodel 몫).

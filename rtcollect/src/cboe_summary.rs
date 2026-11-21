@@ -12,7 +12,7 @@ extern "C" {
     fn pow(x: f64, y: f64) -> f64;
 }
 
-fn erf_(x: f64) -> f64 {
+pub fn erf_(x: f64) -> f64 {
     unsafe { erf(x) }
 }
 fn pow_(x: f64, y: f64) -> f64 {
@@ -170,7 +170,7 @@ fn gradient_x(f: &[f64], x: &[f64]) -> Vec<f64> {
     o
 }
 
-fn median(v: &mut [f64]) -> f64 {
+pub fn median(v: &mut [f64]) -> f64 {
     crate::ob5m::np_median(v)
 }
 
@@ -178,7 +178,7 @@ fn pyround(x: f64) -> i64 {
     x.round_ties_even() as i64
 }
 
-fn pyround_n(x: f64, n: usize) -> f64 {
+pub fn pyround_n(x: f64, n: usize) -> f64 {
     format!("{x:.n$}").parse().unwrap()
 }
 
@@ -199,16 +199,17 @@ fn freq(v: &Value) -> Result<f64, String> {
 
 // ── 체인 ────────────────────────────────────────────────────────────────────
 
+/// 체인 한 줄(GEX 계산 도구가 쓰는 칸 -- rtduck deribit_gex 도 같은 도구를 쓴다).
 #[derive(Clone, Debug)]
-struct Row {
-    exp: i64,
-    call: bool,
-    strike: f64,
-    iv: f64,
-    bid: f64,
-    ask: f64,
-    oi: f64,
-    days: f64,
+pub struct Row {
+    pub exp: i64,
+    pub call: bool,
+    pub strike: f64,
+    pub iv: f64,
+    pub bid: f64,
+    pub ask: f64,
+    pub oi: f64,
+    pub days: f64,
 }
 
 /// `chain_frame`(:37-50).
@@ -225,7 +226,7 @@ fn chain_frame(options: &[Value], now: f64) -> Result<Vec<Row>, String> {
     Ok(out)
 }
 
-fn bs_delta(fwd: f64, k: f64, iv_pct: f64, yrs: f64, call: bool) -> f64 {
+pub fn bs_delta(fwd: f64, k: f64, iv_pct: f64, yrs: f64, call: bool) -> f64 {
     let s = iv_pct / 100.0;
     if fwd <= 0.0 || k <= 0.0 || s <= 0.0 || yrs <= 0.0 {
         return 0.0;
@@ -248,7 +249,7 @@ fn argsort_interp(x: &[f64], y: &[f64], x0: f64) -> Option<f64> {
 }
 
 /// `_skew_interp`(D :215-237).
-fn skew_interp(g: &[&Row], fwd: f64, yrs: f64) -> Map<String, Value> {
+pub fn skew_interp(g: &[&Row], fwd: f64, yrs: f64) -> Map<String, Value> {
     let mut out = Map::new();
     out.insert("hours".into(), json!(yrs * 8760.0));
     for k in ["rr25i", "bf25i", "atm_i"] {
@@ -276,7 +277,7 @@ fn skew_interp(g: &[&Row], fwd: f64, yrs: f64) -> Map<String, Value> {
 }
 
 /// `_surface_stats`(D :251-289).
-fn surface_stats(g: &[&Row], fwd: f64, yrs: f64) -> Map<String, Value> {
+pub fn surface_stats(g: &[&Row], fwd: f64, yrs: f64) -> Map<String, Value> {
     let mut out = Map::new();
     for k in ["mfiv", "tail", "rn_skew", "rn_kurt"] {
         out.insert(k.into(), Value::Null);
@@ -330,8 +331,8 @@ fn surface_stats(g: &[&Row], fwd: f64, yrs: f64) -> Map<String, Value> {
     out
 }
 
-/// `_atm_spread_iv`(D :292-308) -- linear=True(USD 호가).
-fn atm_spread_iv(g: &[&Row], fwd: f64, yrs: f64) -> Value {
+/// `_atm_spread_iv`(D :292-308) -- linear = 호가가 USD(cboe · Deribit USDC) · 아니면 × 선도가(Deribit 역옵션).
+pub fn atm_spread_iv(g: &[&Row], fwd: f64, yrs: f64, linear: bool) -> Value {
     let x: Vec<&&Row> = g.iter().filter(|r| (r.strike / fwd - 1.0).abs() <= 0.02 && r.bid > 0.0 && r.ask > r.bid).collect();
     if x.is_empty() || yrs <= 0.0 {
         return Value::Null;
@@ -344,7 +345,7 @@ fn atm_spread_iv(g: &[&Row], fwd: f64, yrs: f64) -> Value {
         }
         let d1 = ((fwd / r.strike).ln() + 0.5 * sig * sig * yrs) / (sig * yrs.sqrt());
         let vega = fwd * (-0.5 * d1 * d1).exp() / (2.0 * std::f64::consts::PI).sqrt() * yrs.sqrt() / 100.0;
-        let spread = (r.ask - r.bid) * 1.0;
+        let spread = (r.ask - r.bid) * (if linear { 1.0 } else { fwd });
         if vega > 0.0 {
             out.push(spread / vega);
         }
@@ -353,7 +354,7 @@ fn atm_spread_iv(g: &[&Row], fwd: f64, yrs: f64) -> Value {
 }
 
 /// `_const_maturity`(D :311-322).
-fn const_maturity(exps: &[Map<String, Value>], days: f64) -> Value {
+pub fn const_maturity(exps: &[Map<String, Value>], days: f64) -> Value {
     let tgt = days * 24.0;
     let f = |e: &Map<String, Value>, k: &str| e.get(k).and_then(Value::as_f64);
     let ok: Vec<&Map<String, Value>> = exps.iter().filter(|e| f(e, "rr25i").is_some() && f(e, "bf25i").is_some() && f(e, "atm_i").is_some()).collect();
@@ -468,7 +469,7 @@ fn gamma_flip(options: &[Value], s: f64, now: f64) -> Value {
 }
 
 /// pandas groupby(strike)[[c, p]].sum() -- 무리마다 Kahan 보정 합(pandas _libs group_sum) · 행사가 오름차순.
-fn ladder(rows: &[(f64, f64, f64)]) -> Vec<Value> {
+pub fn ladder(rows: &[(f64, f64, f64)]) -> Vec<Value> {
     let mut ks: Vec<f64> = rows.iter().map(|r| r.0).collect();
     ks.sort_by(|a, b| a.partial_cmp(b).unwrap());
     ks.dedup();
@@ -584,7 +585,7 @@ pub fn summarize(data: &Value, now: f64) -> Result<Map<String, Value>, String> {
         });
     }
     out.insert("surface".into(), Value::Object(surf));
-    out.insert("atm_spread_iv".into(), pick[1].1.map_or(Value::Null, |i| atm_spread_iv(&exps[i].1, s, exps[i].2)));
+    out.insert("atm_spread_iv".into(), pick[1].1.map_or(Value::Null, |i| atm_spread_iv(&exps[i].1, s, exps[i].2, true)));
     out.insert("front_atm_oi_usd".into(), exps.first().map_or(Value::Null, |e| e.0["atm_oi_usd"].clone()));
     let em: Vec<Map<String, Value>> = exps.iter().map(|e| e.0.clone()).collect();
     out.insert("expiries".into(), Value::from(em.iter().take(8).map(|m| Value::Object(m.clone())).collect::<Vec<_>>()));

@@ -260,7 +260,7 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
   양방향 확인: Rust duckdb 가 원본(pyarrow)이 쓴 parquet 17개를 같은 행으로 읽음 · 서버 판 파이썬(duckdb 1.5.1 · pyarrow 26.0.1)이 Rust 가 쓴 보관본 20개·orderbook.duckdb 뷰를 같은 값으로 읽음.
 - 청산 탭 = 원본 main() 과 liq_tab_<코인>.json · liq_tab_all.json **글자 일치**(정답지는 서버와 같은 numpy 2.2.5·pandas 2.2.3·OpenBLAS ZEN venv -- `rtmodel/tools/server_env.sh` + duckdb 1.5.1).
   값 맞춤에서 찾은 것: numpy 합은 8192칸 묶음마다 짝 합(그 묶음 합을 차례로) · `np.convolve(v, ones(11), "same")` = OpenBLAS ddot 꼬리라 창 안 차례 합(길이 < 11 이면 뒤집힌 차례 · 개발기 MKL numpy 는 다른 차례 -- 정답지를 개발기 numpy 로 뜨면 안 된다) ·
-  `np.round(x, d)` = rint(x·10^d)/10^d(파이썬 round 와 다르다) · 서버에 bottleneck 이 없다는 전제(있으면 median 이 bottleneck 경로 -- 값은 같은 식).
+  `np.round(x, d)` = rint(x·10^d)/10^d(파이썬 round 와 다르다) · 서버에 bottleneck 이 없다(조정자 서버 확인 2026-11-21 -- 전제 맞음).
   1h 봉 캐시는 DuckDB 가 쓴 parquet(t int64 · high·low·close·qv double) -- 서버 판 pandas 가 같은 행·형으로 읽음(되돌리기 때 파이썬이 이어 쓸 수 있다).
   🔴같은 ms 청산이 여럿이면 원본 sort_values(quicksort)와 더하는 순서만 다를 수 있다(정답지엔 없음).
 
@@ -312,13 +312,19 @@ match 의 목록 글자·순서가 감독에 준 것과 같아야 한다. 신선
   🔴hot 정리는 `RTDUCK_TAKEOVER=1` 일 때만 -- 그림자 lake 를 근거로 파이썬 수집기의 hot 행을 지우면 안 된다(그림자 = 봉인만).
   SQLite 원천은 rusqlite 로 읽어 임시 DuckDB(디스크, lake 아래 .snap_*)에 싣는다 -- 열 형 = sqlite_scanner 규칙(INT → BIGINT · TEXT/VARCHAR → VARCHAR · REAL/DOUBLE → DOUBLE).
   **스트림별 지문(원본 seal 을 Rust lake 위에서 dry-run → 전부 «건너뜀»)**: SQLite 13(binance tape·spot_tape·oi_1s·mark_1s·liquidations · okx tape·oi·mark·funding·liquidations · hl asset_ctx · bybit tape·oi·mark·funding · cme treasury · hl xyz_1m·xyz_ctx_1s · yahoo macro_5m)
-  + 섞임 2(hl positions·liquidations = SQLite 셋 + DuckDB 하나) 모두 같음 · DuckDB 원천은 oi_lsratio 로 같음(아홉째 조각) · micro_1m·tail_risk_1m·deribit 6 은 같은 DuckDB 길이나 표 자료로는 아직 안 봄.
-  🔴정답지의 sqlite 확장은 **개발기 duckdb 1.5.5 의 것**이다(서버 판 1.5.1 확장은 개발기에 없고, 설치 = 바깥 접속이라 하지 않았다). hash(row) 는 1.5.1 과 1.5.5 가 같음을 확인했지만,
-  **1.5.1 sqlite 확장의 형 대응이 같은지는 서버에서 한 번 확인해야 한다**: 서버에서 `SEAL_ROOT=. SEAL_LAKE=/tmp/seal_check/lake bin/rtduck --only <스트림>`(RTDUCK_KIND=seal) 로 그림자 lake 를 뜬 뒤
-  `python -c "import scripts.seal_to_lake as S, pathlib; print(S.seal(lake=pathlib.Path('/tmp/seal_check/lake'), dry_run=True, only='<스트림>'))"` 가 written 0·resealed 0 이면 같다(읽기 전용 · hot 안 지움).
+  + 섞임 2(hl positions·liquidations = SQLite 셋 + DuckDB 하나) 모두 같음 · DuckDB 원천: oi_lsratio(아홉째) + micro_1m·tail_risk_1m·deribit 5(option_trades·chain·option_summary·block_rfq·block_future_legs -- BOOLEAN·INTEGER 열 포함 · 열한째) 모두 같음 · deribit/gex_summary 는 원천 표가 지금 수집기에 없다(missing_source).
+  정답지의 sqlite 확장은 개발기 duckdb 1.5.5 의 것이다(서버 판 1.5.1 확장은 개발기에 없고, 설치 = 바깥 접속이라 하지 않았다) -- hash(row) 는 1.5.1 과 1.5.5 가 같다(oi_lsratio 46파일).
+  ✅**서버 확인함(2026-11-21 · 읽기 전용 · 실자료)**: 서버 hot SQLite 에서 rtduck 으로 봉인한 lake 위에 서버 원본(duckdb 1.5.1 + 그 판 sqlite 확장) `S.seal(dry_run=True, only=…)` →
+  bybit/funding 40파일·34,037행 · okx/funding 80파일·115,432행 · cme/treasury_fut_1m 28파일·30,333행 · bybit/oi 40파일·344,804행 넷 다 written 0 · resealed 0 · 전부 skipped_existing
+  = 1.5.1 sqlite 확장의 형 대응이 1.5.5 와 같다(INT·TEXT·REAL). 다시 확인하는 법: `SEAL_ROOT=. SEAL_LAKE=/tmp/seal_check/lake RTDUCK_KIND=seal bin/rtduck --only <스트림>` 뒤
+  `python -c "import scripts.seal_to_lake as S, pathlib; print(S.seal(lake=pathlib.Path('/tmp/seal_check/lake'), dry_run=True, only='<스트림>'))"` 가 written 0·resealed 0.
   등록 후보: `5 2 * * * cd <저장소> && RTDUCK_KIND=seal bin/rtduck >> logs/supervisor/rt_seal.log 2>&1`(REST 없음 · ×1 · 원본 02:05 와 겹치면 원천 사본이 둘 -- 03:05 로 미룰 것).
 - `deribit`(rtduck · 상주): 체결 WS(구독·하트비트·test_request 답·90초 무음 = 끊김·20초마다 write) · 재기동 틈 REST 백필(`RTDUCK_REST=1` 일 때만 -- 그림자 기본 꺼짐) · gaps · 상태 JSON(블록 구조·헤지·흐름).
   `DERIBIT_BT_DIR`(기본 `data/live/rtduck` -- 원본 파일 `data/live/deribit_options.duckdb` 는 단일 writer 라 같이 열면 하나가 죽는다 · TAKEOVER 때만).
-  🔴아직 없는 것: 10분 체인·GEX·옵션 요약(deribit_gex_state.json) · 시간당 history 대조(block_rfq_trades·block_future_legs 채움 -- 그래서 그림자는 헤지 다리가 비고 «hedge: false») · 옛 파일 옮기기.
+  ✅(열한째 조각) 10분 체인·GEX·옵션 요약 → option_chain_snapshot·option_summary·option_oi_other·deribit_gex_state.json(원본 poll_once 두 번과 요청 34·상태 글자·표 1,994행 일치)
+  · 매시 history 대조 → 빠진 체결·강제청산 표시·block_future_legs·block_rfq_trades(원본 reconcile → write 와 요청·결과·표·상태 글자 일치 · ΔOI 46칸) -- 둘 다 `RTDUCK_REST=1` 일 때만(`RTDUCK_DERIBIT_CHAIN=0` 이면 끔).
+  원본과 다른 곳: write_state 의 vov24·atm_oi_pct 는 SQL(ICU·json 확장) 대신 같은 행을 Rust 로 · recorded_at_utc 글자의 지역 오프셋 = libc localtime(서버 KST) · 체인 폴링 직전에 체결 버퍼를 비우지 않는다(지금 요약은 체결을 안 읽는다) ·
+  헤지 다리 조회 순서 = 원본 GROUP BY 해시 순서(두 쪽 다 정해지지 않음 -- 결과 표는 같다) · 한 프로세스 DB 잠금(DB_LOCK) · 🔴연결마다 DuckDB 확장 자동 불러오기를 끈다(개발기 ~/.duckdb 의 ICU 가 TIMESTAMP→TIMESTAMPTZ 를 지역 시각으로 바꾸는 것을 막는다).
+  남은 것: 옛 파일 옮기기(migrate_once -- 서버는 이미 옮겼을 것 · 확인 필요).
   hourly_doi 는 체인 표가 없으면 {}(원본과 같음) -- 체인 표가 있는 원본 DB 를 가리키면 원본은 ΔOI 를 내고 Rust 는 None.
   REST 배수: 켜면 재접속마다 목록 셋 × 쪽 수(×2) · WS 는 Deribit 이라 바이낸스 한도와 무관 · 등록 후보: `@reboot sleep 90 && cd <저장소> && RTDUCK_KIND=deribit bash scripts/ops/supervisor_rtduck.sh deribit …`(감독 스크립트의 종류 목록에 deribit 를 더해야 한다).
