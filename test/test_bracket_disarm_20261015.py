@@ -40,7 +40,6 @@ class DisarmTest(unittest.TestCase):
             with mock.patch.object(orders, "exec_enabled", lambda: enabled), \
                  mock.patch.object(orders, "clear_bracket", clear or _boom), \
                  mock.patch.object(orders, "place_bracket", _boom), \
-                 mock.patch.object(orders, "place_add_order", _boom), \
                  mock.patch.object(orders, "run_entry", _boom), \
                  mock.patch.object(orders, "run_exit", _boom):
                 if armed is not None:

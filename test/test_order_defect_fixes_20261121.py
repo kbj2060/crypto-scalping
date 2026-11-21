@@ -82,8 +82,7 @@ def run_ex(fx, coro_fn):
 POSTS = {
     "tp": lambda: ex.place_bracket(None, {"tp_price": 2600.0}, SYM, "LONG"),
     "ladder": lambda: ex.place_tp_ladder(None, [{"price": 2600.0, "w": 1}, {"price": 2650.0, "w": 1}], SYM, "LONG"),
-    "add": lambda: ex.place_add_order(None, SYM, "LONG", 2400.0, 0.5),
-}
+}   # 2026-11-21 자동 물타기(place_add_order)는 지웠다 -- «add» 경로는 함수째 없음
 
 
 def outcome(path, r):
@@ -232,7 +231,7 @@ def tick(entries: dict, n=1, cancel=None, exit_phase="filled_maker", sec=None, b
         with mock.patch.object(orders, "fetch_account", fake_account), \
              mock.patch.object(orders, "exec_enabled", lambda: True), \
              mock.patch.dict(sys.modules, {"scripts.ops_watchdog": fake_wd}), \
-             mock.patch.multiple(orders, clear_bracket=clear, run_exit=exit_, run_entry=boom, place_bracket=boom, place_add_order=boom), \
+             mock.patch.multiple(orders, clear_bracket=clear, run_exit=exit_, run_entry=boom, place_bracket=boom), \
              mock.patch.object(orders, "cancel_exit_orders", cancel_exits, create=True):
             api = orders.register(account_trip_state={"seen": {}}, refresh_tasks={}, swr_locks={}, binance_session=lambda: None,
                                   fetch_binance_json=_fake_binance, swr_cached=swr, _timed_produce=None,

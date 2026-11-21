@@ -109,24 +109,6 @@ class StopServerTest(ChartLinesTest):
             await asyncio.sleep(0.1)
         self._run(fn, run_entry_limit=fake_limit)
 
-    def test_peg_refused_outside_limit_mode(self) -> None:
-        async def fake_wait(_s, plan, state, wait_sec, on_fill=None):
-            state.update(phase="working", mode="wait", order_id=5, filled=0.0)
-            while state.get("action") != "cancel":
-                await asyncio.sleep(0.01)
-            state.update(phase="cancelled")
-            return state
-
-        async def fn(c):
-            r = await c.post(f"/api/manual-entry/submit?side=LONG&{Q}&sltp=0&mode=wait&wait_min=60&confirm=1")
-            self.assertEqual(r.status, 200, await r.json())
-            await asyncio.sleep(0.1)
-            r = await c.post("/api/manual-entry/wait-action?action=peg&confirm=1")   # 기다리기는 action 이 cancel 이 아니면 시장가로 간다 -- 받으면 안 된다
-            self.assertEqual((r.status, (await r.json())["error"]), (400, "bad_action"))
-            await c.post("/api/manual-entry/wait-action?action=cancel&confirm=1")
-            await asyncio.sleep(0.1)
-        self._run(fn, run_entry_wait=fake_wait)
-
 
 PLAN = {"symbol": "ETHUSDC", "side": "BUY", "positionSide": "LONG", "price": 2520.0, "quantity": 0.4, "limit": {"usdt": 2520.0}}
 

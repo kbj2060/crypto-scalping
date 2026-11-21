@@ -5014,9 +5014,7 @@ def make_app() -> web.Application:
     app.router.add_post("/api/manual-bracket/tp-legs", lambda r: order_api.busy_or(order_api.api_manual_bracket_tp_legs, r))   # 2026-11-11 분할 익절 조각 지우기·무게(진입가 팝업)
     app.router.add_post("/api/manual-bracket/add", lambda r: order_api.busy_or(order_api.api_manual_bracket_add, r))   # 2026-11-11 손절·익절 선 추가(진입가 팝업 → 초안 끌어 놓기)
     app.router.add_post("/api/manual-bracket/modify", lambda r: order_api.busy_or(order_api.api_manual_bracket_modify, r))   # 2026-10-29 선 끌어 주문 수정(주문 잠금 안에서)
-    app.router.add_get("/api/manual-exit/preview", order_api.api_manual_exit_preview)
-    app.router.add_post("/api/manual-exit/submit", lambda r: order_api.busy_or(order_api.api_manual_exit_submit, r))
-    app.router.add_post("/api/manual-exit/submit-all", lambda r: order_api.busy_or(order_api.api_manual_exit_all_submit, r))   # 2026-10-22 여러 코인 한꺼번에
+    app.router.add_post("/api/manual-exit/submit", lambda r: order_api.busy_or(order_api.api_manual_exit_submit, r))   # 2026-11-21 청산 미리보기·전량 일괄(submit-all)은 지웠다(sltp 만)
     app.router.add_get("/api/liquidation-5m-history", api_liquidation_5m_history)
     app.router.add_post("/api/client-timing", api_client_timing)   # 2026-11-20 M0 화면 시간 보고(로그 한 줄 · 저장 없음)
     # show_index=False (data/live 는 2026-10-19 보안 수정으로 더는 정적 서빙하지 않는다): this directory is reachable from the
