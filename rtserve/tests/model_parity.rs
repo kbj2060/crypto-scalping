@@ -265,7 +265,10 @@ fn qx4_ban_stale() {
     };
     let want = rtmodel::handlers::vol_forecast_qx4(&mut f, &mut HashMap::new(), &art, now_ms, "btc").expect("QX4 ok");
     let want_req = lib_req;
-    assert_eq!(std::mem::take(&mut book.lock().unwrap().1), want_req, "QX4 이어 받기 요청 열");
+    let got_req = std::mem::take(&mut book.lock().unwrap().1);
+    let (kl, iv): (Vec<String>, Vec<String>) = got_req.into_iter().partition(|t| t.starts_with("/fapi/"));
+    assert_eq!(kl, want_req, "QX4 이어 받기 요청 열");
+    assert_eq!(iv.len(), 1, "QX4I(BTC): Deribit 옵션 체결 받기 1번 -- 가짜 서버 404 = 그 칸만 빠짐(라이브러리 None 과 같은 본문): {iv:?}");
     assert_eq!(String::from_utf8(body).unwrap(), rtcollect::py_dumps_default(&want), "QX4 본문");
     // 밴: 공용 파일에 해제 시각(지금 + 600초) -- 보내지 않고 원본 문구
     std::fs::write(root.join("data/live/binance_ban_until"), format!("{:.3}\n", 1.796e9 + 600.0)).unwrap();

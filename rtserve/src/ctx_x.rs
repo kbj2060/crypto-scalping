@@ -2,8 +2,8 @@
 //! 원본(Read 로 본 실제 줄): `_flow_read_ctx` 2288~2406 · `_card30_bars` 2282~2286 · `bybit_bars` 759~774 · `VENUE_SETS` 756 ·
 //! micro_ref.py `is_weekend` 181~183 · `flow_hour_scales_from_bars` 186~217 · `sum_venue_bars` 220~227 · `flow_hour_scales_combos` 230~247 ·
 //! `flow_hour_scales` 250~259(+ 그 뒤 return) · 갱신 주기 = collect_micro_ref 1926~1954(MICRO_BASELINE_SECONDS · 실패면 있던 값).
-//! 원본의 «들고 있는 상태»(fr_bar_net · okx_bar_net_by · flow_all_hold)는 `FlowState` 가 든다 -- 같은 걸음(1초)으로 부르면 같은 값이 나온다.
-//! 칸(cells)은 봉 하나의 dict 값을 **원본 dict 차례**로 받는다(합 차례 = 원본). 코어는 가격 키 차례로 든다 -- 마지막 비트만 갈릴 수 있다(Micro.okx_bars 와 같은 한계).
+//! 원본의 «들고 있는 상태» 중 fr_bar_net · okx_bar_net_by(풋프린트 몫 · 반올림 전 봉 순합)는 **코어가 센다**(rtcore situation::flow_nets_tick · Micro.flow 로 옴 →
+//! `apply_flow` 로 쌓는다) · flow_all_hold 는 `FlowState` 가 든다. 같은 걸음(1초)으로 부르면 같은 값이 나온다.
 //! 일치 정답지: rtserve/tools/gen_ctx_x_fixture.py(원본 함수를 줄 번호와 함께 옮겨 적고 서버 판 numpy 로 부름) → tests/ctx_x_parity.rs.
 use serde_json::{json, Map, Value as V};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -14,17 +14,31 @@ pub const BAR: i64 = 300;
 pub const VENUE_SETS: [&[&str]; 2] = [&["binance", "okx", "bybit"], &["binance", "okx"]];
 const G3: [&str; 3] = ["whale", "mid", "retail"];
 
-/// 봉 하나의 칸 [매수, 매도, 고래매수, 고래매도, 리테일매수, 리테일매도](원본 dict 차례).
-pub type Cells = Vec<[f64; 6]>;
 /// (주말 0/1, UTC 시) → {"mid","whale","retail"(,"mid30",…)} -- micro_ref.flow_hour_scales 반환.
 pub type Scales = BTreeMap<(i64, i64), Map<String, V>>;
 
 /// 원본이 make_app 안에 들고 있는 것: fr_bar_net(봉 → 델타·고래순·리테일순) · okx_bar_net_by[asset] · flow_all_hold[asset].
 #[derive(Default, Clone, Debug)]
 pub struct FlowState {
-    pub fr_bar_net: BTreeMap<i64, [f64; 3]>,
-    pub onet: BTreeMap<i64, [f64; 5]>,
     pub hold: Option<Map<String, V>>,
+}
+
+/// Micro.flow 한 건을 받은 값에 얹는다(proto::FlowSums 받는 쪽 규칙).
+pub fn apply_flow(n: &mut rtcore::situation::FlowNets, d: &rtcore::proto::FlowSums) {
+    if d.full {
+        n.bn.clear();
+        n.okx.clear();
+    }
+    n.bn.extend(d.bn.iter().copied());
+    n.okx.extend(d.okx.iter().copied());
+    for b in &d.bn_drop {
+        n.bn.remove(b);
+    }
+    for b in &d.okx_drop {
+        n.okx.remove(b);
+    }
+    n.okx30 = d.okx30;
+    n.bn_last = d.bn_last;
 }
 
 /// 완결 5분봉 하나(candles_day 또는 candles) -- `taker` 가 있는 것만 card30 입력(_card30_bars).
@@ -38,11 +52,8 @@ pub struct Candle {
 
 pub struct XIn<'a> {
     pub now: f64,
-    /// footprint_state["bars"] (봉 → 칸).
-    pub fbars: &'a BTreeMap<i64, Cells>,
-    /// okx_fp["first_bar"](0 = 거짓) · okx_bars.
-    pub okx_first_bar: i64,
-    pub okx_bars: &'a BTreeMap<i64, Cells>,
+    /// 코어가 센 풋프린트 몫(bn = 닫힌 봉 전부 · okx = onet · okx30).
+    pub nets: &'a rtcore::situation::FlowNets,
     /// situation_state["bybit_bars"] (봉 → 매수·매도·고래순·리테일순).
     pub bybit: &'a BTreeMap<i64, [f64; 4]>,
     pub flow_scales: &'a Scales,
@@ -110,17 +121,8 @@ fn num(m: &Map<String, V>, k: &str) -> Option<f64> {
 /// server.py _flow_read_ctx(2288~2406). 반환 = x dict(원본 차례).
 pub fn flow_read_ctx(i: &XIn, st: &mut FlowState) -> Map<String, V> {
     let bar_start = (i.now as i64).div_euclid(BAR) * BAR;
-    let done: Vec<i64> = i.fbars.keys().copied().filter(|&b| b < bar_start).collect();
-    let net3 = |cells: &Cells| {
-        let s = |f: &dyn Fn(&[f64; 6]) -> f64| cells.iter().fold(0.0, |a, v| a + f(v));
-        [s(&|v| v[0] - v[1]), s(&|v| v[2] - v[3]), s(&|v| v[4] - v[5])]
-    };
-    for &b in &done {
-        if !st.fr_bar_net.contains_key(&b) || b >= bar_start - 2 * BAR {
-            st.fr_bar_net.insert(b, net3(&i.fbars[&b]));
-        }
-    }
-    st.fr_bar_net.retain(|b, _| i.fbars.contains_key(b));
+    // done = 닫힌 풋프린트 봉 = 코어 fr_bar_net 의 열쇠(코어는 닫힌 봉을 전부 센다 · 풋프린트에서 사라진 봉은 지운다)
+    let done: Vec<i64> = i.nets.bn.keys().copied().filter(|&b| b < bar_start).collect();
     let mut x = Map::new();
     let put = |x: &mut Map<String, V>, k: &str, v: V| {
         x.insert(k.to_string(), v);
@@ -130,7 +132,7 @@ pub fn flow_read_ctx(i: &XIn, st: &mut FlowState) -> Map<String, V> {
         let (first, last) = (done[0], *done.last().unwrap());
         let grid: Vec<i64> = (first..=last).step_by(BAR as usize).collect();
         let nan3 = [f64::NAN; 3];
-        let a: Vec<[f64; 3]> = grid.iter().map(|b| st.fr_bar_net.get(b).copied().unwrap_or(nan3)).collect();
+        let a: Vec<[f64; 3]> = grid.iter().map(|b| i.nets.bn.get(b).map_or(nan3, |v| [v[0], v[1], v[2]])).collect();
         let cols = |a: &[[f64; 3]]| -> [Vec<f64>; 3] {
             [a.iter().map(|r| r[1]).collect(), a.iter().map(|r| r[0] - r[1] - r[2]).collect(), a.iter().map(|r| r[2]).collect()]
         };
@@ -162,17 +164,8 @@ pub fn flow_read_ctx(i: &XIn, st: &mut FlowState) -> Map<String, V> {
             put(&mut x, "cvd30_z", json!(r30[r30.len() - 1] / np_std(&p30)));
         }
         // 거래소 합산(2332~2373)
-        let ofb = i.okx_first_bar;
-        for &b in &grid {
-            if ofb != 0 && b > ofb && i.okx_bars.contains_key(&b) && (!st.onet.contains_key(&b) || b >= bar_start - 2 * BAR) {
-                let c = &i.okx_bars[&b];
-                let n = net3(c);
-                let s = |j: usize| c.iter().fold(0.0, |a, v| a + v[j]);
-                st.onet.insert(b, [n[0], n[1], n[2], s(0), s(1)]);
-            }
-        }
-        st.onet.retain(|b, _| i.okx_bars.contains_key(b));
-        let ven_okx: Vec<[f64; 3]> = grid.iter().map(|b| st.onet.get(b).map_or(nan3, |o| [o[0], o[1], o[2]])).collect();
+        let onet = &i.nets.okx;
+        let ven_okx: Vec<[f64; 3]> = grid.iter().map(|b| onet.get(b).map_or(nan3, |o| [o[0], o[1], o[2]])).collect();
         let ven_bybit: Vec<[f64; 3]> = grid.iter().map(|b| i.bybit.get(b).map_or(nan3, |v| [v[0] - v[1], v[2], v[3]])).collect();
         let lb = last;
         let late = st.hold.as_ref().is_some_and(|h| !h.is_empty() && h["venues"].as_array().is_some_and(|v| v.iter().any(|s| s == "bybit")))
@@ -219,10 +212,11 @@ pub fn flow_read_ctx(i: &XIn, st: &mut FlowState) -> Map<String, V> {
             if r30a[r30a.len() - 1].is_finite() && p30a.len() >= 72 && np_std(&p30a) > 0.0 {
                 put(&mut x, "cvd30_all_z", json!(r30a[r30a.len() - 1] / np_std(&p30a)));
             }
-            let fb = &i.fbars[&lb];
+            // 코어가 같은 봉을 실었을 때만(시계가 어긋나 다른 봉이면 NaN → 비율 없음 -- 원본엔 없는 경우)
+            let fb = i.nets.bn_last.filter(|l| l.0 == lb).map_or([f64::NAN; 2], |l| l.1);
             let has_by = vs.contains(&"bybit");
-            let buy = fb.iter().fold(0.0, |s, v| s + v[0]) + st.onet[&lb][3] + if has_by { i.bybit[&lb][0] } else { 0.0 };
-            let sell = fb.iter().fold(0.0, |s, v| s + v[1]) + st.onet[&lb][4] + if has_by { i.bybit[&lb][1] } else { 0.0 };
+            let buy = fb[0] + onet[&lb][3] + if has_by { i.bybit[&lb][0] } else { 0.0 };
+            let sell = fb[1] + onet[&lb][4] + if has_by { i.bybit[&lb][1] } else { 0.0 };
             if sell > 0.0 {
                 put(&mut x, "taker_all", json!(buy / sell));
             }
@@ -231,10 +225,8 @@ pub fn flow_read_ctx(i: &XIn, st: &mut FlowState) -> Map<String, V> {
             break;
         }
     }
-    // okx30(2374~2376) -- 여섯 봉 칸을 한 줄로 더한다
-    let last6 = &done[done.len().saturating_sub(6)..];
-    if i.okx_first_bar != 0 && last6.len() == 6 && last6.iter().all(|b| *b > i.okx_first_bar && i.okx_bars.contains_key(b)) {
-        let s = last6.iter().flat_map(|b| i.okx_bars[b].iter()).fold(0.0, |s, v| s + (v[0] - v[1]));
+    // okx30(2374~2376) -- 코어가 센 값
+    if let Some(s) = i.nets.okx30 {
         put(&mut x, "okx30", json!(s));
     }
     // move60·oi60(2377~2382)
@@ -428,4 +420,45 @@ pub fn flow_hour_scales_combos(srcs: &[(&str, &Path, &str)], now_s: i64, days: i
             (c.join(","), flow_hour_scales_from_bars(&sum_venue_bars(&per)))
         })
         .collect()
+}
+
+/// 붙이는 쪽(hub)이 원본 micro 틱마다(1초) **ETH 에 대해** 부르는 하나 -- server.py compute_situation 2478~2517 의 «받은 값 → 본문» 몫.
+/// `core` = 코어가 마지막으로 민 Situation(직렬화 값 · 아직 없으면 None → 원본 «계산 전») · `veto`·`obi`·`persist` = 통과 칸(받는 쪽 원천) ·
+/// `x_in` = x 재료(코어 Micro.flow 를 쌓은 nets · Bybit 봉 · 기준선 · 5분봉 하루 · card30 · 미시 payload · imb40 링) · `vol_mult_by` = 코인별 권장 배수.
+/// 원본처럼 computed_at = `x_in.now`(코어는 값이 바뀔 때만 밀므로 시계는 부르는 쪽 것) · read 는 ETH 만(2489~2491).
+/// 돌려줌: (/api/situation 본문, SSE 한 줄, 이 회차 x -- 시장 맥락이 같은 값을 읽는다 2488) · 장부는 `log` 가 있으면 한 줄(READONLY 면 안 씀).
+#[allow(clippy::too_many_arguments)]
+pub fn situation_tick(
+    core: Option<&V>,
+    veto: i64,
+    obi: Option<f64>,
+    persist: Option<f64>,
+    streams: &rtcore::proto::Streams,
+    x_in: &XIn,
+    st: &mut FlowState,
+    vol_mult_by: &[(String, V)],
+    log: Option<(&mut crate::ctx::FusedLog, &V, &V)>,
+) -> (V, String, Map<String, V>) {
+    use crate::ctx;
+    let now = x_in.now;
+    let (now_v, computed) = match core {
+        Some(c) => {
+            let mut n = ctx::patch_now(c, veto, obi, persist);
+            n["computed_at"] = json!(now);
+            (n, json!(now))
+        }
+        None => (ctx::initial_now(), json!(0.0)),
+    };
+    let x = flow_read_ctx(x_in, st);
+    let ev = now_v.get("evidence").filter(|e| e.as_object().is_some_and(|o| !o.is_empty())).cloned().unwrap_or(json!({}));
+    let read = if core.is_some() { ctx::read(&ev, &V::Object(x.clone())) } else { V::Null };
+    if let (Some((fl, card_p, feat_bar)), true) = (log, core.is_some()) {
+        let mid = x_in.micro.as_object().filter(|m| m.get("available").is_some_and(py_truthy)).and_then(|m| m.get("mid")).cloned().unwrap_or(V::Null);
+        fl.tick(now, &read, &mid, card_p, feat_bar);
+    }
+    let (fo, mp) = ctx::streams_payload(streams);
+    let vm = vol_mult_by.iter().find(|(a, _)| a == "eth").map_or(V::Null, |(_, v)| v.clone());
+    let payload = ctx::situation_payload(&now_v, &computed, &fo, &mp, &read, &vm, vol_mult_by);
+    let sse = ctx::sse_situation(&payload);
+    (payload, sse, x)
 }

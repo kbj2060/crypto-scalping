@@ -34,3 +34,35 @@ fn streams_follow_python_state() {
     let old: rtcore::proto::Micro = serde_json::from_str(r#"{"ts":1,"mid":null,"spread":null,"qi":null,"vol60":0.0,"liq60":{"long":0.0,"short":0.0,"n":0}}"#).unwrap();
     assert!(old.streams.is_none());
 }
+
+/// 관계 읽기 재료(Micro.flow): 봉 순합은 칸이 생긴 차례로 더한다(원본 dict 차례) · 첫 밀기 = 통째로 · 그 뒤 = 바뀐 봉만.
+#[test]
+fn flow_sums_follow_insertion_order() {
+    let st = State::new(&["ethusdt".into()], 16, 1 << 12);
+    let mut rx = st.tx.subscribe();
+    let t0 = 1_763_700_000_000i64 / 300_000 * 300_000; // 봉 시작(ms)
+    let trade = |id: u64, ms: i64, px: f64, qty: f64, sell: bool| ev(ms, Event::Trade { id, px, qty, sell });
+    st.apply(ev(t0, Event::Book { u: 1, bid: 10.0, bid_qty: 1.0, ask: 11.0, ask_qty: 1.0, bid_s: String::new(), ask_s: String::new() }));
+    // 칸 차례: 3000.0 → 2000.0 → 2500.0(가격 키 차례와 다르다) · 1 + 1e16 − 1e16 은 차례에 따라 0 또는 1
+    st.apply(trade(1, t0 + 1_000, 3000.0, 1.0, false));
+    st.apply(trade(2, t0 + 2_000, 2000.0, 1e16, false));
+    st.apply(trade(3, t0 + 3_000, 2500.0, 1e16, true));
+    st.situation_tick((t0 + 300_500) * 1000); // 봉이 닫힌 뒤
+    let flows: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).filter_map(|m| if let Event::Micro(mc) = m.ev { mc.flow } else { None }).collect();
+    let f = flows.last().expect("Micro.flow");
+    assert!(f.full);
+    let b = t0 / 1000;
+    let want = ((0.0 + 1.0) + 1e16) - 1e16; // 생긴 차례
+    assert_eq!((f.bn.len(), f.bn[0].0, f.bn[0].1[0]), (1, b, want)); // 고래·리테일 칸은 주문 묶음 몫이라 여기선 안 본다
+    assert_eq!(f.bn_last, Some((b, [((0.0 + 1.0) + 1e16) + 0.0, ((0.0 + 0.0) + 0.0) + 1e16])));
+    // 바뀐 것 없으면 행 없음 · 새 체결로 봉이 바뀌면 그 봉만(full 아님)
+    st.situation_tick((t0 + 301_500) * 1000);
+    st.apply(trade(4, t0 + 4_000, 3000.0, 2.0, false)); // 닫힌 봉에 늦게 온 체결(최근 두 봉이라 다시 센다)
+    st.situation_tick((t0 + 302_500) * 1000);
+    let flows: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).filter_map(|m| if let Event::Micro(mc) = m.ev { mc.flow } else { None }).collect();
+    let f = flows.last().unwrap();
+    assert!(!f.full);
+    assert_eq!((f.bn.len(), f.bn[0].1[0]), (1, ((0.0 + 3.0) + 1e16) - 1e16));
+    let Event::Snapshot { micro, .. } = st.snapshot("ethusdt", 0).unwrap().ev else { panic!() };
+    assert!(micro.unwrap().flow.unwrap().full, "스냅숏 = 통째로");
+}

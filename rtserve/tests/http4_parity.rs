@@ -49,3 +49,29 @@ fn http4_parity() {
     eprintln!("http4_parity: 요청 {n} · 불일치 {}", bad.len());
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
+
+/// supply-1s 의 `oi` = hot oi_1s 꼬리(원본 collect_oi_1s 641~665 · supply_1s_payload 4299~4301): 초 → 마지막 값 · 지금−660 앞 버림 · 가장 늦은 초 −660 · sinceOi 뒤만
+#[test]
+fn supply_oi_from_hot() {
+    let now = 1_795_000_000.4f64;
+    let n = now as i64;
+    let dir = std::env::temp_dir().join(format!("rtserve_oi1s_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("data/hot")).unwrap();
+    let c = rusqlite::Connection::open(dir.join("data/hot/binance_ctx.sqlite")).unwrap();
+    c.execute_batch("CREATE TABLE oi_1s (symbol TEXT, ts_ms INTEGER, open_interest REAL)").unwrap();
+    for (s, ms, v) in [("ethusdt", n - 700, 0, 1.0), ("ethusdt", n - 655, 100, 2.0), ("ethusdt", n - 655, 900, 2.5), ("ethusdt", n - 300, 5, 3.0), ("ethusdt", n - 2, 0, 4.0), ("solusdt", n - 675, 0, 8.0), ("solusdt", n - 300, 0, 9.0)]
+        .map(|(s, t, ms, v)| (s, t * 1000 + ms, v)) {
+        c.execute("INSERT INTO oi_1s VALUES (?,?,?)", rusqlite::params![s, ms, v]).unwrap();
+    }
+    let cfg = rtserve::Config::new(dir.clone(), vec!["eth".into()], std::sync::Arc::new(move || now));
+    let q = |since: Option<i64>| since.map(|x| [("sinceOi".to_string(), x.to_string())].into_iter().collect()).unwrap_or_default();
+    let v = rtserve::hub::supply_payload(&cfg, &cfg.live, "ethusdt", &q(None));
+    assert_eq!(v["oi"], json!([[n - 655, 2.5], [n - 300, 3.0], [n - 2, 4.0]]), "{}", v["oi"]);
+    let v = rtserve::hub::supply_payload(&cfg, &cfg.live, "ethusdt", &q(Some(n - 300)));
+    assert_eq!(v["oi"], json!([[n - 2, 4.0]]));
+    // 가장 늦은 초가 오래되면(n−300) 창 −660 은 n−960 까지라 n−675 도 들어올 뻔했다 -- 링의 «지금−660 앞 버림»이 막는다
+    let v = rtserve::hub::supply_payload(&cfg, &cfg.live, "solusdt", &q(None));
+    assert_eq!(v["oi"], json!([[n - 300, 9.0]]));
+    let _ = std::fs::remove_dir_all(dir);
+}

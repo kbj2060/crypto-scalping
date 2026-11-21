@@ -306,6 +306,7 @@ pub fn micro(
         okx_bars: vec![],
         okx_full: false,
         streams: None,
+        flow: None,
     }
 }
 
@@ -322,4 +323,64 @@ pub fn okx_oi_rows(m: &BTreeMap<i64, [f64; 2]>, from: i64) -> Vec<(i64, f64, f64
             (ob, d, v[1])
         })
         .collect()
+}
+
+/// 관계 읽기 재료의 풋프린트 몫(server.py _flow_read_ctx 2295~2303 · 2332~2339 · 2374~2376 -- Read 로 본 줄). 반올림 전.
+/// `bn` = 원본 fr_bar_net [Σ(v0−v1), Σ(v2−v3), Σ(v4−v5)] · `bn_last` = 마지막 닫힌 봉의 [Σv0, Σv1](테이커 비율 2368~2369 -- 원본은 그 회차 칸을 그 자리에서 더한다:
+/// 굳은 봉이면 fr_bar_net 과 다른 때의 값이다) · `okx` = 원본 okx_bar_net_by[asset](onet 5칸) · `okx30` = 마지막 여섯 봉 OKX 칸 한 줄 합.
+#[derive(Default, Clone, Debug, PartialEq)]
+pub struct FlowNets {
+    pub bn: BTreeMap<i64, [f64; 3]>,
+    pub bn_last: Option<(i64, [f64; 2])>,
+    pub okx: BTreeMap<i64, [f64; 5]>,
+    pub okx30: Option<f64>,
+}
+
+fn sums(cells: &[[f64; 6]]) -> [f64; 5] {
+    let s = |f: &dyn Fn(&[f64; 6]) -> f64| cells.iter().fold(0.0, |a, v| a + f(v)); // 파이썬 sum = 0 에서 차례로
+    [s(&|v| v[0] - v[1]), s(&|v| v[2] - v[3]), s(&|v| v[4] - v[5]), s(&|v| v[0]), s(&|v| v[1])]
+}
+
+/// 한 회차(원본은 compute_situation 마다 = 1초). `fbars`·`okx_bars` = 봉 → 칸(원본 dict 차례 · footprint::Bar::in_order).
+/// 원본 규칙: 닫힌 봉은 처음 볼 때와 «최근 두 봉»일 때만 센다 · 풋프린트에서 사라진 봉은 지운다 ·
+/// OKX 는 닫힌 봉 12개 이상일 때 격자(첫 닫힌 봉 ~ 마지막 닫힌 봉) 안에서 first_bar «뒤» 봉만 · OKX 봉에서 사라진 봉은 지운다.
+/// `cells` = 봉 하나의 칸을 원본 dict 차례로 꺼내는 함수(코어 = footprint::Bar::in_order · 시험 = 정답지 차례 그대로).
+pub fn flow_nets_tick<B>(n: &mut FlowNets, now_s: f64, fbars: &BTreeMap<i64, B>, okx_first: i64, okx_bars: &BTreeMap<i64, B>, cells: impl Fn(&B) -> Vec<[f64; 6]>) {
+    let bar_start = (now_s as i64).div_euclid(BAR_S) * BAR_S;
+    let done: Vec<i64> = fbars.keys().copied().filter(|&b| b < bar_start).collect();
+    for &b in &done {
+        if !n.bn.contains_key(&b) || b >= bar_start - 2 * BAR_S {
+            let v = sums(&cells(&fbars[&b]));
+            n.bn.insert(b, [v[0], v[1], v[2]]);
+        }
+    }
+    n.bn.retain(|b, _| fbars.contains_key(b));
+    n.bn_last = done.last().map(|&b| {
+        let v = sums(&cells(&fbars[&b]));
+        (b, [v[3], v[4]])
+    });
+    if done.len() >= 12 {
+        let (lo, hi) = (done[0], done[done.len() - 1]);
+        for b in (lo..=hi).step_by(BAR_S as usize) {
+            if okx_first != 0 && b > okx_first && okx_bars.contains_key(&b) && (!n.okx.contains_key(&b) || b >= bar_start - 2 * BAR_S) {
+                n.okx.insert(b, sums(&cells(&okx_bars[&b])));
+            }
+        }
+        n.okx.retain(|b, _| okx_bars.contains_key(b));
+    }
+    let last6 = &done[done.len().saturating_sub(6)..];
+    n.okx30 = (okx_first != 0 && last6.len() == 6 && last6.iter().all(|b| *b > okx_first && okx_bars.contains_key(b)))
+        .then(|| last6.iter().flat_map(|b| cells(&okx_bars[b])).fold(0.0, |s, v| s + (v[0] - v[1])));
+}
+
+/// 보낸 것(`sent`, None = 아직 안 보냄 → 통째로) 대비 바뀐 몫.
+pub fn flow_delta(now: &FlowNets, sent: Option<&FlowNets>) -> crate::proto::FlowSums {
+    fn diff<const N: usize>(a: &BTreeMap<i64, [f64; N]>, b: Option<&BTreeMap<i64, [f64; N]>>) -> (Vec<(i64, [f64; N])>, Vec<i64>) {
+        let rows = a.iter().filter(|(k, v)| b.is_none_or(|b| b.get(k).is_none_or(|o| o.map(f64::to_bits) != v.map(f64::to_bits)))).map(|(k, v)| (*k, *v)).collect();
+        let drop = b.map_or(vec![], |b| b.keys().filter(|k| !a.contains_key(k)).copied().collect());
+        (rows, drop)
+    }
+    let (bn, bn_drop) = diff(&now.bn, sent.map(|s| &s.bn));
+    let (okx, okx_drop) = diff(&now.okx, sent.map(|s| &s.okx));
+    crate::proto::FlowSums { bn, bn_drop, bn_last: now.bn_last, okx, okx_drop, okx30: now.okx30, full: sent.is_none() }
 }

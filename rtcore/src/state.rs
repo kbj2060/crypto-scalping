@@ -30,6 +30,9 @@ struct Sym {
     micro: Option<crate::proto::Micro>,
     /// 마크(@markPrice@1s) 수신 상태(원본 mp_state).
     mp: StreamStat,
+    /// 관계 읽기 재료(풋프린트 몫 · situation::flow_nets_tick) · 마지막으로 Micro 에 실어 보낸 것(None = 아직 → 통째로).
+    nets: situation::FlowNets,
+    nets_sent: Option<situation::FlowNets>,
 }
 
 /// 1초 수급·풋프린트 밀기 묶음 간격(ms). 화면은 한 프레임(60Hz ≈ 16.7ms)에 한 번 칠한다 -- 더 잘게 보내도 안 보이고
@@ -74,6 +77,8 @@ impl State {
                     sit: None,
                     micro: None,
                     mp: StreamStat::default(),
+                    nets: Default::default(),
+                    nets_sent: None,
                 };
                 (s.clone(), Mutex::new(sym))
             })
@@ -431,6 +436,7 @@ impl State {
                     m.okx_oi5m = situation::okx_oi_rows(&g.supply.okx_oi5m, i64::MIN);
                     m.okx_bars = g.supply.okx_sums(None);
                     m.okx_full = m.okx_from.is_some();
+                    m.flow = Some(situation::flow_delta(&g.nets, None));
                     m
                 }),
             },
@@ -450,6 +456,11 @@ impl State {
                 Some(Stamped { ev: Event::Book { bid, bid_qty, ask, ask_qty, .. }, .. }) => Some((*bid, *bid_qty, *ask, *ask_qty)),
                 _ => None,
             };
+            // 관계 읽기 재료(원본은 compute_situation 마다 _flow_read_ctx 가 센다 -- 미시 값과 상관없이 매 회차)
+            let okx_first = g.supply.okx_first_bar;
+            let mut nets = std::mem::take(&mut g.nets);
+            situation::flow_nets_tick(&mut nets, now_s, &g.supply.fp.bars, okx_first, &g.supply.okx_fp.bars, |b| b.in_order());
+            g.nets = nets;
             // 원본은 호가(REST bookTicker)를 받기 전에는 그 틱이 예외로 끝나 payload 가 {"available": false} 그대로다 -- 미시 값을 안 낸다.
             //   코어도 호가를 한 번 받은 뒤부터 민다(OKX OI 5분봉 바뀐 봉 표시는 그때까지 쌓아 둔다).
             if book.is_some() {
@@ -464,6 +475,7 @@ impl State {
                 mc.okx_bars = g.supply.okx_sums(if full { None } else { Some(&dirty) });
                 mc.okx_full = full && mc.okx_from.is_some();
                 mc.streams = Some(Streams { fo: self.fo.lock().unwrap().clone(), mp: g.mp.clone() });
+                mc.flow = Some(situation::flow_delta(&g.nets, g.nets_sent.as_ref()));
                 let fresh = !mc.okx_oi5m.is_empty() || !mc.okx_bars.is_empty() || mc.okx_full || g.micro.as_ref().is_none_or(|o| crate::proto::Micro { ts: mc.ts, ..o.clone() } != mc);
                 if fresh {
                     g.seq += 1;
@@ -471,6 +483,10 @@ impl State {
                 }
                 mc.okx_oi5m.clear();
                 (mc.okx_bars, mc.okx_full) = (vec![], false);
+                if fresh {
+                    g.nets_sent = Some(g.nets.clone());
+                }
+                mc.flow = Some(situation::flow_delta(&g.nets, Some(&g.nets))); // 들고 있는 값 = «바뀐 것 없음»(다음 회차 비교용)
                 g.micro = Some(mc);
             }
             let candles: BTreeMap<i64, [f64; 3]> = g.ohlc.iter().map(|(&b, v)| (b, v.0)).collect();

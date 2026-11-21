@@ -65,6 +65,21 @@ pub fn bar_of(ms: i64) -> i64 {
 pub(crate) struct Bar {
     pub(crate) cells: BTreeMap<i64, [f64; 6]>,
     pub(crate) dhl: Option<[f64; 3]>,
+    /// 칸이 생긴 차례(체결로 생긴 칸만 -- 원본 dict 차례). 복원으로 생긴 칸은 없다 → `in_order` 가 키 차례로 뒤에 붙인다.
+    pub(crate) order: Vec<i64>,
+}
+
+impl Bar {
+    /// 칸 값을 원본 dict 차례로(server.py _flow_read_ctx 의 `fbars[b].values()` 합 차례): 생긴 차례 → 나머지 키 차례.
+    // ponytail: 복원(테이프·스냅숏)으로 생긴 칸은 키 차례 -- 원본도 재기동 뒤엔 자기 복원 차례라 그 봉은 마지막 비트가 갈릴 수 있다.
+    pub(crate) fn in_order(&self) -> Vec<[f64; 6]> {
+        let mut out: Vec<[f64; 6]> = self.order.iter().filter_map(|k| self.cells.get(k).copied()).collect();
+        if out.len() < self.cells.len() {
+            let seen: BTreeSet<i64> = self.order.iter().copied().collect();
+            out.extend(self.cells.iter().filter(|(k, _)| !seen.contains(k)).map(|(_, c)| *c));
+        }
+        out
+    }
 }
 
 pub struct Bars {
@@ -146,7 +161,11 @@ impl Bars {
     pub fn add(&mut self, bar: i64, px: f64, qty: f64, sell: bool, order: bool, whale_min: f64, retail_max: f64) {
         let Some((bucket, _)) = self.spec else { return };
         let k = (px / bucket).round_ties_even() as i64;
-        let cell = self.bars.get_mut(&bar).expect("keep 이 만들었다").cells.entry(k).or_insert([0.0; 6]);
+        let b = self.bars.get_mut(&bar).expect("keep 이 만들었다");
+        if !b.cells.contains_key(&k) {
+            b.order.push(k);
+        }
+        let cell = b.cells.entry(k).or_insert([0.0; 6]);
         let side = sell as usize;
         if !order {
             cell[side] += qty;

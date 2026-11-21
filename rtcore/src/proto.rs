@@ -117,7 +117,29 @@ pub struct Micro {
     pub okx_full: bool,
     /// 2026-11-22 더함 -- 바이낸스 강제청산·마크 수신 상태(원본 /api/situation 의 streams.fo·mp 재료). 옛 받는 쪽은 모르는 칸이라 건너뛴다.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub streams: Option<Streams>,
+    pub streams: Option<Streams>,    /// 2026-11-22 더함 -- 관계 읽기 재료의 풋프린트 몫(반올림 전 봉 순합 · situation.rs flow_nets_tick). 바뀐 봉만 · `full` 이면 통째로 갈아 끼운다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow: Option<FlowSums>,
+}
+
+/// 받는 쪽 규칙: `full` 이면 bn·okx 를 비우고 시작 · 행은 봉마다 덮어쓰기 · `*_drop` 은 지우기 · okx30·bn_last 는 늘 지금 값.
+/// bn 행 = [봉, [Σ(매수−매도), Σ(고래매수−고래매도), Σ(리테일매수−리테일매도)]](server.py fr_bar_net) · bn_last = [마지막 닫힌 봉, [Σ매수, Σ매도]](테이커 비율 · 늘 지금 값) ·
+/// okx 행 = onet 5칸 [위 셋, Σ매수, Σ매도].
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct FlowSums {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bn: Vec<(i64, [f64; 3])>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bn_drop: Vec<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bn_last: Option<(i64, [f64; 2])>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub okx: Vec<(i64, [f64; 5])>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub okx_drop: Vec<i64>,
+    pub okx30: Option<f64>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub full: bool,
 }
 
 /// 원본 server.py fo_state(1801)·mp_state(1774). `last_ms` = fo 의 last_event_ms(청산 T) · mp 의 last_ms(마크 E).

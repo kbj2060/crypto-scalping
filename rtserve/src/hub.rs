@@ -202,7 +202,28 @@ fn liq5(rows: &[rtcore::proto::LiqRow], ok: impl Fn(i64) -> bool) -> Vec<Value> 
     rows.iter().filter(|r| ok(r.0)).map(|r| json!([r.0, f(r.1), f(r.2), r.3, r.4])).collect()
 }
 
-/// 원본 supply_1s_payload 의 모양과 창·커서. `oi`(바이낸스 OI 1초)는 코어 범위 밖이라 늘 [] (원본은 수집 루프의 REST 폴링) -- 문서 §의도한 차이.
+/// 원본 oi_1s 링(coin_flow.py collect_oi_1s 641~665: 수집기 hot oi_1s 꼬리를 0.5초마다 읽어 초 → 마지막 값 · 지금−660초 앞은 버림) +
+/// supply_1s_payload 4299~4301(oi_floor = max(sinceOi, 가장 늦은 초 − 660) 뒤 초만). 2026-11-22 병행 대조에서 rtserve 가 늘 [] 를 내던 결함을 고침
+/// (전엔 «REST 폴링 = 코어 범위 밖»으로 잘못 알았다 -- 원본도 hot 을 읽는다).
+/// ponytail: 부를 때마다 hot 을 읽는다(SSE 0.25초 틱 포함 · 읽기 ~1ms) -- 무거우면 0.5초 메모로
+fn oi_rows(cfg: &Config, symbol: &str, since: i64) -> Vec<Value> {
+    let wall = (cfg.now)();
+    let lo = ((wall - SUPPLY_S as f64) * 1000.0) as i64 - 30_000;
+    let Ok(rows) = crate::api::rows(&cfg.root.join("data/hot/binance_ctx.sqlite"), "SELECT ts_ms, open_interest FROM oi_1s WHERE symbol = ? AND ts_ms > ? ORDER BY ts_ms",
+        &[rusqlite::types::Value::Text(symbol.into()), rusqlite::types::Value::Integer(lo)]) else { return vec![] };
+    let mut ring: BTreeMap<i64, f64> = BTreeMap::new();
+    for r in rows {
+        if let (Some(t), Some(v)) = (r[0].as_i64(), r[1].as_f64()) {
+            ring.insert(t.div_euclid(1000), v);
+        }
+    }
+    let cut = wall.trunc() as i64 - SUPPLY_S;
+    ring.retain(|k, _| *k >= cut);
+    let floor = since.max(ring.keys().next_back().copied().unwrap_or(0) - SUPPLY_S);
+    ring.range(floor + 1..).map(|(k, v)| json!([k, f(*v)])).collect()
+}
+
+/// 원본 supply_1s_payload 의 모양과 창·커서.
 pub fn supply_payload(cfg: &Config, live: &Live, symbol: &str, q: &HashMap<String, String>) -> V {
     let g = live.syms.lock().unwrap();
     let empty = Supply1s {
@@ -233,14 +254,14 @@ pub fn supply_payload(cfg: &Config, live: &Live, symbol: &str, q: &HashMap<Strin
     let spot = rows8(&s.spot, spot_floor, s.spot_now);
     let o = |pairs: Vec<(&str, V)>| Value::Object(pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect::<Map<String, V>>());
     if s.now == 0 && s.partial.bn.is_none() && s.seconds.is_empty() {
-        return o(vec![("symbol", json!(symbol.to_uppercase())), ("seconds", json!([])), ("now", json!(0)), ("oi", json!([])), ("liq", json!([])), ("okx", json!(okx)),
+        return o(vec![("symbol", json!(symbol.to_uppercase())), ("seconds", json!([])), ("now", json!(0)), ("oi", json!(oi_rows(cfg, symbol, q_int(q, "sinceOi")))), ("liq", json!([])), ("okx", json!(okx)),
             ("okxOi", json!(okx_oi)), ("okxLiq", json!(okx_liq)), ("okxNow", json!(s.okx_now)), ("bybitLiq", json!(bybit)), ("okxMeta", okx_meta),
             ("spot", json!(spot)), ("spotNow", json!(s.spot_now)), ("spotMeta", spot_meta), ("partial", partial), ("retailMaxUsd", f(retail)), ("whaleMinUsd", f(whale))]);
     }
     let newest = s.now;
     let liq_floor = q_int(q, "sinceLiq").max(newest - SUPPLY_S);
     let floor = q_int(q, "since").max(newest - SUPPLY_S);
-    o(vec![("symbol", json!(symbol.to_uppercase())), ("now", json!(newest)), ("retailMaxUsd", f(retail)), ("whaleMinUsd", f(whale)), ("oi", json!([])),
+    o(vec![("symbol", json!(symbol.to_uppercase())), ("now", json!(newest)), ("retailMaxUsd", f(retail)), ("whaleMinUsd", f(whale)), ("oi", json!(oi_rows(cfg, symbol, q_int(q, "sinceOi")))),
         ("liq", json!(liq5(&s.liq, |x| liq_floor < x && x < newest))), ("okx", json!(okx)), ("okxOi", json!(okx_oi)), ("okxLiq", json!(okx_liq)),
         ("okxNow", json!(s.okx_now)), ("bybitLiq", json!(bybit)), ("okxMeta", okx_meta), ("spot", json!(spot)), ("spotNow", json!(s.spot_now)),
         ("spotMeta", spot_meta), ("partial", partial), ("seconds", json!(rows8(&s.seconds, floor, newest)))])
