@@ -10,6 +10,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
 pub const BAR: i64 = 300;
+/// 격자 봉 수 상한(코어 풋프린트 보관 288봉의 열 배 남짓).
+pub const MAX_GRID: i64 = 4096;
 /// server.py 756 -- 합산 조합(앞이 우선).
 pub const VENUE_SETS: [&[&str]; 2] = [&["binance", "okx", "bybit"], &["binance", "okx"]];
 const G3: [&str; 3] = ["whale", "mid", "retail"];
@@ -48,6 +50,9 @@ pub struct Candle {
     pub high: f64,
     pub low: f64,
     pub close: f64,
+    /// card30 입력(_card30_bars: taker 칸이 있는 봉만) -- x 계산에는 안 쓴다.
+    pub volume: f64,
+    pub taker: Option<f64>,
 }
 
 pub struct XIn<'a> {
@@ -128,7 +133,9 @@ pub fn flow_read_ctx(i: &XIn, st: &mut FlowState) -> Map<String, V> {
         x.insert(k.to_string(), v);
     };
     let gmap = |vals: [f64; 3]| V::Object(G3.iter().zip(vals).map(|(g, v)| (g.to_string(), json!(v))).collect());
-    if done.len() >= 12 {
+    // 격자 길이 = 첫·마지막 닫힌 봉 사이 봉 수 -- 열쇠는 코어 풋프린트 창(보관 봉 수)에서만 오지만, 깨진 값이 큰 할당을 만들지 않게 막는다.
+    // ponytail: 원본엔 없는 상한(MAX_GRID) -- 넘으면 그 회차 합산 칸만 비운다(원본이라면 수백 MB 를 잡았을 경우).
+    if done.len() >= 12 && (done[done.len() - 1] - done[0]) / BAR < MAX_GRID {
         let (first, last) = (done[0], *done.last().unwrap());
         let grid: Vec<i64> = (first..=last).step_by(BAR as usize).collect();
         let nan3 = [f64::NAN; 3];
@@ -310,7 +317,8 @@ pub fn bybit_bars(symbol: &str, t0: i64, t1: i64, db: &Path) -> BTreeMap<i64, [f
              WHERE symbol = ? AND ts_sec >= ? AND ts_sec < ? GROUP BY 1",
         )?;
         let rows = q.query_map(rusqlite::params![symbol, t0, t1], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?.collect::<Result<Vec<_>, _>>()?;
-        let mut g = c.prepare("SELECT from_ms, to_ms FROM gaps WHERE symbol = ? AND from_ms < ? AND to_ms > ?")?;
+        // ponytail: LIMIT 은 원본에 없다(깨진 표가 행 수로 할당을 키우지 않게) -- 창 26시간에 끊김 10만 개 넘는 일은 없다.
+        let mut g = c.prepare("SELECT from_ms, to_ms FROM gaps WHERE symbol = ? AND from_ms < ? AND to_ms > ? LIMIT 100000")?;
         let gaps = g.query_map(rusqlite::params![symbol, t1 * 1000, t0 * 1000], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<Vec<_>, _>>()?;
         Ok((rows, gaps))
     };

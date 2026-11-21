@@ -57,7 +57,7 @@ fn flow_read_ctx_matches_python_step_by_step() {
             let fs = scales_of(&s["flow_scales"]);
             let fsa: HashMap<String, Scales> = s["flow_scales_all"].as_array().unwrap().iter().map(|e| (e[0].as_str().unwrap().to_string(), scales_of(&e[1]))).collect();
             let bars: Vec<(Option<f64>, Option<f64>)> = s["bars"].as_array().unwrap().iter().map(|b| (opt(&b[0]), opt(&b[1]))).collect();
-            let day5: Vec<Candle> = s["day5"].as_array().unwrap().iter().map(|c| Candle { time: c[0].as_i64().unwrap(), high: f(&c[1]), low: f(&c[2]), close: f(&c[3]) }).collect();
+            let day5: Vec<Candle> = s["day5"].as_array().unwrap().iter().map(|c| Candle { time: c[0].as_i64().unwrap(), high: f(&c[1]), low: f(&c[2]), close: f(&c[3]), volume: 0.0, taker: None }).collect();
             let ring: Vec<f64> = s["ring"].as_array().unwrap().iter().map(f).collect();
             let now = f(&s["now"]);
             flow_nets_tick(&mut core, now, &fbars, s["okx_first_bar"].as_i64().unwrap(), &okx_bars, |c: &Cells| c.clone());

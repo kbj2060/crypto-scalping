@@ -293,7 +293,11 @@ fn flow_heatmap(cfg: &Config, req: &Req) -> Resp {
     // 접근행동(4시간 · 120초 캐시) → rows 에 · 변동 신호 자(300초) · 지금 값(1초) → summary 에. 실패는 삼킨다(원본 try/except pass)
     if rows_only && payload["rows"].as_object().is_some_and(|m| !m.is_empty()) {
         let (r2, s2, t) = (root.clone(), symbol.clone(), now_ms());
-        if let Ok(Value::Object(ap)) = cfg.swr.get(&format!("approach_{symbol}"), 120.0, 600.0, Arc::new(move || Ok(Value::Object(crate::heatmap::approach_read(&r2, &s2, t))))) {
+        // 빈 맵 = 원본 예외 갈래(한도 넘는 창) → swr 에 넣지 않고(Err) 뒤까지 건너뛴다
+        if let Ok(Value::Object(ap)) = cfg.swr.get(&format!("approach_{symbol}"), 120.0, 600.0, Arc::new(move || {
+            let m = crate::heatmap::approach_read(&r2, &s2, t);
+            if m.is_empty() { Err(PyErr("MemoryError".into())) } else { Ok(Value::Object(m)) }
+        })) {
             payload["rows"].as_object_mut().unwrap().extend(ap);
             let (r2, s2) = (root.clone(), symbol.clone());
             let rf = cfg.swr.get(&format!("volsig_ref_{symbol}"), 300.0, 600.0, Arc::new(move || {

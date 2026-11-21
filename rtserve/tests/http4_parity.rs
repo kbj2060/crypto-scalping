@@ -75,3 +75,14 @@ fn supply_oi_from_hot() {
     assert_eq!(v["oi"], json!([[n - 300, 9.0]]));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// /api/situation: 코어 Situation 이 오기 전 = 원본 «계산 전»(_coin_ctx 1777) 모양 · 한 틱 뒤에도 코어가 없으면 그대로
+#[test]
+fn situation_before_core() {
+    let (addr, root) = common::start(&serde_json::Map::new(), 0, 1.795e9, "eth", "sit0");
+    let g = request(addr, "GET", "/api/situation", &[]);
+    let body = String::from_utf8_lossy(&g.body).into_owned();
+    assert_eq!(g.status, 200);
+    assert!(body.contains("\"reason\": \"\\uacc4\\uc0b0 \\uc804\"") && body.contains("\"computed_at\": 0.0"), "{body}");
+    let _ = std::fs::remove_dir_all(root);
+}

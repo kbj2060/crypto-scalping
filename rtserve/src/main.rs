@@ -54,6 +54,7 @@ async fn main() {
     cfg.readonly = std::env::var("RTSERVE_READONLY").as_deref() == Ok("1");
     cfg.fred_key = std::env::var("FRED_API_KEY").ok().filter(|k| !k.is_empty());
     let cfg = Arc::new(cfg);
+    tokio::spawn(rtserve::hub::situation_run(cfg.clone())); // 상황 카드 1초 틱(ETH)
     // rtcore 허브(예 ws://127.0.0.1:8788/rt) -- 없으면 메모리 상태 엔드포인트는 «아직 없음» 모양만 낸다
     if let Ok(url) = std::env::var("RTSERVE_HUB") {
         let syms: Vec<String> = cfg.flows().iter().map(|a| format!("{a}usdt")).collect();

@@ -80,6 +80,41 @@
 
   → 값이 «다른 정의»가 되는 칸은 없다. 대조 때 mid·spread·qi 파생 칸은 «시점 차이»로 빼고, 래스터·기준선·청산 파생 칸만 글자 대조한다.
 
+## 바깥 값이 크기를 정하는 할당 (2026-11-22 훑음 · ctx.rs·ctx_x.rs·ctx_micro.rs)
+| 곳 | 크기를 정하는 것 | 한도 · 근거 |
+|---|---|---|
+| ctx_micro 래스터 창 | 파일 머리 n_bins · 행 머리 bin_lo | `crate::raster_read::read_window` 를 부르기만(사본 지움) -- 한도는 그 파일(rtserve 에이전트 몫) |
+| ctx_micro `px_of`·`sweep_depth`·`raster_flow` 의 Vec | 창의 n_bins(위 한도 안) | 창 크기 × 12행 |
+| ctx_micro `baseline_from_tape` 행 | SQL `GROUP BY ts_sec` · `ts_sec >= now − 7일` | 초마다 한 행 → 많아야 604,800행(약 10MB) -- 시각 범위가 상한 |
+| ctx_micro 분 합 맵 | 위 행의 분 | ≤ 10,080 |
+| ctx_micro 링 | ofi_hist·imb40_ring·depth25_ring | 600 · 21,600 · 21,600(원본 deque maxlen 1771~1773) · mid_ring 은 600초 넘은 것 지움(1959~1960) |
+| ctx_x `tape_flow_rows` | SQL `GROUP BY 5분` · `[오늘0시 − days일, 오늘0시)` | ≤ days × 288 (14일 = 4,032) |
+| ctx_x `flow_hour_scales_from_bars` 격자 | 행의 첫·끝 봉 | 위 시각 범위 안이라 ≤ days × 288 |
+| ctx_x `bybit_bars` 봉 행 | SQL `GROUP BY 5분` · `[t0, t1)`(26시간) | ≤ 313 |
+| ctx_x `bybit_bars` 끊김 행 | gaps 표 | `LIMIT 100000`(원본엔 없음 · ponytail 주석) |
+| ctx_x `flow_read_ctx` 격자 | 코어 nets 의 첫·끝 닫힌 봉 | `MAX_GRID` 4,096봉 넘으면 합산 칸을 그 회차만 비움(원본엔 없음 · 코어 풋프린트 보관 288봉) |
+| ctx `last_logged_bar` | 장부 파일 | 꼬리 16,384바이트만(원본 2412) |
+| ctx_x `FlowNets`(받는 쪽) | 코어 Micro.flow 행 | 코어 풋프린트·OKX 봉 창 안 열쇠만 · `*_drop`·`full` 로 지움 |
+
+기준선 주기: `MICRO_BASELINE_SECONDS = 3600`(server.py 972 · 정의) · 쓰이는 줄 = 1926 `now - micro_state["baseline_at"] >= (MICRO_BASELINE_SECONDS if micro_state["baseline"] else 60.0)` · 1939 `micro_state["baseline_at"] = now - MICRO_BASELINE_SECONDS + 60.0` (둘 다 Read 확인).
+
+## C. REST 5분봉 재료(ctx_rest.rs · 2026-11-22) -- 전부 `RTSERVE_REST` 있을 때만 · 요청은 `ctx_rest::gate_fetch`(rtmodel::gate: 밴 파일 · 사용 가중치 1,200 넘으면 다음 분까지 쉼 · 간격 200ms)
+| 재료 | 원본 줄 | 요청 | 캐시(swr) | 실패 때 원본 동작 | Rust |
+|---|---|---|---|---|---|
+| ETH·BTC 증거 프레임 → veto · 상황 캔들 tail 200 | load_chart_klines_frames 3185~3273 · 행 조립 1665~1716 | klines ETHUSDT·BTCUSDT 5m limit 1500(EVIDENCE_FETCH_LIMIT = scripts/live_evidence_signal_dashboard_20260823.py 144) | 60초 · max_stale 0(3269~3273 -- 늘 기다려 새로) | ETH 실패 = HTTPBadGateway evidence_signal_upstream_error → load_market_history 가 market_history_upstream_error(1679~1684) → compute_situation 예외 → now = {ok: false, reason: repr}(2020) · BTC 실패 = btc_df None → btc_candles None(2454~2457 · BTC 라벨만 빠짐) | `evidence_frame`(정렬·같은 시각 마지막·형성 봉 버림) → `candles_from_frame`(tail 200 + trend_veto tail 720) |
+| SOL·XRP 상황 캔들 | load_market_history 1718~1736 · kline_candles 1648~1661 | klines 5m limit 1000 · timeout 3초 | 60초 · max_stale 600(STALE_GRACE 1040) | market_history_upstream_error → compute_situation 예외(위와 같음) | `kline_candles`(veto = 마감봉만 · 형성 봉 partial) |
+| veto(12h 추세) | trend_veto_rows 1613~1646 · N 144(1597) · K 1.0(1611) | (위 프레임) | (위) | (위) | `trend_veto` = pandas rolling(144).mean()(roll_mean Kahan·같은 값·부호 고정) · ewm(alpha 1/144 → com 거쳐 다시 · adjust False) 비트 일치 |
+| candles_day | load_5m_day 2418~2438 | klines 5m limit 300 · 시작+300 ≤ 지금인 행만 · taker r[9] | 60초 · max_stale 600 · 방금 닫힌 봉이 없고 2초 지났으면 식힘(2425~2426) | 예외면 로그만 · candles_day 는 옛 값 그대로(2446~2449) | `day5` · `day5_stale` |
+| card30 | _card30_pred 2259~2280 · _card30_bars 2282~2286 · 모델 978~979(joblib) | 없음(candles_day 에서) | 봉마다 한 번(마지막 봉 시각이 같으면 그 값 · 코인마다) | 모델 없음/읽기 실패 = 한 번 알리고 {}(카드는 표로) | `Card30Cache` + rtmodel::card30::predict(card30.json = rtmodel/tools/export_card30.py 가 joblib 에서 뽑음 · 자리 결정 필요) |
+
+검증: tools/gen_ctx_rest_fixture.py(옮겨 적은 trend_veto_rows·kline_candles·프레임 정리·행 조립·load_5m_day 거름 + 서버 판 pandas) → tests/ctx_rest_parity.rs: 24사례(ETH·BTC·SOL · 1500~144봉 · 형성 봉·중복·글자 자릿수) 캔들·veto·day5 · rolling/ewm 60급수 비트 일치.
+
+### 🔴결정 필요 -- 상황 입력 봉의 고·저·종
+원본은 REST 캔들(tail 200)의 high·low·close 를 쓰고(_situation_inputs 2189~2206), 코어 classify 는 체결로 센 5분봉을 쓴다(rtcore situation.rs inputs 의 `candles`).
+- (a) 코어 그대로(권장): 바이낸스 klines 의 고·저·종은 같은 @trade 체결로 만들어진다 -- 코어가 체결을 다 받은 봉이면 값이 같다(다른 경우 = 재연결로 체결을 놓친 봉 · 그 봉은 풋프린트 holes 로 이미 표시된다). REST 는 veto 와 candles_day 에만.
+- (b) rtserve 가 classify 를 다시 센다: rtcore::situation::{Inputs, Bar, classify} 에 REST 캔들 + delta(Micro.flow bn[0]) + 청산(Liq5m) + deriv(마크 링 -- 코어만 가짐 → 코어가 deriv 를 실어야 함). 손이 크다.
+- (c) rtserve 가 REST 캔들을 코어로 보낸다(허브에 들어오는 메시지 추가) -- 코어에 쓰기 길이 생긴다.
+
 ## 3. /api/market-context (market_context_payload 2601~2708 · api_market_context 2717~2732) -- 전부 ❌(그다음 조각)
 
 응답: 3초 안 못 끝나면 shield 로 뒤에서 마저 · 마지막 성공 120초 안이면 `{**last, "stale": True, "stale_age_s", "error"}` · 넘으면 `{"available": False, "error"}`.

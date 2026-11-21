@@ -6,7 +6,7 @@
 
 use serde_json::{json, Map, Value};
 
-use crate::raster_read::{read_window, Window, N_BINS};
+use crate::raster_read::{read_window, try_read_window, Window, N_BINS};
 
 /// numpy pairwise_sum(f32 · 8192칸 묶음) -- rtcollect::ob5m::np_sum 의 f32 판
 pub fn np_sum_f32(a: &[f32]) -> f32 {
@@ -308,7 +308,7 @@ pub fn heatmap_rows(w: &Window, fp: Option<&Fp>) -> Result<(Value, Value), Strin
 
 /// _heatmap_read(symbol, cols, agg, rows_only) -- 원본처럼 dict 순서: read_window 칸(qty·mid 뺌) · scale · rows · summary · (book | qty_i8·mid_b64)
 pub fn heatmap_read(root: &std::path::Path, symbol: &str, now_ms: i64, cols: usize, agg: usize, rows_only: bool, fp: Option<&Fp>) -> Result<Value, String> {
-    let w = read_window(root, symbol, now_ms, cols, agg);
+    let w = try_read_window(root, symbol, now_ms, cols, agg)?; // 칸 수 한도 넘음 = 원본 MemoryError → 500
     let mut nz: Vec<f32> = w.qty.iter().filter(|x| **x != 0.0).map(|x| x.abs()).collect();
     let mut scale = if nz.is_empty() { 1.0 } else { percentile_f32(&mut nz, 97.0) as f64 };
     if !(scale > 0.0) {
@@ -342,8 +342,9 @@ pub fn heatmap_read(root: &std::path::Path, symbol: &str, now_ms: i64, cols: usi
 }
 
 /// _approach_read: 4시간(2880열 × 5초 접기) → rows 에 덧붙일 칸
+/// 빈 맵 = 원본이 예외를 낸 자리(한도 넘는 창) -- 부르는 쪽이 뒤(변동 신호)까지 건너뛴다
 pub fn approach_read(root: &std::path::Path, symbol: &str, now_ms: i64) -> Map<String, Value> {
-    let w = read_window(root, symbol, now_ms, 2880, 5);
+    let Ok(w) = try_read_window(root, symbol, now_ms, 2880, 5) else { return Map::new() };
     let (ratio, q) = approach_ratio(&w);
     let mut m = Map::new();
     m.insert("approach_bin_lo".into(), json!(if w.n_bins == 0 { 0 } else { w.bin_lo }));
@@ -356,7 +357,7 @@ pub fn approach_read(root: &std::path::Path, symbol: &str, now_ms: i64) -> Map<S
 
 /// _volsig_ref → 정렬한 (past, refill, score) · 60개 미만이면 None(원본 {})
 pub fn volsig_ref(root: &std::path::Path, symbol: &str, now_ms: i64) -> Option<(Vec<f32>, Vec<f32>, Vec<f64>)> {
-    let w = read_window(root, symbol, now_ms, 4 * 3600, 1);
+    let w = try_read_window(root, symbol, now_ms, 4 * 3600, 1).ok()?;
     let (past, refill) = vol_scores(&w, Some((600..4 * 3600).step_by(60).collect()));
     if past.len() < 60 {
         return None;
@@ -372,9 +373,9 @@ pub fn volsig_ref(root: &std::path::Path, symbol: &str, now_ms: i64) -> Option<(
 
 /// _volsig_read(symbol, ref) → summary 에 덧붙일 칸(없으면 빈 맵)
 pub fn volsig_read(root: &std::path::Path, symbol: &str, now_ms: i64, rf: &(Vec<f32>, Vec<f32>, Vec<f64>)) -> Map<String, Value> {
-    let w = read_window(root, symbol, now_ms, 660, 1);
-    let (past, refill) = vol_scores(&w, None);
     let mut m = Map::new();
+    let Ok(w) = try_read_window(root, symbol, now_ms, 660, 1) else { return m };
+    let (past, refill) = vol_scores(&w, None);
     if past.is_empty() {
         return m;
     }

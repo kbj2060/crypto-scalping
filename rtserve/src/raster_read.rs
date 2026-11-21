@@ -52,8 +52,24 @@ fn le_f32(b: &[u8]) -> f32 {
     f32::from_le_bytes(b[..4].try_into().unwrap())
 }
 
-/// read_window(symbol, to_ms, cols, agg, root): [to_ms − cols·agg 초, to_ms] 를 절대 가격축으로
+/// 한 창의 칸 수 상한(행 × 칸). 정상 최대 = 히트맵 900열 × 60초 접기 = 54,000행 × N_BINS 240 × 가격 이동 여유 5배 ≈ 6,480만 → 6,400만(256MB f32).
+/// 🔴깨진 파일(머리 n_bins 가 크거나 행 bin_lo 가 엉뚱함)이면 Rust 할당 실패 = 프로세스 abort 다 -- 원본은 numpy MemoryError/ValueError 가 그 요청만 깨뜨린다(→ 500).
+pub const MAX_CELLS: usize = 64_000_000;
+
+/// read_window -- 한도를 넘는 창은 빈 창(유효 행 없음 모양)으로. 상황 카드처럼 «못 읽음 = 없음»으로 다루는 쪽용 · 오류를 구별하려면 try_read_window
 pub fn read_window(root: &Path, symbol: &str, to_ms: i64, cols: usize, agg: usize) -> Window {
+    try_read_window(root, symbol, to_ms, cols, agg).unwrap_or_else(|_| Window {
+        symbol: symbol.into(), t0_ms: to_ms.div_euclid(1000) * 1000 - (cols as i64 * agg as i64 - 1) * 1000, dt_s: agg as i64, cols, bin_size: BIN_SIZE,
+        bin_lo: 0, n_bins: 0, qty: vec![], mid: vec![f32::NAN; cols.min(MAX_CELLS)], valid_ratio: 0.0,
+    })
+}
+
+/// read_window(symbol, to_ms, cols, agg, root): [to_ms − cols·agg 초, to_ms] 를 절대 가격축으로 · Err = 원본이 MemoryError 를 냈을 칸 수(MAX_CELLS 초과)
+pub fn try_read_window(root: &Path, symbol: &str, to_ms: i64, cols: usize, agg: usize) -> Result<Window, String> {
+    let too_big = |a: usize, b: usize| a.checked_mul(b).is_none_or(|c| c > MAX_CELLS);
+    if too_big(cols, agg) {
+        return Err(format!("MemoryError: window {cols}x{agg} rows"));
+    }
     let total = cols * agg;
     let t_end = to_ms.div_euclid(1000) * 1000;
     let t0 = t_end - (total as i64 - 1) * 1000;
@@ -69,6 +85,9 @@ pub fn read_window(root: &Path, symbol: &str, to_ms: i64, cols: usize, agg: usiz
             if fh.read_exact(&mut head).is_ok() && &head[..4] == b"FLWR" && u16::from_le_bytes([head[4], head[5]]) == 1 {
                 let hb = u16::from_le_bytes([head[6], head[7]]) as usize;
                 if raw.is_none() {
+                    if too_big(total, hb) {
+                        return Err(format!("MemoryError: Unable to allocate ({total}, {hb}) float32"));
+                    }
                     (n_bins, bin_size) = (hb, le_f32(&head[8..]) as f64);
                     raw = Some(vec![0f32; total * n_bins]);
                 }
@@ -107,10 +126,13 @@ pub fn read_window(root: &Path, symbol: &str, to_ms: i64, cols: usize, agg: usiz
     }
     let nv = valid.iter().filter(|v| **v).count();
     if nv == 0 {
-        return Window { symbol: symbol.into(), t0_ms: t0, dt_s: agg as i64, cols, bin_size, bin_lo: 0, n_bins: 0, qty: vec![], mid: vec![f32::NAN; cols], valid_ratio: 0.0 };
+        return Ok(Window { symbol: symbol.into(), t0_ms: t0, dt_s: agg as i64, cols, bin_size, bin_lo: 0, n_bins: 0, qty: vec![], mid: vec![f32::NAN; cols], valid_ratio: 0.0 });
     }
     let g_lo = (0..total).filter(|&i| valid[i]).map(|i| lo[i]).min().unwrap();
     let g_hi = (0..total).filter(|&i| valid[i]).map(|i| lo[i] + n_bins as i64).max().unwrap();
+    if g_hi - g_lo > i64::from(i32::MAX) || too_big(total, (g_hi - g_lo) as usize) {
+        return Err(format!("MemoryError: Unable to allocate ({total}, {}) float32", g_hi - g_lo));
+    }
     let w = (g_hi - g_lo) as usize;
     let mut out = vec![0f32; total * w];
     for i in (0..total).filter(|&i| valid[i]) {
@@ -145,5 +167,5 @@ pub fn read_window(root: &Path, symbol: &str, to_ms: i64, cols: usize, agg: usiz
     } else {
         (out, mid)
     };
-    Window { symbol: symbol.into(), t0_ms: t0, dt_s: agg as i64, cols, bin_size, bin_lo: g_lo, n_bins: w, qty, mid, valid_ratio: nv as f64 / total as f64 }
+    Ok(Window { symbol: symbol.into(), t0_ms: t0, dt_s: agg as i64, cols, bin_size, bin_lo: g_lo, n_bins: w, qty, mid, valid_ratio: nv as f64 / total as f64 })
 }

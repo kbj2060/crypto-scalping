@@ -8,6 +8,9 @@
 pub mod api;
 pub mod api2;
 pub mod api3;
+pub mod ctx;
+pub mod ctx_micro;
+pub mod ctx_x;
 pub mod fpd;
 pub mod heatmap;
 pub mod hub;
@@ -252,6 +255,7 @@ fn routes(p: &str) -> Vec<(&'static str, Handler)> {
         "/api/footprint" => v.push(("GET", |c, r| hub::api_footprint(c, &c.live, r))),
         "/api/oi-5m" => v.push(("GET", hub::api_oi_5m)),
         "/api/liquidation-5m-history" => v.push(("GET", hub::api_liquidation_5m_history)),
+        "/api/situation" => v.push(("GET", hub::api_situation)),
         _ => {}
     }
     v.extend(api2::routes(p));
@@ -407,7 +411,26 @@ pub fn hex(b: &[u8]) -> String {
 // ───────────────────────── 화면 문서·정적 파일 ─────────────────────────
 
 /// 원본 _asset_buster(server.py:3593): ASSET_FILES 내용의 sha256 앞 12자(없는 파일은 이름 글자)
+/// ponytail: 파일마다 (수정 시각 ns · 크기)가 같으면 지난 값 -- 병행 대조에서 매 요청 sha256 이 rtserve 를 파이썬보다 느리게 했다(10ms 대 3.6ms).
+///   수정 시각·크기를 안 바꾸고 내용만 바꾸는 쓰기면 옛 버스터가 남는다(배포는 rename 이라 해당 없음).
 fn asset_buster(dir: &Path) -> String {
+    type Memo = std::sync::Mutex<Option<(PathBuf, Vec<Option<(u128, u64)>>, String)>>;
+    static MEMO: std::sync::OnceLock<Memo> = std::sync::OnceLock::new();
+    let sig: Vec<Option<(u128, u64)>> = ASSET_FILES.iter().map(|n| fs::metadata(dir.join(n)).ok().and_then(|m| {
+        Some((m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos(), m.len()))
+    })).collect();
+    let memo = MEMO.get_or_init(Default::default);
+    if let Some((d, s, v)) = memo.lock().unwrap().as_ref() {
+        if d == dir && *s == sig {
+            return v.clone();
+        }
+    }
+    let v = asset_buster_compute(dir);
+    *memo.lock().unwrap() = Some((dir.to_path_buf(), sig, v.clone()));
+    v
+}
+
+fn asset_buster_compute(dir: &Path) -> String {
     let mut h = Sha256::new();
     for name in ASSET_FILES {
         match fs::read(dir.join(name)) {
