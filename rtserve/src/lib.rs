@@ -6,14 +6,18 @@
 //! 시험: tests/http_parity.rs(정답지 = tools/gen_http_fixture.py 가 진짜 aiohttp 객체로 뜬 바이트).
 
 pub mod api;
+pub mod api2;
+pub mod html_entities;
+pub mod hub;
 pub mod py;
+pub mod text;
 
 use std::convert::Infallible;
 use std::fs;
 use std::net::SocketAddr;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
@@ -28,8 +32,10 @@ use tokio::net::TcpListener;
 
 /// 원본 server.py:1282 -- 내용 해시 버스터·no-cache·압축을 받는 화면 파일
 pub const ASSET_FILES: [&str; 5] = ["app.js", "styles.css", "fp_daily.js", "liq_profile.js", "bubble_map.js"];
-/// orders.py:331 MARKET_SYMBOLS 의 열쇠(DASHBOARD_ASSETS 가 이 안에서만 고른다)
-pub const MARKET_ASSETS: [&str; 5] = ["eth", "sol", "btc", "xrp", "hype"];
+/// orders.py:338 MARKET_SYMBOLS 의 열쇠(DASHBOARD_ASSETS 가 이 안에서만 고른다 · client-timing 의 sym 허용 목록)
+pub const MARKET_ASSETS: [&str; 9] = ["eth", "sol", "btc", "xrp", "hype", "sndk", "soxl", "skhynix", "mu"];
+/// dashboard/coin_flow.py FLOW_SPECS 열쇠 -- 흐름 엔진(체결·풋프린트)이 있는 코인. 켜지는 것 = eth + 이 중 DASHBOARD_ASSETS(server.py:1721)
+pub const FLOW_COINS: [&str; 8] = ["eth", "sol", "xrp", "btc", "sndk", "soxl", "skhynix", "mu"];
 /// scripts/coin_config.py COIN_CONFIG 열쇠(2026-11-21) -- `?asset=` 신뢰 경계 허용 목록
 pub const COIN_CONFIG: [&str; 9] = ["eth", "btc", "sol", "xrp", "hype", "sndk", "soxl", "skhynix", "mu"];
 
@@ -42,9 +48,40 @@ pub struct Config {
     /// 원본 DASHBOARD_ASSETS(꺼진 코인 탭을 index.html 에서 hidden 으로)
     pub assets: Vec<String>,
     pub now: Clock,
+    /// env VAPID_PUBLIC_KEY 값 · VAPID_PRIVATE_KEY 가 비지 않았는지(값은 들고 있지 않는다 -- 발송은 파이썬 몫)
+    pub vapid_public: String,
+    pub vapid_private_set: bool,
+    /// 로그 한 줄(원본 print · client_timing) -- 실행 파일은 표준 출력, 시험은 모아 본다
+    pub log: Arc<dyn Fn(&str) + Send + Sync>,
+    /// 파일을 고치는 핸들러(메모·오답·구독)의 읽기-고치기-쓰기를 한 줄로(원본은 이벤트 루프 하나라 저절로 한 줄이었다)
+    pub write_lock: Arc<Mutex<()>>,
+    /// client_timing 0.2초 상한의 마지막 시각(원본 _client_timing_at · time.monotonic)
+    pub timing_at: Arc<Mutex<Option<std::time::Instant>>>,
+    /// rtcore 허브에서 받아 쌓은 상태(허브가 없으면 빈 채로 -- 엔드포인트는 원본의 «아직 없음» 모양을 낸다)
+    pub live: Arc<hub::Live>,
+    /// /api/events 발행기
+    pub events: Arc<hub::Events>,
 }
 
 impl Config {
+    pub fn new(root: PathBuf, assets: Vec<String>, now: Clock) -> Config {
+        Config {
+            root,
+            assets,
+            now,
+            vapid_public: String::new(),
+            vapid_private_set: false,
+            log: Arc::new(|l| println!("{l}")),
+            write_lock: Arc::new(Mutex::new(())),
+            timing_at: Arc::new(Mutex::new(None)),
+            live: Arc::new(hub::Live::default()),
+            events: Arc::new(hub::Events { clients: Mutex::new(Vec::new()), latest: Mutex::new((serde_json::Value::Null, serde_json::json!({}))) }),
+        }
+    }
+    /// 켜진 흐름 엔진 코인(원본 `flows` 의 열쇠 · FLOW_SPECS 순서)
+    pub fn flows(&self) -> Vec<&'static str> {
+        FLOW_COINS.iter().copied().filter(|a| *a == "eth" || self.assets.iter().any(|x| x == a)).collect()
+    }
     pub fn live_dir(&self) -> PathBuf {
         self.root.join("data/live")
     }
@@ -53,10 +90,10 @@ impl Config {
     }
 }
 
-/// 원본 server.py:424 -- `DASHBOARD_ASSETS` env(기본 "eth,sol,xrp") 중 아는 코인만 · 비면 ["eth"]
+/// 원본 server.py:424 -- `DASHBOARD_ASSETS` env(기본 "eth,btc,sol,xrp,sndk,soxl,skhynix,mu") 중 아는 코인만 · 비면 ["eth"]
 pub fn parse_assets(env: Option<&str>) -> Vec<String> {
     let v: Vec<String> = env
-        .unwrap_or("eth,sol,xrp")
+        .unwrap_or("eth,btc,sol,xrp,sndk,soxl,skhynix,mu")
         .split(',')
         .map(|a| a.trim().to_lowercase())
         .filter(|a| MARKET_ASSETS.contains(&a.as_str()))
@@ -70,6 +107,9 @@ pub struct Req {
     pub path: String,
     pub query: Vec<(String, String)>,
     pub headers: Vec<(String, String)>, // 이름 소문자
+    pub body: Vec<u8>,
+    /// 접속한 쪽 IP(원본 request.remote)
+    pub peer: String,
 }
 
 impl Req {
@@ -152,40 +192,68 @@ fn phrase(status: u16) -> &'static str {
         403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        413 => "Request Entity Too Large", // 파이썬 HTTPStatus 글자(hyper 는 «Payload Too Large»)
+        429 => "Too Many Requests",
         500 => "Internal Server Error",
+        503 => "Service Unavailable",
         _ => "",
     }
 }
 
 // ───────────────────────── 라우터 ─────────────────────────
 
-/// 원본 등록부(server.py 4932~5025) 중 이 조각이 옮긴 것. 모두 add_get(= GET·HEAD).
+pub type Handler = fn(&Config, &Req) -> Resp;
+
+/// 원본 등록부(server.py 4932~5025) 중 옮긴 것: (주소, 메서드, 핸들러). add_get 은 HEAD 도 받는다.
+fn routes(p: &str) -> Vec<(&'static str, Handler)> {
+    let mut v: Vec<(&'static str, Handler)> = match p {
+        "/" => vec![("GET", |_, _| http_exc(302, None, &[("Location", "/dashboard/live/")]))],
+        "/dashboard/live" | "/dashboard/live/" | "/dashboard/live/index.html" => vec![("GET", dashboard_index)],
+        "/dashboard/live/sw.js" | "/dashboard/live/manifest.webmanifest" => vec![("GET", pwa_asset)],
+        _ => Vec::new(),
+    };
+    v.extend(api::handler(p).map(|h| ("GET", h)));
+    match p {
+        "/api/supply-1s" => v.push(("GET", |c, r| hub::api_supply(c, &c.live, r))),
+        "/api/footprint" => v.push(("GET", |c, r| hub::api_footprint(c, &c.live, r))),
+        _ => {}
+    }
+    v.extend(api2::routes(p));
+    v
+}
+
 fn route(cfg: &Config, req: &Req) -> Resp {
     let p = req.path.as_str();
-    let get = req.method == "GET" || req.method == "HEAD";
-    let not_allowed = || http_exc(405, None, &[("Allow", "GET,HEAD")]);
-    let handler: Option<fn(&Config, &Req) -> Resp> = match p {
-        "/" => Some(|_, _| http_exc(302, None, &[("Location", "/dashboard/live/")])),
-        "/dashboard/live" | "/dashboard/live/" | "/dashboard/live/index.html" => Some(dashboard_index),
-        "/dashboard/live/sw.js" | "/dashboard/live/manifest.webmanifest" => Some(pwa_asset),
-        _ => api::handler(p),
-    };
-    if let Some(h) = handler {
-        return if get { h(cfg, req) } else { not_allowed() };
+    let m = if req.method == "HEAD" { "GET" } else { req.method.as_str() };
+    let rs = routes(p);
+    let static_rest = if rs.is_empty() { p.strip_prefix("/dashboard/live/") } else { None };
+    if let Some(rest) = static_rest {
+        return if m == "GET" { static_file(cfg, req, rest) } else { http_exc(405, None, &[("Allow", "GET,HEAD")]) };
     }
-    if let Some(rest) = p.strip_prefix("/dashboard/live/") {
-        return if get { static_file(cfg, req, rest) } else { not_allowed() };
+    if rs.is_empty() {
+        return http_exc(404, None, &[]);
     }
-    http_exc(404, None, &[])
+    if let Some((_, h)) = rs.iter().find(|(x, _)| *x == m) {
+        return h(cfg, req);
+    }
+    // aiohttp: Allow = 그 주소가 받는 메서드(GET 이면 HEAD 도) 이름 순
+    let mut allow: Vec<&str> = rs.iter().flat_map(|(x, _)| if *x == "GET" { vec!["GET", "HEAD"] } else { vec![*x] }).collect();
+    allow.sort();
+    allow.dedup();
+    http_exc(405, None, &[("Allow", &allow.join(","))])
 }
 
 /// 요청 하나 → 연결에 낼 응답(압축·길이까지 정한 것)
 pub fn handle(cfg: &Config, req: &Req) -> Resp {
+    let t0 = (cfg.now)();
     let mut r = route(cfg, req);
     if !r.exc {
         // 미들웨어 둘(안쪽부터) -- 예외 응답(302·4xx·500)은 원본처럼 미들웨어를 안 지난다
         r = json_compress_etag(req, r);
         r = static_asset_headers(req, r);
+    }
+    if req.method == "POST" && req.path.starts_with("/api/manual-") {
+        api2::order_request_log(cfg, req, &r, t0);
     }
     prepare(req, r)
 }
@@ -262,6 +330,12 @@ fn prepare(req: &Req, mut r: Resp) -> Resp {
     if r.close {
         r.set("Connection", "close");
     }
+    r
+}
+
+fn prepare_exc(mut r: Resp) -> Resp {
+    let n = r.body.as_ref().map_or(0, Vec::len);
+    r.set("Content-Length", n.to_string());
     r
 }
 
@@ -510,7 +584,7 @@ fn decode(s: &str, plus: bool) -> String {
     percent_encoding::percent_decode_str(&s).decode_utf8_lossy().into_owned()
 }
 
-pub fn parse_req<B>(r: &hyper::Request<B>) -> Req {
+pub fn parse_req<B>(r: &hyper::Request<B>, body: Vec<u8>, peer: String) -> Req {
     let uri = r.uri();
     let query = uri
         .query()
@@ -527,6 +601,8 @@ pub fn parse_req<B>(r: &hyper::Request<B>) -> Req {
         path: decode(uri.path(), false),
         query,
         headers: r.headers().iter().map(|(k, v)| (k.as_str().to_string(), String::from_utf8_lossy(v.as_bytes()).into_owned())).collect(),
+        body,
+        peer,
     }
 }
 
@@ -542,7 +618,8 @@ pub fn to_hyper(r: Resp) -> hyper::Response<Body> {
     };
     let mut out = hyper::Response::new(body);
     *out.status_mut() = hyper::StatusCode::from_u16(r.status).unwrap();
-    if let Some(reason) = r.reason.filter(|x| x != phrase(r.status)) {
+    let canonical = out.status().canonical_reason().unwrap_or("");
+    if let Some(reason) = r.reason.or_else(|| Some(phrase(r.status).to_string())).filter(|x| !x.is_empty() && x != canonical) {
         if let Ok(p) = hyper::ext::ReasonPhrase::try_from(reason.into_bytes()) {
             out.extensions_mut().insert(p);
         }
@@ -560,13 +637,36 @@ pub fn to_hyper(r: Resp) -> hyper::Response<Body> {
 pub async fn serve(listener: TcpListener, cfg: Config) -> std::io::Result<()> {
     let cfg = Arc::new(cfg);
     loop {
-        let (stream, _) = listener.accept().await?;
+        let (stream, peer) = listener.accept().await?;
         let cfg = cfg.clone();
         tokio::spawn(async move {
             let svc = service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
                 let cfg = cfg.clone();
                 async move {
-                    let r = parse_req(&req);
+                    // 본문 상한 = aiohttp client_max_size 1MB(넘으면 413) -- 원본은 읽을 때 재지만 이 서버의 POST 는 모두 본문을 읽는다
+                    let (parts, body) = req.into_parts();
+                    let limited = http_body_util::Limited::new(body, 1 << 20);
+                    let body = match limited.collect().await {
+                        Ok(b) => b.to_bytes().to_vec(),
+                        Err(_) => {
+                            let n = 1 << 20;
+                            let r = http_exc(413, Some("Request Entity Too Large"), &[]);
+                            let r = Resp { body: Some(format!("Maximum request body size {n} exceeded, actual body size {n}").into_bytes()), ..r };
+                            return Ok::<_, Infallible>(to_hyper(prepare_exc(r)));
+                        }
+                    };
+                    let head = hyper::Request::from_parts(parts, ());
+                    let r = parse_req(&head, body, peer.ip().to_string());
+                    // SSE 둘은 끝나지 않는 응답 -- 블로킹 스레드로 보내지 않는다
+                    if r.method == "GET" && r.path == "/api/events" {
+                        return Ok(cfg.events.connect(&cfg));
+                    }
+                    if r.method == "GET" && r.path == "/api/stream" {
+                        return Ok(match hub::api_stream(cfg.clone(), cfg.live.clone(), &r) {
+                            Ok(resp) => resp,
+                            Err(e) => to_hyper(prepare(&r, e)),
+                        });
+                    }
                     let resp = tokio::task::spawn_blocking(move || handle(&cfg, &r)).await.unwrap_or_else(|_| server_error());
                     Ok::<_, Infallible>(to_hyper(resp))
                 }

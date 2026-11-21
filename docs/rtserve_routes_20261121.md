@@ -8,9 +8,12 @@ Rust 판 = `rtserve/`(새 크레이트). 설계 문서 `docs/rtcore_design_20261
 
 - 등록부(server.py 4932~5025) = **84개**: 화면 문서·정적 6(`/` · `/dashboard/live` 셋 · sw.js/manifest · add_static) + **`/api/*` 78**(GET 61 · POST 17) + SSE 2(그 78 안).
 - `/api/*` 78 을 «무엇을 읽어 답하나»로 나누면: 파일·SQLite 만 21 · 파일 쓰기/설정(POST·푸시) 6 · 저장소+계산(REST 없음) 7 · 프로세스 메모리 상태 10 · 요청 때 외부 REST/모델 20 · 주문·계좌 14.
-- **이번 조각에서 옮김**: 공통 동작 전부(미들웨어 둘 · 정적 파일 · index 302 · 버스터 · pwa · 404/405/500) + 엔드포인트 12(파일·SQLite 만 읽는 것).
-  정답지 = 원본 함수를 진짜 aiohttp 객체(라우터·미들웨어·Response.prepare)로 돌려 뜬 연결 바이트 · 요청 113건(압축 바이트 포함) 일치 ·
-  의도한 차이 1종 3건(§5) · 양성 대조 §6.
+- **첫 조각(main c12b7cc8 · PR 69)**: 공통 동작 전부(미들웨어 둘 · 정적 파일 · index 302 · 버스터 · pwa · 404/405/500) + 엔드포인트 12(파일·SQLite 만 읽는 것).
+  정답지 = 원본 함수를 진짜 aiohttp 객체(라우터·미들웨어·Response.prepare)로 돌려 뜬 연결 바이트 · 요청 113건(압축 바이트 포함) 일치 · 의도한 차이 1종 3건(§5).
+- **둘째 조각(2026-11-21 · 미커밋)**: 나머지 파일·SQLite 9(state · breakout-detector · gex · chip-score · notify-center · news · macro-spikes · bubble-tape · pred-record)
+  + 쓰기 4(acct-notes·acct-wrong POST · push/subscribe·unsubscribe) + 설정 읽기 2(push/config·devices) + client-timing + order_request_log(요청 111 · 쓴 파일 대조 184 일치)
+  + rtcore 허브 구독 → `/api/supply-1s` · `/api/footprint` · SSE `/api/stream`(수급) · `/api/events`(rtcore 시험 정답지의 파이썬 행과 비트 일치). 양성 대조 §6.
+- **옮김 합계**: `/api/*` 78 중 31 + 화면·정적 6 전부. 남은 것 = §7.
 - 인증·세션: **원본 서버 안에 없다.** 127.0.0.1 에만 묶이고, 공개 경로는 Cloudflare 터널(`dashboard/scripts/start_cloudflare_tunnel.sh`) + Cloudflare Access 가 막는다
   (`dashboard/scripts/supervise_server.sh:31~32` 주석 · `docs/rtcore_browser_route_20261120.md:22`). «인증 없이 열면 `/` 는 302, 그 밖은 404» 로 보인 것은
   원본 라우터 그대로다(`/` = `HTTPFound("/dashboard/live/")`, 모르는 주소 = `404: Not Found`). rtserve 도 인증을 새로 만들지 않고 루프백이 아니면 시작을 거절한다.
@@ -19,7 +22,7 @@ Rust 판 = `rtserve/`(새 크레이트). 설계 문서 `docs/rtcore_design_20261
 
 | 동작 | 원본 | 내용 | rtserve |
 |---|---|---|---|
-| 미들웨어 순서 | 1381 | `[order_request_log, static_asset_headers, json_compress_etag]`(앞이 바깥) | 같은 순서(`lib.rs handle`) · order_request_log 는 다음 조각(POST `/api/manual-*` 만 건드림) |
+| 미들웨어 순서 | 1381 | `[order_request_log, static_asset_headers, json_compress_etag]`(앞이 바깥) | 같은 순서(`lib.rs handle`) |
 | `json_compress_etag` | 1325 | GET·200·`application/json`·본문 있음 → ETag 없으면 `W/"body-<sha256 앞16>"` + `Cache-Control` 기본 no-cache · If-None-Match(쉼표로 갈라 공백 벗긴 글자 = `*` 또는 같음)면 304(ETag·Cache-Control 만) · 압축 켬 | 같음 |
 | 압축 | aiohttp 3.13/3.14 | **문턱 없음**(모든 JSON·index.html·ASSET_FILES). Accept-Encoding 소문자에 «deflate» 글자가 있으면 deflate(zlib 머리) 먼저, 없으면 «gzip» — 부분 글자 일치라 브라우저(`gzip, deflate, br, zstd`)는 **deflate** 를 받는다. C zlib 수준 6. 4096 바이트는 «압축을 실행기로 넘기는» 문턱(`_zlib_executor_size`)일 뿐 | flate2 + C zlib(같은 수준·같은 머리) → 압축 바이트까지 같음 |
 | `static_asset_headers` | 1287 | 요청 경로 마지막 이름이 ASSET_FILES(app.js·styles.css·fp_daily.js·liq_profile.js·bubble_map.js)면 no-cache+압축 · `.ttf` 면 1년 immutable · `.html` 이면 no-cache | 같음 |
@@ -31,8 +34,8 @@ Rust 판 = `rtserve/`(새 크레이트). 설계 문서 `docs/rtcore_design_20261
 | 꺼진 코인 탭 | 3609 | `<button … data-asset="x">` 의 x 가 `DASHBOARD_ASSETS`(env · 기본 eth,sol,xrp)에 없으면 ` hidden>` | 같음(정규식 대신 손으로 · 같은 결과) |
 | pwa | 3635 | sw.js·manifest = FileResponse + no-cache | 같음 |
 | 예외 응답 | aiohttp web_protocol | `HTTPException` 은 미들웨어를 안 지나고 `"{status}: {reason}"` text/plain · 400 은 상태 줄 글자도 reason(`400 unsupported_asset`) · 405 는 `Allow: GET,HEAD` · 잡히지 않은 예외 = 500 `500 Internal Server Error\n\nServer got itself in trouble` + 연결 닫음 | 같음(상태 줄 글자 포함) |
-| 요청 기록 `order_request_log` | 1352 | POST `/api/manual-*` 만: KST 시각·경로·쿼리·상태·error·ms·UA·IP(CF-Connecting-IP 우선) → `data/live/order_requests.jsonl` | 다음 조각(주문 접수와 같이) |
-| M0 `client_timing` | 5102 | POST `/api/client-timing` 본문 1KB·아는 키·숫자만 → 로그 한 줄 · 0.2초 상한 | 다음 조각(로그 한 줄이라 쉬움 · 전환이 끝날 때까지 둔다 — 질문지 25) |
+| 요청 기록 `order_request_log` | 1352 | POST `/api/manual-*` 만: KST 시각·경로·쿼리(**키마다 첫 값**)·상태·error·ms·UA 200자·IP(CF-Connecting-IP → X-Forwarded-For → 접속 IP) → `data/live/order_requests.jsonl` 한 줄 덧붙이기. 예외(404·405)도 상태와 함께 적힌다 | **옮김**(`api2.rs order_request_log` · 주문 주소가 아직 없어 지금은 404 줄만 적힌다 -- rtorder 붙일 때 그대로 쓴다) |
+| M0 `client_timing` | 5102 | POST `/api/client-timing` 본문 1KB·아는 키·숫자만 → 로그 한 줄 · 0.2초 상한 | **옮김**(로그 = `Config.log` · 실행 파일은 표준 출력) |
 | swr 캐시 | 1460~1500 | 키별 ttl·max_stale · 묵은 값 먼저 주고 뒤에서 갱신 | **안 옮김**(이 조각의 읽기는 µs) — §5 |
 | 시작·종료 | 5030~5043 · main 5123 | 시작: http 세션 · SSE 발행 · 흐름(코인별 WS) · 미시 루프 6종 · 손절 감시 · 대기 정리 · 사용자 스트림 · 멈춤 감지 / 종료는 역순 · `shutdown_timeout=2.0`(SSE 때문) | 시작 = 묶기만 · Ctrl+C 끝 · 백그라운드 루프 없음(§3) |
 
@@ -65,24 +68,26 @@ Rust 판 = `rtserve/`(새 크레이트). 설계 문서 `docs/rtcore_design_20261
 | `/api/xyz100` | 2121 → 622 | S `data/hot/hl_xyz.sqlite` | since 없을 때 swr 5/60 | 비교 화면 1초 · 아니면 60초 | rtcollect `xyz` | **옮김** |
 | `/api/macro-today` | 2117 → 646 | S hl_xyz + `macro_5m.sqlite` | swr 30/600 | 60초 | rtcollect `xyz`·`macro_5m` | **옮김** |
 | `/api/macro-calendar` | 4836 → 1150 → worker_state.py:31 | F `macro_calendar_state.json`(90분 신선도) | swr 6h/600 | 6시간 | 안 옮김(거시 달력 워커) | **옮김** |
-| `/api/macro-spikes` | 2130 → 712 | S treasury + hl_xyz · `statistics.stdev` · 뉴욕 시각(CME 개장) | swr 30/120 | 30초(비교 화면) | — | 다음(정확 유리수 stdev·뉴욕 서머타임 표 필요) |
-| `/api/news` | 2096 → 729 | S `data/hot/news_rss.sqlite` · `html.unescape`·정규식 | swr 15/300 | 30초 | 안 옮김(뉴스 수집기) | 다음(HTML 엔티티 표 전체 필요) |
-| `/api/chip-score` | 2088 → 303·321 | F `chip_score_YYYYMM.jsonl` 두 달 | swr 60/600 | 5분 | — (쓰는 쪽 = 서버 안 chip_score_loop · §3) | 다음(404 판정에 흐름 코인 목록 필요) |
-| `/api/notify-center` | 2134 → 336 | F verdict_calendar·push_sent_log·liqmap_score_status + 상수 PUSH_KINDS(scripts/live_push_notifier:131) | — | 5분 | — | 다음(PUSH_KINDS 를 한 곳에 둘 방법) |
-| `/api/state` | 3647 | F `dashboard_state.json` + 명시 ETag | json_cache | 안 부름(SSE 가 같은 원천) | rtduck market_data | 다음 |
-| `/api/breakout-detector` | 4456 | F `{a}_breakout_detector_state.json` | swr 60/600 | **안 부름** | (워커 꺼짐 · 질문지 20) | 지움 후보 |
-| `/api/gex` | 4715 → 1208 | F deribit_gex·cboe_option·block_trades state | swr 60/600 | 60초 | rtcollect `cboe_chain`(반쯤) | 다음 |
-| `/api/bubble-tape` | 1107 → 1071 | S 체결 테이프 hot 셋(바이낸스·OKX·Bybit) | 자체 1초 | 1초(bubble_map.js) | rtcollect 테이프 셋 · rtcore 테이프 | 다음 |
-| `/api/pred-record` | 2890 → pred_record.py:187 | F `pred_record/*.jsonl` 꼬리 8MB + **M** `_xs_latest` | swr 30/600 | 60초 | rtmodel `bin/rt_dirpred`(기록) | 다음(상대 강도 latest 가 메모리) |
+| `/api/macro-spikes` | 2130 → 712 | S treasury + hl_xyz · `statistics.stdev` · 뉴욕 시각(CME 개장) | swr 30/120 | 30초(비교 화면) | — | **옮김**(statistics.stdev 정확 유리수 = num-bigint · 미국 서머타임 규칙) |
+| `/api/news` | 2096 → 729 | S `data/hot/news_rss.sqlite` · `html.unescape`·정규식 | swr 15/300 | 30초 | 안 옮김(뉴스 수집기) | **옮김**(html.unescape 표 2,231개를 `src/html_entities.rs` 로 떠 둠 · news_key 정규식 다섯 줄 손으로) |
+| `/api/chip-score` | 2088 → 303·321 | F `chip_score_YYYYMM.jsonl` 두 달 | swr 60/600 | 5분 | — (쓰는 쪽 = 서버 안 chip_score_loop · §3) | **옮김**(흐름 코인 = FLOW_SPECS 열쇠 ∩ DASHBOARD_ASSETS) |
+| `/api/notify-center` | 2134 → 336 | F verdict_calendar·push_sent_log·liqmap_score_status + 상수 PUSH_KINDS(scripts/live_push_notifier:131) | — | 5분 | — | **옮김**(PUSH_KINDS 를 옮겨 적음 -- 알림 데몬 모듈은 import 때 환경 파일을 읽어 불러 쓰지 않았다 · 바뀌면 둘 다) |
+| `/api/state` | 3647 | F `dashboard_state.json` + 명시 ETag | json_cache | 안 부름(SSE 가 같은 원천) | rtduck market_data | **옮김**(명시 ETag `W/"state-…"` · ensure_ascii=False 압축형) |
+| `/api/breakout-detector` | 4456 | F `{a}_breakout_detector_state.json` | swr 60/600 | **안 부름** | (워커 꺼짐 · 질문지 20) | **옮김**(원본이 지금 내는 그대로: 파일 없음/낡음 → available false · 지울지는 사용자) |
+| `/api/gex` | 4715 → 1208 | F deribit_gex·cboe_option·block_trades state | swr 60/600 | 60초 | rtcollect `cboe_chain`(반쯤) | **옮김** |
+| `/api/bubble-tape` | 1107 → 1071 | S 체결 테이프 hot 셋(바이낸스·OKX·Bybit) | 자체 1초 | 1초(bubble_map.js) | rtcollect 테이프 셋 · rtcore 테이프 | **옮김**(503 본문 error = sqlite3 예외 이름) |
+| `/api/pred-record` | 2890 → pred_record.py:187 | F `pred_record/*.jsonl` 꼬리 8MB + **M** `_xs_latest` | swr 30/600 | 60초 | rtmodel `bin/rt_dirpred`(기록) | **옮김**(xsec.latest 는 늘 null -- §5 #12) |
 
 ### 2-2. 파일 쓰기·설정 (6) — rtserve
 
 | 주소 | 핸들러 | 하는 일 | 비고 |
 |---|---|---|---|
-| `/api/acct-notes` POST | 2869 → acct_notes.save | 날짜·글 검증 → 원자적 쓰기 | 400 = ValueError 글자 |
-| `/api/acct-wrong` POST | 2881 → wrong_add·wrong_del | 한 줄 더하기·지우기 | 〃 |
-| `/api/push/config` · `/devices` GET | 4856·4891 | env VAPID 공개키 + 구독 파일 | 비밀값 = 환경변수(값은 옮기지 않는다) |
-| `/api/push/subscribe` · `/unsubscribe` POST | 4868·4879 | 구독 파일 쓰기 | 〃 |
+| `/api/acct-notes` POST | 2869 → acct_notes.save | 날짜·글 검증 → `acct_notes.tmp` 에 쓰고 rename | **옮김** · 400 = ValueError 글자 |
+| `/api/acct-wrong` POST | 2881 → wrong_add·wrong_del | 한 줄 더하기(id = max(기존, 지금 ms−1)+1 · 공백 접기)·지우기 → `acct_wrong.tmp` → rename | **옮김** |
+| `/api/push/config` · `/devices` GET | 4856·4891 | env VAPID 공개키 + 구독 파일 | **옮김** · 비밀키는 «있는지»만 든다(값은 안 든다) |
+| `/api/push/subscribe` · `/unsubscribe` POST | 4868·4879 | 구독 파일(json.dump indent=2) → `.json.tmp` → rename | **옮김** · 같은 기기 다시 구독 = 이름·시각 유지 |
+
+`/api/push/test`(4904 · 웹푸시 발송 = 외부 접속)는 2-5 묶음 -- 파이썬에 둔다. 쓰기 핸들러는 `Config.write_lock` 하나로 읽기-고치기-쓰기를 한 줄로 세운다(원본은 이벤트 루프 하나라 저절로 한 줄).
 
 ### 2-3. 저장소 + 계산(요청 때 REST 없음) (7) — rtserve(계산은 Rust 로 다시)
 
@@ -96,18 +101,18 @@ Rust 판 = `rtserve/`(새 크레이트). 설계 문서 `docs/rtcore_design_20261
 
 ### 2-4. 프로세스 메모리 상태 (10) — rtcore 허브/상태와 잇기
 
-| 주소 | 핸들러 | 원본 상태(채우는 루프) | rtcore 대응물 |
-|---|---|---|---|
-| `/api/events` SSE | 3651 | latest_event_*(publish_dashboard_events 1초 · 티커 REST) | Prices(티커) · 계좌 순번은 rtorder |
-| `/api/stream` SSE | 3130 | footprint_state·oi_1s·okx_*·spot_*·liq_events_by·situation_state | Supply1s(밀기) — 화면이 허브로 가면 지움 |
-| `/api/supply-1s` | 4341 | 같은 supply_1s_payload | Supply1s(실서버 그림자 일치 · 설계 문서 진행 기록 5·6) |
-| `/api/footprint` | 3971 | flows[a].footprint_state + fp_dhl(S) | Footprint(봉 623·칸 1,637 일치) |
-| `/api/situation` | 4721 | situation_state·fo_state·mp_state(collect_micro_ref 1초 · compute_situation) | 없음 — 계산 조각 |
-| `/api/sr-watch` | 2041 | sr_watch(sr_break_loop 10초) | 없음 · 화면이 안 부름(SR 근접 알림 워커만) |
-| `/api/oi-5m` | 4344 | S oi_1s + M oi_1s·okx_oi_5m | Oi 사건 · OI 5분 묶음은 아직 |
-| `/api/liquidation-5m-history` | 4394 | M liq_5m + S OKX·Bybit·HL 청산 + D tail_risk | Liq5m 밀기 · Liq 사건 |
-| `/api/market-context` | 2698 | M micro_state·mark_ring·mid_ring·depth25 + S/D 수집기 + R Deribit | Mark·Book · 나머지 계산 조각 |
-| `/api/client-timing` POST | 5102 | 로그 한 줄 | — (rtserve 가 그대로) |
+| 주소 | 핸들러 | 원본 상태(채우는 루프) | rtcore 대응물 | rtserve |
+|---|---|---|---|---|
+| `/api/events` SSE | 3651 | latest_event_*(publish_dashboard_events 1초 · 티커 REST) | Prices(티커) · 계좌 순번은 rtorder | **옮김**(첫 프레임·1초 발행·20초 keepalive · acct_seq 0 -- §5 #14) |
+| `/api/stream` SSE | 3130 | footprint_state·oi_1s·okx_*·spot_*·liq_events_by·situation_state | Supply1s(밀기) — 화면이 허브로 가면 지움 | **수급만 옮김**(🔴situation 이벤트 없음 -- §5 #15) |
+| `/api/supply-1s` | 4341 | 같은 supply_1s_payload | Supply1s(실서버 그림자 일치 · 설계 문서 진행 기록 5·6) | **옮김**(oi 는 [] -- §5 #13) |
+| `/api/footprint` | 3971 | flows[a].footprint_state + fp_dhl(S) | Footprint(봉 623·칸 1,637 일치) | **옮김**(agg 늘 false · dhl 코어 판 -- §5 #16) |
+| `/api/situation` | 4721 | situation_state·fo_state·mp_state(collect_micro_ref 1초 · compute_situation) | 없음 — 계산 조각 | 다음 |
+| `/api/sr-watch` | 2041 | sr_watch(sr_break_loop 10초) | 없음 · 화면이 안 부름(SR 근접 알림 워커만) | 다음 |
+| `/api/oi-5m` | 4344 | S oi_1s + M oi_1s·okx_oi_5m | Oi 사건 · OI 5분 묶음은 아직 | 다음(바이낸스 OI 1초 원천이 코어에 없다) |
+| `/api/liquidation-5m-history` | 4394 | M liq_5m + S OKX·Bybit·HL 청산 + D tail_risk | Liq5m 밀기 · Liq 사건 | 다음(OKX·Bybit·HL 청산 SQLite 합치기) |
+| `/api/market-context` | 2698 | M micro_state·mark_ring·mid_ring·depth25 + S/D 수집기 + R Deribit | Mark·Book · 나머지 계산 조각 | 다음 |
+| `/api/client-timing` POST | 5102 | 로그 한 줄 | — | **옮김** |
 
 ### 2-5. 요청 때 외부 REST·모델 (20) — 순서 맨 뒤 · 대부분 rtmodel 서빙을 붙이거나 워커 파일로 바꾼 뒤
 
@@ -158,7 +163,7 @@ Rust: `rtorder/src/intake.rs` `Desk::api_*`(접수 핸들러가 HTTP 와 떨어�
 ## 4. rtserve 첫 조각
 
 - **HTTP 스택**: hyper 1(+hyper-util 의 tokio 어댑터 · http-body-util). 라우트가 정해진 글자 목록이라 axum·tower 의 라우터·미들웨어 틀이 할 일이 없고, 원본과 헤더·상태 줄·청크 전송까지 바이트를 맞추려면 응답을 손에 쥐는 쪽이 짧다. tokio 1.54 는 형제 크레이트와 같은 판.
-- **설정**: `RTSERVE_ROOT`(필수 · 저장소 뿌리) · `RTSERVE_ADDR`(기본 127.0.0.1:8790 · 루프백 아니면 종료코드 2) · `DASHBOARD_ASSETS`(원본과 같은 뜻).
+- **설정**: `RTSERVE_ROOT`(필수 · 저장소 뿌리) · `RTSERVE_ADDR`(기본 127.0.0.1:8790 · 루프백 아니면 종료코드 2) · `DASHBOARD_ASSETS`(원본과 같은 뜻 · 기본 eth,btc,sol,xrp,sndk,soxl,skhynix,mu) · 둘째 조각부터 `RTSERVE_HUB`(rtcore 허브 주소) · `VAPID_PUBLIC_KEY`·`VAPID_PRIVATE_KEY`(원본과 같은 이름 · 비밀키는 있는지만).
 - **옮긴 엔드포인트 12**: acct-notes·acct-wrong(GET) · risk-radar · sr-lean · regime-band · liq-tab · iceberg · ob5m · treasury-futures · xyz100 · macro-today · macro-calendar.
   원본 구조대로 «워커가 쓴 파일을 읽어 돌려줌»만 한다(rtmodel 은 쓰는 쪽이라 의존하지 않는다).
 - **정답지**: `rtserve/tools/gen_http_fixture.py`. 원본 함수 본문을 옮겨 적고(대시보드 서버 모듈은 import 하지 않는다 — import 만으로 수집기·키를 끌어온다)
@@ -166,6 +171,16 @@ Rust: `rtorder/src/intake.rs` `Desk::api_*`(접수 핸들러가 HTTP 와 떨어�
   바이트를 모으는 가짜 전송으로 연결 바이트를 뜬다. 서버를 띄우지 않고 소켓도 안 연다. 시계 고정(time.time·datetime.now). 파일 트리 = 합성(개인 값 없음).
   시나리오 4(정적·API·파일 낡음/깨짐/빔·꼬리 경계) · 요청 113 · 그중 304 재요청 자동 생성.
 - **시험**: `cargo test` — `http_parity`(Rust 를 127.0.0.1:0 에 띄워 날 HTTP 로) · `static_traversal_blocked`(Rust 만 · 10경로) · `round_like_python`(파이썬 round 27,784개 비트) · `loopback_only` · 단위 3.
+
+### 둘째 조각 (2026-11-21)
+
+- **정답지**: `rtserve/tools/gen_http2_fixture.py`(첫 생성기의 가짜 전송·시계 고정·미들웨어를 가져다 씀 · order_request_log 미들웨어 포함 · POST 본문은 aiohttp StreamReader 로).
+  시나리오 3(api2 · api2_variants = 없음·깨짐·낡음 · writes = 쓰기 45걸음) · 요청 111 · 쓰기 시나리오는 요청마다 메모·오답·구독·주문 기록 파일 바이트 + 남은 `.tmp` + print 줄까지.
+  원본 상수(FLOW_SPECS·MARKET_SYMBOLS·테이프 칸 폭·고래 경계)는 정답지가 원본 모듈에서 읽어 실어 Rust 상수와 대조한다(`consts_match_original`). statistics.stdev 7벌 비트(`stdev_exact`).
+- **허브 구독**(`src/hub.rs`): `RTSERVE_HUB`(예 `ws://127.0.0.1:8788/rt`)에 붙어 흐름 코인 심볼을 구독(끊기면 1·2·4…30초). 받는 규칙은 proto.rs 그대로(스냅숏 통째 · Supply1s::merge · 풋프린트 칸 덮어쓰기+drop+창).
+  응답은 원본 supply_1s_payload·api_footprint 의 창(660초)·커서(since*)·키 순서. 시험(`tests/hub_live.rs`)은 127.0.0.1 의 진짜 rtcore 허브에 rtcore 정답지 합성 체결을 넣고,
+  rtserve 가 가운데서 붙어(앞 절반 스냅숏 · 뒤 밀기) 낸 값이 정답지 `final`(파이썬 행)과 비트까지 같은지 본다: 수급 619행·4,952필드 · 풋프린트 144봉·374칸(dhl 142 = 코어 판과 같음).
+- 고친 것(첫 조각 결함): `DASHBOARD_ASSETS` 기본값·허용 목록이 옛 값(eth,sol,xrp · 5코인)이었다 → 원본 지금 값(eth,btc,sol,xrp,sndk,soxl,skhynix,mu · MARKET_SYMBOLS 9코인).
 
 ## 5. 의도한 차이 · 원본에서 본 이상한 점
 
@@ -181,6 +196,15 @@ Rust: `rtorder/src/intake.rs` `Desk::api_*`(접수 핸들러가 HTTP 와 떨어�
 | 8 | HEAD | aiohttp 는 HEAD 에 JSON 미들웨어(ETag·압축)를 안 건다 | 같은 갈래로 처리하나 정답지 대조 안 함 |
 | 9 | 안 옮긴 FileResponse 기능 | Range(206) · If-Match/If-Unmodified-Since(412) · 미리 압축한 `.gz`/`.br` 형제 | 없음(화면이 안 쓴다 · `ponytail:` 주석) |
 | 10 | regime_band 의 시각 | `pd.Timestamp(글자, tz="UTC")` 는 꼴을 넓게 받는다 | 크론이 쓰는 꼴(`YYYY-MM-DD[ T]HH:MM[:SS[.f]]`)만 · 그 밖은 깨진 줄 |
+| 11 | 🔴pred-record 코인 열쇠 순서 | `set(coins) \| {eth,btc,sol,xrp}` 를 **집합 순서(문자열 해시 무작위)**로 돌며 띠만 있는 코인을 더한다 → 기록 없이 띠만 있는 코인이 둘 이상이면 열쇠 순서가 프로세스마다 다르다(본문 ETag 도 재시작마다 바뀜) | 기록 있는 코인(이름 순) 뒤 eth·btc·sol·xrp 순으로 고정 · 정답지는 그런 코인을 하나만 둔다 |
+| 12 | pred-record `xsec.latest` | 서버 메모리 `_xs_latest`(pred_record_loop 가 5분마다 채움) | 늘 null -- 다음: rt_dirpred 가 스냅숏을 파일로 쓰게 |
+| 13 | supply-1s `oi` | 수집 루프의 바이낸스 OI 1초 REST 폴링 | 늘 [] -- 코어 범위 밖(rtcollect binance_ctx 는 OI REST 기본 꺼짐) |
+| 14 | events `acct_seq` · tickers | acct_seq = 사용자 스트림이 계좌를 새로 읽을 때마다 +1 · tickers = REST ticker/price · ts = 받은 시각 | acct_seq 늘 0(rtorder 붙일 때) · 가격 = 허브 마지막 체결가 · ts = 발행 시각 |
+| 15 | 🔴/api/stream 의 `event: situation` | 상황 계산이 바뀔 때마다 | 안 낸다(상황 계산은 파이썬 몫) -- 화면은 스트림이 살면 /api/situation 폴링을 끄므로, 상황을 옮기기 전에는 화면을 rtserve 스트림으로 돌리면 안 된다 |
+| 16 | footprint `agg`·창 | aggTrades 로 메운 봉 = true · 창 288봉까지 | 코어가 agg 를 싣지 않아 늘 false · 코어 스냅숏이 144봉이라 bars>144 도 144봉까지 · dhl 은 코어 판(테이프 가지가 파이썬과 다른 봉 -- rtcore footprint.rs 머리 주석) |
+| 17 | supply-1s meta 나이 | 응답 시각 기준 tradeAge·oiAge | 코어가 보낸 시각 기준(받은 그대로) |
+| 18 | events 큐가 찼을 때 | 옛 프레임을 버리고 새 것 | 새 프레임을 버린다(다음 초에 다시 온다 · `ponytail:`) |
+| 19 | 첫 조각 #1(304 뒤 빈 zlib) | 그대로 | 그대로 안 보냄(파이썬 수정 여부는 사용자 결정 대기) |
 
 ## 6. 양성 대조
 
@@ -188,12 +212,12 @@ Rust: `rtorder/src/intake.rs` `Desk::api_*`(접수 핸들러가 HTTP 와 떨어�
 2026-11-21 결과: **46/46 잡힘**(공통 동작 22 · 엔드포인트 22 · 파이썬 의미 2) · 무변경 사본 통과 · 원본 바이트 그대로.
 첫 판에서 못 잡은 5개로 정답지를 보강했다: 정적 `.html` 파일 · 같은 초·같은 쪽에 grp 만 다른 사건 · stale 경계(100초 전) · 꼬리 32KB 가 줄 머리에서 정확히 잘리는 파일.
 절대 경로 검사를 빼는 변이는 동등 변이(폴더 밖 검사가 같은 404)라 목록에서 뺐다.
+둘째 조각 변이 38개를 더했다(api2·text·py 30 · hub 8). **둘째 조각 결과(2026-11-21): 전체 84/84 잡힘**(첫 조각 46 포함) · 무변경 통과 · 원본 바이트 그대로. 첫 판 못 잡음 6(급변 문턱 · 버블 반올림 자리 · 적중 구멍 문턱 · 순위 동점 · 구독 옛 시각 · IP 머리 순서) → 정답지에 그 갈래를 넣어 보강.
 
 ## 7. 다음 조각 순서
 
-1. **나머지 파일·SQLite 읽기 9**: state · gex · bubble-tape · pred-record(상대 강도 latest 를 rt_dirpred 가 파일로 쓰게) · chip-score · notify-center · news(엔티티 표) · macro-spikes(정확 stdev·뉴욕 시각) · breakout-detector(지울지 결정). + POST 쓰기 6(acct·push).
-2. **메모리 상태 = rtcore 허브/상태와 잇기**: rtserve 가 rtcore `/rt` 를 구독(rtorder `coreval::subscribe` 와 같은 방식)해 footprint·supply-1s·oi-5m·liquidation-5m-history 를 같은 JSON 으로. SSE 두 개는 화면이 허브로 옮기면 지우고, 그 전까지는 rtserve 가 같은 프레임을 낸다(`/api/events` 의 티커 = rtcore Prices).
-3. **계좌·주문 = rtorder intake 붙이기**: 14 주소 → `Desk::api_*` · order_request_log · client-timing · busy_or · exec 스위치. 그림자 모드(rtorder `shadow.rs`)로 먼저.
-4. **계산 엔드포인트**: footprint-daily/4h·cells · flow/heatmap(래스터 행 집계) · session-alerts · situation · market-context · liquidation-5m-signal.
-5. **요청 때 REST·모델**(맨 뒤): rtmodel 서빙을 붙이거나(dir4h·dir-short·vol-forecast) 워커가 파일로 쓰게 바꾼다. 가짜 서버 녹화본으로만 대조.
-6. 나란히 가동: 파이썬 8787 과 rtserve 8790 을 같은 서버에서 띄우고 같은 요청을 둘에 보내 본문 대조(읽기 전용 엔드포인트만) → 서버 처리 시간 중앙값 비교(§2 전환 규칙).
+1. **메모리 상태 남은 것**: `/api/oi-5m`(바이낸스 OI 1초 원천을 코어 또는 rtcollect 가 내야 한다) · `/api/liquidation-5m-history`(코어 Liq5m + OKX·Bybit·HL 청산 SQLite 합치기 merge_*) · `/api/sr-watch` · `/api/stream` 의 situation.
+2. **계좌·주문 = rtorder intake 붙이기**(rtorder 계좌 알림 작업 뒤): 14 주소 → `Desk::api_*` · busy_or · exec 스위치 · events `acct_seq`. order_request_log 는 이미 있다. 그림자 모드(rtorder `shadow.rs`)로 먼저.
+3. **계산 엔드포인트**: footprint-daily/4h·cells · flow/heatmap(래스터 행 집계) · session-alerts · situation · market-context · liquidation-5m-signal.
+4. **요청 때 REST·모델**(맨 뒤): rtmodel 서빙을 붙이거나(dir4h·dir-short·vol-forecast) 워커가 파일로 쓰게 바꾼다. 가짜 서버 녹화본으로만 대조. pred-record latest 도 rt_dirpred 파일로.
+5. 나란히 가동: 파이썬 8787 과 rtserve 8790 을 같은 서버에서 띄우고 같은 요청을 둘에 보내 본문 대조(읽기 전용 엔드포인트만) → 서버 처리 시간 중앙값 비교(§2 전환 규칙).
