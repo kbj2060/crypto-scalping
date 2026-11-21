@@ -173,6 +173,12 @@ SEVEN = [  # 일곱째 조각 뒤 «sltp 만»(원본 PR 61): 새 거절 3종 ·
     ("flow_fixture", "dbad 정리 빠짐", B, " || (!only_tp && cid.starts_with(&add_pre))", ""),
     ("http_replay", "옛 무장 backstop 칸(«안 걸었음») 빠짐", B, '    if truthy(bracket.get("backstop_price")) {\n        out.insert("backstop"', '    if false {\n        out.insert("backstop"'),
 ]
+EIGHT = [  # 그림자 실행(C): 전송 계층 막이 · 재생 도구
+    ("shadow_replay", "그림자 막이 꺼짐", H, 'if self.shadow && method != "GET" {', "if false {"),
+    ("shadow_replay", "그림자에서 listenKey 도 막음", H, 'if path != "/fapi/v1/listenKey" {', "if true {"),
+    ("shadow_replay", "실제 주소도 그림자 아님으로 시작", H, "shadow: !loopback(base) }", "shadow: false }"),
+    ("shadow_replay", "재생 정규화가 수량까지 지움", "src/shadow.rs", '!kv.starts_with("signature="))', '!kv.starts_with("signature=") && !kv.starts_with("quantity="))'),
+]
 WIRE = [  # wire_e2e(감시 → 계좌 → 조립 → 집행)로 잡혀야 한다
     ("스트림 계좌를 쓸 수 있어도 REST 로 읽음", A_, 'Ok(v) => Ok((v, "stream")),', 'Ok(_) => Ok((book.produce(rest).await?, "stream")),'),
     ("감시 청산 조립이 for_order=True(원본은 화면 조회까지 함)", "src/wire.rs", "pside, fraction, true, asset, false, Some(only_symbol)", "pside, fraction, true, asset, true, Some(only_symbol)"),
@@ -207,7 +213,7 @@ def main() -> int:
             ok = r.returncode != 0
             caught, total = caught + ok, total + 1
             print(f"{'잡음' if ok else '🔴못 잡음'} | {test} | {name} | {', '.join(failed)[:110]}", flush=True)
-    for grp, lst in (("six", SIX), ("seven", SEVEN)):
+    for grp, lst in (("six", SIX), ("seven", SEVEN), ("eight", EIGHT)):
       if not only or only == grp:
         for test, name, f, a, b in lst:
             shutil.rmtree(W, ignore_errors=True)

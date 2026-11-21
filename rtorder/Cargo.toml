@@ -19,3 +19,7 @@ tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[features]
+# 🔴실전송·키 읽기(Binance::from_env · arm_live)는 이 기능을 켠 빌드에만 있다. 기본 = 꺼짐(그림자 전용).
+live = []

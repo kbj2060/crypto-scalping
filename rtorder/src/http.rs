@@ -113,6 +113,13 @@ pub struct Binance {
     ban_file: PathBuf,
     filters: HashMap<String, Filters>,
     pub(crate) fees: HashMap<String, (f64, f64, f64, &'static str)>,
+    /// 🔴그림자 모드(2026-11-21 일곱째 뒤 C): true 면 GET 과 listenKey 말고는 **보내기 전에 panic**(주문·취소·레버리지·algo 등 쓰기 전부).
+    /// 루프백(127.0.0.1) 이 아닌 주소는 만들 때 늘 true · 끄는 길은 `arm_live`(cargo feature `live` + 실행 때 확인 두 개)뿐.
+    shadow: bool,
+}
+
+fn loopback(base: &str) -> bool {
+    base.starts_with("http://127.0.0.1:") || base.starts_with("http://localhost:")
 }
 
 impl Binance {
@@ -125,11 +132,36 @@ impl Binance {
             .build()
             .into();
         Binance { base: base.trim_end_matches('/').into(), key: key.into(), secret: secret.into(), offset: 0, agent, clock: Arc::new(sys_time),
-                  t0: Instant::now(), wake: Arc::new(tokio::sync::Notify::new()), virtual_sleep: None, ban_file, filters: HashMap::new(), fees: HashMap::new() }
+                  t0: Instant::now(), wake: Arc::new(tokio::sync::Notify::new()), virtual_sleep: None, ban_file, filters: HashMap::new(), fees: HashMap::new(), shadow: !loopback(base) }
+    }
+
+    /// 그림자 모드를 켠다(시험·재생이 루프백에서도 쓰기 금지를 확인할 때). 끄는 함수는 없다 -- `arm_live` 만.
+    pub fn shadow_on(&mut self) {
+        self.shadow = true;
+    }
+    pub fn is_shadow(&self) -> bool {
+        self.shadow
+    }
+    /// 실전송 켜기 -- `crate::shadow::Mode::Live` 를 받아야만(그 값은 feature `live` 빌드 + RTORDER_MODE=live + 확인 문구가 있을 때만 만들어진다).
+    #[cfg(feature = "live")]
+    pub fn arm_live(&mut self, _proof: &crate::shadow::LiveProof) {
+        self.shadow = false;
+    }
+
+    /// 전송 직전 검사: 그림자 모드에서 GET·listenKey 가 아닌 요청 = panic(조용히 막고 넘어가면 «보냈다»로 착각한 상태가 남는다).
+    fn guard(&self, method: &str, url: &str) {
+        if self.shadow && method != "GET" {
+            let path = url.split('?').next().unwrap_or("").trim_start_matches(&self.base);
+            if path != "/fapi/v1/listenKey" {
+                panic!("그림자 모드: 쓰기 요청 금지 {method} {path}");
+            }
+        }
     }
 
     /// 운영용: 키를 환경(`BINANCE_API_KEY`·`BINANCE_SECRET_KEY`)에서 읽는다. 시험은 쓰지 않는다(키는 `new` 로 주입).
     /// ponytail: 원본은 호출마다 환경을 다시 읽는다 -- 여기는 만들 때 한 번. 실행 중 키를 바꿀 일이 생기면 새로 만든다.
+    /// 🔴키를 읽는 코드는 feature `live` 빌드에만 있다(기본 빌드 = 키 없음 = 계좌도 못 읽는 순수 그림자). 만든 값은 그림자 모드로 시작한다.
+    #[cfg(feature = "live")]
     pub fn from_env(base: &str, ban_file: PathBuf) -> Self {
         let g = |k: &str| std::env::var(k).unwrap_or_default();
         Self::new(base, &g("BINANCE_API_KEY"), &g("BINANCE_SECRET_KEY"), TIMEOUT, ban_file)
@@ -150,6 +182,7 @@ impl Binance {
     }
 
     async fn send(&self, method: &'static str, url: &str, signed: bool) -> Result<Resp, String> {
+        self.guard(method, url);
         let mut retry = IDEMPOTENT.contains(&method);
         loop {
             let (agent, u, k) = (self.agent.clone(), url.to_string(), signed.then(|| self.key.clone()));
