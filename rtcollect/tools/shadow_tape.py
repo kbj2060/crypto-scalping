@@ -72,6 +72,7 @@ INTENDED_EXTRA = {
 }
 # 받은 시각(초·ms)을 빼면 같은 값이 여러 번 찍힌 줄 -- 몇 번 찍혔는지는 각자 받은 초에 달렸다 → 값 묶음의 «종류»(집합)로 견준다
 #   (xyz ctx: 파이썬에만 2,219 · Rust에만 1,024 가 대부분 같은 값의 찍힌 횟수 차였다)
+BAR_W = {"hl_xyz_1m": 60}
 SET_TABLES = {"hl_xyz_ctx_1s", "hl_asset_ctx"}
 SYM_COL = {"trade_tape_1s": "symbol", "bybit_liquidations": "symbol", "bybit_oi": "inst", "bybit_mark": "inst", "bybit_funding": "inst",
            "okx_oi": "inst", "okx_mark": "inst", "okx_funding": "inst", "okx_liquidations": "inst_id",
@@ -108,19 +109,31 @@ def holes(ts: list, starts: list, margin: int) -> list[tuple[float, float]]:
     import bisect
     st, out = sorted(starts), []
     for i, T in enumerate(st):
-        if i == 0:
-            j = bisect.bisect_left(ts, T)
-            b = ts[j] if j < len(ts) else T + CAP
-            out.append((float("-inf"), min(b, T + CAP) + margin))
+        j = bisect.bisect_left(ts, T)
+        nxt = ts[j] if j < len(ts) else float("inf")   # T 뒤 첫 자료(없으면 끝까지)
+        if i == 0:   # 첫 기동: 처음 쓴 때까지 전부 -- 감독이 곧바로 죽고 다시 뜨기를 몇 시간 되풀이했어도(11-21 OKX 맥락 00:56~10:53)
+            out.append((float("-inf"), nxt + margin))
             continue
         seg = ts[bisect.bisect_left(ts, st[i - 1]):bisect.bisect_right(ts, T + CAP)]
-        best = (T - CAP, T + CAP) if not seg else None
-        cands = list(zip(seg, seg[1:])) + ([(seg[-1], T + CAP)] if seg and seg[-1] < T else [])
+        best = (st[i - 1], nxt) if not seg else None
+        cands = list(zip(seg, seg[1:])) + ([(seg[-1], nxt)] if seg and seg[-1] < T else [])
         for a, b in cands:
             if b >= T - CAP and (best is None or b - a > best[1] - best[0]):
                 best = (a, b)
         out.append((best[0] - margin, best[1] + margin) if best else (T - margin, T + margin))
     return merge(out)
+
+
+def silences(a_ts: list, b_ts: list, gap: float, skip: list) -> list:
+    """a 쪽 자료 사이 빈틈 중 gap 초보다 길고 그 안에 b 쪽 자료가 있는 것(= a 만 비었다) -- skip(재기동 구간)과 겹치면 뺀다. 긴 것부터."""
+    import bisect
+    out = []
+    for x, y in zip(a_ts, a_ts[1:]):
+        if y - x > gap and not any(p < y and x < q for p, q in skip):
+            k = bisect.bisect_right(b_ts, x)
+            if k < len(b_ts) and b_ts[k] < y:
+                out.append((x, y))
+    return sorted(out, key=lambda g: g[0] - g[1])
 
 
 def merge(out: list) -> list:
@@ -134,6 +147,7 @@ def merge(out: list) -> list:
 
 
 RASTER_L1 = 0.02
+EXT = 30    # 빈틈 뒤 종목마다 다시 붙는 늦음은 30초까지만(실측 bybit BTC mark ~10초) -- 드문 표가 빈틈 뒤를 통째로 빼지 않게
 CAP = 300   # ponytail: 재기동 빈틈은 T 앞뒤 300초 안에서 찾는다(드문 종목 하나 때문에 몇 시간을 빼지 않게) -- 재기동이 더 길면 늘린다
 
 
@@ -148,13 +162,27 @@ def sec_expr(tcol: str, ms: bool) -> str:
     return f"({tcol} / 1000)" if ms else tcol
 
 
-def proc_holes(con, tabs: list, starts: list, margin: int) -> list:
-    """sqlite: 가장 행이 많은 표의 초 목록으로 holes()."""
-    if not starts or not tabs:
-        return []
+def proc_holes(con, tabs: list, starts: list, margin: int, py=None, reconnects: int = 0) -> tuple[list, str]:
+    """sqlite: 가장 행이 많은 표의 초 목록으로 (뺄 구간, 설명 글).
+      재기동 구간 = holes() · 연결 끊김(재기동 아님):
+        Rust 만 빈 곳 = 그림자 Rust 의 끊김 -- 감독 로그의 «끊김» 줄 수(reconnects)만큼만 긴 것부터 설명으로 친다(로그보다 많으면 나머지는 설명 못 함)
+        파이썬만 빈 곳 = 원본의 끊김 -- 그 안의 «Rust 에만» 은 Rust 가 더 받은 것(둘 다 받은 대로 적음)."""
+    if not tabs:
+        return [], ""
     t, tcol, ms = max(tabs, key=lambda x: con.execute(f"SELECT count(*) FROM {x[0]}").fetchone()[0])
-    ts = [r[0] for r in con.execute(f"SELECT DISTINCT {sec_expr(tcol, ms)} FROM {t} ORDER BY 1")]
-    return holes(ts, starts, margin)
+    q = f"SELECT DISTINCT {sec_expr(tcol, ms)} FROM {t} ORDER BY 1"
+    ts = [r[0] for r in con.execute(q)]
+    hs = holes(ts, starts, margin) if starts else []
+    if py is None:
+        return hs, ""
+    pts = [r[0] for r in py.execute(q)]
+    d = sorted(b - a for a, b in zip(ts, ts[1:]))
+    gap = max(5.0, 10.0 * (d[len(d) // 2] if d else 1.0))
+    rsil, psil = silences(ts, pts, gap, hs), silences(pts, ts, gap, hs)
+    took = rsil[:reconnects]
+    note = (f" · 연결 끊김(촘촘한 표 {t} 에서 {gap:.0f}초 넘게 한쪽만 빔): Rust {len(rsil)}번(그림자 로그 «끊김» {reconnects}줄 → {len(took)}번 설명 · 합 {sum(b - a for a, b in took):.0f}초)"
+            f" · 파이썬 {len(psil)}번(합 {sum(b - a for a, b in psil):.0f}초)") if rsil or psil else ""
+    return merge(hs + [(a, b) for a, b in took] + [(a, b) for a, b in psil]), note
 
 
 def sym_down(con, t: str, tcol: str, ms: bool, symcol, proc: list, margin: int) -> dict:
@@ -170,7 +198,7 @@ def sym_down(con, t: str, tcol: str, ms: bool, symcol, proc: list, margin: int) 
         late = dict(con.execute(f"SELECT {sel}min({x}) FROM {t} WHERE {x} >= ?{g}", [int(b - margin)]).fetchall())
         for s in out:
             f1 = late.get(s)
-            out[s].append((a, min(f1 if f1 is not None else b + CAP, b + CAP) + margin))
+            out[s].append((a, min(f1 if f1 is not None else b + EXT, b + EXT) + margin))
     return {s: merge(v) for s, v in out.items()}
 
 
@@ -240,12 +268,14 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
     carry: tuple = (Counter(), Counter())
     sp_: set = set()
     sr_: set = set()
+    matched: set = set()   # 묶음 표: 두 쪽에 다 있던 줄 -- 남은 «한쪽에만»이 그 줄의 또 한 벌이면 «같은 줄 두 번»(받기 차이 · 값 정보는 같다)
 
     def keep(r) -> bool:
         nonlocal n_down
         sec = r[ti] // 1000 if ms else r[ti]
         sym = r[si] if si is not None else None
-        if any(a <= sec < b for a, b in down.get(sym, ())):
+        w = BAR_W.get(t, 1)   # 봉 표: 그 봉 [시작, 시작+폭) 이 뺄 구간에 걸치면 뺀다(끊김이 걸친 1분봉은 받은 체결 수가 갈린다 -- SHADOW.md §5)
+        if any(a < sec + w and sec < b for a, b in down.get(sym, ())):
             n_down += 1
             return False
         m = sec // 60
@@ -289,6 +319,7 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
             # 행 묶음: 못 맞춘 행은 다음 창으로 넘긴다(창 경계에 걸린 행 · 받은 시각이 한쪽만 늦은 행)
             cp, cr = Counter(rp) + carry[0], Counter(rr) + carry[1]
             n_cmp += sum((cp & cr).values())
+            matched.update(cp & cr)
             carry = (cp - cr, cr - cp)
             continue
         only_py += len(po)
@@ -303,9 +334,22 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
         for tag, extra in (("파이썬에만", carry[0]), ("Rust에만", carry[1])):
             for k in sorted(extra, key=repr)[: max(0, show - len(first))]:
                 first.append(f"{tag} {k}")
+    dup_py = sum(c for k, c in carry[0].items() if k in matched) if not kidx and t not in SET_TABLES else 0
+    dup_rs = sum(c for k, c in carry[1].items() if k in matched) if not kidx and t not in SET_TABLES else 0
+    # 재구독 현재값: 다시 붙은 쪽은 거래소가 «지금 값»을 한 번 더 보낸다(OKX funding-rate 등) -- 값이 그 종목 직전 파이썬 줄과 같으면 새 정보가 아니다
+    resub = 0
+    if not kidx and si is not None and carry[1]:
+        tpos = keepcols.index(ti) if ti in keepcols else None
+        spos = keepcols.index(si)
+        for k, c in list(carry[1].items())[:10000]:
+            if k in matched or tpos is None:
+                continue
+            prev = py.execute(f"SELECT {', '.join(knames)} FROM {t} WHERE {SYM_COL[t]} = ? AND {tcol} <= ? ORDER BY {tcol} DESC LIMIT 1", [k[spos], k[tpos]]).fetchone()
+            if prev and all(x == y for j, (x, y) in enumerate(zip(prev, k)) if j != tpos):
+                resub += c
     rs_note = f"(의도한 차이 후보 -- {INTENDED_EXTRA[t]})" if t in INTENDED_EXTRA and only_rs else ""
     hot = (" · 파이썬에만 많은 분(서버 시각) " + ", ".join(f"{time.strftime('%F %R', time.localtime(m))}({c})" for m, c in po_min.most_common(3))) if po_min else ""
-    bad = n_bad + only_py + (0 if t in INTENDED_EXTRA else only_rs)
+    bad = n_bad + only_py - dup_py + (0 if t in INTENDED_EXTRA else only_rs - dup_rs - resub)
     if t == "hl_xyz_ctx_1s" and only_py + only_rs <= 0.005 * n_cmp:   # 받은 초가 1칸 밀린 합침 -- §5 의 0.5% 기준
         bad = n_bad
     TALLY[0] += n_cmp
@@ -313,17 +357,19 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
     line = (f"{t}: 비교 {n_cmp:,}행 · 불일치 {n_bad:,} · 파이썬에만 {only_py:,} · Rust에만 {only_rs:,}{rs_note} · 범위 [{s0}, {s1}) 초 · "
             f"뺀 (종목,분) {len(skipped):,}{down_note(list(proc), n_down)}"
             f"{f' · 끝자리 차(상대 1e-9 안) 최대 {worst:.1e}' if worst else ''}"
-            f"{hot}{f' · 준비 구간(warm) 봉 {n_warm:,} 뺌' if n_warm else ''}")
+            f"{hot}{f' · 준비 구간(warm) 봉 {n_warm:,} 뺌' if n_warm else ''}"
+            f"{f' · 같은 줄 두 번(설명) 파이썬 {dup_py:,}·Rust {dup_rs:,}' if dup_py or dup_rs else ''}"
+            f"{f' · Rust 재구독 현재값(직전 파이썬 줄과 같은 값 · 설명) {resub:,}' if resub else ''}")
     return line + "".join(f"\n    {x}" for x in first)
 
 
-def run(py_path: Path, rs_path: Path, lo=None, hi=None, margin=5, window=3600, show=3, starts=()) -> list[str]:
+def run(py_path: Path, rs_path: Path, lo=None, hi=None, margin=5, window=3600, show=3, starts=(), reconnects: int = 0) -> list[str]:
     py, rs = ro(py_path), ro(rs_path)
     try:
         excl = excluded_minutes(py, rs, margin)
         common = sorted(tables(py) & tables(rs) & TABLES.keys())
-        proc = proc_holes(rs, [(t, TABLES[t][0], TABLES[t][1]) for t in common], list(starts), margin)
-        return [compare_table(py, rs, t, lo, hi, margin, window, show, excl, proc) for t in common] or ["비교할 표가 없다"]
+        proc, note = proc_holes(rs, [(t, TABLES[t][0], TABLES[t][1]) for t in common], list(starts), margin, py, reconnects)
+        return ([note.lstrip(" ·")] if note else []) + [compare_table(py, rs, t, lo, hi, margin, window, show, excl, proc) for t in common] or ["비교할 표가 없다"]
     finally:
         py.close()
         rs.close()
@@ -353,6 +399,34 @@ def compare_depth(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", start
     a, b = read(py_dir), read(rs_dir)
     down = holes(sorted({t for h in b for x in b[h] if (t := sec(x)) is not None}), list(starts), margin) if starts else []
     n_down = 0
+    ua, pa = re.compile(r'"u":(\d+)'), re.compile(r'"pu":(\d+)')
+
+    def reconnects(d: dict) -> list:
+        """그 쪽이 다시 붙은 자리(ms): 이웃 프레임 둘 사이에 _gap 줄이 없는데 뒤 프레임의 pu ≠ 앞 프레임의 u.
+        원본 수집기는 연결 안에서 pu 가 끊기면 _gap 줄을 쓰고, 다시 붙을 때는 prev_u 를 비워 _gap 을 안 쓴다(depth.rs on_connect = 원본 :136)
+        → 이 모양 = 그 쪽 연결이 끊겼다 다시 붙음. 그 사이 다른 쪽만 받은 프레임은 «받는 쪽 연결 차이»(둘 다 받은 대로 적음 · 읽는 쪽은 스냅숏으로 다시 맞춘다)."""
+        out, prev, gap = [], None, False
+        for h in sorted(d):
+            for x in d[h]:
+                if x.startswith('{"_gap"'):
+                    gap = True
+                    continue
+                if x.startswith('{"_'):
+                    continue
+                e, u, q = ev.search(x), ua.search(x), pa.search(x)
+                if not (e and u and q):
+                    continue
+                cur = (int(e.group(1)), int(u.group(1)), int(q.group(1)))
+                if prev and not gap and cur[2] != prev[1]:
+                    out.append((prev[0], cur[0]))
+                prev, gap = cur, False
+        return out
+    ra, rb = reconnects(a), reconnects(b)   # 파이썬 쪽 · Rust 쪽 다시 붙은 자리
+    n_rc = [0, 0]
+
+    def in_win(x: str, wins) -> bool:
+        e = ev.search(x)
+        return bool(e) and any(p < int(e.group(1)) < q for p, q in wins)
 
     def frames(lines):
         nonlocal n_down
@@ -372,12 +446,19 @@ def compare_depth(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", start
         ga, gb = sum(x.startswith('{"_gap"') for x in a[h]), sum(x.startswith('{"_gap"') for x in b[h])
         sa, sb = sum(x.startswith('{"_snapshot":{') for x in a[h]), sum(x.startswith('{"_snapshot":{') for x in b[h])
         TALLY[0] += sum((fa & fb).values())
-        TALLY[1] += sum((fa - fb).values()) + sum((fb - fa).values())
+        ex_py = sum(c for x, c in (fa - fb).items() if in_win(x, rb))   # Rust 가 다시 붙는 사이 파이썬만 받은 프레임
+        ex_rs = sum(c for x, c in (fb - fa).items() if in_win(x, ra))   # 파이썬이 다시 붙는 사이 Rust 만 받은 프레임
+        n_rc[0] += ex_py
+        n_rc[1] += ex_rs
+        TALLY[1] += sum((fa - fb).values()) + sum((fb - fa).values()) - ex_py - ex_rs
         pt = sorted(t for x in (fa - fb) if (t := sec(x)) is not None)
         when = f" · 파이썬에만 프레임 시각(서버) {time.strftime('%T', time.localtime(pt[0]))}~{time.strftime('%T', time.localtime(pt[-1]))}" if pt else ""
         res.append(f"depth {h}: 같은 프레임 {sum((fa & fb).values()):,} · 파이썬에만 {sum((fa - fb).values()):,} · Rust에만 {sum((fb - fa).values()):,} · "
                    f"_gap 파이썬 {ga}·Rust {gb} · 스냅숏 있음 파이썬 {sa}·Rust {sb}{when}")
-    return (res + [f"depth:{down_note(down, n_down)}"] if down else res) or ["depth: 두 쪽에 같은 시 파일이 없다"]
+    rc = (f"depth: 다시 붙은 자리 Rust {len(rb)}·파이썬 {len(ra)}(_gap 없이 pu 끊김) -- 그 사이 한쪽만 받은 프레임은 설명: 파이썬에만 {n_rc[0]:,}·Rust에만 {n_rc[1]:,}"
+          if ra or rb else "")
+    res += [x for x in (rc, f"depth:{down_note(down, n_down)}" if down else "") if x]
+    return res or ["depth: 두 쪽에 같은 시 파일이 없다"]
 
 
 def compare_raster(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", starts=(), margin: int = 5) -> list[str]:
@@ -423,6 +504,48 @@ def compare_raster(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", star
         res.append(f"raster {h}: 두 쪽 유효 초 {len(both):,} · bin_lo·mid 같음 {same_hdr:,} · 칸 같음 비율 중앙 전체 {med(fr)} · mid ±20칸 {med(near)} · "
                    f"잔량 상대차(L1) 중앙 {med(l1)} · 파이썬만 유효 {len(a.keys() - b.keys()):,} · Rust만 유효 {len(b.keys() - a.keys()):,}")
     return (res + [f"raster:{down_note(down, n_down)}"] if down else res) or ["raster: 두 쪽에 같은 시 파일이 없다"]
+
+
+def compare_bt(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", starts=(), margin: int = 5, reconnects: int = 0) -> list[str]:
+    """HL 최우선 호가 .bt 시 파일(<폴더>/<COIN>/<UTC 시>.bt[.gz] · 헤더 32B + 행 32B `<qdfdf` = 거래소 ts_ms·매수가·량·매도가·량) 대조:
+    시마다 행 바이트 묶음(중복 포함). 행에 받은 시각이 없다(거래소 ts) → 두 쪽이 같은 메시지를 받았으면 바이트가 같다.
+    빼는 곳: 그림자 재기동 구간(holes) · Rust 만 빈 연결 끊김(로그 «끊김» 줄 수만큼) · 파이썬만 빈 끊김."""
+    import gzip
+    import struct
+
+    def read(d: Path) -> dict:
+        out: dict = {}
+        for f in sorted(d.glob("*.bt*")):
+            h = f.name.split(".")[0]
+            if lo <= h <= hi:
+                raw = gzip.decompress(f.read_bytes()) if f.suffix == ".gz" else f.read_bytes()
+                out.setdefault(h, []).extend(raw[32 + 32 * k:64 + 32 * k] for k in range((len(raw) - 32) // 32))
+        return out
+    a, b = read(py_dir), read(rs_dir)
+    ts = lambda rows: sorted({struct.unpack_from("<q", r)[0] // 1000 for h in rows for r in rows[h]})   # noqa: E731
+    ta, tb = ts(a), ts(b)
+    hs = holes(tb, list(starts), margin) if starts else []
+    rsil, psil = silences(tb, ta, 5.0, hs), silences(ta, tb, 5.0, hs)
+    down = merge(hs + rsil[:reconnects] + psil)
+    res, n_down = [], 0
+    for h in sorted(a.keys() & b.keys()):
+        def keep(rows):
+            nonlocal n_down
+            out = Counter()
+            for r in rows:
+                t = struct.unpack_from("<q", r)[0] // 1000
+                if any(x <= t < y for x, y in down):
+                    n_down += 1
+                else:
+                    out[r] += 1
+            return out
+        fa, fb = keep(a[h]), keep(b[h])
+        same, op, orr = sum((fa & fb).values()), sum((fa - fb).values()), sum((fb - fa).values())
+        TALLY[0] += same
+        TALLY[1] += op + orr
+        res.append(f"bt {h}: 같은 행 {same:,} · 파이썬에만 {op:,} · Rust에만 {orr:,}")
+    res.append(f"bt: 연결 끊김 Rust {len(rsil)}번(로그 «끊김» {reconnects}줄 → {min(len(rsil), reconnects)} 설명) · 파이썬 {len(psil)}번{down_note(hs, n_down)}")
+    return res if len(res) > 1 else ["bt: 두 쪽에 같은 시 파일이 없다"]
 
 
 def compare_events(py: Path, rs: Path, lo=None, hi=None, show: int = 3) -> list[str]:
@@ -560,6 +683,31 @@ def selftest() -> None:
             (Path(d) / side / "2026-11-21T07.jsonl.gz").write_bytes(gzip.compress(("\n".join(['{"_snapshot":null}'] + fr) + "\n").encode()))
         dd = compare_depth(Path(d) / "dp", Path(d) / "dr", starts=[T - 50, T + 120])
         assert dd[0].startswith("depth 2026-11-21T07: 같은 프레임 152 · 파이썬에만 1 · Rust에만 0") and "뺀 행 63" in dd[1], dd   # 뺀 구간 = 첫 기동 전(~T+5) + [99-5, 131+5) 초
+        # 다시 붙은 자리: Rust 가 E 20~29 를 못 받고(재접속 -- _gap 없이 pu 끊김) 파이썬만 받음 → 설명 · Rust 가 E 50 을 못 받았는데 pu 가 이어지면(연결 안) → 설명 못 함
+        for side in ("cp", "cr"):
+            (Path(d) / side).mkdir()
+            fr = [f'{{"e":"depthUpdate","E":{1000 * (T + i)},"U":{10 * i + 1},"u":{10 * i + 10},"pu":{10 * i}}}' for i in range(1, 80)
+                  if not (side == "cr" and (20 <= i < 30 or i == 50))]
+            if side == "cr":   # 연결 안에서 끊김은 원본이 _gap 줄을 쓴다
+                fr.insert([k for k, x in enumerate(fr) if f'"E":{1000 * (T + 51)}' in x][0], '{"_gap":true,"expected_pu":500,"got_pu":510}')
+            (Path(d) / side / "2026-11-21T08.jsonl.gz").write_bytes(gzip.compress(("\n".join(['{"_snapshot":null}'] + fr) + "\n").encode()))
+        TALLY[:] = [0, 0]
+        cd = compare_depth(Path(d) / "cp", Path(d) / "cr")
+        assert TALLY[1] == 1 and "다시 붙은 자리 Rust 1·파이썬 0" in cd[-1] and "파이썬에만 10" in cd[-1], (TALLY, cd)
+        # .bt: 같은 행 · Rust 끊김(로그 1줄) 설명 · 값 하나 다른 행은 실패
+        for side in ("bp", "br"):
+            (Path(d) / side).mkdir()
+            rows = [struct.pack("<qdfdf", 1000 * (T + i), 100.0 + i, 1.0, 101.0 + i, 2.0) for i in range(100)
+                    if not (side == "br" and 40 <= i < 60)]
+            if side == "br":
+                rows[5] = struct.pack("<qdfdf", 1000 * (T + 5), 999.0, 1.0, 101.0, 2.0)
+            (Path(d) / side / "2026-11-21T08.bt").write_bytes(b"BTKR" + b"\0" * 28 + b"".join(rows))
+        TALLY[:] = [0, 0]
+        bt0 = compare_bt(Path(d) / "bp", Path(d) / "br", reconnects=1)
+        assert TALLY == [78, 2] and "Rust 1번(로그 «끊김» 1줄 → 1 설명)" in bt0[-1], (TALLY, bt0)   # 끊김 [39,60) 안 행(파이썬 21·Rust 1) 뺌 · 다른 값 1 행 = 양쪽 1씩
+        TALLY[:] = [0, 0]
+        compare_bt(Path(d) / "bp", Path(d) / "br", reconnects=0)
+        assert TALLY[1] == 22, TALLY   # 로그에 끊김이 없으면 그 20행도 설명 못 함
         # raster: 머리 n 을 읽는다 · mid ±20칸만 같으면 통과 쪽
         def f32(path, vals):
             n = 60
@@ -575,6 +723,39 @@ def selftest() -> None:
         TALLY[:] = [0, 0]
         rz = compare_raster(Path(d) / "rp", Path(d) / "rr")
         assert "mid ±20칸 1.0" in rz[0] and TALLY == [10, 0], (rz, TALLY)
+        # 설명 규칙 양성 대조(11-22): 같은 줄 두 번 · 재구독 현재값 · 연결 끊김(로그 줄 수만큼)
+        q, w = Path(d) / "q.sqlite", Path(d) / "w.sqlite"
+        for f in (q, w):
+            con = sqlite3.connect(f)
+            con.execute("CREATE TABLE okx_mark(inst TEXT, ts_ms INTEGER, mark REAL)")
+            con.execute("CREATE TABLE okx_funding(inst TEXT, ts_ms INTEGER, rate REAL)")
+            rows = [("ETH", 1000 * (T + s), 1.0 + s) for s in range(600)]
+            if f == w:   # Rust: T+100~T+130 끊김(연결) · T+300~T+330 끊김(연결) -- 둘
+                rows = [r for r in rows if not (100 < r[1] // 1000 - T < 131 or 300 < r[1] // 1000 - T < 331)]
+            con.executemany("INSERT INTO okx_mark VALUES (?,?,?)", rows)
+            fr = [("ETH", 1000 * (T + 60 * k), 0.1 * k) for k in range(10)]
+            con.executemany("INSERT INTO okx_funding VALUES (?,?,?)", fr)
+            if f == q:
+                con.execute("INSERT INTO okx_funding VALUES ('ETH', ?, 0.4)", [1000 * (T + 240)])   # 파이썬: 같은 줄 두 번 → 설명
+                con.execute("INSERT INTO okx_funding VALUES ('ETH', ?, 0.77)", [1000 * (T + 450)])  # 파이썬에만 (진짜) → 설명 못 함
+            else:
+                con.execute("INSERT INTO okx_funding VALUES ('ETH', ?, ?)", [1000 * (T + 200), 0.1 * 3])   # Rust: 직전 파이썬 줄(T+180, 0.3)과 같은 값 → 재구독 현재값
+                con.execute("INSERT INTO okx_funding VALUES ('ETH', ?, 0.99)", [1000 * (T + 500)])  # Rust 에만 다른 값 → 설명 못 함
+            con.commit()
+            con.close()
+        TALLY[:] = [0, 0]
+        o0 = run(q, w, reconnects=0)
+        TALLY0 = TALLY[1]
+        TALLY[:] = [0, 0]
+        o1 = run(q, w, reconnects=1)
+        TALLY1 = TALLY[1]
+        TALLY[:] = [0, 0]
+        o2 = run(q, w, reconnects=2)
+        fl = next(x for x in o2 if x.startswith("okx_funding"))
+        assert "같은 줄 두 번(설명) 파이썬 1·Rust 0" in fl and "재구독 현재값(직전 파이썬 줄과 같은 값 · 설명) 1" in fl, fl
+        assert o2[0].startswith("연결 끊김") and "Rust 2번(그림자 로그 «끊김» 2줄 → 2번 설명" in o2[0], o2[0]
+        # 끊김 줄 0 → 두 끊김(30초씩 = 60행) 다 설명 못 함 · 1 → 하나만 · 2 → 0 · 진짜 파이썬에만 1·Rust 에만 1 은 늘 남는다
+        assert TALLY0 - TALLY1 == 30 and TALLY1 - TALLY[1] == 30 and TALLY[1] == 2, (TALLY0, TALLY1, TALLY[1], o0)
         # 첫 기동 전(-inf)은 뺀다: 기동 T+600 하나면 그 앞 Rust 자료가 있어도 첫 기동 = 로그의 가장 이른 것
         assert holes([T + 603], [t0 := T + 600], 5) == [(float("-inf"), t0 + 8)]
         # 재기동: 죽인 때(T+100) 뒤 빈틈을 다시 붙을 때 받은 «최근 체결»(T+148~149)이 T 바로 앞까지 메워도, 가장 큰 빈틈 [T+100, T+148] 을 찾는다
@@ -620,7 +801,9 @@ def main() -> None:
     ap.add_argument("--json", default="", help="두 경로 = 폴더 · 값 = glob(예: 'liq_tab_*.json') · --drop 열쇠를 빼고 비교")
     ap.add_argument("--drop", default="generated_ms")
     ap.add_argument("--starts", default="", help="그림자 Rust 감독 «SUPERVISOR starting» 시각(초, 쉼표) -- 그 앞뒤 Rust 가 비어 있던 구간을 뺀다(takeover.sh 가 로그에서 읽어 넘긴다)")
+    ap.add_argument("--reconnects", type=int, default=0, help="그림자 Rust 감독 로그의 «끊김» 줄 수(takeover.sh 가 센다) -- 그만큼의 Rust 만 빈 곳을 설명으로")
     ap.add_argument("--summary", action="store_true", help="끝에 «요약: 견준 N · 설명 못 함 M» · M>0 이거나 N=0 이면 종료코드 1(takeover.sh check)")
+    ap.add_argument("--bt", action="store_true", help="두 경로 = HL .bt 코인 폴더 · --hours 시작,끝")
     ap.add_argument("--events", action="store_true", help="두 경로 = 아이스버그 <sym>_events.jsonl · --from/--to = t_end 초")
     a = ap.parse_args()
     if a.selftest:
@@ -631,6 +814,8 @@ def main() -> None:
     st = [int(x) for x in a.starts.split(",") if x.strip()]
     if a.json:
         out = compare_json(a.py, a.rs, a.json, a.drop)
+    elif a.bt:
+        out = compare_bt(a.py, a.rs, lo, hi or "~", st, a.margin, a.reconnects)
     elif a.events:
         out = compare_events(a.py, a.rs, a.lo, a.hi, a.show)
     elif a.raster:
@@ -638,7 +823,7 @@ def main() -> None:
     elif a.depth:
         out = compare_depth(a.py, a.rs, lo, hi or "~", st, a.margin)
     else:
-        out = run(a.py, a.rs, a.lo, a.hi, a.margin, a.window, a.show, st)
+        out = run(a.py, a.rs, a.lo, a.hi, a.margin, a.window, a.show, st, a.reconnects)
     print("\n".join(out))
     if a.summary:
         print(f"요약: 견준 {TALLY[0]:,} · 설명 못 함 {TALLY[1]:,}")
