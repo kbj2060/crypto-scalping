@@ -160,7 +160,7 @@ def run(plan, fx, *, drift=False, entry=False):
 
 
 def run_path(plan, fx, path):
-    """«나갔는지 모르는» POST 사례용(2026-11-20 D2): 청산·진입(fill_maker) · 기다리기 · 지정가 대기를 같은 가짜로.
+    """«나갔는지 모르는» POST 사례용(2026-11-20 D2): 청산·진입(fill_maker) · 지정가 대기를 같은 가짜로(기다리기는 2026-11-21 지웠다).
     표식 조회 사이 1초 대기는 실제로 기다리지 않는다(asyncio.sleep 을 잠시 갈아끼움 -- 횟수만 센다)."""
     state: dict = {}
     ex.signed = fx.signed
@@ -174,7 +174,6 @@ def run_path(plan, fx, path):
     async def no_sleep(sec, *a, **k):
         sleeps.append(sec)
     fn = {"exit": lambda: ex.run_exit(None, plan, state), "entry": lambda: ex.run_entry(None, plan, state),
-          "wait": lambda: ex.run_entry_wait(None, plan, state, 5.0),
           "limit": lambda: ex.run_entry_limit(None, plan, state, max_sec=5.0)}[path]
     asyncio.sleep = no_sleep
     try:
@@ -346,7 +345,7 @@ def main() -> int:
         ("e 조회·DELETE 전부 실패", dict(place_err=(timeout, True), fail=("lookup", "delete_cid")), "error", 3, True, 1),
         ("음성: 4xx 확정 거부", dict(place_err=("400 [-2019] Margin is insufficient.", False)), "rejected", 0, False, 0),
     )
-    for path in ("exit", "entry", "wait", "limit"):
+    for path in ("exit", "entry", "limit"):   # 2026-11-21 기다리기(run_entry_wait)는 지웠다(사용자 «sltp 만»)
         for name, kw, phase, lookups, deleted, live_n in unknown_cases:
             label = f"불명 POST {path}/{name}"
             fx = FakeExchange(fill_after=1, **kw)
@@ -374,7 +373,7 @@ def main() -> int:
             print("   -", f)
         return 1
     print("통과 12/12 — 과청산 없음 · 중복 주문 없음 · 항상 종료 · 실패시 멈춤(재호가 0·1·3회 뒤) · 진입 리페그 · post-only 재호가"
-          " · 불명 POST 4경로×7사례")
+          " · 불명 POST 3경로×7사례")
     return 0
 
 

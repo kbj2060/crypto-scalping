@@ -121,19 +121,6 @@ def executed_qty(order: dict) -> float:
     return float(order.get("executedQty") or 0.0)
 
 
-async def margin_type(session, symbol: str) -> str | None:
-    """심볼의 마진 방식 "cross"·"isolated"(헤지 두 다리가 섞이면 isolated). 못 읽으면 None -- 읽기만(주문 없음).
-    2026-10-09 자동 규칙은 교차 전제다(격리 20배는 청산 −4.6% 가 3σ 손절보다 안쪽 -- 실사고: 롱 0.893 청산 2,384 > 손절 2,376)."""
-    key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
-    if not (key and secret):
-        return None
-    r = await signed(session, "GET", "/fapi/v2/positionRisk", {"symbol": symbol}, key, secret, await _clock_offset(session))
-    if not isinstance(r, list) or not r:
-        return None
-    kinds = {str(p.get("marginType") or "").lower() for p in r}
-    return "cross" if kinds == {"cross"} else "isolated" if "isolated" in kinds else None
-
-
 # 2026-10-10 주문 심볼의 계정 실수수료율. 🔴**화면에 보이는 «예상 비용» 표시 전용**이다 --
 # 크기·손절(7.5% 동일위험)·지평 권고·연구 판정은 표준 USDT-M 상수를 그대로 쓴다(사용자 정책:
 # 경제성은 표준 수수료 기준, USDC 0% 는 «기간 한정» 프로모션). 가중치 20 이라 봇과 공유하는
@@ -250,22 +237,6 @@ async def clear_bracket(session, symbol: str, pside: str, *, only_sl: bool = Fal
     return await cancel_bracket(session, symbol, pside, key, secret, await _clock_offset(session), only_sl=only_sl, only_tp=only_tp)
 
 
-async def place_add_order(session, symbol: str, pside: str, price: float, qty: float) -> dict:
-    """자동 물타기 지정가(2026-10-14). GTC -- 이미 그 아래로 내려가 있으면 그 자리에서 체결(테이커)되는 게 «−0.75% 에 산다»의 뜻에 맞다.
-    🔴실패해도 진입·손절은 그대로(결과를 돌려 화면이 말한다). 지우기는 cancel_bracket(ADD_TAG)."""
-    key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
-    if not (key and secret):
-        return {"placed": False, "reason": "API 키가 없습니다"}
-    cid, offset = f"{bracket_tag(ADD_TAG, pside)}{int(time.time() * 1000)}", await _clock_offset(session)
-    r = await signed(session, "POST", "/fapi/v1/order",
-                     {"symbol": symbol, "side": "BUY" if pside == "LONG" else "SELL", "positionSide": pside,
-                      "type": "LIMIT", "timeInForce": "GTC", "price": price, "quantity": qty,
-                      "newClientOrderId": cid},
-                     key, secret, offset)
-    r = await resolve_resting(session, symbol, cid, r, key, secret, offset)
-    return {"placed": "__error__" not in r, "price": price, "qty": qty, "order_id": r.get("orderId"), "error": r.get("__error__")}
-
-
 async def resolve_resting(session, symbol: str, cid: str, r: dict, key: str, secret: str, offset: int) -> dict:
     """2026-11-21 익절 GTX·분할 익절·물타기 POST 도 진입과 같은 «나갔는지 모름» 규칙(resolve_unknown_post) -- 확인 없이 실패로 치면
     살아 있는 유령 주문이 남거나(물타기 = 손절 없이 크기만 늘어남) 걸린 익절을 «없음»으로 본다. 끝내 모르면 표식 DELETE 를 보냈으니 «안 걸림»."""
@@ -273,38 +244,13 @@ async def resolve_resting(session, symbol: str, cid: str, r: dict, key: str, sec
     return got if got is not None else {"__error__": f"주문 접수 여부를 확인하지 못했습니다({r['__error__']}) — 표식으로 취소를 보냈습니다"}
 
 
-async def _post_stop(session, symbol: str, pside: str, price: float, key: str, secret: str, offset: int, stamp: int) -> dict:
-    """비상 스탑 = Algo STOP_MARKET closePosition(마크가 기준). place_bracket · place_stop 이 같이 쓴다."""
-    r = await signed(session, "POST", "/fapi/v1/algoOrder",
-                     {"algoType": "CONDITIONAL", "symbol": symbol, "side": "SELL" if pside == "LONG" else "BUY",
-                      "positionSide": pside, "type": "STOP_MARKET",
-                      "triggerPrice": price, "closePosition": "true",
-                      "workingType": "MARK_PRICE",
-                      "clientAlgoId": f"{bracket_tag(SL_TAG, pside)}{stamp}"},
-                     key, secret, offset)
-    return {"placed": "__error__" not in r, "price": price, "algo_id": r.get("algoId"), "error": r.get("__error__")}
-
-
-async def place_stop(session, symbol: str, pside: str, price: float) -> dict:
-    """2026-10-15 «손절 다시 켜기» -- 비상 스탑만 다시 건다. place_bracket 은 TP·자동 물타기까지 지우고 다시 걸어서 못 쓴다.
-    남아 있는 우리 스탑은 먼저 지운다(두 개 걸리지 않게). 포지션이 없거나 스탑을 못 걸면 placed=False -- 🔴호출 쪽은 그때 아무것도 안 바꾼다."""
-    key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
-    if not (key and secret):
-        return {"placed": False, "error": "API 키가 없습니다"}
-    offset = await _clock_offset(session)
-    pos = await signed(session, "GET", "/fapi/v2/positionRisk", {"symbol": symbol}, key, secret, offset)
-    if not isinstance(pos, list):
-        return {"placed": False, "error": f"포지션 조회 실패: {pos.get('__error__') if isinstance(pos, dict) else pos}"}
-    if not any(p.get("positionSide") == pside and abs(float(p.get("positionAmt") or 0.0)) > 0 for p in pos):
-        return {"placed": False, "error": "포지션 없음"}
-    cl = await cancel_bracket(session, symbol, pside, key, secret, offset, only_sl=True)
-    if cl.get("errors"):
-        return {"placed": False, "error": f"남은 스탑 정리 실패: {'; '.join(map(str, cl['errors']))}"}
-    return await _post_stop(session, symbol, pside, price, key, secret, offset, int(time.time() * 1000))
+# 🔴2026-11-21 사용자 결정 «−5% 비상 스탑 전부 뺀다»: 거래소 STOP_MARKET(Algo) 을 거는 코드(_post_stop·place_stop)를 지웠다.
+#   규칙 손절 = 서버 5분봉 종가 감시(bracket_sl_hit)만 -- 서버가 꺼지면 손절이 없다. 배포 전에 걸린 우리 스탑(SL_TAG)은 cancel_bracket 이 계속 지운다.
+NO_STOP = {"placed": False, "skipped": True, "reason": "거래소 스탑 없음(2026-11-21 사용자 결정) — 손절은 서버 5분봉 종가 감시"}
 
 
 async def place_bracket(session, bracket: dict, symbol: str, pside: str, *, strict: bool = False) -> dict:
-    """체결 뒤 TP 지정가(GTX, 포지션 **전량**)와 비상 스탑(Algo STOP_MARKET, closePosition)을 건다.
+    """체결 뒤 TP 지정가(GTX, 포지션 **전량**)를 건다. 비상 스탑은 2026-11-21 부터 안 건다(backstop = NO_STOP · 남은 우리 스탑은 아래 정리가 지운다).
     물타기면 우리 옛 주문을 지우고 새 레벨·새 수량으로 다시 건다.
 
     🔴실패해도 진입을 되돌리지 않는다(이미 체결됐다) -- 결과를 그대로 돌려 화면이 크게 말하게 한다.
@@ -340,8 +286,8 @@ async def place_bracket(session, bracket: dict, symbol: str, pside: str, *, stri
         out["tp"] = {"placed": "__error__" not in r, "price": bracket["tp_price"],
                      "order_id": r.get("orderId"), "error": r.get("__error__")}
     if bracket.get("backstop_price"):
-        out["backstop"] = await _post_stop(session, symbol, pside, bracket["backstop_price"], key, secret, offset, stamp)
-    out["placed"] = all(v.get("placed") for k, v in out.items() if k in ("tp", "backstop"))
+        out["backstop"] = {**NO_STOP, "price": bracket["backstop_price"]}
+    out["placed"] = all(v.get("placed") for k, v in out.items() if k == "tp")
     return out
 
 
@@ -627,95 +573,9 @@ async def fill_maker(session, *, common: dict, price: float, total: float, deadl
     return done, price, repegs, None
 
 
-# ── 진입 «기다리기»(2026-10-10) ─────────────────────────────────────────────────
-# 원장 진입 의도 362건 재생: «따라가지 않고 60분 → 잔량 시장가»가 현행(3초 리페그·120초)보다 +$64 [+33,+99](명목당 +0.5bp).
-# 미체결 포기는 안 된다 -- 놓친 주문이 이긴 주문이라(research_ledger_entry_patience_20261010) 마감엔 반드시 시장가.
+# ── 대기 주문 표식 ── 2026-11-21 «기다리기»(mode=wait · run_entry_wait)는 지웠다(사용자 «sltp 만 쓴다») -- 지정가 대기·감시 진입이 WAIT_TAG 를 이어 쓴다.
 PEG_TAG = "dbpg"           # 2026-10-16 따라가기(fill_maker) GTX 표식 -- 모호한 POST 조회 · 재시작 고아 정리(cancel_wait_orphans)
 WAIT_TAG = "dbwt"          # 이 표식의 GTX 만 «기다리기 주문»으로 알아본다 -- 서버 재시작 때 고아 정리(cancel_wait_orphans)
-WAIT_CHOICES_MIN = (15, 60)
-
-
-async def run_entry_wait(session, plan: dict, state: dict, wait_sec: float, on_fill=None) -> dict:
-    """GTX 최우선 호가에 **한 번** 걸고 앞질러도 다시 걸지 않는다(처음 -5022 로 못 걸리면 새 호가로 다시 거는 것만).
-    wait_sec 가 지나면 잔량 시장가. 밖에서 state["action"] = "cancel"(잔량 버림) | "market"(지금 잔량 시장가) 을 넣으면
-    다음 조회(≤3초)에 따른다. 거래소에서 사람이 취소했으면(앱) 그것도 «취소»다 -- 몰래 시장가로 채우지 않는다.
-    on_fill: 첫 체결을 본 순간 한 번(서버가 손절을 바로 건다 -- 60분 동안 무방비로 두지 않는다)."""
-    key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
-    if not (key and secret):
-        state.update(phase="error", error="API 키가 없습니다", done_at=now_iso())
-        return state
-    offset = await _clock_offset(session)
-    pside = plan["positionSide"]
-    common = {"symbol": plan["symbol"], "side": plan["side"], "positionSide": pside}
-    state["leverage"] = await ensure_leverage(session, plan["symbol"], int(plan.get("target_leverage") or 0),
-                                              key, secret, offset)
-    total, price = float(plan["quantity"]), float(plan["price"])
-    state.update(phase="working", mode="wait", filled=0.0, limit_price=price, quantity=total, repegs=0,
-                 deadline_sec=wait_sec, wait_until=datetime.fromtimestamp(time.time() + wait_sec, timezone.utc).isoformat())
-    deadline = time.monotonic() + wait_sec
-    while True:
-        cid = f"{WAIT_TAG}{pside[:1]}{int(time.time() * 1000)}"
-        order = await signed(session, "POST", "/fapi/v1/order",
-                             {**common, "type": "LIMIT", "timeInForce": "GTX", "price": round(price, 8),
-                              "quantity": total, "newClientOrderId": cid}, key, secret, offset)
-        got = await resolve_unknown_post(session, common["symbol"], cid, order, key, secret, offset)
-        if got is None:
-            state.update(phase="error", done_at=now_iso(),
-                         error=f"주문 접수 여부를 확인하지 못했습니다({order['__error__']}) — 거래소에서 직접 확인하세요")
-            return state
-        order = got
-        if "__error__" not in order:
-            break
-        if not (is_post_only_reject(order["__error__"]) and state["repegs"] < REPEG_MAX and not state.get("action")):
-            state.update(phase="rejected", error=order["__error__"], done_at=now_iso())
-            return state
-        try:
-            price, _, _ = await maker_price(session, common["side"], common["symbol"])
-        except Exception as exc:  # noqa: BLE001 -- 걸린 주문 없음 -- 예외로 새면 «기다리기»가 working 에 영영 묶인다
-            state.update(phase="rejected", error=f"호가 조회 실패 {type(exc).__name__}: {exc}", done_at=now_iso())
-            return state
-        state.update(repegs=state["repegs"] + 1, limit_price=price)
-    oid = order.get("orderId")
-    state.update(order_id=oid, client_order_id=cid, limit_price=price)
-    filled, status = 0.0, ""
-    while time.monotonic() < deadline and not state.get("action"):
-        await nap(POLL_SEC)
-        cur = await signed(session, "GET", "/fapi/v1/order", {**common, "orderId": oid}, key, secret, offset)
-        if "__error__" in cur:
-            continue        # 조회 실패는 재시도 -- 주문은 거래소에 살아 있다
-        filled, status = executed_qty(cur), str(cur.get("status") or "")
-        state["filled"] = filled
-        if filled > 0 and on_fill is not None:
-            await on_fill()
-            on_fill = None
-        if status in TERMINAL:
-            break
-    outside_cancel = status in TERMINAL and status != "FILLED"
-    if status not in TERMINAL:
-        confirmed = await ensure_closed(session, common, oid, key, secret, offset)
-        if confirmed is None:
-            state.update(phase="error", done_at=now_iso(),
-                         error=f"주문 {oid} 취소를 확인하지 못했습니다 — 거래소에서 직접 확인하세요")
-            return state
-        filled = confirmed
-    state["filled"] = round(filled, 8)
-    remaining = round(total - filled, 8)
-    if remaining <= 0:
-        state.update(phase="filled_maker", taker_qty=0.0, done_at=now_iso())
-        return state
-    if state.get("action") == "cancel" or outside_cancel:
-        state.update(phase="cancelled", taker_qty=0.0, done_at=now_iso(),
-                     cancel_reason=state.get("action_reason") or ("사용자 취소" if state.get("action") else f"거래소에서 {status}"))
-        return state
-    taker = await signed(session, "POST", "/fapi/v1/order", {**common, "type": "MARKET", "quantity": remaining},
-                         key, secret, offset)
-    if "__error__" in taker:
-        state.update(phase="taker_failed", taker_qty=0.0, error=taker["__error__"], done_at=now_iso())
-        return state
-    state.update(phase="filled_taker", taker_qty=executed_qty(taker) or remaining,
-                 filled=round(filled + (executed_qty(taker) or remaining), 8), taker_order_id=taker.get("orderId"),
-                 taker_reason="지금 시장가(사용자)" if state.get("action") == "market" else "대기 마감", done_at=now_iso())
-    return state
 
 
 LIMIT_MAX_SEC = 4 * 3600.0   # 지정가 대기 최대(재시작·다운 중 체결은 손절이 없다 -- 노출 창을 줄인다, 검증 D2) -- 넘으면 «만료 취소»(시장가 없음)
@@ -1021,13 +881,13 @@ def _self_check() -> None:
     # 🔴옛 3% 손절 경로는 -4120 으로 죽어 있었다 -- /fapi/v1/order 로 조건부 주문을 다시 보내지 않는다.
     import inspect as _i
     assert "STOP_MARKET" not in _i.getsource(run_entry)
-    assert "/fapi/v1/algoOrder" in _i.getsource(_post_stop) and "_post_stop(" in _i.getsource(place_bracket)   # 스탑 POST 는 _post_stop 으로 옮겨졌다
+    assert "STOP_MARKET" not in _i.getsource(place_bracket)   # 2026-11-21 비상 스탑 제거 -- 스탑 POST 가 되살아나지 않게
 
     # ── 리페그 루프 공유 (2026-09-15) ────────────────────────────────────────
     # 진입과 청산이 **같은 함수**를 쓴다. 한쪽만 고쳐지는 걸 막는 검사다.
     for _fn in (run_entry, run_exit):
         assert "fill_maker(" in _i.getsource(_fn), f"{_fn.__name__} 이 공용 루프를 안 쓴다"
-    for _fn in (fill_maker, run_entry_wait, run_entry_limit):   # 2026-11-20 D2 «나갔는지 모름»도 한 벌
+    for _fn in (fill_maker, run_entry_limit):   # 2026-11-20 D2 «나갔는지 모름»도 한 벌
         assert "resolve_unknown_post(" in _i.getsource(_fn), f"{_fn.__name__} 이 불명 응답 공용 처리를 안 쓴다"
     # 호가 기준은 **주문 측면**이다. 진입 롱과 청산 숏은 둘 다 BUY 라 같은 값이어야 한다.
     assert drifted("BUY", 100.0, 100.01, 100.02) is True, "매수는 최우선 매수호가가 위로 가면 밀린다"
@@ -1097,10 +957,6 @@ def _self_check() -> None:
     calm = build_exit_plan(position_side="LONG", position_qty=2.0, best_bid=2470.00,
                            best_ask=2470.01, filters=f, vol_bpm=None)
     assert calm["fallback_after_sec"] == exit_deadline_sec(None) == 120.0
-    # ── 기다리기(2026-10-10): 앞지름 판정을 아예 안 본다(따라가지 않음) · 거는 주문엔 고아 정리용 표식 ──
-    _w = _i.getsource(run_entry_wait)
-    assert "drifted(" not in _w and "fill_maker(" not in _w, "기다리기가 호가를 따라간다"
-    assert "newClientOrderId" in _w and "WAIT_TAG" in _w
     print("통과 21/21 — 집행 보조 함수 + 손절 주문 형태 + 청산 리페그 판정 + 변동성 마감 계약 유지")
 
 

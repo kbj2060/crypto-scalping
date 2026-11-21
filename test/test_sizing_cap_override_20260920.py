@@ -52,7 +52,6 @@ def test_both_cap_sites_honor_the_switch():
 def test_payload_and_screen_say_it_is_off():
     assert "override_x=SIZING_CAP_OVERRIDE_X if overridden else None" in SRC
     assert 'who = ("override" if overridden' in SRC
-    # 위험모델이 죽어도 남는 무조건 경고 + 위험모델 줄의 경고, 둘 다.
-    assert "cap.override_x" in JS, "화면이 payload 의 override_x 를 안 읽는다"
-    assert '사이징 상한 꺼짐' in JS
-    assert 'r.applied_binding === "override"' in JS
+    # 2026-11-21 화면 PR 60(플로팅 주문 버튼 제거)이 미리보기 카드를 지워 «사이징 상한 꺼짐» 표시도 사라졌다 --
+    #   화면 단언(cap.override_x · 사이징 상한 꺼짐 · applied_binding === "override")은 뺐다. 서버가 payload 에 싣는 계약만 남는다.
+    #   🔴지금은 스위치가 켜져도 화면에 드러나는 곳이 없다(③ 이 깨진 상태) -- 다시 띄우려면 선 도구 미리보기에 cap.override_x 를 읽어 붙인다.
