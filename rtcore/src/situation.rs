@@ -302,9 +302,6 @@ pub fn micro(
         vol60,
         liq60: l,
         okx_oi5m: from.map_or_else(Vec::new, |f| okx_oi_rows(okx_oi5m, f)),
-        okx_from: None,
-        okx_bars: vec![],
-        okx_full: false,
     }
 }
 

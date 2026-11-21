@@ -388,8 +388,6 @@ impl State {
                 situation: g.sit.clone(),
                 micro: g.micro.clone().map(|mut m| {
                     m.okx_oi5m = situation::okx_oi_rows(&g.supply.okx_oi5m, i64::MIN);
-                    m.okx_bars = g.supply.okx_sums(None);
-                    m.okx_full = m.okx_from.is_some();
                     m
                 }),
             },
@@ -409,28 +407,17 @@ impl State {
                 Some(Stamped { ev: Event::Book { bid, bid_qty, ask, ask_qty, .. }, .. }) => Some((*bid, *bid_qty, *ask, *ask_qty)),
                 _ => None,
             };
-            // 원본은 호가(REST bookTicker)를 받기 전에는 그 틱이 예외로 끝나 payload 가 {"available": false} 그대로다 -- 미시 값을 안 낸다.
-            //   코어도 호가를 한 번 받은 뒤부터 민다(OKX OI 5분봉 바뀐 봉 표시는 그때까지 쌓아 둔다).
-            if book.is_some() {
-                let from = g.supply.okx_oi5m_dirty.first().copied();
-                g.supply.okx_oi5m_dirty.clear();
-                let liq = g.supply.liq.iter().map(|e| (e.ts_ms, e.long, e.usd));
-                let mut mc = situation::micro(now_s, book, g.supply.cells_of(Venue::Bn), liq, &g.supply.okx_oi5m, from);
-                mc.okx_from = (g.supply.okx_first_bar != 0).then_some(g.supply.okx_first_bar);
-                let first = g.micro.is_none();
-                let full = std::mem::take(&mut g.supply.okx_sum_full) || first;
-                let dirty = std::mem::take(&mut g.supply.okx_sum_dirty);
-                mc.okx_bars = g.supply.okx_sums(if full { None } else { Some(&dirty) });
-                mc.okx_full = full && mc.okx_from.is_some();
-                let fresh = !mc.okx_oi5m.is_empty() || !mc.okx_bars.is_empty() || mc.okx_full || g.micro.as_ref().is_none_or(|o| crate::proto::Micro { ts: mc.ts, ..o.clone() } != mc);
-                if fresh {
-                    g.seq += 1;
-                    let _ = self.tx.send(Stamped { s: s.clone(), seq: g.seq, ex_ms: 0, rx_us: now_us, tx_us: 0, ev: Event::Micro(mc.clone()) });
-                }
-                mc.okx_oi5m.clear();
-                (mc.okx_bars, mc.okx_full) = (vec![], false);
-                g.micro = Some(mc);
+            let from = g.supply.okx_oi5m_dirty.first().copied();
+            g.supply.okx_oi5m_dirty.clear();
+            let liq = g.supply.liq.iter().map(|e| (e.ts_ms, e.long, e.usd));
+            let mut mc = situation::micro(now_s, book, g.supply.cells_of(Venue::Bn), liq, &g.supply.okx_oi5m, from);
+            let fresh = !mc.okx_oi5m.is_empty() || g.micro.as_ref().is_none_or(|o| crate::proto::Micro { ts: mc.ts, ..o.clone() } != mc);
+            if fresh {
+                g.seq += 1;
+                let _ = self.tx.send(Stamped { s: s.clone(), seq: g.seq, ex_ms: 0, rx_us: now_us, tx_us: 0, ev: Event::Micro(mc.clone()) });
             }
+            mc.okx_oi5m.clear();
+            g.micro = Some(mc);
             let candles: BTreeMap<i64, [f64; 3]> = g.ohlc.iter().map(|(&b, v)| (b, v.0)).collect();
             let liq: BTreeMap<i64, [f64; 2]> = g.supply.liq5m.iter().map(|(&b, v)| (b, v.0)).collect();
             let mid = match &g.book {

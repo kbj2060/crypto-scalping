@@ -103,10 +103,6 @@ def main() -> None:
             ei += 1
         now_sec = int(now)
         row = {"now": now}   # 틱마다 전부 싣는다(쌓은 값과 비교)
-        if book is None:
-            # 원본: REST 호가를 못 받은 틱은 예외로 끝나 payload 가 {"available": False} 그대로(1936 fetch → except) -- 미시 값 없음
-            out.append({"now": now, "available": False})
-            continue
         if book is not None:   # server.py 1937·1938·1988 옮겨 적음
             row["qi"] = mref.qi(float(book["bidQty"]), float(book["askQty"]))
             row["mid"] = (float(book["bidPrice"]) + float(book["askPrice"])) / 2.0
@@ -123,7 +119,7 @@ def main() -> None:
     p = ROOT / "rtcore" / "tests" / "fixtures" / "micro_eth.json"
     p.write_text(json.dumps({"events": events, "ticks": out}))
     print(f"{p}: 사건 {len(events)} · 틱 {len(out)} · OKX 봉 {len(okx_oi_5m)} · 청산 있는 틱 "
-          f"{sum(1 for r in out if r.get('liq60', {}).get('n'))} · 호가 전 틱 {sum(1 for r in out if 'liq60' not in r)} · {p.stat().st_size // 1024}KB")
+          f"{sum(1 for r in out if r['liq60']['n'])} · {p.stat().st_size // 1024}KB")
 
 
 if __name__ == "__main__":
