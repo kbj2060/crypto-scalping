@@ -1,4 +1,4 @@
-//! 15분·1시간 방향 65열판(SOL·BTC·XRP) «REST 꼴 5분봉 → 피쳐 → LightGBM 시드 앙상블 → payload» 를 원본 payload_from_features 와 대조(숫자 비트).
+//! 15분·1시간 방향 65열판(SOL·BTC·XRP) + ETH 75열판(서버 모델 사본 · 호가 깊이 10열 4벌) «REST 꼴 5분봉 → 피쳐 → LightGBM 시드 앙상블 → payload» 를 원본 payload_from_features 와 대조(숫자 비트).
 //! 🔴표본 밖 분위 씨앗은 개발기에 ETH 것만 있어 세 코인 모두 그것을 대역으로 쓴다(식 대조) -- tools/gen_dirshort_fixture.py 머리말.
 //!     python rtmodel/tools/gen_dirshort_fixture.py && cargo test -j 2 --release --test dirshort -- --nocapture
 use rtmodel::dir4h::{build_features, frames_for, Frame};
@@ -55,12 +55,24 @@ fn dirshort_payload_parity() {
             volume: col(&f["volume"]), trades: col(&f["trades"]), tbb: col(&f["taker_buy_base"]), m: MCOLS.map(|c| col(&f[c])) })).collect();
         let dc: Vec<(i64, f64)> = s["dc"][0].as_array().unwrap().iter().zip(col(&s["dc"][1])).map(|(t, v)| (t.as_i64().unwrap(), v)).collect();
         let f = build_features(&frames_for(&fr, coin), &dc).unwrap();
-        same(&payload(art, &f, 13, &oos), &s["payload"], &format!("{coin}/{}", s["name"].as_str().unwrap()), &mut bad);
+        // ETH 75열판: 정답지의 임시 sqlite 행(봉 시작 ms → [warm, 10열]) 을 book_status 로
+        let book = |t: i64| -> (Option<Vec<f64>>, &'static str) {
+            if coin != "ETH" {
+                return (Some(vec![]), "n/a");
+            }
+            let r = s["book"].get(t.to_string()).and_then(Value::as_array).map(|a| (a[0].as_f64().unwrap(), a[1..].iter().map(Value::as_f64).collect::<Vec<_>>()));
+            book_status(r.as_ref().map(|(w, v)| (*w, v.as_slice())))
+        };
+        let pay = if coin == "ETH" { payload_book(art, &f, 13, &oos, &book) } else { payload(art, &f, 13, &oos) };
+        same(&pay, &s["payload"], &format!("{coin}/{}", s["name"].as_str().unwrap()), &mut bad);
         let n = f.ts.len();
+        let rows: Vec<usize> = s.get("ok_rows").and_then(Value::as_array).map_or((0..13).collect(), |a| a.iter().map(|x| x.as_u64().unwrap() as usize).collect());
         for (h, seeds) in &art.models {
             let nm = NAMES.iter().find(|x| x.0 == *h).unwrap().1;
-            for (k, w) in col(&s["raw"][nm]).iter().enumerate() {
-                let x: Vec<f64> = rtmodel::dir4h::FEATS.iter().map(|c| f.cols[c][n - 13 + k] as f32 as f64).collect();
+            let Some(raw) = s["raw"].get(nm) else { continue };
+            for (k, w) in col(raw).iter().enumerate() {
+                let i = n - 13 + rows[k];
+                let x: Vec<f64> = rtmodel::dir4h::FEATS.iter().map(|c| f.cols[c][i] as f32 as f64).chain(book(f.ts[i]).0.unwrap()).collect();
                 let g = rtmodel::lgb::ensemble(seeds, &x);
                 if g.to_bits() != w.to_bits() {
                     bad.push(format!("{coin} {nm} 행 {k}: 반올림 전 예측 Rust {g:?} 대 파이썬 {w:?}"));

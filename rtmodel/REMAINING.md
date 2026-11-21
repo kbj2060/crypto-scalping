@@ -21,14 +21,14 @@
 | 띠 안·이탈(regime band · `live_regime_band_*_20261102.py` · cron 매시) | `regime_band.rs` (청산맵 레벨 compute_spliced_levels 계열 · 피쳐 27열 · HGB 분류 · 기록·채점·요약 · 크론 한 회차) · `bin/rt_regime` | 모델 = 개발기 사본(서버와 md5 같음 f62774c6) · 합성 4코인 11회차(빈 봉·같은 값 구간·3시간 건너뜀·자료 지연·묵은 자료 FAIL) 출력·기록·채점·요약 파일 글자 · 요청 순서 · 레벨 가격 14,389칸 · 청산 칸 번호·무게 30,454칸(넣은 순서까지) · 피쳐 29,916칸 · 확률 1,108개 비트 · 실행 파일 가짜 HTTP |
 | 상대 강도(xsec · `pred_record.xsec_record` · 서버 5분 루프 끝) | `dirrest::xsec_px`·`Record::xsec` · `bin/rt_dirpred` 회차 끝 | 12회차 요청 108개·기록 글자·스냅숏(rel_bp) 같음 · 실행 파일 한 회차 |
 | 방향 전진 기록기(`live_eth_direction_forward_recorder_20261010.py --record` · 00·08·16 UTC 31분) | `signals::decide`·`record` · `bin/rt_dirfwd` | 가짜 시계·가짜 klines 7회차(00:31·08:40·16:31 · 03:00 거부 · 첫 30분 거래 0 · SOL 00:25 봉 빠짐 KeyError → 앞 두 줄은 남음 · votes 90일 창 경계) 요청 36개 순서·URL · 기록 17줄 글자 같음 · 실행 파일 가짜 HTTP |
-| 지평 사다리 · ⑤ 판 보조(`dashboard/dir_signals.py`: `vol4h_from_klines`(QX4 실패 때 대체) · `open_rev_from_klines` · `dir_signals_payload` 코인베이스 7일·FRED 4~13주) | `signals::vol4h`·`vol4h_rows`·`open_rev`·`dir_signals` · 피쳐 22열 = `qx4::svm_features`(QX4 와 공용으로 뺌) | 4h 변동성 2벌(+ expand_logit 다른 판 · 봉 부족 문구) · 개장 되돌림 5벌(대기·00:31·05:00·23:59·서버 실수 시계) · 신호 2벌(FRED 키 있음·없음) 요청 10개 URL · 전부 JSON 글자 같음 · 🔴모델 = 개발기 `data/live/eth_sizing_vol_model.joblib`(md5 fc984e6e · train_end 2025-08-31 · expand_logit 없음) -- 서버는 매달 재학습이라 다를 것 · 서버 md5 미확인 · XRP 모델은 서버에만 · 서버 HGB 쪽 klines 10쪽 URL(`fetch_binance_json`)은 정답지로 대조 안 함 · 원천 예외 문구는 키 없음만 같은 글자 |
+| 지평 사다리 · ⑤ 판 보조(`dashboard/dir_signals.py`: `vol4h_from_klines`(QX4 실패 때 대체) · `open_rev_from_klines` · `dir_signals_payload` 코인베이스 7일·FRED 4~13주) | `signals::vol4h`·`vol4h_rows`·`open_rev`·`dir_signals` · 피쳐 22열 = `qx4::svm_features`(QX4 와 공용으로 뺌) | 4h 변동성 2벌(+ expand_logit 다른 판 · 봉 부족 문구) · 개장 되돌림 5벌(대기·00:31·05:00·23:59·서버 실수 시계) · 신호 2벌(FRED 키 있음·없음) 요청 10개 URL · 전부 JSON 글자 같음 · 모델 = 서버 사본 eth 722f7bc8(train_end 2026-10-14 · expand_logit 있음) · xrp 085161de(2026-10-19) -- 코디네이터가 md5 같음 확인(개발기 data/live 의 fc984e6e 는 낡은 판) · 4h 변동성 4벌(eth·xrp × expand_logit 있음·없음 · XRP 는 4자리 달러) · 서버 HGB 쪽 klines 10쪽 URL = 서버 원문과 같음(코디네이터 확인 · 쿼리 symbol·interval·limit=1000·endTime) · 원천 예외 문구는 키 없음만 같은 글자 |
+| 15분·1시간 방향 ETH 75열판(`live_eth_dir_short_20261028.py` `payload_from_features` ETH 갈래 · 호가 깊이 sqlite 10열) | `dirshort::payload_book`(+ `book_status`) · 65열판과 한 함수 | 서버 모델 사본 eth_dirshort_model 124d3c86(2026-11) · 임시 sqlite 4벌(전부 온전 · 없는 봉·warm·빈 칸 · 지금 봉 warm → pred null · 전부 없음 → hist 빔) payload 비트 · 반올림 전 예측 비트(온전한 봉만) · 🔴표본 밖 분위 씨앗 = 개발기 eth_dirshort_oos_seed.parquet(서버 md5 미확인) · 🔴sqlite 읽기는 rtmodel 에 의존성이 없어 안 붙임 → `bin/rt_dirpred` 는 ETH 15분·1시간을 계속 건너뜀 |
+| 30분 카드 방향·닿음(card30 · `dashboard/flow_read.card30_features` + server.py `_card30_pred`) | `card30::features`·`predict`(보정 = `lib::card30`) | 서버 모델 사본 model b4994b68 · model_reach 6409c409 · 창 309벌 + 빈 봉 · 피쳐 7,852칸 · 확률 604개 비트(거래 0·고=저 구간 포함) · 보정 6줄은 server.py 안 닫힌 함수라 정답지 생성기에 글자 그대로 옮겨 부름 |
 
 ## 남은 것
 
 | # | 서빙 | 스크립트(줄) | 주기 | 모델 종류 | 입력 원천 | 출력 | 읽는 곳(화면 칸) | 개발기에 모델 | 전진 검정 |
 |---|---|---|---|---|---|---|---|---|---|
-| 3 | 30분 카드(card30) | `dashboard/server.py` `_card30_pred`(서버 안) | 5분봉이 바뀔 때 | HGB 3개 평균 + logit 섞기(식은 `rtmodel::card30` 에 있음) | 서버 메모리 5분봉 | 상황 카드 | `/api/situation`(1초)·SSE `situation` | **없음 → 모델 파일을 개발기로 가져와야 함**(서버 `tmp/card30_direction_20260926/` 전용 · 가져오기는 코디네이터 -- 로컬 핸들러 REST 함정) | 없음 |
-| 6 | 15분·1시간 방향 ETH 75열판(호가 깊이) | `live_eth_dir_short_20261028.py` `book_row`(sqlite 읽기 -- 상태 판정 `dirshort::book_status` 만 옮김 · `book_feats`·`dataset` 은 학습 몫) | 5분(서버 루프) | (65열판은 옮김) | REST(4h 와 같은 `rest_frames`) + 호가 깊이 워커 sqlite 10열 | `/api/dir-short` | ⑤ 예측 줄 15분·1시간 | 65열판 eth·btc·xrp 있음 · **ETH 75열판(`data/live/eth_dirshort_model.joblib`) 없음 → 모델 파일을 개발기로 가져와야 함**(코디네이터) · oos 씨앗은 ETH 만 | **fwd_dirshort 2027-01-08** |
 | 10 | 사이징 변동성·MAE 분위 | `live_eth_sizing_vol_model_20260912.py` · `live_eth_mae_quantile_model_20260913.py` | — | — | — | — | — | — | **안 옮김(꺼짐)** -- 서버 `SIZING_RISK_MODEL_ENABLED=False` · 주문 범위가 sltp 만(2026-11-21) |
 | 11 | 차트 표식(극값 탐지) | `live_eth_chart_markers_20260909.py` · `live_eth_extreme_detector_20260909.py` | — | — | — | — | — | — | **안 옮김** -- 사용자 결정(2026-11-21) |
 
@@ -37,6 +37,28 @@
 
 **주기 순(«실시간 값을 빨리»)**: 위험 레이더(매분 · 화면 30초) → card30(5분 · 모델 없음) → dir4h·dir_short·QX4(요청 때 · 화면 2~5분) → regime band(매시) → 기록기(매일).
 개발기에서 대조 가능한 것 중 가장 짧은 = 위험 레이더(4코인 + SOXL + cron 한 회차) — 2026-11-21 에 옮겼다. 다음 = #10 사이징·MAE(주문 지연) → #4 QX4 → #5 → #7 -- 셋 다 옮김(11-21) · 남은 = #3 card30(서버 안) · #6 ETH 75열판 · #8 · #9.
+
+## card30 서빙 경로 (2026-11-21 조사 · server.py 읽기 전용)
+
+| 무엇 | 어디 | 주기 | 쓰는 곳 | 판정 |
+|---|---|---|---|---|
+| 방향(dir)·닿음(reach) 확률 | `compute_situation`(코인마다 매초 도는 상황 계산) → 스레드에서 `_card30_pred`(봉이 바뀔 때만 · ETH 모델을 SOL·XRP 등에도 그대로) | 5분봉 마감마다 한 번(캐시 = 봉 시각) | `_flow_read_ctx` 의 `dir_p`·`reach_p` → `fr.read`(융합 카드 «30분 안 닿음/방향») · ETH 융합 장부 `flow_read_fused.jsonl` 의 dir_p·reach_p · 시장 맥락 카드 | **쓰임 → 옮김**(위 표) |
+| 입력 5분봉 | `load_5m_day`(REST 300개 · 60초 캐시 · 형성 봉 시각으로 거름) 또는 카드 캐시 | — | 같은 봉 목록을 상황 카드·권장 배수가 같이 쓴다 | 봉 받기는 rtserve/rtcore 몫 |
+| 원본 `run.py`·`live_parity.py` | 저장소에 없음 · 학습·내보내기 = `scripts/research_eth_card30_direction_hgb_tabpfn_20260926.py`(저장소에 있음) | — | — | 서빙엔 필요 없음 |
+
+## 응답 서버(rtserve)에 붙일 공개 함수 (2026-11-21 · `rtmodel::handlers`)
+
+| 경로 | 원본 | rtmodel 함수 | 입력 → 출력 |
+|---|---|---|---|
+| /api/dir4h | dir4h_cached → d4.live_payload | `handlers::dir4h_body` | Rest 캐시 + Get → Value(키 = 원본 순서 · preserve_order 크레이트에서 직렬화) |
+| /api/dir-short | dir_short_cached → ds.live_payload | `handlers::dir_short_body` | Rest(4h 와 따로) + Get + 표본 밖 분위 + (ETH) 호가 깊이 한 봉 콜백 → Value |
+| /api/vol-forecast | qx4_payload → 실패면 HGB | `handlers::vol_forecast_qx4` → None 이면 `handlers::vol_forecast_hgb` | QX4 행 상태 + fetch → Value(+asset) · HGB = fetch → 글자(+asset) · 🔴QX4I(Deribit 옵션 체결 받기) 없음 |
+| /api/open-rev | api_open_rev | `handlers::open_rev_body` | fetch(1일봉 93 · 5분봉 600) + 실수 시계 → 글자 |
+| /api/dir-signals | dir_signals_payload | `handlers::dir_signals_body`(= `signals::dir_signals`) | fetch + FRED 키 → 글자 |
+| /api/regime-band · /api/risk-radar · /api/sr-lean · /api/pred-record | 파일 읽기만 | rtserve/src/api.rs 에 이미 있음 | — |
+| 상황 카드 dir_p·reach_p | _card30_pred | `card30::predict` | 완결 5분봉 → (dir, reach) |
+
+모델 다시 읽기(mtime)·캐시 시간·밴 가드·예외를 `{"ok": false, "reason"}` 로 감싸기는 부르는 쪽(rtserve)이 한다.
 
 ## pandas 가속 꾸러미(bottleneck·numexpr)에 따라 갈리는 자리 (2026-11-21 · 서버 확인함: 둘 다 없음 · pandas 2.2.3)
 

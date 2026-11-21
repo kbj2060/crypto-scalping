@@ -51,13 +51,13 @@ fn open_rev_vol4h_parity() {
         let g = open_rev(o["daily"].as_array().unwrap(), o["m5"].as_array().unwrap(), now.as_f64().unwrap(), now.is_f64()).unwrap();
         assert_eq!(g, o["out"].as_str().unwrap(), "open_rev {now}");
     }
-    let art = rtmodel::read_json::<Value>(&d.join("svm_eth.json")).expect("svm_eth.json");
+    let art = |a: &str| rtmodel::read_json::<Value>(&d.join(format!("svm_{a}.json"))).expect("svm_*.json");
     for v in fx["vol"].as_array().unwrap() {
         let el = v["expand_logit"].as_array().map(|a| (a[0].as_f64().unwrap(), a[1].as_f64().unwrap()));
-        let a = Svm::from_json(&art).unwrap().with_expand(el);
+        let a = Svm::from_json(&art(v["asset"].as_str().unwrap())).unwrap().with_expand(el);
         assert_eq!(vol4h(v["rows"].as_array().unwrap(), &a, v["now"].as_f64().unwrap()), v["out"].as_str().unwrap(), "vol4h {}", v["now"]);
     }
-    let a = Svm::from_json(&art).unwrap();
+    let a = Svm::from_json(&art("eth")).unwrap();
     let short: Vec<Value> = fx["vol"][0]["rows"].as_array().unwrap()[..599].to_vec();
     assert_eq!(vol4h(&short, &a, 9e18), fx["vol_short"].as_str().unwrap(), "봉 부족 문구");
     println!("개장 되돌림 {} · 4h 변동성 {} 글자 같음", fx["open_rev"].as_array().unwrap().len(), fx["vol"].as_array().unwrap().len());
@@ -121,4 +121,36 @@ fn dirfwd_bin_over_fake_http() {
     assert_eq!(run(r0["now"].as_i64().unwrap(), &dir.join("data/live")).status.code(), Some(2), "원본 자리 거부");
     let _ = std::fs::remove_dir_all(&dir);
     println!("rt_dirfwd 실행 파일: 요청 6 · 기록 글자 같음 · 시각 밖 1 · 거부 2");
+}
+
+/// handlers: 서버 핸들러 몫(쪽 나눠 받기 · URL · "asset" 덧붙이기)이 라이브러리 함수와 같은 본문을 내는지.
+#[test]
+fn handlers_bodies() {
+    let (d, fx) = fx();
+    let v = &fx["vol"][0];
+    let rows = v["rows"].as_array().unwrap();
+    let mut pages: VecDeque<Value> = rows.rchunks(1000).map(|c| Value::Array(c.to_vec())).collect();
+    pages.push_back(Value::Array(vec![]));
+    let (mut urls, mut end): (Vec<String>, Option<i64>) = (vec![], None);
+    let mut f = |u: &str| -> Result<Value, String> {
+        urls.push(u.to_string());
+        let p = pages.pop_front().unwrap();
+        let want = format!("http://fake/fapi/v1/klines?symbol=ETHUSDT&interval=5m&limit=1000{}", end.map_or(String::new(), |e| format!("&endTime={e}")));
+        assert_eq!(u, want);
+        end = p.as_array().and_then(|a| a.first()).map(|r| r[0].as_i64().unwrap() - 1);
+        Ok(p)
+    };
+    let art = Svm::from_json(&rtmodel::read_json::<Value>(&d.join("svm_eth.json")).unwrap()).unwrap();
+    let body = rtmodel::handlers::vol_forecast_hgb(&mut f, "http://fake", "ETHUSDT", "eth", &art, v["now"].as_f64().unwrap()).unwrap();
+    let want = v["out"].as_str().unwrap();
+    assert_eq!(body, format!("{}, \"asset\": \"eth\"}}", &want[..want.len() - 1]));
+    assert_eq!(urls.len(), 10, "1000봉 × 10쪽(서버 원문 range(10))");
+    let o = &fx["open_rev"][4]; // 서버 시계(실수 ms) 벌
+    let mut q: VecDeque<Value> = VecDeque::from([o["daily"].clone(), o["m5"].clone()]);
+    let mut g = |u: &str| -> Result<Value, String> {
+        assert!(u.starts_with("http://fake/fapi/v1/klines?symbol=ETHUSDT&interval="));
+        Ok(q.pop_front().unwrap())
+    };
+    assert_eq!(rtmodel::handlers::open_rev_body(&mut g, "http://fake", o["now"].as_f64().unwrap()).unwrap(), o["out"].as_str().unwrap());
+    println!("핸들러: vol-forecast HGB 요청 {} · open-rev 본문 같음", urls.len());
 }

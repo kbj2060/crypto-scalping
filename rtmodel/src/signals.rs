@@ -259,7 +259,7 @@ pub fn vol4h(rows: &[Value], art: &Svm, now_ms: f64) -> String {
 }
 
 /// 서버 api_vol_forecast 의 HGB 쪽: 5분봉 1000 × 최대 10쪽(endTime 으로 거슬러 · 빈 쪽이면 멈춤).
-// ponytail: 쿼리 글자는 aiohttp params(딕셔너리 순서)를 따랐다 -- 서버 fetch_binance_json 의 URL 은 정답지로 대조하지 않았다
+/// 서버 원문(2026-11-21 코디네이터 확인): 쿼리 symbol·interval·limit=1000·(endTime) · 첫 쪽 endTime 없음 · 빈 쪽이면 멈춤 · rows = got + rows.
 pub fn vol4h_rows(fetch: &mut Fetch, base: &str, sym: &str) -> Result<Vec<Value>, String> {
     let mut rows: Vec<Value> = vec![];
     let mut end: Option<i64> = None;

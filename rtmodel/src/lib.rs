@@ -13,9 +13,11 @@ use serde::{Deserialize, Deserializer};
 
 pub mod ban;
 pub mod box_hold;
+pub mod card30;
 pub mod dir4h;
 pub mod dirrest;
 pub mod dirshort;
+pub mod handlers;
 pub mod lgb;
 pub mod qx4;
 pub mod regime_band;
