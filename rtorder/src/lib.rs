@@ -17,6 +17,7 @@ pub mod http;
 pub mod intake;
 pub mod plan;
 pub mod pyfmt;
+pub mod route;
 pub mod runner;
 pub mod shadow;
 pub mod sign;

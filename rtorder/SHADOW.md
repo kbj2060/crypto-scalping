@@ -59,3 +59,103 @@
 
 - `app::run(cfg, mk, stop, hub)` 에 넘긴 `Arc<userstream::Hub>` 를 같이 쥐면 된다. `hub.acct_seq()` 는 원본 `/api/events` 의 `acct_seq` 와 같다(체결 알림 뒤 계좌를 다시 읽는 데 성공할 때마다 +1, 처음은 0). `hub.us` 는 원본 `user_stream` 의 connected·last_event_at·error 이다(seq 는 `acct_seq()` 로 읽는다).
 - rtorder 를 **다른 프로세스**로 돌리면 이 값은 보이지 않는다. 같은 프로세스에 넣거나, 이 값을 내보낼 길(파일이나 소켓)을 따로 정해야 한다.
+
+## 7. 주문·계좌 주소 14개를 응답 서버가 부르는 법 (`route::Front::call`)
+
+- 부르는 쪽이 할 일은 넷이다. ① 받은 메서드·경로·쿼리(받은 순서 그대로 `(키, 값)` 목록)를 넘긴다. ② 돌아온 `Reply` 의 status·content_type·headers·body 를 그대로 내보낸다. ③ `Reply::task` 를 `runner::run_task` 로 띄운다. ④ `Reply::log` 가 있으면 at(KST 밀리초)·ms·ua(200자)·ip(CF-Connecting-IP → X-Forwarded-For → 접속 주소)를 더해 `order_requests.jsonl` 에 한 줄 덧붙인다.
+- 주소 표, 405·404 글자, 주문 잠금 409, confirm·실행 스위치, 본문 글자(파이썬 json.dumps), 200 의 no-cache, server_ms 는 모두 rtorder 안에서 처리한다.
+- `Front` 하나, `DeskCell` 하나, `Hub` 하나를 프로세스에 하나씩 두고 모든 요청이 같이 쓴다.
+- 요청 하나가 `DeskCell` 을 끝까지 쥔다. 그래서 조립(REST 왕복, 보통 수백 ms) 동안에는 다른 주문 요청이 기다린다. 잠금 안 주소는 기다리지 않고 409 로 돌아온다. 원본은 await 사이에 다른 핸들러가 돌았다.
+
+## 8. 프로세스 배치에 필요한 사실 (결정은 조정자 몫)
+
+### 공통 사실
+- 손절은 거래소에 걸려 있지 않다. 비상 스탑은 2026-11-21 사용자 결정으로 없앴다. 손절은 서버의 감시 틱(2초)뿐이다. **감시가 돌지 않는 동안에는 손절이 없다.** 거래소에 남는 것은 익절 지정가(dbtp)와 걸려 있던 진입 지정가(dbwt)뿐이다.
+- 무장(`manual_bracket_state.json`)과 지정가 대기 복구 파일(`manual_limit_wait_*.json`)은 디스크에 남는다. 진입·청산·대기 칸의 phase, 도는 작업(PEG 따라가기, 청산 따라가기), 주문 잠금은 메모리에만 있어 프로세스가 죽으면 사라진다. 원본 파이썬도 같다.
+- 재시작 복구(`app::run`)는 실행 스위치가 켜져 있을 때 이 순서로 돈다. ① 남은 대기·따라가기 주문(dbwt·dbpg)을 지운다. ② 복구 파일로 무장한다. ③ 감시를 시작한다. ④ 사용자 스트림이 붙자마자 계좌를 한 번 읽는다.
+  - 청산 도중 죽었으면 무장이 남아 있다. 가격이 아직 손절선 너머면 다음 틱에 다시 쏜다.
+  - 진입 따라가기 도중 죽었으면 걸려 있던 GTX 는 ①에서 지워진다. 이미 체결된 몫은 ②의 복구 파일 선으로 무장된다(복구 파일이 없으면 무장 없이 남는다 -- 원본과 같다).
+- 파이썬 서버의 실전송과 rtorder 실전송을 같은 계좌에서 동시에 켜면 손절이 두 번 나간다. 그림자일 때만 둘을 같이 돌릴 수 있다.
+- 지금 `app::run` 의 감시 `Watcher` 와 접수용 `Desk` 는 서로 다른 객체다. 무장은 같은 파일이라 공유되지만, 메모리 칸(진입·청산 칸의 working 여부)은 공유되지 않는다. 원본은 같은 dict 를 본다(감시 청산 중이면 접수가 409). **어느 배치든 붙이기 전에** `app::run` 이 `DeskCell` 하나를 받아 감시 틱도 `desk.w` 로 돌게 바꿔야 한다. 이 조각에서는 바꾸지 않았다.
+
+### A. 같은 프로세스 (rtserve 가 rtorder 라이브러리를 링크해 `app::run` 을 tokio 작업으로 띄움)
+
+| 넘길 것 | 길 |
+|---|---|
+| acct_seq · 스트림 상태 | `Arc<Hub>` 를 같이 쥔다(`hub.acct_seq()` · `hub.us`) -- 복사 없음 |
+| 계좌 캐시 | `Wired.cache`(`Arc<Mutex<Option<(시각, 계좌)>>>`). 지금은 `app::run` 안에서 만든다 -- 바깥에서 넘겨받게 한 줄 고쳐야 /api/binance-account 가 감시와 같은 캐시를 본다 |
+| 대기·진입·청산 칸 | `Arc<DeskCell>` 하나(위 공통 사실의 고칠 것) |
+| 주문 잠금 | `Front` 하나 |
+
+- 한쪽이 죽으면: 응답 서버 코드의 panic 은 그 요청 작업만 죽는다(tokio 작업 단위 · panic=unwind 일 때). 프로세스가 죽거나 OOM·SIGKILL 이면 **화면과 손절 감시가 같이 멈춘다** -- 지금 파이썬과 같은 위험이다.
+- 응답 서버 재배포(재시작)마다 감시도 재시작한다. 재시작 동안(보통 수 초) 손절이 없고, 메모리 칸·도는 작업도 잃는다.
+- 사용자 스트림·REST 연결을 하나로 쓴다. 따로 둘 때보다 요청 수가 늘지 않는다.
+
+### B. 따로 (rtorder 를 별도 실행 파일로 · rtserve 는 127.0.0.1 로 넘김)
+
+| 넘길 것 | 길 |
+|---|---|
+| 주문·계좌 14주소 | rtorder 가 127.0.0.1 HTTP 로 `Front::call` 을 그대로 내고 rtserve 가 프록시한다(본문 글자 그대로). 접수 HTTP 서버는 아직 없다 -- hyper 한 겹(rtserve 와 같은 판)이 새로 필요하다 |
+| acct_seq | rtorder 의 작은 주소(예: GET /api/acct-seq) 를 rtserve 가 SSE 1초 주기마다 읽거나, rtorder 가 바뀔 때 미는 연결 하나 |
+| 계좌 캐시 | rtorder 안에만 둔다. /api/binance-account 는 프록시라 사본이 없다 |
+| 대기 칸 | rtorder 안에만(프록시) |
+
+- rtserve 가 죽으면 손절 감시는 계속 돈다. 화면·주문 접수만 멈춘다.
+- rtorder 가 죽으면 손절 감시가 멈춘다. rtserve 의 주문 주소는 502 가 된다. supervisor 재기동이 필요하다(재시작 복구는 위와 같다).
+- 화면 배포와 주문 경로 재시작이 갈라진다. 화면을 자주 고쳐도 감시는 재시작하지 않는다.
+- 비용: 프록시 왕복(127.0.0.1, 1ms 미만) 한 번이 더해진다. acct_seq 가 주기 읽기면 화면이 최대 1초 늦게 안다(원본도 SSE 1초 주기라 같다).
+
+## 9. «그림자 기록» 제안서 -- 파이썬에 넣을 기록 코드의 모양 (고치지 않았다 · 서빙 코드라 사용자 결정)
+
+파일은 새로 하나 쓴다: `data/live/order_shadow.jsonl`. 한 줄에 한 기록이고, 모양은 `{"rec": ..., "chain": ..., "t": time.time(), "mono": time.monotonic(), ...}` 이다. 쓰기는 한 곳에서만 한다.
+
+```python
+# live/execution/live_manual_peg_execute_20260912.py (모듈 위쪽 · 기존 _ORDER_T 옆)
+SHADOW_LOG = Path(__file__).resolve().parents[2] / "data" / "live" / "order_shadow.jsonl"
+_SHADOW_ON = os.getenv("ORDER_SHADOW_LOG") == "1"            # 기본 끔 -- 켜는 것은 사용자
+_CHAIN: contextvars.ContextVar[str | None] = contextvars.ContextVar("chain", default=None)
+
+def shadow_rec(rec: str, **kw) -> None:
+    if not _SHADOW_ON:
+        return
+    try:                                                        # 기록 실패가 주문 흐름을 막으면 안 된다
+        row = {"rec": rec, "chain": kw.pop("chain", None) or _CHAIN.get(), "t": time.time(), "mono": time.monotonic(), **kw}
+        with SHADOW_LOG.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(_redact(row), ensure_ascii=False, default=str) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
+
+def new_chain(kind: str) -> str:
+    c = f"{kind}-{time.time_ns():x}"
+    _CHAIN.set(c)                                               # create_task 는 맥락을 복사한다 -- 집행 작업까지 같은 chain
+    return c
+```
+
+| # | 자리 | 넣을 줄 |
+|---|---|---|
+| 1 | orders.py:965 `entry_then_bracket` 첫 줄 | `shadow_rec("start", op="entry", plan=copy.deepcopy(plan), limit=limit, slot=copy.deepcopy(state), file=bracket_load(), limits=sorted(p.name for p in LIVE_DIR.glob("manual_limit_wait*.json")))` |
+| 2 | orders.py `api_manual_exit_submit` 의 create_task 바로 앞(2045 근처) | `shadow_rec("start", op="exit", plan=..., rearm=fraction < 1, slot=copy.deepcopy(st), file=bracket_load())` |
+| 3 | orders.py:1128 `bracket_tick` 첫 줄 | `new_chain("tick")` -- start 줄은 틱 끝(13)에서 «요청이 나갔거나 파일이 바뀐 틱»일 때만 앞당겨 적는다(2초마다 쌓이지 않게: 틱 안 기록을 목록에 모았다가 조건이 맞을 때만 쓴다) |
+| 4 | 실행 모듈:101 `signed` 의 `session.request` | 보내기 직전 `t_send = time.time()` · 응답에서 `raw = await response.read()`를 먼저 하고 그다음 기존 `payload = await response.json()`(본문은 캐시되어 동작이 같다) · `shadow_rec("wire", method=method, target=path + "?" + _strip_sig(params_qs), status=response.status, body=raw.decode("utf-8", "replace"), sent_at=t_send)` · 예외 갈래에서는 `error=f"{type(exc).__name__}: {exc}"` |
+| 5 | `maker_price`(bookTicker) · 계좌 `_clock_offset`(/time) · `load_filters`(exchangeInfo) | 4 와 같은 칸(서명 없음) |
+| 6 | orders.py:1134 swr_cached("binance_account") 뒤 | `shadow_rec("input", what="account", value=acct)` |
+| 7 | orders.py:1151 load_market_history 뒤 | `shadow_rec("input", what="bars", args=[asset], value=bars)` |
+| 8 | orders.py:1002 `stop_touched` · 1160 sec_prices 뒤 | `shadow_rec("input", what="sec", args=[asset], value=[r for r in rows if r[0] > since])` |
+| 9 | orders.py:1195·1250 assemble_exit_plan 뒤 | `shadow_rec("input", what="exit_plan", args=[pside, frac, fresh, asset, only_symbol], value={"plan": plan, "err": err})` |
+| 10 | `limit_reprice` 의 호가·필터 · `basis_for` 기준 호가 | `what="book"` / `what="filters"` |
+| 11 | 실행 모듈:49 `wake_fills` | `shadow_rec("input", what="wake")` |
+| 12 | `api_manual_wait_action`·`api_manual_limit_amend`·`api_manual_entry_cancel` 끝(응답 만들기 직전) | `shadow_rec("input", what="handler", chain=<그 칸의 chain>, args=[이름, dict(request.query)], value={"status": s, "body": body})` -- 칸 dict 에 `chain` 을 넣어 두면(1·2 에서) 핸들러가 꺼내 쓴다 |
+| 13 | `entry_then_bracket` 끝(finally) · `settle` 뒤 · `bracket_tick` 끝 | `shadow_rec("end", slot=..., file=bracket_load(), limits=..., raised=repr(exc) or None)` |
+| 14 | server.py:1371 `order_request_log` 의 row | `"chain": getattr(request, "_chain", None)` -- 접수 핸들러가 `request["chain"] = new_chain("api")` 로 남긴다 |
+
+**가릴 칸 (`_redact`)**: 파일에 키·서명·listenKey 가 절대 남지 않게 한다.
+- `target`: 서명 쿼리에서 `signature=` 와 그 뒤를 잘라 낸다(`_strip_sig`). `timestamp`·`recvWindow` 는 남긴다(재생이 시계 차이를 본다).
+- 머리: `X-MBX-APIKEY` 는 적지 않는다(row 에 headers 칸 자체를 두지 않는다).
+- listenKey: `/fapi/v1/listenKey` 응답 본문의 `listenKey` 값과 웹소켓 주소 끝은 `"<listenKey>"` 로 바꾼다.
+- 텔레그램 토큰·채팅 번호: 주문 경로 기록에는 들어오지 않는다(보내기를 기록하지 않는다).
+- 계좌 값(잔고·증거금·포지션 수량·진입가·미실현·원장 trades·income): **정확한 재생에는 진짜 값이 필요하다**(수량 반올림·상한·청산 수량이 이 값으로 정해진다). 그래서 값을 가리는 대신 두 벌로 나눈다.
+  - 서버 원본 파일: chmod 600, git 밖(`data/live` 는 이미 무시 목록), 서버 밖으로 복사하지 않는다. 재생도 서버에서 돌린다.
+  - 개발기로 가져올 사본: `tools/redact_shadow.py`(새로 만들 것)로 금액 칸 전부(`balance*`·`available*`·`margin*`·`wallet*`·`unrealized*`·`assets`·`trades`·`income*`)를 지우고, 서명 응답 본문은 상태 코드만 남긴다. 이 사본은 재생이 «구조(요청 순서·핸들러 응답)»만 맞춰 보고 금액이 드는 비교는 건너뛴다.
+- `ua`·`ip`(14번)는 접수 기록에 이미 있다. 그림자 기록에는 넣지 않는다.
+
+크기 어림(RULES.md 와 같다): 따라가기 120초 ≈ 요청 80 · 무장 1회 ≈ 5 · 감시 발동 ≈ 10 → 하루 접수 수십 건이면 수 MB.

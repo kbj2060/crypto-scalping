@@ -2,6 +2,7 @@
 //! 원본에서 주문 경로가 텔레그램을 보내는 자리는 이것 하나다(감시가 건너뛴 칸 · 칸·예외 종류마다 한 번 -- `Watcher::tick_alert`).
 //! 본문 바이트는 원본 `json.dumps`(ensure_ascii · ", " ": ") 그대로. 시험 = tests/telegram.rs(127.0.0.1 가짜 서버 · 원본을 돌린 정답지).
 
+use crate::pyfmt::json_str;
 use std::time::Duration;
 
 pub const API: &str = "https://api.telegram.org";
@@ -33,7 +34,7 @@ impl Telegram {
     }
 
     pub fn body(&self, text: &str) -> String {
-        format!("{{\"chat_id\": {}, \"text\": {}, \"parse_mode\": \"HTML\"}}", py_str(&self.chat_id), py_str(text))
+        format!("{{\"chat_id\": {}, \"text\": {}, \"parse_mode\": \"HTML\"}}", json_str(&self.chat_id), json_str(text))
     }
 
     /// 원본 send_telegram(이미 html.escape 된 문구) -- true = 보냄 · false = 실패(네트워크·HTTP 오류 -- 원본 OSError). 막는 호출(뒤에서 부를 것).
@@ -42,30 +43,6 @@ impl Telegram {
         agent.post(format!("{}/bot{}/sendMessage", self.base, self.token)).header("Content-Type", "application/json").send(self.body(text).as_bytes())
             .and_then(|mut r| r.body_mut().read_to_vec()).is_ok()
     }
-}
-
-/// 파이썬 json.dumps(ensure_ascii=True) 의 문자열 한 개.
-fn py_str(s: &str) -> String {
-    let mut o = String::from("\"");
-    for c in s.chars() {
-        match c {
-            '"' => o.push_str("\\\""),
-            '\\' => o.push_str("\\\\"),
-            '\n' => o.push_str("\\n"),
-            '\r' => o.push_str("\\r"),
-            '\t' => o.push_str("\\t"),
-            '\u{8}' => o.push_str("\\b"),
-            '\u{c}' => o.push_str("\\f"),
-            ' '..='~' => o.push(c),
-            _ => {
-                for u in c.encode_utf16(&mut [0; 2]) {
-                    o.push_str(&format!("\\u{u:04x}"));
-                }
-            }
-        }
-    }
-    o.push('"');
-    o
 }
 
 /// 파이썬 html.escape(quote=True).

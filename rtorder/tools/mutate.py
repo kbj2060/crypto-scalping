@@ -207,9 +207,26 @@ ELEVEN = [  # 계좌 알림 → Wired · 번호(acct_seq) · 텔레그램 -- des
     ("app_run", "갱신기가 스트림 계좌를 안 맞춤", AP, "        self.hub.reconcile(&v, now);\n        *self.cache", "        *self.cache"),
     ("app_run", "실행 스위치 꺼져도 시작 정리(원본 기동 훅 게이트)", AP, "    if gate {\n        if let Err(e) = w.wait_cleanup", "    if true {\n        if let Err(e) = w.wait_cleanup"),
     ("telegram", "html.escape 빠짐", AP, "            let text = html_escape(msg);", "            let text = msg.to_string();"),
-    ("telegram", "ensure_ascii 빠짐(한글 그대로)", TG, "            ' '..='~' => o.push(c),", "            _ if (c as u32) >= 0x20 && c != '\\u{7f}' => o.push(c),"),
+    ("telegram", "ensure_ascii 빠짐(한글 그대로)", F, "            ' '..='~' => o.push(c),", "            _ if (c as u32) >= 0x20 && c != '\\u{7f}' => o.push(c),"),
     ("telegram", "그림자인데 알림을 보냄", AP, '        if self.shadow(format!("TELEGRAM {msg}")) {\n            return;\n        }', ""),
     ("telegram", "HTTP 오류를 보냄으로 셈", TG, ".and_then(|mut r| r.body_mut().read_to_vec()).is_ok()", ".map(|_| ()).is_ok() || true"),
+]
+RT = "src/route.rs"
+TWELVE = [  # 주문·계좌 주소 14개 -- route_fixture(원본 aiohttp 앱 바이트 158사례) · route_concurrency(동시 요청)
+    ("route_fixture", "청산 접수가 주문 잠금 밖", RT, '("POST", "/api/manual-exit/submit", "exit_submit", true)', '("POST", "/api/manual-exit/submit", "exit_submit", false)'),
+    ("route_fixture", "선 수정이 주문 잠금 밖", RT, '("POST", "/api/manual-bracket/modify", "bracket_modify", true)', '("POST", "/api/manual-bracket/modify", "bracket_modify", false)'),
+    ("route_fixture", "405 Allow 에 HEAD 빠짐", RT, 'if m == "GET" { "GET,HEAD" } else { m }', 'm'),
+    ("route_fixture", "같은 키는 마지막 값", RT, "            if !q.contains_key(k) {\n                q.insert(k.clone(), v.clone());\n                first.insert(k.clone(), json!(v));\n            }", "            q.insert(k.clone(), v.clone());\n            first.insert(k.clone(), json!(v));"),
+    ("route_fixture", "접수 기록이 GET 도 적음", RT, 'if method == "POST" && path.starts_with("/api/manual-") {', 'if path.starts_with("/api/manual-") {'),
+    ("route_fixture", "기록 error: ok 없음을 실패로", RT, 'Ok(Value::Object(m)) if m.get("ok").is_some_and(|v| !truthy(Some(v))) =>', 'Ok(Value::Object(m)) if !m.get("ok").is_some_and(|v| truthy(Some(v))) =>'),
+    ("route_fixture", "no-cache 를 모든 상태에", RT, 'let headers = if status == 200 {', 'let headers = if status != 0 {'),
+    ("route_fixture", "server_ms 빠짐", RT, '                    body["server_ms"] = json!(t0.elapsed().as_millis() as i64);', '                    let _ = t0;'),
+    ("route_fixture", "HEAD 본문을 버리지 않음", RT, "            r.body.clear();", ""),
+    ("route_fixture", "상태 조회가 wait 칸을 안 만듦", RT, '    let wait = Value::Object(d.w.wait_slot(&asset, 1).clone());', '    let wait = d.w.waits.get(&crate::watch::Watcher::wkey(&asset, 1)).cloned().unwrap_or(json!({"phase": "idle"}));'),
+    ("route_fixture", "무방비 목록이 손절 무장을 안 봄", RT, '        .filter(|k| !armed.get(k).is_some_and(|a| truthy(a.get("sl_price"))))\n', ''),
+    ("route_fixture", "정수를 실수로 씀(json_dumps)", F, "            (Some(i), _) => i.to_string(),", "            (Some(i), _) => repr(i as f64),"),
+    ("route_fixture", "빈 포지션 투영 0 을 0.0", "src/assemble.rs", '        out["before"]["notional_usdt"] = json!(0);', ""),
+    ("route_concurrency", "잠긴 동안 409 가 칸을 기다림(교착)", RT, "                            let e = match desk.try_lock() {", "                            let e = match Ok::<_, ()>(desk.lock().await) {"),
 ]
 WIRE = [  # wire_e2e(감시 → 계좌 → 조립 → 집행)로 잡혀야 한다
     ("스트림 계좌를 쓸 수 있어도 REST 로 읽음", "src/wire.rs", '                    Ok(v) => {\n                        self.source.push("stream");\n                        return Ok(v);', '                    Ok(_) => {\n                        self.source.push("stream");\n                        return self.book.produce(self.rest).await;'),
@@ -245,7 +262,7 @@ def main() -> int:
             ok = r.returncode != 0
             caught, total = caught + ok, total + 1
             print(f"{'잡음' if ok else '🔴못 잡음'} | {test} | {name} | {', '.join(failed)[:110]}", flush=True)
-    for grp, lst in (("six", SIX), ("seven", SEVEN), ("eight", EIGHT), ("nine", NINE), ("ten", TEN), ("eleven", ELEVEN)):
+    for grp, lst in (("six", SIX), ("seven", SEVEN), ("eight", EIGHT), ("nine", NINE), ("ten", TEN), ("eleven", ELEVEN), ("twelve", TWELVE)):
       if not only or only == grp:
         for test, name, f, a, b in lst:
             shutil.rmtree(W, ignore_errors=True)

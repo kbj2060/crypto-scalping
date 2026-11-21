@@ -270,8 +270,12 @@ pub fn entry_projection(plan: &Value, balance: &Value, positions: &[Value], exis
                "available_usdt": if eq { json!(round_n(equity - m, 2)) } else { Value::Null }, "notional_usdt": round_n(n, 2),
                "exposure_x": if eq { json!(round_n(n / equity, 2)) } else { Value::Null }, "liq_pct": liq.map(|l| round_n(l, 2))})
     };
-    Ok(json!({"equity_usdt": round_n(equity, 2), "available_before_usdt": round_n(available, 2),
-              "before": side(used, existing, liq_before), "after": side(used + add_margin, total, liq_after)}))
+    let mut out = json!({"equity_usdt": round_n(equity, 2), "available_before_usdt": round_n(available, 2),
+              "before": side(used, existing, liq_before), "after": side(used + add_margin, total, liq_after)});
+    if positions.is_empty() {
+        out["before"]["notional_usdt"] = json!(0); // 원본 existing = 빈 sum() = 정수 0 → round(0, 2) = 0(응답 글자 «0»)
+    }
+    Ok(out)
 }
 
 /// `leverage_setting(...)["setting"]` -- 거래소에 걸 레버리지(정책 상한을 거래소에 새기는 값). 순자산·상한이 없으면 None.

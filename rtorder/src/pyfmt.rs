@@ -126,3 +126,44 @@ mod tests {
         assert_eq!(round0(1.5), 2.0);
     }
 }
+
+/// 파이썬 json.dumps(ensure_ascii=True) 의 문자열 한 개.
+pub fn json_str(s: &str) -> String {
+    let mut o = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => o.push_str("\\\""),
+            '\\' => o.push_str("\\\\"),
+            '\n' => o.push_str("\\n"),
+            '\r' => o.push_str("\\r"),
+            '\t' => o.push_str("\\t"),
+            '\u{8}' => o.push_str("\\b"),
+            '\u{c}' => o.push_str("\\f"),
+            ' '..='~' => o.push(c),
+            _ => {
+                for u in c.encode_utf16(&mut [0; 2]) {
+                    o.push_str(&format!("\\u{u:04x}"));
+                }
+            }
+        }
+    }
+    o.push('"');
+    o
+}
+
+/// 파이썬 json.dumps(v) 기본 모양(", " · ": " · ensure_ascii · 실수 = repr) -- aiohttp web.json_response 본문 글자.
+pub fn json_dumps(v: &serde_json::Value) -> String {
+    use serde_json::Value;
+    match v {
+        Value::Null => "null".into(),
+        Value::Bool(b) => if *b { "true".into() } else { "false".into() },
+        Value::Number(n) => match (n.as_i64(), n.as_u64()) {
+            (Some(i), _) => i.to_string(),
+            (_, Some(u)) => u.to_string(),
+            _ => repr(n.as_f64().unwrap()),
+        },
+        Value::String(s) => json_str(s),
+        Value::Array(a) => format!("[{}]", a.iter().map(json_dumps).collect::<Vec<_>>().join(", ")),
+        Value::Object(m) => format!("{{{}}}", m.iter().map(|(k, x)| format!("{}: {}", json_str(k), json_dumps(x))).collect::<Vec<_>>().join(", ")),
+    }
+}
