@@ -3,7 +3,7 @@
 정답은 원본 모듈의 build_features·frames_for·predict·payload_from_features 를 그대로 부른다. 안전(소스 확인): 그 모듈은 import 때 json·numpy·pandas 만
 부르고, REST(requests)는 `_get` 안에서만 import 한다 -- 여기서는 rest_frames·daily_closes·live_payload 를 부르지 않는다. 입력은 rest_frames 가
 돌려주는 꼴(대상 코인 = 5분봉 9,000개 + metrics 5열 · 나머지 19코인 = 5분봉 340개 · "BTC" 자리 코인만 OI)을 합성해 만든다.
-모델은 개발기에 있는 SOL·XRP 판(메인 체크아웃 data/live/ -- 읽기만 · ETH 판은 개발기에 없다).
+모델은 SOL·XRP 판 + ETH 판(11-22 서버에서 가져온 사본 · 메인 체크아웃 data/live/ -- 읽기만).
 
     python rtmodel/tools/export_dir4h.py && python rtmodel/tools/gen_dir4h_fixture.py      # → tests/fixtures/dir4h_fixture.json (커밋 안 함)
 """
@@ -102,12 +102,14 @@ def main():
     warnings.filterwarnings("ignore")
     rng = np.random.default_rng(20261121)
     fx = {"sets": []}
-    for coin in ("SOL", "XRP"):
+    for coin in ("SOL", "XRP", "ETH"):                                    # 2026-11-22 ETH 판(서버에서 가져온 사본 · 읽기만 · 이 파일로 핸들러를 띄우지 않는다)
         art = joblib.load(LIVE / f"{coin.lower()}_dir4h_model.joblib")
         names = ["normal", "gaps", "zero_vol", "nan_metrics", "dup_ts", "missing_coin", "short", "exact"]
         ends = ["2026-11-20 13:35", "2026-11-20 23:55", "2026-11-21 00:00", "2026-11-21 00:20", "2026-11-21 00:25", "2026-11-22 07:40", "2026-11-23 16:00", "2026-11-24 03:10"]
         for name, end in zip(names, ends):
-            frames, dc = case(rng, coin, name, end)
+            frames, dc = case(rng, "SOL" if coin == "ETH" else coin, name, end)
+            if coin == "ETH":                                                  # 합성기는 대상 이름 SOL·XRP 만 안다 -- 대상(9,000봉·metrics)을 ETH 자리로
+                frames["ETH"], frames["SOL"] = frames["SOL"], frames["ETH"]
             enc_frames = {s: {"ts": (f.timestamp.astype("int64") // 10**6).tolist(), **{c: bits(f[c]) for c in COLS + d4.MCOLS}} for s, f in frames.items()}
             try:
                 F = d4.build_features(d4.frames_for(frames, coin), dc)

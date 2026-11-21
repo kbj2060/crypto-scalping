@@ -119,5 +119,22 @@ mkdir -p "$F/nul"; printf '{"k":"4","t":5,"px":1.0}\n\0\0\0{"k":"4","t":9,"px":1
 printf '{"k":"4","t":5,"px":1.0}\n' > "$F/nul/rs.jsonl"
 mt=$(python3 "$R/rtmodel/tools/takeover_cmp.py" maxt "$F/nul" 4); out=$(python3 "$R/rtmodel/tools/takeover_cmp.py" lines "$F/nul/BTC.jsonl" "$F/nul/rs.jsonl" --key k,t --text); rc=$?; echo "$out"
 ok "maxt = NUL 줄을 건너뛴 가장 큰 4h t(6) · lines 통과 + 깨진 줄 수를 찍음" '[ "$mt" = 6 ] && [ "$rc" = 0 ] && [[ "$out" == *"깨진 줄"*"파이썬 1"* ]]'
+echo "9. 여러 줄 check.ok(11-22 서버: 깨진 줄 알림이 앞줄에 붙어 go 가 산술 오류로 죽었다)"
+printf '%s\n%s\n' "$NOW  깨진 줄(NUL 등) 파이썬 1 · Rust 0" "칸 65 · 어긋남 0 · 짝 없음 0" > "$F/shadow/rt_regime/check.ok"
+$TK rt_regime go > "$F/go9.txt" 2>&1; rc=$?; tail -1 "$F/go9.txt"
+ok "옛 여러 줄 check.ok 도 첫 줄 epoch 로 읽어 go 진행(산술 오류 없음)" '[ "$rc" = 0 ] && ! grep -q "syntax error\|산술\|arithmetic" "$F/go9.txt" && grep -q "rt-takeover:rt_regime" "$F/crontab.txt"'
+$TK rt_regime back > /dev/null 2>&1
+mkdir -p "$F/fake9"; printf '#!/bin/bash\nprintf "  깨진 줄 파이썬 1 · Rust 0\\n칸 3 · 어긋남 0 · 짝 없음 0\\n"\n' > "$F/fake9/cmp.sh"
+( SH="$F/shadow/x9" NAME=x CMD=t; source <(sed -n '/^now_s()/p;/^say()/p;/^record_check() {/,/^}/p' "$R/rtmodel/tools/takeover.sh"); out=$(bash "$F/fake9/cmp.sh"); record_check 0 "기록 $out" > /dev/null )
+ok "record_check 는 여러 줄 대조 출력을 한 줄로 펴서 check.ok 에 쓴다" '[ "$(wc -l < "$F/shadow/x9/check.ok")" = 1 ] && grep -q "깨진 줄 파이썬 1 · Rust 0 칸 3 · 어긋남 0" "$F/shadow/x9/check.ok"'
+echo "10. rt_sr_lean check 둘째 호출(65분 뒤): 대조기 종료코드를 그대로 판정에(전엔 | tail -1 의 종료코드라 불일치도 통과로 적혔다)"
+SR="$F/shadow/rt_sr_lean"; mkdir -p "$SR/run"; echo $(( NOW - 4000 )) > "$SR/started"
+( cd "$R" && RT_SR_OUT="$SR/run" setsid nohup "$RB/rt_sr_lean" > /dev/null 2>&1 < /dev/null & )
+for i in $(seq 1 20); do [ -n "$(for p in /proc/[0-9]*; do [ "$(cat "$p/comm" 2>/dev/null)" = rt_sr_lean ] && tr '\0' '\n' 2>/dev/null < "$p/environ" | grep -qx "RT_SR_OUT=$SR/run" && echo x; done)" ] && break; sleep 0.5; done
+printf '%s\n' 'import os, sys' 'print("사건 id: 파이썬 10 · Rust 10 · 양쪽 10")' 'print("양쪽 다 있는 id 의 줄: ev 10 · 결과 9 · 피쳐 10 → 다른 줄", 0 if os.environ.get("FAKE_SR_OK") else 1)' 'sys.exit(0 if os.environ.get("FAKE_SR_OK") else 1)' > "$R/rtmodel/tools/shadow_sr_lean.py"
+out=$($TK rt_sr_lean check 2>&1); echo "$out" | tail -1 | cut -c1-200
+ok "다른 줄 1 → 불통과 · check.ok 없음 · 출력에 사건 수" '[ ! -f "$SR/check.ok" ] && [[ "$out" == *"불통과"*"다른 줄 1"* ]]'
+out=$(FAKE_SR_OK=1 $TK rt_sr_lean check 2>&1); echo "$out" | tail -1 | cut -c1-200
+ok "다른 줄 0 → 통과 · check.ok 한 줄 · 견줌 시작 시각 출력" '[ -f "$SR/check.ok" ] && [ "$(wc -l < "$SR/check.ok")" = 1 ] && [[ "$out" == *"통과"*"견줌 시작"*"다른 줄 0"* ]]'
 echo "== 통과 $PASS · 실패 $FAIL"
 [ "$FAIL" = 0 ]

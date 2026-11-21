@@ -58,7 +58,7 @@ fn same(g: &Value, w: &Value, path: &str, bad: &mut Vec<String>) {
 #[test]
 fn dir4h_parity() {
     let fx: Value = rtmodel::read_json(&dir().join("dir4h_fixture.json")).expect("정답지 없음 -- 파일 머리말의 python 두 줄을 먼저");
-    let arts: HashMap<String, Art> = ["sol", "xrp"].iter().map(|c| (c.to_uppercase(), Art::load(&dir().join(format!("dir4h_{c}.json"))).unwrap())).collect();
+    let arts: HashMap<String, Art> = ["sol", "xrp", "eth"].iter().map(|c| (c.to_uppercase(), Art::load(&dir().join(format!("dir4h_{c}.json"))).unwrap())).collect();
     let mut err: BTreeMap<&str, (f64, usize, usize)> = BTreeMap::new(); // 열 → (최대 상대 오차, 비트 같음, 칸)
     let (mut pmax, mut bad, mut nsets) = (0.0f64, vec![], 0);
     for s in fx["sets"].as_array().unwrap() {
