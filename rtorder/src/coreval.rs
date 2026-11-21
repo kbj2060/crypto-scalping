@@ -22,10 +22,33 @@ pub struct Feed {
     pub secs: HashMap<String, Vec<(i64, f64)>>,
     pub connected: bool,
     pub connects: u64,
+    /// 마지막으로 허브 메시지를 받은 벽시계 초(0 = 한 번도 못 받음)
+    pub last_rx: f64,
+    /// 구독 루프가 남긴 줄(닫힘 사유 · 같은 사유는 1분에 한 번) -- 계량 줄 자리가 비운다
+    pub logs: Vec<String>,
 }
+/// 이만큼 허브 메시지가 없으면 «못 받음»(계량 줄 자리에 한 줄 · /internal/acct feed.stale)
+pub const FEED_STALE_S: f64 = 10.0;
 pub const SEC_KEEP: i64 = 1800; // 감시 1초 닿음은 무장 뒤만 본다 -- 30분이면 넉넉(ponytail: 더 길게 쉬면 그 사이는 «모름»)
 
 impl Feed {
+    /// 허브 상태(값 없이 나이만): 연결 · 붙은 횟수 · 마지막 수신 뒤 초 · 심볼별 마지막 가격 뒤 초(호가 rx · 1초가 끝 초 중 늦은 것).
+    pub fn health(&self, now: f64) -> Value {
+        let mut syms: std::collections::BTreeMap<String, f64> = Default::default();
+        for (s, (_, rx)) in &self.books {
+            syms.insert(s.clone(), sec(*rx));
+        }
+        for (s, v) in &self.secs {
+            if let Some(&(t, _)) = v.last() {
+                let e = syms.entry(s.clone()).or_insert(0.0);
+                *e = e.max(t as f64);
+            }
+        }
+        let age = |t: f64| if t > 0.0 { json!(((now - t) * 10.0).round() / 10.0) } else { Value::Null };
+        json!({"connected": self.connected, "connects": self.connects, "last_rx_age_s": age(self.last_rx),
+               "stale": self.last_rx <= 0.0 || now - self.last_rx > FEED_STALE_S,
+               "symbols": syms.into_iter().map(|(s, t)| (s, age(t))).collect::<serde_json::Map<_, _>>()})
+    }
     /// 허브 메시지 하나(Stamped JSON)를 반영한다.
     pub fn apply(&mut self, m: &Value) {
         let sym = m.get("s").and_then(Value::as_str).unwrap_or("").to_uppercase();
@@ -100,35 +123,60 @@ pub async fn subscribe_owned(url: String, feed: Arc<Mutex<Feed>>, stop: Arc<Atom
 }
 
 /// 허브 구독 루프: 붙고 → 구독 보내고 → 받는 대로 `Feed` 에. 끊기면 1·2·4…30초 뒤 다시(stop 이 서면 끝).
+/// 물러나기는 **첫 메시지를 받은 뒤**에만 1초로 되돌린다(2026-11-22 · 허브가 구독을 Close(Policy)로 거절하면 전에는 1초마다 다시 붙었다).
 pub async fn subscribe(url: &str, feed: Arc<Mutex<Feed>>, stop: Arc<AtomicBool>) {
+    use tokio_tungstenite::tungstenite::Message;
     let symbols = ["ethusdc", "ethusdt", "solusdc", "solusdt", "xrpusdc", "xrpusdt", "btcusdc", "btcusdt", "soxlusdt", "sndkusdt"];
     let mut wait = 1.0f64;
+    let mut said: HashMap<String, f64> = HashMap::new(); // 사유 → 마지막으로 적은 시각
     while !stop.load(Ordering::SeqCst) {
-        if let Ok((mut ws, _)) = tokio_tungstenite::connect_async(url).await {
-            let sub = json!({"subscribe": symbols}).to_string();
-            if ws.send(tokio_tungstenite::tungstenite::Message::Text(sub.into())).await.is_ok() {
-                {
-                    let mut f = feed.lock().unwrap();
-                    f.connected = true;
-                    f.connects += 1;
-                }
-                wait = 1.0;
-                while let Some(Ok(m)) = ws.next().await {
-                    if let tokio_tungstenite::tungstenite::Message::Text(t) = m {
-                        if let Ok(v) = serde_json::from_str::<Value>(t.as_str()) {
-                            feed.lock().unwrap().apply(&v);
+        let why = match tokio_tungstenite::connect_async(url).await {
+            Err(e) => format!("접속 실패: {e}"),
+            Ok((mut ws, _)) => {
+                let mut why = "끊김(닫힘 사유 없음)".to_string();
+                let sub = json!({"subscribe": symbols}).to_string();
+                if ws.send(Message::Text(sub.into())).await.is_ok() {
+                    {
+                        let mut f = feed.lock().unwrap();
+                        f.connected = true;
+                        f.connects += 1;
+                    }
+                    while let Some(Ok(m)) = ws.next().await {
+                        match m {
+                            Message::Text(t) => {
+                                wait = 1.0;
+                                if let Ok(v) = serde_json::from_str::<Value>(t.as_str()) {
+                                    let mut f = feed.lock().unwrap();
+                                    f.last_rx = wall();
+                                    f.apply(&v);
+                                }
+                            }
+                            Message::Close(fr) => {
+                                why = fr.map_or(why, |f| format!("닫힘 {} {}", u16::from(f.code), f.reason));
+                            }
+                            _ => {}
+                        }
+                        if stop.load(Ordering::SeqCst) {
+                            break;
                         }
                     }
-                    if stop.load(Ordering::SeqCst) {
-                        break;
-                    }
                 }
+                feed.lock().unwrap().connected = false;
+                why
             }
-            feed.lock().unwrap().connected = false;
+        };
+        let now = wall();
+        if said.get(&why).is_none_or(|t| now - t >= 60.0) && !stop.load(Ordering::SeqCst) {
+            said.insert(why.clone(), now);
+            feed.lock().unwrap().logs.push(format!("rtorder 허브 연결 끝 · {why} · {wait:.0}초 뒤 다시"));
         }
         tokio::time::sleep(std::time::Duration::from_secs_f64(wait)).await;
         wait = (wait * 2.0).min(30.0);
     }
+}
+
+pub fn wall() -> f64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64()
 }
 
 fn sec(us: i64) -> f64 {

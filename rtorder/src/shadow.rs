@@ -89,10 +89,10 @@ pub fn chains(jsonl: &str) -> Result<Vec<Chain>, String> {
     Ok(order.into_iter().map(|id| by.remove(&id).unwrap()).filter(|c| !c.start.is_null()).collect())
 }
 
-/// 비교에서 뺄 벽시계 칸(실기록 = 진짜 시계 · 재생 = 가짜 시계): 이름이 `_at` 으로 끝나거나 `at`·`wait_until`.
+/// 비교에서 뺄 벽시계 칸(실기록 = 진짜 시계 · 재생 = 가짜 시계): 이름이 `_at` 으로 끝나거나 `at`·`wait_until`·`retry_after`(30초 뒤 다시 -- 시각).
 pub fn drop_times(v: &Value) -> Value {
     match v {
-        Value::Object(m) => Value::Object(m.iter().filter(|(k, _)| !(k.ends_with("_at") || *k == "at" || *k == "wait_until")).map(|(k, x)| (k.clone(), drop_times(x))).collect()),
+        Value::Object(m) => Value::Object(m.iter().filter(|(k, _)| !(k.ends_with("_at") || *k == "at" || *k == "wait_until" || *k == "retry_after")).map(|(k, x)| (k.clone(), drop_times(x))).collect()),
         Value::Array(a) => Value::Array(a.iter().map(drop_times).collect()),
         x => x.clone(),
     }
@@ -318,6 +318,8 @@ impl WatchIo for Io {
         note(&self.t, &self.calls, json!(["exit_plan", p, f, true, a, s]));
         let v = take(&self.inputs, &self.last, "exit_plan");
         match v.get("err") {
+            // 파이썬 기록 = [본문, 상태](assemble_exit_plan 의 err 튜플) · 감시는 본문 dict 를 본다
+            Some(Value::Array(a)) if !a.is_empty() => Err(a[0].clone()),
             Some(e) if !e.is_null() => Err(e.clone()),
             _ => Ok(v.get("plan").cloned().unwrap_or(Value::Null)),
         }
@@ -410,7 +412,89 @@ fn act_of(w: &Value) -> Act {
 pub struct Report {
     pub chain: String,
     pub requests: usize,
+    /// 차이(값 포함 -- `--show-values` 일 때만 찍는다)
     pub diffs: Vec<String>,
+    /// 2026-11-21 값 없는 어긋난 위치(«요청 #3 칸 quantity» · «칸 phase» · «무장 파일 ETHUSDT:LONG.sl_level») -- 실기록 출력은 이것만
+    pub where_: Vec<String>,
+    pub op: String,
+    /// 감시 틱 안 청산 계획 조립 중 파이썬이 보낸 읽기 왕복(/time·commissionRate) -- Rust 재생은 조립을 기록값으로 대신해 안 보낸다(따로 센다)
+    pub assembly: usize,
+    /// 시작은 있고 끝이 없다(프로세스 재시작으로 잘림) -- 재생하지 않는다
+    pub truncated: bool,
+}
+
+/// 감시 틱 안 조립 구간의 읽기 왕복 경로(파이썬 produce_account 의 _clock_offset · commission_bp).
+pub const ASSEMBLY_PATHS: [&str; 2] = ["/fapi/v1/time", "/fapi/v1/commissionRate"];
+
+/// 감시 틱: 청산 계획 입력(what=exit_plan) 바로 앞에 붙은 조립 왕복을 떼어 낸다(시각 차례로 거꾸로 이어진 것만) · 조립 안 입력(filters)도.
+fn split_assembly(c: &Chain) -> (Chain, usize) {
+    if c.start.get("op").and_then(Value::as_str) != Some("tick") {
+        return (c.clone(), 0);
+    }
+    let tt = |v: &Value| v.get("t").and_then(Value::as_f64).unwrap_or(0.0);
+    let path = |w: &Value| w.get("target").and_then(Value::as_str).unwrap_or("").split('?').next().unwrap_or("").to_string();
+    let mut drop = std::collections::BTreeSet::new();
+    for ep in c.inputs.iter().filter(|i| i["what"] == "exit_plan") {
+        let te = tt(ep);
+        // exit_plan 앞의 파이썬 기록을 시각 거꾸로 -- 조립 왕복이 아닌 것(다른 요청·입력)이 나오면 멈춘다
+        let mut rows: Vec<(f64, Option<usize>)> = c.wire.iter().enumerate().filter(|(_, w)| w.get("t").is_some() && tt(w) < te).map(|(i, w)| (tt(w), Some(i))).collect();
+        rows.extend(c.inputs.iter().filter(|i| tt(i) < te && i["what"] != "filters").map(|i| (tt(i), None)));
+        rows.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+        for (_, w) in rows {
+            match w {
+                Some(i) if ASSEMBLY_PATHS.contains(&path(&c.wire[i]).as_str()) => {
+                    drop.insert(i);
+                }
+                _ => break,
+            }
+        }
+    }
+    let mut out = c.clone();
+    out.wire = c.wire.iter().enumerate().filter(|(i, _)| !drop.contains(i)).map(|(_, w)| w.clone()).collect();
+    out.inputs = c.inputs.iter().filter(|i| i["what"] != "filters").cloned().collect(); // 조립 안 격자 입력(Rust 감시 틱은 조립을 기록값으로)
+    (out, drop.len())
+}
+
+/// 값 없이 어디가 다른지(dict 키 경로만 · 첫 몇 곳).
+pub fn diff_paths(a: &Value, b: &Value, path: &str, out: &mut Vec<String>) {
+    if out.len() >= 5 {
+        return;
+    }
+    match (a, b) {
+        (Value::Object(x), Value::Object(y)) => {
+            for k in x.keys().chain(y.keys().filter(|k| !x.contains_key(*k))) {
+                let p = if path.is_empty() { k.clone() } else { format!("{path}.{k}") };
+                match (x.get(k), y.get(k)) {
+                    (Some(u), Some(v)) => diff_paths(u, v, &p, out),
+                    _ => out.push(p),
+                }
+            }
+        }
+        (Value::Array(x), Value::Array(y)) if x.len() == y.len() => {
+            for (i, (u, v)) in x.iter().zip(y).enumerate() {
+                diff_paths(u, v, &format!("{path}[{i}]"), out);
+            }
+        }
+        _ if !same(a, b) => out.push(if path.is_empty() { "(값)".into() } else { path.to_string() }),
+        _ => {}
+    }
+}
+
+/// 요청 두 개(정규화 글자)의 다른 곳: 메서드·경로가 다르면 «경로» · 같으면 다른 쿼리 키 이름만.
+fn request_where(at: usize, want: Option<&String>, got: Option<&String>) -> String {
+    let (Some(w), Some(g)) = (want, got) else {
+        let p = want.or(got).map(|x| x.split('?').next().unwrap_or("").to_string()).unwrap_or_default();
+        return format!("요청 #{at}: {} ({p})", if want.is_none() { "Rust 가 더 보냄" } else { "Rust 가 덜 보냄" });
+    };
+    let (wh, wq) = w.split_once('?').unwrap_or((w, ""));
+    let (gh, gq) = g.split_once('?').unwrap_or((g, ""));
+    if wh != gh {
+        return format!("요청 #{at}: 경로 다름(원본 {wh} · Rust {gh})");
+    }
+    let kv = |q: &str| -> std::collections::BTreeMap<String, String> { q.split('&').filter_map(|x| x.split_once('=')).map(|(k, v)| (k.into(), v.into())).collect() };
+    let (a, b) = (kv(wq), kv(gq));
+    let keys: Vec<&String> = a.keys().chain(b.keys()).filter(|k| a.get(*k) != b.get(*k)).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+    format!("요청 #{at} {wh}: 칸 {}", keys.iter().map(|k| k.as_str()).collect::<Vec<_>>().join("·"))
 }
 
 /// 작업들을 차례로 재생한다(같은 무장 폴더·같은 칸을 이어 쓴다 -- 시작 기록이 무장 파일·칸을 주면 그 값으로 맞춘 뒤).
@@ -451,8 +535,16 @@ pub async fn replay(chs: &[Chain], symbol: &str, dir: &Path, exact: bool, secret
     let mut quotes = Q { t: t.clone(), calls: calls.clone(), inputs: inputs.clone(), last: last.clone() };
     let fpath: PathBuf = crate::watch::bracket_path(dir);
     let mut out = vec![];
-    for c in chs {
+    for c0 in chs {
+        let op = c0.start.get("op").and_then(Value::as_str).unwrap_or("?").to_string();
+        if c0.end.is_null() {
+            out.push(Report { chain: c0.id.clone(), requests: 0, diffs: vec![], where_: vec![], op, assembly: 0, truncated: true });
+            continue;
+        }
+        let (c, assembly) = split_assembly(c0);
+        let c = &c;
         let mut d = vec![];
+        let mut wh: Vec<String> = vec![];
         let st = &c.start;
         *t.lock().unwrap() = st.get("t").and_then(Value::as_f64).unwrap_or(0.0);
         match st.get("file") {
@@ -528,6 +620,7 @@ pub async fn replay(chs: &[Chain], symbol: &str, dir: &Path, exact: bool, secret
         if got != want {
             let at = got.iter().zip(&want).position(|(a, b)| a != b).unwrap_or(got.len().min(want.len()));
             d.push(format!("요청 열 다름 #{at}/{}: 원본 {} · Rust {}", want.len(), want.get(at).map_or("없음", String::as_str), got.get(at).map_or("없음", String::as_str)));
+            wh.push(request_where(at, want.get(at), got.get(at)));
         }
         // 읽은 입력(종류·인자 · exact 면 시각까지)
         let rs: Vec<Value> = calls.lock().unwrap().iter().map(|x| if exact { x.clone() } else { Value::Array(x.as_array().unwrap()[1..].to_vec()) }).collect();
@@ -539,17 +632,27 @@ pub async fn replay(chs: &[Chain], symbol: &str, dir: &Path, exact: bool, secret
         }).collect();
         if !same(&json!(rs), &json!(py)) {
             d.push(format!("읽은 입력: 원본 {} · Rust {}", json!(py), json!(rs)));
+            let at = rs.iter().zip(&py).position(|(a, b)| !same(a, b)).unwrap_or(rs.len().min(py.len()));
+            let kind = |v: Option<&Value>| v.and_then(|x| x.as_array()).and_then(|a| a.iter().find(|x| x.is_string())).map(crate::sign::py_str).unwrap_or_else(|| "없음".into());
+            wh.push(format!("읽은 입력 #{at}: 원본 {} · Rust {}", kind(py.get(at)), kind(rs.get(at))));
         }
         // 끝 상태
         let tm = |v: &Value| if exact { v.clone() } else { drop_times(v) }; // 실기록(진짜 시계)은 시각 칸을 빼고 본다
         if let Some(es) = c.end.get("slot") {
             let rs_slot = dk.slot_obj(&sref).clone();
+            let n0 = d.len();
             slot_diff(&tm(es), tm(&Value::Object(rs_slot)).as_object().unwrap(), &mut d);
+            for x in &d[n0..] {
+                wh.push(x.split(':').next().unwrap_or("칸").to_string()); // «칸 <이름>» -- 값은 ':' 뒤
+            }
         }
         if let Some(ef) = c.end.get("file") {
             let file = std::fs::read_to_string(&fpath).ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()).unwrap_or(Value::Null);
             if !same(&tm(ef), &tm(&file)) {
                 d.push(format!("무장 파일: 원본 {ef} · Rust {file}"));
+                let mut ps = vec![];
+                diff_paths(&tm(ef), &tm(&file), "", &mut ps);
+                wh.push(format!("무장 파일 {}", ps.join("·")));
             }
         }
         if let Some(el) = c.end.get("limits") {
@@ -558,11 +661,13 @@ pub async fn replay(chs: &[Chain], symbol: &str, dir: &Path, exact: bool, secret
             names.sort();
             if json!(names) != *el {
                 d.push(format!("복구 파일: 원본 {el} · Rust {names:?}"));
+                wh.push("복구 파일".into());
             }
         }
         if let Some(lg) = c.end.get("logs") {
             if json!(dk.w.logs) != *lg {
                 d.push(format!("로그: 원본 {lg} · Rust {:?}", dk.w.logs));
+                wh.push("로그".into());
             }
         }
         if exact {
@@ -574,7 +679,15 @@ pub async fn replay(chs: &[Chain], symbol: &str, dir: &Path, exact: bool, secret
             }
         }
         drop(dk);
-        out.push(Report { chain: c.id.clone(), requests: got.len(), diffs: d });
+        // 위에서 위치를 못 단 차이(감시 틱 예외·화면 입력·모르는 op·끝 시각 등) = 앞머리 이름만
+        for x in &d {
+            if !["요청 열", "읽은 입력", "칸 ", "무장 파일", "복구 파일", "로그"].iter().any(|p| x.starts_with(p)) {
+                // 감시 틱 예외 · 화면 입력 · 모르는 op · 끝 시각 등 = 앞머리 이름만(숫자는 지운다)
+                let head: String = x.split([':', '(']).next().unwrap_or("").chars().filter(|c| !c.is_ascii_digit()).collect();
+                wh.push(head.trim().to_string());
+            }
+        }
+        out.push(Report { chain: c.id.clone(), requests: got.len(), diffs: d, where_: wh, op, assembly, truncated: false });
     }
     out
 }
@@ -612,15 +725,63 @@ mod tests {
 /// 재생 보고서(사람이 읽는 글자): 작업마다 한 줄(요청 수 · 같음/차이) + 맨 끝 요약
 /// «견준 작업 N · 요청 M · 어긋난 작업 K» + 첫 어긋남(작업 · 첫 차이 -- 요청 열이면 몇 번째·원본·Rust).
 pub fn report_text(reports: &[Report]) -> String {
+    report_with(reports, true)
+}
+
+/// `values=false`(실기록 출력): 작업마다 «chain · op · 요청 N · 같음/다름 + 어긋난 위치(값 없음)» · 금액·수량·키는 안 찍는다.
+pub fn report_with(reports: &[Report], values: bool) -> String {
     let mut out = String::new();
     for r in reports {
-        out.push_str(&format!("{} | 요청 {} | {}\n", r.chain, r.requests, if r.diffs.is_empty() { "같음".into() } else { r.diffs.join(" | ") }));
+        if r.truncated {
+            out.push_str(&format!("{} | {} | 잘림(끝 줄 없음 -- 재시작) · 건너뜀\n", r.chain, r.op));
+            continue;
+        }
+        let what = if r.diffs.is_empty() { "같음".to_string() } else if values { r.diffs.join(" | ") } else { format!("다름 -- {}", r.where_.join(" | ")) };
+        let asm = if r.assembly > 0 { format!(" · 조립 구간 왕복 {}", r.assembly) } else { String::new() };
+        out.push_str(&format!("{} | {} | 요청 {}{asm} | {what}\n", r.chain, r.op, r.requests));
     }
-    let bad: Vec<&Report> = reports.iter().filter(|r| !r.diffs.is_empty()).collect();
-    out.push_str(&format!("견준 작업 {} · 요청 {} · 어긋난 작업 {}\n", reports.len(), reports.iter().map(|r| r.requests).sum::<usize>(), bad.len()));
+    let done: Vec<&Report> = reports.iter().filter(|r| !r.truncated).collect();
+    let bad: Vec<&&Report> = done.iter().filter(|r| !r.diffs.is_empty()).collect();
+    out.push_str(&format!("견준 작업 {} · 요청 {} · 어긋난 작업 {}", done.len(), done.iter().map(|r| r.requests).sum::<usize>(), bad.len()));
+    let (cut, asm): (usize, usize) = (reports.iter().filter(|r| r.truncated).count(), done.iter().map(|r| r.assembly).sum());
+    if cut > 0 {
+        out.push_str(&format!(" · 잘림 {cut}"));
+    }
+    if asm > 0 {
+        out.push_str(&format!(" · 조립 구간 왕복 {asm}(따로 셈)"));
+    }
+    out.push('\n');
     if let Some(b) = bad.first() {
-        let first = b.diffs.iter().find(|d| d.starts_with("요청 열")).unwrap_or(&b.diffs[0]);
+        let first = if values {
+            b.diffs.iter().find(|d| d.starts_with("요청 열")).unwrap_or(&b.diffs[0]).clone()
+        } else {
+            b.where_.iter().find(|d| d.starts_with("요청 #")).or(b.where_.first()).cloned().unwrap_or_default()
+        };
         out.push_str(&format!("첫 어긋남: {} -- {first}\n", b.chain));
     }
     out
+}
+
+/// 실기록 파일 읽기(2026-11-21 서버 replay): `<파일>.1`(돌린 앞부분)이 있으면 먼저 · 깨진 줄(쓰는 중이던 반쪽 줄 등)은 세고 건너뛴다 ·
+/// 시작 줄 없는 chain(접수 요청 자체)·chain "*"(깨움)은 세기만. 돌려주기 = (작업들, 깨진 줄, 접수만 chain, 깨움 줄).
+pub fn chains_lenient(texts: &[String]) -> (Vec<Chain>, usize, usize, usize) {
+    let (mut good, mut bad, mut wake) = (String::new(), 0, 0);
+    for t in texts {
+        for line in t.lines().filter(|l| !l.trim().is_empty()) {
+            match serde_json::from_str::<Value>(line) {
+                Ok(v) if v.get("chain").is_some() => {
+                    if v["chain"] == "*" {
+                        wake += 1;
+                    }
+                    good.push_str(line);
+                    good.push('\n');
+                }
+                _ => bad += 1,
+            }
+        }
+    }
+    let ids: std::collections::BTreeSet<String> = good.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter_map(|v| v.get("chain").map(crate::sign::py_str)).filter(|c| c != "*").collect();
+    let chs = chains(&good).unwrap_or_default();
+    let api_only = ids.len() - chs.len();
+    (chs, bad, api_only, wake)
 }

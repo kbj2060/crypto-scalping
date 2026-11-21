@@ -138,7 +138,7 @@ impl Door<'_> {
         let t0 = wall();
         if path == "/internal/acct" && (method == "GET" || method == "HEAD") {
             let us = self.hub.us.lock().unwrap().clone();
-            let body = json_dumps(&json!({"seq": self.hub.acct_seq(), "user_stream": {"connected": us.connected, "last_event_at": us.last_event_at, "error": us.error}}));
+            let body = json_dumps(&json!({"seq": self.hub.acct_seq(), "user_stream": {"connected": us.connected, "last_event_at": us.last_event_at, "error": us.error}, "feed": self.feed.lock().unwrap().health(t0)}));
             return (resp(200, "application/json; charset=utf-8", &[("Cache-Control", "no-cache".into())], if method == "HEAD" { String::new() } else { body }), vec![]);
         }
         let pairs = parse_query(raw_q);

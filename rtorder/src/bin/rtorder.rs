@@ -7,6 +7,10 @@ use rtorder::http::Binance;
 use rtorder::shadow::{self, Mode};
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("replay") {
+        std::process::exit(replay(&args[2..]));
+    }
     let get = |k: &str| std::env::var(k).ok();
     let mut cfg = app::config_from(&get).unwrap_or_else(|e| {
         eprintln!("rtorder: 설정 오류 -- {e}");
@@ -79,4 +83,41 @@ fn make(cfg: &app::Config, mode: &Mode) -> Binance {
         Mode::Live(_) => b.shadow_on(), // 기본 빌드에서는 만들어지지 않는 값 -- 와도 그림자
     }
     b
+}
+
+/// `rtorder replay <order_shadow.jsonl> [--show-values] [--symbol ETHUSDC]` (2026-11-21 · 서버의 파이썬 그림자 실기록 재생).
+/// 🔴바깥으로 아무것도 보내지 않는다: 127.0.0.1 가짜 서버(기록된 응답을 차례로 돌려준다)만 · 그 밖 주소로 가는 요청은 보내기 전에 panic(`http::LOOPBACK_ONLY`).
+/// 입력은 읽기만(`<파일>.1` 이 있으면 먼저 -- 돌린 앞부분). 실기록에는 계좌 값이 있어 출력은 chain·op·요청 수·어긋난 위치(칸 이름)까지 -- 값은 `--show-values` 일 때만.
+/// 종료코드 0 = 어긋남 없음 · 1 = 어긋남 · 2 = 입력 오류.
+fn replay(args: &[String]) -> i32 {
+    rtorder::http::LOOPBACK_ONLY.store(true, std::sync::atomic::Ordering::SeqCst);
+    let show = args.iter().any(|a| a == "--show-values");
+    let symbol = args.iter().position(|a| a == "--symbol").and_then(|i| args.get(i + 1)).cloned()
+        .or_else(|| std::env::var("DASHBOARD_MANUAL_EXEC_SYMBOL").ok().filter(|s| !s.is_empty())).unwrap_or_else(|| "ETHUSDC".into());
+    let Some(path) = args.iter().find(|a| !a.starts_with("--") && Some(*a) != args.iter().position(|x| x == "--symbol").and_then(|i| args.get(i + 1))) else {
+        eprintln!("쓰는 법: rtorder replay <order_shadow.jsonl> [--show-values] [--symbol ETHUSDC]");
+        return 2;
+    };
+    let mut texts = vec![];
+    if let Ok(t) = std::fs::read_to_string(format!("{path}.1")) {
+        texts.push(t);
+    }
+    match std::fs::read_to_string(path) {
+        Ok(t) => texts.push(t),
+        Err(e) => {
+            eprintln!("{path}: {e}");
+            return 2;
+        }
+    }
+    let (chs, bad, api_only, wake) = rtorder::shadow::chains_lenient(&texts);
+    let dir = std::env::temp_dir().join(format!("rtorder_replay_{}", std::process::id()));
+    if std::fs::create_dir_all(&dir).is_err() {
+        return 2;
+    }
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let reports = rt.block_on(rtorder::shadow::replay(&chs, &symbol, &dir, false, None));
+    let _ = std::fs::remove_dir_all(&dir);
+    println!("rtorder replay · 파일 {}{} · 깨진 줄 {bad} · 접수만 chain {api_only} · 깨움 줄 {wake}", path, if texts.len() > 1 { " (+ .1)" } else { "" });
+    print!("{}", rtorder::shadow::report_with(&reports, show));
+    if reports.iter().any(|r| !r.truncated && !r.diffs.is_empty()) { 1 } else { 0 }
 }

@@ -324,6 +324,28 @@ impl Stop {
     }
 }
 
+/// 감시 틱(칸 사본 `w2`) 끝 → 접수 원본 칸(`d`)으로: 발동 청산이 올린 칸의 마지막 값(정리 결과 등) · 틱이 대기 칸에 쓴 취소(action·action_reason --
+/// 도는 대기 집행에 바로 `push_live`) · 알림 표시. 그 밖 칸은 원본(접수가 그 사이 쓴 값)이 이긴다.
+pub fn merge_tick(d: &mut Desk, w2: &mut Watcher, waits0: &Obj, touched: &[crate::watch::SlotId]) {
+    for at in touched {
+        *d.w.slot_mut(at) = w2.slot_mut(at).clone();
+    }
+    for (k, v) in w2.waits.iter() {
+        if waits0.get(k) == Some(v) {
+            continue;
+        }
+        if let (Some(cur), Some(nv)) = (d.w.waits.get_mut(k).and_then(Value::as_object_mut), v.as_object()) {
+            for f in ["action", "action_reason"] {
+                if let Some(x) = nv.get(f) {
+                    cur.insert(f.into(), x.clone());
+                }
+            }
+            d.push_live(&crate::intake::SlotRef::Wait(k.clone()));
+        }
+    }
+    d.w.alerted.extend(w2.alerted.iter().cloned());
+}
+
 /// 몸통: 시작 복구 → (사용자 스트림 · 계좌 갱신기 · 허브 구독 · 루프백 HTTP 문과 함께) 감시 루프 → 멈춤. `mk` = 같은 설정의 `Binance` 를 하나 더 만든다(계좌·시세·집행·손절 함수가 각자 하나).
 /// `hub` = 스트림 상태(`hub.acct_seq()` · `hub.us` -- 문의 /internal/acct 가 낸다) · `listener` = bin 이 묶어 둔 루프백 문(None = 문 없음 · 시험).
 /// 감시·접수·작업이 **같은 `DeskCell`**(무장·대기 칸이 메모리에서도 하나 -- 원본 같은 dict) 과 **같은 계좌 한 곳**(`SharedAccount`)을 쓴다.
@@ -407,23 +429,8 @@ pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop, hub: Arc<Hu
                     w2.log(format!("bracket watch: {e}"));
                 }
                 let mut d = desk.lock().await;
-                for at in io.touched.drain(..) {
-                    *d.w.slot_mut(&at) = w2.slot_mut(&at).clone();
-                }
-                for (k, v) in w2.waits.iter() {
-                    if waits0.get(k) == Some(v) {
-                        continue;
-                    }
-                    if let (Some(cur), Some(nv)) = (d.w.waits.get_mut(k).and_then(Value::as_object_mut), v.as_object()) {
-                        for f in ["action", "action_reason"] {
-                            if let Some(x) = nv.get(f) {
-                                cur.insert(f.into(), x.clone());
-                            }
-                        }
-                        d.push_live(&crate::intake::SlotRef::Wait(k.clone()));
-                    }
-                }
-                d.w.alerted.extend(w2.alerted.iter().cloned());
+                let touched: Vec<_> = io.touched.drain(..).collect();
+                merge_tick(&mut d, &mut w2, &waits0, &touched);
                 let mut l = std::mem::take(&mut w2.logs);
                 l.extend(hub.logs.lock().unwrap().drain(..));
                 l.extend(io.ops.alerts.drain(..));
@@ -474,10 +481,24 @@ pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop, hub: Arc<Hu
             let (n, w, used, skipped) = crate::http::meter::take();
             let line = format!("rtorder 요청 계량 · 지난 {}초 · 요청 {n} · 가중치 {w}(추정) · 거래소 사용 가중치(마지막 응답) {used} · 쉰 요청 {skipped}{}",
                                cfg.meter_sec, if shadow { " · 그림자" } else { "" });
-            if cfg.echo {
-                println!("{line}");
-            } else {
-                hub.logs.lock().unwrap().push(line);
+            // 허브: 구독 루프가 남긴 닫힘 사유 + N초 넘게 못 받았으면 한 줄(떠 있고 panic 0 인데 감시 자료가 빈 상태를 드러낸다)
+            let mut lines = vec![line];
+            {
+                let mut f = feed.lock().unwrap();
+                lines.append(&mut f.logs);
+                if cfg.hub_url.is_some() {
+                    let h = f.health(coreval::wall());
+                    if h["stale"] == true {
+                        lines.push(format!("rtorder 허브 가격 못 받음 · 마지막 수신 뒤 {}초 · 연결 {} · 붙은 횟수 {}", h["last_rx_age_s"], h["connected"], h["connects"]));
+                    }
+                }
+            }
+            for line in lines {
+                if cfg.echo {
+                    println!("{line}");
+                } else {
+                    hub.logs.lock().unwrap().push(line);
+                }
             }
         }
     };
