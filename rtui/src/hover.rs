@@ -1,6 +1,6 @@
 //! 마우스 반응 첫 걸음: 십자선 · 커서 가격 배지 · 봉/칸/델타·TPO 툴팁. app.js 10680-10903(svg.onmousemove) + showTooltip 11692.
 //! 끌기·휠 확대·시간 단위 바꾸기는 다음 조각 -- 붙일 자리: Chart::ui 의 포인터 입력(lib.rs) · fp::Cfg.window.
-//! 범위 밖 갈래(다른 응답이 필요): 포지션 기둥(posInfo) · 청산 기둥(liqInfo) · 체결 기둥(tradeInfo, 휴대폰) · 호가 띠(bookInfo) · 네 숫자(statsGeo) · 차트 표식 줄(trigLines) · 청산 줄(liqTip).
+//! 범위 밖 갈래(다른 응답이 필요): 포지션 기둥(posInfo) · 청산 기둥(liqInfo) · 체결 기둥(tradeInfo, 휴대폰) · 호가 띠(bookInfo) · 네 숫자(statsGeo) · 차트 표식 줄(trigLines).
 use crate::data::{fmt_qty, to_fixed};
 use crate::fp::{Anchor, Clip, Col, Prim, Scene, tnum};
 use crate::lane::qname;
@@ -85,6 +85,11 @@ pub fn hover(sc: &Scene, mx: f64, my: f64, at: [f64; 2], tz_off_min: i64, measur
                                                 if Some(k) == sc.pocs[idx] { " · POC(최다 체결)" } else { "" }))]));
             }
         }
+        // 11277-11282 liqTip: 청산 금액(롱/숏) · 진행 중 · 거래소별(liqVenueText 276)
+        if let Some(lb) = sc.liq.get(idx).and_then(|x| x.as_ref()).filter(|b| b.long_usd + b.short_usd > 0.0) {
+            lines.push(line(vec![w(format!("청산 {} (롱 {} / 숏 {}){}", usd(lb.long_usd + lb.short_usd), usd(lb.long_usd), usd(lb.short_usd), if lb.partial { " · 진행 중" } else { "" }))]));
+            for s in liq_venue_text(lb) { lines.push(line(vec![w(s)])); }
+        }
         // 11148-11155 laneTip (신규계약 = 모름: OI 응답 범위 밖)
         match &sc.lane.get(idx).and_then(|r| r.as_ref()) {
             None => { lines.push(line(vec![])); lines.push(line(vec![w("풋프린트 없음")])); }
@@ -100,4 +105,20 @@ pub fn hover(sc: &Scene, mx: f64, my: f64, at: [f64; 2], tz_off_min: i64, measur
         tip = Some(Tip { lines, wrap: None, at, x: 0.0, y: 0.0, w: 0.0, h: 0.0 });
     }
     Hover { prims, tip }
+}
+
+/// 276 liqVenueText 의 줄들(앞 «\n» 마다 한 줄): 금액이 있는 거래소(바이낸스 = 합 − 나머지) · 끝에 «합산: 본 거래소»
+fn liq_venue_text(b: &crate::data::LiqBar) -> Vec<String> {
+    use crate::data::LiqVenue;
+    let u = |x: &LiqVenue| x.long_usd + x.short_usd;
+    let parts = [("OKX", &b.okx_detail), ("Bybit", &b.bybit), ("HL 고래", &b.hl)];
+    let sum = |f: fn(&LiqVenue) -> f64| parts.iter().map(|(_, x)| x.as_ref().map_or(0.0, f)).sum::<f64>();
+    let bn = LiqVenue { long_usd: b.long_usd - sum(|x| x.long_usd), short_usd: b.short_usd - sum(|x| x.short_usd), n: (b.events - sum(|x| x.n)).max(0.0) };
+    let js_num = |n: f64| if n.fract() == 0.0 && n.abs() < 1e15 { format!("{}", n as i64) } else { format!("{n}") }; // ponytail: JS Number→글자는 정수만 같게(건수는 정수)
+    let mut out: Vec<String> = std::iter::once(("바이낸스", Some(&bn))).chain(parts.iter().map(|(n, x)| (*n, x.as_ref())))
+        .filter_map(|(nm, x)| x.filter(|x| u(x) >= 0.5).map(|x| format!("{nm} {} {}건(롱 {}/숏 {})", usd(u(x)), js_num(x.n), usd(x.long_usd.max(0.0)), usd(x.short_usd.max(0.0)))))
+        .collect();
+    let seen: Vec<&str> = [Some("바이낸스"), b.okx.then_some("OKX"), b.bybit.as_ref().map(|_| "Bybit"), b.hl.as_ref().map(|_| "HL 고래(추적 300지갑)")].into_iter().flatten().collect();
+    out.push(format!("합산: {}", seen.join(" · ")));
+    out
 }

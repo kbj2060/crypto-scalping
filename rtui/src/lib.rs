@@ -131,7 +131,8 @@ impl Chart {
         let last_close = { let n = full.len().min((win.edge - 1e-6).ceil().max(1.0) as usize); full[n - 1].close };
         let or_close = |v: f64| if v > 0.0 { v } else { last_close };
         let pill_w = |tw: f64, len: usize| { let w = ((tw + 18.0) / 4.0).ceil() * 4.0; let mut m = self.pill_max.borrow_mut(); let e = m.entry(len).or_insert(w); *e = e.max(w); *e };
-        let inp = fp::Input { full: &full, bucket, by_time, lane, current: or_close(self.feed.price), shown: or_close(self.feed.shown), pill_w: &pill_w };
+        let liq = view::tf_liq(&self.feed.liq_full(), k); // 8284 tfLiq(weekJoin("liq", latestLiquidation5mHist))
+        let inp = fp::Input { full: &full, bucket, by_time, lane, current: or_close(self.feed.price), shown: or_close(self.feed.shown), liq: &liq, pill_w: &pill_w };
 
         let p = ui.painter();
         if self.bg.a() > 0 { p.rect_filled(p.clip_rect(), 0.0, self.bg); }

@@ -34,13 +34,106 @@ pub struct MarketHistory {
     pub candles: Vec<Candle>,
 }
 
-/// /api/footprint-week (app.js maybeFetchFpWeek 가 읽는 칸 중 이 카드가 쓰는 것 -- oi·liq·volPre 는 범위 밖 레인)
+/// /api/footprint-week (app.js maybeFetchFpWeek 가 읽는 칸 중 이 카드가 쓰는 것 -- oi·volPre 는 범위 밖 레인)
 #[derive(Deserialize)]
 pub struct Week {
     #[serde(default)]
     pub candles: Vec<Candle>,
     #[serde(default)]
     pub bars: Vec<FpBar>,
+    #[serde(default)]
+    pub liq: Vec<LiqBar>,
+}
+
+/// /api/liquidation-5m-history 응답(app.js refreshLiquidation5mSignal 3257 · 꼬리 3215) -- warmed_up 이 아니면 빈 목록
+#[derive(Deserialize, Default)]
+pub struct LiqHist {
+    #[serde(default)]
+    pub warmed_up: bool,
+    #[serde(default)]
+    pub bars: Vec<LiqBar>,
+}
+
+/// 5분 청산 한 봉(ts = ISO 시각 글자 · 금액 = 거래소 합 · okx = 그 봉을 OKX 가 봤나 · okx_detail·bybit·hl = 거래소 몫(있으면))
+#[derive(Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct LiqBar {
+    pub ts: String,
+    #[serde(default, deserialize_with = "num")]
+    pub long_usd: f64,
+    #[serde(default, deserialize_with = "num")]
+    pub short_usd: f64,
+    #[serde(default, deserialize_with = "num")]
+    pub events: f64,
+    #[serde(default, deserialize_with = "truthy")]
+    pub partial: bool,
+    #[serde(default, deserialize_with = "truthy")]
+    pub okx: bool,
+    #[serde(default)]
+    pub okx_detail: Option<LiqVenue>,
+    #[serde(default)]
+    pub bybit: Option<LiqVenue>,
+    #[serde(default)]
+    pub hl: Option<LiqVenue>,
+}
+
+#[derive(Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct LiqVenue {
+    #[serde(default, deserialize_with = "num")]
+    pub long_usd: f64,
+    #[serde(default, deserialize_with = "num")]
+    pub short_usd: f64,
+    #[serde(default, deserialize_with = "num")]
+    pub n: f64,
+}
+
+/// `Number(x) || 0`(null·글자·없음 → 0)
+fn num<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    Ok(match v { serde_json::Value::Number(n) => n.as_f64().unwrap_or(0.0), serde_json::Value::String(s) => s.trim().parse().unwrap_or(0.0), serde_json::Value::Bool(b) => b as u8 as f64, _ => 0.0 })
+}
+/// JS `!!x`
+fn truthy<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    Ok(match v { serde_json::Value::Null => false, serde_json::Value::Bool(b) => b, serde_json::Value::Number(n) => n.as_f64() != Some(0.0), serde_json::Value::String(s) => !s.is_empty(), _ => true })
+}
+
+/// Date.parse(ISO 글자) → 초(내림). 받는 꼴: YYYY-MM-DDTHH:MM:SS[.fff][Z|±HH:MM] · 시간대 없으면 UTC 로 본다
+// ponytail: JS 는 시간대 없는 날짜+시각을 지역 시각으로 읽는다 -- 서버 ts 는 늘 +00:00/Z 를 단다(fixture 도). 아니면 여기서 tz 를 받는다
+pub fn iso_sec(s: &str) -> Option<i64> {
+    let b = s.as_bytes();
+    let n = |a: usize, l: usize| s.get(a..a + l)?.parse::<i64>().ok();
+    if b.len() < 19 { return None; }
+    let (y, mo, d, h, mi, se) = (n(0, 4)?, n(5, 2)?, n(8, 2)?, n(11, 2)?, n(14, 2)?, n(17, 2)?);
+    let mut i = 19;
+    let mut ms = 0.0;
+    if b.get(i) == Some(&b'.') { let j = i + 1 + b[i + 1..].iter().take_while(|c| c.is_ascii_digit()).count(); ms = format!("0{}", &s[i..j]).parse::<f64>().ok()? * 1000.0; i = j; }
+    let off = match b.get(i) { None | Some(b'Z') => 0, Some(&c) if c == b'+' || c == b'-' => { let v = n(i + 1, 2)? * 3600 + n(i + 4, 2)? * 60; if c == b'+' { v } else { -v } } _ => return None };
+    let ms_total = (days_from_civil(y, mo, d) * 86_400 + h * 3600 + mi * 60 + se - off) as f64 * 1000.0 + ms;
+    Some((ms_total / 1000.0).floor() as i64)
+}
+/// new Date(sec*1000).toISOString()
+pub fn iso_of(sec: i64) -> String {
+    let (d, t) = (sec.div_euclid(86_400), sec.rem_euclid(86_400));
+    let (y, m, dd) = civil_from_days(d);
+    format!("{y:04}-{m:02}-{dd:02}T{:02}:{:02}:{:02}.000Z", t / 3600, t % 3600 / 60, t % 60)
+}
+// Howard Hinnant 날짜 식
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (m + if m > 2 { -3 } else { 9 }) + 2) / 5 + d - 1;
+    era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468
+}
+fn civil_from_days(z: i64) -> (i64, i64, i64) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let (d, m) = (doy - (153 * mp + 2) / 5 + 1, if mp < 10 { mp + 3 } else { mp - 9 });
+    (yoe + era * 400 + if m <= 2 { 1 } else { 0 }, m, d)
 }
 
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
@@ -92,6 +185,14 @@ pub fn fmt_qty(v: f64) -> String {
 #[cfg(test)]
 mod t {
     use super::*;
+    #[test]
+    fn iso() {
+        assert_eq!(iso_sec("2026-11-20T06:35:00+00:00"), Some(1_795_156_500));
+        assert_eq!(iso_sec("2026-11-20T15:35:00.999+09:00"), Some(1_795_156_500));
+        assert_eq!(iso_sec("2026-11-20T06:35:00Z"), Some(1_795_156_500));
+        assert_eq!(iso_of(1_795_156_500), "2026-11-20T06:35:00.000Z");
+        assert_eq!(iso_sec(&iso_of(951_782_400)), Some(951_782_400)); // 2000-02-29
+    }
     #[test]
     fn fmt() {
         assert_eq!(to_fixed(42.25, 1), "42.3");

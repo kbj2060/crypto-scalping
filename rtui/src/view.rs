@@ -227,3 +227,26 @@ mod t {
         assert_eq!(t[&1800], a);      // 마지막 묶음은 예외
     }
 }
+
+/// 6821 tfLiq: 청산 봉을 tf 봉으로(금액·건수·거래소 몫 합 · 진행 중·okx = 하나라도) -- 5m 이면 그대로(tfMemo). 순서 = 처음 본 tf 봉 순
+pub fn tf_liq(bars: &[crate::data::LiqBar], k: i64) -> Vec<crate::data::LiqBar> {
+    use crate::data::{LiqBar, LiqVenue, iso_of, iso_sec};
+    if k == 1 { return bars.to_vec(); }
+    let mut out: Vec<LiqBar> = vec![];
+    let mut at: std::collections::HashMap<i64, usize> = Default::default();
+    for b in bars {
+        let Some(s) = iso_sec(&b.ts) else { continue };
+        let t = tft(k, s);
+        let i = *at.entry(t).or_insert_with(|| { out.push(LiqBar { ts: iso_of(t), ..Default::default() }); out.len() - 1 });
+        let a = &mut out[i];
+        (a.long_usd, a.short_usd, a.events) = (a.long_usd + b.long_usd, a.short_usd + b.short_usd, a.events + b.events);
+        a.partial |= b.partial; a.okx |= b.okx;
+        for (src, dst) in [(&b.okx_detail, &mut a.okx_detail), (&b.bybit, &mut a.bybit), (&b.hl, &mut a.hl)] {
+            if let Some(v) = src {
+                let x = dst.get_or_insert(LiqVenue::default());
+                (x.long_usd, x.short_usd, x.n) = (x.long_usd + v.long_usd, x.short_usd + v.short_usd, x.n + v.n);
+            }
+        }
+    }
+    out
+}

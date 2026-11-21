@@ -74,6 +74,8 @@ def jnorm(r):
         _, x, y, w, h, rx = r["p"][0]; return dict(k="rect", x=x, y=y, w=w, h=h, c=CN.get(r["s"], r["s"]), a=r["al"], rx=rx)
     if r["k"] == "stroke":
         return dict(k="line", pts=[q[1:3] for q in r["p"] if q[0] in ("moveTo", "lineTo")], c=CN.get(r["st"], r["st"]), a=r["al"], lw=r["lw"])
+    if r["k"] == "fill" and r["p"] and r["p"][0][0] == "arc":
+        _, x, y, rr = r["p"][0][:4]; return dict(k="circle", x=x, y=y, r=rr, c=CN.get(r["s"], r["s"]), a=r["al"])
 
 
 def rnorm(p):
@@ -104,11 +106,12 @@ i0 = next(n for n, r in enumerate(fgr) if r["k"] == "fillRect" and r["s"] == "#1
 lane_js = []
 for r in fgr[i0:]:
     q = jnorm(r)
-    if q is None or (q["k"] == "rect" and q["y"] < R["quad_y"] - 9) or (q["k"] == "line" and q["c"] != "Turnover"): break
+    if q is None or q["k"] == "circle" or (q["k"] == "rect" and q["y"] < R["quad_y"] - 9) or (q["k"] == "line" and q["c"] != "Turnover"): break   # 레인 뒤 = 청산 동그라미(11280)
     lane_js.append(q)
 G = lambda g: [rnorm(p) for p in P0 if p["g"] == g]
 cmp_items("레인: 바탕·경계선·리본·0선·델타 캔들(꼬리·몸통)·거래대금 선", lane_js, G("lane"))
 cmp_items("스택 불균형 막대", [q for q in map(jnorm, fgr) if q and q["k"] == "rect" and q["w"] == 2 and q["rx"] == 1], G("stack"))
+cmp_items("청산 동그라미(봉 위 · 다섯째 조각)", [q for q in map(jnorm, fgr) if q and q["k"] == "circle"], G("liq"))
 cmp_items("미완 경매 꺾쇠(︿﹀)", [q for q in map(jnorm, fgr) if q and q["k"] == "line" and q["c"] == "Text"], G("ua"))
 
 # 프로파일(svg 요소): 칠한 사각형 → rect · 테두리 → srect(같은 요소면 rect 다음) · 점 · 0선 · 머리 글자

@@ -10,6 +10,7 @@ canvas{display:block;width:100vw;height:100vh;background:transparent}
 <body><canvas id="c"></canvas><div id="tf" hidden><button data-k="1">5m</button><button data-k="6">30m</button><button data-k="12">1h</button></div>
 <script type="module">
 // 혼자 뜨는 풋프린트 카드: ?asset=eth (흐름 코인) · 같은 출처의 옛 서버(/api/footprint · /api/market-history · /api/footprint-week) + 바이낸스 @trade 직결.
+//   ?src=push = 풋프린트·체결을 rtcore 허브에서(기본 같은 출처 /rt · ?hub=ws://… 로 바꿈) -- 캔들 이력·1주일은 그대로 묻는다.
 // 비교 하네스: ?mode=shot&x=&y=&w=&h=&bars=&tz=&bg=(hex|none)&plate=  · ?mode=bench&bars=&n=  (compare/*.py) -- 결과 window.RESULT
 // 접착(이 파일의 일): Rust(feed::Req)가 window.rtui_io 로 넘긴 할 일을 fetch · WebSocket 으로 하고 결과를 돌려준다 · 500ms tick(app.js POLL_MS) · 탭 숨김.
 const q = new URLSearchParams(location.search), t0 = performance.now(), N = (k, d) => (q.has(k) ? +q.get(k) : d);
@@ -32,9 +33,11 @@ if (q.get("mode") === "bench") {
   window.rtui_io = (json) => {
     for (const r of JSON.parse(json)) {
       if (r === "WsClose") { if (ws) { const w = ws; ws = null; try { w.close(); } catch (e) {} } continue; }
+      if (r.WsSend != null) { const w = ws, t = r.WsSend; if (w) (w.readyState === 1 ? w.send(t) : w.addEventListener("open", () => w.send(t), { once: true })); continue; }
       if (r.WsOpen) {
         try {
-          const w = new WebSocket(r.WsOpen); ws = w;
+          const u = r.WsOpen.startsWith("/") ? `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${r.WsOpen}` : r.WsOpen;
+          const w = new WebSocket(u); ws = w;
           w.onmessage = (e) => m.on_ws(e.data);
           w.onclose = () => { if (ws === w) { ws = null; m.on_ws_close(); } };
           w.onerror = () => { try { w.close(); } catch (e) {} };
@@ -50,7 +53,7 @@ if (q.get("mode") === "bench") {
   if (q.get("plate")) document.body.style.background = `url(${q.get("plate")}) no-repeat 0 0`;   // 비교 캡처: 지금 화면에서 차트 층만 숨긴 바탕
   // 혼자 뜰 때 = 창 전체(w=0 → Rust 가 창에 맞춘다) · 상자 왼쪽 위 8px · 1주일은 지표 스위치 기본값처럼 늘 받는다(wk=0 이면 끔 -- 하네스)
   await m.start("c", q.get("asset") || "eth", N("x", 8), N("y", 8), N("w", 0), N("h", 0), N("tz", new Date().getTimezoneOffset()), bg,
-          N("wk", shot ? 0 : 1) === 1, q.get("api") || "", q.get("ws") || "");
+          N("wk", shot ? 0 : 1) === 1, q.get("api") || "", q.get("ws") || "", q.get("src") === "push", q.get("hub") || "");
   const tick = () => m.tick(document.hidden);
   tick(); setInterval(tick, 500);
   document.addEventListener("visibilitychange", tick);

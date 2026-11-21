@@ -9,6 +9,7 @@
   const N = (k, d) => (q.has(k) && q.get(k) !== "" ? +q.get(k) : d);
   const SECS = N("bench", 8) || 8, RATE = N("rate", 300), IDLE = N("idle", 6), LEAD = N("lead", 12);
   const PAGE = location.pathname.startsWith("/rtui/") ? "rtui" : "js";
+  const LABEL = PAGE + (q.get("src") === "push" ? "-push" : "") + (q.get("aa") === "0" ? "-aa0" : "");   // 결과 파일 이름·표
   const B = 1795156500;   // rtui/compare/fixture 의 형성 봉 시작(live_bench.py 와 같다)
   const now = () => performance.now(), RT = { st: window.setTimeout.bind(window), rq: window.requestAnimationFrame.bind(window) };
   const sleep = (ms) => new Promise((r) => RT.st(r, ms));
@@ -32,12 +33,13 @@
       return o.call(window, function (...x) { const t0 = now(); try { return f.apply(this, x); } finally { if (S.on) S.timer += now() - t0; } }, ...a);
     };
   }
-  // 소켓: @trade → 이 서버 /ws/trade(그 밖 소켓은 /ws/none -- 서버가 바로 닫고 주소는 기록) · onmessage 시간과 «보낸 시각(_s) · 처리 시작 시각»
+  // 소켓: @trade → 이 서버 /ws/trade · 허브(경로 /rt · rtui ?src=push) → 그대로(이 서버의 가짜 허브) · 그 밖은 /ws/none(서버가 바로 닫고 주소는 기록)
+  // onmessage 시간과 «보낸 시각 · 처리 시작 시각»: 보낸 시각 = 직결은 서버가 붙인 _s(ms) · 허브는 체결 사건의 tx_us(µs, 허브가 보낸 시각)
   const RWS = window.WebSocket;
   window.WebSocket = class extends RWS {
     constructor(u, p) {
-      const trade = /@trade$/.test(String(u));
-      super(`ws://${location.host}/ws/${trade ? "trade" : "none"}`, p);
+      const hub = new URL(String(u), location.href).pathname === "/rt", trade = hub || /@trade$/.test(String(u));
+      super(hub ? String(u) : `ws://${location.host}/ws/${trade ? "trade" : "none"}`, p);
       this.__trade = trade; S.sockets.push(this); if (!trade) S.other.push(String(u));
     }
     get onmessage() { return this.__om || null; }
@@ -45,7 +47,11 @@
       this.__om = f;
       super.onmessage = f && ((e) => {
         const t0 = now(); let s = NaN;
-        if (S.on && typeof e.data === "string") { const i = e.data.lastIndexOf('"_s":'); if (i >= 0) s = parseFloat(e.data.slice(i + 5)); }
+        if (S.on && typeof e.data === "string") {
+          const i = e.data.lastIndexOf('"_s":');
+          if (i >= 0) s = parseFloat(e.data.slice(i + 5));
+          else if (e.data.includes('"type":"trade"')) { const j = e.data.indexOf('"tx_us":'); if (j >= 0) s = parseFloat(e.data.slice(j + 8)) / 1000; }
+        }
         try { return f.call(this, e); } finally { if (S.on) { S.wsms += now() - t0; if (s > 0) S.arr.push([s, t0]); } }
       });
     }
@@ -79,9 +85,10 @@
   };
 
   // 체결별: 도착(서버가 보낸 시각을 페이지 시계로 -- 최소 지연을 0 으로 맞춘다) → 그 뒤 처음 끝난 그리기 → 그 그리기가 들어간 프레임의 «다음» 프레임 시각(rAF 기준 표시)
+  // 서버 시각 = 단조 시계(serve.py) · 페이지 = performance.now(단조) -- 두 시계의 차는 일정해서 최소 지연 하나로 맞춘다(벽시계를 쓰면 시각 맞추기 한 번에 전체가 수백 ms 밀린다)
   function latency(arr, ends, fr) {
     if (!arr.length) return {};
-    const to = performance.timeOrigin, off = Math.min(...arr.map(([s, h]) => h - (s - to)));
+    const to = 0, off = Math.min(...arr.map(([s, h]) => h - (s - to)));
     const e = [...ends].sort((a, b) => a - b), F = [...fr.entries()].sort((a, b) => a[0] - b[0]);
     const lb = (v, x) => { let lo = 0, hi = v.length; while (lo < hi) { const m = (lo + hi) >> 1; if (v[m] < x) lo = m + 1; else hi = m; } return lo; };
     const shown = (d) => {
@@ -144,7 +151,7 @@
     const rest = [];
     if (PAGE === "rtui") L.ends.forEach((e, i) => { const f = F.find(([, x]) => x[0] <= e && e <= x[1]); if (f) rest.push(f[1][2] - L.ui[i]); });
     const res = {
-      page: PAGE, params: Object.fromEntries(q), when: new RD().toISOString(),
+      page: LABEL, params: Object.fromEntries(q), when: new RD().toISOString(),
       env: { ua: navigator.userAgent, renderer: renderer(), dpr: devicePixelRatio, screen: [screen.width, screen.height], inner: [innerWidth, innerHeight],
              ctx: PAGE === "rtui" ? (() => { try { return document.getElementById("c").getContext("webgl2").getContextAttributes(); } catch (e) { return null; } })() : null },
       first_ms: r2(first - tNav), first_note: PAGE === "rtui" ? "window.RESULT(장면 + rAF 두 번) 시각 · 탐색 시작 기준" : "fpCv.cs·latestFootprint 가 생긴 시각(20ms 폴링) · 탐색 시작 기준",

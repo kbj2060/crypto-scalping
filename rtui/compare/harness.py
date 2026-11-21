@@ -25,6 +25,8 @@ INIT = r"""(() => {
   let path = [];
   // cvUnion(8199)은 Path2D 에 사각형을 모아 ctx.fill(p) 한 번 -- 그 사각형도 기록한다
   const PR = Path2D.prototype.rect; Path2D.prototype.rect = function (...a) { (this.__r = this.__r || []).push(['rect', ...a.map(r3)]); return PR.apply(this, a); };
+  // 청산 동그라미 1주일 창(cvUnion 색별 한 칠 = moveTo + arc) -- 원도 기록한다(다섯째 조각)
+  const PA = Path2D.prototype.arc; Path2D.prototype.arc = function (...a) { (this.__r = this.__r || []).push(['arc', ...a.map(r3)]); return PA.apply(this, a); };
   const ob = P.beginPath; P.beginPath = function () { if (window.__rec && tag(this)) path = []; return ob.apply(this, arguments); };
   for (const k of ['moveTo', 'lineTo', 'roundRect', 'rect', 'arc', 'closePath']) { const o = P[k]; P[k] = function (...a) { if (window.__rec && tag(this)) path.push([k, ...a.map(r3)]); return o.apply(this, a); }; }
   for (const k of ['fillRect', 'fillText', 'strokeRect', 'stroke', 'fill']) { const o = P[k]; P[k] = function (...a) {

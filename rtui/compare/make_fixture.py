@@ -76,3 +76,25 @@ for i in range(NW):
     px = c
 (OUT / "footprint-week.json").write_text(json.dumps({"asset": "eth", "candles": wc, "bars": wb, "oi": [], "liq": [], "volPre": []}, separators=(",", ":")))
 print("week bars", NW, "bytes", (OUT / "footprint-week.json").stat().st_size)
+
+# 청산 5분봉(/api/liquidation-5m-history · 신호 /api/liquidation-5m-signal 은 내용 없이 200): 라이브 144봉 중 약 40% 봉에 청산 · 거래소 몫 몇 봉 · 마지막 봉 진행 중.
+# 1주일(footprint-week liq)도 같은 모양으로 앞 봉들. 따로 뽑아 위 파일들의 다른 칸은 바이트 그대로.
+from datetime import datetime, timezone
+RL = random.Random(20261124)
+iso = lambda t: datetime.fromtimestamp(t, timezone.utc).isoformat()
+def liq_bar(t, rl, last=False):
+    lo = round(rl.lognormvariate(math.log(4000), 1.6)) if rl.random() < 0.7 else 0
+    sh = round(rl.lognormvariate(math.log(4000), 1.6)) if rl.random() < 0.7 else 0
+    b = {"ts": iso(t), "long_usd": lo, "short_usd": sh, "events": rl.randint(1, 40), "okx": rl.random() < 0.5}
+    if b["okx"] and rl.random() < 0.6: b["okx_detail"] = {"long_usd": round(lo * 0.2), "short_usd": round(sh * 0.3), "n": rl.randint(0, 5)}
+    if rl.random() < 0.3: b["bybit"] = {"long_usd": round(lo * 0.1), "short_usd": round(sh * 0.1), "n": rl.randint(0, 3)}
+    if rl.random() < 0.1: b["hl"] = {"long_usd": round(lo * 0.05), "short_usd": 0, "n": 1}
+    if last: b["partial"] = True
+    return b
+lq = [liq_bar(T_END - (N - 1 - i) * 300, RL, i == N - 1) for i in range(N) if RL.random() < 0.4 or i == N - 1]
+(OUT / "liquidation-5m-history.json").write_text(json.dumps({"asset": "eth", "warmed_up": True, "bars": lq}, separators=(",", ":")))
+(OUT / "liquidation-5m-signal.json").write_text("{}")
+wk = json.loads((OUT / "footprint-week.json").read_text())
+wk["liq"] = [liq_bar(t, RL) for t in (b["time"] for b in wk["bars"]) if RL.random() < 0.3]
+(OUT / "footprint-week.json").write_text(json.dumps(wk, separators=(",", ":")))
+print("liq bars", len(lq), "week liq", len(wk["liq"]))

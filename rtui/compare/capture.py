@@ -18,6 +18,7 @@ FONT = WT / "rtui/fonts/Pretendard-Bold.ttf"
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))   # -I 는 스크립트 폴더를 안 넣는다
 from harness import T_FX, TZ, FONT_CSS, CT, INIT, LAUNCH as _L, make_route
 API = {"/api/footprint": FX / "footprint.json", "/api/market-history": FX / "market-history.json"}
+API |= {f"/api/liquidation-5m-{k}": FX / f"liquidation-5m-{k}.json" for k in ("signal", "history")}   # 청산 동그라미(다섯째 조각)
 route = make_route(WT, API, FONT)
 
 # 지금 화면: 창을 BARS 로 맞추고 한 번 다시 그리며 캔버스 명령·svg 요소·기하를 모은다
@@ -80,7 +81,7 @@ def prof_x(rg):
 
 
 def hover_points(js, rg):
-    """정해진 호버 자리(svg 좌표): ① 봉 칸 위 ② 레인 위 ③ 체결·델타 칸 ④ TPO 칸 아래쪽 ⑤ 플롯 위 여백(가격 배지 없음 · 봉 툴팁)"""
+    """정해진 호버 자리(svg 좌표): ① 봉 칸 위 ② 레인 위 ③ 체결·델타 칸 ④ TPO 칸 아래쪽 ⑤ 플롯 위 여백(가격 배지 없음 · 봉 툴팁) ⑥ 청산 있는 봉"""
     g, c = js["geo"], js["candles"]
     slot = g["cw"] / len(c)
     y_at = lambda v: g["mt"] + (g["ymax"] - v) * (g["pb"] - g["mt"]) / (g["ymax"] - g["ymin"])
@@ -90,7 +91,18 @@ def hover_points(js, rg):
             (g["ml"] + slot * (i2 + 0.5), rg["lane_top"] + 60),
             (px["d_mid"] + 6, y_at(rg["cp"]) - 9),
             (px["t_x0"] + 8, g["pb"] - 70),
-            (g["ml"] + slot * (len(c) - 1.5), g["mt"] + 20)]
+            (g["ml"] + slot * (len(c) - 1.5), g["mt"] + 20)] + liq_point(g, c, slot)
+
+
+def liq_point(g, c, slot):
+    """⑥ 청산이 있는 마지막 보이는 봉의 플롯 위 여백(봉 툴팁의 «청산» 줄 · 다섯째 조각)"""
+    from datetime import datetime
+    f = FX / "liquidation-5m-history.json"
+    if not f.is_file(): return []
+    # 거래소 몫(okx_detail·bybit·hl)이 가장 많은 봉(같으면 뒤 봉) -- 거래소별 줄까지 보이게
+    lq = {int(datetime.fromisoformat(b["ts"]).timestamp()): sum(k in b for k in ("okx_detail", "bybit", "hl")) for b in json.loads(f.read_text())["bars"] if (b.get("long_usd") or 0) + (b.get("short_usd") or 0) > 0}
+    i = max((i for i, x in enumerate(c) if x[0] in lq), key=lambda i: (lq[c[i][0]], i), default=None)
+    return [] if i is None else [(g["ml"] + slot * (i + 0.5), g["mt"] + 20)]
 
 
 LAUNCH = _L + (["--font-render-hinting=none"] if NOHINT else [])

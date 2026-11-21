@@ -44,13 +44,16 @@ pub fn scene() -> Option<String> { LAST.with(|l| l.borrow().as_ref().map(|(sc, h
 pub fn state() -> Option<String> { with(|c| c.state_json().to_string()) }
 #[wasm_bindgen]
 pub fn tick(hidden: bool) { with(|c| { let w = c.view.want_week(); c.feed.tick(date_now(), hidden, w) }); }
-/// kind = "Footprint" | "History" | "Week" · body = 응답 글자(실패면 null)
+/// kind = "Footprint" | "History" | "Week" | "LiqSig" | "Liq" | "LiqTail" · body = 응답 글자(실패면 null)
 #[wasm_bindgen]
 pub fn on_get(kind: &str, body: Option<String>) {
     with(|c| match kind {
         "Footprint" => c.feed.on_footprint(body.as_deref()),
         "History" => c.feed.on_history(body.as_deref(), date_now()),
         "Week" => c.feed.on_week(body.as_deref(), date_now()),
+        "LiqSig" => c.feed.on_liq_sig(body.as_deref()),
+        "Liq" => c.feed.on_liq(body.as_deref()),
+        "LiqTail" => c.feed.on_liq_tail(body.as_deref()),
         _ => {}
     });
 }
@@ -92,19 +95,20 @@ impl eframe::App for WebApp {
 }
 
 /// asset = ?asset= · (x, y) = 상자 왼쪽 위 · w·h = viewBox(0 이면 창에 맞춤) · tz = getTimezoneOffset · bg = 0xRRGGBB(0xFFFFFFFF 투명)
-/// week = 지표 스위치 기본값이 1주일을 늘 부르나(feed::Feed::week_always) · api·ws = 주소(feed::Urls -- 빈 글자면 기본)
+/// week = 지표 스위치 기본값이 1주일을 늘 부르나(feed::Feed::week_always) · api·ws·hub = 주소(feed::Urls -- 빈 글자면 기본) · push = 풋프린트·체결을 rtcore 허브에서(feed::Source::Push)
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
-pub async fn start(canvas_id: String, asset: String, x: f32, y: f32, w: f64, h: f64, tz: i32, bg: u32, week: bool, api: String, ws: String) -> Result<(), JsValue> {
+pub async fn start(canvas_id: String, asset: String, x: f32, y: f32, w: f64, h: f64, tz: i32, bg: u32, week: bool, api: String, ws: String, push: bool, hub: String) -> Result<(), JsValue> {
     use eframe::wasm_bindgen::JsCast;
     let (sym, dp, unit) = asset_cfg(&asset).ok_or_else(|| JsValue::from_str("흐름 코인이 아니다(app.js FLOW_ASSETS)"))?;
     let mut urls = feed::Urls::default();
     if !api.is_empty() { urls.api = api; }
     if !ws.is_empty() { urls.trade_ws = ws; }
+    if !hub.is_empty() { urls.hub = hub; }
     let bgc = if bg == u32::MAX { Color32::TRANSPARENT } else { Color32::from_rgb((bg >> 16) as u8, (bg >> 8) as u8, bg as u8) };
     let mut cfg = default_cfg(view::FP_BARS, w, h, tz as i64);
     (cfg.dp, cfg.unit) = (dp, unit.into());
-    let mut ch = Chart::new(feed::Feed::new(&asset, sym, feed::Source::Poll, urls, week), cfg, pos2(x, y), bgc);
+    let mut ch = Chart::new(feed::Feed::new(&asset, sym, if push { feed::Source::Push } else { feed::Source::Poll }, urls, week), cfg, pos2(x, y), bgc);
     ch.fill = w == 0.0;
     let ch = Rc::new(RefCell::new(ch));
     CH.with(|c| *c.borrow_mut() = Some(ch.clone()));

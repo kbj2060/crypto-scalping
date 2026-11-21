@@ -18,6 +18,8 @@ pub struct Input<'a> {
     /// 축·미완 경매가 쓰는 현재가(latestLivePriceByAsset || 마지막 종가) · 선·알약이 그리는 값(80ms 규칙 -- feed::Feed::shown)
     pub current: f64,
     pub shown: f64,
+    /// 청산 5분봉(tfLiq(weekJoin("liq", latestLiquidation5mHist)) -- renderSnapshotChart 8283 liqBars) · 빈 목록 = 청산 동그라미 없음
+    pub liq: &'a [crate::data::LiqBar],
     /// 4418 pillW(글자 폭, 글자 수) -- 글자 수별로 본 가장 넓은 폭(4px 단위)을 기억하는 쪽(lib.rs Chart)
     pub pill_w: &'a dyn Fn(f64, usize) -> f64,
 }
@@ -92,6 +94,8 @@ pub struct Scene {
     pub bar_rows: Vec<BTreeMap<i64, [f64; 2]>>,
     pub pocs: Vec<Option<i64>>,
     pub lane: Vec<Option<crate::lane::Row>>,
+    /// 보이는 봉마다 청산 봉(liqTip -- 봉 툴팁 «청산» 줄)
+    pub liq: Vec<Option<crate::data::LiqBar>>,
     pub dt: Option<crate::profile::Dt>,
     /// pxDp · coinUnit (호버 글자)
     pub dp: usize,
@@ -399,21 +403,24 @@ pub fn prep(inp: &Input, win: &Win, cfg: &Cfg, measure: &dyn Fn(&str, f64) -> f6
         pill.push(Prim::Text { x: g.x_rr - 9.0, y: label_y + 4.5, s, size: 14.0, c: Col::OnFill, a: 1.0, anchor: Anchor::End, halo: false, clip: Clip::No });
     }
 
-    // 층 순서(app.js 그대로): bg 캔버스 → fg 캔버스(칸·캔들·델타·POC 선 → 스택 9769 → 레인 11158 → 미완 경매 11332) → svg(시간축 → 프로파일 9299 → 레인 글자 → 알약 post)
+    // 층 순서(app.js 그대로): bg 캔버스 → fg 캔버스(칸·캔들·델타·POC 선 → 스택 9769 → 레인 11158 → 청산 동그라미 11280 → 미완 경매 11332) → svg(시간축 → 프로파일 9299 → 레인 글자 → 알약 post)
     let candles = candles.to_vec();
     let lane_rows = crate::lane::rows(&inp.lane, &candles);
     let dt = crate::profile::build(&g, &candles, by_time);
     let (lane_fg, lane_svg) = crate::lane::draw(&g, &lane_rows, measure);
-    let mut sc = Scene { prims: vec![], groups: vec![], g, candles: vec![], bar_rows: vec![], pocs, lane: vec![], dt: None, dp: cfg.dp, unit: cfg.unit.clone() };
+    let liq_by: HashMap<i64, &crate::data::LiqBar> = inp.liq.iter().filter_map(|b| Some((crate::data::iso_sec(&b.ts)?, b))).collect(); // 11248 byTs(같은 초면 뒤 것)
+    let mut sc = Scene { prims: vec![], groups: vec![], g, candles: vec![], bar_rows: vec![], pocs, lane: vec![], liq: vec![], dt: None, dp: cfg.dp, unit: cfg.unit.clone() };
     sc.add("bg", bg);
     sc.add("fg", fg);
     sc.add("stack", if sc.g.draw_cells { crate::marks::stack(&sc.g, &bar_rows) } else { vec![] });
     sc.add("lane", lane_fg);
+    sc.add("liq", crate::marks::liq(&sc.g, &candles, &inp.lane, &liq_by, dense));
     sc.add("ua", if dense { vec![] } else { crate::marks::unfinished(&sc.g, &candles, by_time, q) });
     sc.add("svg", svg);
     sc.add("profile", dt.as_ref().map_or(vec![], |d| crate::profile::draw(&sc.g, d)));
     sc.add("lane_text", lane_svg);
     sc.add("pill", pill);
+    sc.liq = candles.iter().map(|c| liq_by.get(&c.time).map(|b| (*b).clone())).collect();
     (sc.candles, sc.bar_rows, sc.lane, sc.dt) = (candles, bar_rows, lane_rows, dt);
     Some(sc)
 }

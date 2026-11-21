@@ -1,4 +1,4 @@
-//! 차트 안 표식 중 풋프린트 자료만으로 나오는 둘(fg 캔버스 · 가격 플롯 자르기): 스택 불균형 막대 · 미완 경매 꺾쇠.
+//! 차트 안 표식(fg 캔버스 · 가격 플롯 자르기): 스택 불균형 막대 · 미완 경매 꺾쇠(풋프린트 자료만) · 청산 동그라미(청산 5분봉 응답).
 use crate::data::{Candle, lv};
 use crate::fp::{Clip, Col, Geo, Prim};
 use std::collections::BTreeMap;
@@ -56,3 +56,31 @@ pub fn unfinished(g: &Geo, candles: &[Candle], by_time: &BTreeMap<i64, &Vec<Vec<
         Prim::Line { pts: vec![[x0 - s, yc + d * s * 0.6], [x0, yc - d * s * 0.6], [x0 + s, yc + d * s * 0.6]], c: Col::Text, a: 0.85, lw: 1.6, dash: None, clip: Clip::Plot }
     }).collect()
 }
+
+/// 11226-11289 청산 동그라미: 봉이 그린 가장 높은 가격(고가 · 서버 봉 칸 맨 위 가격) 위 14px · 반지름 √(금액/창 안 최대) · 숏 청산이 같거나 크면 초록 · 불투명 0.9
+/// lane = 서버 봉 칸(fpBars = tfFpBars(fpBarsNow())) · by_ts = 봉 시각(초) → 청산 봉
+/// DENSE(1주일 창) = 지금 화면은 색별 한 칠(cvUnion 8199 · 처음 본 색 순서) -- 같은 순서로 낸다. ponytail: 한 칠이라 겹친 원이 진해지지 않는 것은 못 맞춤(좌표는 같고 겹친 곳 픽셀만 다름) -- 필요하면 색별 메시로 묶는다
+pub fn liq(g: &Geo, candles: &[Candle], lane: &std::collections::HashMap<i64, (&Vec<Vec<f64>>, Option<[f64; 3]>)>, by_ts: &std::collections::HashMap<i64, &crate::data::LiqBar>, dense: bool) -> Vec<Prim> {
+    let usd = |c: &Candle| by_ts.get(&c.time).map(|b| (b.long_usd, b.short_usd));
+    let peak = candles.iter().filter_map(usd).fold(0.0f64, |m, (l, s)| m.max(l + s));
+    if !(peak > 0.0) { return vec![]; }
+    let r_max = 13.0; // 데스크톱(mobileChart 거짓)
+    let (r0, r1) = if g.slot < 4.0 { (1.5, r_max * 0.6) } else { (3.0, r_max) };
+    let mut v = vec![];
+    for (i, c) in candles.iter().enumerate() {
+        let Some((lo, sh)) = usd(c) else { continue };
+        if !(lo + sh > 0.0) { continue; }
+        let r = r0 + ((lo + sh) / peak).sqrt() * (r1 - r0);
+        let top_lv = lane.get(&c.time).map(|(lv, _)| lv.iter().map(|l| lv0(l)).fold(f64::NEG_INFINITY, f64::max)).filter(|t| t.is_finite());
+        let top = c.high.max(top_lv.unwrap_or(f64::NEG_INFINITY));
+        let cy = (g.mt + r + 1.0).max(g.y_at(top) - r - 14.0);
+        v.push(Prim::Circle { x: g.x_at(i) + g.bw / 2.0, y: cy, r, c: if sh >= lo { Col::Good } else { Col::Bad }, a: 0.9, clip: Clip::Plot });
+    }
+    if dense {
+        let col = |p: &Prim| if let Prim::Circle { c, .. } = p { *c } else { Col::Good };
+        if let Some(first) = v.first().map(col) { v.sort_by_key(|p| col(p) != first); } // 안정 정렬 = 색마다 봉 순서 그대로
+    }
+    v
+}
+/// Number(l[0]) -- NaN 이면 최댓값 후보에서 빠진다(pz > top 이 거짓)
+fn lv0(l: &[f64]) -> f64 { l.first().copied().filter(|x| !x.is_nan()).unwrap_or(f64::NEG_INFINITY) }

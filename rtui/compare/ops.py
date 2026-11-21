@@ -11,6 +11,7 @@ from harness import INIT, LAUNCH, TZ, make_route
 WT = pathlib.Path(sys.argv[1]).resolve()
 HERE, FX = WT / "rtui/compare", WT / "rtui/compare/fixture"
 API = {"/api/footprint": FX / "footprint.json", "/api/market-history": FX / "market-history.json", "/api/footprint-week": FX / "footprint-week.json"}
+API |= {f"/api/liquidation-5m-{k}": FX / f"liquidation-5m-{k}.json" for k in ("signal", "history")}   # 청산 동그라미(다섯째 조각)
 route = make_route(WT, API)
 X, Y = 600, 300   # svg 좌표(가격 플롯 안)
 W = lambda dy, x=X, y=Y: ("wheel", x, y, 0, dy)
@@ -163,7 +164,7 @@ def compare(name, res):
         win_ok = (j["t0"], j["t1"], j["nc"]) == (r["t0"], r["t1"], r["nc"]) and abs(g["ymin"] - h["ymin"]) < 1e-6 and abs(g["ymax"] - h["ymax"]) < 1e-6 and abs(g["off"] - h["off"]) < 1e-9
         P = r["prims"]
         bg = cmp_list([q for x in j["rec"] if x["L"] == "bg" for q in jnorm(x)], [rnorm(p) for p in P if p["g"] == "bg"])
-        fg = cmp_list([q for x in j["rec"] if x["L"] == "fg" for q in jnorm(x)], [rnorm(p) for p in P if p["g"] in ("fg", "stack", "lane", "ua")])
+        fg = cmp_list([q for x in j["rec"] if x["L"] == "fg" for q in jnorm(x)], [rnorm(p) for p in P if p["g"] in ("fg", "stack", "lane", "liq", "ua")])
         tax, prof, pill = svg_items(j)
         ta = cmp_list(tax, [rnorm(p) for p in P if p["g"] == "svg" and p["k"] == "text"])
         pr = cmp_list(prof, [rnorm(p) for p in P if p["g"] == "profile" and p["k"] in ("rect", "srect", "circle")])

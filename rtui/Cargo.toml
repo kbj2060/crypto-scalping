@@ -12,6 +12,13 @@ eframe = { version = "0.37", default-features = false, features = ["default_font
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# tests/push_parity.rs: 프로세스 안 진짜 rtcore(가짜 거래소 127.0.0.1) -- 네이티브 시험에만(웹어셈블리 묶음에 안 들어감)
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+rtcore = { path = "../rtcore" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
+tokio-tungstenite = "0.26"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"] }
 
