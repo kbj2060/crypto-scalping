@@ -28,6 +28,22 @@ GAP_MS = 30 * 60_000                  # 지평 뒤 종가가 이만큼 지나도
 STALE_MS = 20 * 60_000                # 상대 강도 스냅숏이 이보다 묵으면 화면에 안 낸다(5분 루프가 멈췄다는 뜻)
 _seen: dict = {}                      # (파일, k) -> 이미 쓴 t 집합 (프로세스 안)
 _xs_latest: dict = {}                 # 마지막 상대 강도 스냅숏 {t, rel_bp}
+# 2026-11-22 Rust 전환 스위치(rtmodel/SHADOW.md «rt_dirpred 를 넘기는 대시보드 스위치»): 이 표식 파일이 있으면 적중 기록·상대 강도를 Rust(rt_dirpred)가 같은 파일에 이어 쓴다 --
+#   여기서는 아무것도 안 쓰고(record_short·record_h4·xsec_record = 0), 최신 상대 강도 스냅숏은 Rust 가 쓰는 XS_LATEST_RUST 를 읽는다. 없으면 지금 동작 그대로.
+#   대시보드 재시작 없이 회차마다 본다(파일 하나 만들고 지우는 것으로 전환·되돌리기 · rtmodel/tools/takeover.sh rt_dirpred go|back).
+RUST_ON = Path(__file__).resolve().parents[1] / "data" / "live" / "rtmodel" / "pred_record_rust.on"
+XS_LATEST_RUST = Path(__file__).resolve().parents[1] / "data" / "live" / "xsec_latest.json"
+_rust_was_on = False
+
+
+def rust_on() -> bool:
+    """표식이 있나. 있다가 사라진 순간(되돌리기) «이미 쓴 시각» 캐시를 비운다 -- 다음 기록 때 파일 꼬리를 새로 읽어 Rust 가 쓴 줄을 두 번 쓰지 않게."""
+    global _rust_was_on
+    on = RUST_ON.exists()
+    if _rust_was_on and not on:
+        _seen.clear()
+    _rust_was_on = on
+    return on
 
 
 def _tail(path: Path) -> list[dict]:
@@ -84,7 +100,7 @@ def _settled(payload: dict) -> list:
 
 def record_short(coin: str, payload: dict, closes: pd.Series, d: Path = DIR) -> int:
     """/api/dir-short 응답의 hist [[결정 ms, 15분 분위, 1시간 분위], …] 를 쌓는다."""
-    if not (payload and payload.get("ok")):
+    if rust_on() or not (payload and payload.get("ok")):
         return 0
     rows = [{"k": "s", "t": int(t), "px": _px(closes, int(t)), "a": a, "b": b} for t, a, b in _settled(payload)]
     return _append(d / f"{coin.upper()}.jsonl", "s", [r for r in rows if r["px"] is not None])
@@ -92,7 +108,7 @@ def record_short(coin: str, payload: dict, closes: pd.Series, d: Path = DIR) -> 
 
 def record_h4(coin: str, payload: dict, closes: pd.Series, d: Path = DIR) -> int:
     """/api/dir4h 응답의 hist [[결정 ms, 예측 bp], …] + 문턱 lo·hi(같은 bp 단위)."""
-    if not (payload and payload.get("ok")):
+    if rust_on() or not (payload and payload.get("ok")):
         return 0
     lo, hi = payload["lo"], payload["hi"]
     rows = [{"k": "4", "t": int(t), "px": _px(closes, int(t)), "d": v, "s": 1 if v >= hi else -1 if v <= lo else 0} for t, v in _settled(payload)]
@@ -154,7 +170,9 @@ def _band(coin: str, scored: Path = BAND_SCORED) -> dict | None:
 
 def xsec_record(px_by_coin: dict, d: Path = DIR) -> int:
     """px_by_coin = {코인: 종가 Series(봉 시작 ts)} -- 4h 격자 결정 시각(봉 시작 hour%4==3·55분)마다 9코인 종가를 쌓고 최신 스냅숏을 갱신."""
-    frame = pd.DataFrame({c: s for c, s in px_by_coin.items() if len(s)}).dropna()
+    if rust_on():
+        return 0
+    frame =pd.DataFrame({c: s for c, s in px_by_coin.items() if len(s)}).dropna()
     if frame.shape[1] < len(X_COINS) or len(frame) < 49:
         return 0
     if frame.index[-1] - frame.index[-49] != pd.Timedelta(minutes=240):   # 결측 봉이 있으면 «49번째 앞»이 4h 앞이 아니다 -- 스냅숏을 갱신하지 않는다
@@ -180,8 +198,14 @@ def _xsec(d: Path = DIR, now_ms: int | None = None, bf: Path | None = None) -> d
         nxt = pd.Series({c: b[c] / now[c] - 1 for c in cs})
         ics.append(float(past.rank().corr(nxt.rank())))
     ics = [x for x in ics if x == x]   # 가격이 안 변한 코인뿐이면 NaN -- JSON 에 NaN 이 나가면 브라우저가 응답 전체를 못 읽는다
-    fresh = _xs_latest and (now_ms is None or now_ms - _xs_latest["t"] <= STALE_MS)
-    return {"n": len(ics), "ic": float(sum(ics) / len(ics)) if ics else None, "latest": dict(_xs_latest) if fresh else None}
+    latest = _xs_latest
+    if rust_on():   # Rust(rt_dirpred)가 회차마다 원자적으로 쓰는 같은 꼴 {t, rel_bp} -- 못 읽으면 없음(묵은 판정은 아래 그대로)
+        try:
+            latest = json.loads(XS_LATEST_RUST.read_text())
+        except (OSError, ValueError):
+            latest = {}
+    fresh = latest and (now_ms is None or now_ms - latest["t"] <= STALE_MS)
+    return {"n": len(ics), "ic": float(sum(ics) / len(ics)) if ics else None, "latest": dict(latest) if fresh else None}
 
 
 def summary(now_ms: int, d: Path = DIR, band: Path = BAND_SCORED, bf: Path | None = BACKFILL) -> dict:
@@ -199,7 +223,9 @@ def summary(now_ms: int, d: Path = DIR, band: Path = BAND_SCORED, bf: Path | Non
 
 
 def _selftest() -> None:
+    global RUST_ON, XS_LATEST_RUST
     d = Path(tempfile.mkdtemp())
+    RUST_ON, XS_LATEST_RUST = d / "pred_record_rust.on", d / "xsec_latest.json"   # 서버에서 돌려도 진짜 표식과 무관하게(아래 스위치 시험이 만든다)
     t0 = 1_793_000_000_000 // BAR * BAR
     idx = pd.date_range(pd.Timestamp(t0 - 20 * BAR, unit="ms"), periods=200, freq="5min")
     closes = pd.Series(range(100, 300), index=idx, dtype=float)                  # 단조 상승 -> 롱 신호만 적중
@@ -244,6 +270,23 @@ def _selftest() -> None:
                                    + json.dumps({"k": "s", "t": t0 - 3 * BAR, "px": 99.0, "a": 95.0, "b": 50.0, "bf": 1}) + "\n")  # 재구성 롱: 종료가 = t0 의 px 100 -> 적중
     m = summary(t0 + 100 * BAR, live, live / "none", bfd)["coins"]["eth"]["15m"]
     assert (m["n"], m["hit"], m["pending"]) == (2, 2, 0), m   # 실시간 t0(롱·종료가 101 적중) + 재구성 t0-3봉(롱·종료가 100 적중). 재구성 t0 는 무시, t0-10봉 숏은 종료가가 없어 구멍
+    # 2026-11-22 Rust 전환 스위치: 표식이 있으면 아무것도 안 쓰고 최신 스냅숏은 Rust 파일에서 · 표식이 사라지면 꼬리를 새로 읽어 Rust 가 쓴 줄을 다시 안 씀
+    sw = Path(tempfile.mkdtemp())
+    assert not rust_on() and record_short("ETH", {"ok": True, "hist": hist[:3]}, closes, sw) == 3   # 꺼짐 = 지금 동작
+    RUST_ON.write_text("x")
+    before = (sw / "ETH.jsonl").read_text()
+    assert record_short("ETH", {"ok": True, "hist": hist[:6]}, closes, sw) == 0 and record_h4("ETH", {"ok": True, "lo": -1, "hi": 1, "hist": [[t0, 2.0]]}, closes, sw) == 0
+    _xs_latest.clear(); _xs_latest.update(t=5_000_000, rel_bp={"ETH": 9.0})
+    assert xsec_record({c: closes for c in X_COINS}, sw) == 0 and _xs_latest["t"] == 5_000_000 and not (sw / "xsec.jsonl").exists()   # 상대 강도도 안 씀
+    assert (sw / "ETH.jsonl").read_text() == before
+    assert _xsec(sw, 1_000_000)["latest"] is None                                    # Rust 파일이 아직 없으면 없음(파이썬 프로세스 안 스냅숏을 쓰지 않는다)
+    XS_LATEST_RUST.write_text(json.dumps({"t": 1_000_000, "rel_bp": {"ETH": -3.5}}))
+    assert _xsec(sw, 1_000_000 + 1000)["latest"] == {"t": 1_000_000, "rel_bp": {"ETH": -3.5}} and _xsec(sw, 1_000_000 + STALE_MS + 1)["latest"] is None
+    with (sw / "ETH.jsonl").open("a") as f:                                            # 켜져 있는 동안 Rust 가 이어 쓴 줄(t0+3·t0+4봉)
+        f.write("".join(json.dumps({"k": "s", "t": t0 + i * BAR, "px": 1.0, "a": 50.0, "b": 50.0}, separators=(",", ":")) + "\n" for i in (3, 4)))
+    RUST_ON.unlink()
+    assert record_short("ETH", {"ok": True, "hist": hist[:6]}, closes, sw) == 1                 # 되돌린 뒤: Rust 가 쓴 t0+3·4 는 건너뛰고 t0+5 만
+    assert _xsec(sw)["latest"] == {"t": 5_000_000, "rel_bp": {"ETH": 9.0}}                      # 꺼지면 다시 프로세스 안 스냅숏
     print("selftest OK")
 
 

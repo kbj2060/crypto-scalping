@@ -2870,6 +2870,8 @@ def make_app() -> web.Application:
             return
         while True:
             await asyncio.sleep(300 - time.time() % 300 + 20)
+            if pred_record.rust_on():   # 2026-11-22 표식 data/live/rtmodel/pred_record_rust.on = Rust(rt_dirpred)가 이 회차를 맡는다(예측·상대 강도 REST 도 안 부름) -- 화면 요청 때 기록(pred_record_safe)도 record_* 가 0 을 돌려 안 쓴다
+                continue
             for coin in ("ETH", "BTC", "SOL", "XRP"):
                 await asyncio.sleep(3)   # 재기동 직후 첫 호출은 코인마다 31일치 REST -- 한꺼번에 몰리지 않게 띄운다
                 for fn in (dir_short_cached,) + ((dir4h_cached,) if coin in d4.ARTIFACTS else ()):
