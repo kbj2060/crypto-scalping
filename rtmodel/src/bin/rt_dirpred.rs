@@ -7,6 +7,7 @@
 //! 환경변수(기본값):
 //!   RT_DIR_OUT      data/live/rt_dirpred     쓰는 곳. 🔴data/live(= 파이썬 서버의 data/live/pred_record)면 종료코드 2(전환 때만 RT_DIR_TAKEOVER=1)
 //!   RT_DIR_MODELS   <RT_DIR_OUT>             dir4h_<코인>.json(tools/export_dir4h.py) · ds_<코인>.json·oos_<코인>.json(tools/export_dirshort.py)
+//!   RT_DIR_SRC_DIR  (있으면) 원본 joblib 디렉터리 -- 회차마다 모델 JSON 보다 새 joblib 이 있으면 그 모델은 건너뛴다(옛 JSON 값을 내지 않음 · 로그 한 줄)
 //!   RT_DIR_REST     https://fapi.binance.com
 //!   RT_SR_BAN_FILE  data/live/binance_ban_until   (공용 밴 파일 -- 밴 중이면 보내지 않고 그 코인은 이번 회차 실패)
 //!   RT_DIR_NOW_MS   (시험만) 고정 시각으로 한 회차만 돌고 끝낸다
@@ -62,6 +63,7 @@ fn main() {
         die(2, &format!("🔴{} 는 파이썬 서버의 기록 자리다(pred_record) -- 그림자는 다른 경로에(기본 data/live/rt_dirpred). 전환이면 RT_DIR_TAKEOVER=1", out.display()));
     }
     let models = PathBuf::from(env("RT_DIR_MODELS", &out.to_string_lossy()));
+    let src_dir: Option<PathBuf> = std::env::var("RT_DIR_SRC_DIR").ok().map(PathBuf::from);
     let (base, ban) = (env("RT_DIR_REST", "https://fapi.binance.com"), PathBuf::from(env("RT_SR_BAN_FILE", "data/live/binance_ban_until")));
     let fixed: Option<i64> = std::env::var("RT_DIR_NOW_MS").ok().map(|v| v.parse().unwrap_or_else(|_| die(2, "RT_DIR_NOW_MS")));
     std::fs::create_dir_all(out.join("pred_record")).unwrap_or_else(|e| die(2, &format!("{}: {e}", out.display())));
@@ -94,6 +96,12 @@ fn main() {
             for kind in ["dir_short", "dir4h"] {
                 let now = fixed.unwrap_or_else(|| (wall() * 1000.0) as i64);
                 let res: Result<(), String> = (|| {
+                    let mj = models.join(if kind == "dir_short" { format!("ds_{}.json", c.to_lowercase()) } else { format!("dir4h_{}.json", c.to_lowercase()) });
+                    if let (Some(d), Ok(v)) = (&src_dir, read_json::<Value>(&mj)) {
+                        if let Some(why) = rtmodel::model_stale(&mj, &v, d) {
+                            return Err(why);
+                        }
+                    }
                     let (r, pay) = if kind == "dir_short" {
                         let Some((_, art, oos)) = ass.iter().find(|x| x.0 == c) else { return Ok(()) };
                         let fr = rs.frames(&mut g, now, now as f64, c)?;

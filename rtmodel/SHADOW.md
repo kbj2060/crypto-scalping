@@ -122,22 +122,39 @@ python rtmodel/tools/shadow_sr_lean.py data/live/sr_lean data/live/rt_sr_lean --
 
 ---
 
-# 서버에서 옮겨 켤 때 순서 (초안 · 2026-11-21 · 사용자 결정 전)
+# 서버에서 그 자리에서 대조하고 넘기기 (2026-11-21 · 사용자 «기다리지 말고 바로바로 반영 배포»)
 
-원칙: (1) 그림자 출력 폴더에 따로 쓰게 켠다 → (2) 파이썬과 글자 대조가 기준을 넘긴다 → (3) 사용자 승인 뒤 화면이 읽는 파일·전진 검정이 읽는 파일을 바꾼다(= 파이썬을 끄고 Rust 를 `*_TAKEOVER=1` 로 원래 자리에).
-한 번에 하나씩 켜고, 첫 회차(재기동 몰림)가 끝난 걸 로그로 본 뒤 다음을 켠다. 위 REST 표의 «처음 몰림»이 큰 것(rt_dirpred · rt_radar)은 서로 다른 날에.
+대기 기간(7일 병행·24시간 관찰)을 두지 않는다. **같은 입력에 같은 줄 글자임을 그 자리에서 보이고 곧바로 넘긴다** -- 대조 자체는 줄이지 않는다.
+전진 판정이 걸린 기록(fwd_band · dir4h_p2 · fwd_dirshort · xsec)도 같다: Rust 가 같은 파일에 이어 쓰고, 넘기는 순간 같은 시각 줄이 두 번 들어가거나 빠지지 않는 것이 조건.
 
-| 순서 | 실행 파일 | 그림자 폴더 | 글자 대조 기준(통과 = 이만큼 같음) | 화면·검정이 읽는 자리를 바꾸는 시점 |
+```
+bash rtmodel/tools/takeover.sh <이름> export     # 모델 JSON(data/live/rtmodel/) -- rt_regime · rt_dirpred · rt_sr_lean
+bash rtmodel/tools/takeover.sh <이름> check      # Rust 한 회차(그림자 /mnt/data2/rtcollect_shadow/model/<이름>/) vs 파이썬이 실제로 쓴 줄 → «칸 N · 어긋남 M · 짝 없음 K» · 통과면 check.ok
+bash rtmodel/tools/takeover.sh <이름> go         # check.ok(2시간 안)일 때만 → crontab 백업·파이썬 줄 주석·Rust 줄 추가(줄 수 검증) → (상주형) 파이썬 감독·워커 끔 → Rust 감독 → 한 회차 지켜봄
+bash rtmodel/tools/takeover.sh <이름> back       # 되돌리기(태그 줄만 · 상주형은 Rust 끄고 파이썬 감독 다시)
+bash rtmodel/tools/takeover_selftest.sh          # 가짜 저장소·가짜 crontab·가짜 워커로 check·go·back 자체 시험(진짜 crontab·프로세스 안 건드림)
+```
+
+| 이름 | check 가 견주는 것(빼는 칸) | check 의 REST | go 의 끊김·중복 막기 | go 뒤 확인 |
 |---|---|---|---|---|
-| 1 | rt_regime(매시 · REST 시간당 8회 · 몰림 없음) | data/live/rt_regime_band | 7일 동안 regime_band_forward.jsonl 의 같은 (ts, coin) 줄 전부 같음 · 요약 파일 같음 | fwd_band(2027-01-08) 판정 뒤, 또는 사용자 승인 때 -- 전진 기록이라 «두 벌이 같다»가 확인된 뒤에만 |
-| 2 | rt_dirfwd(하루 3회 · 6회/회차) | data/live/rt_dirfwd | 14회차(5일) 줄이 recorded_ms 빼고 전부 같음 | 판정일(2027-03-14) 전에는 바꾸지 않는 것을 권함 -- 판정 원장은 한 벌로 |
-| 3 | rt_radar(매분 · 첫 회차 31일 백필) | data/live/rt_risk_radar | 24시간 latest.json 같은 updated 끼리 문자열 같음·숫자 1e-12 상대 · forward.jsonl 줄 수 같음 | 화면 `/api/risk-radar` 가 읽는 파일 -- 대조 통과 뒤 바로 가능(전진 검정 없음) |
-| 4 | rt_dirpred(5분 · 첫 회차 ~880회 · xsec 포함) | data/live/rt_dirpred | 3일 동안 pred_record/{코인}.jsonl·xsec.jsonl 같은 (k, t) 줄 전부 같음 · payload 숫자 비트 | fwd_dirshort(2027-01-08) 가 읽는 기록 -- 판정 뒤, 또는 사용자 승인 때. ETH 15분·1시간(75열판)은 아직 파이썬만 -- 전환해도 파이썬 몫이 남는다 |
-| 5 | rt_sr_lean(상주 · 웹소켓) | data/live/rt_sr_lean | `tools/shadow_sr_lean.py` 종료코드 0(양쪽 다 채점한 id 전부 같음) 3일 | `/api/sr-lean` 이 읽는 폴더 -- 사용자 승인 때 |
-| — | 4h 변동성 QX4·HGB 대체 · 개장 되돌림 · 7일/4~13주 신호 · dir4h·dir_short payload | (요청 때 계산 -- 웹 서버 몫) | 라이브러리만 옮김(rtserve 가 붙일 때 같은 정답지로) | rtserve 전환 때 |
+| rt_regime | 파이썬 마지막 결정 시각 T 의 4줄 vs Rust 한 회차(그 결정 줄만 뺀 기록 사본에 이어 씀) 글자 · 요약 파일 글자(빼는 칸 없음) · T 뒤 55분 안에 | 8 | (ts, coin) 중복 제거(원본·Rust 둘 다) · 정시 0~5분엔 거부 | 즉시 한 회차(새 줄 0 · 요약 다시 씀) → 요약 파일 갱신 |
+| rt_dirfwd | 파이썬 마지막 회차 3줄 vs Rust(같은 recorded_ms) 글자 · 회차 뒤 90분 안에 | 6 | 회차 시각(00·08·16시 29~40분) 거부 -- 원본 기록기는 중복 제거가 없다 | 다음 회차 뒤 `status` |
+| rt_radar | latest.json 칸별(updated·data_age_s 빼고 · 실수 1e-12 상대 = X@β BLAS 끝자리) · 파이썬 latest 90초 안 | 처음: 코인마다 1분봉 45쪽 + DVOL · 다음부터 코인마다 1 | 분의 20초 뒤에만 바꿈 + 그림자 1분봉 캐시를 data/live/cache 로 옮겨 첫 회차 백필 없음 | 다음 분 latest 갱신 |
+| rt_dirpred | pred_record/{코인}.jsonl·xsec.jsonl 의 같은 (k, t) 줄 글자 | 약 890(처음 회차) | — | 🔴go 불가: 파이썬 몫이 대시보드 서버 프로세스 안(pred_record_loop) -- server.py 에 루프를 끄는 스위치가 있어야 한다 |
+| rt_sr_lean | `shadow_sr_lean.py`(양쪽 다 채점한 id 의 줄 글자) -- 그림자가 없으면 띄우고 65분 뒤 다시(원본도 재시작 뒤 1시간 준비) | 웹소켓 1 + klines | 파이썬 감독·워커를 /proc cmdline(저장소 경로·락 파일까지)으로 찾아 감독 먼저 끔 → Rust 감독(같은 폴더 · TAKEOVER) · 재시작이라 1시간 준비(원본 재시작과 같다) | Rust 워커 pid · 상태 파일 갱신 |
+| — 요청 때 계산(vol-forecast · open-rev · dir-signals · dir-short · dir4h) | rtserve 몫 | — | — | **rtserve 전환 때**(rtmodel::handlers) |
 
-- 재기동 몰림 피하기: 서버 재부팅 @reboot 줄은 서로 다른 sleep(90·120·150초…)으로 띄우고, rt_dirpred 는 코인 사이 3초를 지킨다. 418·429 는 공용 밴 파일로 모두 멈춘다.
-- 되돌리기: Rust 를 끄고 파이썬을 다시 켠다(각 TAKEOVER 전 원래 파일을 복사해 둔다). 그림자 폴더는 지워도 된다.
+- 🔴check 의 «같은 시각» 조건: Rust 한 회차는 REST 최근 창을 다시 받는다 -- 파이썬 회차 직후(위 표의 «안에»)에 돌려야 같은 봉을 본다. 늦으면 도구가 거부한다.
+- rt_dirpred 의 4h·15분/1시간은 Rest 캐시의 첫 봉이 파이썬(재기동 뒤 이어 붙인 32일)과 다르다 -- rolling 합 끝자리가 갈려 반올림한 칸이 드물게 어긋날 수 있다(어긋남은 그대로 보인다).
+- 모델이 매달 바뀌는 것 따라가기: Rust 는 원본 joblib 이 모델 JSON 보다 새것이면(재학습 뒤 내보내기 안 함) **값을 내지 않는다** -- rt_regime 은 종료코드 1(`RT_REGIME_SRC_DIR`) ·
+  rt_dirpred 는 그 모델만 건너뜀(`RT_DIR_SRC_DIR` · 로그 «모델 낡음»). 규칙 = `rtmodel::model_stale`(JSON 의 source·sources 이름 → mtime).
+  crontab 후보(재학습 cron 시각을 몰라도 되게 매시): `17 * * * * cd <저장소> && bash rtmodel/tools/takeover.sh all export-if-stale >> logs/supervisor/rt_export.log 2>&1`
+
+## card30 · 상황 카드에 dir_p·reach_p 싣기 (결론)
+
+**응답 서버(rtserve)가 합친다.** 원본도 `sit.classify`(코어의 Situation 계산)는 card30 을 쓰지 않고, 그 뒤 서버의 `_flow_read_ctx`·`fr.read` 단계에서 dir_p·reach_p 를 붙인다.
+rtserve 가 5분봉 마감 때 한 번 `rtmodel::card30::predict`(완결 5분봉 → (dir, reach) · HGB 10개 · 봉당 수 ms)를 돌려 (봉 시각, dir, reach) 를 들고 있다가 시장 맥락·융합 카드와 융합 장부를 낼 때 싣는다.
+코어(rtcore)가 rtmodel 을 path 의존성으로 쓰면 rtmodel 의 실행 파일 의존(ureq·tokio-tungstenite·rustls)과 모델 JSON 읽기가 매초 미는 허브로 번진다 -- 코어는 봉·상황만, 모델 값은 응답 서버.
 
 ---
 

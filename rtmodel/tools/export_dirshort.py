@@ -24,7 +24,7 @@ def main(out: Path) -> None:
         if not all(p.exists() for p in ds.art_paths(coin)) or not ds.OOS_SEEDS[coin].exists():
             print(coin, "모델 또는 분위 씨앗 없음 -- 건너뜀"); continue
         art = ds.load_art(coin)
-        d = {"coin": coin, "month": art["month"], "src": art["src"],
+        d = {"coin": coin, "month": art["month"], "src": art["src"], "sources": [p.name for p in ds.art_paths(coin)],   # 원본 joblib(낡음 검사 rtmodel::model_stale)
              "models": {str(h): [[{"txt": m.booster_.model_to_string(), "scale": bits([s])[0]} for m, s in ms] for ms in seeds] for h, seeds in art["models"].items()}}
         (out / f"ds_{coin.lower()}.json").write_text(json.dumps(d))
         S = pd.read_parquet(ds.OOS_SEEDS[coin])
