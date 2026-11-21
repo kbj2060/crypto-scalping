@@ -61,10 +61,6 @@ pub trait WatchIo {
     async fn cancel_exit_orders(&mut self, symbol: &str, pside: &str) -> Result<Value, String>;
     /// 망가진 칸 알림(텔레그램 -- 뒤에서 보내 감시를 막지 않는다). 기본 = 안 보냄.
     fn alert(&mut self, _msg: &str) {}
-    /// 진입 전 거래소 레버리지 맞추기(bracket::ensure_leverage -- 실패해도 주문은 보낸다, P16). 기본 = 원본의 «목표값 없음» 결과(요청 없음).
-    async fn ensure_leverage(&mut self, _symbol: &str, target: i64) -> Value {
-        if target <= 0 { json!({"changed": false, "reason": "목표값 없음"}) } else { json!({"changed": false, "error": "ensure_leverage 구현 없음"}) }
-    }
 }
 
 // ── 파이썬 값 다루기 ──────────────────────────────────────────────────────────
@@ -319,6 +315,7 @@ pub fn exec_plan_of(plan: &Value) -> Result<ExecPlan, String> {
         maker_only: false,
         vol_bpm: p.get("vol_bpm").and_then(Value::as_f64),
         market_reason: p.get("market_reason").and_then(Value::as_str).map(String::from),
+        target_leverage: p.get("target_leverage").filter(|v| truthy(Some(v))).map_or(Ok(0.0), crate::sign::py_float)?.trunc() as i64,
     })
 }
 

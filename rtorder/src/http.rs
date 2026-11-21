@@ -355,4 +355,14 @@ impl Exchange for Binance {
         }
         tokio::time::sleep(Duration::from_secs_f64(sec)).await
     }
+    async fn prepare(&mut self, symbol: &str, leverage: Option<i64>) -> Result<Option<Value>, String> {
+        if !self.has_keys() {
+            return Err("API 키가 없습니다".into());
+        }
+        self.sync_clock().await;
+        Ok(match leverage {
+            Some(t) => Some(crate::bracket::ensure_leverage(self, symbol, t).await),
+            None => None,
+        })
+    }
 }

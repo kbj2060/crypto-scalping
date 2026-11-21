@@ -1,5 +1,5 @@
 //! 작업 실행기(2026-11-21 여섯째 조각) -- 접수 문이 내놓은 `intake::Task` 를 돈다. 원본 `dashboard/orders.py` 의
-//! `entry_then_bracket` · `exit_then_switch` · `limit_reprice` · `settle` 과 집행 앞의 `ensure_leverage`(run_entry·run_entry_wait 가 부르던 것).
+//! `entry_then_bracket` · `exit_then_switch` · `limit_reprice` · `settle`(집행 머리 키·시계·레버리지는 `exec` 안 `Exchange::prepare`).
 //! 상태 칸(`Obj` -- 화면·API 가 읽고 action·amend 를 쓴다) ↔ 집행 상태(`exec::ExecState`) 다리 = `slot_to_exec`·`exec_to_slot`.
 //! **어디에도 연결하지 않는다** -- 거래소는 `Exchange`, 손절·익절 함수·시계는 `WatchIo`, 시세는 `Quotes` 뒤. 시험 = tests/runner_e2e.rs(가짜 거래소).
 
@@ -54,6 +54,18 @@ pub fn exec_to_slot(e: &ExecState, slot: &mut Obj) {
     if e.pegged {
         slot.insert("pegged".into(), json!(true));
     }
+    if e.mode == "limit" {
+        slot.insert("amends".into(), json!(e.amends)); // 원본: 지정가·감시 대기만 amends=0 으로 시작 · reprices 는 재조정이 한 번이라도 있을 때만
+    }
+    if e.reprices > 0 {
+        slot.insert("reprices".into(), json!(e.reprices));
+    }
+    if let Some(w) = e.wait_until {
+        slot.insert("wait_until".into(), json!(iso_utc(w)));
+    }
+    if let Some(l) = &e.leverage {
+        slot.insert("leverage".into(), l.clone());
+    }
     if e.stop {
         slot.insert("stop".into(), json!(true));
         slot.insert("triggered".into(), json!(e.triggered));
@@ -103,6 +115,9 @@ impl<E: Exchange, I: WatchIo, Q: Quotes> Exchange for RunEx<'_, '_, E, I, Q> {
     async fn sleep(&mut self, sec: f64) {
         self.ex.sleep(sec).await
     }
+    async fn prepare(&mut self, symbol: &str, leverage: Option<i64>) -> Result<Option<Value>, String> {
+        self.ex.prepare(symbol, leverage).await
+    }
     /// 원본 first_fill: 추가 진입이면 keep_rearm, 아니면 **지금 저장된 선**(plan_from_current)으로 무장(물타기 없이) -- 예외는 결과 칸에 남기고 대기는 계속(W10).
     async fn on_fill(&mut self) {
         if !self.first_fill {
@@ -151,7 +166,7 @@ fn settle(r: Result<(), String>, slot: &mut Obj, now: f64) {
 }
 
 /// 원본 entry_then_bracket(plan, state, wait_sec, limit): 진입 → 체결이 있으면(부분 포함, 모든 종료 경로) 익절을 걸고 감시를 무장한다(B3).
-/// 레버리지(`WatchIo::ensure_leverage`)는 원본처럼 run_entry·run_entry_wait 앞에서 -- 실패해도 주문은 보내고 결과를 칸 leverage 에(P16).
+/// 키 확인·시계·레버리지는 집행 머리(`Exchange::prepare` -- 원본 run_entry·run_entry_wait·run_entry_limit 안) · 결과는 칸 leverage 에(P16).
 #[allow(clippy::too_many_arguments)]
 pub async fn entry_then_bracket<E: Exchange, I: WatchIo, Q: Quotes>(desk: &mut Desk, ex: &mut E, io: &mut I, quotes: &mut Q, plan: &Obj, slot: &mut Obj,
                                                                     wait_sec: Option<f64>, limit: bool) {
@@ -164,10 +179,6 @@ pub async fn entry_then_bracket<E: Exchange, I: WatchIo, Q: Quotes>(desk: &mut D
         Err(e) => return settle(Err(e), slot, now),
     };
     let stop = limit && truthy(plan.get("stop"));
-    if !limit && !stop {
-        let target = plan.get("target_leverage").and_then(|v| py_float(v).ok()).unwrap_or(0.0) as i64;
-        slot.insert("leverage".into(), io.ensure_leverage(&ep.symbol, target).await);
-    }
     let s: Shared = Arc::new(Mutex::new(ExecState::default()));
     slot_to_exec(slot, &s);
     let mut w = std::mem::replace(&mut desk.w, crate::watch::Watcher::new(std::env::temp_dir(), "ETHUSDC"));
@@ -190,7 +201,7 @@ pub async fn entry_then_bracket<E: Exchange, I: WatchIo, Q: Quotes>(desk: &mut D
     }
     desk.w = w;
     exec_to_slot(&s.lock().unwrap(), slot);
-    slot.insert("done_at".into(), json!(iso_utc(io_now(&s, now))));
+    slot.insert("done_at".into(), json!(iso_utc(io.now()))); // 원본 now_iso() = 집행이 끝난 시각
     let filled = slot.get("filled").and_then(Value::as_f64).unwrap_or(0.0);
     if filled > 0.0 {
         let key = bracket_key(&ep.symbol, &ep.position_side);
@@ -219,20 +230,15 @@ pub async fn entry_then_bracket<E: Exchange, I: WatchIo, Q: Quotes>(desk: &mut D
     }
 }
 
-fn io_now(_s: &Shared, now: f64) -> f64 {
-    now // ponytail: done_at 은 시작 시각의 벽시계로 -- 집행 시계(monotonic)와 벽시계를 잇는 자리가 생기면 바꾼다
-}
-
 
 /// 원본 exit_then_switch: 전량 청산이 **다 닫힌 뒤에만**(filled_* · 체결 ≥ 수량×0.999) 반대 진입. 칸을 await 없이 진입 상태로 바꾸고,
 /// 진입 버튼과 같은 assemble_entry_plan(fresh) · 막히면 주문 없이 사유 · 반대 진입은 MARKET(M2 · 2026-10-10 «즉시») → entry_then_bracket.
 #[allow(clippy::too_many_arguments)]
 pub async fn exit_then_switch<E: Exchange, I: WatchIo, D: DeskIo, Q: Quotes>(desk: &mut Desk, ex: &mut E, io: &mut I, dio: &mut D, quotes: &mut Q,
                                                                             plan: &Value, sw: &Value, asset: &str) {
-    let now = io.now();
     let mut slot = std::mem::take(&mut desk.w.entry);
-    let r = crate::watch::run_exit_into(ex, plan, &mut slot, || iso_utc(now)).await;
-    settle(r, &mut slot, now);
+    let r = crate::watch::run_exit_into(ex, plan, &mut slot, || iso_utc(io.now())).await;
+    settle(r, &mut slot, io.now());
     let mut info = slot.get("switch").cloned().unwrap_or(json!({}));
     let done = matches!(slot.get("phase").and_then(Value::as_str), Some("filled_maker" | "filled_taker"))
         && slot.get("filled").and_then(Value::as_f64).unwrap_or(0.0) >= slot.get("quantity").and_then(Value::as_f64).unwrap_or(0.0) * 0.999;
@@ -298,10 +304,9 @@ pub async fn run_task<E: Exchange, I: WatchIo, D: DeskIo, Q: Quotes>(desk: &mut 
             desk.task_done(&key);
         }
         Task::Exit { key, slot, plan, rearm } => {
-            let now = io.now();
             let mut st = take_slot(desk, &slot);
-            let r = crate::watch::run_exit_into(ex, &plan, &mut st, || iso_utc(now)).await;
-            settle(r, &mut st, now);
+            let r = crate::watch::run_exit_into(ex, &plan, &mut st, || iso_utc(io.now())).await;
+            settle(r, &mut st, io.now());
             if rearm {
                 let _ = desk.w.partial_exit_rearm_tp(io, plan.as_object().cloned().unwrap_or_default(), &mut st).await; // 부분 청산 뒤 남은 수량으로 익절(B30 · C2)
             }

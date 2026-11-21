@@ -262,7 +262,7 @@ impl Exchange for Fake {
 
 fn plan(side: &str, pside: &str, qty: f64) -> ExecPlan {
     ExecPlan { symbol: "ETHUSDC".into(), side: side.into(), position_side: pside.into(), market: false, price: 2500.0, quantity: qty,
-               fallback_after_sec: 0.0, maker_only: false, vol_bpm: None, market_reason: None }
+               fallback_after_sec: 0.0, maker_only: false, vol_bpm: None, market_reason: None, target_leverage: 0 }
 }
 fn exit_plan() -> ExecPlan {
     plan("SELL", "LONG", 2.0)

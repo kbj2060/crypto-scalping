@@ -5,7 +5,8 @@
 //! 시장가 다리(M1·M2·M3·M4·M5·M6·M7·M8·M9)는 원본과 같은 순서·같은 요청·같은 결과(2026-11-21 사용자 결정 «원본 동작 유지») -- `Exchange::place_market`.
 //! 그래서 trait 에 시장가 메서드가 없다 -- 시장가가 «구조적으로» 못 나간다.
 //!
-//! 호출부 몫으로 남김(접수 조각): API 키 없음 → error · `_clock_offset` · `ensure_leverage`(함수는 `bracket`·`http` 에 있다).
+//! 원본 run_* 머리(API 키 없음 → error · `_clock_offset` · 진입이면 `ensure_leverage`)는 `Exchange::prepare`(2026-11-21 일곱째 조각 --
+//! 전체 흐름 정답지에서 실행기가 시계 요청·레버리지를 빼먹던 것을 잡고 옮김. run_entry_stop 은 원본처럼 머리 없이 닿은 뒤 run_entry 가 한다).
 //! 실제 전송 = `http::Binance`(이 trait 의 구현) · 브래킷·고아 정리 = `bracket`.
 
 use crate::pyfmt::round_n;
@@ -73,6 +74,28 @@ pub trait Exchange {
     async fn reprice(&mut self) -> Result<Option<f64>, String> {
         Ok(None)
     }
+    /// 원본 run_entry·run_exit·run_entry_wait·run_entry_limit 머리: 키 없음 = Err("API 키가 없습니다") · 시계 맞추기 · leverage = Some(목표) 면
+    /// ensure_leverage 결과(state["leverage"] -- 실패해도 주문은 보낸다, P16). 기본(시험 가짜) = 아무것도 안 함.
+    async fn prepare(&mut self, _symbol: &str, _leverage: Option<i64>) -> Result<Option<serde_json::Value>, String> {
+        Ok(None)
+    }
+}
+
+/// `prepare` 를 부르고 실패면 error 로 끝낸다(false = 멈춤).
+async fn head<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Shared, leverage: bool) -> bool {
+    match ex.prepare(&plan.symbol, leverage.then_some(plan.target_leverage)).await {
+        Err(e) => {
+            st(s).error = Some(e);
+            finish(s, Phase::Error);
+            false
+        }
+        Ok(l) => {
+            if l.is_some() {
+                st(s).leverage = l;
+            }
+            true
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -134,6 +157,10 @@ pub struct ExecState {
     pub stop: bool,
     pub triggered: bool,
     pub done: bool,
+    /// ensure_leverage 결과(원본 state["leverage"]).
+    pub leverage: Option<serde_json::Value>,
+    /// 지정가·감시 대기 만료 벽시계(epoch 초 · 원본 wait_until iso).
+    pub wait_until: Option<f64>,
 }
 pub type Shared = Arc<Mutex<ExecState>>;
 
@@ -150,6 +177,8 @@ pub struct ExecPlan {
     pub maker_only: bool,        // 감시 진입: 마감 뒤 잔량은 버린다(시장가 없음)
     pub vol_bpm: Option<f64>,
     pub market_reason: Option<String>,
+    /// int(plan.get("target_leverage") or 0) -- 진입 머리의 ensure_leverage.
+    pub target_leverage: i64,
 }
 
 fn r8(x: f64) -> f64 {
@@ -341,7 +370,10 @@ async fn taker<E: Exchange>(ex: &mut E, c: &Common<'_>, qty: f64, s: &Shared, fi
 
 /// peg 를 걸고 호가가 달아나면 따라가며 다시 걸다가 마감에서 멈춘다(파이썬: 마감 잔량 시장가).
 pub async fn run_entry<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Shared) {
-    let c = Common { symbol: &plan.symbol, side: &plan.side, position_side: &plan.position_side };
+    if !head(ex, plan, s, true).await {
+        return;
+    }
+    let c =Common { symbol: &plan.symbol, side: &plan.side, position_side: &plan.position_side };
     let total = plan.quantity;
     {
         let mut g = st(s);
@@ -380,7 +412,10 @@ pub async fn run_entry<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Shared) {
 
 /// 메이커로 포지션을 닫는다(진입과 같은 루프 · 리페그). 🔴헤지 모드라 reduceOnly 없음 -- 과청산 방어는 수량(`total - done`)뿐.
 pub async fn run_exit<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Shared) {
-    let c = Common { symbol: &plan.symbol, side: &plan.side, position_side: &plan.position_side };
+    if !head(ex, plan, s, false).await {
+        return;
+    }
+    let c =Common { symbol: &plan.symbol, side: &plan.side, position_side: &plan.position_side };
     let total = plan.quantity;
     if plan.market {
         // M6·M7·M8: 계획이 MARKET(변동성 ≥30 · 먼지 · exec=market) -- 지정가 없이 전량 시장가 · 체결량 = 응답(스위칭이 «다 닫혔나»를 본다), ACK 면 전량
@@ -430,6 +465,9 @@ pub async fn run_exit<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Shared) {
 /// 진입 «기다리기»(2026-10-10): GTX 를 **한 번** 걸고 앞질러도 다시 걸지 않는다(처음 -5022 만 새 호가로 재시도, E20).
 /// wait_sec 뒤 잔량 = 파이썬 시장가(M3). 거래소에서 사람이 취소했으면 «취소» -- 몰래 시장가로 채우지 않는다.
 pub async fn run_entry_wait<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Shared, wait_sec: f64, mut on_fill: bool) {
+    if !head(ex, plan, s, true).await {
+        return;
+    }
     let ps = &plan.position_side;
     let c = Common { symbol: &plan.symbol, side: &plan.side, position_side: ps };
     let (total, mut price) = (plan.quantity, plan.price);
@@ -526,6 +564,7 @@ pub async fn run_entry_stop<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Shared
         let mut g = st(s);
         (g.phase, g.mode, g.stop, g.triggered, g.filled, g.limit_price, g.quantity, g.amends, g.deadline_sec) =
             (Phase::Working, "limit", true, false, 0.0, plan.price, plan.quantity, 0, max_sec);
+        g.wait_until = Some(ex.wall_ms() as f64 / 1000.0 + max_sec);
     }
     let (mut since, deadline) = (ex.wall_ms() as f64 / 1000.0, ex.now() + max_sec);
     while st(s).action.is_none() {
@@ -586,12 +625,16 @@ pub async fn run_entry_stop<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Shared
 /// 지정가 대기(2026-10-31): **사용자가 정한 가격**에 GTX, 따라가지도 시장가로 넘기지도 않는다(E21).
 /// action cancel → 취소 확인 뒤 멈춤 · amend → 취소 확인 뒤 새 가격(체결 0 일 때만, E22) · reprice(basis 따라가기, E23) · action peg → 따라가기(E26).
 pub async fn run_entry_limit<E: Exchange>(ex: &mut E, plan: &ExecPlan, s: &Shared, max_sec: f64, mut on_fill: bool, reprice: bool) {
+    if !head(ex, plan, s, true).await {
+        return;
+    }
     let c = Common { symbol: &plan.symbol, side: &plan.side, position_side: &plan.position_side };
     let ps = &plan.position_side;
     let (mut total, mut price) = (plan.quantity, plan.price);
     {
         let mut g = st(s);
         (g.phase, g.mode, g.filled, g.limit_price, g.quantity, g.repegs, g.amends, g.deadline_sec) = (Phase::Working, "limit", 0.0, price, total, 0, 0, max_sec);
+        g.wait_until = Some(ex.wall_ms() as f64 / 1000.0 + max_sec);
     }
     let deadline = ex.now() + max_sec;
     let (mut done, mut outside, mut rej) = (0.0, false, 0u32);

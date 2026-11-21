@@ -93,6 +93,9 @@ impl Exchange for Virt {
     async fn sleep(&mut self, sec: f64) {
         self.adv(sec)
     }
+    async fn prepare(&mut self, symbol: &str, leverage: Option<i64>) -> Result<Option<Value>, String> {
+        self.bx.prepare(symbol, leverage).await
+    }
 }
 
 fn params(a: &Value) -> Vec<(String, P)> {
@@ -183,7 +186,6 @@ async fn run(v: &mut Virt, fn_: &str, a: &Value) -> Value {
             let st: Shared = Arc::new(Mutex::new(ExecState::default()));
             v.hook = Some((st.clone(), a["act_at"].as_u64().unwrap() as u32, exec::Action::Market));
             v.gets = 0;
-            v.bx.sync_clock().await;
             exec::run_entry_limit(v, &plan, &st, a.get("max_sec").and_then(Value::as_f64).unwrap_or(600.0), false, false).await;
             v.hook = None;
             let g = st.lock().unwrap().clone();
@@ -191,13 +193,12 @@ async fn run(v: &mut Virt, fn_: &str, a: &Value) -> Value {
                    "taker_reason": g.taker_reason, "error": g.error, "repegs": g.repegs, "cancel_reason": g.cancel_reason})
         }
         "run_entry" | "run_exit" | "run_entry_wait" | "run_entry_stop" => {
-            // 원본 run_* 는 시작에 _clock_offset(시계 요청 1)을 한다 -- Rust 는 호출부 몫이라 여기서(같은 요청 열)
+            // 원본 run_* 는 시작에 _clock_offset(시계 요청 1)을 한다 -- Rust 는 exec 머리(Exchange::prepare)
             let plan = rtorder::watch::exec_plan_of(&a["plan"]).unwrap();
             let st: Shared = Arc::new(Mutex::new(ExecState::default()));
             if a.get("state0").and_then(|s| s.get("action")) == Some(&json!("market")) {
                 st.lock().unwrap().action = Some(exec::Action::Market);
             }
-            v.bx.sync_clock().await;
             match fn_ {
                 "run_entry" => exec::run_entry(v, &plan, &st).await,
                 "run_exit" => exec::run_exit(v, &plan, &st).await,

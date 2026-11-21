@@ -85,10 +85,6 @@ impl WatchIo for Io {
         self.calls.push(format!("cancel_exit_orders {s} {p}"));
         Ok(json!({"cancelled": 0, "errors": []}))
     }
-    async fn ensure_leverage(&mut self, s: &str, target: i64) -> Value {
-        self.calls.push(format!("ensure_leverage {s} {target}"));
-        json!({"changed": false, "from": target, "to": target, "reason": "이미 같음"})
-    }
 }
 
 fn q(kv: &[(&str, &str)]) -> Query {
@@ -120,8 +116,7 @@ fn entry_fill_arms_lines_then_stop_touch_exits_and_disarms() {
     let (mut desk, mut io, _d) = enter("ok", Fake { fill_after: 1, ..Default::default() }, false);
     assert_eq!(desk.w.entry["phase"], "filled_maker", "{:?}", desk.w.entry);
     assert!(desk.running.is_empty(), "작업이 끝나면 칸 이름을 뺀다(G12)");
-    assert_eq!(io.calls[0], "ensure_leverage ETHUSDC 10", "원본 run_entry 처럼 진입 전 레버리지");
-    assert!(io.calls[1].starts_with("place_bracket ETHUSDC LONG tp=2600"), "{:?}", io.calls);
+    assert!(io.calls[0].starts_with("place_bracket ETHUSDC LONG tp=2600"), "{:?}", io.calls);
     let b = desk.w.load()["ETHUSDC:LONG"].clone();
     assert_eq!((b["lines"].clone(), b["tp_resting"].clone(), b["sl_level"].clone()), (json!(true), json!(true), json!(2400.0)));
     // 1초 체결가가 손절선 2400 에 닿음 → 우리 익절·물타기 지정가 먼저 지우고(원본 clear_bracket 전체) → 청산(메이커) → 다 닫힘 → 무장 내림

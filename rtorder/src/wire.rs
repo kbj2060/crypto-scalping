@@ -130,8 +130,8 @@ impl<O: WatchIo, R: AccountRest, Q: Quotes, E: Exchange> WatchIo for Wired<O, R,
         self.planner.assemble_exit_plan(&mut self.quotes, &mut io, pside, fraction, true, asset, false, false, Some(only_symbol)).await.map_err(|e| e.0)
     }
     async fn run_exit(&mut self, plan: &Value, slot: &mut Obj) -> Result<(), String> {
-        let t = self.ops.now();
-        run_exit_into(&mut self.ex, plan, slot, || iso_utc(t)).await
+        let ops = &self.ops;
+        run_exit_into(&mut self.ex, plan, slot, || iso_utc(ops.now())).await // done_at = 끝난 시각(원본 now_iso)
     }
     async fn place_bracket(&mut self, spec: &Value, symbol: &str, pside: &str, strict: bool) -> Result<Value, String> {
         self.ops.place_bracket(spec, symbol, pside, strict).await
@@ -150,8 +150,5 @@ impl<O: WatchIo, R: AccountRest, Q: Quotes, E: Exchange> WatchIo for Wired<O, R,
     }
     fn alert(&mut self, msg: &str) {
         self.ops.alert(msg)
-    }
-    async fn ensure_leverage(&mut self, symbol: &str, target: i64) -> Value {
-        self.ops.ensure_leverage(symbol, target).await
     }
 }
