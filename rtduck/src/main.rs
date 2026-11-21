@@ -19,7 +19,8 @@
 //!               SEAL_STATUS(기본 data/live/rtduck/seal_status.json) · `--dry-run` · `--only venue/stream` · 🔴hot 정리(원천 행 지우기)는 RTDUCK_TAKEOVER=1 일 때만(그림자 lake 를 근거로 파이썬 hot 을 지우면 안 된다)
 //!   deribit     Deribit 옵션 체결·블록(상주 · 첫 단계 -- 체인·요약·대조는 아직) · DERIBIT_BT_DIR(기본 data/live/rtduck -- data/live 는 RTDUCK_TAKEOVER=1 일 때만):
 //!               deribit_options.duckdb(option_trades·gaps·…) · deribit_block_trades_state.json · 🔴재기동 틈 REST 백필은 RTDUCK_REST=1 일 때만 ·
-//!               RTDUCK_DERIBIT_WS · RTDUCK_DERIBIT_REST(시험 = 127.0.0.1) · RTDUCK_DERIBIT_FLUSH_S(시험만 -- 원본 20)
+//!               RTDUCK_DERIBIT_WS · RTDUCK_DERIBIT_REST(시험 = 127.0.0.1) · RTDUCK_DERIBIT_FLUSH_S(시험만 -- 원본 20) ·
+//!               10분 체인·요약(deribit_gex_state.json)·매시 대조 = RTDUCK_REST=1 일 때 · RTDUCK_DERIBIT_CHAIN=0 이면 끔(RTCOLLECT_TEST=1 이면 127.0.0.1 밖 요청 거절)
 //!   RTDUCK_ONCE=1 = 기다리지 않고 한 바퀴만 돌고 끝(시험·손 확인용). RTDUCK_OI_BASE = REST 주소(시험 = 127.0.0.1 가짜 서버).
 use rtduck::oi;
 use std::path::PathBuf;
@@ -430,6 +431,61 @@ async fn deribit_loop(db: PathBuf, state: PathBuf, ws_url: String, rest_base: St
         Ok((n, added))
     };
     let chans = d::channels();
+    if rest && env_s("RTDUCK_DERIBIT_CHAIN", "1") != "0" {
+        // 원본 chain_loop: 10분 체인·요약·deribit_gex_state.json + 매시 대조(history·헤지 다리·RFQ) -- 🔴REST 전용이라 RTDUCK_REST=1 일 때만.
+        //   원본은 체인 폴링 직전에 체결 버퍼를 비운다(옛 딜러 감마 몫) -- 지금 요약은 체결을 안 읽어 Rust 는 비우지 않는다.
+        let (db2, dir) = (db.clone(), db.parent().unwrap().to_path_buf());
+        std::thread::spawn(move || {
+            let agent = rtcollect::rest::agent(Duration::from_secs(90));
+            let mut cache = rtduck::deribit_gex::Cache::default();
+            let mut recon_at = 0.0;
+            loop {
+                let now = rtcollect::rest::wall_s();
+                let now_us = (now * 1e6) as i64;
+                let r = (|| -> Result<Vec<String>, String> {
+                    let _g = d::DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+                    let con = d::connect(&db2)?;
+                    rtduck::deribit_gex::poll_once(&con, &dir.join("deribit_gex_state.json"), now_us, now_us, d::local_offset_s(now as i64), &mut cache, &mut |u: &str, timeout: u64, ua: bool| {
+                        if std::env::var("RTCOLLECT_TEST").as_deref() == Ok("1") && !u.starts_with("http://127.0.0.1:") {
+                            return Err(format!("시험인데 바깥 주소 {u}"));
+                        }
+                        let mut rq = agent.get(u).config().timeout_global(Some(Duration::from_secs(timeout))).build();
+                        if ua {
+                            rq = rq.header("User-Agent", "Mozilla/5.0");
+                        }
+                        let mut r = rq.call().map_err(|e| format!("ConnectionError: {e}"))?;
+                        let st = r.status().as_u16();
+                        let mut b = vec![];
+                        std::io::Read::read_to_end(&mut r.body_mut().as_reader(), &mut b).map_err(|e| e.to_string())?;
+                        if st >= 400 { Err(format!("HTTPError: {st}")) } else { Ok(b) }
+                    })
+                })();
+                match r {
+                    Ok(log) => log.iter().for_each(|l| println!("[deribit_gex] {l}")),
+                    Err(e) => println!("체인 폴링 실패: {e}"),
+                }
+                if rtcollect::rest::wall_s() - recon_at >= 3600.0 {
+                    recon_at = rtcollect::rest::wall_s();
+                    let mut log = vec![];
+                    match d::reconcile(&db2, (recon_at * 1000.0) as i64, &mut |u: &str| {
+                        if std::env::var("RTCOLLECT_TEST").as_deref() == Ok("1") && !u.starts_with("http://127.0.0.1:") {
+                            return Err(format!("시험인데 바깥 주소 {u}"));
+                        }
+                        let mut r = agent.get(u).config().timeout_global(Some(Duration::from_secs(30))).build().call().map_err(|e| format!("ConnectionError: {e}"))?;
+                        let st = r.status().as_u16();
+                        let mut b = vec![];
+                        std::io::Read::read_to_end(&mut r.body_mut().as_reader(), &mut b).map_err(|e| e.to_string())?;
+                        if st >= 400 { Err(format!("HTTPError: {st}")) } else { Ok(b) }
+                    }, &mut |l| log.push(l)) {
+                        Ok(m) => println!("대조 {}", serde_json::Value::Object(m)),
+                        Err(e) => println!("대조 실패: {e}"),
+                    }
+                    log.iter().for_each(|l| println!("{l}"));
+                }
+                std::thread::sleep(Duration::from_secs_f64(d::next_chain_wait(rtcollect::rest::wall_s())));
+            }
+        });
+    }
     loop {
         let r: Result<(), String> = async {
             let (mut ws, _) = tokio_tungstenite::connect_async(ws_url.as_str()).await.map_err(|e| format!("OSError: {e}"))?;

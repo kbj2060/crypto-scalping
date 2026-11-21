@@ -4,7 +4,7 @@
 //!   그래서 hourly_doi 는 체인 표가 없으면 {}(원본도 표가 없으면 {}) -- 🔴체인 표가 있는 DB 를 가리키면 원본은 ΔOI 를 내고 Rust 는 None(아직).
 use duckdb::{params, Connection};
 use serde_json::{json, Map, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 pub const WS: &str = "wss://www.deribit.com/ws/api/v2";
@@ -67,7 +67,7 @@ pub fn parse_instrument(name: &str) -> Option<(f64, f64, bool)> {
     Some((strike, (days_from_civil(y, mon, day) * 86_400 + 8 * 3600) as f64, t == "C"))
 }
 
-fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+pub fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = y.div_euclid(400);
     let yoe = y - era * 400;
@@ -139,6 +139,9 @@ pub fn row(t: &Value) -> Result<Vec<duckdb::types::Value>, String> {
             int(g("block_trade_leg_count"))?, g("block_rfq_id").map_or(D::Null, |v| D::Text(s(v))), txt(g("combo_id")), txt(g("combo_trade_id"))])
 }
 
+/// 한 프로세스 안 DuckDB 파일 잠금(원본 _DB_LOCK + Python duckdb 의 인스턴스 공유 몫) -- 체결 쓰기·체인 폴링·대조가 같은 파일을 동시에 열지 않게.
+pub static DB_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// `_connect`(표 넷 -- 글자 그대로) · 잠겨 있으면 2초씩 15번.
 pub fn connect(db: &Path) -> Result<Connection, String> {
     if let Some(d) = db.parent() {
@@ -148,6 +151,8 @@ pub fn connect(db: &Path) -> Result<Connection, String> {
     for i in 0..15 {
         match Connection::open(db) {
             Ok(con) => {
+                // 🔴확장 자동 불러오기 끔: 개발기 ~/.duckdb 에 ICU 가 깔려 있으면 TIMESTAMP→TIMESTAMPTZ 변환이 지역 시각(KST)으로 바뀐다 -- 늘 UTC 로
+                con.execute_batch("SET autoload_known_extensions=false; SET autoinstall_known_extensions=false;").map_err(|e| e.to_string())?;
                 con.execute_batch("CREATE TABLE IF NOT EXISTS option_trades (
         ts_ms BIGINT, trade_id VARCHAR PRIMARY KEY, trade_seq BIGINT, instrument_name VARCHAR,
         direction VARCHAR, amount DOUBLE, price DOUBLE, mark_price DOUBLE, index_price DOUBLE,
@@ -384,7 +389,7 @@ fn group_blocks(rows: &[Leg], fut: &BTreeMap<String, Vec<Fut>>) -> Vec<Value> {
 }
 
 /// `hourly_flow(rows, doi)` -- 코인별 정시 버킷 25개
-fn hourly_flow(rows: &[(i64, String, String, f64, Option<f64>, Option<f64>, Option<String>, bool)], now_s: f64) -> Value {
+fn hourly_flow(rows: &[(i64, String, String, f64, Option<f64>, Option<f64>, Option<String>, bool)], now_s: f64, doi: &HashMap<(String, i64), f64>) -> Value {
     let now_h = (now_s / 3600.0).floor() as i64 * 3_600_000;
     let hours: Vec<i64> = (0..=24).rev().map(|i| now_h - i * 3_600_000).collect();
     const K: [&str; 8] = ["cb", "cs", "pb", "ps", "dlt", "vg", "vgb", "liq"];
@@ -421,7 +426,7 @@ fn hourly_flow(rows: &[(i64, String, String, f64, Option<f64>, Option<f64>, Opti
             for (i, k) in K.iter().enumerate() {
                 o.insert((*k).into(), json!(pyround(b[i], 3)));
             }
-            o.insert("doi".into(), Value::Null); // hourly_doi = {}(체인 표 없음 -- 머리 설명)
+            o.insert("doi".into(), doi.get(&(c.to_string(), *h)).map_or(Value::Null, |x| json!(pyround(*x, 3))));
             Value::Object(o)
         }).collect();
         m.insert(c.into(), Value::Array(v));
@@ -431,6 +436,34 @@ fn hourly_flow(rows: &[(i64, String, String, f64, Option<f64>, Option<f64>, Opti
 
 /// `_write(rows, gaps)` + 상태 JSON. 반환 = 새로 들어간 행 수.
 pub fn write(db: &Path, state: &Path, rows: &[Vec<duckdb::types::Value>], gaps: &[(i64, i64, String, Option<i64>)], now_s: f64, iso_now: &str) -> Result<usize, String> {
+    write_with(db, state, rows, gaps, now_s, iso_now, (now_s * 1e6) as i64)
+}
+
+/// `hourly_doi(con)` -- 코인·정시별 ΔOI(그 시각 첫 체인 스냅숏 → 다음 시각 첫 스냅숏, 두 스냅숏에 다 있는 종목만). 원본 SQL 의 date_trunc·now() - INTERVAL(ICU)을
+/// epoch µs 산수로(KST·UTC 정시 같음) · 원본처럼 스냅숏이 바뀔 때만 다시 센다(프로세스 캐시) · 표가 없으면 {}.
+fn hourly_doi(con: &Connection, db_now_us: i64) -> HashMap<(String, i64), f64> {
+    static DOI: std::sync::Mutex<Option<(Option<i64>, HashMap<(String, i64), f64>)>> = std::sync::Mutex::new(None);
+    let Ok(key) = con.query_row("SELECT epoch_us(max(recorded_at_utc)) FROM option_chain_snapshot", [], |r| r.get::<_, Option<i64>>(0)) else { return HashMap::new() };
+    let mut g = DOI.lock().unwrap();
+    let cached = g.get_or_insert((None, HashMap::new()));
+    if key.is_none() || key == cached.0 {
+        return cached.1.clone();
+    }
+    let rows: Vec<(String, i64, f64)> = con.prepare("
+        WITH s AS (SELECT epoch_us(recorded_at_utc) t, currency, instrument_name, open_interest FROM option_chain_snapshot
+                   WHERE epoch_us(recorded_at_utc) >= ?),
+             hs AS (SELECT currency, t // 3600000000 h, min(t) t0 FROM s GROUP BY 1, 2),
+             a AS (SELECT s.currency, hs.h, s.instrument_name, s.open_interest oi FROM s JOIN hs ON s.currency = hs.currency AND s.t = hs.t0)
+        SELECT a.currency, a.h * 3600000, sum(b.oi - a.oi) FROM a JOIN a b
+          ON a.currency = b.currency AND a.instrument_name = b.instrument_name AND b.h = a.h + 1
+        GROUP BY 1, 2").and_then(|mut st| st.query_map([db_now_us - 26 * 3_600_000_000], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect()).unwrap_or_default();
+    *cached = (key, rows.into_iter().map(|(c, h, d)| ((c, h), d)).collect());
+    cached.1.clone()
+}
+
+/// `write` 에 DuckDB now()(ΔOI 창) 를 따로 준다(시험 -- 원본은 체인 창을 DuckDB 의 now() 로, 상태 창을 time.time() 으로 잰다).
+pub fn write_with(db: &Path, state: &Path, rows: &[Vec<duckdb::types::Value>], gaps: &[(i64, i64, String, Option<i64>)], now_s: f64, iso_now: &str, db_now_us: i64) -> Result<usize, String> {
+    let _g = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut con = connect(db)?;
     let cnt = |c: &Connection| c.query_row("SELECT count(*) FROM option_trades", [], |r| r.get::<_, i64>(0)).map_err(|e| e.to_string());
     let before = cnt(&con)?;
@@ -467,8 +500,9 @@ pub fn write(db: &Path, state: &Path, rows: &[Vec<duckdb::types::Value>], gaps: 
         "SELECT ts_ms, instrument_name, direction, amount, iv, index_price, liquidation, is_block FROM option_trades WHERE ts_ms >= ?").and_then(|mut s| {
         s.query_map([fr0], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get::<_, Option<bool>>(7)?.unwrap_or(false))))?.collect()
     }).map_err(|e| e.to_string())?;
+    let doi = hourly_doi(&con, db_now_us);
     drop(con);
-    let flow = hourly_flow(&flow_rows, now_s);
+    let flow = hourly_flow(&flow_rows, now_s, &doi);
     let mut bsum = Map::new();
     for (c, v) in &by_coin {
         // 원본: round(sum(b.get(...) or 0 ...), 3) -- 블록이 없거나 모두 구조 칸이 없으면 정수 0
@@ -502,6 +536,7 @@ pub fn write(db: &Path, state: &Path, rows: &[Vec<duckdb::types::Value>], gaps: 
 
 /// `last_ts()` -- 목록별 마지막 저장 시각
 pub fn last_ts(db: &Path) -> Result<Vec<Option<i64>>, String> {
+    let _g = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let con = connect(db)?;
     API_CURRENCIES.iter().map(|api| {
         let pat = if *api == "USDC" { "%_USDC-%".to_string() } else { format!("{api}-%") };
@@ -561,4 +596,174 @@ pub fn iso_utc(t: f64) -> String {
     let sec = s.rem_euclid(86_400);
     let f = if frac != 0 { format!(".{frac:06}") } else { String::new() };
     format!("{:04}-{m:02}-{dd:02}T{:02}:{:02}:{:02}{f}+00:00", yoe + era * 400 + i64::from(m <= 2), sec / 3600, sec / 60 % 60, sec % 60)
+}
+
+pub const HIST: &str = "https://history.deribit.com/api/v2/public/";
+pub const API_PUB: &str = "https://www.deribit.com/api/v2/public/";
+const RECON_LOOKBACK_MS: i64 = 3 * 3600 * 1000;
+
+fn fut_api(coin: &str) -> &'static str {
+    match coin {
+        "ETH" => "ETH",
+        "BTC" => "BTC",
+        _ => "USDC",
+    }
+}
+
+/// `_get(base, method, **params)` → result(timeout 30)
+fn get_r(get: &mut dyn FnMut(&str) -> Result<Vec<u8>, String>, base: &str, method: &str, params: &[(&str, String)]) -> Result<Value, String> {
+    let u = format!("{base}{method}?{}", params.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("&"));
+    let v: Value = serde_json::from_slice(&get(&u)?).map_err(|e| format!("JSONDecodeError: {e}"))?;
+    v.get("result").cloned().ok_or_else(|| "KeyError: 'result'".into())
+}
+
+/// `reconcile()`(매시) -- 지난 3시간 history 체결(빠진 행·강제청산 표시) · 다리 수가 모자란 블록의 선물 헤지 다리 · 블록 RFQ. 반환 = 원본 사전.
+pub fn reconcile(db: &Path, now_ms: i64, get: &mut dyn FnMut(&str) -> Result<Vec<u8>, String>, log: &mut dyn FnMut(String)) -> Result<Map<String, Value>, String> {
+    use duckdb::types::Value as D;
+    let since = now_ms - RECON_LOOKBACK_MS;
+    let mut rows: Vec<Vec<D>> = vec![];
+    for api in API_CURRENCIES {
+        let mut t = since;
+        loop {
+            let res = get_r(get, HIST, "get_last_trades_by_currency_and_time", &[("currency", api.into()), ("kind", "option".into()), ("start_timestamp", t.to_string()),
+                ("end_timestamp", now_ms.to_string()), ("count", "1000".into()), ("sorting", "asc".into()), ("include_old", "true".into())])?;
+            let tr = res.get("trades").and_then(Value::as_array).cloned().unwrap_or_default();
+            for x in &tr {
+                if coin_of(x["instrument_name"].as_str().ok_or("TypeError")?).is_some() {
+                    rows.push(row(x)?);
+                }
+            }
+            let nxt = tr.iter().filter_map(|x| x["timestamp"].as_i64()).max().unwrap_or(t);
+            if !res.get("has_more").is_some_and(rtcollect_truthy) || nxt <= t {
+                break;
+            }
+            t = nxt;
+        }
+    }
+    let liq: Vec<(String, String)> = rows.iter().filter_map(|r| match (&r[11], &r[1]) {
+        (D::Text(l), D::Text(id)) if !l.is_empty() => Some((l.clone(), id.clone())),
+        _ => None,
+    }).collect();
+    let (need, last_rfq): (Vec<(Option<String>, i64, String)>, HashMap<String, i64>) = {
+        let _g = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut con = connect(db)?;
+        let tx = con.transaction().map_err(|e| e.to_string())?;
+        {
+            let mut st = tx.prepare(&format!("INSERT OR IGNORE INTO option_trades VALUES ({})", vec!["?"; COLS.len()].join(","))).map_err(|e| e.to_string())?;
+            for r in &rows {
+                st.execute(duckdb::params_from_iter(r.iter())).map_err(|e| e.to_string())?;
+            }
+            for (l, id) in &liq {
+                tx.execute("UPDATE option_trades SET liquidation = ? WHERE trade_id = ? AND liquidation IS NULL", params![l, id]).map_err(|e| e.to_string())?;
+            }
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+        let need = con.prepare("SELECT block_trade_id, min(ts_ms), any_value(instrument_name) FROM option_trades
+                                  WHERE is_block AND ts_ms >= ? GROUP BY 1
+                                  HAVING max(block_trade_leg_count) > count(*)
+                                     AND block_trade_id NOT IN (SELECT block_trade_id FROM block_future_legs)")
+            .and_then(|mut s| s.query_map([since], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect()).map_err(|e| e.to_string())?;
+        let last: Vec<(String, Option<i64>)> = con.prepare("SELECT api, max(ts_ms) FROM block_rfq_trades GROUP BY 1").and_then(|mut s| s.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()).map_err(|e| e.to_string())?;
+        (need, last.into_iter().filter_map(|(a, t)| t.map(|t| (a, t))).collect())
+    };
+    let mut fut: Vec<Vec<D>> = vec![];
+    for (bid, ts, inst) in &need {
+        let base = if now_ms - ts < 20 * 3600 * 1000 { API_PUB } else { HIST };
+        let coin = coin_of(inst).ok_or("KeyError: None")?;
+        let res = get_r(get, base, "get_last_trades_by_currency_and_time", &[("currency", fut_api(coin).into()), ("kind", "future".into()), ("start_timestamp", ts.to_string()),
+            ("end_timestamp", ts.to_string()), ("count", "100".into())])?;
+        for x in res.get("trades").and_then(Value::as_array).cloned().unwrap_or_default() {
+            if x.get("block_trade_id").and_then(Value::as_str) == bid.as_deref() && bid.is_some() {
+                let s = |v: &Value| match v { Value::String(s) => s.clone(), o => o.to_string() };
+                fut.push(vec![D::Text(s(&x["trade_id"])), D::BigInt(x["timestamp"].as_i64().ok_or("ValueError: int")?), D::Text(x["instrument_name"].as_str().ok_or("TypeError")?.into()),
+                              D::Text(x["direction"].as_str().ok_or("TypeError")?.into()), D::Double(fnum(&x["amount"])?), D::Double(fnum(&x["price"])?),
+                              x.get("index_price").and_then(Value::as_f64).map_or(D::Null, D::Double), D::Text(bid.clone().unwrap())]);
+            }
+        }
+    }
+    let mut rfq: Vec<Vec<D>> = vec![];
+    for api in API_CURRENCIES {
+        let mut cont: Option<String> = None;
+        let r = (|| -> Result<(), String> {
+            for _ in 0..20 {
+                let mut p = vec![("currency", api.to_string()), ("count", "50".to_string())];
+                if let Some(c) = &cont {
+                    p.push(("continuation", c.clone()));
+                }
+                let r = get_r(get, API_PUB, "get_block_rfq_trades", &p)?;
+                let (empty_a, empty_o) = (json!([]), json!({}));
+                let got = r.get("block_rfqs").and_then(Value::as_array).cloned().unwrap_or_default();
+                for b in &got {
+                    let s = |v: &Value| match v { Value::String(s) => s.clone(), o => o.to_string() };
+                    fn nul(v: Option<&Value>) -> Option<&Value> {
+                        v.filter(|x| !x.is_null())
+                    }
+                    let dbl = |v: Option<&Value>| nul(v).map_or(Ok(D::Null), |x| fnum(x).map(D::Double));
+                    let txt = |v: Option<&Value>| nul(v).map_or(D::Null, |x| D::Text(s(x)));
+                    let tr0 = b.get("trades").and_then(Value::as_array).and_then(|a| a.first()).cloned().unwrap_or(json!({}));
+                    let truthy = |v: Option<&Value>| v.is_some_and(rtcollect_truthy);
+                    rfq.push(vec![D::Text(s(&b["id"])), D::BigInt(b["timestamp"].as_i64().ok_or("ValueError: int")?), D::Text(api.into()), txt(b.get("direction")), dbl(b.get("amount"))?,
+                                  dbl(tr0.get("price"))?, dbl(b.get("mark_price"))?, txt(b.get("combo_id")),
+                                  D::Text(rtcollect::py_dumps_default(if truthy(b.get("legs")) { &b["legs"] } else { &empty_a })),
+                                  if truthy(b.get("hedge")) { D::Text(rtcollect::py_dumps_default(&b["hedge"])) } else { D::Null },
+                                  D::Text(rtcollect::py_dumps_default(if truthy(b.get("index_prices")) { &b["index_prices"] } else { &empty_o }))]);
+                }
+                cont = r.get("continuation").and_then(|c| match c { Value::String(s) if !s.is_empty() => Some(s.clone()), Value::Number(n) => Some(n.to_string()), _ => None });
+                let mn = got.iter().filter_map(|b| b["timestamp"].as_i64()).min();
+                if cont.is_none() || got.is_empty() || mn.is_some_and(|m| m <= last_rfq.get(api).copied().unwrap_or(0)) {
+                    break;
+                }
+            }
+            Ok(())
+        })();
+        if let Err(e) = r {
+            log(format!("  RFQ {api} 건너뜀: {e}"));
+        }
+    }
+    if !fut.is_empty() || !rfq.is_empty() {
+        let _g = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut con = connect(db)?;
+        let tx = con.transaction().map_err(|e| e.to_string())?;
+        for f in &fut {
+            tx.execute("INSERT OR IGNORE INTO block_future_legs VALUES (?,?,?,?,?,?,?,?)", duckdb::params_from_iter(f.iter())).map_err(|e| e.to_string())?;
+        }
+        for r in &rfq {
+            tx.execute("INSERT OR IGNORE INTO block_rfq_trades VALUES (?,?,?,?,?,?,?,?,?,?,?)", duckdb::params_from_iter(r.iter())).map_err(|e| e.to_string())?;
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+    }
+    let mut m = Map::new();
+    m.insert("체결".into(), json!(rows.len()));
+    m.insert("강제청산".into(), json!(liq.len()));
+    m.insert("헤지 다리".into(), json!(fut.len()));
+    m.insert("RFQ".into(), json!(rfq.len()));
+    Ok(m)
+}
+
+/// 지역 시각 오프셋(초) -- 원본 Python duckdb 는 TIMESTAMPTZ 를 세션 TimeZone(= 시스템 지역 시각)으로 돌려준다(서버 KST +09:00).
+pub fn local_offset_s(t: i64) -> i64 {
+    #[repr(C)]
+    struct Tm {
+        sec: i32, min: i32, hour: i32, mday: i32, mon: i32, year: i32, wday: i32, yday: i32, isdst: i32,
+        gmtoff: i64,
+        zone: *const i8,
+    }
+    extern "C" {
+        fn tzset();
+        fn localtime_r(t: *const i64, tm: *mut Tm) -> *mut Tm;
+    }
+    let mut tm = Tm { sec: 0, min: 0, hour: 0, mday: 0, mon: 0, year: 0, wday: 0, yday: 0, isdst: 0, gmtoff: 0, zone: std::ptr::null() };
+    unsafe {
+        tzset();
+        if localtime_r(&t, &mut tm).is_null() {
+            return 0;
+        }
+    }
+    tm.gmtoff
+}
+
+/// `next_chain_wait`: 정시(:00·:10 …) + 5초 · 30초보다 짧으면 한 칸 건너뜀
+pub fn next_chain_wait(now: f64) -> f64 {
+    let w = 600.0 - now.rem_euclid(600.0) + 5.0;
+    if w < 30.0 { w + 600.0 } else { w }
 }
