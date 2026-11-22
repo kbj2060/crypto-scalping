@@ -930,7 +930,8 @@ pub fn run(sym: &str, dd: &Path, tape: &Path, db: &Path, now: &dyn Fn() -> f64, 
 
 /// 정답지 재생(시험·예제 공용 -- 원본 정답지 생성기와 같은 바깥): 테이프 SQLite 를 만들고, 시계 = 처음 한 번은 «첫 시 + 26시간»(시작 시 계산),
 /// 뒤로는 «방금 넘긴 거래소 시각 + 10초» · 잠 = 멈춤(마지막 시 파일 끝). 결과 = out/{ob5m,bookdepth}.sqlite.
-pub fn replay_fixture(fix: &Path, out: &Path) {
+/// `dd`·`fixed_now` = 다른 시 파일 폴더 · 멈춘 시계(실행 파일의 RTCOLLECT_FAKE_NOW 와 같은 바깥 -- replay_book.py 재생 대조).
+pub fn replay_fixture(fix: &Path, out: &Path, dd: Option<&Path>, fixed_now: Option<f64>) {
     let meta: Value = serde_json::from_str(&std::fs::read_to_string(fix.join("ob5m_tape.json")).unwrap()).unwrap();
     let (h0, nh) = (meta["h0"].as_i64().unwrap(), meta["nh"].as_i64().unwrap());
     std::fs::create_dir_all(out).unwrap();
@@ -950,10 +951,13 @@ pub fn replay_fixture(fix: &Path, out: &Path) {
         con.execute("INSERT INTO gaps VALUES ('ethusdt', ?, ?, 'ws_reconnect')", params![(h0 + 9) * 3_600_000 + 100_000, (h0 + 9) * 3_600_000 + 130_000]).unwrap();
         con.execute_batch("COMMIT").unwrap();
     }
-    let dd = fix.join("ob5m").join("ETHUSDT");
+    let dd = dd.map_or_else(|| fix.join("ob5m").join("ETHUSDT"), Path::to_path_buf);
     for which in ["ob5m", "bookdepth"] {
         let (first, last_t) = (std::cell::Cell::new(true), std::cell::Cell::new(0i64));
         let now = || {
+            if let Some(f) = fixed_now {
+                return f;
+            }
             if first.replace(false) {
                 ((h0 + 26) * 3600) as f64 + 5.0
             } else {

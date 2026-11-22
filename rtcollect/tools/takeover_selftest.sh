@@ -24,6 +24,7 @@ X
 cat > "$R/tmp/rtbin/rtcollect" <<'X'
 #!/bin/bash
 # 한 회차 종류(국채선물): 그림자 DB 를 파이썬 것과 같게 만들고 끝(진짜 Rust 한 회차 흉내) · 받은 인자를 적는다
+# RTCOLLECT_FAKE_NOW 를 아는 실행 파일인 척(replay_book.py 가 이 글자가 없는 옛 실행 파일을 거른다)
 if [ "$RTCOLLECT_KIND" = treasury_futures ]; then echo "once $*" >> $R/order.log; cp "$R/data/hot/treasury_futures.sqlite" "$R/data/hot/rtcollect/treasury_futures.sqlite"; exit 0; fi
 trap 'echo "rs_term takeover=${RTCOLLECT_TAKEOVER:-0}" >> $R/order.log; exit 0' TERM
 echo "rs_start takeover=${RTCOLLECT_TAKEOVER:-0} db=${TAPE_DB_PATH:-shadow} rest=${RTCOLLECT_REST:-0} sym=$TAPE_SYMBOL" >> $R/order.log
