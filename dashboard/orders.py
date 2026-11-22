@@ -25,7 +25,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from aiohttp import ClientSession, ClientTimeout, TCPConnector, WSMsgType, web
+from aiohttp import ClientError, ClientSession, ClientTimeout, TCPConnector, WSMsgType, web
+from yarl import URL
 
 from dashboard.trend_rule import trend_payload
 from dashboard.coin_flow import FOOTPRINT_BAR_SECONDS
@@ -601,6 +602,52 @@ def sizing_cap() -> dict[str, Any]:
             "window": SIZING_CAP_WINDOW, "mult": SIZING_CAP_MULT,
             "median_notional_usdt": round(median, 2),
             "cap_notional_usdt": round(SIZING_CAP_MULT * median, 2)}
+
+
+# 2026-11-22 Rust 주문 전환 스위치(rtorder/SHADOW.md §9): LIVE_DIR/rtorder_live.on 이 있으면 주문·계좌 14주소를 rtorder 문으로 그대로 넘기고(rtorder_door)
+#   여기 감시 틱·사용자 스트림·시작 정리·대기 복구는 그 회차를 건너뛴다(요청 0 · 파일 쓰기 0). 없으면 지금 동작 그대로(존재 확인 한 번만 늘어남) · 재시작 없이 회차마다 본다.
+#   넘기는 규칙 = rtserve/src/order.rs(rtorder/route.rs ROUTES 와 같은 14개 · 같은 머리 · 문이 닫혀 있으면 502 rtorder_unavailable).
+RTORDER_PATHS = frozenset((
+    "/api/binance-account", "/api/manual-entry/preview", "/api/manual-entry/submit", "/api/manual-entry/status",
+    "/api/manual-entry/wait-action", "/api/manual-entry/cancel", "/api/manual-entry/limit-amend",
+    "/api/manual-bracket/disarm", "/api/manual-bracket/rearm", "/api/manual-bracket/tp", "/api/manual-bracket/tp-legs",
+    "/api/manual-bracket/add", "/api/manual-bracket/modify", "/api/manual-exit/submit"))
+
+
+def _loopback_door(v: str) -> str | None:
+    """RTORDER_DOOR(기본 127.0.0.1:8791) -- 루프백 IP:포트만 받는다. 아니면 None(넘기는 요청은 전부 502)."""
+    import ipaddress
+    try:
+        host, port = v.strip().rsplit(":", 1)
+        ok = ipaddress.ip_address(host.strip("[]")).is_loopback and 0 < int(port) < 65536
+    except ValueError:
+        ok = False
+    if not ok:
+        print(f"RTORDER_DOOR 거부(루프백 IP:포트만): {v!r}", flush=True)
+    return v.strip() if ok else None
+
+
+RTORDER_DOOR = _loopback_door(os.getenv("RTORDER_DOOR", "127.0.0.1:8791"))
+
+
+def rtorder_on() -> bool:
+    return (LIVE_DIR / "rtorder_live.on").exists()
+
+
+_rtorder_mode: list = [None, False]   # [(mtime_ns, ino, size), 내용이 live 인가]
+
+
+def rtorder_live() -> bool:
+    """표식 내용이 정확히 `live` 일 때만 참 -- `switching`·빈 파일·모르는 글자·못 읽음 = 거짓(안전 쪽: 주문 POST 를 안 넘긴다). 파일이 바뀔 때만 다시 읽는다."""
+    p = LIVE_DIR / "rtorder_live.on"
+    try:
+        s = p.stat()
+        key = (s.st_mtime_ns, s.st_ino, s.st_size)
+        if key != _rtorder_mode[0]:
+            _rtorder_mode[:] = [key, p.read_text("utf-8").strip() == "live"]
+    except (OSError, UnicodeDecodeError):
+        return False
+    return _rtorder_mode[1]
 
 
 USER_STREAM_WS = "wss://fstream.binance.com/private/ws/"   # 2026-11-09 공식 문서(caas user-data-streams): /private 를 빼면 계좌 알림이 안 온다
@@ -1317,8 +1364,15 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             bracket_save(bracket_merge(bracket_load(), st, seen_at))
 
     async def watch_brackets(app: web.Application) -> None:
+        was_on = False
         while True:
             await nap(2.0)   # 2026-11-09 체결 알림이 오면 2초를 안 기다린다(익절 체결 → 남은 손절 정리 · 지정가 체결 뒤 감시)
+            if rtorder_on():   # 2026-11-22 rtorder 가 감시한다 -- 이 회차 건너뜀(겹치면 두 번 청산)
+                was_on = True
+                continue
+            if was_on:   # 되돌린 뒤 첫 틱은 계좌를 새로 읽는다 -- 표식 동안 캐시는 원장 주기(5분) 값이라 rtorder 가 연 포지션이 안 보일 수 있다
+                was_on = False
+                binance_account_cache["ts"] = 0.0
             try:
                 await shadow_bracket_tick()
             except asyncio.CancelledError:
@@ -2724,7 +2778,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         print(f"wait cleanup: {r} limit_recover: {recs}", flush=True)
 
     async def start_wait_cleanup(app: web.Application) -> None:
-        if exec_enabled():
+        if exec_enabled() and not rtorder_on():   # 2026-11-22 표식이 있으면 시작 정리·대기 복구는 rtorder 몫
             refresh_tasks["wait_cleanup"] = asyncio.create_task(wait_cleanup())
 
     # ── 2026-11-09 체결 알림(바이낸스 사용자 데이터 스트림) ─────────────────────────────
@@ -2757,6 +2811,9 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
     async def _user_stream_run(ws_session, wait: float) -> None:
         while True:
             t_conn = None
+            if rtorder_on():   # 2026-11-22 rtorder 가 스트림을 쥔다 -- listenKey 도 안 부른다
+                await asyncio.sleep(1.0)
+                continue
             try:
                 if ban_guard.ban_remaining() > 0:
                     await asyncio.sleep(ban_guard.ban_remaining() + 1)
@@ -2772,6 +2829,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                     t_conn = kept = time.monotonic()
                     first = True
                     while True:
+                        if rtorder_on():   # 2026-11-22 붙은 채 표식이 생기면 끊는다(연장 PUT·알림 처리 없이)
+                            break
                         if time.monotonic() - kept > USER_STREAM_KEEPALIVE_S:
                             kept = time.monotonic()
                             try:
@@ -2782,8 +2841,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                             msg = await ws.receive(timeout=60)
                         except asyncio.TimeoutError:
                             continue
-                        if msg.type != WSMsgType.TEXT:
-                            break   # CLOSE·ERROR -- 거래소가 24시간마다 끊는다 → 다시 연결
+                        if msg.type != WSMsgType.TEXT or rtorder_on():
+                            break   # CLOSE·ERROR -- 거래소가 24시간마다 끊는다 → 다시 연결 · 2026-11-22 표식이 생겼으면 받은 알림을 처리하지 않고 끊는다
                         try:
                             data = json.loads(msg.data)
                             kind = user_event_kind(data)
@@ -2821,6 +2880,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             await acct_dirty.wait()
             await asyncio.sleep(0.3)   # 한 체결의 알림 두세 개(ORDER_TRADE_UPDATE·ACCOUNT_UPDATE·부분 체결)를 조회 한 번으로
             acct_dirty.clear()
+            if rtorder_on():   # 2026-11-22 계좌 갱신·seq 는 rtorder 몫
+                continue
             # 2026-11-09 사용자 «매매 리스트는 바로인데 순자산·오늘 수익률은 느리다»: 오늘 손익 = income 실현 + 미실현 변화(app.js) 인데 income 은 60초마다만 다시 물었다 --
             #   닫히는 순간 미실현은 0 이 되고 실현은 최대 60초 늦게 들어와 오늘 손익이 그만큼 빠져 보였다. 체결 알림 재조회는 income 도 같이(무게 30, 최소 3초 간격).
             #   ponytail: 거래소 income 기록이 체결보다 늦게 잡히면 그 몫은 다음 60초 갱신에 -- 실측으로 늦으면 몇 초 뒤 한 번 더 묻기를 더한다.
@@ -2861,10 +2922,56 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         async with manual_order_lock:
             return await handler(request)
 
+    @web.middleware
+    async def rtorder_door(request: web.Request, handler) -> web.StreamResponse:
+        """2026-11-22 표식이 있으면 14주소를 rtorder 문으로(rtserve/src/order.rs proxy 와 같은 규칙) -- 메서드·경로·쿼리 원문·본문 · User-Agent·CF-Connecting-IP·Content-Type
+        · X-Forwarded-For(없으면 접속 주소) → 상태·Content-Type·Cache-Control·Allow·본문 그대로. 접수 기록은 rtorder 가 적는다(order_request_log 는 건너뜀)."""
+        if request.path not in RTORDER_PATHS or not rtorder_on():
+            return await handler(request)
+        if request.method == "POST" and not rtorder_live():   # 전환 중(내용 switching) -- 그림자 rtorder 가 «성공처럼» 답하지 않게 주문 POST 는 막는다 · 조회 GET 은 넘긴다
+            return web.json_response({"ok": False, "error": "rtorder_switching"}, status=503)
+        unavailable = web.json_response({"ok": False, "error": "rtorder_unavailable"}, status=502)
+        if RTORDER_DOOR is None:
+            return unavailable
+        qs = request.rel_url.raw_query_string
+        h = {k: request.headers[k] for k in ("User-Agent", "CF-Connecting-IP", "Content-Type") if k in request.headers}
+        h["X-Forwarded-For"] = request.headers.get("X-Forwarded-For") or request.remote or ""
+        h["Connection"] = "close"   # rtserve 와 같다 -- rtorder 가 다시 떠도 죽은 keep-alive 연결을 다시 쓰지 않게
+        try:
+            async with binance_session().request(
+                    request.method, URL(f"http://{RTORDER_DOOR}{request.path}" + (f"?{qs}" if qs else ""), encoded=True),
+                    data=await request.read(), headers=h, skip_auto_headers=("User-Agent", "Content-Type"),
+                    allow_redirects=False, timeout=ClientTimeout(total=15, connect=2)) as r:   # rtorder 는 칸을 5초까지 기다린다 -- 그보다 길게
+                body = await r.read()
+                out = {k: r.headers[k] for k in ("Content-Type", "Cache-Control", "Allow") if k in r.headers}
+                return web.Response(status=r.status, reason=r.reason, body=body, headers=out)
+        except (ClientError, asyncio.TimeoutError):
+            return unavailable
+
+    door_acct: dict[str, Any] = {"seq": None, "task": None}
+
+    async def door_acct_read() -> None:
+        try:
+            async with binance_session().request("GET", f"http://{RTORDER_DOOR}/internal/acct", headers={"Connection": "close"},
+                                             timeout=ClientTimeout(total=1.5, connect=0.5)) as r:
+                if r.status == 200:
+                    door_acct["seq"] = int((await r.json(content_type=None))["seq"])
+        except Exception:  # noqa: BLE001 -- 못 읽으면 마지막 값(rtserve 와 같다)
+            pass
+
+    def acct_seq() -> int:
+        """SSE 가 1초마다 부른다. 표식이 있으면 rtorder /internal/acct 의 seq(부를 때마다 뒤에서 한 번 읽음 · 못 읽었으면 마지막 값)."""
+        if not rtorder_on():
+            return user_stream["seq"]
+        if RTORDER_DOOR and (door_acct["task"] is None or door_acct["task"].done()):
+            door_acct["task"] = asyncio.create_task(door_acct_read())
+        return user_stream["seq"] if door_acct["seq"] is None else door_acct["seq"]
+
     return SimpleNamespace(
         keep_trip_ledger=keep_trip_ledger,
         start_user_stream=start_user_stream,
-        acct_seq=lambda: user_stream["seq"],   # SSE 가 화면에 싣는다 -- 오르면 화면이 계좌를 바로 받는다
+        acct_seq=acct_seq,   # SSE 가 화면에 싣는다 -- 오르면 화면이 계좌를 바로 받는다
+        rtorder_door=rtorder_door,   # 2026-11-22 server.py 가 미들웨어 맨 안쪽에 붙인다
         start_bracket_watcher=start_bracket_watcher,
         bracket_tick=bracket_tick,
         shadow_bracket_tick=shadow_bracket_tick,   # 2026-11-21 감시 루프가 부르는 틱(그림자 기록 틱으로 감쌈) -- 시험용   # 시험이 감시 한 틱을 직접 돌린다(test_chart_lines_entry)

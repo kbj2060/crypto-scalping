@@ -1371,7 +1371,7 @@ def make_app() -> web.Application:
 
     @web.middleware
     async def order_request_log(request: web.Request, handler: Any) -> web.StreamResponse:
-        if request.method != "POST" or not request.path.startswith("/api/manual-"):
+        if request.method != "POST" or not request.path.startswith("/api/manual-") or orders.rtorder_on():   # 2026-11-22 표식이 있으면 접수 기록은 rtorder 가 적는다
             return await handler(request)
         t0, status, err = time.time(), 500, None
         # 2026-11-21 그림자 기록: 접수 하나 = chain 하나(contextvars -- 핸들러가 띄운 집행 작업까지 따라간다 · 이 줄에도 실어 둘을 잇는다)
@@ -4954,6 +4954,8 @@ def make_app() -> web.Application:
         # 2026-10-28 차트 선 손절 = 1초 마지막 체결가(USDT, sr_break_loop 와 같은 원천) 닿음
         sec_prices=lambda a: None if a not in flows else [(t, float(c[6])) for t, c in list(flows[a].footprint_state["sec"].items()) if c[6]])
     keep_trip_ledger = order_api.keep_trip_ledger
+    # 2026-11-22 Rust 주문 전환 스위치: 표식(data/live/rtorder_live.on)이 있으면 14주소를 rtorder 문으로 -- 맨 안쪽이라 ETag·압축은 지금처럼 바깥 미들웨어가 건다
+    app.middlewares.append(order_api.rtorder_door)
 
     app.router.add_get("/", index)
     app.router.add_get("/dashboard/live", dashboard_index)
