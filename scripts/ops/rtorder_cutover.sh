@@ -36,7 +36,7 @@ idle_check() {   # $1 = 물을 곳(파이썬 또는 문) -- 도는 작업·대�
     printf '%s' "$j" | python3 -c '
 import sys, json
 d = json.load(sys.stdin); st = d.get("state") or {}; ph = st.get("phase")
-busy = [k for k, v in (d.get("waits") or {}).items() if isinstance(v, dict) and v.get("busy")]
+busy = [k for k, v in list((d.get("waits") or {}).items()) + [("wait", d.get("wait") or {})] if isinstance(v, dict) and v.get("phase") not in (None, "idle")]   # 서버 실제 모양: waits = {코인: {phase}}
 ex = [k for k, v in (d.get("side_exits") or {}).items() if isinstance(v, dict) and v.get("phase") not in (None, "idle", "done", "failed", "cancelled")]
 ok = ph in (None, "idle", "filled_maker", "filled_taker", "done", "failed", "cancelled", "expired", "rejected") and not d.get("wait_list") and not busy and not ex
 print("  %s: 진입 칸 %s · 대기 %d · busy %s · 청산 중 %s · 무장 %s → %s" % (sys.argv[1], ph, len(d.get("wait_list") or []), busy, ex, d.get("bracket_armed"), "됨" if ok else "🔴안 됨"))
