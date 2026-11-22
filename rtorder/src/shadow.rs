@@ -62,16 +62,23 @@ pub struct Chain {
     pub wire: Vec<Value>,
     pub inputs: Vec<Value>,
     pub end: Value,
+    /// 이 작업이 도는 동안의 파이썬 체결 알림 시각(chain "*" · wake_fills) -- 재생 nap 이 그 시각에 일찍 깬다(2026-11-22 서버 실기록 어긋남 1의 원인)
+    pub wakes: Vec<f64>,
 }
 
 /// JSONL → 작업들(시작 순서). 모르는 rec·모르는 칸은 무시(기록 쪽이 칸을 더해도 깨지지 않게).
 pub fn chains(jsonl: &str) -> Result<Vec<Chain>, String> {
     let (mut order, mut by): (Vec<String>, HashMap<String, Chain>) = (vec![], HashMap::new());
+    let mut wakes: Vec<f64> = vec![];
     for (n, line) in jsonl.lines().enumerate().filter(|(_, l)| !l.trim().is_empty()) {
         let v: Value = serde_json::from_str(line).map_err(|e| format!("{}번째 줄: {e}", n + 1))?;
         let id = v.get("chain").map(crate::sign::py_str).ok_or_else(|| format!("{}번째 줄: chain 없음", n + 1))?;
         if id == "*" {
-            continue; // 파이썬 체결 알림(wake_fills · 모든 작업) -- 재생은 아직 깨움을 넣지 않는다(시각만 갈린다)
+            // 파이썬 체결 알림(wake_fills · 모든 작업) -- 그 시각에 자던 nap 이 일찍 깬다(3초 따라가기 판단 전에 주문 조회만 한 번 더)
+            if v.get("what").and_then(Value::as_str) == Some("wake") {
+                wakes.extend(v.get("t").and_then(Value::as_f64));
+            }
+            continue;
         }
         let c = by.entry(id.clone()).or_insert_with(|| {
             order.push(id.clone());
@@ -86,7 +93,12 @@ pub fn chains(jsonl: &str) -> Result<Vec<Chain>, String> {
         }
     }
     // 시작 줄이 없는 chain = 작업이 아니다(접수 요청 자체의 조회 -- 파이썬 order_request_log 의 chain) -- 재생하지 않는다
-    Ok(order.into_iter().map(|id| by.remove(&id).unwrap()).filter(|c| !c.start.is_null()).collect())
+    let tt = |v: &Value, d: f64| v.get("t").and_then(Value::as_f64).unwrap_or(d);
+    Ok(order.into_iter().map(|id| by.remove(&id).unwrap()).filter(|c| !c.start.is_null()).map(|mut c| {
+        let (a, b) = (tt(&c.start, f64::MIN), tt(&c.end, f64::MAX));
+        c.wakes = wakes.iter().copied().filter(|w| a <= *w && *w <= b).collect();
+        c
+    }).collect())
 }
 
 /// 비교에서 뺄 벽시계 칸(실기록 = 진짜 시계 · 재생 = 가짜 시계): 이름이 `_at` 으로 끝나거나 `at`·`wait_until`·`retry_after`(30초 뒤 다시 -- 시각).
@@ -227,6 +239,7 @@ struct Vx {
     bx: Binance,
     t: Clock,
     inj: Option<Arc<Inject>>,
+    wakes: Arc<Mutex<VecDeque<f64>>>,
 }
 impl Exchange for Vx {
     async fn place_limit_gtx(&mut self, o: &LimitOrder) -> Reply {
@@ -251,7 +264,21 @@ impl Exchange for Vx {
         self.bx.wall_ms()
     }
     async fn nap(&mut self, s: f64) {
-        *self.t.lock().unwrap() += s;
+        // 원본 nap = asyncio.wait(timeout=s) 인데 wake_fills 가 오면 그 자리에서 깬다 -- 기록된 깨움 시각이 (지금, 지금+s] 안이면 거기까지만
+        {
+            let mut t = self.t.lock().unwrap();
+            let mut w = self.wakes.lock().unwrap();
+            while w.front().is_some_and(|x| *x <= *t) {
+                w.pop_front(); // 자는 사이가 아니었던 깨움(아무도 안 깨운다)
+            }
+            match w.front().copied() {
+                Some(x) if x <= *t + s => {
+                    w.pop_front();
+                    *t = x;
+                }
+                _ => *t += s,
+            }
+        }
         if let Some(i) = &self.inj {
             i.due().await;
         }
@@ -411,7 +438,10 @@ fn act_of(w: &Value) -> Act {
 
 pub struct Report {
     pub chain: String,
+    /// 원본(파이썬) 요청 수(조립 구간 왕복 뺀 것)
     pub requests: usize,
+    /// Rust 가 재생에서 보낸 요청 수(어긋나면 원본보다 많거나 적다 -- 기록이 소진되면 599 를 받으며 계속 보낸다)
+    pub rust_requests: usize,
     /// 차이(값 포함 -- `--show-values` 일 때만 찍는다)
     pub diffs: Vec<String>,
     /// 2026-11-21 값 없는 어긋난 위치(«요청 #3 칸 quantity» · «칸 phase» · «무장 파일 ETHUSDT:LONG.sl_level») -- 실기록 출력은 이것만
@@ -530,15 +560,16 @@ pub async fn replay(chs: &[Chain], symbol: &str, dir: &Path, exact: bool, secret
     let handlers: Arc<Mutex<VecDeque<Value>>> = Arc::new(Mutex::new(VecDeque::new()));
     let hdiffs: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![]));
     let inj = Arc::new(Inject { desk: desk.clone(), handlers: handlers.clone(), t: t.clone(), calls: calls.clone(), inputs: inputs.clone(), last: last.clone(), diffs: hdiffs.clone() });
-    let mut ex = Vx { bx: mk(&t), t: t.clone(), inj: Some(inj) };
-    let mut io = Io { bx: mk(&t), ex: Vx { bx: mk(&t), t: t.clone(), inj: None }, t: t.clone(), calls: calls.clone(), inputs: inputs.clone(), last: last.clone() };
+    let wakes: Arc<Mutex<VecDeque<f64>>> = Arc::default();
+    let mut ex = Vx { bx: mk(&t), t: t.clone(), inj: Some(inj), wakes: wakes.clone() };
+    let mut io = Io { bx: mk(&t), ex: Vx { bx: mk(&t), t: t.clone(), inj: None, wakes: wakes.clone() }, t: t.clone(), calls: calls.clone(), inputs: inputs.clone(), last: last.clone() };
     let mut quotes = Q { t: t.clone(), calls: calls.clone(), inputs: inputs.clone(), last: last.clone() };
     let fpath: PathBuf = crate::watch::bracket_path(dir);
     let mut out = vec![];
     for c0 in chs {
         let op = c0.start.get("op").and_then(Value::as_str).unwrap_or("?").to_string();
         if c0.end.is_null() {
-            out.push(Report { chain: c0.id.clone(), requests: 0, diffs: vec![], where_: vec![], op, assembly: 0, truncated: true });
+            out.push(Report { chain: c0.id.clone(), requests: 0, rust_requests: 0, diffs: vec![], where_: vec![], op, assembly: 0, truncated: true });
             continue;
         }
         let (c, assembly) = split_assembly(c0);
@@ -547,6 +578,7 @@ pub async fn replay(chs: &[Chain], symbol: &str, dir: &Path, exact: bool, secret
         let mut wh: Vec<String> = vec![];
         let st = &c.start;
         *t.lock().unwrap() = st.get("t").and_then(Value::as_f64).unwrap_or(0.0);
+        *wakes.lock().unwrap() = c.wakes.iter().copied().collect();
         match st.get("file") {
             Some(Value::Null) => {
                 let _ = std::fs::remove_file(&fpath);
@@ -687,7 +719,7 @@ pub async fn replay(chs: &[Chain], symbol: &str, dir: &Path, exact: bool, secret
                 wh.push(head.trim().to_string());
             }
         }
-        out.push(Report { chain: c.id.clone(), requests: got.len(), diffs: d, where_: wh, op, assembly, truncated: false });
+        out.push(Report { chain: c.id.clone(), requests: want.len(), rust_requests: got.len(), diffs: d, where_: wh, op, assembly, truncated: false });
     }
     out
 }
@@ -738,7 +770,8 @@ pub fn report_with(reports: &[Report], values: bool) -> String {
         }
         let what = if r.diffs.is_empty() { "같음".to_string() } else if values { r.diffs.join(" | ") } else { format!("다름 -- {}", r.where_.join(" | ")) };
         let asm = if r.assembly > 0 { format!(" · 조립 구간 왕복 {}", r.assembly) } else { String::new() };
-        out.push_str(&format!("{} | {} | 요청 {}{asm} | {what}\n", r.chain, r.op, r.requests));
+        let rust = if r.rust_requests != r.requests { format!("(Rust {})", r.rust_requests) } else { String::new() };
+        out.push_str(&format!("{} | {} | 요청 {}{rust}{asm} | {what}\n", r.chain, r.op, r.requests));
     }
     let done: Vec<&Report> = reports.iter().filter(|r| !r.truncated).collect();
     let bad: Vec<&&Report> = done.iter().filter(|r| !r.diffs.is_empty()).collect();

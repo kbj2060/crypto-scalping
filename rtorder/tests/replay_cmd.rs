@@ -103,3 +103,42 @@ fn loopback_only_panics_before_any_outside_request() {
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rt.block_on(bx.clock_offset())));
     assert!(r.is_err(), "바깥 주소 요청이 막히지 않았다");
 }
+
+/// 2026-11-22 서버 실기록 어긋남 1(SOXL 진입): 체결 알림(chain "*" · wake_fills)이 원본 nap(3초)을 2.2초에 깨워 «주문 조회만 한 번 더»(3초 따라가기 판단 전 = 호가 조회 없음).
+/// 합성 진입 chain 을 그 꼴로 바꾼다: 첫 조회(1.2초 · 깨움) = 아직 NEW · 둘째 조회(1.9초 · 깨움) = 체결. 원본 fill_maker 2546~2566 을 Read 로 확인한 순서(깨움 → 조회 → `monotonic-last_chk < POLL_SEC` 면 continue).
+/// 깨움을 재생에 넣으면 어긋남 0 · 깨움 줄을 지우면(= 고치기 전 재생기) 둘째 조회 자리에 bookTicker = 서버에서 본 것과 같은 어긋남 · 요청 수는 원본·Rust 따로.
+#[test]
+fn replay_wakes_nap_early_like_python_fill_alert() {
+    let d = tmp("wake");
+    let chain = fixture().lines().map(|l| serde_json::from_str::<Value>(l).unwrap()).find(|r| r["rec"] == "start" && r["op"] == "entry").unwrap()["chain"].as_str().unwrap().to_string();
+    let woke = edit(&fixture(), |rows| {
+        rows.retain(|r| r["chain"] == chain.as_str());
+        let post = rows.iter().position(|r| r["rec"] == "wire" && r["method"] == "POST" && r["target"].as_str().unwrap().contains("type=LIMIT")).unwrap();
+        let t0 = rows[post]["t"].as_f64().unwrap();
+        let mut early = rows[post + 1].clone(); // 체결 조회(FILLED)를 본떠 아직 NEW
+        assert_eq!(early["method"], "GET");
+        let body = early["body"].as_str().unwrap().replace("\"FILLED\"", "\"NEW\"");
+        let mut b: Value = serde_json::from_str(&body).unwrap();
+        b["executedQty"] = json!("0");
+        early["body"] = json!(b.to_string());
+        early["t"] = json!(t0 + 1.21);
+        rows[post + 1]["t"] = json!(t0 + 1.91);
+        rows.insert(post + 1, early);
+        rows.insert(post + 1, json!({"rec": "input", "chain": "*", "t": t0 + 1.2, "mono": 0, "what": "wake"}));
+        rows.insert(post + 3, json!({"rec": "input", "chain": "*", "t": t0 + 1.9, "mono": 0, "what": "wake"}));
+    });
+    let f = d.join("order_shadow.jsonl");
+    std::fs::write(&f, &woke).unwrap();
+    let (code, out) = run(&f, &[]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("깨움 줄 2") && out.contains("견준 작업 1 · 요청 11 · 어긋난 작업 0"), "{out}");
+    let (code, out) = run(&f, &[]);
+    assert_eq!(code, 0, "두 번 돌려도 같다: {out}");
+    // 깨움 줄 없이 = 고치기 전 재생기가 본 것
+    std::fs::write(&f, woke.lines().filter(|l| !l.contains("\"chain\":\"*\"")).map(|l| l.to_string() + "\n").collect::<String>()).unwrap();
+    let (code, out) = run(&f, &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("경로 다름(원본 GET /fapi/v1/order · Rust GET /fapi/v1/ticker/bookTicker)"), "{out}");
+    assert!(out.contains("| 요청 11(Rust "), "원본·Rust 요청 수를 따로: {out}");
+    let _ = std::fs::remove_dir_all(&d);
+}
