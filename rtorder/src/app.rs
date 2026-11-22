@@ -534,7 +534,14 @@ pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop, hub: Arc<Hu
                 // 틱은 칸 **사본**에서 돈다(칸 잠금을 쥐지 않는다 -- 원본처럼 기다리는 사이 접수가 돈다). 사본과 원본을 잇는 것:
                 // ① exiting 표시 = 같은 Arc(B1) ② 발동 청산의 칸 = `Wired::run_exit_at` 이 원본에 «submitting»·결과를 올린다
                 // ③ 틱 끝에 원본으로: 올린 칸의 마지막 값 · 대기 칸에 쓴 취소(action) -- 도는 대기 집행에 바로(push_live) · 로그·알림 표시
-                let mut w2 = desk.lock().await.w.clone();
+                // 접수 핸들러가 원본 칸에 남긴 로그 줄은 사본으로 한 번만 가져간다 -- 원본에 남기면 틱마다(2초) 같은 줄을 다시 찍는다
+                //   (2026-11-22 서버 실측: 취소 한 번이 1분에 44줄 · 로그가 줄 수 × 틱 수로 자람)
+                let mut w2 = {
+                    let mut d = desk.lock().await;
+                    let w = d.w.clone();
+                    d.w.logs.clear();
+                    w
+                };
                 let waits0 = w2.waits.clone();
                 if let Err(e) = w2.drain_tp_fills(&hub.tp_fills) {
                     w2.log(format!("tp_leg_filled: {e}"));
