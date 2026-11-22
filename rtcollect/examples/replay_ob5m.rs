@@ -2,5 +2,5 @@
 //!   cargo run --release --example replay_ob5m -- <fixtures 폴더> <out_dir>
 fn main() {
     let a: Vec<String> = std::env::args().collect();
-    rtcollect::ob5m::replay_fixture(std::path::Path::new(&a[1]), std::path::Path::new(&a[2]));
+    rtcollect::ob5m::replay_fixture(std::path::Path::new(&a[1]), std::path::Path::new(&a[2]), None, None);
 }

@@ -138,12 +138,12 @@ class _End(BaseException):
     pass
 
 
-def python_reference(d: Path, which: str) -> None:
-    """원본 main() 을 그대로(무한 루프) -- 마지막 시 파일 끝에서 Source 가 잠들려 하면 멈춘다."""
+def python_reference(d: Path, which: str, dd: Path = DDIR, fixed: float | None = None) -> None:
+    """원본 main() 을 그대로(무한 루프) -- 마지막 시 파일 끝에서 Source 가 잠들려 하면 멈춘다. fixed = 멈춘 시계(replay_book.py 와 같은 바깥)."""
     meta = json.loads((FIX / "ob5m_tape.json").read_text())
     ob = __import__("scripts.live_ob5m_20261026", fromlist=["x"])
     bf = __import__("scripts.live_bookdepth_feat_20261028", fromlist=["x"])
-    ob.DD, ob.TAPE = DDIR, d / "binance_tape.sqlite"
+    ob.DD, ob.TAPE = dd, d / "binance_tape.sqlite"
     ob.DB, bf.DB = d / "ob5m.sqlite", d / "bookdepth.sqlite"
     # 🔴db_open(path=DB) 의 기본값은 import 때 굳는다 -- 바꾸지 않으면 저장소 data/live 에 쓴다(2026-11-21 처음 그랬다 · 지움)
     ob.db_open.__defaults__, bf.db_open.__defaults__ = (ob.DB,), (bf.DB,)
@@ -155,6 +155,8 @@ def python_reference(d: Path, which: str) -> None:
     st = {"first": True, "t": 0}
 
     def now():
+        if fixed is not None:
+            return fixed
         if st["first"]:
             st["first"] = False
             return (meta["h0"] + 26) * 3600 + 5.0      # 시작 시 h0 = 이 시 − 26 = 첫 파일
@@ -277,11 +279,42 @@ def empty_cases() -> list:
     return out
 
 
+GAPMID = FIX / "ob5m_gapmid" / "ETHUSDT"
+
+
+def gapmid() -> None:
+    """창 가운데 사슬 끝 구멍(2026-11-22 서버 재생 대조: 11-21 16시 1124줄 -- _gap 줄 없이 pu 가 끊긴 재접속 · 파이썬은 다음 시 스냅숏부터 warm=1 로 잇는다).
+    H0+6 시 파일 120째 줄의 pu 만 바꾼 사본을 덧대고, 시계를 멈춘 채(«첫 시 + 26시간 + 180초» = RTCOLLECT_FAKE_NOW 꼴) 원본 main() 둘을 돌린다."""
+    name = time.strftime("%Y-%m-%dT%H", time.gmtime((H0 + 6) * 3600))
+    lines = gzip.decompress((DDIR / f"{name}.jsonl.gz").read_bytes()).split(b"\n")
+    m = json.loads(lines[119])
+    m["pu"] += 5
+    lines[119] = json.dumps(m, separators=(",", ":")).encode()
+    GAPMID.mkdir(parents=True, exist_ok=True)
+    (GAPMID / f"{name}.jsonl.gz").write_bytes(gzip.compress(b"\n".join(lines), compresslevel=9, mtime=0))
+    fixed = (H0 + 26) * 3600 + 180.0
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        dd = td / "dd"
+        dd.mkdir()
+        for p in list(DDIR.iterdir()) + list(GAPMID.iterdir()):
+            (dd / p.name).write_bytes(p.read_bytes())
+        python_reference(td, "ob5m", dd, fixed)
+        python_reference(td, "bookdepth", dd, fixed)
+        golden = dump(td)
+    golden["fixed_now"] = fixed
+    (FIX / "ob5m_gapmid_golden.json").write_text(json.dumps(golden, separators=(",", ":")))
+    print(f"gapmid: ob5m 봉 {len(golden['ob5m_bars'])} · 표식 {len(golden['ob5m_marks'])} · live {len(golden['ob5m_live'])} · bookdepth 봉 {len(golden['bd_bars'])}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--check-readers", action="store_true")
     ap.add_argument("--empty", action="store_true", help="빈 북 사례만 다시 만든다(tests/fixtures/ob5m_empty.json)")
+    ap.add_argument("--gapmid", action="store_true", help="창 가운데 사슬 끝 구멍 사례만(tests/fixtures/ob5m_gapmid · ob5m_gapmid_golden.json)")
     a = ap.parse_args()
+    if a.gapmid:
+        return gapmid()
     if a.check_readers:
         return check_readers()
     if a.empty:

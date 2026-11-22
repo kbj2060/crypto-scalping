@@ -168,12 +168,20 @@ def compare(py, rs, lo: int, hi: int, margin: int, show: int, starts=()) -> list
         a, b = rows
         both = a.keys() & b.keys()
         bad = [k for k in both if a[k] != b[k]]
+        # 강제청산 표시: WS 체결은 liquidation 을 안 싣고 매시 reconcile(REST history)이 UPDATE 로 채운다(원본 :333-334·361 · Rust 도 같음 = deribit_recon_parity).
+        # 그림자 REST 꺼짐(Rust 에 체인 표가 없거나 빔)이면 Rust 만 비는 게 맞다 -- 그 칸 하나만 «파이썬 값 / Rust NULL» 인 줄은 설명으로 친다.
+        li = names.index("liquidation") if t == "option_trades" and "liquidation" in names else None
+        rest_off = li is not None and (not rs.execute("SELECT count(*) FROM duckdb_tables() WHERE table_name = 'option_chain_snapshot'").fetchone()[0]
+                                       or not rs.execute("SELECT count(*) FROM option_chain_snapshot").fetchone()[0])
+        liq = [k for k in bad if rest_off and a[k][li] is not None and b[k][li] is None and a[k][:li] + a[k][li + 1:] == b[k][:li] + b[k][li + 1:]]
+        bad = [k for k in bad if k not in set(liq)]
         TALLY[0] += len(both)
         TALLY[1] += len(bad) + len(a.keys() ^ b.keys())
         n_down = sum(c.execute(f'SELECT count(*) FROM "{t}" WHERE {te} >= {w0} AND {te} < {w1}').fetchone()[0]
                      - c.execute(f'SELECT count(*) FROM "{t}" {where}').fetchone()[0] for c in (py, rs)) if down else 0
         line = (f"{t}: 비교 {len(both):,}행 · 불일치 {len(bad):,} · 파이썬에만 {len(a.keys() - b.keys()):,} · Rust에만 {len(b.keys() - a.keys()):,}"
-                f" · 범위 [{w0 // 1000}, {w1 // 1000}) 초 · 뺀 분 {len(excl):,}" + (down_note(down, n_down) if down else ""))
+                f" · 범위 [{w0 // 1000}, {w1 // 1000}) 초 · 뺀 분 {len(excl):,}" + (down_note(down, n_down) if down else "")
+                + (f" · 강제청산 표시 파이썬에만 {len(liq):,}(그림자 REST 꺼짐 = 매시 reconcile 안 돎 · 설명)" if liq else ""))
         ts_ = lambda k: time.strftime("%F %T", time.localtime(tof[k]))   # noqa: E731 -- 서버 시각
         first = [f"다름 {k} {ts_(k)}: " + " · ".join(f"{n} 파이썬 {x} / Rust {y}" for n, x, y in zip(names, a[k], b[k]) if x != y) for k in sorted(bad, key=repr)[:show]]
         first += [f"파이썬에만 {k} {ts_(k)}" for k in sorted(a.keys() - b.keys(), key=repr)[:show]]
@@ -279,6 +287,22 @@ def selftest() -> None:
         st = run(d / "py.duckdb", d / "rs.duckdb", None, None, tmp=d, starts=[T - 100, T + 500])
         hl3 = next(x for x in st if x.startswith("hl_trades"))
         assert "불일치 1 · 파이썬에만 0 · Rust에만 0" in hl3 and "그림자 꺼진 구간 2개" in hl3, hl3
+        # deribit 강제청산 표시: 파이썬만 'M'(매시 reconcile) -- Rust 체인 표 없음(REST 꺼짐) = 설명 · 체인 표에 행이 있으면(REST 켬) = 설명 못 함 · 다른 칸도 다르면 = 설명 못 함
+        for name, liq in (("op.duckdb", "M"), ("or.duckdb", None)):
+            con = duckdb.connect(str(d / name))
+            con.execute("CREATE TABLE option_trades (ts_ms BIGINT, trade_id VARCHAR, amount DOUBLE, liquidation VARCHAR)")
+            con.executemany("INSERT INTO option_trades VALUES (?,?,?,?)", [(1000 * T, "A", 1.0, liq), (1000 * T + 1, "B", 1.0 if liq else 2.0, liq), (1000 * (T + 60), "C", 1.0, None)])
+            con.close()
+        TALLY[:] = [0, 0]
+        o = next(x for x in run(d / "op.duckdb", d / "or.duckdb", T - 60, T + 120, tmp=d) if x.startswith("option_trades"))
+        assert "불일치 1" in o and "강제청산 표시 파이썬에만 1(" in o and TALLY[1] == 1, (o, TALLY)
+        con = duckdb.connect(str(d / "or.duckdb"))
+        con.execute("CREATE TABLE option_chain_snapshot (ts_ms BIGINT)")
+        con.execute("INSERT INTO option_chain_snapshot VALUES (1)")
+        con.close()
+        TALLY[:] = [0, 0]
+        o = next(x for x in run(d / "op.duckdb", d / "or.duckdb", T - 60, T + 120, tmp=d) if x.startswith("option_trades"))
+        assert "불일치 2" in o and "강제청산" not in o and TALLY[1] == 2, (o, TALLY)
         # lake: 같은 파일 · 행 하나 다른 파일 · 한쪽에만
         con = duckdb.connect()
         for root, extra in ((d / "lp", 0), (d / "lr", 1)):

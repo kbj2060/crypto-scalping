@@ -30,7 +30,39 @@ fn ob5m_and_bookdepth_match_python_workers() {
     let gold: Value = serde_json::from_str(&std::fs::read_to_string(fix.join("ob5m_golden.json")).unwrap()).unwrap();
     let out = std::env::temp_dir().join(format!("rtcollect_ob5m_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&out);
-    rtcollect::ob5m::replay_fixture(&fix, &out);
+    rtcollect::ob5m::replay_fixture(&fix, &out, None, None);
+    let (n_cells, exact, tol, worst) = check(&gold, &out);
+    eprintln!("ob5m 비트 일치 칸 {n_cells} · bookdepth 칸 비트 {exact} · 1e-12 안 {tol}(BLAS 내적 몫, 최대 {worst:.1e})");
+    let _ = std::fs::remove_dir_all(&out);
+}
+
+/// 창 가운데 사슬 끝 구멍(2026-11-22 서버 재생 대조에서 Rust 가 «사슬 끝 gap» 뒤 상한까지 침묵 -- 원인은 RTCOLLECT_FAKE_NOW 를 모르는 옛 실행 파일이었다):
+/// H0+6 시 120째 줄 pu 끊김(_gap 줄 없음) · 시계 멈춤(실행 파일의 FAKE_NOW 와 같은 바깥) -- 원본 main() 둘(tools/gen_ob5m_fixture.py --gapmid)과 같은 봉에서 끝난다.
+#[test]
+fn ob5m_mid_window_chain_gap_ends_and_matches_python() {
+    let fix = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let gold: Value = serde_json::from_str(&std::fs::read_to_string(fix.join("ob5m_gapmid_golden.json")).unwrap()).unwrap();
+    let out = std::env::temp_dir().join(format!("rtcollect_ob5m_gapmid_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&out);
+    let dd = out.join("dd");
+    std::fs::create_dir_all(&dd).unwrap();
+    for d in ["ob5m/ETHUSDT", "ob5m_gapmid/ETHUSDT"] {
+        for e in std::fs::read_dir(fix.join(d)).unwrap() {
+            let p = e.unwrap().path();
+            std::fs::copy(&p, dd.join(p.file_name().unwrap())).unwrap();
+        }
+    }
+    let t0 = std::time::Instant::now();
+    rtcollect::ob5m::replay_fixture(&fix, &out, Some(&dd), gold["fixed_now"].as_f64());
+    assert!(t0.elapsed().as_secs() < 60, "끝나지 않았다");
+    let (n_cells, exact, tol, _) = check(&gold, &out);
+    let warm_after = gold["ob5m_bars"].as_array().unwrap().iter().filter(|r| r[0].as_i64().unwrap() >= (491_006 * 3600 + 1800) * 1000 && r[2].as_f64() == Some(0.0)).count();
+    assert!(warm_after > 50, "구멍 뒤 온전한 봉이 없다 {warm_after}");
+    eprintln!("가운데 구멍: ob5m 칸 {n_cells} · bookdepth 비트 {exact} · 1e-12 안 {tol} · 구멍 뒤 온전한 ob5m 봉 {warm_after}");
+    let _ = std::fs::remove_dir_all(&out);
+}
+
+fn check(gold: &Value, out: &std::path::Path) -> (usize, usize, usize, f64) {
     let (ob, bd) = (out.join("ob5m.sqlite"), out.join("bookdepth.sqlite"));
     let mut n_cells = 0;
     for (k, sql) in [("ob5m_bars", "SELECT * FROM bars ORDER BY t"), ("ob5m_marks", "SELECT * FROM marks ORDER BY t, side, px"),
@@ -67,8 +99,7 @@ fn ob5m_and_bookdepth_match_python_workers() {
         }
     }
     assert_eq!(gold["bd_schema"].as_array().unwrap().len(), 1);
-    eprintln!("ob5m 비트 일치 칸 {n_cells} · bookdepth 칸 비트 {exact} · 1e-12 안 {tol}(BLAS 내적 몫, 최대 {worst:.1e})");
-    let _ = std::fs::remove_dir_all(&out);
+    (n_cells, exact, tol, worst)
 }
 
 /// 빈 북(2026-11-21 그림자 SNDKUSDT 패닉): 한쪽·양쪽이 diff 로 비는 사슬 · 스냅숏 한쪽이 빈 사슬 · 그 뒤 온전한 스냅숏에서 다시 -- 원본 `replay` 와

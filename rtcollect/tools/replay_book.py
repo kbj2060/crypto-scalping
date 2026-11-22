@@ -96,6 +96,10 @@ def main() -> int:
     T0 = time.time()
     deadline = T0 + a.limit
     sym = a.symbol.upper()
+    # 11-22 서버: 이 변수를 모르는 옛 실행 파일은 벽시계로 돌고 파일 끝에서 영원히 기다린다(시작 시 h0 가 파이썬과 한 시 어긋남 · 상한까지 침묵) -- 먼저 거른다
+    if b"RTCOLLECT_FAKE_NOW" not in a.bin.read_bytes():
+        print(f"🔴{a.bin} 는 RTCOLLECT_FAKE_NOW 를 모르는 옛 실행 파일 -- 다시 빌드(be4ab731 뒤)한 것으로")
+        return 2
     if a.kind == "bookdepth" and sym != "ETHUSDT":
         ap.error("bookdepth 는 ETHUSDT 만")
     h_end = calendar.timegm(time.strptime(a.end_hour, "%Y-%m-%dT%H")) // 3600

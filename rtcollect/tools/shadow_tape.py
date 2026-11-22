@@ -151,6 +151,7 @@ def merge(out: list) -> list:
 
 
 RASTER_L1 = 0.02
+RECONNECT_MS = 3000   # .bt 연결 끊김 빈틈(재접속 전 3초 쉼 · 두 구현 같음)
 EXT = 30    # 빈틈 뒤 종목마다 다시 붙는 늦음은 30초까지만(실측 bybit BTC mark ~10초) -- 드문 표가 빈틈 뒤를 통째로 빼지 않게
 CAP = 300   # ponytail: 재기동 빈틈은 T 앞뒤 300초 안에서 찾는다(드문 종목 하나 때문에 몇 시간을 빼지 않게) -- 재기동이 더 길면 늘린다
 
@@ -182,6 +183,8 @@ def proc_holes(con, tabs: list, starts: list, margin: int, py=None, reconnects: 
     pts = [r[0] for r in py.execute(q)]
     d = sorted(b - a for a, b in zip(ts, ts[1:]))
     gap = max(5.0, 10.0 * (d[len(d) // 2] if d else 1.0))
+    if t.startswith("hl_"):   # HL 맥락(activeAssetCtx·xyz ctx)은 매 블록 ~1/초로 끊이지 않는다 -- 재접속 전 3초 쉼(두 구현 같음)이 만든 빈틈(초 차 ≥3)을 잡는다(11-22: 10초 문턱이라 «끊김» 134줄이 0번 설명)
+        gap = 2.0
     rsil, psil = silences(ts, pts, gap, hs), silences(pts, ts, gap, hs)
     took = rsil[:reconnects]
     note = (f" · 연결 끊김(촘촘한 표 {t} 에서 {gap:.0f}초 넘게 한쪽만 빔): Rust {len(rsil)}번(그림자 로그 «끊김» {reconnects}줄 → {len(took)}번 설명 · 합 {sum(b - a for a, b in took):.0f}초)"
@@ -547,18 +550,21 @@ def compare_bt(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", starts=(
                 out.setdefault(h, []).extend(raw[32 + 32 * k:64 + 32 * k] for k in range((len(raw) - 32) // 32))
         return out
     a, b = read(py_dir), read(rs_dir)
-    ts = lambda rows: sorted({struct.unpack_from("<q", r)[0] // 1000 for h in rows for r in rows[h]})   # noqa: E731
+    ts = lambda rows: sorted({struct.unpack_from("<q", r)[0] for h in rows for r in rows[h]})   # noqa: E731 -- 거래소 ms
     ta, tb = ts(a), ts(b)
-    hs = holes(tb, list(starts), margin) if starts else []
-    rsil, psil = silences(tb, ta, 5.0, hs), silences(ta, tb, 5.0, hs)
-    down = merge(hs + rsil[:reconnects] + psil)
+    hs = holes(sorted({t // 1000 for t in tb}), list(starts), margin) if starts else []
+    # 연결 끊김 = 다른 쪽은 받는데 이쪽 bbo 가 RECONNECT_MS 넘게 빔(원본 asyncio.sleep(3) · Rust 도 3초 + 접속 -- 11-22 서버: 초 단위 «5초 넘게»로는
+    # 이 3~4초 빈틈을 못 잡아 Rust 로그 «끊김» 33줄이 0번 설명). 같은 연결 하나가 받은 bbo 는 둘 다 거래소 값 그대로 -- 빈 쪽은 그동안 연결이 없었을 뿐이다.
+    hs_ms = [(x * 1000, y * 1000) for x, y in hs]
+    rsil, psil = silences(tb, ta, RECONNECT_MS, hs_ms), silences(ta, tb, RECONNECT_MS, hs_ms)
+    down = merge(hs_ms + rsil[:reconnects] + psil)
     res, n_down = [], 0
     for h in sorted(a.keys() & b.keys()):
         def keep(rows):
             nonlocal n_down
             out = Counter()
             for r in rows:
-                t = struct.unpack_from("<q", r)[0] // 1000
+                t = struct.unpack_from("<q", r)[0]
                 if any(x <= t < y for x, y in down):
                     n_down += 1
                 else:
@@ -569,7 +575,12 @@ def compare_bt(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", starts=(
         TALLY[0] += same
         TALLY[1] += op + orr
         res.append(f"bt {h}: 같은 행 {same:,} · 파이썬에만 {op:,} · Rust에만 {orr:,}")
-    res.append(f"bt: 연결 끊김 Rust {len(rsil)}번(로그 «끊김» {reconnects}줄 → {min(len(rsil), reconnects)} 설명) · 파이썬 {len(psil)}번{down_note(hs, n_down)}")
+        for who, d, other in (("파이썬에만", fa - fb, tb), ("Rust에만", fb - fa, ta)):   # 진단: 남은 행 앞 2개 · 다른 쪽에 같은 ms 행이 있나(있으면 같은 시각 다른 값)
+            for r in sorted(d)[:2]:
+                v = struct.unpack("<qdfdf", r)
+                res.append(f"    {who} {v} · 다른 쪽 같은 ms 행 {'있음' if v[0] in set(other) else '없음'}")
+    res.append(f"bt: 연결 끊김(다른 쪽만 {RECONNECT_MS / 1000:.0f}초 넘게 받음) Rust {len(rsil)}번(로그 «끊김» {reconnects}줄 → {min(len(rsil), reconnects)} 설명) · 파이썬 {len(psil)}번"
+               f"{down_note([(x / 1000, y / 1000) for x, y in merge(hs_ms + rsil[:reconnects] + psil)], n_down)}")
     return res if len(res) > 1 else ["bt: 두 쪽에 같은 시 파일이 없다"]
 
 
@@ -777,6 +788,18 @@ def selftest() -> None:
         TALLY[:] = [0, 0]
         compare_bt(Path(d) / "bp", Path(d) / "br", reconnects=0)
         assert TALLY[1] == 22, TALLY   # 로그에 끊김이 없으면 그 20행도 설명 못 함
+        # 3~4초 재접속 빈틈(11-22 서버 hl_bt): 200ms 간격 · Rust 가 [5.0, 8.6)초 빔 · 파이썬이 [12.0, 15.6)초 빔 · 2.4초 빈틈(Rust)은 끊김 아님
+        for side in ("sp", "sr"):
+            (Path(d) / side).mkdir()
+            ms = [200 * i for i in range(100)]
+            ms = [x for x in ms if not ((side == "sr" and 5000 <= x < 8600) or (side == "sp" and 12000 <= x < 15600) or (side == "sr" and 17000 <= x < 19400))]
+            (Path(d) / side / "2026-11-21T08.bt").write_bytes(b"BTKR" + b"\0" * 28 + b"".join(struct.pack("<qdfdf", 1000 * T + x, 100.0, 1.0, 101.0, 2.0 + x) for x in ms))
+        TALLY[:] = [0, 0]
+        b1 = compare_bt(Path(d) / "sp", Path(d) / "sr", reconnects=1)
+        assert TALLY[1] == 12 and "Rust 1번" in b1[-1] and "파이썬 1번" in b1[-1], (TALLY, b1)   # 남는 것 = 2.4초 빈틈의 파이썬 12행
+        TALLY[:] = [0, 0]
+        compare_bt(Path(d) / "sp", Path(d) / "sr", reconnects=0)
+        assert TALLY[1] == 12 + 18, TALLY   # 로그에 끊김이 없으면 Rust 3.6초 빈틈의 파이썬 18행도 설명 못 함 · 파이썬 쪽 빈틈은 그대로 설명
         # raster: 머리 n 을 읽는다 · mid ±20칸만 같으면 통과 쪽
         def f32(path, vals):
             n = 60
