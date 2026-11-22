@@ -498,11 +498,14 @@ weight_judge() { # weight_judge "<전 값들>" "<뒤 값들>" -- 되돌릴 까�
   # 근거: 가중치 머리는 같은 IP 의 모든 프로세스 몫(대시보드·봇·다른 수집기)이라 한 번 튀는 값은 우리 몫이 아니다(11-22: 뒤 다섯 중 1382 하나만 튐 ·
   #   나머지 넷은 전과 같음 · 수집기 자체 요청률은 508.8 대 512.2 = 0.66%). 늘 얹히는 몫은 «중앙값»으로, 연달아 넘는 것은 «두 번 연속»으로 잡는다.
   local mb ma lim prev=0 x
-  mb="$(median "$1")"; ma="$(median "$2")"; lim=$((mb + 100))
+  # WEIGHT_TOL(기본 100): 11-22 두 번 실측에서 5분 창 사이의 이 IP 가중치가 우리와 무관하게 ±100~190 흔들렸다(전 중앙 933 → 뒤 [1012 1040 1119 980 985])
+  #   -- 주 근거는 수집기 자체 요청률 대조(±2%)이고 이 머리는 «폭주»만 잡는다. 흔들림이 큰 시간대에는 WEIGHT_TOL 을 올려 부른다.
+  local tol="${WEIGHT_TOL:-100}"
+  mb="$(median "$1")"; ma="$(median "$2")"; lim=$((mb + tol))
   echo "  가중치(1분): 넘기기 전 [$1] 중앙 $mb · 뒤 [$2] 중앙 $ma"
-  [ "$ma" -le "$lim" ] || { echo "  🔴중앙값이 $((ma - mb)) 늘었다(> 100)"; return 1; }
+  [ "$ma" -le "$lim" ] || { echo "  🔴중앙값이 $((ma - mb)) 늘었다(> $tol)"; return 1; }
   for x in $2; do
-    if [ "$x" -gt "$lim" ]; then [ "$prev" = 1 ] && { echo "  🔴두 번 연속 넘기기 전 중앙 + 100($lim) 초과"; return 1; }; prev=1; else prev=0; fi
+    if [ "$x" -gt "$lim" ]; then [ "$prev" = 1 ] && { echo "  🔴두 번 연속 넘기기 전 중앙 + $tol($lim) 초과"; return 1; }; prev=1; else prev=0; fi
   done
 }
 if [ "$MODE" = rest-shadow ]; then   # market_data: 미시구조 REST 를 켠 그림자를 REST_SHADOW_S(기본 600)초만 → 칸별 대조 → 그림자를 REST 없이 되돌림
