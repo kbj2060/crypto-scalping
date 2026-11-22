@@ -241,6 +241,11 @@ FIFTEEN = [  # 실기록 재생 하위 명령 · 양성 대조가 없던 셋(202
     ("replay_cmd", "돌린 파일(.1)을 안 읽음", "src/bin/rtorder.rs", '    if let Ok(t) = std::fs::read_to_string(format!("{path}.1")) {', '    if let Ok(t) = std::fs::read_to_string(format!("{path}.none")) {'),
     ("replay_cmd", "파이썬 err 튜플을 그대로", SH, "            Some(Value::Array(a)) if !a.is_empty() => Err(a[0].clone()),\n", ""),
 ]
+SIXTEEN = [  # 허브 끊김 → 거래소 직접 조회(2026-11-22 사용자 결정)
+    ("hub_fallback", "대체를 끔(끊긴 동안 손절이 안 걸림)", AP, "            if rf.on.is_some() || age.is_some() {", "            if false {"),
+    ("hub_fallback", "허브가 돌아와도 대체 계속", AP, ".filter(|_| self.hub_stale().is_none());", ".filter(|_| false);"),
+    ("hub_fallback", "그림자 대체 요청 60초 한 번을 안 지킴", AP, "pub const REST_FEED_SHADOW_GAP_S: f64 = 60.0;", "pub const REST_FEED_SHADOW_GAP_S: f64 = 0.0;"),
+]
 RT = "src/route.rs"
 TWELVE = [  # 주문·계좌 주소 14개 -- route_fixture(원본 aiohttp 앱 바이트 158사례) · route_concurrency(동시 요청)
     ("route_fixture", "청산 접수가 주문 잠금 밖", RT, '("POST", "/api/manual-exit/submit", "exit_submit", true)', '("POST", "/api/manual-exit/submit", "exit_submit", false)'),
@@ -292,7 +297,7 @@ def main() -> int:
             ok = r.returncode != 0
             caught, total = caught + ok, total + 1
             print(f"{'잡음' if ok else '🔴못 잡음'} | {test} | {name} | {', '.join(failed)[:110]}", flush=True)
-    for grp, lst in (("six", SIX), ("seven", SEVEN), ("eight", EIGHT), ("nine", NINE), ("ten", TEN), ("eleven", ELEVEN), ("twelve", TWELVE), ("thirteen", THIRTEEN), ("fourteen", FOURTEEN), ("fifteen", FIFTEEN)):
+    for grp, lst in (("six", SIX), ("seven", SEVEN), ("eight", EIGHT), ("nine", NINE), ("ten", TEN), ("eleven", ELEVEN), ("twelve", TWELVE), ("thirteen", THIRTEEN), ("fourteen", FOURTEEN), ("fifteen", FIFTEEN), ("sixteen", SIXTEEN)):
       if not only or only == grp:
         for test, name, f, a, b in lst:
             shutil.rmtree(W, ignore_errors=True)

@@ -320,7 +320,7 @@ async fn fresh_reuses_within_one_second_and_shares_watch_cache() {
     let mut sh = bx();
     sh.shadow_on();
     let ops = rtorder::app::Ops { bx: sh, feed: Default::default(), hub: Default::default(), stop: Default::default(), stopped: Default::default(),
-                                  would: Arc::new(Mutex::new(vec![])), alerts: vec![], telegram: None, front: Default::default() };
+                                  would: Arc::new(Mutex::new(vec![])), alerts: vec![], telegram: None, front: Default::default(), rest_feed: None };
     let mut io = rtorder::door::DoorIo { ops, rest: bx(), acct: acct.clone(), stream: None };
     let a = io.account_screen(true).await.unwrap();
     assert_eq!(a["ok"], json!(true));
