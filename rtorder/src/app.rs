@@ -44,6 +44,8 @@ pub struct Config {
     pub shadow_account_ttl: f64,
     /// 요청 계량 한 줄 주기(초 · RTORDER_METER_SEC · 기본 60 -- 시험이 줄인다).
     pub meter_sec: f64,
+    /// 허브 끊김 → 거래소 직접 조회 중 알림 다시 보내는 주기(초 · RTORDER_FALLBACK_ALERT_SEC · 기본 600 -- 시험이 줄인다).
+    pub fallback_alert_sec: f64,
 }
 
 /// 그림자 모드의 체결 뒤 계좌 다시 읽기 최소 간격(원본 3초 · 몰려도 분당 2회 = 가중치 44 이하).
@@ -77,6 +79,7 @@ pub fn config_from(get: &dyn Fn(&str) -> Option<String>) -> Result<Config, Strin
         telegram: Telegram::from_env(get),
         shadow_account_ttl: num("RTORDER_SHADOW_ACCOUNT_TTL", 60.0)?,
         meter_sec: num("RTORDER_METER_SEC", 60.0)?,
+        fallback_alert_sec: num("RTORDER_FALLBACK_ALERT_SEC", 600.0)?,
         listen: {
             let raw = get("RTORDER_LISTEN").filter(|s| !s.is_empty()).unwrap_or_else(|| "127.0.0.1:8791".into());
             let a: std::net::SocketAddr = raw.parse().map_err(|e| format!("RTORDER_LISTEN {raw:?}: {e}"))?;
@@ -166,8 +169,103 @@ pub struct Ops {
     pub telegram: Option<Telegram>,
     /// 주문 잠금(원본 manual_order_lock) -- 감시가 손절 발동을 미룬다(D9 · G9).
     pub front: Arc<Front>,
+    /// 2026-11-22 사용자 결정: 허브 가격이 끊기면(`Feed` stale) 무장 코인의 5분봉·1초가를 거래소에서 직접 읽어 감시를 잇고 알린다. None = 허브 없이 띄움(대체 안 함).
+    pub rest_feed: Option<RestFeed>,
 }
+
+/// 허브 끊김 동안의 거래소 직접 조회 상태. 한 틱은 한 원천만: 대체에 들어가면(`on`) 그 틱의 남은 코인도 대체 · 나오는 것은 다음 틱 머리(`nap`)에서만.
+#[derive(Debug, Default)]
+pub struct RestFeed {
+    pub alert_every: f64,
+    on: Option<f64>,
+    last_alert: f64,
+    coins: std::collections::BTreeSet<String>,
+    bars: std::collections::HashMap<String, (i64, f64)>,
+    secs: std::collections::HashMap<String, Vec<(i64, f64)>>,
+    fetched: std::collections::HashMap<String, f64>,
+    said: std::collections::HashMap<String, f64>,
+}
+/// 실전송: 같은 화면 심볼을 1초 안에 다시 묻지 않는다(롱·숏 두 칸이어도 틱당 코인마다 ticker 1 + klines ≤1 = 2 이하).
+pub const REST_FEED_GAP_S: f64 = 1.0;
+/// 그림자: 실제 요청은 코인마다 60초에 한 번(가중치 줄임 규칙) -- 나머지 틱은 «대체했을 것» 줄(60초에 한 번)만.
+pub const REST_FEED_SHADOW_GAP_S: f64 = 60.0;
 impl Ops {
+    /// 허브가 낡았으면 Some(마지막 수신 뒤 초 · 한 번도 못 받음 = 무한).
+    fn hub_stale(&self) -> Option<f64> {
+        let f = self.feed.lock().unwrap();
+        let age = if f.last_rx > 0.0 { coreval::wall() - f.last_rx } else { f64::INFINITY };
+        (age > coreval::FEED_STALE_S).then_some(age)
+    }
+    fn fallback_note(&mut self, line: String) {
+        self.hub.logs.lock().unwrap().push(format!("rtorder {line}"));
+        self.alert(&line); // 그림자 = 안 보내고 «TELEGRAM …» 목록(기존 규칙)
+    }
+    /// 허브 끊김 중 5분봉(그리고 같은 틱 1초가) -- 원본 load_market_history = REST klines 5m 의 마감 봉 · 1초가 자리 = ticker/price(마지막 체결가).
+    async fn rest_bars(&mut self, asset: &str, sym: &str, age: Option<f64>) -> Vec<Value> {
+        let (now, shadow) = (self.bx.time(), self.bx.is_shadow());
+        let (mut note, mut quiet, fetch, need_bar) = {
+            let rf = self.rest_feed.as_mut().unwrap();
+            let first = rf.on.is_none();
+            if first {
+                rf.on = Some(now);
+            }
+            rf.coins.insert(asset.to_string());
+            let (mut note, mut quiet) = (vec![], vec![]);
+            if let Some(age) = age.filter(|_| first || now - rf.last_alert >= rf.alert_every) {
+                rf.last_alert = now;
+                let a = if age.is_finite() { format!("{age:.0}초") } else { "한 번도 못 받음".into() };
+                note.push(format!("허브 가격 끊김 {a} · 거래소 직접 조회로 감시 계속 · 무장 코인 {}", rf.coins.iter().cloned().collect::<Vec<_>>().join("·")));
+            }
+            let gap = if shadow { REST_FEED_SHADOW_GAP_S } else { REST_FEED_GAP_S };
+            let fetch = rf.fetched.get(sym).is_none_or(|t| now - t >= gap);
+            if fetch {
+                rf.fetched.insert(sym.into(), now);
+            } else if shadow && rf.said.get(sym).is_none_or(|t| now - t >= REST_FEED_SHADOW_GAP_S) {
+                rf.said.insert(sym.into(), now);
+                quiet.push(format!("그림자: 허브 끊김 → 거래소 직접 조회했을 것 ({sym} · 실제 요청은 {REST_FEED_SHADOW_GAP_S:.0}초에 한 번)"));
+            }
+            let need_bar = rf.bars.get(sym).is_none_or(|(end, _)| now >= *end as f64 + 300.0);
+            (note, quiet, fetch, need_bar)
+        };
+        if fetch {
+            use crate::sign::{py_float, P};
+            let px = self.bx.public("/fapi/v1/ticker/price", &[("symbol", P::s(sym))]).await.ok().and_then(|v| v.get("price").and_then(|p| py_float(p).ok()));
+            let bar = if need_bar {
+                self.bx.public("/fapi/v1/klines", &[("symbol", P::s(sym)), ("interval", P::s("5m")), ("limit", P::s("2"))]).await.ok().and_then(|v| {
+                    v.as_array()?.iter().filter_map(|r| Some((r.get(0)?.as_i64()? / 1000 + 300, py_float(r.get(4)?).ok()?))).filter(|(end, _)| *end as f64 <= now).last()
+                })
+            } else {
+                None
+            };
+            let rf = self.rest_feed.as_mut().unwrap();
+            if let Some(px) = px {
+                let v = rf.secs.entry(sym.into()).or_default();
+                let t = now.floor() as i64;
+                match v.last_mut() {
+                    Some(l) if l.0 == t => l.1 = px,
+                    _ => v.push((t, px)),
+                }
+                v.retain(|x| x.0 > t - coreval::SEC_KEEP);
+            }
+            if let Some(b) = bar {
+                rf.bars.insert(sym.into(), b);
+            }
+            if px.is_none() {
+                // 허브도 거래소도 못 읽는다 = 감시가 눈을 감은 상태 -- 60초에 한 번은 알림으로(나머지 틱은 로그 줄만)
+                if rf.said.get("fail").is_none_or(|t| now - t >= 60.0) {
+                    rf.said.insert("fail".into(), now);
+                    note.push(format!("🔴허브·거래소 둘 다 가격을 못 읽음({sym}) -- 손절 감시가 멈춰 있다 · 다음 틱에 다시"));
+                } else {
+                    quiet.push(format!("거래소 직접 조회 실패({sym} 가격) -- 다음 틱에 다시"));
+                }
+            }
+        }
+        for n in note.drain(..) {
+            self.fallback_note(n);
+        }
+        self.hub.logs.lock().unwrap().extend(quiet.drain(..).map(|q| format!("rtorder {q}"))); // 알림 아님(로그 줄만)
+        coreval::bars(self.rest_feed.as_ref().unwrap().bars.get(sym).copied(), now)
+    }
     fn shadow(&self, what: String) -> bool {
         if self.bx.is_shadow() {
             self.would.lock().unwrap().push(what);
@@ -191,6 +289,15 @@ impl WatchIo for Ops {
         if self.stopped.load(Ordering::SeqCst) {
             return false;
         }
+        // 허브가 돌아왔으면 다음 틱부터 허브 값(틱 머리에서만 바꾼다 -- 한 틱 안에서 두 원천을 섞지 않게)
+        let back = self.rest_feed.as_ref().and_then(|r| r.on).filter(|_| self.hub_stale().is_none());
+        if let Some(t0) = back {
+            let rf = self.rest_feed.as_mut().unwrap();
+            let coins = std::mem::take(&mut rf.coins).into_iter().collect::<Vec<_>>().join("·");
+            *rf = RestFeed { alert_every: rf.alert_every, ..Default::default() };
+            let line = format!("허브 가격 돌아옴 · 거래소 직접 조회 {:.0}초 끝 · 허브 값으로 감시 · 코인 {coins}", self.bx.time() - t0);
+            self.fallback_note(line);
+        }
         tokio::select! {
             _ = tokio::time::sleep(std::time::Duration::from_secs_f64(sec)) => {}
             _ = self.hub.wake.notified() => {}
@@ -205,10 +312,20 @@ impl WatchIo for Ops {
         unreachable!("계좌는 Wired 가 읽는다")
     }
     async fn bars(&mut self, asset: &str) -> Result<Vec<Value>, String> {
+        if let (Some(rf), Some(sym)) = (&self.rest_feed, crate::assemble::market_symbol(asset)) {
+            // 대체 중이면(이 틱에 이미 들어갔으면) 그대로 · 아니면 허브가 낡았을 때 들어간다 -- 감시가 무장 코인에만 bars 를 부른다(무장 없음 = 요청 0)
+            let age = self.hub_stale();
+            if rf.on.is_some() || age.is_some() {
+                return Ok(self.rest_bars(asset, sym, age).await); // 허브가 이 틱 안에 돌아왔어도 틱 끝까지 대체(다시 알리지는 않는다)
+            }
+        }
         let f = self.feed.lock().unwrap(); // 감시 5분봉 = 화면 심볼(USDT) -- 원본 load_market_history
         Ok(coreval::bars(crate::assemble::market_symbol(asset).and_then(|s| f.bar5m.get(s)).copied(), self.bx.time()))
     }
     fn sec_prices(&mut self, asset: &str) -> Result<Option<Vec<(f64, f64)>>, String> {
+        if let (Some(rf), Some(sym)) = (self.rest_feed.as_ref().filter(|r| r.on.is_some()), crate::assemble::market_symbol(asset)) {
+            return Ok(coreval::sec_prices(rf.secs.get(sym).map(Vec::as_slice)).or(Some(vec![]))); // 대체 중 = 거래소 직접 조회 값만(허브 값과 안 섞는다)
+        }
         let f = self.feed.lock().unwrap();
         Ok(coreval::sec_prices(crate::assemble::market_symbol(asset).and_then(|s| f.secs.get(s)).map(Vec::as_slice)))
     }
@@ -367,7 +484,8 @@ pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop, hub: Arc<Hu
     });
     let desk = Arc::new(DeskCell::new(Desk::new(Watcher::new(&cfg.dir, &cfg.eth_symbol))));
     let ops = |front: &Arc<Front>| Ops { bx: mk(), feed: feed.clone(), hub: hub.clone(), stop: stop.notify.clone(), stopped: stop.flag.clone(), would: would.clone(), alerts: vec![],
-                                         telegram: cfg.telegram.clone(), front: front.clone() };
+                                         telegram: cfg.telegram.clone(), front: front.clone(),
+                                         rest_feed: cfg.hub_url.is_some().then(|| RestFeed { alert_every: cfg.fallback_alert_sec, ..Default::default() }) };
     // 원본 기동 훅 게이트: start_wait_cleanup = 실행 스위치 · start_user_stream = 실행 스위치 + 키(주문이 없는 곳은 알림도 필요 없다)
     let gate = crate::plan::exec_enabled();
     let streaming = cfg.stream && gate && mk().has_keys();
