@@ -313,3 +313,52 @@ impl Card30File {
         self.m.clone()
     }
 }
+
+// ── 청산맵 레벨(load_liquidation_map 3461~3508 의 레벨 몫 · 미시 payload 의 sr 재료) ──
+/// LIQUIDATION_MAP_FETCH_LIMIT(211) · LIQUIDATION_MAP_5M_FETCH_LIMIT(271) · LIQUIDATION_MAP_CACHE_SECONDS(221) · LIQUIDATION_MAP_LOOKBACK_HOURS(196).
+pub const LIQ_MAP_FETCH_LIMIT: usize = 48;
+pub const LIQ_MAP_5M_FETCH_LIMIT: usize = 460;
+pub const LIQ_MAP_TTL: f64 = 60.0;
+pub const LIQ_MAP_LOOKBACK_H: usize = 24;
+
+pub fn klines_url_iv(base: &str, symbol: &str, interval: &str, limit: usize) -> String {
+    format!("{base}/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}")
+}
+
+fn win(k: &[Kline]) -> rtmodel::regime_band::Win {
+    rtmodel::regime_band::Win {
+        t: k.iter().map(|x| x.open_ms.div_euclid(1000)).collect(),
+        h: k.iter().map(|x| x.high).collect(),
+        l: k.iter().map(|x| x.low).collect(),
+        c: k.iter().map(|x| x.close).collect(),
+        v: k.iter().map(|x| x.volume).collect(),
+    }
+}
+
+/// compute_spliced_levels(scripts/live_liquidation_map_20260824.py 303~362)를 load_liquidation_map 입력으로(3473~3478):
+/// liq_klines_df(1시간 · 48개 · 형성 봉 버림 3314~3337) 의 tail(24) · 기준가 = 마지막 닫힌 1시간봉 종가 · 5분봉(460개 · 형성 봉 버림) = 자기 봉 안 쓸림 판정.
+/// 계산은 rtmodel::regime_band 의 prepare·bins·side_levels(같은 원본을 옮긴 것 -- 한 곳만). 반환 = 원본 반환 dict 에서 heatmap_bins 뺀 것.
+// ponytail: heatmap_bins·heatmap_history·tier_profile 은 안 낸다(미시 payload 는 레벨만 읽는다 -- /api/liquidation-map 을 옮길 때 더한다).
+pub fn liq_levels(raw_1h: &V, raw_5m: &V, now_ms: i64) -> Result<V, String> {
+    use serde_json::json;
+    let h = evidence_frame(raw_1h, now_ms)?;
+    let m = evidence_frame(raw_5m, now_ms)?;
+    let cp = h.last().map_or(0.0, |k| k.close);
+    let w = &h[h.len().saturating_sub(LIQ_MAP_LOOKBACK_H)..];
+    let empty = |reason: &str, n: usize| json!({"warmed_up": false, "error": reason, "current_price": null, "bars_used": n, "lookback_hours": 0.0, "support_levels": [], "resistance_levels": []});
+    let (wv, mv) = (win(w), win(&m));
+    let Some(cm) = rtmodel::regime_band::prepare(&wv, cp, &mv) else {
+        let reason = if w.len() < 20 || !(cp > 0.0) { "insufficient_data" } else { "no_surviving_levels" };
+        return Ok(empty(reason, w.len()));
+    };
+    let mid: Vec<f64> = (0..w.len()).map(|i| (wv.h[i] + wv.l[i]) / 2.0).collect();
+    let (Some(bm), Some(bc)) = (rtmodel::regime_band::bins(&cm, &mid), rtmodel::regime_band::bins(&cm, &cm.close.clone())) else {
+        return Ok(empty("no_surviving_levels", w.len()));
+    };
+    let lv = |l: Vec<(f64, f64, f64)>| serde_json::Value::Array(l.into_iter().map(|(p, wp, d)| json!({"price": p, "weight_pct": wp, "distance_pct": d})).collect());
+    Ok(json!({"warmed_up": true, "error": null, "current_price": cp, "bars_used": w.len(),
+              "lookback_hours": (wv.t[wv.t.len() - 1] - wv.t[0]) as f64 / 3600.0,
+              "bin_width": crate::py::round_nd(cm.bw, 4),
+              "support_levels": lv(rtmodel::regime_band::side_levels(&bm, cm.bw, cp, true)),
+              "resistance_levels": lv(rtmodel::regime_band::side_levels(&bc, cm.bw, cp, false))}))
+}

@@ -145,6 +145,26 @@
 
 재사용 판단: rtmodel::regime_band 에 같은 원본(_prepare_common·_bins_from_common·_own_bar_alive·levels_from_bins 한쪽)을 옮긴 것이 있다(regime_band.rs 116~170). 다만 ① 함수가 비공개(`prepare`·`bins`·`side`) ② 입력이 «5분봉 패널을 1시간으로 접은 것 + 이번 시간 부분봉»(_window_at) -- load_liquidation_map 은 REST 닫힌 1시간봉 tail(24) 그대로 ③ `side` 가 가격만 낸다(weight_pct·distance_pct 없음). → **rtmodel 의 그 셋을 pub 으로 열고 `side` 가 (가격, 무게%)를 내게 넓히는 것**이 가장 짧다(같은 원본을 둘로 옮기지 않게). rtmodel 은 내 쓰기 범위 밖이라 결정이 필요하다.
 
+### 청산맵 레벨 -- 옮김(2026-11-22 · `ctx_rest::liq_levels`)
+- 상수(Read 로 정의 줄 확인): LIQUIDATION_MAP_FETCH_LIMIT = 48(server.py 211) · LIQUIDATION_MAP_5M_FETCH_LIMIT = 460(271) · LIQUIDATION_MAP_CACHE_SECONDS = 60(221) · LOOKBACK_HOURS = 24(196) · STALE_GRACE 600(1040).
+- 입력 맞춤(ctx 쪽): liq_klines_df(3314~3337: 정렬 · 같은 시각 마지막 · 형성 봉 버림) → 1시간봉 tail(24) · 기준가 = 마지막 닫힌 1시간봉 종가 · 5분봉 460 = 자기 봉 안 쓸림.
+- 계산 = rtmodel::regime_band 의 `prepare`·`bins`·`side_levels`(pub 으로 엶 · `side` 는 `side_levels` 의 가격만 -- 기존 출력 비트 그대로).
+- 검증: 원본 compute_spliced_levels(import) 30사례(1시간봉 48/21/19 · 5분봉 460/100/0 · ETH·XRP 가격) 글자 일치(heatmap_bins 는 빼고 비교 -- 미시는 레벨만 읽는다 · ponytail).
+- 붙이는 쪽: swr `liquidation_map:{asset}` 60/600 · REST 둘(`klines_url_iv(base, SYM, "1h", 48)` · `"5m", 460`) · `RTSERVE_REST` 있을 때만 · 결과를 ctx_micro `MicroRef::tick` 의 `levels` 로.
+
+## 서버 대조에서 빈 세 칸(2026-11-22 · 08:46 KST 관찰) -- 원인
+- `basis_d_bp`·`basis_thr_bp`: 코어 Situation 이 마크 링(코어 메모리 · 재시작 때 빈 채)에서 센다(rtcore situation.rs deriv_from_ring = micro_ref 263~279). 받는 쪽(ctx::patch_now)은 그대로 넘긴다 -- 빈 원인은 **코어 재시작 직후 링이 덜 참**. 원본도 같은 규칙: 마크 링은 메모리뿐(collect_mark_price 1873~1910 · 다시 읽는 곳 없음) → 원본도 재시작 뒤 `basis_d_bp` 는 링이 30분(1800초) 넘게 쌓여야 · `basis_thr_bp` 는 «1800초 전 값이 있는» 표본(링 키 30개마다 1개)이 60개 → 마크 1초마다 약 **60분** 뒤에 찬다. 파이썬이 오래 떠 있었고 코어는 막 다시 떴다 = 시각 차이. 고칠 것 없음(원본과 같은 규칙 · 대조는 코어 기동 60분 뒤부터).
+- `btc_move_bp`: 코어는 BTC 를 «체결로 센 5분봉»에서 잰다(rtcore situation.rs inputs 149~158 · 원본은 REST btc_candles). 필요 = 창 7봉의 처음·끝 봉이 BTC 체결 캔들에 있음 → **btcusdt 가 RTCORE_SYMBOLS 에 있어야** 하고 · 있어도 재시작 뒤 BTC 체결 5분봉 7개(35분) 뒤에야 찬다(코어는 체결 캔들을 테이프로 되살리지 않는다).
+- `move_bp`·`range_bp`·`move_ratio` 차이도 같은 뿌리: 코어 재시작 앞 봉은 체결 캔들이 없어 풋프린트 칸 가격(0.5 격자)·1초 링 마지막가로 메운다(_situation_inputs 2207~2218 과 같은 대체 규칙) → 창 7봉이 다 재시작 뒤 봉이 되는 35분 뒤부터 같아야 한다(«holes 없는 봉은 같아야 한다»의 시각판).
+
+## 복원 봉 agg · dhl 재시도(rtcore · 2026-11-22)
+- 원본 `/api/footprint` 봉마다 `"agg": bar in agg_bars`(4049~4050) · agg_bars = **ETH 의 REST aggTrades 백필 봉**(coin_flow.py footprint_add 381~382 · footprint_backfill 442~518 `agg=True`) · SOL·XRP 등은 테이프 복원(533~570 -- agg 안 붙임).
+  → 코어 `FpBar.agg`(거짓이면 직렬화에서 빠짐 · 옛 받는 쪽 그대로): **ethusdt 의 테이프 복원 봉**만 참(restore.rs merge ①) · 그 밖 코인 거짓(원본과 같다). 스냅숏 파일로 되살린 봉은 거짓(원본도 재시작 때 agg_bars = 빈 set).
+  받는 규칙: 한 번 참이면 그 봉이 지워질 때까지 참(app.js keep 4852·4854 와 같은 뜻 · rtcore 시험 footprint_parity·restore_parity 의 받는 쪽도 그렇게).
+  app.js 확인: agg 는 `footprintForChart` 의 `aggTimes`(6891~6897)로 넘어가지만 그리는 코드에서 읽는 곳이 없다(grep -- 지금은 표시 효과 없음 · 보존만).
+- dhl(sol 에서 원본에만 있던 키): 원본 fp_dhl(3949~3988)은 링 밖 봉을 **요청마다** «닫힌 지 6분 지났으면» 테이프로 정한다(값 없음도 15분 지나면 기억). 코어는 복원 때 테이프가 다 덮은 봉만 정하고 그 뒤로 다시 안 읽었다 → 재시작이 걸쳐 그때 테이프가 덜 따라온 봉은 dhl 이 끝까지 비었다.
+  → `Bars::dhl_need`·`dhl_apply`(원본 규칙 그대로) + `State::retry_dhl`(테이프 읽기는 락 밖) + lib.rs 5초 주기(원본은 화면 폴링 400ms 마다 -- 코어 dhl 은 최대 5초 늦게 뜬다).
+
 ## 3-옛. /api/market-context (market_context_payload 2601~2708 · api_market_context 2717~2732) -- 전부 ❌(그다음 조각)
 
 응답: 3초 안 못 끝나면 shield 로 뒤에서 마저 · 마지막 성공 120초 안이면 `{**last, "stale": True, "stale_age_s", "error"}` · 넘으면 `{"available": False, "error"}`.

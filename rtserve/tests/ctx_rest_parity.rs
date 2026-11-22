@@ -78,3 +78,12 @@ fn card30_file_reloads_on_mtime() {
     }
     let _ = std::fs::remove_dir_all(&d);
 }
+
+#[test]
+fn liq_levels_match_compute_spliced_levels() {
+    let d = load();
+    for (k, c) in d["liq"].as_array().unwrap().iter().enumerate() {
+        let got = ctx_rest::liq_levels(&c["raw_1h"], &c["raw_5m"], c["now_ms"].as_i64().unwrap()).unwrap();
+        assert_eq!(py::dumps(&got, (", ", ": "), true, None), c["out"].as_str().unwrap(), "#{k}");
+    }
+}

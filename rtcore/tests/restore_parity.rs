@@ -122,7 +122,7 @@ fn holey(fp: &Footprint, hs: &[(i64, i64)]) -> Vec<i64> {
 /// 화면 쪽(proto.rs Footprint 받는 규칙 + holes 는 메시지마다 통째로) · 1초 칸(초 단위 덮어쓰기).
 #[derive(Default)]
 struct View {
-    bars: BTreeMap<i64, (BTreeMap<u64, Level>, Option<[f64; 3]>)>,
+    bars: BTreeMap<i64, (BTreeMap<u64, Level>, Option<[f64; 3]>, bool)>,
     holes: Vec<i64>,
     secs: BTreeMap<i64, SecRow>,
 }
@@ -138,6 +138,7 @@ impl View {
                 e.0.insert(l.0.to_bits(), *l);
             }
             e.1 = b.dhl;
+            e.2 |= b.agg; // 한 번 참이면 지워질 때까지(proto FpBar.agg)
         }
         for t in &f.drop {
             self.bars.remove(t);
@@ -168,7 +169,7 @@ impl View {
     }
 
     fn same_as(&self, what: &str, fp: &Footprint, sup: &Supply1s) {
-        let got: Vec<FpBar> = self.bars.iter().map(|(&t, (ls, d))| FpBar { time: t, levels: ls.values().copied().collect(), dhl: *d }).collect();
+        let got: Vec<FpBar> = self.bars.iter().map(|(&t, (ls, d, a))| FpBar { time: t, levels: ls.values().copied().collect(), dhl: *d, agg: *a }).collect();
         assert_eq!(got, fp.bars, "{what}: 밀기로 지은 봉 != 스냅숏");
         assert_eq!(self.holes, fp.holes, "{what}: 밀기로 받은 holes != 스냅숏");
         for r in sup.seconds.iter().chain(sup.partial.bn.iter()) {
