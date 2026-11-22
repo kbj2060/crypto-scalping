@@ -433,3 +433,13 @@
 - 합성 정답지가 못 잡은 까닭: 합성 진입은 첫 조회에서 바로 체결되어 깨움 줄이 0 이었다(모양 차이 = 실기록에만 chain "*" 깨움 줄이 작업 중간에 있다 · 진입 작업 쪽 input 줄은 합성에도 0 -- 원본 진입은 호가를 REST 로 읽고 wire 로 남기므로 기록기 구멍 아님).
 - 시험 `replay_cmd::replay_wakes_nap_early_like_python_fill_alert`: 합성 진입을 서버 꼴로 바꿈(첫 조회 NEW · 깨움 1.2초·1.9초) → 어긋남 0 · 깨움 줄을 지우면 서버와 같은 «경로 다름(원본 GET /fapi/v1/order · Rust GET /fapi/v1/ticker/bookTicker)» + «요청 11(Rust …)». 이 바꾼 기록의 정답은 원본 코드 순서를 읽고 만든 것이다(파이썬으로 뽑은 정답지는 아님 -- 생성기에 «조회 NEW → wake_fills()» 사례를 넣으면 그것으로 바꾼다).
 
+## 감시 틱 끝의 홀로 남은 /time = 뒤 계좌 갱신 (2026-11-22 · 서버 실기록 tick 5건)
+- 꼴(값 없음): `input account → wire GET /fapi/v1/time → input bars → input sec → end` · 무장 파일 그대로 · 칸 그대로 · 주문 없음. 재생은 «요청 1(Rust 0) · Rust 가 덜 보냄 (/time)».
+- 원본(Read 로 확인): 감시 틱 `bracket_tick` 1150 = `swr_cached("binance_account", 10초, produce_account, max_stale=600)` → 10초 넘게 낡았으면 **낡은 값을 바로 주고** `_schedule_refresh`(server.py 1452) 가 `asyncio.create_task` 로 뒤 갱신을 띄운다.
+  create_task 는 contextvars 를 복사하므로 그 갱신 = `fetch_account` 첫 줄 `_clock_offset`(/fapi/v1/time · 캐시 없음 · 부를 때마다 왕복)이 **틱의 그림자 버퍼에** 들어온다. 뒤따르는 서명 요청(/fapi/v2/account 등)은 틱이 끝난 뒤라 안 남는다.
+  = 무엇이 닿아 조립을 시작한 것이 **아니다**(갈래: 계좌 캐시 낡음 → 뒤 갱신). 이 5틱에서만 = 화면·체결 알림이 계좌를 10초 안에 다시 읽지 않던 때(밤 · 화면 닫힘). 60초 짝은 그 사이 다른 읽기 주기와 겹친 것으로 보이나 판정과 무관.
+- Rust: 재생 틱은 기록된 계좌 입력을 쓰므로 안 보낸다. 실전송 시계 보정 규칙은 원본과 같다 -- 계좌 한 번 읽을 때마다(`account.rs` fetch 첫 줄 `clock_offset`) · 집행·브래킷 한 번마다(`sync_clock`, http.rs 489 · bracket.rs) /time 을 새로 묻고, 오래 묵힌 보정값을 쓰지 않는다(-1021 위험 같음).
+- 재생: 감시 틱 기록 **끝**(마지막 다른 요청 뒤)에 남은 /time 은 떼어 «뒤 계좌 갱신 시계 왕복 k(따로 셈)». 틱만 · /time 만.
+  ponytail: 끝에 붙은 것만 -- 뒤 갱신의 /time 이 틱의 다른 요청 사이에 끼면 그대로 어긋남으로 나온다.
+- 시험 `replay_cmd::trailing_refresh_clock_in_tick_is_counted_apart_but_other_requests_still_differ`: 요청 0 틱 끝에 /time → 같음 + 따로 셈 · 대조 ① 발동 틱 마지막 openAlgoOrders 를 /time 으로 바꾸면 어긋남 · 대조 ② 진입 끝 /time 은 안 뗌(어긋남). 변이(떼기 끔) → 이 시험 실패(손으로 확인 · 되돌림 · 해시 같음).
+

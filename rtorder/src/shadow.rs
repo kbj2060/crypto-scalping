@@ -449,6 +449,10 @@ pub struct Report {
     pub op: String,
     /// 감시 틱 안 청산 계획 조립 중 파이썬이 보낸 읽기 왕복(/time·commissionRate) -- Rust 재생은 조립을 기록값으로 대신해 안 보낸다(따로 센다)
     pub assembly: usize,
+    /// 2026-11-22 감시 틱 끝에 홀로 남은 `/fapi/v1/time`(= 틱이 낡은 계좌 캐시를 내주며 띄운 **뒤 계좌 갱신**의 첫 왕복).
+    /// 원본 swr_cached → _schedule_refresh 의 create_task 가 틱의 contextvars(그림자 버퍼)를 복사해, 그 갱신의 `_clock_offset` 만 틱 기록에 들어오고
+    /// 뒤따르는 서명 요청(account·positionRisk)은 틱이 끝난 뒤라 안 남는다. Rust 재생 틱은 기록된 계좌를 쓰므로 안 보낸다 -- 판정과 무관(따로 셈).
+    pub refresh_clock: usize,
     /// 시작은 있고 끝이 없다(프로세스 재시작으로 잘림) -- 재생하지 않는다
     pub truncated: bool,
 }
@@ -457,6 +461,21 @@ pub struct Report {
 pub const ASSEMBLY_PATHS: [&str; 2] = ["/fapi/v1/time", "/fapi/v1/commissionRate"];
 
 /// 감시 틱: 청산 계획 입력(what=exit_plan) 바로 앞에 붙은 조립 왕복을 떼어 낸다(시각 차례로 거꾸로 이어진 것만) · 조립 안 입력(filters)도.
+/// 감시 틱 기록 끝(마지막 다른 요청 뒤)에 남은 `/fapi/v1/time` 들을 뗀다(`Report.refresh_clock`). /time 이 아닌 요청은 절대 안 뗀다.
+// ponytail: 끝에 붙은 것만 -- 뒤 계좌 갱신의 /time 이 틱의 다른 요청 사이에 끼면 그대로 어긋남으로 나온다(그때 시각·다음 줄 꼴로 가른다)
+fn split_refresh_clock(c: &mut Chain) -> usize {
+    if c.start.get("op").and_then(Value::as_str) != Some("tick") {
+        return 0;
+    }
+    let is_time = |w: &Value| w.get("target").and_then(Value::as_str).unwrap_or("").split('?').next() == Some("/fapi/v1/time");
+    let mut n = 0;
+    while c.wire.last().is_some_and(is_time) {
+        c.wire.pop();
+        n += 1;
+    }
+    n
+}
+
 fn split_assembly(c: &Chain) -> (Chain, usize) {
     if c.start.get("op").and_then(Value::as_str) != Some("tick") {
         return (c.clone(), 0);
@@ -569,10 +588,11 @@ pub async fn replay(chs: &[Chain], symbol: &str, dir: &Path, exact: bool, secret
     for c0 in chs {
         let op = c0.start.get("op").and_then(Value::as_str).unwrap_or("?").to_string();
         if c0.end.is_null() {
-            out.push(Report { chain: c0.id.clone(), requests: 0, rust_requests: 0, diffs: vec![], where_: vec![], op, assembly: 0, truncated: true });
+            out.push(Report { chain: c0.id.clone(), requests: 0, rust_requests: 0, diffs: vec![], where_: vec![], op, assembly: 0, refresh_clock: 0, truncated: true });
             continue;
         }
-        let (c, assembly) = split_assembly(c0);
+        let (mut c, assembly) = split_assembly(c0);
+        let refresh_clock = split_refresh_clock(&mut c);
         let c = &c;
         let mut d = vec![];
         let mut wh: Vec<String> = vec![];
@@ -719,7 +739,7 @@ pub async fn replay(chs: &[Chain], symbol: &str, dir: &Path, exact: bool, secret
                 wh.push(head.trim().to_string());
             }
         }
-        out.push(Report { chain: c.id.clone(), requests: want.len(), rust_requests: got.len(), diffs: d, where_: wh, op, assembly, truncated: false });
+        out.push(Report { chain: c.id.clone(), requests: want.len(), rust_requests: got.len(), diffs: d, where_: wh, op, assembly, refresh_clock, truncated: false });
     }
     out
 }
@@ -769,7 +789,8 @@ pub fn report_with(reports: &[Report], values: bool) -> String {
             continue;
         }
         let what = if r.diffs.is_empty() { "같음".to_string() } else if values { r.diffs.join(" | ") } else { format!("다름 -- {}", r.where_.join(" | ")) };
-        let asm = if r.assembly > 0 { format!(" · 조립 구간 왕복 {}", r.assembly) } else { String::new() };
+        let asm = if r.assembly > 0 { format!(" · 조립 구간 왕복 {}", r.assembly) } else { String::new() }
+            + &if r.refresh_clock > 0 { format!(" · 뒤 계좌 갱신 시계 왕복 {}", r.refresh_clock) } else { String::new() };
         let rust = if r.rust_requests != r.requests { format!("(Rust {})", r.rust_requests) } else { String::new() };
         out.push_str(&format!("{} | {} | 요청 {}{rust}{asm} | {what}\n", r.chain, r.op, r.requests));
     }
@@ -777,11 +798,15 @@ pub fn report_with(reports: &[Report], values: bool) -> String {
     let bad: Vec<&&Report> = done.iter().filter(|r| !r.diffs.is_empty()).collect();
     out.push_str(&format!("견준 작업 {} · 요청 {} · 어긋난 작업 {}", done.len(), done.iter().map(|r| r.requests).sum::<usize>(), bad.len()));
     let (cut, asm): (usize, usize) = (reports.iter().filter(|r| r.truncated).count(), done.iter().map(|r| r.assembly).sum());
+    let rclk: usize = done.iter().map(|r| r.refresh_clock).sum();
     if cut > 0 {
         out.push_str(&format!(" · 잘림 {cut}"));
     }
     if asm > 0 {
         out.push_str(&format!(" · 조립 구간 왕복 {asm}(따로 셈)"));
+    }
+    if rclk > 0 {
+        out.push_str(&format!(" · 뒤 계좌 갱신 시계 왕복 {rclk}(따로 셈)"));
     }
     out.push('\n');
     if let Some(b) = bad.first() {
