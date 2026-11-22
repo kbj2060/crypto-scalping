@@ -29,6 +29,11 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
+# 2026-11-22: 표식이 있으면 파이썬이 주문을 이 문으로 넘긴다 -- 그림자가 그 문을 쥐면 주문이 «성공처럼» 보이고 안 나간다. 실전송 판(supervisor_rtorder_live.sh)만 떠야 한다.
+if [ -f "$ROOT/data/live/rtorder_live.on" ]; then
+  echo "[$(date -Iseconds)] 표식(data/live/rtorder_live.on)이 있다 -- 그림자를 켜지 않는다." >&2
+  exit 1
+fi
 
 # 키 = 대시보드 감독 스크립트와 같은 줄(값은 이 프로세스 환경에만)
 if [[ -f "$ROOT/.env" ]]; then
