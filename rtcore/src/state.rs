@@ -387,6 +387,27 @@ impl State {
         }
     }
 
+    /// 원본 fp_dhl 테이프 가지(server.py 3949~3988)를 주기로(lib.rs): 재시작이 걸쳐 1초 링도 복원 테이프도 다 못 덮은 봉의 dhl 을
+    /// 닫힌 지 6분 뒤 테이프에서 한 번 정한다. 테이프 읽기는 락 밖에서. 돌려줌 = 새로 채운 봉 수. 복원을 끈 상태면 0.
+    pub fn retry_dhl(&self, now_us: i64) -> usize {
+        let Some(rc) = &self.restore else { return 0 };
+        let now_s = now_us as f64 / 1e6;
+        let mut n = 0;
+        for (s, cell) in &self.syms {
+            let need = {
+                let g = cell.lock().unwrap();
+                g.supply.fp.dhl_need(g.supply.cells_of(Venue::Bn), now_s)
+            };
+            let (Some(&lo), Some(&hi)) = (need.first(), need.last()) else { continue };
+            let got = restore::read_dhl(&rc.tape, s, lo, hi + crate::footprint::BAR_SECONDS);
+            if let Err(e) = &got {
+                println!("rtcore dhl 테이프 {s}: {e}"); // 원본 3977~3979 -- 못 읽으면 이번엔 몸통만
+            }
+            n += cell.lock().unwrap().supply.fp.dhl_apply(&need, got.as_ref().ok(), now_s);
+        }
+        n
+    }
+
     /// 현물·OKX 수신 연결 상태(화면 meta 의 connected·errors).
     pub fn feed_status(&self, s: &str, venue: Venue, up: bool) {
         if let Some(cell) = self.syms.get(s) {

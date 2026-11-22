@@ -154,6 +154,17 @@ pub fn start(cfg: &Cfg, listener: TcpListener) -> (Arc<state::State>, tokio::tas
                 });
             }
         });
+        // 원본 fp_dhl 테이프 가지(요청마다 · 화면 폴링 400ms) -- 코어는 5초마다(봉 dhl 이 그만큼 늦게 뜰 수 있다)
+        let s2 = st.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(5));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tick.tick().await;
+                let s3 = s2.clone();
+                let _ = tokio::task::spawn_blocking(move || s3.retry_dhl(now_us())).await;
+            }
+        });
         let s2 = st.clone();
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(restore::SNAP_EVERY);

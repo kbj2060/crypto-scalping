@@ -67,6 +67,8 @@ pub(crate) struct Bar {
     pub(crate) dhl: Option<[f64; 3]>,
     /// 칸이 생긴 차례(체결로 생긴 칸만 -- 원본 dict 차례). 복원으로 생긴 칸은 없다 → `in_order` 가 키 차례로 뒤에 붙인다.
     pub(crate) order: Vec<i64>,
+    /// 재시작 공백을 테이프로 메운 봉(ETH 만 -- proto FpBar.agg 주석).
+    pub(crate) agg: bool,
 }
 
 impl Bar {
@@ -95,6 +97,10 @@ pub struct Bars {
     pub(crate) pending: Option<(i64, i64)>,
     /// holes·pending 이 바뀌었다 -- 다음 밀기가 봉이 안 바뀌었어도 나간다.
     pub(crate) holes_dirty: bool,
+    /// 테이프 복원 봉에 agg 를 붙이나(원본이 REST aggTrades 로 메우는 종목 = ethusdt -- coin_flow.py 534 «ETH 외 코인» 은 테이프).
+    pub(crate) agg_on_restore: bool,
+    /// 테이프로 dhl 을 한 번 정한 봉(원본 fp_dhl_cache 3947 · 3983~3985 -- 값이 없어도 «정함»이면 다시 안 읽는다).
+    pub(crate) dhl_tried: BTreeSet<i64>,
 }
 
 /// 1초 링이 다 드는 가장 이른 초(가장 새 초 − 660). 링은 새 초 s 가 올 때 s − 660 밑만 지운다(supply.rs sec_cell).
@@ -131,7 +137,8 @@ pub(crate) fn dhl_ok(v: [f64; 3], bar: &Bar) -> Option<[f64; 3]> {
 
 impl Bars {
     pub fn new(symbol: &str) -> Bars {
-        Bars { spec: spec(symbol), bars: BTreeMap::new(), dirty: BTreeMap::new(), dropped: vec![], holes: vec![], pending: None, holes_dirty: false }
+        Bars { spec: spec(symbol), bars: BTreeMap::new(), dirty: BTreeMap::new(), dropped: vec![], holes: vec![], pending: None, holes_dirty: false,
+               agg_on_restore: symbol.eq_ignore_ascii_case("ethusdt"), dhl_tried: BTreeSet::new() }
     }
 
     /// 체결의 봉을 들고 있어도 되나(coin_flow.py 355~365). 새 봉이면 만들고 창 밖 봉을 지운다.
@@ -250,7 +257,7 @@ impl Bars {
     pub fn snapshot(&self, sec: &BTreeMap<i64, [f64; 7]>, retail_max: f64, whale_min: f64) -> Option<Footprint> {
         self.spec?;
         let lo = self.window_lo().unwrap_or(i64::MIN);
-        let bars = self.bars.range(lo..).map(|(&b, bar)| FpBar { time: b, levels: self.levels(bar, None), dhl: self.dhl_now(sec, b, bar) }).collect();
+        let bars = self.bars.range(lo..).map(|(&b, bar)| FpBar { time: b, levels: self.levels(bar, None), dhl: self.dhl_now(sec, b, bar), agg: bar.agg }).collect();
         Some(self.head(true, retail_max, whale_min, bars))
     }
 
@@ -276,15 +283,93 @@ impl Bars {
         let dirty = std::mem::take(&mut self.dirty);
         let bars = dirty
             .range(lo..)
-            .filter_map(|(b, ks)| self.bars.get(b).map(|bar| FpBar { time: *b, levels: self.levels(bar, Some(ks)), dhl: bar.dhl }))
+            .filter_map(|(b, ks)| self.bars.get(b).map(|bar| FpBar { time: *b, levels: self.levels(bar, Some(ks)), dhl: bar.dhl, agg: bar.agg }))
             .collect();
         let mut m = self.head(false, retail_max, whale_min, bars);
         m.drop = std::mem::take(&mut self.dropped);
         Some(m)
     }
 
+    /// 원본 fp_dhl 의 테이프 가지(server.py 3957~3967): 창 안 봉 중 1초 링이 안 덮고(링 바닥 앞) · dhl 이 없고 · 아직 안 정했고 ·
+    /// 닫힌 지 6분(360초) 지난 봉 → 테이프에서 읽을 봉. 원본은 /api/footprint 요청마다 · 코어는 주기 일감(lib.rs)이 부른다.
+    pub fn dhl_need(&self, sec: &BTreeMap<i64, [f64; 7]>, now_s: f64) -> Vec<i64> {
+        if self.spec.is_none() {
+            return vec![];
+        }
+        let floor = ring_floor(sec).unwrap_or(i64::MAX);
+        let lo = self.window_lo().unwrap_or(i64::MIN);
+        self.bars
+            .range(lo..)
+            .filter(|(&b, bar)| b < floor && bar.dhl.is_none() && !self.dhl_tried.contains(&b) && (b + BAR_SECONDS) as f64 <= now_s - 360.0)
+            .map(|(&b, _)| b)
+            .collect()
+    }
+
+    /// 읽은 테이프 dhl 을 얹는다(원본 3983~3987): 읽기 성공이면 «그 봉 값이 있거나 닫힌 지 15분 지남» 일 때 정함으로 적고 ·
+    /// 값이 칸 델타와 맞으면(dhl_ok) 그 봉 dhl 로. 읽기 실패(None)면 아무것도 안 적는다(다음 회차에 다시).
+    pub fn dhl_apply(&mut self, need: &[i64], got: Option<&BTreeMap<i64, [f64; 3]>>, now_s: f64) -> usize {
+        let Some(got) = got else { return 0 };
+        let mut n = 0;
+        for &b in need {
+            if got.contains_key(&b) || (b + BAR_SECONDS) as f64 <= now_s - 900.0 {
+                self.dhl_tried.insert(b);
+            }
+            let Some(bar) = self.bars.get_mut(&b) else { continue };
+            if bar.dhl.is_none() {
+                if let Some(v) = got.get(&b).and_then(|v| dhl_ok(*v, bar)) {
+                    bar.dhl = Some(v);
+                    self.dirty.entry(b).or_default();
+                    n += 1;
+                }
+            }
+        }
+        let keep: BTreeSet<i64> = self.bars.keys().copied().collect();
+        self.dhl_tried.retain(|b| keep.contains(b));
+        n
+    }
+
     /// 시험용: 봉 → 칸(반올림 전).
     pub fn raw(&self) -> Vec<(i64, Vec<(i64, [f64; 6])>)> {
         self.bars.iter().map(|(&b, bar)| (b, bar.cells.iter().map(|(&k, c)| (k, *c)).collect())).collect()
+    }
+}
+
+#[cfg(test)]
+mod dhl_retry {
+    use super::*;
+
+    /// 원본 fp_dhl 테이프 가지의 고를 봉·정함 규칙(server.py 3957~3987).
+    #[test]
+    fn need_and_apply_follow_python() {
+        let mut fp = Bars::new("solusdt");
+        let now = 10_000.0;
+        for b in [6000, 6300, 9000, 9300, 9600] {
+            fp.bars.insert(b, Bar::default());
+        }
+        fp.bars.get_mut(&6000).unwrap().cells.insert(1, [5.0, 2.0, 0.0, 0.0, 0.0, 0.0]); // 칸 델타 3
+        fp.bars.get_mut(&6300).unwrap().dhl = Some([0.0, 1.0, 1.0]); // 이미 있음 → 안 고른다
+        // 1초 링이 9300 부터 덮는다 → 9300·9600 은 링 몫 · 9000 봉(끝 9300)은 지금 10000 에서 닫힌 지 6분 넘음
+        let mut sec = BTreeMap::new();
+        sec.insert(9300 + 660, [0.0; 7]);
+        assert_eq!(fp.dhl_need(&sec, now), vec![6000, 9000]);
+        assert_eq!(fp.dhl_need(&sec, 9500.0), vec![6000], "9000 봉은 닫힌 지 6분 전");
+        // 읽기 실패 = 아무것도 안 적는다
+        assert_eq!(fp.dhl_apply(&[6000, 9000], None, now), 0);
+        assert_eq!(fp.dhl_need(&sec, now), vec![6000, 9000]);
+        // 6000 = 값 있음(맞음) · 9000 = 값 없음 · 닫힌 지 15분 안 → 정함 아님(다음에 다시)
+        let got: BTreeMap<i64, [f64; 3]> = [(6000, [-1.0, 4.0, 3.0])].into_iter().collect();
+        assert_eq!(fp.dhl_apply(&[6000, 9000], Some(&got), now), 1);
+        assert_eq!(fp.bars[&6000].dhl, Some([-1.0, 4.0, 3.0]));
+        assert_eq!(fp.dhl_need(&sec, now), vec![9000]);
+        // 15분 지나면 값이 없어도 정함
+        fp.dhl_apply(&[9000], Some(&BTreeMap::new()), 9300.0 + 900.0);
+        assert!(fp.dhl_need(&sec, 9300.0 + 900.0).is_empty());
+        // 칸 델타와 안 맞는 값은 안 얹는다(원본 ok)
+        let mut fp2 = Bars::new("solusdt");
+        fp2.bars.insert(6000, Bar::default());
+        fp2.bars.get_mut(&6000).unwrap().cells.insert(1, [5.0, 2.0, 0.0, 0.0, 0.0, 0.0]);
+        let bad: BTreeMap<i64, [f64; 3]> = [(6000, [-1.0, 9.0, 9.0])].into_iter().collect();
+        assert_eq!(fp2.dhl_apply(&[6000], Some(&bad), now), 0);
+        assert!(fp2.bars[&6000].dhl.is_none());
     }
 }

@@ -33,7 +33,7 @@ fn text(r: &[Value], sym: &str, t0: i64) -> String {
 /// 화면 쪽: proto.rs Footprint 주석의 받는 규칙 그대로.
 #[derive(Default)]
 struct View {
-    bars: BTreeMap<i64, (BTreeMap<u64, Level>, Option<[f64; 3]>)>,
+    bars: BTreeMap<i64, (BTreeMap<u64, Level>, Option<[f64; 3]>, bool)>,
     msgs: usize,
     bytes: usize,
 }
@@ -51,6 +51,7 @@ impl View {
                 e.0.insert(l.0.to_bits(), *l); // 가격 > 0 이라 비트 순서 = 값 순서
             }
             e.1 = b.dhl;
+            e.2 |= b.agg; // 한 번 참이면 지워질 때까지(proto FpBar.agg)
         }
         for t in &f.drop {
             self.bars.remove(t);
@@ -61,7 +62,7 @@ impl View {
     }
 
     fn same_as(&self, what: &str, snap: &Footprint) {
-        let got: Vec<FpBar> = self.bars.iter().map(|(&t, (ls, d))| FpBar { time: t, levels: ls.values().copied().collect(), dhl: *d }).collect();
+        let got: Vec<FpBar> = self.bars.iter().map(|(&t, (ls, d, a))| FpBar { time: t, levels: ls.values().copied().collect(), dhl: *d, agg: *a }).collect();
         assert_eq!(got.len(), snap.bars.len(), "{what}: 봉 수");
         for (g, w) in got.iter().zip(&snap.bars) {
             assert_eq!(g, w, "{what}: 봉 {}", w.time);

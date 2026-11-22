@@ -183,5 +183,48 @@ for v in ([0.1] * 300, [3000.3] * 200 + [R.uniform(2990, 3010) for _ in range(20
           [R.choice([-1e-17, 0.0, -3e-17]) for _ in range(300)], [R.choice([1e-17, 0.0, 3e-17]) for _ in range(300)], [0.7] * 150 + [0.1] * 150):
     s = pd.Series(v)
     series.append({"v": v, "roll": [None if np.isnan(x) else x for x in s.rolling(144).mean()], "ewm": s.ewm(alpha=1 / 144, adjust=False).mean().tolist()})
-(OUT / "rest.json").write_text(json.dumps({"cases": cases, "series": series}))
+# 청산맵 레벨: liq_klines_df 3326~3337 옮겨 적음 + scripts/live_liquidation_map_20260824.compute_spliced_levels(import) -- load_liquidation_map 3473~3478 의 입력 모양
+from scripts.live_liquidation_map_20260824 import compute_spliced_levels  # noqa: E402
+
+
+def liq_klines_df(raw, now_ms, keep_forming=False):
+    cols = ["open_time", "open", "high", "low", "close", "volume", "close_time",
+            "quote_volume", "trades", "taker_buy_base", "taker_buy_quote", "ignore"]
+    df = pd.DataFrame(raw, columns=cols)
+    for c in ("high", "low", "close", "volume"):
+        df[c] = df[c].astype("float64")
+    df["close_time"] = df["close_time"].astype("int64")
+    df["timestamp"] = pd.to_datetime(df["open_time"].astype("int64"), unit="ms", utc=True)
+    df = df.sort_values("timestamp").drop_duplicates("timestamp", keep="last").reset_index(drop=True)
+    if not keep_forming and len(df) and int(df.iloc[-1]["close_time"]) >= now_ms:
+        df = df.iloc[:-1].reset_index(drop=True)  # drop the still-forming bar
+    return df
+
+
+liq = []
+for i in range(30):
+    now_ms = 1_763_700_000_000 + R.randrange(0, 3_600_000)
+    h_end = now_ms // 3_600_000 * 3_600_000
+    px = R.choice([3000.0, 2.15])
+    n1 = R.choice([48, 48, 21, 19])
+    raw1 = []
+    for k in range(n1):
+        o = h_end - (n1 - 1 - k) * 3_600_000
+        px *= 1 + R.gauss(0, 0.006)
+        hi, lo = px * (1 + abs(R.gauss(0, 0.004))), px * (1 - abs(R.gauss(0, 0.004)))
+        raw1.append([o, f"{px:.4f}", f"{hi:.4f}", f"{lo:.4f}", f"{px:.4f}", f"{R.uniform(100, 9000):.3f}", o + 3_599_999, "0", 1, "0", "0", "0"])
+    n5 = R.choice([460, 460, 100, 0])
+    e5 = now_ms // 300_000 * 300_000
+    raw5 = []
+    for k in range(n5):
+        o = e5 - (n5 - 1 - k) * 300_000
+        hi, lo = px * (1 + abs(R.gauss(0, 0.003))), px * (1 - abs(R.gauss(0, 0.003)))
+        raw5.append([o, f"{px:.4f}", f"{hi:.4f}", f"{lo:.4f}", f"{(hi + lo) / 2:.4f}", f"{R.uniform(0, 900):.3f}", o + 299_999, "0", 1, "0", "0", "0"])
+    df = liq_klines_df(raw1, now_ms)
+    df5 = liq_klines_df(raw5, now_ms)
+    cp = float(df["close"].iloc[-1]) if len(df) else 0.0
+    out = compute_spliced_levels(df.tail(24).reset_index(drop=True), cp, df5)
+    out.pop("heatmap_bins", None)
+    liq.append({"now_ms": now_ms, "raw_1h": raw1, "raw_5m": raw5, "out": json.dumps(out)})
+(OUT / "rest.json").write_text(json.dumps({"cases": cases, "series": series, "liq": liq}))
 print(f"사례 {len(cases)} · 급수 {len(series)} → {OUT}")

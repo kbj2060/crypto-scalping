@@ -28,7 +28,16 @@ nrm() { echo "$1" | tr '[:lower:]' '[:upper:]' | tr -d ' '; }
 envof() { tr '\0' '\n' 2>/dev/null < "/proc/$1/environ" | grep "^$2=" | head -1 | cut -d= -f2-; }
 argv() { tr '\0' '\n' 2>/dev/null < "/proc/$1/cmdline"; }
 val() { echo "$1" | grep -oE "(^| )$2=[^ ]+" | head -1 | sed -E "s/^ ?$2=//"; }
-gone() { [ ! -e "/proc/$1" ] || [ "$(ps -o stat= -p "$1" 2>/dev/null | cut -c1)" = Z ]; }
+gone() { # 판정은 여기 한 곳: ps 가 그 pid 를 «살아 있는 상태»(좀비 Z·죽는 중 X 아님)로 보여 줄 때만 산 것
+  # 11-22 08:49 hl_trades XRP: 옛 판(/proc 있음 && ps 상태 ≠ Z)은 좀비→거둬짐 사이에 «살아 있음»으로 뒤집혔다(같은 pid 를 고리는 «죽음», 마지막 확인은 «삶»으로 봄 · ps 는 빈칸)
+  local st; st="$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' ')"
+  [ -z "$st" ] || [[ "$st" == Z* ]] || [[ "$st" == X* ]]
+}
+why_alive() { # 실패 갈래 진단 한 줄(다음에 또 나면 바로 보이게)
+  local g; gone "$1" && g=죽음 || g=삶
+  echo "/proc/$1 $([ -e "/proc/$1" ] && echo 있음 || echo 없음) · ps[$(ps -o pid=,ppid=,stat=,pgid=,etime= -p "$1" 2>/dev/null | xargs)] · gone()=$g · 명령줄[$(ps -o args= -p "$1" 2>/dev/null | cut -c1-120)]"
+}
+[ "${1:-}" = gone-test ] && { gone "${2:-0}" && echo 죽음 || echo 삶; exit 0; }   # 시험용: takeover.sh gone-test <pid>
 # 기다림은 «돈 횟수»가 아니라 벽시계 초(SECONDS)로 잰다 -- 11-22 hl_trades XRP go 에서 «120초 뒤에도 산다»가 9초 만에 나왔다
 #   (횟수 고리 seq×sleep 0.2 가 실제로 얼마나 기다렸는지 남지 않았다 · sleep 이 바로 돌아오는 환경이면 횟수는 시간이 아니다)
 nap() { sleep "$1" 2>/dev/null || read -rt "$1" _ <> <(:) 2>/dev/null || :; }
@@ -111,10 +120,10 @@ case "$KIND" in
                 CHK="once_cboe:data/live/cboe_option_state.json:data/live/rtcollect/cboe_option_state.json"; REQ="CBOE 체인 종목마다 1 + 바이낸스 klines 1h 종목마다 하루 1(캐시)" ;;
   news)         PYSUP=supervisor_news_rss.sh; PYRUN=live_news_rss_collector_20261005.py; TENV="NEWS_RSS_DB=data/hot/news_rss.sqlite"
                 CHK="once_news:data/hot/news_rss.sqlite:data/hot/rtcollect/news_rss.sqlite"; REQ="RSS 8곳을 원본 주기대로 NEWS_S(기본 180)초 동안(같은 IP 두 배는 그 동안만)" ;;
-  hl_positions) die "$KIND 는 이 스크립트가 다루지 않는다 -- rtcollect/REMAINING.md «넘겨도 되는가» 표" ;;
+  hl_positions) ENG=rtduck; PYSUP=supervisor_hyperliquid_positions.sh; PYRUN=live_hyperliquid_positions_collector_20260924.py; SELV=HL_POS_COINS; SELD=ETH; CHK="pos" ;;   # 경로는 종목 뒤(아래)
   *) [ -n "$KIND" ] || { sed -n '2,12p' "$0"; exit 2; }; die "모르는 종류 '$KIND'" ;;
 esac
-case "$MODE" in check|go|back|weight|weight-judge) ;; *) die "check|go|back 중 하나" ;; esac
+case "$MODE" in check|go|back|weight|weight-judge|rest-shadow) ;; *) die "check|go|back 중 하나" ;; esac
 ENGU="$(echo "$ENG" | tr '[:lower:]' '[:upper:]')"
 BIN="$(eval echo "\${${ENGU}_BIN:-$ROOT/tmp/rtbin/$ENG}")"
 COVK="${COVK:-$RK}"
@@ -222,7 +231,25 @@ once_check() { # Rust 를 그림자 경로로 한 번 돌리고(REST 켬) 파이
   echo "check $KIND (한 회차): 견준 ${a:-0} · 설명 못 함 ${b:-?} · $([ "$rc" = 0 ] && echo 통과 || echo '🔴불통과')"
   return "$rc"
 }
+pos_check() { # hl_positions(11-22 결정): 조회 순간마다 값이 달라 실시간 대조가 불가 -- 근거 = 정답지 hl_positions_parity.
+  #   넘기기 전: 표·칸 모양을 적어 둔다 · 넘긴 뒤(진짜 경로 Rust 가 돌면): 모양이 그대로인지 + 최근 15분에 hl_cycles 행이 쌓였는지
+  local snap="logs/supervisor/takeover_schema_hl_positions_${SEL}.txt" cur
+  [ -f "$POSDB" ] || { echo "check hl_positions: $POSDB 없음 -- 🔴불통과"; return 1; }
+  cur="$(python3 -c "import sqlite3,sys; c=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True,timeout=10); print('\n'.join(t+': '+','.join(r[1] for r in c.execute(f'PRAGMA table_info({t})')) for (t,) in c.execute(\"SELECT name FROM sqlite_master WHERE type='table' ORDER BY 1\")))" "$POSDB")" || { echo "check hl_positions: DB 를 못 읽음 -- 🔴불통과"; return 1; }
+  if [ -z "$(rs_procs takeover)" ]; then
+    printf '%s\n' "$cur" > "$snap"
+    echo "  근거: 정답지 hl_positions_parity(실시간 대조 불가 -- 조회 순간마다 값이 다르다 · 11-22 결정) · 표·칸 모양을 $snap 에 적어 둠"
+    echo "check hl_positions: 통과(넘긴 뒤 «check hl_positions» 한 번 더 = 모양·쌓임 확인)"
+    return 0
+  fi
+  local n15; n15="$(python3 -c "import sqlite3,sys,time; c=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True,timeout=10); print(c.execute('SELECT count(*) FROM hl_cycles WHERE ts_ms >= ?',[int(time.time()*1000)-900000]).fetchone()[0])" "$POSDB")"
+  local same=같음; [ -f "$snap" ] && [ "$(cat "$snap")" = "$cur" ] || same=다름
+  echo "  넘긴 뒤: 표·칸 모양 $same(넘기기 전 $snap) · 최근 15분 hl_cycles 행 $n15"
+  echo "check hl_positions(넘긴 뒤): $([ "$same" = 같음 ] && [ "${n15:-0}" -gt 0 ] && echo 통과 || echo '🔴불통과')"
+  [ "$same" = 같음 ] && [ "${n15:-0}" -gt 0 ]
+}
 check() {
+  [ "$CHK" = pos ] && { pos_check; return $?; }
   [[ "$CHK" == once_* ]] && { once_check; return $?; }
   [ "$KIND" = raster_archive ] && { archive_check; return $?; }
   [ "$KIND" = ob5m ] || [ "$KIND" = bookdepth ] && { replay_check; return $?; }
@@ -238,7 +265,7 @@ check() {
       sq)     out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "$py" "$rs" --starts "$ST" --reconnects "$RC" --summary)" ;;
       events) out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" --events "$py" "$rs" --summary)" ;;
       json)   out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" --json 'liq_tab_*.json' "$py" "$rs" --summary)" ;;
-      duck)   out="$(nice -n 10 "$PYC" "$TOOLS/shadow_duck.py" "$py" "$rs" --starts "$ST" --summary)" ;;
+      duck)   out="$(nice -n 10 "$PYC" "$TOOLS/shadow_duck.py" "$py" "$rs" --starts "$ST" ${CHECK_FROM:+--from "$CHECK_FROM" --to "$(date +%s)"} --summary)" ;;
       bt)     h="$(hours "$rs")" || { echo "  $e: 그림자 시 파일이 3개 미만"; rc=1; continue; }
               out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" --bt "$py" "$rs" --hours "$h" --starts "$ST" --reconnects "$RC" --summary)" ;;
       depth|raster) h="$(hours "$rs")" || { echo "  $e: 그림자 시 파일이 3개 미만"; rc=1; continue; }
@@ -303,15 +330,16 @@ stop() { # stop <수집기 pid> <이름> [nosave] -- 감독(_supervise.sh 부모
   if [ -n "$s" ] && [ "$s" != 1 ] && is_sup "$s"; then
     [ "${3:-}" = nosave ] || save "$s" "$c" "$2 감독"
     kill -TERM "$s" 2>/dev/null
-    wait_gone "$s" 10 || { echo "  🔴$2 감독 pid $s 가 SIGTERM ${WAITED}초 뒤에도 산다"; return 1; }
+    wait_gone "$s" 10 || { echo "  🔴$2 감독 pid $s 가 SIGTERM ${WAITED}초 뒤에도 산다 -- $(why_alive "$s")"; return 1; }
     echo "  끔: $2 감독 pid $s"
   else
     echo "  ⚠️ $2 pid $c 의 부모($s)가 _supervise.sh 가 아니다 -- 수집기만 끈다"
     [ "${3:-}" = nosave ] || save "$c" "$c" "$2 수집기"
   fi
+  if gone "$c"; then echo "  끔: $2 수집기 pid $c (감독과 함께 이미 끝남)"; return 0; fi   # 감독을 끄면 같이 죽는 수집기 · 좀비로 잠깐 남은 것
   kill -TERM "$c" 2>/dev/null
   wait_gone "$c" "$TERM_WAIT_S" "$2 수집기" || {
-    echo "  🔴$2 수집기 pid $c 가 SIGTERM ${WAITED}초 뒤에도 산다(기다림 한도 ${TERM_WAIT_S}초 · 감독은 이미 꺼짐) -- $(ps -o pid=,stat=,etime=,args= -p "$c" 2>/dev/null | cut -c1-160)"
+    echo "  🔴$2 수집기 pid $c 가 SIGTERM ${WAITED}초 뒤에도 산다(기다림 한도 ${TERM_WAIT_S}초 · 감독은 이미 꺼짐) -- $(why_alive "$c")"
     return 2; }
   echo "  끔: $2 수집기 pid $c (SIGTERM 뒤 ${WAITED}초)"
 }
@@ -443,6 +471,8 @@ case "$KIND" in   # 종목마다 경로가 갈리는 종류(이 종류들은 수
   iceberg) c="${SYML%usdt}"; CHK="events:data/live/iceberg/${c}_events.jsonl:data/live/rtcollect/iceberg/${c}_events.jsonl"; W="data/live/iceberg/${c}_state.json" ;;
   hl_bt)   CHK="bt:data/live/orderflow/hyperliquid_bookticker/$SEL:data/live/rtcollect/orderflow/hyperliquid_bookticker/$SEL sq:data/hot/hl_ctx.sqlite:$(ls data/hot/rtcollect/hl_ctx.sqlite data/hot/rtcollect/hl_ctx_only.sqlite 2>/dev/null | paste -sd+)"
            W="data/live/orderflow/hyperliquid_bookticker/$SEL" ;;
+  hl_positions) n="hl_positions.sqlite"; [ "$SEL" = ETH ] || n="hl_positions_$(echo "$SEL" | tr '[:upper:]' '[:lower:]' | tr , _).sqlite"   # rtduck hl_positions::default_db 와 같은 이름
+           TENV="HL_POS_DB=data/hot/$n HL_ROOT=data/live/orderflow/hyperliquid RTDUCK_REST=1"; W="data/hot/$n data/hot/$n-wal"; POSDB="data/hot/$n" ;;
   hl_trades) d="${SEL//,/_}"; CHK="duckdir:data/live/orderflow/hyperliquid/$d:data/live/rtduck/orderflow/hyperliquid/$d"; W="data/live/orderflow/hyperliquid/$d" ;;
 esac
 TAG="$KIND"; [ -z "$SELV" ] || [ "$GROUP" = 1 ] || TAG="${KIND}_${SEL//[,:]/_}"
@@ -468,13 +498,31 @@ weight_judge() { # weight_judge "<전 값들>" "<뒤 값들>" -- 되돌릴 까�
   # 근거: 가중치 머리는 같은 IP 의 모든 프로세스 몫(대시보드·봇·다른 수집기)이라 한 번 튀는 값은 우리 몫이 아니다(11-22: 뒤 다섯 중 1382 하나만 튐 ·
   #   나머지 넷은 전과 같음 · 수집기 자체 요청률은 508.8 대 512.2 = 0.66%). 늘 얹히는 몫은 «중앙값»으로, 연달아 넘는 것은 «두 번 연속»으로 잡는다.
   local mb ma lim prev=0 x
-  mb="$(median "$1")"; ma="$(median "$2")"; lim=$((mb + 100))
+  # WEIGHT_TOL(기본 100): 11-22 두 번 실측에서 5분 창 사이의 이 IP 가중치가 우리와 무관하게 ±100~190 흔들렸다(전 중앙 933 → 뒤 [1012 1040 1119 980 985])
+  #   -- 주 근거는 수집기 자체 요청률 대조(±2%)이고 이 머리는 «폭주»만 잡는다. 흔들림이 큰 시간대에는 WEIGHT_TOL 을 올려 부른다.
+  local tol="${WEIGHT_TOL:-100}"
+  mb="$(median "$1")"; ma="$(median "$2")"; lim=$((mb + tol))
   echo "  가중치(1분): 넘기기 전 [$1] 중앙 $mb · 뒤 [$2] 중앙 $ma"
-  [ "$ma" -le "$lim" ] || { echo "  🔴중앙값이 $((ma - mb)) 늘었다(> 100)"; return 1; }
+  [ "$ma" -le "$lim" ] || { echo "  🔴중앙값이 $((ma - mb)) 늘었다(> $tol)"; return 1; }
   for x in $2; do
-    if [ "$x" -gt "$lim" ]; then [ "$prev" = 1 ] && { echo "  🔴두 번 연속 넘기기 전 중앙 + 100($lim) 초과"; return 1; }; prev=1; else prev=0; fi
+    if [ "$x" -gt "$lim" ]; then [ "$prev" = 1 ] && { echo "  🔴두 번 연속 넘기기 전 중앙 + $tol($lim) 초과"; return 1; }; prev=1; else prev=0; fi
   done
 }
+if [ "$MODE" = rest-shadow ]; then   # market_data: 미시구조 REST 를 켠 그림자를 REST_SHADOW_S(기본 600)초만 → 칸별 대조 → 그림자를 REST 없이 되돌림
+  [ "$KIND" = market_data ] || die "rest-shadow 는 market_data 만"
+  echo "rest-shadow market_data: 미시구조 REST = 종목 3(ETH·BTC·SOL) × (openInterest·premiumIndex) × 10초마다 = 분당 36요청 더(두 경로 가중치는 이 저장소에서 실측 안 함 -- 앞뒤 가중치 머리로 본다) · ${REST_SHADOW_S:-600}초 동안만"
+  W_B="$(WEIGHT_N=3 weight_max)" || die "가중치를 못 읽음 -- 아무것도 안 바꿈"; echo "  켜기 전 가중치(1분) [$W_B] 중앙 $(median "$W_B")"
+  for p in $(rs_procs shadow); do stop "$p" "그림자 Rust($RK)" nosave || die "그림자를 못 껐다"; done
+  env RTDUCK_BIN="$BIN" TAIL_SYMBOLS=ETHUSDT BOT_SYMBOLS=ETHUSDT,BTCUSDT,SOLUSDT RTDUCK_REST=1 nohup setsid bash scripts/ops/supervisor_rtduck.sh market_data >> logs/supervisor/rtduck_boot.log 2>&1 < /dev/null &
+  CHECK_FROM=$(( $(date +%s) + 60 ))   # 칸별 대조는 REST 를 켠 뒤(1분 지나서)부터만
+  t0=$SECONDS; while [ $((SECONDS - t0)) -lt "${REST_SHADOW_S:-600}" ]; do nap 5; done
+  W_A="$(WEIGHT_N=3 weight_max)" && echo "  켠 동안 가중치(1분) [$W_A] 중앙 $(median "$W_A")"
+  check; RC=$?
+  for p in $(rs_procs shadow); do stop "$p" "REST 켠 그림자 Rust($RK)" nosave; done
+  env RTDUCK_BIN="$BIN" TAIL_SYMBOLS=ETHUSDT BOT_SYMBOLS=ETHUSDT,BTCUSDT,SOLUSDT nohup setsid bash scripts/ops/supervisor_rtduck.sh market_data >> logs/supervisor/rtduck_boot.log 2>&1 < /dev/null &
+  sleep 3; echo "rest-shadow 끝: 그림자를 REST 없이 다시 띄움(pid $(rs_procs shadow | tr '\n' ' ')) · check 종료코드 $RC -- 칸별 줄(«같은 분 … 칸별»)을 보고 판단"
+  exit "$RC"
+fi
 [ "$MODE" = weight-judge ] && { weight_judge "${4:-}" "${5:-}"; exit $?; }   # 시험용: weight-judge binance_ctx "" "<전>" "<뒤>"
 [ "$MODE" = weight ] && { v="$(weight_max)" || exit 1; echo "$v"; echo "중앙 $(median "$v")"; exit 0; }   # 시험·손 확인용
 [ "$MODE" = check ] && { check; exit $?; }

@@ -47,12 +47,13 @@ impl Bundle {
 }
 
 // ── 청산맵 레벨
-struct Win {
-    t: Vec<i64>,
-    h: Vec<f64>,
-    l: Vec<f64>,
-    c: Vec<f64>,
-    v: Vec<f64>,
+/// 봉 창(시작 초 · 고 · 저 · 종 · 거래량) -- 청산맵 입력(2026-11-22 pub: rtserve ctx_rest 가 REST 닫힌 1시간봉으로 같은 계산을 쓴다).
+pub struct Win {
+    pub t: Vec<i64>,
+    pub h: Vec<f64>,
+    pub l: Vec<f64>,
+    pub c: Vec<f64>,
+    pub v: Vec<f64>,
 }
 fn ss(a: &[i64], x: i64) -> usize {
     a.partition_point(|&v| v < x) // np.searchsorted(side=left)
@@ -104,16 +105,17 @@ fn own_alive(sub: &Option<Vec<[[f64; 12]; 3]>>, e: &[f64], liq: &[f64], long: bo
     }).collect()
 }
 
-struct Common {
+pub struct Common {
     base: Vec<f64>,
     fmin: Vec<f64>,
     fmax: Vec<f64>,
-    bw: f64,
-    close: Vec<f64>,
+    pub bw: f64,
+    pub close: Vec<f64>,
     sub: Option<Vec<[[f64; 12]; 3]>>,
 }
 
-fn prepare(w: &Win, cp: f64, m5: &Win) -> Option<Common> {
+/// _prepare_common(가중·생존 필터 · 5분봉 자기 봉 판정) -- 창이 20줄 미만이거나 가격이 0 이하면 None.
+pub fn prepare(w: &Win, cp: f64, m5: &Win) -> Option<Common> {
     let n = w.t.len();
     if n < 20 || !(cp > 0.0) {
         return None;
@@ -129,7 +131,7 @@ fn prepare(w: &Win, cp: f64, m5: &Win) -> Option<Common> {
 }
 
 /// _bins_from_common: 칸 번호 → 무게(넣은 순서 유지 · 차례 합).
-fn bins(cm: &Common, e: &[f64]) -> Option<Bins> {
+pub fn bins(cm: &Common, e: &[f64]) -> Option<Bins> {
     let mut out: Vec<(i64, f64)> = vec![];
     let mut at: HashMap<i64, usize> = HashMap::new();
     let mut add = |px: &[f64], w: &[f64], alive: &dyn Fn(usize) -> bool| {
@@ -158,15 +160,21 @@ fn bins(cm: &Common, e: &[f64]) -> Option<Bins> {
     if out.is_empty() || !(mx > 0.0) { None } else { Some(out) }
 }
 
-/// levels_from_bins 의 한쪽: 가까운 순 가격(round 4).
-fn side(b: &[(i64, f64)], bw: f64, cp: f64, below: bool) -> Vec<f64> {
+/// levels_from_bins 의 한쪽(scripts/live_liquidation_map_20260824.py 238~265): 가까운 순 (price, weight_pct, distance_pct) = fmt 그대로
+/// (round 4 · round 4 · round 3). 2026-11-22 넓힘: 화면 청산맵 레벨(rtserve)이 무게%·거리%까지 쓴다.
+pub fn side_levels(b: &[(i64, f64)], bw: f64, cp: f64, below: bool) -> Vec<(f64, f64, f64)> {
     let mx = b.iter().map(|x| x.1).fold(f64::NEG_INFINITY, f64::max); // 파이썬 max(값) -- NaN 없음
     let mut lv: Vec<(f64, f64)> = b.iter().map(|&(k, w)| (k as f64 * bw, w))
         .filter(|&(p, w)| w / mx >= 0.05 && (p - cp).abs() / cp <= 0.05 && if below { p < cp } else { p > cp }).collect();
     lv.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap()); // 무게 큰 순(안정)
     lv.truncate(6);
     lv.sort_by(|a, b| if below { b.0.partial_cmp(&a.0) } else { a.0.partial_cmp(&b.0) }.unwrap());
-    lv.into_iter().map(|x| py_round(x.0, 4)).collect()
+    lv.into_iter().map(|(p, w)| (py_round(p, 4), py_round(w / mx, 4), py_round((p - cp) / cp * 100.0, 3))).collect()
+}
+
+/// levels_from_bins 의 한쪽: 가까운 순 가격(round 4).
+fn side(b: &[(i64, f64)], bw: f64, cp: f64, below: bool) -> Vec<f64> {
+    side_levels(b, bw, cp, below).into_iter().map(|x| x.0).collect()
 }
 
 /// level_at(df, t): 경계 t(초)에 알 수 있던 (가격, 지지[], 저항[]) -- 가까운 순.

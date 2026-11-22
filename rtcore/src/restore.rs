@@ -240,6 +240,21 @@ const SQL_SECS: &str = "
 const SQL_DHL: &str = "WITH s AS (SELECT ts_sec - ts_sec % ? AS bar, ts_sec, sum(buy_qty) - sum(sell_qty) AS d FROM trade_tape_1s WHERE symbol = ? AND ts_sec >= ? AND ts_sec < ? GROUP BY ts_sec), c AS (SELECT bar, d, sum(d) OVER (PARTITION BY bar ORDER BY ts_sec) AS cum FROM s) SELECT bar, min(cum), max(cum), sum(d) FROM c GROUP BY bar";
 const SQL_TOP: &str = "SELECT max(ts_sec) FROM trade_tape_1s WHERE symbol = ?";
 
+/// fp_dhl 테이프 가지의 읽기만(3971~3980): [lo, hi) 봉마다 [round(min(0, 최저), 3), round(max(0, 최고), 3), round(마감, 3)]. 읽기 전용.
+pub fn read_dhl(path: &Path, symbol: &str, lo: i64, hi: i64) -> Result<BTreeMap<i64, [f64; 3]>, String> {
+    let err = |e: rusqlite::Error| format!("{}: {e}", path.display());
+    let con = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX).map_err(err)?;
+    con.busy_timeout(Duration::from_secs(10)).map_err(err)?;
+    let mut st = con.prepare(SQL_DHL).map_err(err)?;
+    let mut rows = st.query(rusqlite::params![BAR_SECONDS, symbol, lo, hi]).map_err(err)?;
+    let mut out = BTreeMap::new();
+    while let Some(r) = rows.next().map_err(err)? {
+        let (lo_, hi_, c) = (f(r, 1).map_err(err)?, f(r, 2).map_err(err)?, f(r, 3).map_err(err)?);
+        out.insert(r.get(0).map_err(err)?, [r3(if lo_ < 0.0 { lo_ } else { 0.0 }), r3(if hi_ > 0.0 { hi_ } else { 0.0 }), r3(c)]);
+    }
+    Ok(out)
+}
+
 /// 파이썬 round(x, 10) 뒤 / 칸 폭 → 짝수 반올림(coin_flow.py 163). `{:.10}` 은 정확값 기준·동률 짝수라 파이썬 round 와 같다(supply.rs r3).
 fn tape_key(pb: i64, tape_bucket: f64, bucket: f64) -> i64 {
     let px: f64 = format!("{:.10}", pb as f64 * tape_bucket).parse().unwrap_or(f64::NAN);
@@ -365,6 +380,7 @@ impl Supply {
         // ① 봉: 테이프 칸을 더한다(footprint_tape_restore 557~567 -- 스냅숏 봉은 시작 때 통째로 썼다).
         let mut touched = BTreeSet::new();
         let mut n_cells = 0;
+        let agg_on = self.fp.agg_on_restore;
         if let Ok(t) = &t {
             for (&b, cells) in t.bars.range(cut..) {
                 let bar = self.fp.bars.entry(b).or_default();
@@ -377,6 +393,8 @@ impl Supply {
                     dirty.insert(k);
                     n_cells += 1;
                 }
+                // 원본 ETH = REST aggTrades 백필 → agg 봉(coin_flow.py 381~382) · 그 밖 코인 = 테이프 복원(533~570 · agg 안 붙임)
+                bar.agg |= agg_on;
                 touched.insert(b);
             }
         }
@@ -468,7 +486,7 @@ impl Supply {
 
     /// 스냅숏 되살리기(시작 때 · 수신 전). 봉은 통째로, 1초 칸은 옆에 둔다(merge 가 테이프 없는 초에만 쓴다).
     pub(crate) fn load_snap(&mut self, s: Snap) {
-        self.fp.bars = s.bars.into_iter().map(|(b, cells, dhl)| (b, Bar { cells: cells.into_iter().collect(), dhl, order: vec![] })).collect();
+        self.fp.bars = s.bars.into_iter().map(|(b, cells, dhl)| (b, Bar { cells: cells.into_iter().collect(), dhl, order: vec![], agg: false })).collect();
         self.fp.holes = s.holes;
         self.last_ms = s.last_ms;
         self.rs.snap_sec = s.sec.into_iter().collect();
@@ -802,7 +820,7 @@ impl Supply {
         while b >= lo && covered(b, b + 300) {
             if self.okx_fr.restored.insert(b) {
                 let cells = got.bars.get(&b).cloned().unwrap_or_default();
-                self.okx_fp.bars.insert(b, crate::footprint::Bar { cells, dhl: None, order: vec![] });
+                self.okx_fp.bars.insert(b, crate::footprint::Bar { cells, dhl: None, order: vec![], agg: false });
             }
             earliest = b;
             b -= 300;

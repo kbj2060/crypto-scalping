@@ -382,6 +382,11 @@ pub struct FpBar {
     pub levels: Vec<Level>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dhl: Option<[f64; 3]>,
+    /// 2026-11-22 더함 -- 재시작 공백을 메운 봉(원본 /api/footprint 의 `agg` -- server.py 4049~4050 · coin_flow.py footprint_add 381~382:
+    /// ETH 는 REST aggTrades 백필 봉 · 그 밖 코인은 테이프 복원이라 원본도 false). 코어는 REST 를 안 쓰므로 **ETH 의 테이프 복원 봉**을 표시한다.
+    /// 거짓이면 직렬화에서 빠진다(옛 받는 쪽 그대로) · 받는 쪽은 한 번 참이면 그 봉이 지워질 때까지 참(app.js keep 4852 와 같은 뜻).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub agg: bool,
 }
 
 /// 이름은 파이썬 /api/footprint 응답과 같다(app.js · rtui/src/data.rs 가 읽는 것만 -- footprint.rs 머리 주석의 «뺀 것»).
