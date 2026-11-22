@@ -142,3 +142,51 @@ fn replay_wakes_nap_early_like_python_fill_alert() {
     assert!(out.contains("| 요청 11(Rust "), "원본·Rust 요청 수를 따로: {out}");
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// 2026-11-22 서버 실기록 tick 5건 «요청 1(Rust 0) · Rust 가 덜 보냄 (GET /fapi/v1/time)»: 원본 감시 틱의 swr_cached 가 낡은 계좌를 내주며 띄운 뒤 계좌 갱신
+/// (_schedule_refresh → create_task 가 틱의 그림자 버퍼를 복사)의 `_clock_offset` 왕복만 틱 기록에 남은 것 -- 판정과 무관. 틱 끝에 홀로 남은 /time 은 따로 센다.
+/// 양성 대조: /time 이 아닌 요청이 하나 빠지면 그대로 어긋남 · 틱이 아닌 작업의 /time 은 안 뗀다.
+#[test]
+fn trailing_refresh_clock_in_tick_is_counted_apart_but_other_requests_still_differ() {
+    let d = tmp("rclk");
+    let rows: Vec<Value> = fixture().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    let ticks: Vec<String> = rows.iter().filter(|r| r["rec"] == "start" && r["op"] == "tick").map(|r| r["chain"].as_str().unwrap().to_string()).collect();
+    let (fire, quiet) = (ticks[0].clone(), ticks[1].clone());
+    let time_wire = |chain: &str, t: f64| json!({"rec": "wire", "chain": chain, "t": t, "mono": 0, "method": "GET", "target": "/fapi/v1/time", "status": 200, "error": null, "body": format!("{{\"serverTime\": {}}}", (t * 1000.0) as i64)});
+    // 무장 파일만 바뀌는 틱(요청 0) 끝에 /time 하나 = 서버 tick 5건 꼴
+    let with_clock = edit(&fixture(), |rows| {
+        rows.retain(|r| r["chain"] == quiet.as_str());
+        let end = rows.iter().position(|r| r["rec"] == "end").unwrap();
+        let t = rows[end]["t"].as_f64().unwrap() - 0.01;
+        rows.insert(end, time_wire(&quiet, t));
+    });
+    let f = d.join("order_shadow.jsonl");
+    std::fs::write(&f, &with_clock).unwrap();
+    let (code, out) = run(&f, &[]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("| 요청 0 · 뒤 계좌 갱신 시계 왕복 1 | 같음") && out.contains("뒤 계좌 갱신 시계 왕복 1(따로 셈)"), "{out}");
+    // 대조 ①: 발동 틱의 마지막 요청(openAlgoOrders)을 빼면 -- 끝에 /time 이 남아도 -- 어긋남
+    let dropped = edit(&fixture(), |rows| {
+        rows.retain(|r| r["chain"] == fire.as_str());
+        let last = rows.iter().rposition(|r| r["rec"] == "wire").unwrap();
+        assert!(rows[last]["target"].as_str().unwrap().starts_with("/fapi/v1/openAlgoOrders"));
+        let t = rows[last]["t"].as_f64().unwrap();
+        rows[last] = time_wire(&fire, t);
+    });
+    std::fs::write(&f, &dropped).unwrap();
+    let (code, out) = run(&f, &[]);
+    assert_eq!(code, 1, "/time 아닌 요청이 빠지면 어긋남: {out}");
+    assert!(out.contains("Rust 가 더 보냄") || out.contains("경로 다름"), "{out}");
+    // 대조 ②: 진입 작업 끝의 /time 은 안 뗀다(틱만)
+    let entry = rows.iter().find(|r| r["rec"] == "start" && r["op"] == "entry").unwrap()["chain"].as_str().unwrap().to_string();
+    let entry_clock = edit(&fixture(), |rows| {
+        rows.retain(|r| r["chain"] == entry.as_str());
+        let end = rows.iter().position(|r| r["rec"] == "end").unwrap();
+        let t = rows[end]["t"].as_f64().unwrap() - 0.0001;
+        rows.insert(end, time_wire(&entry, t));
+    });
+    std::fs::write(&f, &entry_clock).unwrap();
+    let (code, out) = run(&f, &[]);
+    assert_eq!(code, 1, "진입 끝 /time 은 어긋남 그대로: {out}");
+    let _ = std::fs::remove_dir_all(&d);
+}
