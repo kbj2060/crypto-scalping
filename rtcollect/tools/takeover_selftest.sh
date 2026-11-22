@@ -16,6 +16,7 @@ cat > "$R/scripts/live_trade_tape_collector_20260916.py" <<'X'
 P0=$PPID
 trap 'if kill -0 $P0 2>/dev/null; then echo "py_term $TAPE_MARKET parent_alive" >> $R/order.log; else echo "py_term $TAPE_MARKET parent_gone" >> $R/order.log; fi; [ -s $R/slow ] && for i in $(seq $(( $(cat $R/slow) * 2 ))); do touch "$f"; sleep 0.5; done; echo "py_exit $TAPE_MARKET" >> $R/order.log; exit 0' TERM   # slow 파일에 적힌 초만큼 SIGTERM 뒤 더 쓰다가 끝남(마지막 묶음 흉내)
 echo "py_start $TAPE_SYMBOL $TAPE_MARKET" >> $R/order.log
+[ -e $R/diewithparent ] && { while kill -0 $P0 2>/dev/null; do sleep 0.1; done; echo "py_die_with_parent" >> $R/order.log; kill -9 $$; } &   # 감독이 죽으면 같이 죽는 수집기
 f=$R/data/hot/binance_tape.sqlite; [ "$TAPE_MARKET" = futures ] || f=$R/data/hot/binance_spot_tape.sqlite
 while :; do touch "$f"; sleep 0.3 & wait $!; done
 X
@@ -223,4 +224,22 @@ ok "파이썬 두 줄 주석 · Rust 두 줄(같은 시각·같은 인자) · �
 bash rtcollect/tools/takeover.sh back treasury_futures > /dev/null 2>&1
 ok "back 뒤 crontab 원래대로" '[ "$(cat crontab.txt)" = "$C0" ]'
 mv crontab.keep crontab.txt
+echo "== 10. gone() 한 곳 판정: 좀비 · 없는 pid · 산 것 + 감독을 끄면 같이 죽는 수집기"
+bash -c 'sleep 0.1 & echo $! > "$R/zpid"; exec sleep 8' & sleep 1
+ZP="$(cat "$R/zpid")"; LP=$!
+ok "좀비(부모가 안 거둠) = 죽음 ($(ps -o stat= -p "$ZP" | xargs))" '[ "$(bash rtcollect/tools/takeover.sh gone-test "$ZP")" = 죽음 ]'
+ok "산 것 = 삶" '[ "$(bash rtcollect/tools/takeover.sh gone-test "$LP")" = 삶 ]'
+ok "없는 pid = 죽음" '[ "$(bash rtcollect/tools/takeover.sh gone-test 4000000)" = 죽음 ]'
+touch "$R/diewithparent"
+env TAPE_SYMBOL=ethusdt,btcusdt PYTHON_BIN=bash setsid nohup bash scripts/ops/supervisor_trade_tape.sh > /dev/null 2>&1 < /dev/null &
+[ -n "$(rsp "")" ] || env RTCOLLECT_BIN="$R/tmp/rtbin/rtcollect" TAPE_SYMBOL=ethusdt,btcusdt setsid nohup bash scripts/ops/supervisor_rtcollect.sh binance_tape > /dev/null 2>&1 < /dev/null &
+sleep 3; rm -f "$R/diewithparent"; : > order.log
+OUT="$(bash rtcollect/tools/takeover.sh go binance_tape 2>&1)"; RC=$?; echo "$OUT" | grep -E "끔:|🔴|go binance"
+ok "감독과 같이 죽는 수집기 → 성공(«감독과 함께 이미 끝남» 또는 0초) · 되돌림 없음" '[ "$RC" = 0 ] && echo "$OUT" | grep -qE "수집기 pid [0-9]+ \((감독과 함께 이미 끝남|SIGTERM 뒤 0초)\)"'
+bash rtcollect/tools/takeover.sh back binance_tape > /dev/null 2>&1
+ok "back 뒤 crontab 원래대로" '[ "$(cat crontab.txt)" = "$ORIG" ]'
+echo "== 11. hl_positions: 넘기기 전 check = 정답지 근거 + 표·칸 모양을 적어 둠"
+python3 -c "import sqlite3; c=sqlite3.connect('data/hot/hl_positions.sqlite'); c.execute('CREATE TABLE hl_cycles(ts_ms INTEGER, n INTEGER)'); c.execute('CREATE TABLE hl_positions(addr TEXT, coin TEXT, szi REAL)'); c.commit()"
+OUT="$(bash rtcollect/tools/takeover.sh check hl_positions 2>&1)"; RC=$?
+ok "통과 · 모양을 적어 둠" '[ "$RC" = 0 ] && grep -q "hl_cycles: ts_ms,n" logs/supervisor/takeover_schema_hl_positions_ETH.txt'
 [ "$FAIL" = 0 ] && echo "takeover selftest OK" || { echo "takeover selftest 실패"; exit 1; }
