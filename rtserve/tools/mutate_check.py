@@ -162,6 +162,25 @@ M = [
     ('⑤풋프린트 빈 since 통과', 'src/api3.rs', 'req.q(k).map(|v| crate::fpd::iso_day(v)', 'req.q(k).filter(|v| !v.is_empty()).map(|v| crate::fpd::iso_day(v)', 'fpd_http'),
     ('⑤일봉 cells range → 500', 'src/api3.rs', 'Err(PyErr(m)) if m == "range" => crate::http_exc(400, Some("range"), &[]),', '', 'fpd_http'),
     ('⑤4h cells from_to 를 bad_key 보다 먼저', 'src/api3.rs', 'let (frm, to) = (tri!(iso_h4_q(req, "from")), tri!(iso_h4_q(req, "to")));', 'if req.q("from").is_none() || req.q("to").is_none() { return crate::http_exc(400, Some("from_to"), &[]); }\n    let (frm, to) = (tri!(iso_h4_q(req, "from")), tri!(iso_h4_q(req, "to")));', 'fpd_http'),
+    # ── 아홉째 조각(바이낸스 한 문 · trend · cycle-path) -- 이름 «⑨» ──
+    ('⑨무변경(대조: 통과해야 함)', 'src/rest.rs', 'fn market_symbol', 'fn market_symbol', 'rest_parity'),
+    ('⑨가중치 문턱 무시', 'src/model.rs', 'if let Some(w) = r.1.filter(|w| *w > limit) {', 'if let Some(w) = r.1.filter(|w| *w > limit * 2.0) {', 'rest_parity'),
+    ('⑨문턱 거절 없이 보냄', 'src/model.rs', '    if st.1 > t {\n        return Err(Refused::Hold(st.1 - t));\n    }\n', '', 'rest_parity'),
+    ('⑨trend 형성 봉 포함', 'src/rest.rs', '(r[6].as_i64().unwrap_or(i64::MAX) as f64) < now_ms).collect();\n        Ok(trend_payload', '(r[6].as_i64().unwrap_or(i64::MAX) as f64) < now_ms + 86_400_000.0).collect();\n        Ok(trend_payload', 'rest_parity'),
+    ('⑨trend 표본 분산 n−1 → n', 'src/rest.rs', '/ 19.0).sqrt()', '/ 20.0).sqrt()', 'rest_parity'),
+    ('⑨trend 크기 상한 빼기', 'src/rest.rs', 'let m = if v < 2.0 { v } else { 2.0 }; if m > -2.0 { m } else { -2.0 }', 'v', 'rest_parity'),
+    ('⑨trend 나이 경계 90 → 89', 'src/rest.rs', 'for i in (90..n).rev() {', 'for i in (89..n).rev() {', 'rest_parity'),
+    ('⑨trend sma50 14 → 13', 'src/rest.rs', '(49.max(n - 14)..n)', '(49.max(n - 13)..n)', 'rest_parity'),
+    ('⑨cycle 1m 경계 <= → <', 'src/rest.rs', 'if span_min <= 1490.0 { "1m" }', 'if span_min < 1490.0 { "1m" }', 'rest_parity'),
+    ('⑨cycle 15m 경계 7450 → 7449', 'src/rest.rs', 'else if span_min <= 7450.0 { "5m" }', 'else if span_min <= 7449.0 { "5m" }', 'rest_parity'),
+    ('⑨cycle 밑줄 숫자 거절', 'src/rest.rs', "let v: i64 = d.replace('_', \"\").parse().ok()?;", 'let v: i64 = d.parse().ok()?;', 'rest_parity'),
+    ('⑨cycle 30일 하한 빼기', 'src/rest.rs', 'Some(s) if now_ms - 30 * 86_400_000 <= s && s <= now_ms => s,', 'Some(s) if s <= now_ms => s,', 'rest_parity'),
+    ('⑨cycle 주문 심볼 빼기', 'src/rest.rs', '&& !exec_symbols().contains(&symbol)', '', 'rest_parity'),
+    ('⑨swing 창 50 → 49', 'src/rest.rs', 'const SWING_N: usize = 50;', 'const SWING_N: usize = 49;', 'rest_parity'),
+    ('⑨swing 깨짐 > → >=', 'src/rest.rs', '.filter(|(px, _)| c[i] > *px)', '.filter(|(px, _)| c[i] >= *px)', 'rest_parity'),
+    ('⑨swing CHoCH 판정 뒤집음', 'src/rest.rs', '"kind": if trend == -1 { "CHoCH" } else { "BOS" }', '"kind": if trend == 1 { "CHoCH" } else { "BOS" }', 'rest_parity'),
+    ('⑨swing 한쪽 실패 partial 빼기', 'src/rest.rs', '            out.insert("partial".into(), json!(errs));\n', '', 'rest_parity'),
+    ('⑨cycle 실패 reason 통째', 'src/rest.rs', 'm.split_once(": ").map_or(m.as_str(), |x| x.1)', 'm.as_str()', 'rest_parity'),
 ]
 
 

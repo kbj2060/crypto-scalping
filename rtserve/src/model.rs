@@ -45,6 +45,8 @@ pub struct State {
     qrows: Mutex<HashMap<String, Vec<Value>>>,
     /// QX4I: 코인별 Deribit ATM IV 시간 칸 기억(원본 qx4_state["iv"][coin])
     qiv: Mutex<HashMap<String, std::collections::BTreeMap<i64, Option<f64>>>>,
+    /// 바이낸스 선물 REST 한 문(binance_get)의 공유 상태: 마지막으로 보낸 벽시계 · 가중치 문턱으로 안 보내는 끝 시각
+    gate: Mutex<(f64, f64)>,
 }
 
 fn e(kind: &str, msg: impl AsRef<str>) -> PyErr {
@@ -131,13 +133,12 @@ fn query(params: &[(&'static str, String)]) -> String {
 /// 원본 d4._get(requests · 서버 안에선 binance_ban_guard 가 감쌈 · 20초): 밴 중이면 BinanceBanned · raise_for_status · json
 fn rest_get(cfg: &Config, path: &str, params: &[(&'static str, String)]) -> Result<Value, String> {
     rest_on(cfg)?;
-    let (ban, now) = (ban_file(cfg), (cfg.now)());
-    let left = rtmodel::ban::ban_left(&ban, now);
-    if left > 0.0 {
-        return Err(format!("BinanceBanned: binance IP ban: {left:.0}s left -- request not sent"));
-    }
-    let (status, retry, body) = call(&format!("{}{path}?{}", cfg.rest, query(params)), 20, None).map_err(|m| format!("ConnectionError: {m}"))?;
-    rtmodel::ban::ban_note(&ban, status, &body, retry.as_deref(), now);
+    let (status, body) = match binance_get(cfg, &format!("{}{path}?{}", cfg.rest, query(params))) {
+        Ok(x) => x,
+        Err(Refused::Ban(left)) => return Err(format!("BinanceBanned: binance IP ban: {left:.0}s left -- request not sent")),
+        Err(Refused::Hold(left)) => return Err(format!("BinanceWeightHold: used weight over limit: {left:.0}s left -- request not sent")),
+        Err(Refused::Conn(m)) => return Err(format!("ConnectionError: {m}")),
+    };
     if status >= 400 {
         return Err(format!("HTTPError: {status}"));
     }
@@ -145,18 +146,83 @@ fn rest_get(cfg: &Config, path: &str, params: &[(&'static str, String)]) -> Resu
 }
 
 /// 원본 fetch_binance_json(10초): 밴 중 = 안 보냄(error_reason 있으면 HTTPServiceUnavailable binance_ip_ban · 없으면 None) · 200 아님 = 418·429 기록 뒤 HTTPBadGateway(reason) · None
-fn fetch_binance(cfg: &Config, url: &str, reason: Option<&str>) -> Result<Option<Value>, String> {
+/// 가중치 문턱인 분 = 밴과 같은 «안 보냄» 갈래(이유 글자만 binance_weight_hold)
+pub(crate) fn fetch_binance(cfg: &Config, url: &str, reason: Option<&str>) -> Result<Option<Value>, String> {
     rest_on(cfg)?;
-    let (ban, now) = (ban_file(cfg), (cfg.now)());
-    if rtmodel::ban::ban_left(&ban, now) > 0.0 {
-        return reason.map_or(Ok(None), |_| Err("HTTPServiceUnavailable: binance_ip_ban".into()));
-    }
-    let (status, retry, body) = call(url, 10, None).map_err(|m| format!("ClientError: {m}"))?;
+    let (status, body) = match binance_get(cfg, url) {
+        Ok(x) => x,
+        Err(Refused::Ban(_)) => return reason.map_or(Ok(None), |_| Err("HTTPServiceUnavailable: binance_ip_ban".into())),
+        Err(Refused::Hold(_)) => return reason.map_or(Ok(None), |_| Err("HTTPServiceUnavailable: binance_weight_hold".into())),
+        Err(Refused::Conn(m)) => return Err(format!("ClientError: {m}")),
+    };
     if status != 200 {
-        rtmodel::ban::ban_note(&ban, status, &body, retry.as_deref(), now);
         return reason.map_or(Ok(None), |r| Err(format!("HTTPBadGateway: {r}")));
     }
     serde_json::from_str(&body).map(Some).map_err(|m| format!("ContentTypeError: {m}"))
+}
+
+pub enum Refused {
+    /// 밴 파일이 아직 밴 중(남은 초) -- 안 보냄
+    Ban(f64),
+    /// 앞 응답의 x-mbx-used-weight-1m 이 문턱을 넘은 분(남은 초) -- 안 보냄
+    Hold(f64),
+    /// 연결·본문 읽기 실패
+    Conn(String),
+}
+
+fn env_num(k: &str, d: f64) -> f64 {
+    std::env::var(k).ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(d)
+}
+
+fn wall() -> f64 {
+    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
+}
+
+/// 🔴바이낸스 선물 REST 는 전부 여기 하나를 지난다(이 서버 IP 로 실주문이 나간다 · 한도 2,400/분 공유):
+///   ① 밴 파일(data/live/binance_ban_until · cfg 시계)이 밴 중이면 안 보냄 · 418/429 는 그 파일에 적음 ② 앞 응답의 `x-mbx-used-weight-1m` 이
+///   문턱(RT_REST_WEIGHT_LIMIT · 기본 1,200)을 넘었으면 그 분 끝(+0.5초)까지 안 보냄 ③ 요청 사이 최소 간격(RT_REST_GAP_MS · 기본 200ms).
+///   보내기·418/429 기록·가중치 머리 읽기는 rtmodel::gate::Gate 그대로. ②는 Gate 처럼 «쉬며 기다리지» 않고 거절한다(화면 요청이 1분 붙잡히지 않게 --
+///   원본의 못 받음 갈래로). 원본 fetch_binance_json·d4._get 에는 ②③이 없다(값은 그대로 · 느리게만).
+/// ponytail: 한 문 = 잠금 하나로 바이낸스 요청을 한 줄로 세운다(원본은 연결 32개 동시) · Gate 는 시계 상자가 Send 가 아니라 스레드마다 하나
+///   (공유 상태 = 위 잠금). rtmodel Gate 에 Send·«쉬지 말고 거절» 이 생기면 하나로.
+pub fn binance_get(cfg: &Config, url: &str) -> Result<(u16, String), Refused> {
+    use rtmodel::gate::{Fail, Gate};
+    thread_local!(static G: std::cell::RefCell<Option<(PathBuf, Gate)>> = const { std::cell::RefCell::new(None) });
+    let ban = ban_file(cfg);
+    let left = rtmodel::ban::ban_left(&ban, (cfg.now)());
+    if left > 0.0 {
+        return Err(Refused::Ban(left));
+    }
+    let mut st = cfg.models_state.gate.lock().unwrap();
+    let t = wall();
+    if st.1 > t {
+        return Err(Refused::Hold(st.1 - t));
+    }
+    let gap = env_num("RT_REST_GAP_MS", 200.0) / 1000.0;
+    if t - st.0 < gap {
+        std::thread::sleep(Duration::from_secs_f64(gap - (t - st.0)));
+    }
+    let r = G.with(|g| {
+        let mut g = g.borrow_mut();
+        if g.as_ref().is_none_or(|(p, _)| *p != ban) {
+            *g = Some((ban.clone(), Gate::new(Duration::from_secs(20), ban.clone())));
+        }
+        let gate = &mut g.as_mut().unwrap().1;
+        gate.weight = None;
+        let r = gate.send(url, true);
+        (r, gate.weight)
+    });
+    st.0 = wall();
+    let limit = env_num("RT_REST_WEIGHT_LIMIT", 1200.0); // Gate 와 같은 이름·기본값
+    if let Some(w) = r.1.filter(|w| *w > limit) {
+        st.1 = (st.0 / 60.0).floor() * 60.0 + 60.5;
+        (cfg.log)(&format!("[rest] 가중치 {w:.0} > 문턱 {limit:.0} -- 바이낸스 요청 {:.1}초 안 보냄", st.1 - st.0));
+    }
+    match r.0 {
+        Ok(x) => Ok(x),
+        Err(Fail::Banned(s)) => Err(Refused::Ban(s)),
+        Err(Fail::Conn(m) | Fail::Body(m)) => Err(Refused::Conn(m)),
+    }
 }
 
 /// REST 꺼짐(RTSERVE_REST 없음 = 병행 가동 기본 -- 파이썬과 같은 IP 로 같은 REST 를 겹쳐 부르지 않게): 보내지 않고 오류

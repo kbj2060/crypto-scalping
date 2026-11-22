@@ -23,6 +23,8 @@ Rust 판 = `rtserve/`(새 크레이트). 설계 문서 `docs/rtcore_design_20261
   + 결함 고침: supply-1s `oi` 가 늘 [] 이던 것(원본도 hot oi_1s 를 읽는다 -- §5 #13 정정) · vol-forecast QX4I(Deribit IV 칸) 붙임(rtmodel 새 함수).
 - **옮김 합계(2026-11-22 · 여섯째 조각 뒤)**: `/api/*` 78 중 **60** + 화면·정적 6 = **66 / 84**. 남은 것 = §7.
   (다시 셈 -- 묶음별: 파일 21/21 · 쓰기·설정 6/6 · 저장소+계산 6/7 · 메모리 상태 7/10 · 요청 때 REST·모델 5/20 · 주문 14/14 = 59. 앞 조각 보고의 «33 → 54 → 60/84»는 하나 덜 센 값이었다.)
+- **아홉째 조각(2026-11-22 · 미커밋 · §10)**: 요청 때 REST 14주소 표 · 바이낸스 한 문(`model::binance_get` = 밴·가중치 1,200 넘은 분 거절·간격 200ms · rtmodel::gate::Gate 재사용) ·
+  `/api/trend` · `/api/cycle-path` · `/api/swing-lines` 옮김(정답지 33/33). 합계 66 → **69 / 84**(+ /api/situation). sr-watch 는 청산맵 계산에 막힘 · position-profile 은 다음.
 - 인증·세션: **원본 서버 안에 없다.** 127.0.0.1 에만 묶이고, 공개 경로는 Cloudflare 터널(`dashboard/scripts/start_cloudflare_tunnel.sh`) + Cloudflare Access 가 막는다
   (`dashboard/scripts/supervise_server.sh:31~32` 주석 · `docs/rtcore_browser_route_20261120.md:22`). «인증 없이 열면 `/` 는 302, 그 밖은 404» 로 보인 것은
   원본 라우터 그대로다(`/` = `HTTPFound("/dashboard/live/")`, 모르는 주소 = `404: Not Found`). rtserve 도 인증을 새로 만들지 않고 루프백이 아니면 시작을 거절한다.
@@ -341,6 +343,8 @@ oi 기본 48→24(ETH 는 OKX 가 있어 20봉만 남아 같았다 → SOL 기�
 
 **여섯째 조각 결과(2026-11-22): 변이 8/8 잡힘**(`⑥` · 백분위 f32 · 재깔림 합 차례 · 블록 문턱 · 접근 문턱 · 구멍 ts 0 · agg 첫 최대 · supply oi 660초) · 무변경 통과. 첫 판 못 잡음 2(agg 첫 최대 = 정답지에 |값| 같은 부호 다른 칸이 없었다 → 주기 3 칸 · supply oi 자르기 = 가장 늦은 초가 오래된 사례 → 더함).
 
+**아홉째 조각 결과(2026-11-22): 변이 17/17 잡힘**(`⑨` · 가중치 문턱 2 · trend 6 · cycle-path 6 · swing 4 -- 무변경 통과 · 원본 바이트 그대로). 첫 판 못 잡음 1: swing «깨짐 > → >=»(종가가 스윙 고점과 꼭 같은 봉이 없었다 → SNDK 봉을 더함).
+
 ## 7. 다음 조각 순서
 
 1. ~~일봉·4시간 풋프린트 4~~ -- 다섯째 조각에서 옮김.
@@ -500,3 +504,54 @@ flow_scales_all(`flow_hour_scales_combos` · binance·okx(okx_tape · ETH-USDT-S
 3. **dhl**(봉 안 누적 델타 저·고·마감): 원본 api_footprint 의 fp_dhl(서버 · 테이프 hot 에서) vs 코어 판(rtcore footprint.rs 머리 주석 «테이프 가지가 파이썬과 다른 봉») -- sol 은 dhl 키가 파이썬에만(코어가 그 봉 dhl 을 안 셈).
 → 전환 전에 정하려면: rtcore 가 재시작 공백을 aggTrades 로 메울지(REST 가중치 · 밴 가드) 아니면 «복원 봉은 다르다»를 받아들일지(사용자 결정).
 - (여덟째 조각 뒤) 결정: rtcore 는 재시작 공백을 REST aggTrades 로 메우지 않고 복원 봉에 `agg: true` 를 싣는다(코어 몫) → `shadow_http.py` 는 /api/footprint 에서 **한쪽이라도 agg 인 봉 시각을 두 쪽에서 빼고** 나머지만 글자 대조 · 뺀 수는 «복원 봉 n»(불일치 아님) · 자체 시험 2(한쪽만 agg 도 뺌 · agg 아닌 봉 차이는 그대로 잡힘).
+
+## 10. 아홉째 조각 (2026-11-22) -- 요청 때 REST
+
+### 10-1. 원본이 부르는 REST 표(주소마다 · server.py 줄은 Read 로 확인 · 가중치는 바이낸스 문서 규칙: klines limit [1,100)=1 · [100,500)=2 · [500,1000]=5 · >1000=10)
+
+공통: 바이낸스 호출은 거의 전부 `fetch_binance_json`(1531~1551 · 밴 가드는 호스트가 binance.com 일 때만 · 밴 중이면 안 보냄: error_reason 있으면 503 `binance_ip_ban`, 없으면 None ·
+200 아니면 418/429 기록 뒤 502(reason) 또는 None · 연결 오류·시간 초과는 안 잡음 → 핸들러 따라 500). Deribit·OKX·Bybit 도 이 함수를 지나지만 가드·기록은 안 탄다.
+requests 경로(macro_trend)는 server.py:171 의 binance_ban_guard 가 Session.request 를 감싼다. swr = 1482~1517 · STALE_GRACE_SECONDS 600(1040).
+🔴원본에는 «가중치 머리를 보고 쉬기»·«요청 사이 간격»이 없다(같은 IP 의 주문과 한도를 나눠 쓴다).
+
+| 주소 | 바깥 요청(한 번 만들 때) | 가중치 | 캐시(swr 키 · ttl/max_stale) | 실패 | 계산 · 메모리 상태 | rtserve |
+|---|---|---|---|---|---|---|
+| `/api/trend` (2743~2760) | fapi klines 1d limit 120 ×1 | 2(원본 주석 «1»은 틀림) | `trend_{a}_1d` 300/600 | 모든 예외 → 200 `{"ok": false, "reason": "<종류>: <글>"}` · 코인 밖 400 unsupported_asset | trend_rule.py 81줄(math) · 상태 없음 | **옮김** |
+| `/api/cycle-path` (4820~4845) | fapi klines {1m·5m·15m} startTime limit 1500 ×1 | 10 | `cycle_path:{SYM}:{start}` 20/0 · 키 상한 없음 | HTTPException → 200 `{"ok": false, "reason": <reason>, "rows": []}` · 연결 오류 500 · 400 unsupported_symbol·bad_start | 한 줄 변환 · 상태 없음 | **옮김** |
+| `/api/swing-lines` (2762~2794) | klines 1h·30m limit 1000 ×2 | 10 | `swing_{a}` 60/600 | 한쪽 실패 = 그 tf null + partial · 둘 다 = 200 ok false | swing_lines.py 57줄(numpy max·min 같음 비교뿐) | **옮김** |
+| `/api/opt-smile` (4739~4755) | Deribit get_book_summary_by_currency(ETH·BTC·USDC) ×1 · 6초 | 바이낸스 아님 | `opt_smile_{CUR}` 60/600 · 🔴실패 payload 도 캐시 | 200 ok false deribit_unavailable·eth_btc_xrp_only | front_smile 35줄(np.polyfit) | 다음 |
+| `/api/market-history` (3701~) | eth·btc: ETH·BTC 5m limit 1500 ×2(evidence 캐시) · 그 밖: 5m limit 1000 ×1(3초) | 20 / 5 | `evidence_signal` 60/0 · `market_history:{a}` 60/600 | 502 텍스트 evidence_signal_upstream_error·market_history_upstream_error · 밴 503 · 400 unsupported_market_history_asset | trend_veto(pandas rolling·ewm -- ctx_rest.rs 에 이미 있음) · vwap_rows · 형성 봉 | 다음 |
+| `/api/liquidation-map` (4774 → 3461) | klines 1h limit 48 + 5m limit 460 | 3 | `liquidation_map:{a}` 60/600 + liq_hist_memo | 502 JSON `{"error": "liquidation_map_upstream_error", "detail": …}` · 밴 503 텍스트 | live_liquidation_map_20260824.py 725줄(numpy·pandas) + 로컬 OI 3 DB | 다음(무거움) |
+| `/api/liquidation-map/tiers` (4847 → 3359) | 1h limit days×24+2 · 1500 넘으면 endTime 으로 앞쪽(1d 1회 … 365d 6회) | 1~60 | `liquidation_tiers:{a}:{d}` 60(365d 300)/600 | 502 JSON · days 밖 = 조용히 1 | compute_tier_profile | 다음(청산맵과 함께) |
+| `/api/position-profile` (4785 → 3418·3388) | 첫 적재: openInterestHist 5m limit 500 ×18 + klines 5m limit 1500 ×6 · 증분: 각 1(5분봉 닫힌 뒤 · 60초 간격) | ≥60 + oiHist(모름) | `position_profile:{a}:{wins}:{rng}` 1/600 · pos_books(코인 장부) · 실패 백오프 60초 | 502 JSON position_profile_upstream_error · 404 flow_off · 400 bad_range | position_profile.py 204줄(numpy exp·pairwise 합) · **흐름 메모리(oi_1s·footprint sec·bars)** | 다음 |
+| `/api/sr-watch` (2060) | 직접 없음 -- sr_break_loop(2063~2105) 이 10초마다 load_liquidation_map 을 불러 채운 메모리 | (청산맵 몫) | 메모리 | — | sr_breaks·sr_watch_view + footprint sec | **막힘**: 청산맵 먼저 |
+| `/api/footprint-daily/heat` · `/api/footprint-4h/heat` (3928·3914 → 3753) | klines 1h limit 500 ×1(둘이 공유) | 5 | `fp_daily_k1h_{a}` 600/3600 · 바깥 `fp_*_heat_{a}_{from}_{to}_{row}` 300/1800 | 받기 실패 = 빈 heat 를 300초 캐시 | footprint_daily heat_at → 청산맵 내부 함수 · 소급 parquet | 다음 |
+| `/api/footprint-daily/xcvd` (3853) | 현물 klines·OKX 3·Bybit 2·fapi fundingRate·OKX funding = 8 | 현물 2(?)·fundingRate(모름) | `fp_xcvd_{a}` 3600/21600 + 디스크 누적 data/live/xcvd/{a}.json | 전부 실패 = RuntimeError(차가우면 500) | dict 합치기 75줄 · 🔴파일 쓰기(병행 중 READONLY 와 부딪힘) | 다음 |
+| `/api/footprint-week` (4183 → 4161) | klines 5m limit 1000 · 4000행까지 쪽(보통 4회) | 20 | `fp_week_k5_{a}` 600/3600 · `fp_week_{a}` 300/1800 | 받기 실패 = candles [] 를 300초 캐시 | hot SQLite·duckdb 테이프 재구성이 본체 | 다음 |
+| `/api/macro-trend` (2125 → macro_trend.payload) | FRED 20계열(3번 시도) + DefiLlama 1 + fapi 1d limit 1200 ×2 | 20 | `macro_trend` 3600/21600 · 실패 payload 도 캐시 | 200 ok false | macro_trend.py 434줄(pandas) · 키 필요 | 제안: 파이썬 워커가 파일로 |
+| `/api/push/test` POST (4923) | 구독마다 웹푸시 POST(새 세션 · 가드 밖) | — | — | VAPID 키 없음 503 | RFC8291 암호화 | 알림 묶음과 함께 |
+
+### 10-2. 바이낸스 한 문(`model::binance_get`)
+- rtserve 의 바이낸스 선물 REST(모델 5 · trend · cycle-path · 앞으로 옮길 것)는 전부 `model::fetch_binance`/`rest_get` → `binance_get` 하나를 지난다:
+  ① 밴 파일(cfg 시계 · 418/429 기록 = rtmodel::gate::Gate 안의 ban_note) ② 앞 응답 `x-mbx-used-weight-1m` > `RT_REST_WEIGHT_LIMIT`(기본 1,200) 이면 **그 분 끝 +0.5초까지 보내지 않고 거절**
+  (Gate 는 쉬며 기다리지만 화면 요청을 1분 붙잡지 않게 거절 → 원본 «못 받음» 갈래: fetch 꼴 = `HTTPServiceUnavailable: binance_weight_hold` · 모델 rest_get 꼴 = `BinanceWeightHold: …`)
+  ③ 요청 사이 최소 간격 `RT_REST_GAP_MS`(기본 200ms · 문 하나 잠금 안에서 · 시험은 0).
+- 보내기·가중치 머리 읽기는 `rtmodel::gate::Gate`(rtmodel 안 고침). 🔴Gate 의 시계 상자가 `Send` 가 아니라 스레드마다 하나씩 두고, 공유 상태(마지막 보낸 시각·거절 끝)는 Config 안 잠금 하나.
+  바뀐 점: 모델 주소의 받기 시간 제한 10초(fetch_binance_json) → 20초(Gate 하나) · 바이낸스 요청이 한 줄로 선다(원본 연결 32개 동시).
+- 바깥 받기 중 **이 문 밖**: `ext_get`(dir-signals 의 Coinbase·바이낸스 현물·FRED · QX4I Deribit -- 원본도 밴 가드 밖 · 현물 가중치는 선물과 다른 한도).
+- 시험 `tests/rest_parity.rs::weight_over_limit_holds_rest_of_minute`: 가짜 REST 가 1100 을 알리면 다음 요청도 보냄(양성) · 1300 을 알린 뒤 trend·cycle-path·trend·open-rev 4요청 = **가짜 서버가 받은 요청 0** · 응답은 못 받음 갈래 글자.
+  `rest_off_sends_nothing`: RTSERVE_REST 없음 = trend `RestOff: …` · cycle-path `{"ok": false, "reason": "RestOff: …", "rows": []}`.
+
+### 10-3. 옮긴 주소
+- `/api/swing-lines`(swing_lines.swing_state 17~44 · 앞뒤 50봉 피벗 · 한쪽 실패 = null + partial `"<tf>: <종류>"` · 둘 다 = RuntimeError) · `/api/trend`(`src/rest.rs` · trend_rule.trend_payload 22~68 를 그대로: 합 = 파이썬 3.11 sum(왼쪽부터 -- 3.12 부터 보정 합이라 정답지는 3.11 venv) · ln·sqrt = libm) · `/api/cycle-path`(int() = 공백·부호·숫자 사이 밑줄 · 1490·7450분 경계 · 주문 심볼 = MANUAL_EXEC_SYMBOLS(env DASHBOARD_MANUAL_EXEC_SYMBOL)).
+- 정답지 `tools/gen_rest_fixture.py`(서버 판 venv 3.11.15 · 원본 핸들러 본문 옮겨 적음 · trend_rule 은 원본 모듈 · 생성물 tests/fixtures/gen/rest/rest.json) -- 요청 33(swing 8: 정상·1h 실패·둘 다 실패·60봉(피벗 없음)·30m 실패·종가 = 스윙 고점(안 깨짐)·400·캐시 · trend 10: 정상·모자람·502·0 종가·크기 상한·같은 종가·400·빈 asset 캐시 · cycle 15: 1m/5m/15m 경계 ±1ms·소문자·502·400 다섯·밑줄 숫자)
+  → 시험 `rest_parity::rest_endpoints_match_original` 본문 바이트·상태·보낸 요청 열 **33/33 같음**.
+- 알려진 차이: 연결 실패 글자(원본 aiohttp ClientConnectorError 문장 · rtserve `ClientError: <ureq 글>`) · cycle-path 연결 실패는 둘 다 500.
+- 원본 결함(그대로 둠 · 사용자 결정): cycle-path 15m × 1500봉 = 15.6일 -- start 가 그보다 오래면 선이 지금까지 안 온다.
+
+### 10-4. 할당 한도(§9-1 에 더함)
+
+| 곳 | 크기를 정하는 것 | 한도 · 근거 |
+|---|---|---|
+| rest klines 응답 | 바이낸스 응답 길이 | limit 120·1500 행(요청이 정함) · ponytail: 본문 길이 상한 없음(ureq 읽기 그대로) |
+| swr `cycle_path:{SYM}:{start}` 키 | 쿼리 start(ms) | 원본처럼 상한 없음(30일 안 정수 · 화면은 순환 첫 체결 하나) -- ponytail |

@@ -410,7 +410,7 @@
 
 - `rtorder replay <order_shadow.jsonl> [--show-values] [--symbol S]`: 서버 파이썬 실기록을 127.0.0.1 가짜 서버로 재생한다. `http::LOOPBACK_ONLY` 를 켜서 그 밖 주소로 가는 요청은 보내기 전에 panic 한다.
   - 출력: 작업마다 «chain | op | 요청 N(· 조립 구간 왕복 k) | 같음/다름 -- 어긋난 위치(칸 이름만)» · 끝 «견준 작업 N · 요청 M · 어긋난 작업 K · 잘림 · 조립 구간 왕복» · «첫 어긋남». 값(금액·수량·키)은 `--show-values` 일 때만.
-  - 입력: `.1`(돌린 앞부분)을 먼저 읽고, 깨진 줄(쓰는 중인 반쪽)·접수만 chain·깨움 줄은 세기만 한다. 끝 없는 chain = «잘림»(건너뜀). 감시 틱 안 청산 계획 조립 왕복(`/time`·`commissionRate` · 계획 입력 바로 앞에 이어진 것)은 떼어 따로 센다. 파이썬 계획 오류 기록 `[본문, 상태]` 를 감시가 보는 본문으로 고쳤다. `retry_after` 도 벽시계 칸으로 뺐다.
+  - 입력: `.1`(돌린 앞부분)을 먼저 읽고, 깨진 줄(쓰는 중인 반쪽)·접수만 chain 은 세기만 한다. 깨움 줄(chain "*" · wake_fills)은 세고, 2026-11-22부터 그 작업이 도는 동안의 깨움 시각을 재생 nap 에 넣는다(아래). 끝 없는 chain = «잘림»(건너뜀). 감시 틱 안 청산 계획 조립 왕복(`/time`·`commissionRate` · 계획 입력 바로 앞에 이어진 것)은 떼어 따로 센다. 파이썬 계획 오류 기록 `[본문, 상태]` 를 감시가 보는 본문으로 고쳤다. `retry_after` 도 벽시계 칸으로 뺐다.
   - 시험: `tests/replay_cmd.rs`(진짜 실행 파일 · 합성 기록 «견준 작업 4 · 요청 23 · 어긋난 작업 0 · 잘림 1» · 값 없는 출력 · `.1`+반쪽 줄 · 조립 구간 왕복 2 · `unshare -rn` 망 없이도 같은 결과 · 바깥 주소 panic · 입력 파일 그대로). 정답지 `tests/fixtures/py_shadow_cases.jsonl` = `tools/gen_py_shadow_fixture.py`(main 판 파이썬을 망 차단 + 루프백으로 -- 진입·청산·접수만 chain·감시 발동 청산·무장 파일만 바뀐 틱·잘린 chain).
 - 양성 대조가 없던 넷 중 셋에 시험을 붙였다. «작업 바깥 계좌 캐시 공유» 는 그림자에서 드러나는 행동이 없어 시험이 없다(작업 Wired 가 계좌를 읽는 것은 체결 뒤 무장뿐 -- 그림자에서는 체결이 없다).
   - run_exit_at 이 원본 칸이 바쁘면 쏘지 않음: `wire_e2e` run_exit_at_does_not_fire_*
@@ -422,4 +422,14 @@
 - 결함: `coreval::subscribe` 가 «구독 보내기 성공»이면 물러나기를 1초로 되돌렸다 → 허브가 구독을 Close(Policy)로 거절해도(연결당 상한 8 < 구독 10) 1초마다 다시 붙었고, 가격을 한 번도 못 받은 채 panic 0 으로 떠 있었다.
 - 고침: 1초로 되돌리는 것은 **첫 메시지를 받은 뒤**만(거절·곧 끊김이면 1·2·4…30초). 닫힘 사유(코드·사유 글자, 접속 실패면 그 오류)를 «rtorder 허브 연결 끝 · … · N초 뒤 다시» 한 줄로, 같은 사유는 1분에 한 번. `Feed.last_rx`(마지막 수신 벽시계) · `Feed::health(now)` = {connected, connects, last_rx_age_s, stale(10초 넘게 못 받음·한 번도 못 받음), symbols{심볼: 마지막 가격 뒤 초}} → `/internal/acct` 의 `feed` 칸 · 계량 줄 자리에 stale 이면 «rtorder 허브 가격 못 받음» 한 줄.
 - 시험: `hub_feed::refused_subscribe_backs_off_and_first_message_resets_to_one_second` -- 가짜 허브가 Close(1008)로 거절하면 4.5초에 3번(옛 판 5번) · 메시지 하나 보낸 뒤 닫으면 4번 이상 · 사유 줄은 1줄 · health stale/심볼 나이. 양성 대조: 1초 되돌리기를 보내기 성공 자리로 옮기면 이 시험이 실패한다(손으로 확인 · 되돌림).
+
+## 재생 nap 에 체결 알림 깨움 넣기 (2026-11-22 · 서버 실기록 어긋남 1)
+- 서버 실기록 `entry-18ea19f7c2076312`(SOXL 진입) 어긋남 «요청 #4: 원본 GET /fapi/v1/order · Rust GET /fapi/v1/ticker/bookTicker»의 원인 = **재생기**(파이썬 기록기·Rust 집행 아님).
+  - 원본 따라가기 고리(live_manual_peg_execute 546~566 을 Read 로 확인): `nap(POLL_SEC)` → 주문 조회 → `monotonic()-last_chk < POLL_SEC` 면 continue(호가 안 봄) → 3초가 찼을 때만 호가 REST bookTicker(기록에 wire 로 남는다). `nap` 은 `wake_fills()`(체결 알림)가 오면 일찍 깬다 -- 그 시각이 chain "*" 깨움 줄로 남는다.
+  - 서버 기록: 주문(1242.93) → 깨움 1245.130 ×2 → 조회(아직) → 깨움 1245.797 → 조회(체결) -- 2.2초·0.6초에 깨서 3초 판단 전에 끝났다. 재생 nap 은 깨움을 버리고 늘 3초를 더해, 첫 조회 뒤 «3초 참» → bookTicker.
+  - Rust 실전송 nap(`http.rs` select 잠·알림)은 원본과 같다. 재생만 빠졌던 것.
+- 고침: `Chain.wakes` = 그 작업 [시작 t, 끝 t] 안의 깨움 시각 · 재생 `Vx::nap(s)` 은 (지금, 지금+s] 안의 첫 깨움에서 멈춘다(지난 깨움은 버림 · `sleep` 은 원본 asyncio.sleep 이라 안 깸).
+- «요청 52»: 보고의 요청 수가 **Rust 가 보낸 수**였다. 어긋난 뒤 Rust 는 엇갈린 응답(기록 소진 뒤 599)을 받으며 따라가기를 이어 52번 보냈다. 이제 `요청 N` = 원본 수(조립 구간 뺀 것) · 다르면 `요청 10(Rust 52)` 처럼 따로.
+- 합성 정답지가 못 잡은 까닭: 합성 진입은 첫 조회에서 바로 체결되어 깨움 줄이 0 이었다(모양 차이 = 실기록에만 chain "*" 깨움 줄이 작업 중간에 있다 · 진입 작업 쪽 input 줄은 합성에도 0 -- 원본 진입은 호가를 REST 로 읽고 wire 로 남기므로 기록기 구멍 아님).
+- 시험 `replay_cmd::replay_wakes_nap_early_like_python_fill_alert`: 합성 진입을 서버 꼴로 바꿈(첫 조회 NEW · 깨움 1.2초·1.9초) → 어긋남 0 · 깨움 줄을 지우면 서버와 같은 «경로 다름(원본 GET /fapi/v1/order · Rust GET /fapi/v1/ticker/bookTicker)» + «요청 11(Rust …)». 이 바꾼 기록의 정답은 원본 코드 순서를 읽고 만든 것이다(파이썬으로 뽑은 정답지는 아님 -- 생성기에 «조회 NEW → wake_fills()» 사례를 넣으면 그것으로 바꾼다).
 

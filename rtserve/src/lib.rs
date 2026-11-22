@@ -18,6 +18,7 @@ pub mod model;
 pub mod order;
 pub mod py;
 pub mod raster_read;
+pub mod rest;
 pub mod swr;
 pub mod text;
 
@@ -262,6 +263,7 @@ fn routes(p: &str) -> Vec<(&'static str, Handler)> {
     v.extend(api3::routes(p));
     v.extend(order::routes(p));
     v.extend(model::routes(p));
+    v.extend(rest::routes(p));
     v
 }
 

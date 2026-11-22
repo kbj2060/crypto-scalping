@@ -90,8 +90,11 @@ async fn shadow_five_minutes_stays_under_weight_cap_and_pauses_above_1800() {
     let t0 = wall();
     // 3분째 어느 순간 거래소가 «이번 분 1,900» 을 알린다 → 그 분 끝까지 쉼 → 다음 분부터 다시
     let (s2, u3) = (stop.clone(), used.clone());
+    let set_at = Arc::new(Mutex::new(0.0f64)); // 1,900 을 켠 벽시계(개발기 WSL 벽시계가 tokio 잠보다 3초 넘게 늦게 간 적이 있다 -- t0+150 으로 보면 안 된다)
+    let sa = set_at.clone();
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(150)).await;
+        *sa.lock().unwrap() = wall();
         u3.lock().unwrap().0 = 1900;
         tokio::time::sleep(std::time::Duration::from_secs(150)).await;
         s2.stop();
@@ -110,7 +113,8 @@ async fn shadow_five_minutes_stays_under_weight_cap_and_pauses_above_1800() {
     assert!(got.iter().all(|x| x.1 == "GET" || x.2.starts_with("/fapi/v1/listenKey")), "쓰기 0");
     // ② 1,900 을 받은 뒤 그 분 경계까지 요청 0 · 다음 분에 다시
     let hit = used.lock().unwrap().1;
-    assert!(hit > t0 + 150.0, "1,900 을 알린 응답이 있어야 한다");
+    let on = *set_at.lock().unwrap();
+    assert!(on > 0.0 && hit >= on, "1,900 을 알린 응답이 있어야 한다(켠 뒤 {:.1}초 · 켠 뒤 요청 {}건)", hit - on, got.iter().filter(|x| x.0 >= on).count());
     let boundary = ((hit / 60.0).floor() + 1.0) * 60.0;
     let between: Vec<_> = got.iter().filter(|x| x.0 > hit + 0.5 && x.0 < boundary - 0.5).collect();
     assert!(between.is_empty(), "1,800 을 넘은 분에는 쉰다 {between:?}");
