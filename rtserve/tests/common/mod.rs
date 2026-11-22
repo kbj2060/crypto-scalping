@@ -95,6 +95,7 @@ pub fn start_with(files: &serde_json::Map<String, Value>, mtime_ns: u64, now: f6
         std::fs::write(&p, b64(data.as_str().unwrap())).unwrap();
         set_mtime(&p, mtime_ns);
     }
+    std::env::set_var("RT_REST_GAP_MS", "0"); // 바이낸스 한 문(model::binance_get)의 요청 사이 간격 -- 시험은 녹화본이라 0(기본 200ms 면 모델 시험 545요청이 109초)
     let mut cfg = rtserve::Config::new(root.clone(), rtserve::parse_assets(Some(assets)), Arc::new(move || now));
     tweak(&mut cfg);
     let (tx, rx) = std::sync::mpsc::channel();
