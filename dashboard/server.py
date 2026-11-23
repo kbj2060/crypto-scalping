@@ -3994,11 +3994,33 @@ def make_app() -> web.Application:
                     out[b] = got[b]
         return out
 
+    def footprint_1m(request: web.Request) -> web.Response:
+        """2026-11-23 사용자 «풋프린트에 1m 도» -- 최근 2시간 1분봉(coin_flow bars1m·ohlc1m). 칸 = 5분봉과 같은 7열 · ohlc = [시가, 고가, 저가, 종가].
+        m1_from 앞 봉(재시작 첫 배포로 덜 센 봉)은 뺀다 · ?since=<봉시각> 증분은 5분봉과 같은 규약(ready 가 아니면 전량)."""
+        f = flow_for(request.query)
+        st, dp, bucket = f.footprint_state, f.spec.price_dp, f.spec.bucket
+        floor = st.get("m1_from") or 0
+        bars = sorted((b, c) for b, c in st["bars1m"].items() if b >= floor and b in st["ohlc1m"])
+        try:
+            since = int(request.query.get("since", "0"))
+        except (TypeError, ValueError):
+            since = 0
+        full = since <= 0 or not st["ready"]
+        sent = bars if full else [(b, c) for b, c in bars if b >= since]
+        return web.json_response({
+            "symbol": f.spec.symbol, "bucket": bucket, "barSeconds": 60, "barsExpected": 120, "ready": bool(st["ready"]), "full": full,
+            "retailMaxUsd": f.retail_max, "whaleMinUsd": f.whale_min, "venues": ["binance-perp"],
+            "bars": [{"time": b, "ohlc": [round(x, dp) for x in st["ohlc1m"][b][:4]],
+                      "levels": [[round(k * bucket, dp)] + [round(x, 3) for x in v] for k, v in sorted(c.items())]} for b, c in sent],
+        }, headers=NOCACHE)
+
     async def api_footprint(request: web.Request) -> web.Response:
         """가격레벨별 매수/매도 체결량. 레벨은
         [가격, 매수, 매도, 고래매수, 고래매도, 리테일매수, 리테일매도] 7칸 배열이다
         -- 키 이름을 반복해 싣지 않으려는 것(12봉 x 수십 레벨을 2초마다 보낸다).
         고래·리테일은 매수/매도의 **부분집합**이고, 중형은 셋을 빼서 얻는다."""
+        if request.query.get("tf") == "1m":
+            return footprint_1m(request)
         want = footprint_window_bars(request)
         f = flow_for(request.query)       # 2026-09-26 코인별 -- 아래 본문의 이름을 그 코인으로 가린다
         RETAIL_MAX_USD, WHALE_MIN_USD = f.retail_max, f.whale_min   # noqa: N806 -- 코인별 경계

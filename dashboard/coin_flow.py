@@ -49,6 +49,9 @@ LIVE_DIR = REPO_ROOT / "data" / "live"
 FOOTPRINT_SYMBOL = "ETHUSDT"
 FOOTPRINT_BAR_SECONDS = 300      # 차트 캔들과 같은 5분봉
 FOOTPRINT_BARS = 12              # 1시간
+# 2026-11-23 사용자 «풋프린트에 1m 도» -- 같은 체결로 1분봉 칸·OHLC 를 따로 쌓는다(가벼운 1m: 최근 2시간 · 5분 전용 레인은 화면이 끈다).
+FOOTPRINT_1M_SECONDS = 60
+FOOTPRINT_1M_KEEP = 120          # 2시간
 FOOTPRINT_BUCKET = 0.5           # 가격 버킷(달러). 화면 행 크기는 이것의 배수로 클라가 묶는다
 # 백필 페이스. 요청당 가중치 20 이므로 2.5초 = ~480/분. 한도는 IP 당 2400/분인데 그 IP 를
 # **트레이딩 봇과 대시보드의 다른 폴링이 같이 쓴다** -- 1.2초(~1000/분)로 돌렸더니 2026-09-15
@@ -318,7 +321,10 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
                                    "agg_bars": set(),
                                    # 초 -> [리테일매수, 리테일매도, 고래매수, 고래매도,
                                    #        총매수, 총매도, 마지막가격]. 아래 supply_1s_cell 참고.
-                                   "sec": {}}
+                                   "sec": {},
+                                   # 1분봉: 시작초 -> 칸(5분봉과 같은 6열) · 시작초 -> [시가, 고가, 저가, 종가, 첫 ms, 끝 ms] ·
+                                   #   m1_from = 이 초부터의 1분봉만 «다 센» 봉(스냅샷에 1분봉이 없던 첫 배포는 백필 공백 시작부터).
+                                   "bars1m": {}, "ohlc1m": {}, "m1_from": 0}
 
     def supply_1s_cell(ts_ms: int) -> list[float]:
         """그 초의 칸. 오래된 초는 새 초가 생길 때만 버린다(체결마다 돌 일이 아니다)."""
@@ -363,20 +369,43 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
             for old_bar in [b for b in bars if b < cutoff]:
                 del bars[old_bar]   # 새 봉이 생길 때만 정리한다 -- 체결마다 돌 일이 아니다(266/s)
                 footprint_state["agg_bars"].discard(old_bar)
-        cell = cells.setdefault(int(round(price / FOOTPRINT_BUCKET)), [0.0] * 6)
+        key = int(round(price / FOOTPRINT_BUCKET))
+        cell = cells.setdefault(key, [0.0] * 6)
+        m1 = (int(ts_ms) // 1000) // FOOTPRINT_1M_SECONDS * FOOTPRINT_1M_SECONDS
+        b1 = footprint_state["bars1m"]
+        if m1 not in b1:
+            b1[m1] = {}
+            cut1 = m1 - (FOOTPRINT_1M_KEEP - 1) * FOOTPRINT_1M_SECONDS
+            for old in [b for b in b1 if b < cut1]:   # 새 1분봉이 생길 때만 정리
+                del b1[old]
+                footprint_state["ohlc1m"].pop(old, None)
+        cell1 = b1[m1].setdefault(key, [0.0] * 6)
         sec_cell = supply_1s_cell(ts_ms)
         side = 1 if sell else 0
         if not order:
             cell[side] += qty
+            cell1[side] += qty
             sec_cell[4 + side] += qty
             sec_cell[6] = price          # 그 초의 마지막 체결가 = 1초 가격선
+            # 1분봉 OHLC -- 백필은 늦게(순서 밖) 올 수 있어 시가·종가는 시각으로 정한다(같은 ms 면 먼저 온 것이 시가·나중 것이 종가)
+            o = footprint_state["ohlc1m"].get(m1)
+            if o is None:
+                footprint_state["ohlc1m"][m1] = [price, price, price, price, ts_ms, ts_ms]
+            else:
+                o[1], o[2] = max(o[1], price), min(o[2], price)
+                if ts_ms < o[4]:
+                    o[0], o[4] = price, ts_ms
+                if ts_ms >= o[5]:
+                    o[3], o[5] = price, ts_ms
         if order or agg:
             notional = price * qty
             if notional >= WHALE_MIN_USD:
                 cell[2 + side] += qty
+                cell1[2 + side] += qty
                 sec_cell[2 + side] += qty
             elif notional < RETAIL_MAX_USD:
                 cell[4 + side] += qty
+                cell1[4 + side] += qty
                 sec_cell[side] += qty
         if agg:
             footprint_state["agg_bars"].add(bar)
@@ -409,6 +438,9 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
                 # 실제 봉 수를 적으므로 짧아진 걸 숨기지 않는다.
                 "bars": {str(bar): {str(k): v for k, v in cells.items()}
                          for bar, cells in sorted(footprint_state["bars"].items())[-FOOTPRINT_MAX_WINDOW_BARS:]},
+                "bars1m": {str(bar): {str(k): v for k, v in cells.items()} for bar, cells in footprint_state["bars1m"].items()},
+                "ohlc1m": {str(bar): v for bar, v in footprint_state["ohlc1m"].items()},
+                "m1_from": footprint_state["m1_from"],
             }))
             tmp.replace(FOOTPRINT_SNAPSHOT_PATH)
             footprint_state["saved_at"] = time.time()
@@ -437,6 +469,14 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
             return
         footprint_state["bars"] = bars
         footprint_state["last_ms"] = int(saved.get("last_ms") or 0)
+        # 1분봉: 스냅샷에 있으면 그대로(그 판의 m1_from 까지) · 없으면(첫 배포) 백필이 메울 공백 시작 뒤 첫 분부터만 «다 센» 봉
+        if "bars1m" in saved:
+            cut1 = time.time() // FOOTPRINT_1M_SECONDS * FOOTPRINT_1M_SECONDS - (FOOTPRINT_1M_KEEP - 1) * FOOTPRINT_1M_SECONDS
+            footprint_state["bars1m"] = {int(b): {int(k): [float(x) for x in v] for k, v in c.items()} for b, c in saved["bars1m"].items() if int(b) >= cut1}
+            footprint_state["ohlc1m"] = {int(b): [float(x) for x in v] for b, v in (saved.get("ohlc1m") or {}).items() if int(b) in footprint_state["bars1m"]}
+            footprint_state["m1_from"] = int(saved.get("m1_from") or 0)
+        else:
+            footprint_state["m1_from"] = -(-footprint_state["last_ms"] // 60_000) * 60
         print(f"{TAG}footprint snapshot: {len(bars)}봉 복원", flush=True)
 
     async def footprint_backfill(gap_from_ms: int, until_ms: int) -> None:

@@ -62,6 +62,9 @@
   --ma-ema5: #e6d36e;
   --ma-ema20: #f08fc6;
   --ma-vwma: #d3c2ff;
+  /* 2026-11-23 사용자 «SMMA 21·50 도»: 위 셋과 같은 이유로 남은 색 -- 연두(21)·하늘(50). 방향 초록(--good)보다 노랗고 옅다 · 하늘은 가격판에 다른 파랑이 없다(호가 깊이 막대는 오른쪽 칸). 차트 배경 대비 12.6 · 10.3:1 */
+  --ma-smma21: #c3e88d;
+  --ma-smma50: #8ecbff;
   /* 2026-09-26 호가 프로파일 왼쪽(쌓인 호가 깊이) 막대 -- app.js 에 리터럴 #7dd3fc 로 박혀 있던 것을 토큰으로.
      방향이 없는 «양»이라 방향색을 못 준다(청산 밀도 쿨 램프와 같은 이유). 값은 그대로다. */
   --book-depth: #7dd3fc;
@@ -129,6 +132,8 @@
   --ma-ema5: #6b5c00;
   --ma-ema20: #a1306e;
   --ma-vwma: #5a3fae;
+  --ma-smma21: #4a6a00;
+  --ma-smma50: #1f5c99;
   --amber: var(--warn);
   --liq-support: var(--good);
   --liq-resistance: var(--bad);
@@ -3423,7 +3428,8 @@ html.fp-lock { overflow: hidden; scrollbar-gutter: stable; }
    아래 블록은 가로로 눕힌 휴대폰(높이 600 이하 · 터치)에도 켠다 -- 🔴app.js FPW_MQ 와 같은 조건 */
 @media (max-width: 720px) {
   #fpWideBtn { display: inline-flex; order: 1; flex: none; width: 44px; height: 44px; align-self: center; }
-  #chartWindowTabs { flex: 1 1 0; }
+  /* 2026-11-23 1m 탭이 더해져 여섯 칸 -- 코인 버튼 옆에서는 칸이 17px(390 폭)라 «30m1h» 가 붙었다(다섯 칸 때도 20px). 시간 탭은 전체화면 단추와 제 줄(코인 줄은 위) */
+  #chartWindowTabs { flex: 1 1 calc(100% - 80px); }
 }
 @media (min-width: 1700px) and (orientation: landscape) and (hover: hover), (orientation: landscape) and (hover: none) and (max-height: 600px) {
   #fpWideBtn { display: inline-flex; }
