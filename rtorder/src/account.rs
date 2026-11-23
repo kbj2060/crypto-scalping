@@ -2,7 +2,7 @@
 //! `scripts/live_binance_account_20260910.py` 의 `fetch_account`·`pick_balance`·`round_trips`(왕복 접기 -- 포지션 `entry_at` 이 여기서 온다) ·
 //! `dashboard/orders.py` 의 `produce_account`(exec_symbol·last_good) · `swr_cached` 규칙(server.py) · `user_event_kind` · `_user_stream_run` · `account_refresher`.
 //! **어디에도 연결하지 않는다** -- 거래소는 `AccountRest`(서명 GET) · 스트림은 `StreamIo` 뒤. 시험은 가짜뿐(tests/desk_fixture.rs).
-//! 화면 몫(왕복 원장 파일 기록·income·day_start·추세 칸)은 옮기지 않았다 -- 응답 서버(R6) 몫. 주문 경로는 이 칸들을 안 읽는다.
+//! 화면 몫(왕복 원장 파일 기록·income·day_start·추세 칸)은 `screen`(2026-11-23) -- 화면 응답에서만 붙인다. 주문 경로는 이 칸들을 안 읽는다.
 //!
 //! «받아 둔 값» 자리(사용자 결정): `StreamAccount` = 마지막 REST 스냅숏 + 사용자 스트림 사건으로 고친 포지션·미체결.
 //! 스트림이 살아 있고 · 그 연결에서 · `STREAM_TRUST_SEC` 안에 REST 와 맞춰 봤고 · 마지막 대조가 어긋나지 않았을 때만 쓴다. 아니면 REST(`wire::Wired` 의 청산 조립 계좌).
@@ -311,6 +311,10 @@ pub trait AccountRest {
         }
         out
     }
+    /// 서명 없는 GET(화면 몫 일봉 -- `screen`). 기본 = 없음(가짜·정답지).
+    async fn public(&mut self, _path: &str, _params: &[(&str, P)]) -> Result<Value, String> {
+        Err("public GET 없음".into())
+    }
 }
 
 impl AccountRest for crate::http::Binance {
@@ -339,6 +343,13 @@ impl AccountRest for crate::http::Binance {
         }
         self.offset = offset;
         self.signed_get_many(reqs).await
+    }
+    async fn public(&mut self, path: &str, params: &[(&str, P)]) -> Result<Value, String> {
+        let left = self.ban_left();
+        if left > 0.0 {
+            return Err(format!("binance IP ban: {left:.0}s left -- request not sent"));
+        }
+        crate::http::Binance::public(self, path, params).await
     }
 }
 
@@ -539,12 +550,21 @@ pub struct SharedAccount {
     pub stale_grace: f64,
     /// 감시 틱 캐시 수명(원본 10초 · 그림자는 기본 60초 -- 같은 IP 의 파이썬 주문 경로 가중치를 지킨다).
     pub ttl: f64,
+    /// 화면 몫(원장·income·day_start·추세 -- `screen`). None = 붙이지 않음(그림자·시험 · RTORDER_SCREEN_DIR 없음).
+    pub screen: Option<tokio::sync::Mutex<crate::screen::Screen>>,
 }
 
 impl SharedAccount {
     pub fn new(eth_symbol: &str) -> Self {
         SharedAccount { cache: Default::default(), book: tokio::sync::Mutex::new(AccountBook { eth_symbol: eth_symbol.into(), last_good: None, trades: true }), stale_grace: 60.0,
-                        ttl: ACCOUNT_CACHE_SEC }
+                        ttl: ACCOUNT_CACHE_SEC, screen: None }
+    }
+    /// 화면 응답에만(주문·감시 계좌엔 안 붙인다): 화면 몫 칸을 얹은 사본. 로그 = (screen.logs 를 비워) 돌려준다.
+    pub async fn with_screen<R: AccountRest>(&self, mut p: Value, rest: &mut R) -> (Value, Vec<String>) {
+        let Some(s) = &self.screen else { return (p, vec![]) };
+        let mut s = s.lock().await;
+        s.enrich(&mut p, rest).await;
+        (p, std::mem::take(&mut s.logs))
     }
     /// 원본 produce_account(새로 읽기 · 캐시에 안 넣음) + 스트림 계좌 대조.
     pub async fn produce<R: AccountRest>(&self, rest: &mut R, hub: Option<&crate::userstream::Hub>) -> Result<Value, String> {

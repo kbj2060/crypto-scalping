@@ -35,6 +35,7 @@ export RTORDER_LISTEN="${RTORDER_LISTEN:-127.0.0.1:8791}"
 export RTORDER_HUB="${RTORDER_HUB:-ws://127.0.0.1:8788/rt}"
 export RTORDER_STREAM=1
 export RTORDER_BAN_FILE="${RTORDER_BAN_FILE:-$ROOT/data/live/binance_ban_until}"   # 파이썬과 같은 418·429 차단 기록(같은 IP)
+export RTORDER_SCREEN_DIR="${RTORDER_SCREEN_DIR:-$ROOT/data/live}"   # 2026-11-23 계좌 카드 화면 몫(원장·income·0시 순자산) -- 파이썬과 같은 파일을 이어 쓴다(표식이 있는 동안 파이썬은 안 씀)
 export RUST_BACKTRACE=1
 
 if [ ! -x "$BIN" ]; then

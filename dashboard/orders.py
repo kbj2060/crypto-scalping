@@ -741,7 +741,14 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         if isinstance(payload, dict):
             payload["exec_symbol"] = MANUAL_EXEC_SYMBOL
             payload["exec_symbols"] = dict(MANUAL_EXEC_SYMBOLS)   # 코인 -> 주문 심볼(화면이 탭마다 고른다)
-        added = record_account_trips(payload, account_trip_state["seen"])
+        # 2026-11-23 표식이 있는 동안은 rtorder 가 같은 원장에 적는다(rtorder/src/screen.rs) -- 둘이 적으면 서로의 seen 을 몰라 같은 왕복이 두 번 들어간다.
+        #   표식이 사라진 뒤 첫 기록 전에 seen 을 파일에서 다시 읽는다(그동안 rtorder 가 적은 줄).
+        if rtorder_on():
+            account_trip_state["paused"], added = True, 0
+        else:
+            if account_trip_state.pop("paused", False):
+                account_trip_state["seen"] = load_account_trip_keys()
+            added = record_account_trips(payload, account_trip_state["seen"])
         if added:
             print(f"account_round_trips: +{added}건 (누적 {len(account_trip_state['seen'])}건)", flush=True)
         # 기록 **뒤에** 싣는다 -- 방금 닫힌 왕복이 같은 응답에 들어간다(원장 주기 300초는
@@ -818,6 +825,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
 
         별도 태스크로 떼는 이유: 부르는 쪽(publish_dashboard_events)은 모든 탭의 SSE 유일
         공급원이라, 서명 요청 3~4개를 그 안에서 기다리면 화면 갱신이 함께 밀린다."""
+        if rtorder_on():   # 2026-11-23 rtorder 가 5분 원장 주기·income·0시 순자산을 돈다(screen.rs) -- 여기는 요청 0
+            return
         try:
             await swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS, produce_account,
                              max_stale=STALE_GRACE_SECONDS, cache=binance_account_cache)
@@ -2943,28 +2952,10 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                     data=await request.read(), headers=h, skip_auto_headers=("User-Agent", "Content-Type"),
                     allow_redirects=False, timeout=ClientTimeout(total=15, connect=2)) as r:   # rtorder 는 칸을 5초까지 기다린다 -- 그보다 길게
                 body = await r.read()
-                if request.path == "/api/binance-account" and r.status == 200:
-                    body = with_screen_fields(body)
                 out = {k: r.headers[k] for k in ("Content-Type", "Cache-Control", "Allow") if k in r.headers}
                 return web.Response(status=r.status, reason=r.reason, body=body, headers=out)
         except (ClientError, asyncio.TimeoutError):
             return unavailable
-
-    def with_screen_fields(body: bytes) -> bytes:
-        """2026-11-23 rtorder 계좌 응답엔 화면 몫(왕복 원장·날별 income·0시 순자산)이 없다(rtorder/src/account.rs 머리 «옮기지 않았다») --
-        계좌 카드의 달력·자산 곡선·통계·그날 거래가 통째로 비었다. keep_trip_ledger 가 5분마다 채우는 이 캐시에서 그 칸만 얹는다(잔고·포지션·무장은 rtorder 것 그대로).
-        ponytail: 원장은 최대 5분 늦다(방금 닫힌 왕복) -- rtorder 가 원장·income 을 직접 실으면 이 함수를 지운다."""
-        cached = binance_account_cache.get("payload")
-        if not isinstance(cached, dict):
-            return body
-        try:
-            p = json.loads(body)
-        except ValueError:
-            return body
-        if not isinstance(p, dict):
-            return body
-        p.update({k: cached[k] for k in ("ledger", "day_start", "income_days", "income_from", "income_synced_at") if k in cached})
-        return json.dumps(p, ensure_ascii=False).encode()
 
     door_acct: dict[str, Any] = {"seq": None, "task": None}
 
