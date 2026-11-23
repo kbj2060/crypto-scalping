@@ -28,7 +28,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
-  <link rel="stylesheet" href="styles.css?v=20261121-nofab">
+  <link rel="stylesheet" href="styles.css?v=20261123-fp1m">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -192,6 +192,8 @@
             <div id="chartWindowTabs" class="asset-tabs chart-mode-tabs" aria-label="데이터 창"
                  title="풋프린트와 수급 프로파일이 보는 구간. 5m·30m·1h 에서 차트 위 휠 = 넓히기(최대 1주일 · 봉이 좁아지면 캔들)·좁히기(풋프린트) · 끌기·가로 휠 = 이동.">
               <!-- 2026-10-20 사용자 «2h·4h·12h 제거 · 휠로 축소하면 캔들, 확대하거나 1h 를 누르면 풋프린트» -- 넓힌 창은 #fpZoomNote 가 말한다 -->
+              <!-- 2026-11-23 사용자 «풋프린트에 1m 도» -- 가벼운 1m(최근 2시간 1분봉 · OI·청산·호가 5분 레인은 5m 이상에서) · app.js chart1m -->
+              <button type="button" class="asset-tab" data-bars="12" data-m1="1" title="1분봉 풋프린트(최근 2시간) — 캔들·칸·델타·이동평균 · OI·청산·호가 5분 레인은 5m 이상에서 · 휠 = 넓히기/좁히기 · 끌기 = 이동">1m</button>
               <button type="button" class="asset-tab active" data-bars="12" title="5분봉 풋프린트(최신 1시간) — 차트 위 휠을 아래로 굴리면 넓어지며(최대 1주일) 봉이 좁아지면 캔들로, 위로 굴리거나 여기를 누르면 다시 풋프린트 · 끌기 = 이동">5m</button>
               <!-- 2026-10-20 사용자 «5m과 같은 구성으로 30m과 1h 도» -- 5분봉을 6·12개씩 묶은 봉 12개(app.js chartTfK). 휠 줌·가로 이동·미니맵은 5m 과 같다(10-20 1주일) -->
               <button type="button" class="asset-tab" data-bars="12" data-tfk="6" title="30분봉 풋프린트(최신 6시간) — 5m 과 같은 구성 · 휠 = 넓히기/좁히기(최대 1주일) · 끌기 = 이동">30m</button>
@@ -423,7 +425,7 @@
     <button type="button" data-go="optCard" aria-label="Option 카드로" title="Option"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16"/><path d="M5 15h7l7-9"/></svg><span>옵션</span></button>
     <button type="button" data-go="acctCard" aria-label="계좌 카드로" title="계좌"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8a2 2 0 0 1 2-2h12v2"/><rect x="4" y="8" width="16" height="11" rx="2"/><circle cx="16" cy="13.5" r="1.2"/></svg><span>계좌</span></button>
   </nav>
-  <script src="./app.js?v=20261122-rtfix"></script>
+  <script src="./app.js?v=20261123-fp1m"></script>
   <script src="./fp_daily.js?v=20261120-mfs"></script>
   <script src="./liq_profile.js?v=20261108-liqcurve2"></script>
   <script src="./liq_tab.js?v=20261117-nonow1"></script>
