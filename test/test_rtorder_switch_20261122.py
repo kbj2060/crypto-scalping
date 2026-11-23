@@ -207,6 +207,22 @@ class RouteSwitchTest(unittest.TestCase):
             self.assertTrue(json.loads(got)["ok"])
         self._routes(fn)
 
+    def test_account_gets_screen_fields_from_python_cache(self) -> None:
+        """2026-11-23 계좌 카드 빔: rtorder 응답에 원장·income·0시 순자산이 없다 -- 파이썬 캐시(표식 없을 때 한 번 채움)의 그 칸만 얹고 나머지는 문 응답 그대로."""
+        async def fn(c, _ref, door_state, _hits, _door):
+            st, got, _h = await self._send(c, "GET", "/api/binance-account", "", b"")   # 표식 없음 = 파이썬이 캐시를 채운다
+            cached = json.loads(got)
+            self.assertEqual(st, 200)
+            self.assertIn("ledger", cached)
+            (orders.LIVE_DIR / "rtorder_live.on").write_text("live", "utf-8")
+            st, got, _h = await self._send(c, "GET", "/api/binance-account", "", b"")
+            out = json.loads(got)
+            self.assertEqual({k: out[k] for k in ("door", "i", "말")}, {"door": "/api/binance-account", "i": 0, "말": "문"}, "문 응답 칸 그대로")
+            for k in ("ledger", "day_start", "income_days", "income_from", "income_synced_at"):
+                self.assertEqual(out.get(k), cached.get(k), k)
+            self.assertNotIn("balance", out, "화면 몫 다섯 칸 말고는 캐시에서 안 가져온다")
+        self._routes(fn)
+
     def test_switching_blocks_posts_passes_gets(self) -> None:
         """표식 내용 switching·빈 파일·모르는 글자 = POST 11개 503 rtorder_switching(문에 0번) · GET 3개는 넘어감 · live 로 바꾸면(임시 파일 → 바꿔치기) POST 도 넘어감."""
         async def fn(c, _ref, door_state, hits, _door):
