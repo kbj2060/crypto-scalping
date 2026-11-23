@@ -6366,8 +6366,6 @@ function mcUsSession(nowMs = Date.now()) {
 let mcNeedH = FIT0.mc || 0;   // 시장 맥락(좁은 칸) 내용 높이 -- renderMarketCtx 가 재고 renderCandleSvg 가 1초 수급 몫을 정할 때 쓴다
 // 2026-10-30 펜 메모 «이전 미니 체결 버블 실시간 차트를 같은 자리(1초 수급 아래)에 · 수급 차트 말고 아래 것들 높이를 줄이고 바닥을 왼쪽 지지·저항 바닥에 맞춰» --
 //   bubble_map.js 가 #mcBubble 에 최근 90초를 그린다(10-24 «지금 들어가면» 가격 자로 바꿨다가 10-28 가격 자를 지운 자리). 높이 = 칸 − 아래 두 줄(시장 맥락·⑤) 내용 → 바닥이 지지·저항 칸 바닥과 같은 선.
-const FP_BUB_BAND = 150;   // 2026-11-10 펜 메모: 넓은 화면 체결 버블 = 차트 아래 전폭 띠 높이(#mcWall)
-const MC_BUBBLE_H = 176;   // 2026-11-04 160 → 176: 상대 강도 박스를 ~42px 줄여 생긴 높이를 버블(+16)과 1초 수급(+26)이 나눠 갖는다(펜 메모)   // 1초 수급 몫에서 빼는 버블 자리 = 아래 두 줄을 줄여 생긴 높이(그래서 수급 차트 높이는 그대로)
 let mcBubbleEl = null;
 const mcBubbleCanvas = () => mcBubbleEl || (mcBubbleEl = Object.assign(document.createElement("canvas"), { id: "mcBubble", className: "mc-bubble", tabIndex: 0,
   title: "체결 버블(최근 90초 · 실시간) · 휠 = 확대·축소 · 끌기 = 이동 · 더블클릭 = 실시간" }));
@@ -8712,11 +8710,12 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // 2026-09-30 풋프린트(데스크톱)는 왼쪽 여백 71 -> 36(사용자 «풋프린트를 왼쪽으로»).
   // 2026-11-10 펜 메모 «선택한 박스들을 선·화살표 방향으로»: ⓪ 레버리지·수급 게이지 → 오른쪽 칸 맨 위(옛 체결 버블 자리) · ② 체결 버블 → 차트 아래 전폭 띠 ·
   //   ④ 차트 아래 줄(사분면·거래대금·시각)은 그 띠 높이만큼 위로. 띠 = 바닥 여백(mb)에 더해 플롯·레인·시각 줄을 통째로 올린다(#mcWall 이 띠를 맡는다).
-  const FP_BUB = svg.id === "candleSvgSnapshot" && splitR && !mobileChart && !FPM && footprint && flowOn() ? FP_BUB_BAND : 0;
+  // 2026-11-23 사용자 «미니 버블차트 제거(전체화면도) · 남은 공간은 풋프린트로»: 띠(150px)를 뺐다 -- 레인을 플롯 안 바닥에 겹치는 배치(FP_LIN)는 그대로 두고 띠 몫을 플롯·레인이 가져간다.
+  const FP_LIN = svg.id === "candleSvgSnapshot" && splitR && !mobileChart && !FPM && footprint && flowOn();
   const ml = (mobileChart ? (footprint ? 4 : 44) : footprint ? 36 - CENTER_NUDGE : 45) + CENTER_NUDGE + TRADE_L - (splitR ? FP_LEFT_SHIFT : 0),
         // 2026-09-27 풋프린트는 가격 배지를 전부 왼쪽 글자로 옮겼다(사용자 «호가가 잘 보이게») -- 오른쪽은 호가 띠가 쓴다.
         mr = (mobileChart ? 10 : footprint ? 34 : 112) - CENTER_NUDGE,
-        mtTop = splitR ? 4 : 12 /* 2026-11-08 펜 메모 «카드 위 남는 부분 최소화» */, mt = mtTop + SUB_TOTAL + (splitR && svg.id === "candleSvgSnapshot" ? FP_TOP_ALIGN : 0), mb = svg.id === "candleSvgSnapshot" ? (FP_BUB ? FP_BUB + 2 : 28) : 70;   // 11-10(2) 버블 띠가 있으면 시각 줄은 플롯 안 바닥으로   // 2026-10-06 풋프린트는 레짐·전환 리본 두 줄(+28~+64)이 빠져 x축 글자(+21)까지만 -- 빈 42px 는 가격 플롯에
+        mtTop = splitR ? 4 : 12 /* 2026-11-08 펜 메모 «카드 위 남는 부분 최소화» */, mt = mtTop + SUB_TOTAL + (splitR && svg.id === "candleSvgSnapshot" ? FP_TOP_ALIGN : 0), mb = svg.id === "candleSvgSnapshot" ? (FP_LIN ? 4 : 28) : 70;   // 11-10(2) 버블 띠가 있으면 시각 줄은 플롯 안 바닥으로   // 2026-10-06 풋프린트는 레짐·전환 리본 두 줄(+28~+64)이 빠져 x축 글자(+21)까지만 -- 빈 42px 는 가격 플롯에
   // 2026-09-21 사용자 요청: 「차트가 너무 많다 -- 레인을 한 덩어리로」 + 「가격 플롯을 키워라」.
   //   레인 5종(거래대금·델타/CVD·OI·수급·청산)이 각자 6px 간격으로 떨어져 있어 **다섯 장의
   //   그림**으로 읽혔다. 간격 6->3, 높이를 서로 가깝게 맞춰 한 블록으로 읽히게 한다:
@@ -8764,7 +8763,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   🔴데스크톱 거래대금 줄은 24 → 54px: 넓은 화면은 프로파일 아래 지지/저항 칸(#mcWall, 7줄 · 바닥 = 플롯 바닥 + 12)이 이 높이를 같이 쓴다 --
   //     58 로 줄이면 칸이 216 → 78px, 줄이 10px 라 글자가 겹쳤다(실측). 88 이면 108px · 줄 ~15px.
   //   막대 밑 글자 칸(QUAD_TXT)·모바일 «레인 아래 한 줄»(ROW_H)도 같이 뺐다 -- 다섯 줄 높이 몫이었다.
-  const QUAD_H = fpBars.length ? (mobileChart || FPM ? 42 : 108) : 0;   // 11-20 휴대폰 가로 전체화면도 휴대폰 높이   // 2026-11-04 88 → 108 (위 여백 -20 과 맞교환 · #mcWall 높이 = QUAD_H + 20)
+  const QUAD_H = fpBars.length ? (mobileChart || FPM ? 42 : FP_LIN ? 172 : 108) : 0;   // 11-23 버블 띠를 뺀 자리 일부를 CVD 캔들 레인에(108 → 172 -- 리본 22 + 캔들 판 ~130)   // 11-20 휴대폰 가로 전체화면도 휴대폰 높이   // 2026-11-04 88 → 108 (위 여백 -20 과 맞교환 · #mcWall 높이 = QUAD_H + 20)
   const CUM_H = fpBars.length ? (mobileChart ? 104 : 160) : 0;
   // 2026-09-27 데스크톱은 누적 CVD·OI 를 사분면 막대 **뒤에** 흐리게 깐다(사용자 선택 A) -- 제 줄(160+6)을 풋프린트에 준다.
   //   가격 플롯 400 -> 566. 모바일은 제 줄 그대로(사용자 «모바일은 지금대로»).
@@ -8814,7 +8813,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // 2026-11-10(2) 펜 메모 «풋프린트를 미니 버블차트 상단까지 늘리고 박스(봉 색 줄·호가 기울기·거래대금·시각)를 풋프린트 내부 하단에»:
   //   버블 띠가 있으면 레인을 플롯 **안** 바닥(LANE_IN = 레인 + 시각 글자 24)에 겹친다 -- 플롯·프로파일 기둥이 띠 위까지 내려온다.
   //   봉이 레인을 덮지 않게 가격 축 아래쪽에 그만큼 여백을 더한다(yRangeOf). 레인 = 플롯 바닥 − 20(시각 글자) 위 QUAD_H.
-  const LANE_IN = FP_BUB && QUAD_H ? QUAD_H + 24 : 0;
+  const LANE_IN = FP_LIN && QUAD_H ? QUAD_H + 24 : 0;
   const ch = LANE_IN ? h - mt - mb : h - mt - mb - QUAD_H - (LANE_MERGE ? 0 : CUM_H + LANE_GAP) - LANE_GAP
             - PRICE_ROW_H;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
@@ -9722,10 +9721,13 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       // 더 내려오는 마지막 행과 글씨가 겹쳤다(2026-09-16 첫 판에서 실제로 겹쳤다) --
       // 행은 rowSize 격자라 저가보다 최대 한 행만큼 더 내려간다.
       const cellsBottom = Number.isFinite(inf.lowKey) ? yAt(rowLo(inf.lowKey)) : yAt(c.low);
-      let dY = Math.min(plotBottom - 3, Math.max(cellsBottom, yAt(c.low)) + 13);
+      // 2026-11-23 사용자 «델타 바로 아래에 델타 %»: 둘째 줄 = 델타 ÷ (매수 + 매도) -- 라벨 상자는 두 줄(DH) 높이로 겹침을 본다
+      const pf = deltaFont - 1, DH = deltaFont + 2 + pf;
+      let dY = Math.min(plotBottom - 3 - pf - 2, Math.max(cellsBottom, yAt(c.low)) + 13);
       // 글자 폭 근사(굵은 숫자 ~0.62em) 로 상자를 만들고, 겹치면 아래로 한 줄씩 민다.
       const label = (delta >= 0 ? "+" : "−") + fmtFootprintQty(Math.abs(delta));
-      const halfW = label.length * deltaFont * 0.34 + 2;
+      const pct = 100 * delta / (inf.buyTot + inf.sellTot), label2 = `${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(Math.abs(pct) >= 10 ? 0 : 1)}%`;
+      const halfW = Math.max(label.length, label2.length) * deltaFont * 0.34 + 2;
       const cxD = xAt(i) + bw / 2, dY0 = dY;
       for (let guard = 0; guard < 6; guard++) {
         // 상자는 x 순서로 쌓인다 -- 반폭 최대(6글자 ≈ 24px)보다 멀어진 상자 앞은 볼 필요 없다(10-20 1주일 창: some() 전수 = O(n²) 가 렌더의 20%)
@@ -9733,15 +9735,16 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         for (let q = deltaBoxes.length - 1; q >= 0 && !hit; q--) {
           const b = deltaBoxes[q];
           if (b.x2 + 26 < cxD - halfW) break;
-          hit = Math.abs(b.y - dY) < deltaFont + 1 && cxD + halfW > b.x1 && cxD - halfW < b.x2;
+          hit = Math.abs(b.y - dY) < DH + 1 && cxD + halfW > b.x1 && cxD - halfW < b.x2;
         }
-        if (!hit || dY + deltaFont + 2 > plotBottom - 3) break;
-        dY += deltaFont + 2;
+        if (!hit || dY + DH + 2 > plotBottom - 3) break;
+        dY += DH + 2;
       }
       deltaBoxes.push({ x1: cxD - halfW, x2: cxD + halfW, y: dY });
       // 🔴여기까지의 **산수는 늘 돈다** -- dY 는 앞선 봉들의 충돌회피 결과에 달려 있어서 건너뛰면 사슬이 끊긴다.
-      return { bumped: dY !== dY0, it: { x0: cxD - halfW - 8, x1: cxD + halfW + 8, y0: dY - deltaFont - 2, y1: dY + 4, c: plotC,
-        p: (ctx) => { if (dState.on) cvText(ctx, cxD, dY, label, deltaFont, "bold", delta >= 0 ? "var(--good)" : "var(--bad)", 1, "middle"); } } };
+      const dcol = delta >= 0 ? "var(--good)" : "var(--bad)";
+      return { bumped: dY !== dY0, it: { x0: cxD - halfW - 8, x1: cxD + halfW + 8, y0: dY - deltaFont - 2, y1: dY + pf + 6, c: plotC,
+        p: (ctx) => { if (dState.on) { cvText(ctx, cxD, dY, label, deltaFont, "bold", dcol, 1, "middle"); cvText(ctx, cxD, dY + pf + 2, label2, pf, "normal", dcol, 0.8, "middle"); } } } };
     };
     const pocPts = [];    // 2026-09-19 사용자 요청: 봉별 POC 를 선으로 잇는다.
     // POC «점»은 창 밖 행을 건너뛰는 칸 그리기와 **같은 조건**으로 건너뛴다.
@@ -11415,14 +11418,23 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     // 2026-11-10 사용자 «봉 안 델타 고점·저점을 지금 호가 기울기 자리에»: 델타 캔들 -- 몸통 = 0 → 마감 델타 · 꼬리 = 봉 안 누적 델타 최고·최저(서버 1초 체결 순서 b.dhl) ·
     //   색 = 마감 부호. 몸통보다 꼬리가 길면 봉 안에서 힘이 뒤집혔다(예: −1,500 까지 팔리다 +200 마감). 봉 안 순서를 모르면(dhl 없음) 몸통만.
     //   서술 표시 -- 반전 신호 아님(흡수·소진·다이버전스 계열 검정 3회 방향 0).
-    const dh = rows.map((r) => r && (r.dhl ? { lo: Math.min(0, r.dhl[0]), hi: Math.max(0, r.dhl[1]), c: r.dhl[2], w: true } : { lo: Math.min(0, r.delta), hi: Math.max(0, r.delta), c: r.delta, w: false }));
-    const dMax = Math.max(1e-9, ...dh.filter(Boolean).map((d) => Math.max(-d.lo, d.hi))), Yd = (v) => zero - Math.sign(v) * Math.sqrt(Math.abs(v) / dMax) * (LH / 2 - 1);   // 제곱근 눈금 -- 큰 봉 몇 개가 축을 다 먹어 보통 봉이 납작해지지 않게(툴팁이 실제 값)
-    ops.push((ctx) => cvHLine(ctx, ml, ml + cw, zero, "var(--muted)", 0.35));
+    // 2026-11-23 사용자 «CVD 봉을 실제 캔들처럼 -- 앞 봉 종가 = 다음 봉 시가»: 창 첫 봉부터 누적(시가 = 앞 봉까지 누적 · 종가 = 시가 + 마감 델타 ·
+    //   꼬리 = 시가 + 봉 안 최고·최저). 풋프린트 없는 봉은 건너뛰고 누적은 이어 간다(모름을 0 으로 더하지 않는다 -- 그 봉 칸이 빈다). 축 = 보이는 누적 최저~최고(선형).
+    let cum = 0;
+    const dh = rows.map((r) => {
+      if (!r) return null;
+      const c = r.dhl ? r.dhl[2] : r.delta, o = cum;
+      cum += c;
+      return r.dhl ? { o, c: o + c, lo: o + Math.min(0, r.dhl[0], c), hi: o + Math.max(0, r.dhl[1], c), w: true } : { o, c: o + c, lo: Math.min(o, o + c), hi: Math.max(o, o + c), w: false };
+    });
+    const have2 = dh.filter(Boolean), vLo = Math.min(...have2.map((d) => d.lo)), vHi = Math.max(...have2.map((d) => d.hi)), span = Math.max(1e-9, vHi - vLo);
+    const Yd = (v) => y0 + 2 + (vHi - v) / span * (LH - 4);
+    if (vLo < 0 && vHi > 0) ops.push((ctx) => cvHLine(ctx, ml, ml + cw, Yd(0), "var(--muted)", 0.35));   // 창 시작 수준(0)
     dh.forEach((d, i) => {
       if (!d) return;
-      const x = cx(i), col = d.c >= 0 ? "var(--good)" : "var(--bad)", yb = Math.min(zero, Yd(d.c)), hb = Math.max(1, Math.abs(Yd(d.c) - zero)), ww = Math.max(1.5, Math.min(3, bwid * 0.2));
+      const x = cx(i), col = d.c >= d.o ? "var(--good)" : "var(--bad)", yb = Math.min(Yd(d.o), Yd(d.c)), hb = Math.max(1, Math.abs(Yd(d.c) - Yd(d.o))), ww = Math.max(1.5, Math.min(3, bwid * 0.2));
       if (DENSE) { un.add(col, 0.85, (pp) => pp.rect(x - bwid / 2, yb, bwid, hb)); return; }   // 11-10 리뷰: 1주일 창(2천 봉) = 색별 한 칠 · 꼬리 생략
-      ops.push((ctx) => { if (d.w) cvRect(ctx, x - ww / 2, Yd(d.hi), ww, Math.max(1, Yd(d.lo) - Yd(d.hi)), col, 0.75, 1); cvRect(ctx, x - bwid / 2, yb, bwid, hb, col, 0.85, 1.5); });
+      ops.push((ctx) => { cvRect(ctx, x - ww / 2, Yd(d.hi), ww, Math.max(1, Yd(d.lo) - Yd(d.hi)), col, 0.75, 1); cvRect(ctx, x - bwid / 2, yb, bwid, hb, col, 0.85, 1.5); });
     });
     un.flush((f) => ops.push(f));
     // 거래대금 선 -- 값 없는 봉에서 끊는다(모름을 이어 그리지 않는다)
@@ -11432,9 +11444,9 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     turns.forEach((v, i) => { if (v == null) { cur = null; return; } if (!cur) runs.push((cur = [])); cur.push([cx(i), y0 + LH - 1 - v * uSc]); });
     ops.push((ctx) => runs.forEach((pts) => (pts.length > 1 ? cvStroke(ctx, pts, "var(--turnover)", 1.4, 0.9, null, "round") : cvRect(ctx, pts[0][0] - 1, pts[0][1] - 1, 2, 2, "var(--turnover)", 0.9))));
     const lg = txt(ml + 4, chartTop + (mobileChart ? 8 : 9), "", { "font-size": mobileChart ? 9 : 10, fill: "var(--muted)", "pointer-events": "auto" });
-    [["▮ 봉 안 델타 (몸통 = 마감 · 꼬리 = 봉 안 최고·최저 · √ 눈금)", "var(--muted)"], ["  ─ 거래대금", "var(--turnover)"]].forEach(([t, f]) => { const sp = mk("tspan", { fill: f }, lg); sp.textContent = t; });
+    [["▮ CVD 캔들 (창 시작부터 누적 · 시가 = 앞 봉 종가 · 꼬리 = 봉 안 최고·최저)", "var(--muted)"], ["  ─ 거래대금", "var(--turnover)"]].forEach(([t, f]) => { const sp = mk("tspan", { fill: f }, lg); sp.textContent = t; });
     { const tt = document.createElementNS(NS, "title");
-      tt.textContent = "봉 안 델타 = 봉 시작부터 누적한 테이커 매수 − 매도(바이낸스 선물 1초 체결 순서 -- 풋프린트와 같은 원천). 몸통 = 마감 델타 · 위 꼬리 = 봉 안에서 가장 높이 간 값 · 아래 꼬리 = 가장 낮게 간 값.\n"
+      tt.textContent = "CVD 캔들 = 보이는 창 첫 봉부터 누적한 테이커 매수 − 매도(바이낸스 선물 1초 체결 순서 -- 풋프린트와 같은 원천). 시가 = 앞 봉까지 누적(앞 봉 종가) · 종가 = 시가 + 그 봉 델타 · 위·아래 꼬리 = 봉 안에서 누적이 가장 높이·낮게 간 값. 창을 옮기면 기준(0)도 옮겨 간다.\n"
         + "꼬리가 몸통 반대쪽으로 길면 봉 안에서 힘이 뒤집혔다는 뜻이다(예: −1,500 까지 팔리다 +200 마감 = 매수가 받아냄). 서술 표시 -- 반전 신호로 검정된 것 아님.\n파랑 선 = 거래대금(제 축).";
       lg.append(tt); }
   })();
@@ -11609,7 +11621,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     // 2026-10-01 바닥 = 전환 리본 바닥(사용자 «전환 리본까지 나머지 바닥을 맞춰») -- 시장 맥락·모의 판(옛 옵션 요약) 칸이 같은 선에서 끝난다
     const floorY = hAll - 2;   // 2026-10-06 리본 줄이 빠져 칸 바닥 = 상자 바닥
     const s1Avail = floorY + 12 - mtTop - 4 - sHead;   // +10 = 시장 맥락 내용 높이의 여유(+6)·칸 아래 여백 -- 마지막 줄 글자가 리본 바닥에 닿게
-    const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.22), mcNeedH ? Math.round(s1Avail - mcNeedH - 16 - 8 - (FP_BUB ? 0 : MC_BUBBLE_H)) : Math.round(s1Avail * 0.47)) : s1Avail) : S1_BELOW ? S1_PANEL : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
+    const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.22), mcNeedH ? Math.round(s1Avail - mcNeedH - 16 - 8) : Math.round(s1Avail * 0.47)) : s1Avail) : S1_BELOW ? S1_PANEL : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
     { const fs = el("fpLineSwitch"), card = el("fpCard");   // 청산 밀도 범례(왼쪽 위, ~256px) 오른쪽
       if (fs && card) {
         // 2026-10-30 레이아웃 정리: 1단 데스크톱(≈1440, 1초 수급이 아래)도 같은 한 줄 -- 전엔 이 폭에서만 «지표» 버튼이 없고 LONG·SHORT 가 체결 기둥 머리에 끼어 호가 계기와 겹쳤다
@@ -11640,13 +11652,11 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       } }
     // 2026-10-15 아티팩트 댓글 «봉 시간은 수급 차트 위로, 남는 공간은 미니 체결 버블»: 수급 바닥 시각 줄(12px, renderSupply1s mb 16→4)을 버블에 넘긴다
     const s1Give = mcSplit ? 12 : 0, s1Hd = s1H - s1Give, s1Y = sub1sY + sHead;
-    if (mcSplit0 && mcBubbleEl) { const bh = FP_BUB ? FP_BUB - 14 : floorY - (s1Y + s1Hd + 12) - mcNeedH - 6;   // 11-10 띠 안(위 여백 8 · 아래 6)   // 10-30 버블 = 칸 − 아래 두 줄 내용 → 아래 두 줄 바닥 = 칸 바닥(지지·저항 칸 바닥)
+    if (mcSplit0 && mcBubbleEl) { const bh = 0;   // 11-23 미니 버블 제거(사용자) -- 오른쪽 칸 자리도 1초 수급이 가져간다(위 s1H)   // 11-10 띠 안(위 여백 8 · 아래 6)   // 10-30 버블 = 칸 − 아래 두 줄 내용 → 아래 두 줄 바닥 = 칸 바닥(지지·저항 칸 바닥)
       const v = bh >= 60 ? `${bh}px` : "0px"; if (mcBubbleEl.style.height !== v) mcBubbleEl.style.height = v; mcBubbleEl.hidden = bh < 60; }
     if (FP_SIDE) post.push(() => fpSidePlace(svg, true, sX, s1Y));
     post.push(() => mcPlace(svg, mcSplit0 ? { x: sX, y: s1Y + s1Hd + 12, w: Math.max(0, sW - 16), h: floorY - (s1Y + s1Hd + 12) } : null,   // 전체화면도 넓은 배치(mc-cmp)로 둔다 -- 풀면 머리 금리 띠·지지/저항 목록이 차트 아래로 튀어나왔다(CSS 가 #mcBody 를 숨김)
-            mcSplit0 && TRADE_W && !FPM ? (FP_BUB ? { x: ml, y: h - FP_BUB + 8, w: w - mr - ml, h: FP_BUB - 14 }   // 2026-11-10 차트 아래 전폭 체결 버블 띠(플롯 왼쪽 ~ 호가 칸 오른쪽)
-              : (() => { const y = plotBottom + 12;   // 2026-10-01(4) 프로파일 아래 = 2026-10-04 모의 판(renderPaper 가 채운다)
-              return { x: tradeX0 + 4, y, w: REG_W - 8, h: floorY - y }; })()) : null));   // 10-26 레인 값 칸(옛 LANE_VAL_W 144)을 빼 지지/저항 칸이 제자리로
+            null));   // 11-23 넓은 화면 #mcWall = 체결 버블 띠였다(renderPaper) -- 버블을 빼며 칸도 끈다   // 10-26 레인 값 칸(옛 LANE_VAL_W 144)을 빼 지지/저항 칸이 제자리로
     supply1sSubBox = FP_SIDE ? fpSideS1(sW, s1Hd) : FPW ? null : {
       svg: subSvg("s1", subX, sub1sY, subW, s1Hd, sub1sKey(subW, s1Hd),
                   (g) => renderSupply1s({ svg: g, w: subW, h: s1Hd })),

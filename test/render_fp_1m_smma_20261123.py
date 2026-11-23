@@ -1,4 +1,4 @@
-"""풋프린트 1m 봉·SMMA 21/50 렌더 검증 (2026-11-23).
+"""풋프린트 1m 봉·SMMA 21/50 · 미니 버블 제거·델타 %·CVD 캔들 렌더 검증 (2026-11-23).
   공개 대시보드에 이 작업 사본의 index.html·app.js·styles.css 를 끼우고(쓰기 요청 전부 차단), 서버에 아직 없는 /api/footprint?tf=1m 은
   같은 순간의 5분봉 응답을 1분 다섯 개로 나눠 흉내 낸다(칸 = 1/5 · OHLC = 칸 가격 범위 안 걸음 -- 그림 확인용, 값 검증 아님).
   (1) «1m» 탭이 켜지고 캔들 = 1분 간격 (2) 풋프린트 칸이 그려짐 (3) OI·청산 5분 레인 없음 (4) SMMA 21·50 칩·선 (5) 5m 으로 돌아가면 원래대로 · JS 오류 0
@@ -55,7 +55,8 @@ JS = r"""() => {
            fp: !!footprintForChart(), cellsText: svg.querySelectorAll('text').length,
            smma21: titles.some((t) => t.startsWith('SMMA 21')), smma50: titles.some((t) => t.startsWith('SMMA 50')),
            chips: ['smma21', 'smma50'].map((k) => !!document.querySelector(`input[data-line="${k}"]`)),
-           oiLane: titles.some((t) => /신규 계약|OI /.test(t)) };
+           wallOn: !!document.querySelector('#mcWall.on'), bubbleShown: !!(document.getElementById('mcBubble') && document.getElementById('mcBubble').clientHeight > 0),
+           cvdLegend: [...svg.querySelectorAll('text')].some((t) => t.textContent.includes('CVD 캔들')), delta: renderCandleSvg._deltaStats };
 }"""
 
 fails = []
@@ -88,6 +89,14 @@ with sync_playwright() as p:
         r5 = pg.evaluate(JS); print(name, "5m", json.dumps(r5, ensure_ascii=False))
         check(not r5["chart1m"] and r5["tab"] == "5m" and r5["dt"] == 300, f"{name}: 5m 으로 돌아옴(5분 간격)")
         pg.screenshot(path=f"{SP}/fp_5m_{name}.png", full_page=False)
+        check(not r5["wallOn"] and not r5["bubbleShown"], f"{name}: 미니 버블 띠·칸 없음")
+        if name == "desktop":
+            check(r5["cvdLegend"], f"{name}: CVD 캔들 범례")
+            pg.evaluate("() => fpWideSet(true)"); pg.wait_for_timeout(2500)
+            rw = pg.evaluate(JS); print(name, "wide", json.dumps(rw, ensure_ascii=False))
+            check(not rw["wallOn"] and not rw["bubbleShown"], f"{name}: 전체화면도 미니 버블 없음")
+            pg.screenshot(path=f"{SP}/fp_wide_{name}.png", full_page=False)
+            pg.evaluate("() => fpWideSet(false)")
         check(not errs, f"{name}: JS 오류 0 {errs[:2]}")
         ctx.close()
     b.close()
