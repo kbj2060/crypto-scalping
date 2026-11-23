@@ -52,11 +52,17 @@ impl DeskIo for DoorIo {
         }
     }
     async fn account_screen(&mut self, fresh: bool) -> Result<Value, String> {
-        if fresh {
+        let p = if fresh {
             self.acct.refresh(&mut self.rest, self.stream.as_deref(), true).await
         } else {
             self.acct.cached(&mut self.rest, self.stream.as_deref()).await
+        }?;
+        // 2026-11-23 화면 몫(원장·income·0시 순자산·추세) -- 이 응답에만 얹는다(캐시된 계좌·주문 경로는 그대로)
+        let (p, logs) = self.acct.with_screen(p, &mut self.rest).await;
+        for l in logs {
+            println!("{l}");
         }
+        Ok(p)
     }
     fn sec_prices(&mut self, asset: &str) -> Option<Vec<(f64, f64)>> {
         WatchIo::sec_prices(&mut self.ops, asset).ok().flatten()

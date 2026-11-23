@@ -741,7 +741,14 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         if isinstance(payload, dict):
             payload["exec_symbol"] = MANUAL_EXEC_SYMBOL
             payload["exec_symbols"] = dict(MANUAL_EXEC_SYMBOLS)   # 코인 -> 주문 심볼(화면이 탭마다 고른다)
-        added = record_account_trips(payload, account_trip_state["seen"])
+        # 2026-11-23 표식이 있는 동안은 rtorder 가 같은 원장에 적는다(rtorder/src/screen.rs) -- 둘이 적으면 서로의 seen 을 몰라 같은 왕복이 두 번 들어간다.
+        #   표식이 사라진 뒤 첫 기록 전에 seen 을 파일에서 다시 읽는다(그동안 rtorder 가 적은 줄).
+        if rtorder_on():
+            account_trip_state["paused"], added = True, 0
+        else:
+            if account_trip_state.pop("paused", False):
+                account_trip_state["seen"] = load_account_trip_keys()
+            added = record_account_trips(payload, account_trip_state["seen"])
         if added:
             print(f"account_round_trips: +{added}건 (누적 {len(account_trip_state['seen'])}건)", flush=True)
         # 기록 **뒤에** 싣는다 -- 방금 닫힌 왕복이 같은 응답에 들어간다(원장 주기 300초는
@@ -818,6 +825,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
 
         별도 태스크로 떼는 이유: 부르는 쪽(publish_dashboard_events)은 모든 탭의 SSE 유일
         공급원이라, 서명 요청 3~4개를 그 안에서 기다리면 화면 갱신이 함께 밀린다."""
+        if rtorder_on():   # 2026-11-23 rtorder 가 5분 원장 주기·income·0시 순자산을 돈다(screen.rs) -- 여기는 요청 0
+            return
         try:
             await swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS, produce_account,
                              max_stale=STALE_GRACE_SECONDS, cache=binance_account_cache)

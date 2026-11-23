@@ -336,6 +336,58 @@ async fn fresh_reuses_within_one_second_and_shares_watch_cache() {
     assert!(acct.cache.lock().unwrap().is_some());
 }
 
+/// 2026-11-23 계좌 카드 빔: 화면 응답에만 원장·0시 순자산·income 이 붙는다(감시·주문이 쓰는 캐시 계좌엔 안 붙음) · 화면 몫이 없으면(None) 그대로.
+#[tokio::test]
+async fn screen_fields_only_on_screen_response() {
+    use rtorder::account::SharedAccount;
+    use rtorder::assemble::DeskIo;
+    let fx: Value = serde_json::from_str(include_str!("fixtures/desk_fixture.json")).unwrap();
+    let routes = fx["account"].as_array().unwrap().iter().find(|c| c["name"] == "normal_usdc").unwrap()["in"]["routes"].clone();
+    let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+    let srv = serve(Arc::new(move |g: &Got| {
+        let path = g.target.split('?').next().unwrap().to_string();
+        let body = match path.as_str() {
+            "/fapi/v1/time" => json!({"serverTime": now_ms}),
+            "/fapi/v1/income" => json!([{"tranId": 9, "incomeType": "REALIZED_PNL", "asset": "USDC", "income": "4.5", "time": now_ms - 1000}]),
+            _ => routes.get(&path).cloned().unwrap_or(json!([])),
+        };
+        Act::Send { status: 200, ctype: "application/json".into(), body: body.to_string(), headers: vec![] }
+    }));
+    local_only(&srv.base);
+    let dir = std::env::temp_dir().join(format!("rtorder_screen_door_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("account_round_trips.jsonl"),
+                   "{\"symbol\": \"ETHUSDC\", \"side\": \"LONG\", \"entry_time\": 1, \"exit_time\": 2, \"net_pnl\": 3.0, \"peak_notional\": null}\n").unwrap();
+    // 첫 기동은 88일을 7일 창 8개씩 메운다(원본) -- 따라잡은 상태(1시간 전 커서)에서 시작해야 이번 응답에 income 이 실린다
+    std::fs::write(dir.join("account_income_daily.json"), json!({"from": "2026-09-01", "cursor": now_ms - 3_600_000, "days": {}, "recent": {}}).to_string()).unwrap();
+    let bx = || rtorder::http::Binance::new(&srv.base, "test_key", "test_secret", std::time::Duration::from_secs(3), std::env::temp_dir().join("rtorder_door_ban"));
+    let mk_io = |acct: Arc<SharedAccount>| {
+        let mut sh = bx();
+        sh.shadow_on();
+        let ops = rtorder::app::Ops { bx: sh, feed: Default::default(), hub: Default::default(), stop: Default::default(), stopped: Default::default(),
+                                      would: Arc::new(Mutex::new(vec![])), alerts: vec![], telegram: None, front: Default::default(), rest_feed: None };
+        rtorder::door::DoorIo { ops, rest: bx(), acct, stream: None }
+    };
+    let mut plain = mk_io(Arc::new(SharedAccount::new("ETHUSDC")));
+    let a = plain.account_screen(true).await.unwrap();
+    assert!(a.get("ledger").is_none() && a.get("income_days").is_none(), "화면 몫 없음 = 그대로");
+    let mut acct = SharedAccount::new("ETHUSDC");
+    acct.screen = Some(tokio::sync::Mutex::new(rtorder::screen::Screen::new(dir.clone())));
+    let acct = Arc::new(acct);
+    let mut io = mk_io(acct.clone());
+    let s = io.account_screen(true).await.unwrap();
+    assert_eq!(s["ledger"][0]["net_pnl"], json!(3.0));
+    assert_eq!(s["ledger"][0]["trend"], Value::Null, "일봉 없음(가짜 서버 klines = []) → 추세 모름");
+    assert!(s["day_start"]["date"].is_string() && dir.join("account_day_start.json").exists());
+    let today = s["day_start"]["date"].as_str().unwrap().to_string();
+    assert_eq!(s["income_days"][&today]["realized"], json!(4.5), "{s}");
+    assert!(dir.join("account_income_daily.json").exists());
+    let cached = io.account(false).await.unwrap();
+    assert!(cached.get("ledger").is_none() && cached.get("income_days").is_none(), "감시·주문 계좌엔 안 붙는다");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn kst_milliseconds_match_python_isoformat() {
     // python: datetime.fromtimestamp(t, ZoneInfo("Asia/Seoul")).isoformat(timespec="milliseconds")

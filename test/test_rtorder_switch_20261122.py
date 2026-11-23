@@ -368,6 +368,38 @@ class LoopSwitchTest(unittest.TestCase):
         self.assertEqual(again, 0, "다시 표식 = 다음 틱부터 계좌도 안 읽음")
         self.assertGreaterEqual(back, 1, "지우면 다시 돈다")
 
+    def test_trip_ledger_handed_to_rtorder_when_on(self) -> None:
+        """2026-11-23 표식이 있으면 원장 주기 요청 0 · 원장 안 씀(rtorder screen.rs 가 같은 파일에 적는다) · 지운 뒤엔 그동안 rtorder 가 적은 줄을 seen 으로 다시 읽는다."""
+        closed = {"symbol": "ETHUSDC", "side": "LONG", "entry_time": 1000, "exit_time": 2000, "closed": True, "pnl_check_bp": 0.0, "net_pnl": 1.0}
+
+        async def go(tmp: Path):
+            calls = {"swr": 0, "refresh": 0, "tasks": {}}
+            led = tmp / "account_round_trips.jsonl"
+            with mock.patch.object(orders, "LIVE_DIR", tmp), mock.patch.object(orders, "ACCOUNT_TRIP_LEDGER_PATH", led):
+                api, _ = self._api(tmp, session=lambda: None, calls=calls)
+                state = find_cell(api.keep_trip_ledger, "account_trip_state")
+
+                async def acct(*_a, **_k):
+                    return {"ok": True, "balance": {"margin": 1.0}, "trades": [closed]}
+                with mock.patch.object(orders, "fetch_account", acct):
+                    (tmp / "rtorder_live.on").write_text("live", "utf-8")
+                    await api.keep_trip_ledger()
+                    on = (calls["swr"], led.exists())
+                    led.write_text(json.dumps(closed) + "\n", "utf-8")   # 그동안 rtorder 가 적은 줄
+                    produce = find_cell(api.keep_trip_ledger, "produce_account")
+                    await produce()
+                    paused = state.get("paused")
+                    (tmp / "rtorder_live.on").unlink()
+                    await api.keep_trip_ledger()
+                    return on, paused, led.read_text("utf-8").count("\n"), calls["swr"], state.get("paused")
+
+        with tempfile.TemporaryDirectory() as t:
+            on, paused, lines, swr, paused_after = asyncio.run(go(Path(t)))
+        self.assertEqual(on, (0, False), "표식 있음: 계좌 조회 0 · 원장 파일 안 만듦")
+        self.assertTrue(paused)
+        self.assertGreater(swr, 0, "지운 뒤: 원장 주기가 다시 돈다")
+        self.assertEqual((lines, paused_after), (1, None), "rtorder 가 적은 왕복을 두 번 안 적음")
+
     def test_user_stream_and_refresher_skip_when_on(self) -> None:
         async def go(tmp: Path):
             used: list = []

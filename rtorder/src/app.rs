@@ -46,6 +46,8 @@ pub struct Config {
     pub meter_sec: f64,
     /// 허브 끊김 → 거래소 직접 조회 중 알림 다시 보내는 주기(초 · RTORDER_FALLBACK_ALERT_SEC · 기본 600 -- 시험이 줄인다).
     pub fallback_alert_sec: f64,
+    /// 화면 몫 파일 폴더(RTORDER_SCREEN_DIR · 실전송 감독이 data/live 로 준다 -- 파이썬 원장을 이어 쓴다). None = 계좌 응답에 원장·income·day_start 를 안 붙인다. 그림자는 늘 안 붙인다.
+    pub screen_dir: Option<PathBuf>,
 }
 
 /// 그림자 모드의 체결 뒤 계좌 다시 읽기 최소 간격(원본 3초 · 몰려도 분당 2회 = 가중치 44 이하).
@@ -80,6 +82,7 @@ pub fn config_from(get: &dyn Fn(&str) -> Option<String>) -> Result<Config, Strin
         shadow_account_ttl: num("RTORDER_SHADOW_ACCOUNT_TTL", 60.0)?,
         meter_sec: num("RTORDER_METER_SEC", 60.0)?,
         fallback_alert_sec: num("RTORDER_FALLBACK_ALERT_SEC", 600.0)?,
+        screen_dir: get("RTORDER_SCREEN_DIR").filter(|s| !s.is_empty()).map(PathBuf::from),
         listen: {
             let raw = get("RTORDER_LISTEN").filter(|s| !s.is_empty()).unwrap_or_else(|| "127.0.0.1:8791".into());
             let a: std::net::SocketAddr = raw.parse().map_err(|e| format!("RTORDER_LISTEN {raw:?}: {e}"))?;
@@ -479,6 +482,8 @@ pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop, hub: Arc<Hu
         if shadow {
             a.ttl = cfg.shadow_account_ttl;
             a.book.get_mut().trades = false;
+        } else if let Some(d) = &cfg.screen_dir {
+            a.screen = Some(tokio::sync::Mutex::new(crate::screen::Screen::new(d.clone())));
         }
         a
     });
@@ -595,6 +600,26 @@ pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop, hub: Arc<Hu
             d.serve(l, &stop).await;
         }
     };
+    // 2026-11-23 원장 주기(원본 keep_trip_ledger · 300초): 브라우저가 닫혀 있어도 닫힌 왕복을 적는다 -- 거래소 userTrades 는 7일이 지나면 사라진다
+    let ledger = async {
+        if acct.screen.is_some() {
+            let mut rest = mk();
+            loop {
+                match acct.cached(&mut rest, None).await {
+                    Ok(p) => {
+                        for l in acct.with_screen(p, &mut rest).await.1 {
+                            println!("{l}");
+                        }
+                    }
+                    Err(e) => println!("account_round_trips cycle failed (will retry next cycle): {e}"),
+                }
+                tokio::select! { _ = tokio::time::sleep(std::time::Duration::from_secs_f64(crate::screen::RECORD_SEC)) => {}, _ = stop.notify.notified() => break }
+                if stop.flag.load(Ordering::SeqCst) {
+                    break;
+                }
+            }
+        }
+    };
     // 요청 계량 한 줄(서버에서 그림자가 더하는 가중치를 본다) -- 실전송도 찍는다(쉼은 그림자만)
     let meter = async {
         let _ = crate::http::meter::take();
@@ -627,7 +652,7 @@ pub async fn run(cfg: &Config, mk: &dyn Fn() -> Binance, stop: Stop, hub: Arc<Hu
             }
         }
     };
-    tokio::join!(watch, stream, refresher, sub, door, meter);
+    tokio::join!(watch, stream, refresher, sub, door, meter, ledger);
     let mut d = desk.lock().await;
     logs.extend(std::mem::take(&mut d.w.logs));
     logs.extend(hub.logs.lock().unwrap().drain(..));
