@@ -176,6 +176,21 @@ pub struct Snap {
     pub sec: Vec<(i64, [f64; 7])>,
     /// 못 메운 초 구간(창 안에 걸친 것만) -- 다음 판도 그 봉을 «구멍 있음»으로 보인다.
     pub holes: Vec<(i64, i64)>,
+    /// 2026-11-24 더함 -- 틱 봉(tick.rs)과 마지막 체결 id. 옛 파일엔 없다(없으면 빈 채로 시작).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tick: Option<crate::proto::TickBars>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tick_last_id: Option<u64>,
+    /// 2026-11-24 더함 -- 풋프린트 1분봉(coin_flow.py footprint_save 441~443): (분, [(칸 키, 6칸)], OHLC) · m1_from.
+    /// 옛 파일엔 없다 → m1_from = last_ms 뒤 첫 분(footprint_load 479 «첫 배포»).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub m1: Option<Snap1m>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub struct Snap1m {
+    pub bars: Vec<(i64, Vec<(i64, [f64; 6])>, Option<([f64; 4], i64, i64)>)>,
+    pub from: i64,
 }
 
 /// 스냅숏 읽기(footprint_load 419~440): 판·종목·봉 길이·칸 폭이 다르면 버린다 · 143봉보다 오래된 봉은 버린다 ·
@@ -191,6 +206,11 @@ pub fn load(path: &Path, symbol: &str, now_ms: i64) -> Result<Snap, String> {
     s.bars.retain(|b| b.0 >= cutoff);
     if s.bars.is_empty() {
         return Err(format!("스냅숏 봉이 전부 창(143봉 전 {cutoff}) 밖 -- 버린다"));
+    }
+    // 1분봉: 지금 분 − 119분 앞은 버린다(footprint_load 474~476)
+    if let Some(m) = &mut s.m1 {
+        let cut1 = now_ms.div_euclid(60_000) * 60 - (crate::footprint::M1_KEEP - 1) * crate::footprint::M1_SECONDS;
+        m.bars.retain(|b| b.0 >= cut1);
     }
     Ok(s)
 }
@@ -481,7 +501,9 @@ impl Supply {
         let bars = self.fp.bars.range(lo..).map(|(&b, bar)| (b, bar.cells.iter().map(|(&k, c)| (k, *c)).collect(), self.fp.dhl_now(&self.sec, b, bar))).collect();
         let sec = ring_floor(&self.sec).map_or(vec![], |f| self.sec.range(f..).map(|(&s, c)| (s, *c)).collect());
         let holes = self.fp.holes.iter().filter(|h| h.1 > lo).copied().collect();
-        Some(Snap { v: SNAP_V, symbol: symbol.to_string(), bar_seconds: BAR_SECONDS, bucket, last_ms: self.last_ms, bars, sec, holes })
+        Some(Snap { v: SNAP_V, symbol: symbol.to_string(), bar_seconds: BAR_SECONDS, bucket, last_ms: self.last_ms, bars, sec, holes,
+                   tick: self.tick.snapshot(), tick_last_id: self.tick.last_id,
+                   m1: Some(Snap1m { bars: self.fp.m1.iter().map(|(&t, b)| (t, b.cells.iter().map(|(&k, c)| (k, *c)).collect(), b.ohlc)).collect(), from: self.fp.m1_from }) })
     }
 
     /// 스냅숏 되살리기(시작 때 · 수신 전). 봉은 통째로, 1초 칸은 옆에 둔다(merge 가 테이프 없는 초에만 쓴다).
@@ -490,6 +512,16 @@ impl Supply {
         self.fp.holes = s.holes;
         self.last_ms = s.last_ms;
         self.rs.snap_sec = s.sec.into_iter().collect();
+        if let Some(t) = s.tick {
+            self.tick.load(t, s.tick_last_id);
+        }
+        match s.m1 {
+            Some(m) => {
+                self.fp.m1 = m.bars.into_iter().map(|(t, cells, ohlc)| (t, crate::footprint::Bar1 { cells: cells.into_iter().collect(), ohlc })).collect();
+                self.fp.m1_from = m.from;
+            }
+            None => self.fp.m1_from = (s.last_ms + 59_999).div_euclid(60_000) * 60, // 파이썬 -(-last_ms // 60000) * 60
+        }
     }
 }
 

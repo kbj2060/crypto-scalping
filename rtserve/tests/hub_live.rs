@@ -302,3 +302,125 @@ fn b64e(b: &[u8]) -> String {
     out
 }
 
+
+/// 2026-11-24: 틱 봉(/api/tick-bars)과 풋프린트 1분봉(/api/footprint?tf=1m)을 허브에서 받아 낸다. 가운데서 붙는다(앞 절반 = 스냅숏 · 뒤 = 밀기).
+/// 1분봉 = 정답지 final_1m(server.py footprint_1m 옮겨 적은 것)과 비트까지 · 틱 봉 = 코어 스냅숏(rtcore tests/tick_bars.rs 가 계산을 따로 본다)의 반올림.
+#[test]
+fn tick_bars_and_footprint_1m_from_hub() {
+    let fx = fx("footprint_eth.json");
+    let sym = fx["symbol"].as_str().unwrap().to_string();
+    let t0 = fx["t0"].as_i64().unwrap();
+    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+    let (st, hub, addr, live) = rig(&sym, &rt);
+    let rows = fx["rows"].as_array().unwrap();
+    let mut conn = 0;
+    for (i, r) in rows.iter().enumerate() {
+        if i == rows.len() / 2 {
+            st.flush();
+            connect(&rt, hub, &sym, &live);
+        }
+        let r = r.as_array().unwrap();
+        if r[0].as_i64().unwrap() != conn {
+            st.reset_orders(&sym);
+            conn = r[0].as_i64().unwrap();
+        }
+        let (kind, t_ms, tid, p, q, m, w) = (&r[1], r[2].as_i64().unwrap() + t0, &r[3], &r[4], &r[5], &r[6], r[7].as_i64().unwrap() + t0);
+        if kind.as_i64() == Some(1) {
+            continue;
+        }
+        let x = if p.as_str() == Some("0") { "NA" } else { "MARKET" };
+        let txt = json!({"e": "trade", "E": w, "T": t_ms, "s": sym.to_uppercase(), "t": tid, "p": p, "q": q, "X": x, "m": m}).to_string();
+        if let Some(m) = rtcore::feed::parse(&txt, w * 1000) {
+            st.apply(m);
+        }
+        if (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 60 < 3 {
+            st.flush();
+        }
+    }
+    st.flush();
+    let Event::Snapshot { tick, .. } = st.snapshot(&sym, 0).unwrap().ev else { panic!() };
+    let tick = tick.unwrap();
+    let r2 = |x: f64| json!((x * 100.0).round_ties_even() / 100.0); // ETH 가격 2자리(값이 이미 0.01 격자라 같은 수)
+    let r3 = |x: f64| json!(format!("{x:.3}").parse::<f64>().unwrap());
+    let row = |b: &rtcore::proto::TickRow| json!([b.0, b.1, b.2, r2(b.3), r2(b.4), r2(b.5), r2(b.6), r3(b.7), r3(b.8), b.9]);
+    let want = |since: &[i64]| -> Value {
+        let mut m = serde_json::Map::new();
+        for (i, l) in tick.lanes.iter().enumerate() {
+            let lo = since.get(i).copied().unwrap_or(i64::MIN);
+            m.insert(l.n.to_string(), json!({"k": l.k, "bars": l.bars.iter().filter(|b| b.0 >= lo).map(row).collect::<Vec<_>>(), "cur": l.cur.as_ref().map_or(Value::Null, row)}));
+        }
+        json!({"symbol": "ETHUSDT", "sizes": [100, 500, 1000, 2000, 5000], "ticks": m})
+    };
+    let mut got = Value::Null;
+    for _ in 0..3000 {
+        got = get_json(addr, "/api/tick-bars?asset=eth");
+        if same_num(&got["ticks"]["100"]["cur"], &want(&[])["ticks"]["100"]["cur"]) && got["ticks"]["100"]["k"] == want(&[])["ticks"]["100"]["k"] {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let all = want(&[]);
+    let keys: Vec<&str> = got.as_object().unwrap().keys().map(String::as_str).collect();
+    assert_eq!(keys, ["symbol", "sizes", "ticks"]);
+    for n in ["100", "500", "1000", "2000", "5000"] {
+        let (g, w) = (&got["ticks"][n], &all["ticks"][n]);
+        assert_eq!(g["k"], w["k"], "{n} k");
+        assert!(same_num(&g["bars"], &w["bars"]), "{n} bars");
+        assert!(same_num(&g["cur"], &w["cur"]) || (g["cur"].is_null() && w["cur"].is_null()), "{n} cur");
+    }
+    let k100 = tick.lanes[0].k;
+    assert!(k100 > 40 && tick.lanes[0].bars.len() == k100 as usize, "100틱 봉 {k100}");
+    // since: 100틱 = 끝 3봉 · 500틱 = k(닫힌 봉 없음) · 못 읽는 칸·빠진 칸 = 보관분 전부
+    let k = |i: usize| tick.lanes[i].k;
+    let q = format!("/api/tick-bars?asset=eth&since={},{},x,{}", k(0) - 3, k(1), k(3) - 1);
+    let inc = get_json(addr, &q);
+    let w = want(&[k(0) - 3, k(1), i64::MIN, k(3) - 1]);
+    for n in ["100", "500", "1000", "2000", "5000"] {
+        assert!(same_num(&inc["ticks"][n]["bars"], &w["ticks"][n]["bars"]), "since {n}");
+        assert!(same_num(&inc["ticks"][n]["cur"], &w["ticks"][n]["cur"]) || inc["ticks"][n]["cur"].is_null(), "since {n} cur 는 늘");
+    }
+    assert_eq!(inc["ticks"]["100"]["bars"].as_array().unwrap().len(), 3);
+    assert_eq!(inc["ticks"]["500"]["bars"], json!([]));
+    // 정수 칸은 정수로
+    let b0 = &got["ticks"]["100"]["bars"][0];
+    assert!(b0[0].is_i64() && b0[1].is_i64() && b0[2].is_i64() && b0[9].is_i64() && b0[9] == 100, "{b0}");
+    // 모르는 코인 = 풋프린트와 같은 404
+    let (a, b) = (request(addr, "GET", "/api/tick-bars?asset=sol", &[]), request(addr, "GET", "/api/footprint?asset=sol", &[]));
+    assert_eq!((a.status, &a.body, &a.headers), (b.status, &b.body, &b.headers));
+    assert_eq!(a.status, 404);
+    // 응답 머리 = 풋프린트와 같다(본문에 따라 달라지는 칸만 빼고)
+    let hd = |g: &common::Got| g.headers.iter().filter(|(k, _)| !["date", "content-length", "etag"].contains(&k.to_ascii_lowercase().as_str())).cloned().collect::<Vec<_>>();
+    assert_eq!(hd(&request(addr, "GET", "/api/tick-bars?asset=eth", &[])), hd(&request(addr, "GET", "/api/footprint?asset=eth", &[])));
+
+    // 1분봉 응답 = 원본 footprint_1m 의 봉(비트까지)
+    let f1 = &fx["final_1m"];
+    let mut g1 = Value::Null;
+    for _ in 0..3000 {
+        g1 = get_json(addr, "/api/footprint?asset=eth&tf=1m");
+        if same_num(&g1["bars"].as_array().map_or(json!([]), |b| json!(b.iter().map(|x| x["ohlc"].clone()).collect::<Vec<_>>())),
+                    &json!(f1["bars"].as_array().unwrap().iter().map(|x| x["ohlc"].clone()).collect::<Vec<_>>())) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let keys: Vec<&str> = g1.as_object().unwrap().keys().map(String::as_str).collect();
+    assert_eq!(keys, ["symbol", "bucket", "barSeconds", "barsExpected", "ready", "full", "retailMaxUsd", "whaleMinUsd", "venues", "bars"]);
+    assert_eq!((g1["barSeconds"].clone(), g1["barsExpected"].clone(), g1["bucket"].as_f64()), (json!(60), json!(120), f1["bucket"].as_f64()));
+    let (gb, wb) = (g1["bars"].as_array().unwrap(), f1["bars"].as_array().unwrap());
+    assert_eq!(gb.len(), wb.len(), "1분봉 수");
+    for (g, w) in gb.iter().zip(wb) {
+        assert_eq!(g.as_object().unwrap().keys().collect::<Vec<_>>(), ["time", "ohlc", "levels"]);
+        assert_eq!(g["time"], w["time"]);
+        assert!(same_num(&g["ohlc"], &w["ohlc"]), "1분봉 {} ohlc", g["time"]);
+        assert!(same_num(&g["levels"], &w["levels"]), "1분봉 {} 칸", g["time"]);
+    }
+    // since 증분: ready 일 때만(아니면 전량 -- 원본 규약)
+    let last = wb.last().unwrap()["time"].as_i64().unwrap();
+    let inc = get_json(addr, &format!("/api/footprint?asset=eth&tf=1m&since={last}"));
+    if inc["ready"] == json!(true) {
+        assert_eq!((inc["full"].clone(), inc["bars"].as_array().unwrap().len()), (json!(false), 1));
+    } else {
+        assert_eq!((inc["full"].clone(), inc["bars"].as_array().unwrap().len()), (json!(true), wb.len()));
+    }
+    eprintln!("tick_bars·1m: 100틱 k {k100} · 1분봉 {} 봉 · 비트까지 같음", gb.len());
+}

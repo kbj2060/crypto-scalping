@@ -254,6 +254,7 @@ fn routes(p: &str) -> Vec<(&'static str, Handler)> {
     match p {
         "/api/supply-1s" => v.push(("GET", |c, r| hub::api_supply(c, &c.live, r))),
         "/api/footprint" => v.push(("GET", |c, r| hub::api_footprint(c, &c.live, r))),
+        "/api/tick-bars" => v.push(("GET", |c, r| hub::api_tick_bars(c, &c.live, r))),
         "/api/oi-5m" => v.push(("GET", hub::api_oi_5m)),
         "/api/liquidation-5m-history" => v.push(("GET", hub::api_liquidation_5m_history)),
         "/api/situation" => v.push(("GET", hub::api_situation)),

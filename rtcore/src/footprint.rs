@@ -30,7 +30,14 @@
 //! - `ready`: 파이썬은 «백필이 끝나 빈 구간이 없다». 코어는 «창 144봉이 다 찼다»로 둔다 -- 화면의
 //!   «체결 테이프 수집 중 N/144봉» 이 코어가 실제로 가진 봉 수를 보이게. 정답지 비교 대상이 아니다.
 //!   빈 구간은 따로 `holes`(복원이 못 메운 초 구간에 걸친 봉 · restore.rs)로 싣는다 -- 파이썬에는 없는 칸.
-use crate::proto::{FpBar, Footprint, Level};
+//!
+//! 1분봉(2026-11-24 · 원본 2026-11-23 coin_flow.py footprint_add 의 bars1m·ohlc1m·m1_from 374~396 · 저장/복원 441~443·472~479 ·
+//! server.py footprint_1m 3997~4016): 5분봉 칸과 **같은 호출·같은 칸 규칙**(5분봉 창 판정을 통과한 체결만 · 총량은 개별 체결 ·
+//! 크기 구간은 되묶은 주문). 봉 = 체결 시각의 분. 새 분이 생길 때만 «그 분 − 119분» 앞을 지운다(보관 120분).
+//! OHLC 는 개별 체결로만: 시가 = 가장 이른 체결 시각의 가격(같은 ms 면 먼저 온 것) · 종가 = 가장 늦은 시각(같은 ms 면 나중 것).
+//! m1_from 은 복원 때만 정한다(restore.rs load_snap). ponytail: 재시작 공백의 분은 메우지 않는다(테이프 복원은 5분봉 칸만 --
+//! 원본도 ETH 외 코인은 같다 · ETH 원본은 REST aggTrades 로 메운다). 공백에 걸친 분은 덜 센 채 보인다.
+use crate::proto::{Fp1m, Fp1mBar, FpBar, Footprint, Level};
 use crate::supply::{r3, SUPPLY_1S_SECONDS};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -38,6 +45,21 @@ pub const BAR_SECONDS: i64 = 300;
 pub const KEEP_BARS: i64 = 288;
 /// 스냅숏·밀기 창(봉 수). server.py FOOTPRINT_MAX_WINDOW_BARS = app.js CHART_PAN_BARS.
 pub const WINDOW_BARS: usize = 144;
+/// 1분봉(coin_flow.py FOOTPRINT_1M_SECONDS · FOOTPRINT_1M_KEEP).
+pub const M1_SECONDS: i64 = 60;
+pub const M1_KEEP: i64 = 120;
+
+/// 1분봉 하나: 칸(5분봉과 같은 6열) · OHLC([시, 고, 저, 종], 첫 ms, 끝 ms) -- 개별 체결이 하나도 없으면 없음.
+#[derive(Default, Clone, Debug, PartialEq)]
+pub(crate) struct Bar1 {
+    pub(crate) cells: BTreeMap<i64, [f64; 6]>,
+    pub(crate) ohlc: Option<([f64; 4], i64, i64)>,
+}
+
+/// 파이썬 round(x, dp)(supply.rs r3 주석과 같은 방식).
+fn rdp(x: f64, dp: usize) -> f64 {
+    format!("{:.*}", dp, x).parse().unwrap_or(0.0)
+}
 
 /// (심볼, 칸 폭, 응답 가격 소수 자리) -- coin_flow.py FLOW_SPECS 사본. 표에 없는 종목은 파이썬에 흐름 엔진이 없다 → 풋프린트 없음.
 // ponytail: 파이썬 표 사본 -- 칸 폭을 바꾸면 tools/gen_footprint_fixture.py 를 다시 돌려 정답지 specs 대조가 잡는다.
@@ -101,6 +123,11 @@ pub struct Bars {
     pub(crate) agg_on_restore: bool,
     /// 테이프로 dhl 을 한 번 정한 봉(원본 fp_dhl_cache 3947 · 3983~3985 -- 값이 없어도 «정함»이면 다시 안 읽는다).
     pub(crate) dhl_tried: BTreeSet<i64>,
+    /// 1분봉(머리 주석) · 이 초부터 «다 센» 봉 · 마지막 밀기 뒤 바뀐 칸 · 지운 봉 · m1_from 이 바뀌었다.
+    pub(crate) m1: BTreeMap<i64, Bar1>,
+    pub(crate) m1_from: i64,
+    m1_dirty: BTreeMap<i64, BTreeSet<i64>>,
+    m1_dropped: Vec<i64>,
 }
 
 /// 1초 링이 다 드는 가장 이른 초(가장 새 초 − 660). 링은 새 초 s 가 올 때 s − 660 밑만 지운다(supply.rs sec_cell).
@@ -138,7 +165,8 @@ pub(crate) fn dhl_ok(v: [f64; 3], bar: &Bar) -> Option<[f64; 3]> {
 impl Bars {
     pub fn new(symbol: &str) -> Bars {
         Bars { spec: spec(symbol), bars: BTreeMap::new(), dirty: BTreeMap::new(), dropped: vec![], holes: vec![], pending: None, holes_dirty: false,
-               agg_on_restore: symbol.eq_ignore_ascii_case("ethusdt"), dhl_tried: BTreeSet::new() }
+               agg_on_restore: symbol.eq_ignore_ascii_case("ethusdt"), dhl_tried: BTreeSet::new(),
+               m1: BTreeMap::new(), m1_from: 0, m1_dirty: BTreeMap::new(), m1_dropped: vec![] }
     }
 
     /// 체결의 봉을 들고 있어도 되나(coin_flow.py 355~365). 새 봉이면 만들고 창 밖 봉을 지운다.
@@ -187,6 +215,74 @@ impl Bars {
         self.dirty.entry(bar).or_default().insert(k);
     }
 
+    /// footprint_add 의 1분봉 몫(coin_flow.py 374~408). `add` 와 같은 인자로 바로 뒤에 부른다(5분봉 창을 통과한 체결만).
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_1m(&mut self, ts_ms: i64, px: f64, qty: f64, sell: bool, order: bool, whale_min: f64, retail_max: f64) {
+        let Some((bucket, _)) = self.spec else { return };
+        let k = (px / bucket).round_ties_even() as i64;
+        let m = ts_ms.div_euclid(1000).div_euclid(M1_SECONDS) * M1_SECONDS;
+        if !self.m1.contains_key(&m) {
+            self.m1.insert(m, Bar1::default());
+            let kept = self.m1.split_off(&(m - (M1_KEEP - 1) * M1_SECONDS)); // 새 분이 생길 때만 정리
+            for b in std::mem::replace(&mut self.m1, kept).into_keys() {
+                self.m1_dirty.remove(&b);
+                self.m1_dropped.push(b);
+            }
+        }
+        let b = self.m1.get_mut(&m).expect("방금 넣었다");
+        let cell = b.cells.entry(k).or_insert([0.0; 6]);
+        let side = sell as usize;
+        if !order {
+            cell[side] += qty;
+            match &mut b.ohlc {
+                None => b.ohlc = Some(([px; 4], ts_ms, ts_ms)),
+                Some((o, first, last)) => {
+                    o[1] = o[1].max(px);
+                    o[2] = o[2].min(px);
+                    if ts_ms < *first {
+                        (o[0], *first) = (px, ts_ms);
+                    }
+                    if ts_ms >= *last {
+                        (o[3], *last) = (px, ts_ms);
+                    }
+                }
+            }
+        } else {
+            let notional = px * qty;
+            if notional >= whale_min {
+                cell[2 + side] += qty;
+            } else if notional < retail_max {
+                cell[4 + side] += qty;
+            }
+        }
+        self.m1_dirty.entry(m).or_default().insert(k);
+    }
+
+    /// 1분봉 메시지(스냅숏 = 전부 · 밀기 = 바뀐 봉의 바뀐 칸 + 그 봉 OHLC). 표에 없는 종목은 None.
+    fn msg_1m(&self, full: bool, dirty: &BTreeMap<i64, BTreeSet<i64>>, drop: Vec<i64>) -> Option<Fp1m> {
+        let (_, dp) = self.spec?;
+        let bar = |t: i64, b: &Bar1, ks: Option<&BTreeSet<i64>>| Fp1mBar { time: t, ohlc: b.ohlc.map(|o| o.0.map(|x| rdp(x, dp))), levels: self.rows(&b.cells, ks) };
+        let bars = if full {
+            self.m1.iter().map(|(&t, b)| bar(t, b, None)).collect()
+        } else {
+            dirty.iter().filter_map(|(t, ks)| self.m1.get(t).map(|b| bar(*t, b, Some(ks)))).collect()
+        };
+        Some(Fp1m { full, m1_from: self.m1_from, bars, drop })
+    }
+
+    pub fn snapshot_1m(&self) -> Option<Fp1m> {
+        self.msg_1m(true, &BTreeMap::new(), vec![])
+    }
+
+    pub fn take_delta_1m(&mut self) -> Option<Fp1m> {
+        if self.m1_dirty.is_empty() && self.m1_dropped.is_empty() {
+            return None;
+        }
+        let dirty = std::mem::take(&mut self.m1_dirty);
+        let drop = std::mem::take(&mut self.m1_dropped);
+        self.msg_1m(false, &dirty, drop)
+    }
+
     /// 1초 링이 [lo, hi) 에서 시작하는 봉들의 첫 초를 곧 지운다 -- 지우기 직전 링으로 dhl 을 얼린다(머리 주석).
     pub fn freeze(&mut self, sec: &BTreeMap<i64, [f64; 7]>, lo: i64, hi: i64) {
         for (&b, bar) in self.bars.range_mut(lo..hi) {
@@ -211,14 +307,18 @@ impl Bars {
     }
 
     fn levels(&self, bar: &Bar, keys: Option<&BTreeSet<i64>>) -> Vec<Level> {
+        self.rows(&bar.cells, keys)
+    }
+
+    fn rows(&self, cells: &BTreeMap<i64, [f64; 6]>, keys: Option<&BTreeSet<i64>>) -> Vec<Level> {
         let (bucket, dp) = self.spec.expect("spec 있을 때만 부른다");
         let row = |k: i64, c: &[f64; 6]| {
-            let px = format!("{:.*}", dp, k as f64 * bucket).parse().unwrap_or(0.0); // 파이썬 round(k * 칸 폭, dp) -- supply.rs r3 주석
+            let px = rdp(k as f64 * bucket, dp); // 파이썬 round(k * 칸 폭, dp) -- supply.rs r3 주석
             (px, r3(c[0]), r3(c[1]), r3(c[2]), r3(c[3]), r3(c[4]), r3(c[5]))
         };
         match keys {
-            None => bar.cells.iter().map(|(&k, c)| row(k, c)).collect(),
-            Some(ks) => ks.iter().filter_map(|k| bar.cells.get(k).map(|c| row(*k, c))).collect(),
+            None => cells.iter().map(|(&k, c)| row(k, c)).collect(),
+            Some(ks) => ks.iter().filter_map(|k| cells.get(k).map(|c| row(*k, c))).collect(),
         }
     }
 
@@ -371,5 +471,44 @@ mod dhl_retry {
         let bad: BTreeMap<i64, [f64; 3]> = [(6000, [-1.0, 9.0, 9.0])].into_iter().collect();
         assert_eq!(fp2.dhl_apply(&[6000], Some(&bad), now), 0);
         assert!(fp2.bars[&6000].dhl.is_none());
+    }
+}
+
+#[cfg(test)]
+mod m1_restore {
+    use crate::supply::Supply;
+
+    /// 1분봉 저장·복원(coin_flow.py footprint_save 441~443 · footprint_load 472~479): 파일 왕복 == 쓴 상태 · 지금 − 119분 앞은 버림 ·
+    /// 옛 파일(1분봉 칸 없음)은 m1_from = last_ms 뒤 첫 분.
+    #[test]
+    fn roundtrip() {
+        let mut a = Supply::new("ethusdt");
+        let t0 = 1_763_700_000_000i64; // 분 경계
+        for i in 0..20_000i64 {
+            let ms = t0 + i * 997; // 약 5.5시간
+            a.trade(3000.0 + (i % 17) as f64 * 0.25, 0.5 + (i % 7) as f64, ms, i % 3 == 0, i + 1, ms * 1000);
+        }
+        a.rs.merged = true;
+        let snap = a.to_snap("ethusdt").unwrap();
+        assert_eq!(snap.m1.as_ref().unwrap().bars.len(), 120);
+        let dir = std::env::temp_dir().join(format!("rtcore_m1_{}", std::process::id()));
+        let p = dir.join("fp.json");
+        crate::restore::write(&p, &snap).unwrap();
+        let now = a.last_ms + 30 * 60_000; // 30분 뒤 재시작 -- 앞 30분어치(30봉)는 보관 밖
+        let mut b = Supply::new("ethusdt");
+        b.load_snap(crate::restore::load(&p, "ethusdt", now).unwrap());
+        let cut = now.div_euclid(60_000) * 60 - 119 * 60;
+        let want: Vec<_> = a.fp.m1.iter().filter(|(t, _)| **t >= cut).map(|(t, v)| (*t, v.clone())).collect();
+        assert_eq!(b.fp.m1.iter().map(|(t, v)| (*t, v.clone())).collect::<Vec<_>>(), want);
+        assert_eq!((b.fp.m1.len(), b.fp.m1_from), (90, 0));
+        // 옛 파일
+        let mut v: serde_json::Value = serde_json::from_slice(&std::fs::read(&p).unwrap()).unwrap();
+        v.as_object_mut().unwrap().remove("m1");
+        let mut c = Supply::new("ethusdt");
+        c.load_snap(serde_json::from_value(v).unwrap());
+        assert!(c.fp.m1.is_empty());
+        assert_eq!(c.fp.m1_from, (a.last_ms + 59_999) / 60_000 * 60);
+        assert!(c.fp.m1_from * 1000 > a.last_ms && c.fp.m1_from % 60 == 0);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -28,7 +28,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
-  <link rel="stylesheet" href="styles.css?v=20261123-fp1m">
+  <link rel="stylesheet" href="styles.css?v=20261124-tick">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -187,6 +187,7 @@
               <button type="button" class="asset-tab active" data-view="fp" aria-pressed="true">풋프린트</button>
               <button type="button" class="asset-tab" data-view="bubble" aria-pressed="false">체결 버블</button>   <!-- 2026-10-13 bubble_map.js -->
               <button type="button" class="asset-tab" data-view="liq" aria-pressed="false">청산</button>   <!-- 2026-11-07 liq_tab.js -->
+              <button type="button" class="asset-tab" data-view="tick" aria-pressed="false">틱</button>   <!-- 2026-11-23 펜 메모 · tick_charts.js -->
             </div>
             <button type="button" id="fpWinDd" class="fp-dd" aria-haspopup="true" aria-expanded="false" aria-controls="chartWindowTabs"><i>봉</i><b>5m</b><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg></button>
             <div id="chartWindowTabs" class="asset-tabs chart-mode-tabs" aria-label="데이터 창"
@@ -279,6 +280,17 @@
           </div>
           <!-- 2026-10-08 일봉·청산맵 = 5분 차트 교체 영역(window.fpRegion) 위에만 겹치는 상자(사용자 «풋프린트 차트만 바뀌게») -->
           <!-- 2026-10-13 체결 버블(Bookmap 식) -- bubble_map.js · 청산맵과 같은 자리·크기 -->
+          <!-- 2026-11-23 펜 메모 «보기에 틱 -- 100·500·1000·2000·5000틱 5분할 · 지표·SLTP 살림 · 커서 같은 시각» -- tick_charts.js · 체결 버블과 같은 자리 -->
+          <div id="tickCharts" class="fp-overlay tkc" hidden aria-label="틱 차트 다섯 칸">
+            <div class="tkc-grid">
+              <div class="tkc-cell" data-n="100"><p class="tkc-t"><b>100틱</b><span class="tkc-sub"></span></p><canvas role="img" aria-label="100틱 차트 -- 바이낸스 선물 100체결마다 봉 하나"></canvas></div>
+              <div class="tkc-cell" data-n="500"><p class="tkc-t"><b>500틱</b><span class="tkc-sub"></span></p><canvas role="img" aria-label="500틱 차트"></canvas></div>
+              <div class="tkc-cell" data-n="1000"><p class="tkc-t"><b>1000틱</b><span class="tkc-sub"></span></p><canvas role="img" aria-label="1000틱 차트"></canvas></div>
+              <div class="tkc-cell" data-n="2000"><p class="tkc-t"><b>2000틱</b><span class="tkc-sub"></span></p><canvas role="img" aria-label="2000틱 차트"></canvas></div>
+              <div class="tkc-cell" data-n="5000"><p class="tkc-t"><b>5000틱</b><span class="tkc-sub"></span></p><canvas role="img" aria-label="5000틱 차트"></canvas></div>
+            </div>
+            <p id="tickChartsStatus" class="fpd-status muted" role="status"></p>
+          </div>
           <div id="bubbleMap" class="liq-profile fp-overlay" hidden>
             <div class="fpd-head">
               <div class="lqp-legend bbm-legend">
@@ -425,11 +437,12 @@
     <button type="button" data-go="optCard" aria-label="Option 카드로" title="Option"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16"/><path d="M5 15h7l7-9"/></svg><span>옵션</span></button>
     <button type="button" data-go="acctCard" aria-label="계좌 카드로" title="계좌"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8a2 2 0 0 1 2-2h12v2"/><rect x="4" y="8" width="16" height="11" rx="2"/><circle cx="16" cy="13.5" r="1.2"/></svg><span>계좌</span></button>
   </nav>
-  <script src="./app.js?v=20261123-fp1m"></script>
-  <script src="./fp_daily.js?v=20261120-mfs"></script>
-  <script src="./liq_profile.js?v=20261108-liqcurve2"></script>
+  <script src="./app.js?v=20261124-tick"></script>
+  <script src="./fp_daily.js?v=20261124-tick"></script>
+  <script src="./liq_profile.js?v=20261124-tick"></script>
   <script src="./liq_tab.js?v=20261117-nonow1"></script>
   <script src="./bubble_map.js?v=20261016-minitop"></script>
+  <script src="./tick_charts.js?v=20261124-tick"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

@@ -256,15 +256,16 @@
   //   풋프린트·레인·모의 판·지지/저항, 좁은 화면은 풋프린트~5분 레인) 위에 **배경 없이** 놓는다(사용자 «시간봉과 스타일 통일 · 너무 검정»).
   //   아래 5분 그림은 svg 에 그 영역만큼 구멍(clip-path evenodd)을 내 숨긴다 -- 카드의 실제 배경이 그대로 비친다.
   //   viewBox = 상자 픽셀이라 좌표 그대로. 🔴SVG 에는 offsetTop 이 없어(undefined → NaN) 화면 좌표 차로 잰다.
-  var ALT = { daily: false, bubble: false };   // 2026-10-13 bubble = 체결 버블(bubble_map.js)
+  var ALT = { daily: false, bubble: false, tick: false };   // 2026-11-23 tick = 틱 차트(tick_charts.js)   // 2026-10-13 bubble = 체결 버블(bubble_map.js)
   function syncHole() {
-    var svg = $("candleSvgSnapshot"), card = $("fpCard"), g = window.fpRegion, on = ALT.daily || ALT.bubble;
+    var svg = $("candleSvgSnapshot"), card = $("fpCard"), g = window.fpRegion, on = ALT.daily || ALT.bubble || ALT.tick;
     if (card) { card.classList.toggle("fp-alt-on", on); card.classList.toggle("fp-alt-wide", !!(on && g && g.split)); }
     if (!svg) return;
     var clip = "";
     if (on) {
       var W = svg.clientWidth || svg.getBoundingClientRect().width, H = svg.clientHeight || svg.getBoundingClientRect().height;
-      var w = g ? g.w : W, h = g ? g.h : H, p = function (x, y) { return Math.round(x) + "px " + Math.round(y) + "px"; };
+      var full = ALT.tick && !ALT.daily && !ALT.bubble;   // 2026-11-24 사용자 «틱 차트는 오른쪽 칸(수급·예측)도 덮고 카드에 가득» -- svg 전체를 비운다
+      var w = g && !full ? g.w : W, h = g && !full ? g.h : H, p = function (x, y) { return Math.round(x) + "px " + Math.round(y) + "px"; };
       clip = "polygon(evenodd, " + [p(0, 0), p(W, 0), p(W, H), p(0, H), p(0, 0), p(w, 0), p(w, h), p(0, h)].join(", ") + ")";
     }
     if (svg.style.clipPath !== clip) svg.style.clipPath = clip;
@@ -275,7 +276,8 @@
     if (!el || !svg || !el.parentElement) return;
     var r = svg.getBoundingClientRect(), pr = el.parentElement.getBoundingClientRect();
     var x = r.left - pr.left - el.parentElement.clientLeft, y = r.top - pr.top - el.parentElement.clientTop;
-    var w = g ? g.w : r.width, h = g ? g.h : r.height;
+    var full = ALT.tick && !ALT.daily && !ALT.bubble;
+    var w = g && !full ? g.w : r.width, h = g && !full ? g.h : r.height;
     var st = el.style, px_ = function (v) { return Math.round(v) + "px"; };
     if (st.left !== px_(x) || st.top !== px_(y) || st.width !== px_(w) || st.height !== px_(h)) {
       st.left = px_(x); st.top = px_(y); st.width = px_(w); st.height = px_(h);

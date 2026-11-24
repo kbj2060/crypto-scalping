@@ -10,7 +10,7 @@
 //!   없으면(처음부터 덮인 적 없는 봉 · 얼린 뒤 늦은 체결) «몸통만»으로 센다.
 //! - wait(파이썬이 아직 안 내는 6분): 코어가 먼저 내도 된다(센다).
 //! - 파이썬 덮임 판정이 창 기준과 다른 순간(stale: 660초 넘게 늦은 체결이 링에 남은 동안)은 dhl 을 안 본다.
-use rtcore::proto::{Event, FpBar, Footprint, Level};
+use rtcore::proto::{Event, Fp1m, Fp1mView, FpBar, Footprint, Level};
 use rtcore::state::State;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -115,6 +115,29 @@ impl Tally {
     }
 }
 
+fn snap_1m(st: &State, sym: &str) -> Fp1m {
+    let Event::Snapshot { fp1m, .. } = st.snapshot(sym, 0).unwrap().ev else { panic!() };
+    fp1m.expect("칸 폭 표에 있는 종목은 1분봉이 있다")
+}
+
+/// 1분봉 OHLC 대조(파이썬 [시, 고, 저, 종, 첫 ms, 끝 ms] -- 반올림 전이라 비트까지).
+fn ohlc_same(what: &str, got: &[(i64, Vec<(i64, [f64; 6])>, Option<([f64; 4], i64, i64)>)], want: &Value) -> usize {
+    let want = want.as_object().unwrap();
+    let g: Vec<(i64, [f64; 6])> = got.iter().filter_map(|(t, _, o)| o.map(|(v, a, z)| (*t, [v[0], v[1], v[2], v[3], a as f64, z as f64]))).collect();
+    let w: Vec<(i64, [f64; 6])> = want.iter().map(|(t, v)| {
+        let a = v.as_array().unwrap();
+        (t.parse().unwrap(), std::array::from_fn(|j| a[j].as_f64().unwrap()))
+    }).collect::<BTreeMap<_, _>>().into_iter().collect();
+    assert_eq!(g, w, "{what}: 1분봉 OHLC");
+    g.len()
+}
+
+fn view_1m_same(what: &str, v: &Fp1mView, snap: &Fp1m) {
+    let mut w = Fp1mView::default();
+    w.apply(snap.clone());
+    assert_eq!(v, &w, "{what}: 밀기로 지은 1분봉 == 스냅숏");
+}
+
 fn snap_of(st: &State, sym: &str) -> Footprint {
     let Event::Snapshot { footprint, .. } = st.snapshot(sym, 0).unwrap().ev else { panic!() };
     footprint.expect("칸 폭 표에 있는 종목은 풋프린트가 있다")
@@ -164,9 +187,25 @@ fn check(fx: &str) {
     let mut view = View::default(); // 처음부터 밀기만 받은 화면
     let mut late: Option<(u64, View)> = None; // 중간(5번째 대조)에 스냅숏으로 붙은 화면
     let mut drops = 0;
-    let drain = |rx: &mut tokio::sync::broadcast::Receiver<_>, view: &mut View, late: &mut Option<(u64, View)>, drops: &mut usize| {
+    // 1분봉 받는 쪽(처음부터 · 중간에 붙음) -- 처음부터 받는 쪽은 빈 스냅숏에서 시작
+    let mut v1 = Fp1mView::default();
+    v1.apply(snap_1m(&st, &sym));
+    let mut late1: Option<(u64, Fp1mView)> = None;
+    let (mut m1_cells, mut m1_ohlc, mut m1_msgs) = (0usize, 0usize, 0usize);
+    let drain = |rx: &mut tokio::sync::broadcast::Receiver<_>, view: &mut View, late: &mut Option<(u64, View)>, drops: &mut usize,
+                 v1: &mut Fp1mView, late1: &mut Option<(u64, Fp1mView)>, m1_msgs: &mut usize| {
         while let Ok(m) = rx.try_recv() {
             let m: rtcore::proto::Stamped = m;
+            if let Event::Footprint1m(f) = &m.ev {
+                assert!(!f.full, "1분봉 밀기는 늘 바뀐 몫");
+                *m1_msgs += 1;
+                v1.apply(f.clone());
+                if let Some((seq0, v)) = late1 {
+                    if m.seq > *seq0 {
+                        v.apply(f.clone());
+                    }
+                }
+            }
             if let Event::Footprint(f) = &m.ev {
                 assert!(!f.full, "밀기는 늘 바뀐 몫");
                 *drops += f.drop.len();
@@ -192,7 +231,7 @@ fn check(fx: &str) {
         if (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 60 < 3 {
             st.flush();
         }
-        drain(&mut rx, &mut view, &mut late, &mut drops);
+        drain(&mut rx, &mut view, &mut late, &mut drops, &mut v1, &mut late1, &mut m1_msgs);
         if ci < cps.len() && cps[ci]["after"].as_u64().unwrap() as usize == i + 1 {
             let cp = &cps[ci];
             let what = format!("중간 대조 {}", i + 1);
@@ -205,7 +244,22 @@ fn check(fx: &str) {
                 let got = &raw.iter().find(|x| x.0 == b).unwrap().1;
                 t.cells(&what, b, got, cells);
             }
+            // 1분봉: 봉 목록 · 바뀐 봉 칸 · OHLC 전부
+            let r1 = st.footprint_1m_cells(&sym).unwrap();
+            let want1: Vec<i64> = cp["bars1m"].as_array().unwrap().iter().map(|v| v.as_i64().unwrap()).collect();
+            assert_eq!(r1.iter().map(|b| b.0).collect::<Vec<_>>(), want1, "{what}: 1분봉 목록");
+            for (b, cells) in cp["cells1m"].as_object().unwrap() {
+                let b: i64 = b.parse().unwrap();
+                t.cells(&format!("{what} 1분봉"), b, &r1.iter().find(|x| x.0 == b).unwrap().1, cells);
+                m1_cells += 1;
+            }
+            m1_ohlc += ohlc_same(&what, &r1, &cp["ohlc1m"]);
             if ci == 5 {
+                let m = st.snapshot(&sym, 0).unwrap();
+                let Event::Snapshot { fp1m, .. } = m.ev else { panic!() };
+                let mut v = Fp1mView::default();
+                v.apply(fp1m.unwrap());
+                late1 = Some((m.seq, v));
                 // 모으던 것을 아직 안 민 채 스냅숏으로 붙는다 -- 다음 묶음이 같은 값을 다시 덮어써도 같아야 한다.
                 let Event::Snapshot { footprint, .. } = st.snapshot(&sym, 0).unwrap().ev else { panic!() };
                 let mut v = View::default();
@@ -223,14 +277,15 @@ fn check(fx: &str) {
                 }
             }
             st.flush();
-            drain(&mut rx, &mut view, &mut late, &mut drops);
+            drain(&mut rx, &mut view, &mut late, &mut drops, &mut v1, &mut late1, &mut m1_msgs);
             view.same_as(&format!("{what} 밀기로 지은 화면"), &snap);
+            view_1m_same(&what, &v1, &snap_1m(&st, &sym));
             ci += 1;
         }
     }
     assert_eq!(ci, cps.len(), "중간 대조를 다 못 했다");
     st.flush();
-    drain(&mut rx, &mut view, &mut late, &mut drops);
+    drain(&mut rx, &mut view, &mut late, &mut drops, &mut v1, &mut late1, &mut m1_msgs);
 
     let raw = st.footprint_cells(&sym).unwrap();
     let fc = fx["final_cells"].as_object().unwrap();
@@ -274,6 +329,34 @@ fn check(fx: &str) {
     view.same_as("끝 밀기로 지은 화면(처음부터)", &snap);
     late.expect("중간 스냅숏").1.same_as("끝 밀기로 지은 화면(중간에 붙음)", &snap);
     assert!(drops > 0, "정답지가 «창 안 봉이 시각으로 지워짐»을 안 건드린다");
+
+    // 1분봉 끝: 칸 전부 · OHLC · server.py footprint_1m 응답 몫(m1_from 앞 봉·OHLC 없는 봉 뺌 · 가격 자릿수 반올림 · 비트까지)
+    let r1 = st.footprint_1m_cells(&sym).unwrap();
+    m1_ohlc += ohlc_same("끝", &r1, &fx["final_ohlc1m"]);
+    let s1 = snap_1m(&st, &sym);
+    view_1m_same("끝(처음부터)", &v1, &s1);
+    view_1m_same("끝(중간에 붙음)", &late1.expect("중간 1분봉 스냅숏").1, &s1);
+    let f1 = &fx["final_1m"];
+    assert_eq!((f1["barSeconds"].as_i64(), f1["barsExpected"].as_i64()), (Some(rtcore::footprint::M1_SECONDS), Some(rtcore::footprint::M1_KEEP)));
+    assert_eq!(s1.m1_from, f1["m1_from"].as_i64().unwrap());
+    let shown: Vec<_> = s1.bars.iter().filter(|b| b.time >= s1.m1_from && b.ohlc.is_some()).collect();
+    let wb = f1["bars"].as_array().unwrap();
+    assert_eq!(shown.len(), wb.len(), "1분봉 응답 봉 수");
+    let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    let wbits = |v: &Value| v.as_array().unwrap().iter().map(|x| x.as_f64().unwrap().to_bits()).collect::<Vec<_>>();
+    let mut lv1 = 0;
+    for (g, w) in shown.iter().zip(wb) {
+        assert_eq!(g.time, w["time"].as_i64().unwrap());
+        assert_eq!(bits(&g.ohlc.unwrap()), wbits(&w["ohlc"]), "1분봉 {} ohlc", g.time);
+        let wl = w["levels"].as_array().unwrap();
+        assert_eq!(g.levels.len(), wl.len(), "1분봉 {} 칸 수", g.time);
+        for (l, wl) in g.levels.iter().zip(wl) {
+            assert_eq!(bits(&[l.0, l.1, l.2, l.3, l.4, l.5, l.6]), wbits(wl), "1분봉 {} 칸", g.time);
+            lv1 += 1;
+        }
+    }
+    assert!(m1_msgs > 0 && m1_cells > 0 && m1_ohlc > 100, "1분봉 대조가 너무 적다");
+    println!("1분봉 일치: 중간 대조 칸 봉 {m1_cells} · OHLC {m1_ohlc} · 응답 봉 {} 칸 {lv1} · 밀기 {m1_msgs}건", shown.len());
     assert!(t.dhl_same > 50 && t.stale_skipped > 0, "dhl 대조가 너무 적다");
     println!(
         "풋프린트 일치: 메시지 {} · 중간 대조 {} · 비교한 봉 {} · 칸 {} · 필드 {} · 스냅숏 봉 {} 칸 {levels} · \

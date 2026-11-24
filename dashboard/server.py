@@ -28,6 +28,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 from aiohttp import ClientError, ClientSession, ClientTimeout, TCPConnector, WSMsgType, web
+import yarl  # 2026-11-24 rtserve_door(쿼리 원문 그대로 넘기기)
 from dotenv import load_dotenv
 
 
@@ -4978,6 +4979,26 @@ def make_app() -> web.Application:
     keep_trip_ledger = order_api.keep_trip_ledger
     # 2026-11-22 Rust 주문 전환 스위치: 표식(data/live/rtorder_live.on)이 있으면 14주소를 rtorder 문으로 -- 맨 안쪽이라 ETag·압축은 지금처럼 바깥 미들웨어가 건다
     app.middlewares.append(order_api.rtorder_door)
+
+    # 2026-11-24 Rust 이전분(사용자 «파이썬은 넘기기만»): 틱 봉(/api/tick-bars)·풋프린트 1분봉(/api/footprint?tf=1m)은 rtcore 가 세고 rtserve(병행 8790)가 답한다 --
+    #   여기는 GET 을 그대로 넘긴다(계산 0 · rtorder 문과 같은 규칙: 루프백만 · Connection: close · 닫혀 있으면 502). thesan.xyz 를 rtserve 로 돌리면 이 미들웨어를 지운다.
+    rtserve_addr = orders._loopback_door(os.getenv("RTSERVE_DOOR", "127.0.0.1:8790"))
+
+    @web.middleware
+    async def rtserve_door(request: web.Request, handler) -> web.StreamResponse:
+        if not (request.method == "GET" and (request.path == "/api/tick-bars" or (request.path == "/api/footprint" and request.query.get("tf") == "1m"))):
+            return await handler(request)
+        if rtserve_addr is None:
+            return web.json_response({"ok": False, "error": "rtserve_unavailable"}, status=502)
+        qs = request.rel_url.raw_query_string
+        try:
+            async with binance_session().get(yarl.URL(f"http://{rtserve_addr}{request.path}" + (f"?{qs}" if qs else ""), encoded=True),
+                                             headers={"Connection": "close"}, timeout=ClientTimeout(total=5, connect=1)) as r:
+                body = await r.read()
+                return web.Response(status=r.status, body=body, headers={k: r.headers[k] for k in ("Content-Type", "Cache-Control") if k in r.headers})
+        except (ClientError, asyncio.TimeoutError):
+            return web.json_response({"ok": False, "error": "rtserve_unavailable"}, status=502)
+    app.middlewares.append(rtserve_door)
 
     app.router.add_get("/", index)
     app.router.add_get("/dashboard/live", dashboard_index)

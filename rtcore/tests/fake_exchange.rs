@@ -323,7 +323,7 @@ fn t6_trade_ring_is_bounded() {
     st.apply(rtcore::feed::parse(&book(5), 1).unwrap());
     st.flush();
     let snap = st.snapshot("ethusdt", 0).unwrap();
-    assert_eq!(snap.seq, 103); // 체결 100 + 호가 1 + 묶음 1번(1초 수급 1 · 풋프린트 1) -- 사건마다 밀지 않는다(state.rs FLUSH_MS)
+    assert_eq!(snap.seq, 105); // 체결 100 + 호가 1 + 묶음 1번(1초 수급 1 · 풋프린트 1 · 틱 봉 1 · 1분봉 1 -- 2026-11-24) -- 사건마다 밀지 않는다(state.rs FLUSH_MS)
     let Event::Snapshot { trades, book, .. } = snap.ev else { panic!() };
     assert_eq!(trades.len(), 16);
     assert!(matches!(trades.first().map(|t| &t.ev), Some(Event::Trade { id: 85, .. })));

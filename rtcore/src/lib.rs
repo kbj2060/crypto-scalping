@@ -9,6 +9,7 @@ pub mod restore;
 pub mod situation;
 pub mod state;
 pub mod supply;
+pub mod tick;
 
 use std::sync::atomic::{AtomicI64, AtomicU64};
 use std::sync::{Arc, Mutex};

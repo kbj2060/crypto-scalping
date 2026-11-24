@@ -81,7 +81,7 @@
     });
     var saved = null;
     try { saved = localStorage.getItem("fpView"); } catch (e) { /* 없음 */ }
-    setView(saved === "bubble" || saved === "liq" ? saved : "fp");
+    setView(saved === "bubble" || saved === "liq" || saved === "tick" ? saved : "fp");
   }
 
   // 2026-10-27 풋프린트 오른쪽 기둥 «청산»(사용자 «체결/포지션 칸에 청산을 만들어 청산맵을 풋프린트에 붙여줘») -- 지나간 칸은 지운 지도.

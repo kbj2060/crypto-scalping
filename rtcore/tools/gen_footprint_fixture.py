@@ -210,6 +210,16 @@ def payload(fs: dict, tape: dict, now: float) -> dict:
     }
 
 
+def payload_1m(fs: dict) -> dict:
+    """server.py footprint_1m(3997~4016)의 since=0 몫(2026-11-24 옮겨 적음 · ready 는 코어 판이라 뺐다)."""
+    bucket, dp = cf.FLOW_SPECS[COIN].bucket, cf.FLOW_SPECS[COIN].price_dp
+    floor = fs.get("m1_from") or 0
+    bars = sorted((b, c) for b, c in fs["bars1m"].items() if b >= floor and b in fs["ohlc1m"])
+    return {"bucket": bucket, "barSeconds": 60, "barsExpected": 120, "m1_from": fs["m1_from"],
+            "bars": [{"time": b, "ohlc": [round(x, dp) for x in fs["ohlc1m"][b][:4]],
+                      "levels": [[round(k * bucket, dp)] + [round(x, 3) for x in v] for k, v in sorted(c.items())]} for b, c in bars]}
+
+
 def tape_update(tape: dict, base: dict, sec: dict, prev: set) -> set:
     """수집기 테이프 흉내: 초 → [총매수, 총매도] 를 지우지 않고 든다. 링이 지웠다가 다시 만든 초(아주 늦은 체결)는 이어 더한다."""
     for s, c in sec.items():
@@ -244,6 +254,7 @@ async def run(rows: list[list], marks: set[int]) -> dict:
     cps_at = marks | {len(rows) * j // 10 for j in range(1, 10)}
     cps: list[dict] = []
     seen: dict[int, dict] = {}          # 지난 대조 때 봉 칸 -- 그 뒤 바뀐 봉만 싣는다(정답지 크기)
+    seen1: dict[int, dict] = {}         # 1분봉 몫(2026-11-24)
     done = asyncio.Event()
 
     def checkpoint(after: int) -> None:
@@ -251,6 +262,10 @@ async def run(rows: list[list], marks: set[int]) -> dict:
         changed = {str(b): {str(k): v for k, v in sorted(c.items())} for b, c in sorted(bars.items()) if seen.get(b) != c}
         seen.clear()
         seen.update(bars)
+        b1 = {b: {k: list(v) for k, v in cells.items()} for b, cells in fs["bars1m"].items()}
+        changed1 = {str(b): {str(k): v for k, v in sorted(c.items())} for b, c in sorted(b1.items()) if seen1.get(b) != c}
+        seen1.clear()
+        seen1.update(b1)
         sec = fs["sec"]
         top = max(sec) if sec else 0
         win = min((s for s in sec if s >= top - cf.SUPPLY_1S_SECONDS), default=None)
@@ -259,6 +274,8 @@ async def run(rows: list[list], marks: set[int]) -> dict:
                     # 파이썬 덮임 판정(링의 가장 오래된 초)이 창 기준과 다른 순간 -- 시험은 이때 dhl 을 안 본다(footprint.rs «덮임 판정»)
                     "stale": bool(sec) and min(sec) != win,
                     # dhl 은 맨 끝 6봉만(링 덮임이 바뀌는 곳) -- 창 전체는 끝 스냅숏이 본다(정답지 크기)
+                    # 1분봉(2026-11-24): 봉 목록 · 바뀐 봉 칸 · OHLC 전부([시, 고, 저, 종, 첫 ms, 끝 ms] 반올림 전)
+                    "bars1m": sorted(b1), "cells1m": changed1, "ohlc1m": {str(b): list(v) for b, v in sorted(fs["ohlc1m"].items())},
                     "dhl": [[b, *v] for b, v in sorted(fp_dhl(sec, tape, recent, clock["now"]).items())][-6:]})
 
     class FakeWS:
@@ -311,6 +328,8 @@ async def run(rows: list[list], marks: set[int]) -> dict:
     await asyncio.wait_for(done.wait(), 60)
     final_cells = {str(b): {str(k): list(v) for k, v in sorted(c.items())} for b, c in sorted(fs["bars"].items())}
     final = payload(fs, tape, clock["now"])
+    final_1m = payload_1m(fs)
+    final_ohlc1m = {str(b): v for b, v in sorted(fs["ohlc1m"].items())}
     task.cancel()
     try:
         await task
@@ -319,7 +338,7 @@ async def run(rows: list[list], marks: set[int]) -> dict:
     assert FakeSession.n == len(conns)
     # ETH 외 코인은 테이프 복원이 실패해도 ready 가 된다(footprint_tape_restore 끝) -- 값에는 안 닿는다(스냅샷 저장만 · 없는 경로라 실패)
     assert COIN != "eth" or not fs["ready"], "REST 가 막혔는데 ready -- 정답지 전제가 깨졌다"
-    return {"checkpoints": cps, "final_cells": final_cells, "final": final, "final_ms": rows[-1][7]}
+    return {"checkpoints": cps, "final_cells": final_cells, "final": final, "final_ms": rows[-1][7], "final_1m": final_1m, "final_ohlc1m": final_ohlc1m}
 
 
 def main() -> None:
