@@ -62,7 +62,10 @@
     var wasLiq = !!(card && card.classList.contains("lq-on"));
     if (card) card.classList.toggle("lq-on", view === "liq");   // 2026-11-07 «청산» 보기(liq_tab.js) -- 카드 몸통 전체를 쓴다
     var tabsHost = $("fpViewTabs"), allTabs = tabsHost ? Array.prototype.slice.call(tabsHost.querySelectorAll(".asset-tab")) : [];
-    if (tabsHost) tabsHost.style.setProperty("--i", String(Math.max(0, allTabs.findIndex(function (b) { return b.dataset.view === view; }))));
+    if (tabsHost) {
+      tabsHost.style.setProperty("--i", String(Math.max(0, allTabs.findIndex(function (b) { return b.dataset.view === view; }))));
+      tabsHost.style.setProperty("--seg-n", String(allTabs.length));   // 2026-11-25 펜 메모 «틱 버튼 부분이 이상» -- CSS 의 3 고정이라 칸 넷이면 선택 조각이 1/3 폭이었다
+    }
     var wt = $("chartWindowTabs");
     if (wt) wt.hidden = view !== "fp";                       // 2026-10-13 체결 버블 = 창 탭 없음(차트 안에서 확대·이동, bubble_map.js)
     window.dispatchEvent(new CustomEvent("fpview", { detail: view }));

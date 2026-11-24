@@ -431,7 +431,8 @@ pub fn api_footprint(cfg: &Config, live: &Live, req: &Req) -> Resp {
 // ───────────────────────── /api/tick-bars (2026-11-24 · rtcore tick.rs · 원본 없음) ─────────────────────────
 
 /// GET /api/tick-bars?asset=eth[&since=k1,k2,k3,k4,k5] -- 크기 순서대로 그 번호 이상인 닫힌 봉만(없거나 못 읽는 칸 = 보관분 전부) · cur 는 늘.
-/// 봉 = [번호, 첫 ms, 끝 ms, 시, 고, 저, 종, 수량, 델타, 체결 수] · 가격 = 종목 가격 자릿수(풋프린트 칸 가격과 같은 표) · 수량·델타 = 3자리.
+/// 봉 = [번호, 첫 ms, 끝 ms, 시, 고, 저, 종, 수량, 델타, 체결 수, [[가격, 수량], ..]] · 가격 = 종목 가격 자릿수(풋프린트 칸 가격과 같은 표) · 수량·델타 = 3자리.
+/// 11번째(2026-11-25) = 풋프린트 칸 폭으로 묶은 가격 칸별 수량(가격 오름차순 · 화면의 «보이는 구간 POC» 재료).
 pub fn api_tick_bars(cfg: &Config, live: &Live, req: &Req) -> Resp {
     let sym = match flow_symbol(cfg, req.q("asset")) {
         Ok(s) => s,
@@ -441,7 +442,10 @@ pub fn api_tick_bars(cfg: &Config, live: &Live, req: &Req) -> Resp {
     let since: Vec<Option<i64>> = req.q("since").map(|s| s.split(',').map(|x| x.trim().parse().ok()).collect()).unwrap_or_default();
     let lanes = live.syms.lock().unwrap().get(&sym).and_then(|s| s.ticks.as_ref()).map(|t| t.lanes.clone()).unwrap_or_default();
     let (p, q) = (|x: f64| f(py::round_nd(x, dp)), |x: f64| f(py::round_nd(x, 3)));
-    let row = |b: &rtcore::proto::TickRow| json!([b.0, b.1, b.2, p(b.3), p(b.4), p(b.5), p(b.6), q(b.7), q(b.8), b.9]);
+    let row = |b: &rtcore::proto::TickRow| {
+        let cells: Vec<V> = b.10.iter().map(|c| json!([p(c.0), q(c.1)])).collect();
+        json!([b.0, b.1, b.2, p(b.3), p(b.4), p(b.5), p(b.6), q(b.7), q(b.8), b.9, cells])
+    };
     let mut ticks = Map::new();
     for (i, n) in rtcore::tick::SIZES.iter().enumerate() {
         let l = lanes.iter().find(|l| l.n == *n);

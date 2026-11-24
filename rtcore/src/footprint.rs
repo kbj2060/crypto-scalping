@@ -57,7 +57,7 @@ pub(crate) struct Bar1 {
 }
 
 /// 파이썬 round(x, dp)(supply.rs r3 주석과 같은 방식).
-fn rdp(x: f64, dp: usize) -> f64 {
+pub(crate) fn rdp(x: f64, dp: usize) -> f64 {
     format!("{:.*}", dp, x).parse().unwrap_or(0.0)
 }
 
