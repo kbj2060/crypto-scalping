@@ -410,6 +410,14 @@ function setFpCol(mode, win, side) {
   if (fpColR === "pos" && (mode === "pos" || (win && side !== "l"))) { posProfileFetchAt = 0; refreshPositionProfile(); }
   hideTooltip(); scheduleSnapshotChartRender();
 }
+// 2026-11-24 사용자 «SLTP 주문을 틱 차트에서도»: 선 주문 층(선 도구·들어간 선·초안·peg 꼬리표·포지션 막대)은 «주문 판» 하나의 자리만 본다 --
+//   풋프린트면 5분 차트(svg·chartGeo, 지금 그대로) · 틱 보기면 tick_charts.js 의 주문 칸(fpTickFrame: 같은 모양의 G·m). 층 상자(box)는 늘 5분 차트 상자다(좌표는 화면 기준이라 그대로 맞는다).
+function ordFrame() {
+  const svg = el("candleSvgSnapshot"), box = svg && svg.parentElement, t = typeof window.fpTickFrame === "function" ? window.fpTickFrame() : null;
+  return t ? { svg, box, G: t.G, m: t.m } : { svg, box, G: chartGeo, m: svg && svg.getScreenCTM() };
+}
+const ordTick = () => typeof window.fpTickFrame === "function" && !!window.fpTickFrame();
+const ordAltOn = () => fpAltOn() && !(typeof window.fpTickActive === "function" && window.fpTickActive());   // 틱 보기는 덮개지만 주문 층은 그 위에 산다
 // ── 2026-10-28 차트 «선 주문»(사용자 «차트 위 라인 2개를 끌어 위치를 잡고 진입 → peg 메이커 · 익절/손절도 둘 다 메이커 · 닿으면 닫기 · 자동 2×»)
 //   시안 A 꼬리표 + B 포지션 상자(꼬리표 = 선 가운데). 선 = USDT 차트 가격 → 서버 미리보기·주문에 tp·sl 로(같은 assemble_entry_plan).
 //   익절 = 체결 직후 post-only 지정가 · 손절 = 서버가 1초 체결가 닿음 판정 → peg 청산(마감 뒤 남은 수량 시장가) · 거래소 스탑 없음.
@@ -439,7 +447,7 @@ function execPosSide(want) {   // 주문 심볼(USDC 등)에 그 방향 포지�
   return sym && (latestBinanceAccount?.positions || []).some((p) => p.symbol === sym && String(p.side).toUpperCase() === want && Number(p.qty)) ? want : "";
 }
 function lineToolToggle(want) {   // 2026-10-30 사용자 «롱만 나오고 숏 진입 방법이 없다 → SLTP 버튼을 롱/숏으로»
-  const G = chartGeo, p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), cur = lineTool && p > 0 ? lineSide(lineTool, p) : "";
+  const G = ordFrame().G, p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), cur = lineTool && p > 0 ? lineSide(lineTool, p) : "";
   if (lineTool && lineTool.placed && lineTool.add && lineTool.addSide === want && execPosSide(want) === want) { lineParked.push(lineTool); lineTool = null; }   // 11-18 다음 추가 진입 초안(걸린 것은 세워 둔다 · 서로 독립)
   if (lineTool && lineTool.placed) return;   // 대기 주문이 걸린 동안은 «주문 취소»로만 끈다
   if (lineTool && cur === want) { lineTool = lineParked.pop() || null; renderLineTool(); return; }   // 같은 쪽을 다시 누르면 끈다(세워 둔 대기가 있으면 그것이 편집 도구로)
@@ -503,7 +511,7 @@ function lineFire() {   // 바로 발주(manualFireNow) -- 상한·게이트·�
 }
 // 화면 y(clientY) → 차트 가격(USDT). 플롯 밖으로 끌어도 같은 비율로 이어진다. 차트가 아직 없으면 null.
 function chartValAt(clientY) {
-  const svg = el("candleSvgSnapshot"), G = chartGeo, m = svg && svg.getScreenCTM();
+  const svg = el("candleSvgSnapshot"), G = ordFrame().G, m = ordFrame().m;
   if (!m || !G) return null;
   return G.ymax - ((clientY - m.f) / m.d - G.mt) * (G.ymax - G.ymin) / (G.pb - G.mt);
 }
@@ -544,7 +552,7 @@ function lineToolEl(box) {
   });
   h.addEventListener("pointermove", (e) => {
     if (!lineDrag || e.pointerId !== lineDrag.id || !lineTool) return;
-    const G = chartGeo, v1 = chartValAt(e.clientY);
+    const G = ordFrame().G, v1 = chartValAt(e.clientY);
     if (v1 == null) return;
     const far = Math.abs(e.clientY - lineDrag.y0) > 3;
     if (lineTool.placed && far && !lineDrag.moved && lineDrag.touch && performance.now() - lineDrag.t0 < ARMED_TOUCH_HOLD_MS) {   // 대기 지정가 = 실주문 -- 쓸다 걸린 손가락은 무시(들어간 선과 같은 규칙)
@@ -685,8 +693,8 @@ function lineSyncWaits(list) {   // 11-18 이 코인 대기 전부(칸 번호 wi
 }
 // 2026-11-18 세워 둔 추가 진입 대기들: 진입선 + 칩(«LONG 추가 감시 46.20 ✕»). 칩 = 편집 도구와 바꾸기 · ✕ = 그 대기만 취소. 서로 독립(하나 체결돼도 나머지 그대로).
 function renderLineParked() {
-  const svg = el("candleSvgSnapshot"), G = chartGeo, box = svg && svg.parentElement, m = svg && svg.getScreenCTM();
-  const ok = !!(box && G && m && G.ymax > G.ymin && !fpAltOn() && orderCoinOk());
+  const svg = el("candleSvgSnapshot"), G = ordFrame().G, box = svg && svg.parentElement, m = ordFrame().m;
+  const ok = !!(box && G && m && G.ymax > G.ymin && !ordAltOn() && orderCoinOk());
   const list = ok ? lineParked.filter((t) => t.placed && t.entry > 0 && t.asset === activeSnapshotAsset) : [];
   const ids = new Set(list.map((t) => `lineParked${t.wid || 1}`));
   document.querySelectorAll(".lt-parked").forEach((n) => { if (!ids.has(n.id)) n.remove(); });
@@ -774,10 +782,10 @@ function fpLineBtnEl(card) {
 // 2026-10-31 사용자 «✕ 로 peg 진입 주문을 바로 취소» -- 걸린 peg 진입(따라가기)을 차트에 꼬리표 + ✕ 로. 위치 = 지금가(peg 는 호가를 따라다닌다) · 가격 글자 = 실제 주문가(USDC).
 //   취소 = 기존 /api/manual-entry/cancel 그대로(잔량은 시장가로 안 넘김 · 든 몫은 그대로) -- 위험을 줄이는 쪽이라 확인 없이 한 번에(지정가 취소와 같다).
 function renderPegTag() {
-  const svg = el("candleSvgSnapshot"), G = chartGeo, box = svg && svg.parentElement, m = svg && svg.getScreenCTM(), o = pegOrder;
+  const svg = el("candleSvgSnapshot"), G = ordFrame().G, box = svg && svg.parentElement, m = ordFrame().m, o = pegOrder;
   const p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
   let h = el("pegTag");
-  if (!(o && o.asset === activeSnapshotAsset && G && m && G.ymax > G.ymin && p > 0 && !fpAltOn() && orderCoinOk())) { if (h) h.hidden = true; return; }
+  if (!(o && o.asset === activeSnapshotAsset && G && m && G.ymax > G.ymin && p > 0 && !ordAltOn() && orderCoinOk())) { if (h) h.hidden = true; return; }
   if (!h) {
     h = document.createElement("button"); h.id = "pegTag"; h.type = "button"; h.className = "lt-tag en lt-peg";
     h.addEventListener("pointerdown", (e) => e.stopPropagation());
@@ -802,7 +810,7 @@ function renderPegTag() {
 //   불투명 칩(두~세 줄 · 정보는 그대로)으로 읽히게. 띠가 좁거나(휴대폰·기둥 없음) 없으면 예전 자리. 띠 안의 차트 글자(청산 띠 거리 «+18.3 · 0.78%» 등)와 겹치면 위·아래로 비켜 앉는다.
 function ltLanePlace(en, y, R, X, top, bot, mob, svg, box) {
   // 띠 = 플롯 오른쪽 끝(R) 바로 뒤의 체결 기둥 칸(TRADE_W≈104px) -- 기둥은 그 위로 겹쳐 보여도(칩이 불투명) 값이 읽힌다. 기둥이 없는(fpProfileSpan 없음)·휴대폰은 예전 자리.
-  const sp = typeof fpProfileSpan !== "undefined" ? fpProfileSpan : null, on = !!sp && !mob;
+  const sp = typeof fpProfileSpan !== "undefined" && !ordTick() ? fpProfileSpan : null, on = !!sp && !mob;   // 틱 칸엔 5분 프로파일 띠가 없다
   en.classList.toggle("lane", on);
   if (!on) { en.style.width = ""; return; }
   const w = 112, left = R + 5;
@@ -825,8 +833,8 @@ function ltLanePlace(en, y, R, X, top, bot, mob, svg, box) {
 function renderLineTool() {
   renderPegTag();
   renderLineParked();
-  const svg = el("candleSvgSnapshot"), G = chartGeo, box = svg && svg.parentElement;
-  const p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), m = svg && svg.getScreenCTM();
+  const svg = el("candleSvgSnapshot"), G = ordFrame().G, box = svg && svg.parentElement;
+  const p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), m = ordFrame().m;
   if (lineTool && lineTool.asset !== activeSnapshotAsset) lineTool = null;   // 다른 코인 가격의 선을 그대로 두지 않는다
   const cur = lineTool && p > 0 ? lineSide(lineTool, p) : "";   // 끌다가 선이 지금가를 넘으면 눌린 쪽도 바뀐다
   document.querySelectorAll("#fpLineBtn [data-lines], #fpColTog [data-lines]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lines === cur)));
@@ -836,7 +844,7 @@ function renderLineTool() {
     if (!ind.hidden) Object.assign(ind.style, { left: on.offsetLeft + 12 + "px", width: on.offsetWidth - 24 + "px" });
     ind.className = `ind${cur === "SHORT" ? " s" : cur ? " l" : ""}`;
   }
-  const show = !!(lineTool && G && m && G.ymax > G.ymin && p > 0 && !fpAltOn() && orderCoinOk());
+  const show = !!(lineTool && G && m && G.ymax > G.ymin && p > 0 && !ordAltOn() && orderCoinOk());
   const h = show ? lineToolEl(box) : el("lineTool");
   if (!h) return;
   h.hidden = !show;
@@ -848,7 +856,7 @@ function renderLineTool() {
   const top = m.d * G.mt + m.f - pr.top, bot = m.d * G.pb + m.f - pr.top, Y = (v) => m.d * Yv(v) + m.f - pr.top;
   const clampY = (y) => Math.min(bot, Math.max(top, y));
   const L = X(G.ml), R = X(G.ml + G.cw), x0 = L + (R - L) * (mob ? 0.36 : 0.58), w = R - x0, cx = x0 + w / 2;
-  const Rp = !mob && fpProfileSpan ? Math.max(R, X(fpProfileSpan[1])) : R;   // 2026-11-04 펜 메모 «익절·손절·진입 선을 프로파일(델타·TPO·호가 칸)까지 연장»: 가로선만 오른쪽 끝(호가 띠 끝)까지 · 상자·꼬리표 자리는 그대로
+  const Rp = !mob && !ordTick() && fpProfileSpan ? Math.max(R, X(fpProfileSpan[1])) : R;   // 2026-11-04 펜 메모 «익절·손절·진입 선을 프로파일(델타·TPO·호가 칸)까지 연장»: 가로선만 오른쪽 끝(호가 띠 끝)까지 · 상자·꼬리표 자리는 그대로
   const side = lineSide(t, p), sgn = side === "SHORT" ? -1 : 1, ref = lineRef(t, p), lim = t.entry > 0, stp = lim && lineStop(t, p);   // ref = 진입선 가격(지정가면 그 선 · 아니면 지금가) · stp = 감시 진입
   const kindKo = stp ? (t.trig ? "닿음 · 따라가는 중" : "감시") : t.trig ? "따라가는 중" : "지정가";
   const yP = clampY(Y(ref)), yNow = clampY(Y(p)), yT = clampY(Y(t.tp)), yS = clampY(Y(t.sl));
@@ -970,7 +978,7 @@ function lineDraftStart(key, leg) {
   const pos = snapshotAccountPosition(), cur = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
   if (!pos || !(cur > 0)) return;
   const side = key.split(":")[1], b = (latestBinanceAccount?.bracket_armed || {})[key], old = b && Number(b[`${leg}_level`]);
-  const sgn = side === "SHORT" ? -1 : 1, G = chartGeo, up = (leg === "tp") === (sgn > 0);   // up = 초안이 지금가 위
+  const sgn = side === "SHORT" ? -1 : 1, G = ordFrame().G, up = (leg === "tp") === (sgn > 0);   // up = 초안이 지금가 위
   let dflt = cur * (1 + sgn * (leg === "tp" ? 0.02 : -0.02));
   if (G && G.ymax > cur && cur > G.ymin) dflt = up ? Math.min(dflt, cur + (G.ymax - cur) * 0.7) : Math.max(dflt, cur - (cur - G.ymin) * 0.7);   // 화면 밖에서 시작하지 않게(끌 꼬리표가 보이도록)
   const okOld = old > 0 && (leg === "sl" || (old - cur) * sgn > 0);
@@ -1012,10 +1020,10 @@ async function lineDraftSubmit() {
   renderArmedLines(); refreshBinanceAccount(true);
 }
 function renderLineDraft() {
-  const d = lineDraft, svg = el("candleSvgSnapshot"), G = chartGeo, box = svg && svg.parentElement, m = svg && svg.getScreenCTM();
+  const d = lineDraft, svg = el("candleSvgSnapshot"), G = ordFrame().G, box = svg && svg.parentElement, m = ordFrame().m;
   const pos = snapshotAccountPosition(), alive = !!(d && pos && `${pos.symbol}:${String(pos.side).toUpperCase()}` === d.key && Number(pos.qty));
   if (d && !alive) lineDraft = null;   // 포지션이 닫혔거나 다른 코인 -- 초안을 버린다
-  const show = !!(alive && G && m && G.ymax > G.ymin && !fpAltOn() && orderCoinOk());
+  const show = !!(alive && G && m && G.ymax > G.ymin && !ordAltOn() && orderCoinOk());
   let h = el("lineDraft");
   if (!show) { if (h) h.hidden = true; return; }
   if (!h) {
@@ -1031,7 +1039,7 @@ function renderLineDraft() {
       dd.drag = e.pointerId; dd.y0 = e.clientY; dd.lv0 = dd.level; dd.moved = false; tag.setPointerCapture(e.pointerId); e.preventDefault();
     });
     h.addEventListener("pointermove", (e) => {
-      const dd = lineDraft, s2 = el("candleSvgSnapshot"), g = chartGeo, mm = s2 && s2.getScreenCTM();
+      const dd = lineDraft, s2 = el("candleSvgSnapshot"), g = ordFrame().G, mm = ordFrame().m;
       if (!dd || dd.drag !== e.pointerId || !mm || !g) return;
       dd.level = Math.max(0.01, g.ymax - ((e.clientY - mm.f) / mm.d - g.mt) * (g.ymax - g.ymin) / (g.pb - g.mt));
       dd.moved = dd.moved || Math.abs(e.clientY - dd.y0) > 3;
@@ -1240,8 +1248,8 @@ function armedActs(h, a, legsOf, hide) {
 function renderArmedLines() {
   renderLineDraft();
   pmSync();   // 2026-11-14 MANAGE 탭(포지션 관리 막대) -- 선 무장이 없어도   // 2026-11-11 선 추가 초안(들어간 선이 없어도 그린다)
-  const svg = el("candleSvgSnapshot"), G = chartGeo, box = svg && svg.parentElement, m = svg && svg.getScreenCTM();
-  const a = armedLinesNow(), show = !!(a && G && m && G.ymax > G.ymin && !fpAltOn() && orderCoinOk());
+  const svg = el("candleSvgSnapshot"), G = ordFrame().G, box = svg && svg.parentElement, m = ordFrame().m;
+  const a = armedLinesNow(), show = !!(a && G && m && G.ymax > G.ymin && !ordAltOn() && orderCoinOk());
   const h = show ? armedEl(box) : el("lineArmed");
   if (!h) return;
   h.hidden = !show;
@@ -1254,7 +1262,7 @@ function renderArmedLines() {
   const X = (x) => m.a * x + m.e - pr.left, Yv = (v) => G.mt + (G.ymax - v) * (G.pb - G.mt) / (G.ymax - G.ymin);
   const top = m.d * G.mt + m.f - pr.top, bot = m.d * G.pb + m.f - pr.top, Y = (v) => m.d * Yv(v) + m.f - pr.top, clampY = (y) => Math.min(bot, Math.max(top, y));
   const L = X(G.ml), R = X(G.ml + G.cw), x0 = L + (R - L) * (mob ? 0.36 : 0.58), w = R - x0, cx = x0 + w / 2;
-  const Rp = !mob && fpProfileSpan ? Math.max(R, X(fpProfileSpan[1])) : R;   // 2026-11-04 펜 메모 «익절·손절·진입 선을 프로파일(델타·TPO·호가 칸)까지 연장»: 가로선만 오른쪽 끝(호가 띠 끝)까지 · 상자·꼬리표 자리는 그대로
+  const Rp = !mob && !ordTick() && fpProfileSpan ? Math.max(R, X(fpProfileSpan[1])) : R;   // 2026-11-04 펜 메모 «익절·손절·진입 선을 프로파일(델타·TPO·호가 칸)까지 연장»: 가로선만 오른쪽 끝(호가 띠 끝)까지 · 상자·꼬리표 자리는 그대로
   const yE = clampY(Y(en)), yT = clampY(Y(tp)), yS = clampY(Y(sl));
   const set = (sel, css) => { const n = h.querySelector(sel); if (n) Object.assign(n.style, css); return n; };
   h.classList.toggle("short", a.side === "SHORT"); h.classList.toggle("busy", !!(armedEdit && armedEdit.busy)); h.classList.toggle("locked", lineToolBlocksArmed()); h.classList.toggle("adding", !!(lineTool && lineTool.add && !lineTool.placed));   // 2026-11-14 사용자 «추가 진입할 때는 sltp 제거 · 기존 sltp 그대로 비중만»: 추가 진입 도구가 켜진 동안 들어간 익절·손절선(띠·칩·조각·+✕)을 숨긴다 -- 서버도 같은 쪽 추가는 선을 안 바꾼다(add_keep)
@@ -1310,7 +1318,7 @@ function renderArmedLines() {
     });
   });
   // 2026-11-14 펜 메모 «진입선을 차트 끝까지 · 진입선이 «진입» 칩 위를 긋지 않게»: 플롯 왼쪽 끝 ~ 오른쪽 끝(프로파일까지), 같은 높이의 svg «진입» 글자가 있으면 그 앞 6px 에서 멈춘다
-  const enR = svg.querySelector("text[data-en]")?.getBoundingClientRect(), enX = enR && Math.abs((enR.top + enR.bottom) / 2 - pr.top - yE) < 12 ? enR.left - pr.left - 6 : null;
+  const enR = ordTick() ? null : svg.querySelector("text[data-en]")?.getBoundingClientRect(), enX = enR && Math.abs((enR.top + enR.bottom) / 2 - pr.top - yE) < 12 ? enR.left - pr.left - 6 : null;
   const enEnd = enX != null && enX > L + 40 ? Math.min(Rp, enX) : Rp;   // 글자가 플롯 왼쪽 여백에 있으면(풋프린트 없음) 무시 -- 선이 0폭이 되던 것(검증 2)
   set(".lt-ln.en", { left: L + "px", width: Math.max(0, enEnd - L) + "px", top: yE + "px" });
   const pNow = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), upnl = pNow > 0 ? (pNow - en) * qty * sgn : 0, lv = Number(a.p.leverage) || 0;
@@ -1362,7 +1370,7 @@ function posNoSl(pos) {
 function pmSync() {   // renderArmedLines 마다 -- 포지션이 없거나 다른 화면이면 숨기고 막대도 닫는다
   const b = el("fpLineBtn")?.querySelector("[data-pm]");
   if (!b) return;
-  const pos = snapshotAccountPosition(), on = !!(pos && Number(pos.qty) && orderCoinOk() && !fpAltOn());
+  const pos = snapshotAccountPosition(), on = !!(pos && Number(pos.qty) && orderCoinOk() && !ordAltOn());
   b.hidden = !on; b.previousElementSibling.hidden = !on;
   if (!on) { if (el("entryPop")) entryPopClose(); return; }
   const up = pmPnl(pos), mob = isMobileChartMode(), pc = up >= 0 ? "good" : "bad";

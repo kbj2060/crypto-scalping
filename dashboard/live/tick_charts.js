@@ -3,13 +3,18 @@
 // 원천 = 서버 /api/tick-bars(바이낸스 선물 실시간 개별 체결 n 개마다 봉 하나 -- coin_flow tick_add) · 1초마다 새 봉만(since).
 // 그림(칸마다): 캔들 · 아래 거래량(색 = 델타 부호) · 켠 이동평균(지표 팝업의 EMA 5·20 · SMMA 21·50 · 볼린저 -- 5분 차트와 같은 스위치·색) ·
 //   가격선(지금가 · 진입가 · 무장된 익절·손절 -- 계좌 카드와 같은 값, 읽기 전용) · 커서 = 그 체결 시각을 다섯 칸이 함께 따라간다.
-// 선을 새로 놓거나 끄는 것은 5분 차트에서 -- LONG·SHORT 를 누르면 풋프린트 보기로 돌아가 그 자리에서 선이 뜬다.
+// 2026-11-24 사용자 «SLTP 주문도 틱 차트에서 · 청산맵·호가벽·지지/저항도 틱 차트에»:
+//   주문 = «주문 칸» 하나(칸 제목을 누르면 바뀜 · 기본 2000틱)가 app.js 선 주문 층의 자리가 된다(window.fpTickFrame → ordFrame) -- 선 도구·들어간 선·초안·peg 꼬리표가
+//   5분 차트와 똑같이(같은 함수·같은 서버 경로 = rtorder) 그 칸 위에 뜬다. 다른 칸은 그 선을 읽기 전용으로 그린다.
+//   청산맵 = 최신 추정 청산 밀도(/api/liquidation-map heatmap_history 마지막 판)를 가격 줄 배경으로 · 호가벽 = 지금 호가 깊이(/api/flow/heatmap book)를 오른쪽 끝 막대로(큰 벽 둘은 가로선) ·
+//   지지/저항 = 5분 차트·게이지와 같은 srLevelsLive(청산맵 밀집 · 쓸린 레벨 뺌) 점선. 셋 다 새 계산 없이 이미 받는 값을 그린다.
 // 🔴CI esprima: `?.(`·`?.[`·숫자 구분자 금지.
 (function () {
   "use strict";
   var $ = function (id) { return document.getElementById(id); };
   var SIZES = [100, 500, 1000, 2000, 5000];
-  var S = { on: false, asset: "", d: {}, busy: false, raf: 0, hover: null, err: "" };   // d[n] = { k, rows: [..닫힌 봉], cur }
+  var S = { on: false, asset: "", d: {}, busy: false, raf: 0, hover: null, err: "", ord: 2000 };   // d[n] = { k, rows: [..닫힌 봉], cur } · ord = 주문 칸
+  try { var o0 = Number(localStorage.getItem("tickOrd")); if (SIZES.indexOf(o0) >= 0) S.ord = o0; } catch (e) { /* 기억은 편의 */ }
   var asset = function () { return typeof activeSnapshotAsset === "undefined" ? "eth" : activeSnapshotAsset; };
   var css = function (v) {   // "var(--x)" → 실제 색(캔버스는 CSS 변수를 못 읽는다)
     var m = /^var\((--[\w-]+)\)$/.exec(String(v || "").trim());
@@ -98,6 +103,55 @@
     return k;
   }
 
+  // 청산맵(배경) · 호가벽(오른쪽 막대 · 큰 벽 가로선) · 지지/저항(점선) -- 가격만 보는 층이라 다섯 칸이 같은 값을 칸마다 제 축으로
+  function overlays(ctx, g, V, Y, D) {
+    var inY = function (p) { return p >= V.lo && p <= V.hi; }, good = css("var(--good)"), bad = css("var(--bad)");
+    try {   // 청산맵: 최신 판의 칸 밀도 -- 보이는 범위 최대로 정규화 · 5분 차트 배경과 같은 색(densityColor)
+      var hist = typeof liquidationDensityHistory === "function" ? liquidationDensityHistory() : [], last = hist.length ? hist[hist.length - 1] : null;
+      if (last && last.bins && last.binWidth > 0 && typeof densityColor === "function") {
+        var vis = last.bins.filter(function (b) { return b.price + last.binWidth / 2 >= V.lo && b.price - last.binWidth / 2 <= V.hi && b.weightPct > 0; });
+        var mx = Math.max.apply(null, vis.map(function (b) { return b.weightPct; }).concat([1e-9]));
+        ctx.save(); ctx.globalAlpha = 0.32;   // 배경이라 옅게(캔들이 먼저 읽히게)
+        vis.forEach(function (b) {
+          var y1 = Y(b.price + last.binWidth / 2), y2 = Y(b.price - last.binWidth / 2);
+          ctx.fillStyle = densityColor(b.weightPct / mx); ctx.fillRect(g.L, Math.max(g.top, y1), g.plotW, Math.max(1, Math.min(g.top + g.priceH, y2) - Math.max(g.top, y1)));
+        });
+        ctx.restore();
+      }
+    } catch (e) { /* 청산맵 없으면 배경 없음 */ }
+    try {   // 호가벽: 호가 깊이(매수 +·매도 −) -- 보이는 행 최대로 정규화 · 오른쪽 끝에서 안쪽으로(플롯의 22%) · 쪽마다 가장 큰 벽 하나는 가로선 + 수량
+      var fh = typeof latestFlowHeatmap === "undefined" ? null : latestFlowHeatmap, bk = fh && (fh.asset == null || fh.asset === asset()) ? fh.book : null;   // 다른 코인 응답이면 벽 없음
+      if (bk && bk.q && bk.bin_size > 0) {
+        var rows = [], i, maxQ = 0;
+        for (i = 0; i < bk.q.length; i++) { var v = bk.q[i], pr = (bk.bin_lo + i + 0.5) * bk.bin_size; if (v && inY(pr)) { rows.push([pr, v]); maxQ = Math.max(maxQ, Math.abs(v)); } }
+        var W = g.plotW * 0.16, hh = Math.max(1, Math.abs(Y(0) - Y(bk.bin_size)) - 0.5), top2 = { b: null, a: null };
+        rows.forEach(function (r) {
+          var len = Math.abs(r[1]) / (maxQ || 1) * W, bid = r[1] > 0, key = bid ? "b" : "a";
+          ctx.globalAlpha = 0.28; ctx.fillStyle = bid ? good : bad; ctx.fillRect(g.L + g.plotW - len, Y(r[0]) - hh / 2, len, hh);
+          if (!top2[key] || Math.abs(r[1]) > Math.abs(top2[key][1])) top2[key] = r;
+        });
+        ctx.globalAlpha = 1;
+        ["b", "a"].forEach(function (k) {
+          var r = top2[k]; if (!r) return;
+          var yy = Math.round(Y(r[0])) + 0.5, c = k === "b" ? good : bad;
+          ctx.save(); ctx.strokeStyle = c; ctx.globalAlpha = 0.7; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(g.L, yy); ctx.lineTo(g.L + g.plotW, yy); ctx.stroke(); ctx.restore();
+          ctx.fillStyle = c; ctx.textAlign = "right"; ctx.textBaseline = "bottom"; ctx.fillText("벽 " + qty(Math.abs(r[1])).slice(1), g.L + g.plotW - 2, yy - 2);
+        });
+      }
+    } catch (e) { /* 호가 없으면 벽 없음 */ }
+    try {   // 지지/저항: 가까운 셋씩
+      var sr = typeof srLevelsLive === "function" ? srLevelsLive(3) : null;
+      if (sr) [["res", bad, "R"], ["sup", good, "S"]].forEach(function (d) {
+        (sr[d[0]] || []).forEach(function (lv, j) {
+          var pv = Number(lv.price); if (!(pv > 0) || !inY(pv)) return;
+          var yy = Math.round(Y(pv)) + 0.5;
+          ctx.save(); ctx.strokeStyle = d[1]; ctx.globalAlpha = 0.75 - j * 0.15; ctx.setLineDash([4, 4]); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(g.L, yy); ctx.lineTo(g.L + g.plotW, yy); ctx.stroke(); ctx.restore();
+          ctx.fillStyle = d[1]; ctx.textAlign = "left"; ctx.textBaseline = "bottom"; ctx.fillText(d[2] + (j + 1) + " " + pv.toFixed(D), g.L + 2, yy - 2);
+        });
+      });
+    } catch (e) { /* 레벨 없음 */ }
+  }
+
   function drawPanel(n, cell) {
     var cv = cell.querySelector("canvas");
     if (!cv || !cv.clientWidth || !cv.clientHeight) return;
@@ -129,6 +183,7 @@
       ctx.strokeStyle = line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(g.L, yy); ctx.lineTo(g.L + g.plotW, yy); ctx.stroke();
       ctx.fillStyle = muted; ctx.fillText(pv.toFixed(D), g.L + g.plotW + 6, yy);
     }
+    overlays(ctx, g, V, Y, D);
     // 거래량(색 = 델타 부호)
     var vMax = Math.max.apply(null, rows.map(function (r) { return r[7]; })) || 1;
     rows.forEach(function (r, i) {
@@ -161,7 +216,7 @@
       ctx.fillStyle = c; ctx.fillRect(g.L + g.plotW + 2, yy - 8, Math.min(w, g.R - 2), 16);
       ctx.fillStyle = css("var(--on-fill)"); ctx.textAlign = "left"; ctx.fillText(s, g.L + g.plotW + 5, yy);
     };
-    PL.lines.forEach(function (l) { tag(l.v, l.c, g.narrow ? "" : l.t, l.dash); });
+    if (n !== S.ord) PL.lines.forEach(function (l) { tag(l.v, l.c, g.narrow ? "" : l.t, l.dash); });   // 주문 칸은 app.js 선 층(끌 수 있는 선)이 그린다
     tag(PL.now, ink, "", [2, 3]);
     // 시각 눈금(아래) -- 처음·가운데·끝
     ctx.fillStyle = muted; ctx.textBaseline = "alphabetic";
@@ -197,8 +252,21 @@
     if (typeof window.fpPlaceOverlay === "function") window.fpPlaceOverlay(box);
     var st = $("tickChartsStatus");
     if (st) st.textContent = S.err ? "틱 봉 지연 (" + S.err + ")" : "";
-    Array.prototype.forEach.call(document.querySelectorAll("#tickCharts .tkc-cell"), function (cell) { drawPanel(+cell.dataset.n, cell); });
+    Array.prototype.forEach.call(document.querySelectorAll("#tickCharts .tkc-cell"), function (cell) {
+      drawPanel(+cell.dataset.n, cell);
+      cell.classList.toggle("tkc-ord", +cell.dataset.n === S.ord);
+    });
+    // 주문 층(app.js)을 이 칸의 새 가격 축에 다시 맞춘다
+    ["renderLineTool", "renderArmedLines"].forEach(function (f) { if (typeof window[f] === "function") try { window[f](); } catch (e) { /* 층 하나가 실패해도 그림은 그대로 */ } });
   }
+  // app.js ordFrame 이 읽는 주문 칸의 자리 -- chartGeo 와 같은 이름(G: 플롯 위·아래·가격 범위·왼쪽·폭 · m: 칸 좌표 → 화면 좌표)
+  window.fpTickFrame = function () {
+    if (!S.on) return null;
+    var cell = document.querySelector('#tickCharts .tkc-cell[data-n="' + S.ord + '"]'), G0 = cell && cell._geo;
+    if (!G0) return null;
+    var r = cell.querySelector("canvas").getBoundingClientRect(), g = G0.g, V = G0.V;
+    return { G: { mt: g.top, pb: g.top + g.priceH, ymax: V.hi, ymin: V.lo, ml: g.L, cw: g.plotW }, m: { a: 1, d: 1, e: r.left, f: r.top } };
+  };
 
   function bind(cell) {
     var cv = cell.querySelector("canvas"), n = +cell.dataset.n;
@@ -232,13 +300,13 @@
     // 지표 스위치·계좌(무장선)·지금가가 바뀌면 다시 그린다 -- 5분 차트가 다시 그려질 때 같이(가볍다: 칸 다섯 · 봉 수백)
     var old = window.scheduleSnapshotChartRender;
     if (typeof old === "function") window.scheduleSnapshotChartRender = function () { if (S.on) redraw(); return old.apply(this, arguments); };
-    // LONG·SHORT(선 놓기)는 5분 차트에서 -- 틱 보기에서 누르면 풋프린트로 돌아간 뒤 같은 누름이 선을 띄운다
-    var card = $("fpCard");
-    if (card) card.addEventListener("click", function (e) {
-      if (!S.on || !e.target.closest || !e.target.closest(".fp-line-btn")) return;
-      var t = document.querySelector('#fpViewTabs .asset-tab[data-view="fp"]');
-      if (t) t.click();
-    }, true);
+    // 주문 칸 고르기: 칸 제목(«2000틱 · 주문»)을 누르면 그 칸이 선 주문 자리가 된다(기억)
+    Array.prototype.forEach.call(document.querySelectorAll("#tickCharts .tkc-t"), function (t) {
+      t.setAttribute("role", "button"); t.tabIndex = 0;
+      var pick = function () { var n = +t.parentElement.dataset.n; if (n === S.ord) return; S.ord = n; try { localStorage.setItem("tickOrd", String(n)); } catch (e) { /* 편의 */ } redraw(); };
+      t.addEventListener("click", pick);
+      t.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+    });
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
