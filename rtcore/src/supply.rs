@@ -233,6 +233,8 @@ pub struct Supply {
     pub(crate) liq5m_from: f64,
     /// 마지막 밀기 뒤 바뀐 봉.
     pub(crate) liq5m_dirty: std::collections::BTreeSet<i64>,
+    /// 틱 봉(tick.rs · 2026-11-24) -- 흐름 엔진 종목만 켠다.
+    pub(crate) tick: crate::tick::Ticks,
 }
 
 const LIQ5M_BAR_S: i64 = 300;
@@ -294,6 +296,7 @@ impl Supply {
             liq5m: BTreeMap::new(),
             liq5m_from: crate::now_us() as f64 / 1e6, // 복원이 없으면 «지금부터 기록»(원본 liq_events_load 의 now_ms / 1000)
             liq5m_dirty: Default::default(),
+            tick: crate::tick::Ticks::new(crate::footprint::spec(symbol).is_some()),
         }
     }
 
@@ -342,6 +345,7 @@ impl Supply {
     /// 밀 것이 있으면 «바뀐 닫힌 초 + 진행 중인 초»를 돌려준다.
     pub fn trade(&mut self, px: f64, qty: f64, ts_ms: i64, sell: bool, tid: i64, now_us: i64) -> Option<Supply1s> {
         let now_ms = now_us.div_euclid(1000);
+        self.tick.add(tid as u64, ts_ms, px, qty, sell);
         self.last_ms = self.last_ms.max(ts_ms);
         let mut touched: Vec<i64> = Vec::with_capacity(2);
         // 순서도 파이썬 그대로: 총량 먼저, 그다음 이 체결로 닫힌 주문의 구간(coin_flow.py 619~624).
@@ -597,6 +601,7 @@ impl Supply {
             return; // 창을 벗어난 봉(coin_flow.py 360~361) -- 1초 칸도 안 건드린다
         }
         self.fp.add(bar, px, qty, sell, order, self.whale_min, self.retail_max);
+        self.fp.add_1m(ts_ms, px, qty, sell, order, self.whale_min, self.retail_max);
         let s = ts_ms.div_euclid(1000);
         // 가장 새 초가 앞으로 가면 링이 s − 660 밑을 지운다(sec_cell) -- 그 사이에서 시작하는 봉은 지우기 전 링으로 dhl 을 얼린다.
         if let Some(f) = ring_floor(&self.sec) {

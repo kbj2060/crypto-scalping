@@ -325,7 +325,7 @@ impl State {
                 g.marks.push(m.ex_ms, (mark, index, funding), m.rx_us as f64 / 1e6);
                 g.mark = Some(m.clone())
             }
-            Event::Snapshot { .. } | Event::Supply1s(_) | Event::Footprint(_) | Event::Prices { .. } | Event::Liq5m(_) | Event::Situation(_) | Event::Micro(_) => return,
+            Event::Snapshot { .. } | Event::Supply1s(_) | Event::Footprint(_) | Event::Prices { .. } | Event::Liq5m(_) | Event::Situation(_) | Event::Micro(_) | Event::TickBars(_) | Event::Footprint1m(_) => return,
         }
         if let Some(up) = supply {
             g.first.get_or_insert((m.ex_ms, m.rx_us));
@@ -345,11 +345,13 @@ impl State {
             let fp = g.supply.footprint_delta();
             let sup = g.pending.take();
             let l5 = g.supply.liq5m_delta();
-            if fp.is_none() && sup.is_none() && l5.is_none() {
+            let tk = g.supply.tick.take_delta();
+            let f1 = g.supply.fp.take_delta_1m();
+            if fp.is_none() && sup.is_none() && l5.is_none() && tk.is_none() && f1.is_none() {
                 continue;
             }
             let (ex_ms, rx_us) = g.first.take().unwrap_or_else(|| (0, crate::now_us()));
-            for ev in [sup.map(Event::Supply1s), fp.map(Event::Footprint), l5.map(Event::Liq5m)].into_iter().flatten() {
+            for ev in [sup.map(Event::Supply1s), fp.map(Event::Footprint), l5.map(Event::Liq5m), tk.map(Event::TickBars), f1.map(Event::Footprint1m)].into_iter().flatten() {
                 g.seq += 1;
                 let _ = self.tx.send(Stamped { s: s.clone(), seq: g.seq, ex_ms, rx_us, tx_us: 0, ev });
             }
@@ -430,6 +432,13 @@ impl State {
         Some(self.syms.get(s)?.lock().unwrap().supply.footprint_raw())
     }
 
+    /// 시험용: 풋프린트 1분봉 → (칸(반올림 전), OHLC([시, 고, 저, 종], 첫 ms, 끝 ms)).
+    #[allow(clippy::type_complexity)]
+    pub fn footprint_1m_cells(&self, s: &str) -> Option<Vec<(i64, Vec<(i64, [f64; 6])>, Option<([f64; 4], i64, i64)>)>> {
+        let g = self.syms.get(s)?.lock().unwrap();
+        Some(g.supply.fp.m1.iter().map(|(&t, b)| (t, b.cells.iter().map(|(&k, c)| (k, *c)).collect(), b.ohlc)).collect())
+    }
+
     /// 시험용: OKX OI 칸.
     pub fn okx_oi_cells(&self, s: &str) -> Option<Vec<(i64, f64)>> {
         Some(self.syms.get(s)?.lock().unwrap().supply.okx_oi_cells().iter().map(|(&k, &v)| (k, v)).collect())
@@ -460,6 +469,8 @@ impl State {
                     m.flow = Some(situation::flow_delta(&g.nets, None));
                     m
                 }),
+                tick: g.supply.tick.snapshot(),
+                fp1m: g.supply.fp.snapshot_1m(),
             },
         })
     }

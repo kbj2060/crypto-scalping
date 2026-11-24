@@ -33,6 +33,9 @@ pub struct Sym {
     pub okx_from: Option<i64>,
     /// 코어 Liq5m(바이낸스 봉 · OKX·Bybit 몫) -- 원본 liq_5m[asset]·liq_5m_state·okx_liq_events·bybit_liq_events 자리
     pub liq: Option<rtcore::proto::Liq5m>,
+    /// 2026-11-24 -- 코어 틱 봉(Snapshot.tick 통째로 · TickBars 밀기 = TickBars::merge) · 풋프린트 1분봉(Fp1mView)
+    pub ticks: Option<rtcore::proto::TickBars>,
+    pub fp1m: rtcore::proto::Fp1mView,
 }
 
 /// 상황 카드 재료(코인마다 · 코어가 민 것) + 마지막 계산 결과. CTX.md «붙이는 쪽 사용법» 그대로.
@@ -75,7 +78,7 @@ impl Live {
     pub fn apply(&self, v: &str) {
         let Ok(m) = serde_json::from_str::<Stamped>(v) else { return };
         match m.ev {
-            Event::Snapshot { supply, footprint, micro, liq5m, situation, book, .. } => {
+            Event::Snapshot { supply, footprint, micro, liq5m, situation, book, tick, fp1m, .. } => {
                 {
                     let mut st = self.sit.lock().unwrap();
                     if let Some(v) = situation.and_then(|s| serde_json::to_value(&s).ok()) {
@@ -96,6 +99,11 @@ impl Live {
                     put_micro(s, mc);
                 }
                 s.supply = Some(supply);
+                s.ticks = tick;
+                s.fp1m = Default::default();
+                if let Some(m) = fp1m {
+                    s.fp1m.apply(m);
+                }
                 s.fp_bars.clear();
                 if let Some(fp) = footprint {
                     put_fp(s, fp);
@@ -115,6 +123,17 @@ impl Live {
             Event::Footprint(fp) => {
                 let mut g = self.syms.lock().unwrap();
                 put_fp(g.entry(m.s.clone()).or_default(), fp);
+            }
+            Event::TickBars(t) => {
+                let mut g = self.syms.lock().unwrap();
+                let s = g.entry(m.s.clone()).or_default();
+                match &mut s.ticks {
+                    Some(o) => o.merge(t),
+                    None => s.ticks = Some(t),
+                }
+            }
+            Event::Footprint1m(f) => {
+                self.syms.lock().unwrap().entry(m.s.clone()).or_default().fp1m.apply(f);
             }
             Event::Liq5m(l) => {
                 let mut g = self.syms.lock().unwrap();
@@ -366,6 +385,24 @@ pub fn api_footprint(cfg: &Config, live: &Live, req: &Req) -> Resp {
     let (sm, sw) = band(&sym);
     let ready = head.is_some_and(|h| h.ready);
     let full = since <= 0 || !ready;
+    if req.q("tf") == Some("1m") {
+        // server.py footprint_1m(3997~4016): m1_from 앞 봉·OHLC 없는 봉은 뺀다 · 칸은 가격 차례 · ?since 는 5분봉과 같은 규약
+        let mut bars = Vec::new();
+        if let Some(s) = s {
+            for (t, (lv, ohlc)) in s.fp1m.bars.range(s.fp1m.m1_from..) {
+                let Some(o) = ohlc else { continue };
+                if !full && *t < since {
+                    continue;
+                }
+                let levels: Vec<V> = lv.values().map(|l| json!([f(l.0), f(l.1), f(l.2), f(l.3), f(l.4), f(l.5), f(l.6)])).collect();
+                bars.push(json!({"time": t, "ohlc": [f(o[0]), f(o[1]), f(o[2]), f(o[3])], "levels": levels}));
+            }
+        }
+        let bucket = head.map_or_else(|| fp_bucket(&sym), |h| h.bucket);
+        return Resp::json(&json!({"symbol": sym.to_uppercase(), "bucket": f(bucket), "barSeconds": 60, "barsExpected": 120, "ready": ready, "full": full,
+                                  "retailMaxUsd": f(head.map_or(sm, |h| h.retail_max_usd)), "whaleMinUsd": f(head.map_or(sw, |h| h.whale_min_usd)),
+                                  "venues": ["binance-perp"], "bars": bars}));
+    }
     let mut bars = Vec::new();
     if let Some(s) = s {
         let n = s.fp_bars.len();
@@ -389,6 +426,30 @@ pub fn api_footprint(cfg: &Config, live: &Live, req: &Req) -> Resp {
                    "retailMaxUsd": f(head.map_or(sm, |h| h.retail_max_usd)), "whaleMinUsd": f(head.map_or(sw, |h| h.whale_min_usd)),
                    "venues": ["binance-perp"], "bars": bars}); // 원본은 바이낸스 선물만(11-02 사용자 결정 · server.py 3981~3984)
     Resp::json(&v)
+}
+
+// ───────────────────────── /api/tick-bars (2026-11-24 · rtcore tick.rs · 원본 없음) ─────────────────────────
+
+/// GET /api/tick-bars?asset=eth[&since=k1,k2,k3,k4,k5] -- 크기 순서대로 그 번호 이상인 닫힌 봉만(없거나 못 읽는 칸 = 보관분 전부) · cur 는 늘.
+/// 봉 = [번호, 첫 ms, 끝 ms, 시, 고, 저, 종, 수량, 델타, 체결 수] · 가격 = 종목 가격 자릿수(풋프린트 칸 가격과 같은 표) · 수량·델타 = 3자리.
+pub fn api_tick_bars(cfg: &Config, live: &Live, req: &Req) -> Resp {
+    let sym = match flow_symbol(cfg, req.q("asset")) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    let dp = rtcore::footprint::spec(&sym).map_or(2, |s| s.1);
+    let since: Vec<Option<i64>> = req.q("since").map(|s| s.split(',').map(|x| x.trim().parse().ok()).collect()).unwrap_or_default();
+    let lanes = live.syms.lock().unwrap().get(&sym).and_then(|s| s.ticks.as_ref()).map(|t| t.lanes.clone()).unwrap_or_default();
+    let (p, q) = (|x: f64| f(py::round_nd(x, dp)), |x: f64| f(py::round_nd(x, 3)));
+    let row = |b: &rtcore::proto::TickRow| json!([b.0, b.1, b.2, p(b.3), p(b.4), p(b.5), p(b.6), q(b.7), q(b.8), b.9]);
+    let mut ticks = Map::new();
+    for (i, n) in rtcore::tick::SIZES.iter().enumerate() {
+        let l = lanes.iter().find(|l| l.n == *n);
+        let lo = since.get(i).copied().flatten();
+        let bars: Vec<V> = l.map(|l| l.bars.iter().filter(|b| lo.is_none_or(|k| b.0 >= k)).map(row).collect()).unwrap_or_default();
+        ticks.insert(n.to_string(), json!({"k": l.map_or(0, |l| l.k), "bars": bars, "cur": l.and_then(|l| l.cur.as_ref()).map_or(V::Null, row)}));
+    }
+    Resp::json(&json!({"symbol": sym.to_uppercase(), "sizes": rtcore::tick::SIZES, "ticks": ticks}))
 }
 
 /// dashboard/coin_flow.py FLOW_SPECS 칸 폭(코어가 아직 아무것도 안 보냈을 때만 쓴다)

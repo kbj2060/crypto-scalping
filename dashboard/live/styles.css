@@ -3636,3 +3636,28 @@ html.fp-lock { overflow: hidden; scrollbar-gutter: stable; }
 .fp-line-btn button.pm-tab .pm-nosl { margin-left: 8px; font: 700 11px var(--font-sans); font-style: normal; color: var(--bad); }
 .fp-line-btn button.pm-tab .pm-nosl[hidden] { display: none; }
 .pm-strip .pm-nosl { color: var(--bad); font: 700 11px var(--font-sans); }
+
+/* 2026-11-23 펜 메모 «보기에 틱 -- 차트만 5분할(100·500·1000·2000·5000틱) · 지표 설정과 SLTP 는 살리고» (tick_charts.js).
+   자리 = 체결 버블과 같은 교체 영역(fpPlaceOverlay). 넓은 화면 = 위 3칸·아래 2칸(6열 격자에서 2·2·2 / 3·3) · 좁은 화면 = 한 줄씩.
+   차트 위 한 줄(LONG·SHORT·지표 -- #fpLineSwitch·.fp-line-btn)은 덮지 않는다: 그 높이(44)만큼 띄우고 비운 곳은 클릭이 아래로 지나간다. */
+.tkc { pointer-events: none; }
+.tkc > * { pointer-events: auto; }
+#fpCard.fp-toprow .tkc { padding-top: 44px; }
+.tkc-grid { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); grid-template-rows: 1fr 1fr; gap: 10px 12px; }
+.tkc-cell { grid-column: span 2; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--soft-line, var(--line)); padding-top: 4px; }
+.tkc-cell:nth-child(n+4) { grid-column: span 3; }
+.tkc-t { margin: 0; display: flex; align-items: baseline; gap: 8px; color: var(--muted); font: 500 11px/1.4 var(--font-sans); font-variant-numeric: tabular-nums; }
+.tkc-t b { color: var(--text); font: 700 12px/1.4 var(--font-sans); }
+.tkc-cell canvas { flex: 1 1 auto; min-height: 0; width: 100%; display: block; cursor: crosshair; touch-action: pan-y; }
+.tkc .fpd-status:empty { display: none; }
+@media (max-width: 720px) {
+  .tkc-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: repeat(5, minmax(0, 1fr)); gap: 8px; }
+  .tkc-cell, .tkc-cell:nth-child(n+4) { grid-column: auto; }
+}
+/* 틱 보기에서는 차트 위 한 줄(지표 · LONG/SHORT)을 남긴다(넓은 화면 교체 모드는 원래 숨김) */
+#fpCard.fp-tick-on.fp-alt-on.fp-alt-wide #fpLineSwitch { visibility: visible; }
+#fpCard.fp-toprow.fp-tick-on .fp-line-btn { position: absolute; z-index: 4; transform: translate(-50%, -50%); display: inline-flex; }
+#fpCard.fp-tick-on #fpColTog { visibility: hidden; }   /* 5분 차트 체결 기둥 토글(1d·7d·30d · 체결/청산 · 호가)은 틱 칸 제목 위에 겹친다 -- 틱 보기 동안 숨김 */
+/* 2026-11-24 사용자 «틱 차트에서는 오른쪽 패널(수급 차트·예측 모델 등)도 안 보이고 틱 차트가 카드에 가득»: 교체 영역 = svg 전체(fp_daily.js placeOverlay·syncHole) ·
+   svg 위에 겹쳐 둔 오른쪽 칸 HTML(시장 맥락·예측 판·서랍)은 숨긴다 */
+#fpCard.fp-tick-on #mcBody, #fpCard.fp-tick-on #mcWall, #fpCard.fp-tick-on #fpSide, #fpCard.fp-tick-on #fpSideTab { display: none !important; }

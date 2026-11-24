@@ -56,6 +56,12 @@ pub enum Event {
         /// 2026-11-21 더함 -- 마지막 미시 값(`okx_oi5m` 은 가진 봉 전부).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         micro: Option<Micro>,
+        /// 2026-11-24 더함 -- 틱 봉 전체(tick.rs · 흐름 엔진 종목만). 받는 쪽은 통째로 갈아 끼운다.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tick: Option<TickBars>,
+        /// 2026-11-24 더함 -- 풋프린트 1분봉 전체(footprint.rs «1분봉» · 흐름 엔진 종목만). 받는 규칙 = Fp1mView::apply.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fp1m: Option<Fp1m>,
     },
     /// 1초 수급 바뀐 몫: 묶음(state.rs FLUSH_MS)마다 1건. 목록 칸 = 그 사이 바뀐 초만(받은 쪽은 초 단위로 덮어쓴다),
     /// `partial` = 원천별 진행 중인 초. 빈 목록은 «바뀐 것 없음»이지 «지워라»가 아니다.
@@ -89,6 +95,100 @@ pub enum Event {
     /// 2026-11-21 더함 -- 미시 값(원본 `micro_state["payload"]` 의 코어 입력만으로 되는 칸 + /api/oi-5m 의 OKX 몫). situation 과 같은 1초 박자,
     /// 바뀌었을 때만. `okx_oi5m` 은 바뀐 봉부터 끝까지(받는 쪽은 봉마다 덮어쓴다 -- 봉 Δ 가 앞 봉 끝값에 걸려 있어 뒤 봉도 같이 싣는다).
     Micro(Micro),
+    /// 2026-11-24 더함 -- 틱 봉 바뀐 몫(tick.rs take_delta · 묶음마다 · 체결이 있었을 때만). 받는 규칙 = TickBars::merge.
+    TickBars(TickBars),
+    /// 2026-11-24 더함 -- 풋프린트 1분봉 바뀐 몫(묶음마다 · 바뀐 봉의 바뀐 칸 + 그 봉 OHLC). 5분봉 `footprint` 와 따로 둔다 --
+    /// 5분봉만 읽는 받는 쪽(app.js rtFpApply·rtui)이 모르는 type 으로 건너뛰게.
+    Footprint1m(Fp1m),
+}
+
+/// 1분봉 하나(server.py footprint_1m 의 봉): `ohlc` = [시, 고, 저, 종](가격 자릿수로 반올림 · 주문 단위 칸만 바뀐 밀기면 없음 = 그대로) ·
+/// `levels` = 5분봉과 같은 7칸(바뀐 칸만 · 스냅숏은 전부).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Fp1mBar {
+    pub time: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ohlc: Option<[f64; 4]>,
+    pub levels: Vec<Level>,
+}
+
+/// `full` 이면 통째로 · `m1_from` = 이 초부터의 1분봉만 «다 센» 봉(coin_flow.py m1_from -- 응답은 그 앞 봉과 OHLC 없는 봉을 뺀다) ·
+/// `drop` = 보관(120분)에서 지운 봉.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Fp1m {
+    pub full: bool,
+    pub m1_from: i64,
+    pub bars: Vec<Fp1mBar>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drop: Vec<i64>,
+}
+
+/// 1분봉 받는 쪽 상태: 봉 → (가격 비트 → 칸, OHLC). 가격 비트 차례 = 양수 가격 차례.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Fp1mView {
+    pub m1_from: i64,
+    pub bars: std::collections::BTreeMap<i64, (std::collections::BTreeMap<u64, Level>, Option<[f64; 4]>)>,
+}
+
+impl Fp1mView {
+    /// full 이면 비우고 · 칸은 가격으로 덮어쓰고 · OHLC 는 실렸을 때만 갈고 · drop 을 지운다.
+    pub fn apply(&mut self, m: Fp1m) {
+        if m.full {
+            self.bars.clear();
+        }
+        self.m1_from = m.m1_from;
+        for b in m.bars {
+            let e = self.bars.entry(b.time).or_default();
+            for l in b.levels {
+                e.0.insert(l.0.to_bits(), l);
+            }
+            if b.ohlc.is_some() {
+                e.1 = b.ohlc;
+            }
+        }
+        for t in m.drop {
+            self.bars.remove(&t);
+        }
+    }
+}
+
+/// 틱 봉 한 개 `[번호, 첫 ms, 끝 ms, 시, 고, 저, 종, 수량 합, 델타(매수 − 매도), 체결 수]`(반올림 전 · 반올림은 받는 쪽 -- rtserve /api/tick-bars).
+pub type TickRow = (i64, i64, i64, f64, f64, f64, f64, f64, f64, i64);
+
+/// 크기마다 보관하는 닫힌 봉 수.
+pub const TICK_KEEP: usize = 240;
+
+/// 크기 하나: `n` 틱 봉 · `k` = 지금까지 닫힌 봉 총수(형성 봉 번호 = k) · `bars` = 닫힌 봉(번호 오름차순 · 스냅숏은 최근 TICK_KEEP 개,
+/// 밀기는 지난 밀기 뒤 닫힌 것만) · `cur` = 형성 봉(n 번째 체결로 막 닫혔으면 null).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct TickLane {
+    pub n: i64,
+    pub k: i64,
+    pub bars: Vec<TickRow>,
+    pub cur: Option<TickRow>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct TickBars {
+    pub lanes: Vec<TickLane>,
+}
+
+impl TickBars {
+    /// 받는 규칙(밀기): 크기마다 가진 마지막 번호보다 큰 닫힌 봉만 붙이고(스냅숏과 겹친 봉은 건너뛴다) TICK_KEEP 개를 넘으면 앞을 버린다 ·
+    /// k·cur 는 늘 갈아 끼운다. 모르는 크기는 새로 든다.
+    pub fn merge(&mut self, n: TickBars) {
+        for l in n.lanes {
+            let Some(o) = self.lanes.iter_mut().find(|o| o.n == l.n) else {
+                self.lanes.push(l);
+                continue;
+            };
+            let last = o.bars.last().map_or(i64::MIN, |b| b.0);
+            o.bars.extend(l.bars.into_iter().filter(|b| b.0 > last));
+            let over = o.bars.len().saturating_sub(TICK_KEEP);
+            o.bars.drain(..over);
+            (o.k, o.cur) = (l.k, l.cur);
+        }
+    }
 }
 
 /// 이름은 원본 payload 키 그대로. 호가를 받기 전이면 mid·spread·qi 가 null.
