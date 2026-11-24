@@ -59,9 +59,59 @@ fn pushes_rebuild_snapshot_through_state() {
     // 순서 밖 26건을 뺀 수만 셌다: 100틱 k = (26000 − 26) / 100
     let l = &fin.lanes[0];
     assert_eq!((l.n, l.k, l.bars.len()), (100, 259, 240));
+    // 가격 칸(2026-11-25): 칸 합 == 봉 수량 · 칸이 실제로 찼다
+    for b in fin.lanes.iter().flat_map(|l| l.bars.iter().chain(&l.cur)) {
+        assert!(!b.10.is_empty() && (b.10.iter().map(|c| c.1).sum::<f64>() - b.7).abs() < 1e-9);
+    }
     // JSON 왕복(옛 받는 쪽: tick 없는 스냅숏도 읽힌다)
     let line = serde_json::to_string(&st.snapshot(sym, 0).unwrap()).unwrap();
     let back: Stamped = serde_json::from_str(&line).unwrap();
     let Event::Snapshot { tick, .. } = back.ev else { panic!() };
     assert_eq!(tick.unwrap(), fin);
+}
+
+/// 메시지 크기 실측(2026-11-25 · 보고용): 초당 300체결 · ETH 칸 폭 0.5 · 묶음 = FLUSH_MS(16ms) · 무작위 걸음.
+/// `cargo test --release --test tick_bars -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn message_size_with_price_cells() {
+    for (name, step) in [("보통(16초 σ≈$2)", 0.05), ("급변(16초 σ≈$10)", 0.25)] {
+        let sym = "ethusdt";
+        let st = State::new(&[sym.into()], 16, 1 << 20);
+        let mut rx = st.tx.subscribe();
+        let (mut px, mut x, t0) = (3000.0f64, 9u64, 1_763_700_000_000i64);
+        let (mut n, mut bytes, mut bytes_old, mut max) = (0usize, 0usize, 0usize, 0usize);
+        let mut ms = 0i64;
+        for i in 1..=300 * 120u64 {
+            // 120초 · 체결 간격 ≈ 3.33ms
+            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            px += ((x >> 33) % 2001) as f64 / 1000.0 * step - step;
+            let t = t0 + (i as i64 * 1000) / 300;
+            st.apply(trade(sym, i, t, (px * 100.0).round() / 100.0, ((x >> 20) % 1000) as f64 / 100.0 + 0.001, x & 1 == 1));
+            if t - t0 >= ms + 16 {
+                ms = t - t0;
+                st.flush();
+                while let Ok(m) = rx.try_recv() {
+                    if let Event::TickBars(_) = &m.ev {
+                        let len = serde_json::to_string(&m).unwrap().len();
+                        let mut o = m.clone();
+                        if let Event::TickBars(d) = &mut o.ev {
+                            d.lanes.iter_mut().flat_map(|l| l.bars.iter_mut().chain(l.cur.as_mut())).for_each(|r| r.10.clear());
+                        }
+                        let old = serde_json::to_string(&o).unwrap().len();
+                        (n, bytes, bytes_old, max) = (n + 1, bytes + len, bytes_old + old, max.max(len));
+                    }
+                }
+            }
+        }
+        let snap = serde_json::to_string(&st.snapshot(sym, 0).unwrap()).unwrap().len();
+        let cells: Vec<usize> = snap_tick(&st, sym).unwrap().lanes.iter().map(|l| l.cur.as_ref().map_or(0, |c| c.10.len())).collect();
+        eprintln!(
+            "{name}: 묶음 {n}건 · 평균 {} B(칸 없으면 {} B) · 최대 {max} B · 초당 {:.1} KB · 형성 봉 칸 수 {cells:?} · 스냅숏 {} KB",
+            bytes / n,
+            bytes_old / n,
+            bytes as f64 / 120.0 / 1024.0,
+            snap / 1024
+        );
+    }
 }

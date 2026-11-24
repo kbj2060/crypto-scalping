@@ -3666,3 +3666,15 @@ html.fp-lock { overflow: hidden; scrollbar-gutter: stable; }
 .tkc-t[role="button"] { cursor: pointer; }
 .tkc-t[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .tkc-ord .tkc-t b::after { content: " · 주문"; color: var(--accent); font-weight: 700; }
+
+/* 2026-11-25 펜 메모 «틱 탭이 생기며 버튼·수익률 표시가 밀림 -- 타임프레임은 5m·1d 만 · 나머지는 «전체» 드롭다운» (app.js renderChartWindowTabs · setupChartWindowTabs) */
+#chartWindowTabs { --seg-n: 3; }
+#chartWindowTabs .tf-more-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+#chartWindowTabs .tf-more-btn svg { width: 10px; height: 10px; flex: none; opacity: .7; transition: transform .2s cubic-bezier(.22, 1, .36, 1); }
+#chartWindowTabs .tf-more-btn[aria-expanded="true"] svg { transform: rotate(180deg); }
+.tf-more-pop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; display: grid; grid-auto-flow: row; gap: 2px; min-width: 88px; padding: 4px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--panel-strong); box-shadow: 0 10px 28px rgb(0 0 0 / .32); }
+.tf-more-pop[hidden] { display: none; }
+.tf-more-pop .asset-tab { justify-content: flex-start; text-align: left; border-radius: 8px; padding: 8px 12px; }
+.tf-more-pop .asset-tab.active { background: rgb(var(--lift) / .14); color: var(--seg-ink-on); }
+.tf-more-pop .asset-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

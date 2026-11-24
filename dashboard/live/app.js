@@ -2005,27 +2005,44 @@ function setupChartWindowTabs() {
       if (chartPanEnd != null || chartPanY || chartPanRight) chartPanReset();
     });
   });
+  // «전체» 드롭다운: 누르면 열고 닫음 · 안에서 고르거나 바깥을 누르거나 Esc 면 닫힘(고르는 처리는 위 처리기·fp_daily.js 그대로)
+  const more = el("tfMoreBtn"), pop = el("tfMorePop");
+  if (more && pop) {
+    const close = () => { pop.hidden = true; more.setAttribute("aria-expanded", "false"); };
+    more.addEventListener("click", (e) => { e.stopPropagation(); const open = pop.hidden; pop.hidden = !open; more.setAttribute("aria-expanded", String(open)); if (open && e.detail === 0) pop.querySelector(".asset-tab")?.focus(); });   // 키보드로 열었을 때만 첫 칸에 초점(마우스면 초점 테두리 없이)
+    pop.addEventListener("click", (e) => { if (e.target.closest(".asset-tab")) { close(); if (e.detail === 0) more.focus(); } });
+    document.addEventListener("pointerdown", (e) => { if (!pop.hidden && !e.target.closest("#tfMorePop, #tfMoreBtn")) close(); });
+    pop.addEventListener("keydown", (e) => { if (e.key === "Escape") { close(); more.focus(); } });
+  }
   renderChartWindowTabs();
 }
 function renderChartWindowTabs() {
   const host = document.getElementById("chartWindowTabs");
-  const tabs = [...document.querySelectorAll("#chartWindowTabs .asset-tab")];
-  let idx = 0;
+  const tabs = [...document.querySelectorAll("#chartWindowTabs .asset-tab:not(#tfMoreBtn)")], more = el("tfMoreBtn");
+  let idx = 0, onTab = null;
   // 2026-10-09 다섯째 칸 1d(#fpDailyBtn, data-bars 없음) = 일봉 풋프린트. 켜져 있으면 선택 칸이 거기 가고 시간 칸은 꺼진다(fp_daily.js 가 이 함수를 다시 부른다)
   const daily = typeof window.fpDailyActive === "function" && window.fpDailyActive();
   const per = typeof window.fpDailyPeriod === "function" ? window.fpDailyPeriod() : "1d";   // 2026-10-20 같은 그림이 4h(4시간봉)도 그린다
   tabs.forEach((btn, k) => {
     const on = btn.id === "fpDailyBtn" ? daily && per === "1d" : btn.dataset.tf ? daily && per === btn.dataset.tf : !daily && !fpZoomed() && (Number(btn.dataset.tfk) || 1) === chartTfK && (btn.dataset.m1 === "1") === chart1m;   // 2026-11-01 막대 수는 안 본다: 기본 창(24봉)보다 줄여 12~24봉이면 어느 칸도 안 맞아 하이라이트가 5m 로 돌아갔다
     btn.classList.toggle("active", on);
-    if (on) idx = k;
+    if (on) { idx = k; onTab = btn; }
   });
+  // 2026-11-25 펜 메모 «5m·1d 만 · 나머지는 전체 드롭다운»: 줄의 칸 = [5m][1d][전체] -- 고른 칸이 드롭다운 안이면 «전체» 자리가 그 이름으로 켜진다
+  if (more) {
+    const inPop = !!(onTab && onTab.closest("#tfMorePop")), lab = more.querySelector("span");
+    more.classList.toggle("active", inPop);
+    if (lab) lab.textContent = inPop ? onTab.textContent.trim() : "전체";
+    const bar = [...host.children].filter((c) => c.classList && c.classList.contains("asset-tab"));
+    idx = inPop ? bar.indexOf(more) : Math.max(0, bar.indexOf(onTab));
+  }
   // 🔴선택 칸(.chart-mode-tabs::before)의 **폭과 위치는 CSS 변수**다. 전에는 둘 다 칸 수를
   //   3 으로 박아 뒀다: `#chartWindowTabs { --seg-n: 3 }` 와 `:has(nth-child(2|3).active)`
   //   두 규칙뿐. 그래서 12h(4번째)를 고르면 칸이 **1/3 폭으로 첫 자리에 돌아갔다** --
   //   데이터는 바뀌는데 하이라이트는 1h 에 남아 «안 눌렸다»로 보였다(사용자 신고).
   //   버튼 수와 선택 위치를 여기서 읽어 넣는다. 칸이 또 늘어도 CSS 를 안 고쳐도 된다.
   if (host) {
-    host.style.setProperty("--seg-n", String(tabs.length));
+    host.style.setProperty("--seg-n", String(more ? [...host.children].filter((c) => c.classList && c.classList.contains("asset-tab")).length : tabs.length));
     host.style.setProperty("--i", String(idx));
     host.classList.toggle("zoomed", !daily && fpZoomed());   // 넓힌 창 = 어느 칸도 켜지 않는다(1h 를 누르면 풋프린트로)
   }

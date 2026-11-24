@@ -296,7 +296,7 @@ impl Supply {
             liq5m: BTreeMap::new(),
             liq5m_from: crate::now_us() as f64 / 1e6, // 복원이 없으면 «지금부터 기록»(원본 liq_events_load 의 now_ms / 1000)
             liq5m_dirty: Default::default(),
-            tick: crate::tick::Ticks::new(crate::footprint::spec(symbol).is_some()),
+            tick: crate::tick::Ticks::new(crate::footprint::spec(symbol)),
         }
     }
 

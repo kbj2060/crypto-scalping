@@ -152,8 +152,23 @@ impl Fp1mView {
     }
 }
 
-/// 틱 봉 한 개 `[번호, 첫 ms, 끝 ms, 시, 고, 저, 종, 수량 합, 델타(매수 − 매도), 체결 수]`(반올림 전 · 반올림은 받는 쪽 -- rtserve /api/tick-bars).
-pub type TickRow = (i64, i64, i64, f64, f64, f64, f64, f64, f64, i64);
+/// 틱 봉 한 개 `[번호, 첫 ms, 끝 ms, 시, 고, 저, 종, 수량 합, 델타(매수 − 매도), 체결 수, [[가격, 수량], ..]]`(반올림 전 · 반올림은 받는 쪽 --
+/// rtserve /api/tick-bars). 11번째(2026-11-25 더함) = 가격 칸별 수량 합(가격 오름차순 · 칸 = 풋프린트 칸 키 · 가격 = 칸 키 × 칸 폭을 종목 자릿수로).
+/// 옛 10칸 행(옛 스냅숏 파일)은 빈 목록으로 읽힌다.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct TickRow(
+    pub i64,
+    pub i64,
+    pub i64,
+    pub f64,
+    pub f64,
+    pub f64,
+    pub f64,
+    pub f64,
+    pub f64,
+    pub i64,
+    #[serde(default)] pub Vec<(f64, f64)>,
+);
 
 /// 크기마다 보관하는 닫힌 봉 수.
 pub const TICK_KEEP: usize = 240;

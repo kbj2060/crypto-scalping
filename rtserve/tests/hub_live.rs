@@ -342,7 +342,10 @@ fn tick_bars_and_footprint_1m_from_hub() {
     let tick = tick.unwrap();
     let r2 = |x: f64| json!((x * 100.0).round_ties_even() / 100.0); // ETH 가격 2자리(값이 이미 0.01 격자라 같은 수)
     let r3 = |x: f64| json!(format!("{x:.3}").parse::<f64>().unwrap());
-    let row = |b: &rtcore::proto::TickRow| json!([b.0, b.1, b.2, r2(b.3), r2(b.4), r2(b.5), r2(b.6), r3(b.7), r3(b.8), b.9]);
+    let row = |b: &rtcore::proto::TickRow| {
+        let cells: Vec<Value> = b.10.iter().map(|c| json!([r2(c.0), r3(c.1)])).collect();
+        json!([b.0, b.1, b.2, r2(b.3), r2(b.4), r2(b.5), r2(b.6), r3(b.7), r3(b.8), b.9, cells])
+    };
     let want = |since: &[i64]| -> Value {
         let mut m = serde_json::Map::new();
         for (i, l) in tick.lanes.iter().enumerate() {
@@ -384,6 +387,25 @@ fn tick_bars_and_footprint_1m_from_hub() {
     // 정수 칸은 정수로
     let b0 = &got["ticks"]["100"]["bars"][0];
     assert!(b0[0].is_i64() && b0[1].is_i64() && b0[2].is_i64() && b0[9].is_i64() && b0[9] == 100, "{b0}");
+    // 11번째 칸(2026-11-25): [[가격, 수량], ..] · 가격 = ETH 칸 폭 0.5 격자 · 오름차순 · 고저 안 · 수량 3자리 · 칸 합 ≈ 봉 수량
+    for n in ["100", "500", "1000", "2000", "5000"] {
+        for b in got["ticks"][n]["bars"].as_array().unwrap().iter().chain(got["ticks"][n]["cur"].as_array().map(|_| &got["ticks"][n]["cur"])) {
+            let b = b.as_array().unwrap();
+            assert_eq!(b.len(), 11);
+            let cells = b[10].as_array().unwrap();
+            assert!(!cells.is_empty());
+            let (hi, lo, vol) = (b[4].as_f64().unwrap(), b[5].as_f64().unwrap(), b[7].as_f64().unwrap());
+            let mut prev = f64::MIN;
+            let mut sum = 0.0;
+            for c in cells {
+                let (px, qty) = (c[0].as_f64().unwrap(), c[1].as_f64().unwrap());
+                assert!(c.as_array().unwrap().len() == 2 && px > prev && (px * 2.0).fract() == 0.0 && px >= lo - 0.25 && px <= hi + 0.25, "{c}");
+                assert_eq!(qty, format!("{qty:.3}").parse::<f64>().unwrap());
+                (prev, sum) = (px, sum + qty);
+            }
+            assert!((sum - vol).abs() <= 0.0005 * (cells.len() + 1) as f64, "{n} 칸 합 {sum} vs {vol}");
+        }
+    }
     // 모르는 코인 = 풋프린트와 같은 404
     let (a, b) = (request(addr, "GET", "/api/tick-bars?asset=sol", &[]), request(addr, "GET", "/api/footprint?asset=sol", &[]));
     assert_eq!((a.status, &a.body, &a.headers), (b.status, &b.body, &b.headers));

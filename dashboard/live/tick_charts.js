@@ -93,7 +93,7 @@
     var rows = rowsOf(n), cnt = Math.max(30, Math.floor(g.plotW / 7)), v = rows.slice(-cnt);
     var lo = Infinity, hi = -Infinity;
     v.forEach(function (r) { lo = Math.min(lo, r[5]); hi = Math.max(hi, r[4]); });
-    var pad = (hi - lo) * 0.06 || 1;
+    var pad = (hi - lo) * 0.14 || 1;   // 2026-11-25 펜 메모 «위아래 여유 -- 고가·저가 자리가 없다»: 범위의 14% 씩(봉 정보 줄·가격 꼬리표가 고가·저가를 안 덮게)
     return { rows: v, cnt: cnt, lo: lo - pad, hi: hi + pad, slot: g.plotW / cnt };
   }
   // 그 시각(ms)을 품은 봉 = 첫 체결이 그 시각 이하인 마지막 봉 -- 다섯 칸 커서 맞추기(보이는 첫 봉보다 앞이면 없음)
@@ -152,6 +152,22 @@
     } catch (e) { /* 레벨 없음 */ }
   }
 
+  // 2026-11-25 펜 메모 «틱 차트마다 보이는 전체 구간의 POC»: 보이는 봉(형성 봉 포함)의 가격별 체결량 합이 가장 큰 가격 -- rtcore 가 봉마다 싣는 [[가격, 수량]…](풋프린트와 같은 칸 폭)
+  function pocOf(rows) {
+    var vol = new Map(), best = null, bv = -1;
+    rows.forEach(function (r) { (r[10] || []).forEach(function (l) { var k = l[0], v = (vol.get(k) || 0) + Number(l[1] || 0); vol.set(k, v); if (v > bv) { bv = v; best = k; } }); });
+    return best == null ? null : { px: Number(best), vol: bv };
+  }
+  function pocLine(ctx, g, V, Y, D, rows) {
+    var p = pocOf(rows);
+    if (!p || p.px < V.lo || p.px > V.hi) return;
+    var yy = Math.round(Y(p.px)) + 0.5, c = css("var(--amber)") || css("var(--warn)");
+    ctx.save(); ctx.strokeStyle = c; ctx.lineWidth = 1.6; ctx.globalAlpha = 0.9; ctx.beginPath(); ctx.moveTo(g.L, yy); ctx.lineTo(g.L + g.plotW, yy); ctx.stroke(); ctx.restore();
+    var s2 = "POC " + p.px.toFixed(D), w = ctx.measureText(s2).width + 8;
+    ctx.fillStyle = c; ctx.fillRect(g.L + g.plotW + 2, yy - 8, Math.min(w, g.R - 2), 16);
+    ctx.fillStyle = css("var(--on-fill)"); ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(s2, g.L + g.plotW + 5, yy);
+  }
+
   function drawPanel(n, cell) {
     var cv = cell.querySelector("canvas");
     if (!cv || !cv.clientWidth || !cv.clientHeight) return;
@@ -184,6 +200,7 @@
       ctx.fillStyle = muted; ctx.fillText(pv.toFixed(D), g.L + g.plotW + 6, yy);
     }
     overlays(ctx, g, V, Y, D);
+    pocLine(ctx, g, V, Y, D, rows);
     // 거래량(색 = 델타 부호)
     var vMax = Math.max.apply(null, rows.map(function (r) { return r[7]; })) || 1;
     rows.forEach(function (r, i) {

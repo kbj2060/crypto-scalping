@@ -25,7 +25,8 @@ def fake_ticks():
             t0 = now - (200 - i) * dt
             o = p; c = p + random.gauss(0, 0.05 * n ** 0.5)
             rows.append([i, t0, t0 + dt - 1, round(o, 2), round(max(o, c) + abs(random.gauss(0, 0.3)), 2), round(min(o, c) - abs(random.gauss(0, 0.3)), 2), round(c, 2),
-                         round(n * 0.4, 3), round(random.gauss(0, n * 0.05), 3), n])
+                         round(n * 0.4, 3), round(random.gauss(0, n * 0.05), 3), n,
+                         [[round(o, 1), round(n * 0.2, 3)], [round(c, 1), round(n * 0.2 * (1 + (i % 7 == 0) * 3), 3)]]])   # 11번째 칸 = 가격별 체결량(POC)
             p = c
         out[str(n)] = {"k": 200, "bars": rows, "cur": None}
     return {"symbol": "ETHUSDT", "sizes": SIZES, "ticks": out}
