@@ -85,10 +85,21 @@ with sync_playwright() as p:
         pg.mouse.move(cv["x"] + cv["width"] * 0.6, cv["y"] + cv["height"] * 0.4); pg.wait_for_timeout(400)
         pg.screenshot(path=f"{SP}/tick_{name}.png", full_page=False)
         if name == "desktop":
-            pg.evaluate("() => document.querySelector('#fpCard .fp-line-btn button')?.click()")
+            # 2026-11-24 SLTP 도 틱 칸에서: LONG → 선 도구가 «주문 칸»(기본 2000틱) 위에 뜬다(보기는 틱 그대로) · 다른 칸 제목을 누르면 주문 칸이 옮겨 간다
+            pg.evaluate("() => document.querySelector('#fpCard .fp-line-btn button[data-lines=LONG]')?.click()")
             pg.wait_for_timeout(1500)
-            r2 = pg.evaluate(JS)
-            check(r2["tab"] == "fp" and not r2["on"], f"{name}: LONG 누르면 풋프린트로 돌아감")
+            LT = """() => { const ln = document.querySelector('#lineTool .lt-ln.en'), lt = document.getElementById('lineTool');
+              const cell = document.querySelector('#tickCharts .tkc-cell.tkc-ord'), c = cell && cell.querySelector('canvas').getBoundingClientRect(), r = ln && ln.getBoundingClientRect();
+              return { shown: !!lt && !lt.hidden, ord: cell && +cell.dataset.n, inCell: !!(r && c && r.top >= c.top - 1 && r.top <= c.bottom + 1 && r.left >= c.left - 2 && r.left < c.right),
+                       tab: document.querySelector('#fpViewTabs .asset-tab.active')?.dataset.view }; }"""
+            r2 = pg.evaluate(LT); print(name, "sltp", json.dumps(r2, ensure_ascii=False))
+            check(r2["tab"] == "tick" and r2["shown"] and r2["ord"] == 2000 and r2["inCell"], f"{name}: LONG → 틱 보기 그대로 · 선 도구가 주문 칸(2000틱) 위")
+            pg.screenshot(path=f"{SP}/tick_sltp_{name}.png", full_page=False)
+            pg.evaluate("() => document.querySelector('#tickCharts .tkc-cell[data-n=\"500\"] .tkc-t').click()")
+            pg.wait_for_timeout(800)
+            r3 = pg.evaluate(LT)
+            check(r3["ord"] == 500 and r3["inCell"], f"{name}: 제목 누르면 주문 칸이 500틱으로 · 선 도구도 따라감")
+            pg.evaluate("() => { localStorage.removeItem('tickOrd'); document.querySelector('#lineTool .lt-x')?.click(); }")
         check(not errs, f"{name}: JS 오류 0 {errs[:2]}")
         ctx.close()
     b.close()
