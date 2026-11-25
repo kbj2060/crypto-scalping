@@ -440,12 +440,15 @@ pub fn api_tick_bars(cfg: &Config, live: &Live, req: &Req) -> Resp {
     };
     let dp = rtcore::footprint::spec(&sym).map_or(2, |s| s.1);
     let since: Vec<Option<i64>> = req.q("since").map(|s| s.split(',').map(|x| x.trim().parse().ok()).collect()).unwrap_or_default();
-    let lanes = live.syms.lock().unwrap().get(&sym).and_then(|s| s.ticks.as_ref()).map(|t| t.lanes.clone()).unwrap_or_default();
+    let (lanes, big) = live.syms.lock().unwrap().get(&sym).and_then(|s| s.ticks.as_ref()).map(|t| (t.lanes.clone(), t.big.clone())).unwrap_or_default();
     let (p, q) = (|x: f64| f(py::round_nd(x, dp)), |x: f64| f(py::round_nd(x, 3)));
     let row = |b: &rtcore::proto::TickRow| {
         let cells: Vec<V> = b.10.iter().map(|c| json!([p(c.0), q(c.1)])).collect();
         json!([b.0, b.1, b.2, p(b.3), p(b.4), p(b.5), p(b.6), q(b.7), q(b.8), b.9, cells])
     };
+    // 2026-11-25 큰 거래 버블: 고래 주문 [번호, 첫 체결 ms, 가격, 수량, 매도] · ?big=번호 이상만(없거나 못 읽으면 전부)
+    let blo: Option<i64> = req.q("big").and_then(|s| s.trim().parse().ok());
+    let big: Vec<V> = big.iter().filter(|b| blo.is_none_or(|k| b.0 >= k)).map(|b| json!([b.0, b.1, p(b.2), q(b.3), b.4])).collect();
     let mut ticks = Map::new();
     for (i, n) in rtcore::tick::SIZES.iter().enumerate() {
         let l = lanes.iter().find(|l| l.n == *n);
@@ -453,7 +456,7 @@ pub fn api_tick_bars(cfg: &Config, live: &Live, req: &Req) -> Resp {
         let bars: Vec<V> = l.map(|l| l.bars.iter().filter(|b| lo.is_none_or(|k| b.0 >= k)).map(row).collect()).unwrap_or_default();
         ticks.insert(n.to_string(), json!({"k": l.map_or(0, |l| l.k), "bars": bars, "cur": l.and_then(|l| l.cur.as_ref()).map_or(V::Null, row)}));
     }
-    Resp::json(&json!({"symbol": sym.to_uppercase(), "sizes": rtcore::tick::SIZES, "ticks": ticks}))
+    Resp::json(&json!({"symbol": sym.to_uppercase(), "sizes": rtcore::tick::SIZES, "ticks": ticks, "big": big}))
 }
 
 /// dashboard/coin_flow.py FLOW_SPECS 칸 폭(코어가 아직 아무것도 안 보냈을 때만 쓴다)
