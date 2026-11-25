@@ -12,7 +12,7 @@
 //! - 재시작: 코어 스냅숏 파일(restore.rs Snap.tick)에 통째로 싣고 되살린다.
 //!   ponytail: 꺼져 있던 사이 체결은 메우지 않는다 -- 테이프는 1초 칸 합이라 체결 순서·수(봉 경계·시가/종가)를 되살릴 수 없다.
 //!   형성 봉은 그 공백을 품은 채 이어 센다. 메우려면 수집기가 개별 체결(또는 aggTrades 아닌 @trade id 범위)을 남겨야 한다.
-use crate::proto::{TickBars, TickLane, TickRow};
+use crate::proto::{BigRow, TickBars, TickLane, TickRow, BIG_KEEP};
 
 pub const SIZES: [i64; 5] = [100, 500, 1000, 2000, 5000];
 
@@ -22,6 +22,9 @@ pub struct Ticks {
     pub(crate) all: TickBars,
     /// 크기마다 지난 밀기 때의 k -- 이 번호 이상인 닫힌 봉을 다음 밀기에 싣는다.
     sent: Vec<i64>,
+    /// 다음 고래 주문 번호 · 지난 밀기 때의 번호.
+    big_k: i64,
+    big_sent: i64,
     pub(crate) last_id: Option<u64>,
     dirty: bool,
 }
@@ -29,7 +32,7 @@ pub struct Ticks {
 impl Ticks {
     pub fn new(spec: Option<(f64, usize)>) -> Ticks {
         let lanes = SIZES.iter().map(|&n| TickLane { n, k: 0, bars: vec![], cur: None }).collect();
-        Ticks { spec, all: TickBars { lanes }, sent: vec![0; SIZES.len()], last_id: None, dirty: false }
+        Ticks { spec, all: TickBars { lanes, big: vec![] }, sent: vec![0; SIZES.len()], big_k: 0, big_sent: 0, last_id: None, dirty: false }
     }
 
     /// 개별 체결 하나(`sell` = 공격자 매도).
@@ -64,6 +67,18 @@ impl Ticks {
         self.dirty = true;
     }
 
+    /// 닫힌 고래 주문 하나(`ms` = 첫 체결). 경계 판정은 부르는 쪽(supply.rs -- 풋프린트 고래 칸과 같은 하한).
+    pub fn big(&mut self, ms: i64, px: f64, qty: f64, sell: bool) {
+        if self.spec.is_none() {
+            return;
+        }
+        self.all.big.push(BigRow(self.big_k, ms, px, qty, sell));
+        self.big_k += 1;
+        let over = self.all.big.len().saturating_sub(BIG_KEEP);
+        self.all.big.drain(..over);
+        self.dirty = true;
+    }
+
     pub fn snapshot(&self) -> Option<TickBars> {
         self.spec.map(|_| self.all.clone())
     }
@@ -84,7 +99,9 @@ impl Ticks {
                 TickLane { n: l.n, k: l.k, bars, cur: l.cur.clone() }
             })
             .collect();
-        Some(TickBars { lanes })
+        let big = self.all.big.iter().filter(|b| b.0 >= self.big_sent).cloned().collect();
+        self.big_sent = self.big_k;
+        Some(TickBars { lanes, big })
     }
 
     /// 코어 스냅숏 파일에서(시작 때 · 수신 전). 크기 표가 다르면 버린다.
@@ -93,6 +110,8 @@ impl Ticks {
             return;
         }
         self.sent = all.lanes.iter().map(|l| l.k).collect();
+        self.big_k = all.big.last().map_or(0, |b| b.0 + 1);
+        self.big_sent = self.big_k;
         (self.all, self.last_id) = (all, last_id);
     }
 }
@@ -102,6 +121,33 @@ mod tests {
     use super::*;
 
     const SPEC: Option<(f64, usize)> = Some((0.5, 2));
+
+    #[test]
+    fn big_orders_number_cap_push_restore() {
+        let mut t = Ticks::new(SPEC);
+        let mut got = t.snapshot().unwrap();
+        for i in 0..(BIG_KEEP as i64 + 30) {
+            t.big(1_000 + i, 100.0, 5.0, i % 2 == 0);
+            if i % 7 == 0 {
+                got.merge(t.take_delta().unwrap());
+            }
+        }
+        got.merge(t.take_delta().unwrap());
+        assert!(t.take_delta().is_none());
+        let s = t.snapshot().unwrap();
+        assert_eq!(got, s, "밀기만으로 지은 것 == 스냅숏");
+        assert_eq!((s.big.len(), s.big[0].0, s.big.last().unwrap().0), (BIG_KEEP, 30, BIG_KEEP as i64 + 29));
+        let mut r = Ticks::new(SPEC);
+        r.load(s.clone(), None);
+        r.big(9, 1.0, 2.0, true);
+        assert_eq!(r.take_delta().unwrap().big, vec![BigRow(BIG_KEEP as i64 + 30, 9, 1.0, 2.0, true)], "복원 뒤 번호를 잇고 새 것만 민다");
+        let old = serde_json::to_value(&s).unwrap();
+        let lanes_only: TickBars = serde_json::from_value(serde_json::json!({"lanes": old["lanes"]})).unwrap();
+        assert!(lanes_only.big.is_empty(), "옛 파일·메시지");
+        let mut off = Ticks::new(None);
+        off.big(1, 1.0, 1.0, false);
+        assert!(off.snapshot().is_none() && off.take_delta().is_none());
+    }
 
     /// 합성 체결 열: id 1.., 가격 = 100 + (i % 7), 수량 = 1 + i % 3, 짝수 번째 = 매도.
     fn feed(t: &mut Ticks, ids: std::ops::Range<u64>) {

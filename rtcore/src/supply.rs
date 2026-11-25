@@ -351,6 +351,9 @@ impl Supply {
         // 순서도 파이썬 그대로: 총량 먼저, 그다음 이 체결로 닫힌 주문의 구간(coin_flow.py 619~624).
         self.add(px, qty, ts_ms, sell, false, now_ms, &mut touched);
         if let Some((p, q, t, s)) = self.aggregate(px, qty, ts_ms, sell, tid) {
+            if p * q >= self.whale_min {
+                self.tick.big(t, p, q, s); // 틱 차트 큰 거래 버블(2026-11-25) -- 풋프린트 고래 칸과 같은 주문·같은 하한
+            }
             self.add(p, q, t, s, true, now_ms, &mut touched);
         }
         let newest = *self.sec.keys().next_back()?;

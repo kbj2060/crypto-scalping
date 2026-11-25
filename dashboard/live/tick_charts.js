@@ -7,13 +7,15 @@
 //   주문 = «주문 칸» 하나(칸 제목을 누르면 바뀜 · 기본 2000틱)가 app.js 선 주문 층의 자리가 된다(window.fpTickFrame → ordFrame) -- 선 도구·들어간 선·초안·peg 꼬리표가
 //   5분 차트와 똑같이(같은 함수·같은 서버 경로 = rtorder) 그 칸 위에 뜬다. 다른 칸은 그 선을 읽기 전용으로 그린다.
 //   청산맵 = 최신 추정 청산 밀도(/api/liquidation-map heatmap_history 마지막 판)를 가격 줄 배경으로 · 호가벽 = 지금 호가 깊이(/api/flow/heatmap book)를 오른쪽 끝 막대로(큰 벽 둘은 가로선) ·
+// 2026-11-25 펜 메모 «큰 거래에는 버블» 시안 A(사용자 선택): 고래 주문(rtcore -- 개별 체결을 주문으로 되묶어 코인별 하한 이상 · ETH $10만 · 바이낸스 선물) 하나하나를
+//   체결 시각의 봉 · 체결 가격에 채운 원으로(초록 매수 · 빨강 매도 · 넓이 ∝ 금액 · 칸마다 큰 것 40개) · 금액은 봉에 마우스를 올리면.
 //   지지/저항 = 5분 차트·게이지와 같은 srLevelsLive(청산맵 밀집 · 쓸린 레벨 뺌) 점선. 셋 다 새 계산 없이 이미 받는 값을 그린다.
 // 🔴CI esprima: `?.(`·`?.[`·숫자 구분자 금지.
 (function () {
   "use strict";
   var $ = function (id) { return document.getElementById(id); };
   var SIZES = [100, 500, 1000, 2000, 5000];
-  var S = { on: false, asset: "", d: {}, busy: false, raf: 0, hover: null, err: "", ord: 2000 };   // d[n] = { k, rows: [..닫힌 봉], cur } · ord = 주문 칸
+  var S = { on: false, asset: "", d: {}, busy: false, raf: 0, hover: null, err: "", ord: 2000, big: [] };   // d[n] = { k, rows: [..닫힌 봉], cur } · ord = 주문 칸
   try { var o0 = Number(localStorage.getItem("tickOrd")); if (SIZES.indexOf(o0) >= 0) S.ord = o0; } catch (e) { /* 기억은 편의 */ }
   var asset = function () { return typeof activeSnapshotAsset === "undefined" ? "eth" : activeSnapshotAsset; };
   var css = function (v) {   // "var(--x)" → 실제 색(캔버스는 CSS 변수를 못 읽는다)
@@ -25,14 +27,14 @@
   function dur(ms) { var s = Math.max(0, Math.round(ms / 1000)); return s < 90 ? s + "초" : Math.round(s / 60) + "분"; }
   function qty(v) { var a = Math.abs(v); return (v < 0 ? "−" : "+") + (a >= 1000 ? (a / 1000).toFixed(1) + "k" : a.toFixed(a >= 10 ? 0 : 1)); }
 
-  function reset(a) { S.asset = a; S.d = {}; S.hover = null; S.err = ""; }
+  function reset(a) { S.asset = a; S.d = {}; S.big = []; S.hover = null; S.err = ""; }
   function poll() {
     var a = asset();
     if (a !== S.asset) reset(a);
     if (!S.on || S.busy || document.hidden) return;
     var since = SIZES.map(function (n) { var x = S.d[n]; return x && x.rows.length ? x.rows[x.rows.length - 1][0] + 1 : ""; }).join(",");
     S.busy = true;
-    fetch("/api/tick-bars?asset=" + encodeURIComponent(a) + (since.replace(/,/g, "") ? "&since=" + since : ""), { cache: "no-store" })
+    fetch("/api/tick-bars?asset=" + encodeURIComponent(a) + (since.replace(/,/g, "") ? "&since=" + since : "") + (S.big.length ? "&big=" + (S.big[S.big.length - 1][0] + 1) : ""), { cache: "no-store" })
       .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
       .then(function (j) {
         if (a !== S.asset) return;
@@ -44,6 +46,9 @@
           if (x.rows.length > 240) x.rows.splice(0, x.rows.length - 240);
           x.cur = t.cur; x.k = t.k;
         });
+        var bl = S.big.length ? S.big[S.big.length - 1][0] : -1;
+        (j.big || []).forEach(function (b) { if (b[0] > bl) S.big.push(b); });
+        if (S.big.length > 2000) S.big.splice(0, S.big.length - 2000);
         S.err = ""; redraw();
       })
       .catch(function (e) { S.err = String(e && e.message || e); redraw(); })
@@ -170,6 +175,33 @@
     ctx.fillStyle = css("var(--on-fill)"); ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(s2, g.L + g.plotW + 5, yy);
   }
 
+  // 고래 주문 → {봉, 가격, 금액, 매수}: 같은 봉·같은 가격·같은 방향은 합친다. 봉 = 첫 체결 시각을 품은 봉(같은 ms 에 봉이 갈리면 가격이 고저 안인 쪽)
+  function bubbles(rows, V) {
+    var by = new Map(), t0 = rows[0][1], t1 = rows[rows.length - 1][2];
+    S.big.forEach(function (b) {
+      if (b[1] < t0 || b[1] > t1) return;
+      var k = idxAt(rows, b[1]);
+      while (k > 0 && rows[k - 1][2] >= b[1] && (b[2] < rows[k][5] || b[2] > rows[k][4])) k--;
+      if (k < 0) return;
+      var key = k + "|" + b[2] + "|" + b[4], a = by.get(key);
+      if (!a) by.set(key, a = { k: k, px: b[2], usd: 0, buy: !b[4] });
+      a.usd += b[2] * b[3];
+    });
+    return Array.from(by.values()).filter(function (b) { return b.px >= V.lo && b.px <= V.hi; }).sort(function (a, b) { return b.usd - a.usd; });
+  }
+  function drawBubbles(ctx, g, X, Y, B, good, bad) {
+    if (!B.length) return;
+    var mx = B[0].usd, rMax = g.narrow ? 11 : 18;
+    ctx.save(); ctx.beginPath(); ctx.rect(g.L, g.top, g.plotW, g.priceH); ctx.clip();
+    B.slice(0, 40).forEach(function (b) {
+      ctx.beginPath(); ctx.arc(X(b.k), Y(b.px), 3 + (rMax - 3) * Math.sqrt(b.usd / mx), 0, 7);
+      ctx.fillStyle = ctx.strokeStyle = b.buy ? good : bad; ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.34; ctx.fill(); ctx.globalAlpha = 0.95; ctx.stroke();
+    });
+    ctx.restore();
+  }
+  window.fpTickBubbles = function (n) { var c = document.querySelector('#tickCharts .tkc-cell[data-n="' + n + '"]'), G = c && c._geo; return G ? bubbles(G.V.rows, G.V).map(function (b) { var r = G.V.rows[b.k]; return [b.k, b.px, Math.round(b.usd), b.buy, b.px >= r[5] && b.px <= r[4]]; }) : []; };   // 시험·진단용
+
   function drawPanel(n, cell) {
     var cv = cell.querySelector("canvas");
     if (!cv || !cv.clientWidth || !cv.clientHeight) return;
@@ -216,6 +248,8 @@
       ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(cx, Y(r[4])); ctx.lineTo(cx, Y(r[5])); ctx.stroke();
       ctx.fillStyle = col; ctx.fillRect(cx - bw / 2, y1, bw, Math.max(1, y2 - y1));
     });
+    var bub = bubbles(rows, V);
+    drawBubbles(ctx, g, X, Y, bub, good, bad);
     // 지표(5분 차트와 같은 스위치·색)
     indicators(rowsOf(n)).forEach(function (L) {
       ctx.save(); ctx.beginPath(); ctx.rect(g.L, g.top, g.plotW, g.priceH); ctx.clip();   // 선이 칸 밖(제목·거래량)으로 안 나가게
@@ -258,6 +292,7 @@
         }
         // 봉 정보 한 줄(칸 위)
         var info = hms(r[1]) + "  시 " + r[3].toFixed(D) + " 고 " + r[4].toFixed(D) + " 저 " + r[5].toFixed(D) + " 종 " + r[6].toFixed(D) + "  델타 " + qty(r[8]) + "  " + dur(r[2] - r[1]);
+        [[true, "큰 매수"], [false, "큰 매도"]].forEach(function (d) { var u = bub.reduce(function (x, b) { return x + (b.k === k && b.buy === d[0] ? b.usd : 0); }, 0); if (u) info += "  " + d[1] + " $" + (u >= 1e6 ? (u / 1e6).toFixed(1) + "M" : Math.round(u / 1e3) + "k"); });
         ctx.font = (g.narrow ? 10 : 11) + "px " + getComputedStyle(cv).fontFamily; ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
         ctx.fillStyle = r[6] >= r[3] ? good : bad; ctx.fillText(g.narrow ? hms(r[1]) + "  " + r[6].toFixed(D) + "  " + qty(r[8]) : info, g.L + 2, 14);
       }

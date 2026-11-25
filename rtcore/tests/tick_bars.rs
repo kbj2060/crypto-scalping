@@ -115,3 +115,39 @@ fn message_size_with_price_cells() {
         );
     }
 }
+
+/// 고래 주문(2026-11-25): 같은 가격·방향·연속 id 체결을 되묶어 명목 ≥ 하한만 · 시각 = 첫 체결 · 밀기 == 스냅숏. ETH 하한 $100,000.
+#[test]
+fn big_orders_follow_order_grouping() {
+    let sym = "ethusdt";
+    let st = State::new(&[sym.into()], 16, 1 << 16);
+    let mut rx = st.tx.subscribe();
+    let mut got = snap_tick(&st, sym).unwrap();
+    let t0 = chrono_now_ms() / 1000 * 1000;
+    let rows: [(u64, i64, f64, f64, bool); 9] = [
+        (1, 0, 2000.0, 30.0, false), (2, 10, 2000.0, 25.0, false), // 55 개 = $110,000 → 하나
+        (3, 20, 2000.0, 60.0, true),                               // 방향 바뀜 $120,000 → 하나
+        (4, 30, 2001.0, 49.0, true),                               // $98,049 → 하한 미만
+        (6, 40, 2001.0, 49.0, true),                               // id 끊김 → 앞 것과 안 묶임
+        (7, 200, 2001.0, 49.0, true),                              // 100ms 넘음 → 안 묶임
+        (8, 1000, 2000.0, 50.0, false),                            // 딱 $100,000 → 하나
+        (9, 1010, 1999.0, 1.0, false), (10, 1020, 1999.5, 1.0, false), // 앞 주문을 닫는다
+    ];
+    for (id, dt, px, q, s) in rows {
+        st.apply(trade(sym, id, t0 + dt, px, q, s));
+        st.flush();
+    }
+    while let Ok(m) = rx.try_recv() {
+        if let Event::TickBars(d) = m.ev {
+            got.merge(d);
+        }
+    }
+    let fin = snap_tick(&st, sym).unwrap();
+    assert_eq!(got, fin);
+    let b: Vec<_> = fin.big.iter().map(|b| (b.0, b.1 - t0, b.2, b.3, b.4)).collect();
+    assert_eq!(b, vec![(0, 0, 2000.0, 55.0, false), (1, 20, 2000.0, 60.0, true), (2, 1000, 2000.0, 50.0, false)]);
+}
+
+fn chrono_now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64
+}

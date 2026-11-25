@@ -186,12 +186,27 @@ pub struct TickLane {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct TickBars {
     pub lanes: Vec<TickLane>,
+    /// 2026-11-25 더함(틱 차트 큰 거래 버블) -- 고래 주문(supply.rs 주문 되묶기 · 명목 ≥ 고래 하한). 스냅숏 = 최근 BIG_KEEP · 밀기 = 지난 밀기 뒤 것.
+    /// 봉 행에 안 싣는 이유: 주문은 다음 체결이 와야 닫혀 그 봉이 이미 나간 뒤일 수 있다(닫힌 봉은 다시 안 보낸다). 옛 파일·메시지엔 없다(빈 목록).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub big: Vec<BigRow>,
 }
+
+/// 고래 주문: [번호, 첫 체결 ms, 가격, 수량, 공격자 매도].
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct BigRow(pub i64, pub i64, pub f64, pub f64, pub bool);
+
+/// 고래 주문 보관 수(5000틱 봉 240개 ≈ 6시간 남짓의 실측 빈도보다 넉넉히).
+pub const BIG_KEEP: usize = 2000;
 
 impl TickBars {
     /// 받는 규칙(밀기): 크기마다 가진 마지막 번호보다 큰 닫힌 봉만 붙이고(스냅숏과 겹친 봉은 건너뛴다) TICK_KEEP 개를 넘으면 앞을 버린다 ·
     /// k·cur 는 늘 갈아 끼운다. 모르는 크기는 새로 든다.
     pub fn merge(&mut self, n: TickBars) {
+        let last = self.big.last().map_or(i64::MIN, |b| b.0);
+        self.big.extend(n.big.into_iter().filter(|b| b.0 > last));
+        let over = self.big.len().saturating_sub(BIG_KEEP);
+        self.big.drain(..over);
         for l in n.lanes {
             let Some(o) = self.lanes.iter_mut().find(|o| o.n == l.n) else {
                 self.lanes.push(l);

@@ -364,7 +364,13 @@ fn tick_bars_and_footprint_1m_from_hub() {
     }
     let all = want(&[]);
     let keys: Vec<&str> = got.as_object().unwrap().keys().map(String::as_str).collect();
-    assert_eq!(keys, ["symbol", "sizes", "ticks"]);
+    assert_eq!(keys, ["symbol", "sizes", "ticks", "big"]);
+    // 고래 주문(2026-11-25): 코어 스냅숏과 같은 줄 · ?big=번호 이상만
+    let bw: Vec<Value> = tick.big.iter().map(|b| json!([b.0, b.1, r2(b.2), r3(b.3), b.4])).collect();
+    assert!(bw.len() > 3, "정답지에 고래 주문 {}", bw.len());
+    assert!(same_num(&got["big"], &json!(bw)), "big");
+    let cut = tick.big[tick.big.len() - 2].0;
+    assert!(same_num(&get_json(addr, &format!("/api/tick-bars?asset=eth&big={cut}"))["big"], &json!(bw[bw.len() - 2..])), "big 증분");
     for n in ["100", "500", "1000", "2000", "5000"] {
         let (g, w) = (&got["ticks"][n], &all["ticks"][n]);
         assert_eq!(g["k"], w["k"], "{n} k");
