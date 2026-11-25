@@ -75,17 +75,19 @@
       var e = pos && typeof entryUsdt === "function" ? entryUsdt(pos, p) : 0;
       if (e > 0) L.push({ v: e, c: css("var(--amber)") || css("var(--warn)"), t: "진입", dash: [] });
       var a = typeof armedLinesNow === "function" ? armedLinesNow() : null;
-      if (a && a.b) {
-        if (a.b.tp_level > 0) L.push({ v: +a.b.tp_level, c: css("var(--good)"), t: "익절", dash: [6, 4] });
-        if (a.b.sl_level > 0) L.push({ v: +a.b.sl_level, c: css("var(--bad)"), t: "손절", dash: [6, 4] });
-      }
+      // 2026-11-25 펜 메모 «풋프린트에서 지운 손절선이 틱 차트에 보인다»: 지운 선(sl_off·tp_off)은 가격(sl_level)이 남아 있어도 안 그린다 -- app.js renderArmedLines 와 같은 규칙(분할 조각도)
+      if (a && a.b) [["tp", "익절", "var(--good)"], ["sl", "손절", "var(--bad)"]].forEach(function (d) {
+        if (a.b[d[0] + "_off"]) return;
+        var legs = a.b[d[0] + "_legs"], vs = Array.isArray(legs) && legs.length > 1 ? legs.map(function (g) { return +g.level; }) : [+a.b[d[0] + "_level"]];
+        vs.forEach(function (v) { if (v > 0) L.push({ v: v, c: css(d[2]), t: d[1], dash: [6, 4] }); });
+      });
     } catch (err) { /* 계좌 없으면 선 없음 */ }
     return { now: p, lines: L };
   }
 
   function panelGeo(cv) {
     var W = cv.clientWidth, H = cv.clientHeight, narrow = W < 420;
-    var R = narrow ? 50 : 84, top = 22, volH = Math.max(18, Math.round(H * 0.16)), axisH = 14;
+    var R = narrow ? 50 : 84, top = 22, volH = Math.max(12, Math.round(H * 0.07)), axisH = 14;   // 2026-11-25 펜 메모 «거래량 막대는 줄이고 캔들을 더 크게»: 16% → 7%
     return { W: W, H: H, L: 6, R: R, top: top, plotW: W - 6 - R, priceH: H - top - volH - axisH - 6, volY: H - volH - axisH, volH: volH, axisY: H - axisH + 10, narrow: narrow };
   }
   // 보이는 봉 = 칸 폭에 맞춘 최근 봉(봉당 7px 안팎 · 최소 30봉) -- 오른쪽 끝 = 형성 봉
@@ -163,7 +165,7 @@
     if (!p || p.px < V.lo || p.px > V.hi) return;
     var yy = Math.round(Y(p.px)) + 0.5, c = css("var(--amber)") || css("var(--warn)");
     ctx.save(); ctx.strokeStyle = c; ctx.lineWidth = 1.6; ctx.globalAlpha = 0.9; ctx.beginPath(); ctx.moveTo(g.L, yy); ctx.lineTo(g.L + g.plotW, yy); ctx.stroke(); ctx.restore();
-    var s2 = "POC " + p.px.toFixed(D), w = ctx.measureText(s2).width + 8;
+    var s2 = (g.narrow ? "" : "POC ") + p.px.toFixed(D), w = ctx.measureText(s2).width + 8;
     ctx.fillStyle = c; ctx.fillRect(g.L + g.plotW + 2, yy - 8, Math.min(w, g.R - 2), 16);
     ctx.fillStyle = css("var(--on-fill)"); ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(s2, g.L + g.plotW + 5, yy);
   }
@@ -216,7 +218,8 @@
     });
     // 지표(5분 차트와 같은 스위치·색)
     indicators(rowsOf(n)).forEach(function (L) {
-      ctx.save(); ctx.strokeStyle = L.c; ctx.lineWidth = L.w || 1.4; ctx.globalAlpha = L.a || 0.9;
+      ctx.save(); ctx.beginPath(); ctx.rect(g.L, g.top, g.plotW, g.priceH); ctx.clip();   // 선이 칸 밖(제목·거래량)으로 안 나가게
+      ctx.strokeStyle = L.c; ctx.lineWidth = L.w || 1.4; ctx.globalAlpha = L.a || 0.9;
       ctx.setLineDash(L.dash && L.dash !== "none" ? String(L.dash).split(/\s+/).map(Number) : []);
       ctx.beginPath(); var st = false;
       rows.forEach(function (r, i) { var v = L.m.get(r[0]); if (v == null) { st = false; return; } var px = X(i), py = Y(v); if (st) ctx.lineTo(px, py); else { ctx.moveTo(px, py); st = true; } });
@@ -310,6 +313,7 @@
   }
   window.addEventListener("fpview", function (e) { setOn(e.detail === "tick"); });
   window.fpTickActive = function () { return S.on; };
+  window.fpTickPriceLines = function () { return priceLines().lines.map(function (l) { return [l.t, l.v]; }); };   // 시험·진단용(캔버스라 DOM 으로 못 본다)
   function init() {
     Array.prototype.forEach.call(document.querySelectorAll("#tickCharts .tkc-cell"), bind);
     setInterval(poll, 1000);
