@@ -477,6 +477,19 @@ pub trait Hl {
     fn idle(&mut self) -> Result<(), Reconnect>;
     /// 연결 끝. 반환 = 쉴 초.
     fn fail(&mut self) -> f64;
+    /// 연결 안 수신 공백(GAP_LOG_S 이상)을 로그에 남기나(hl_bt -- bbo·맥락을 한 연결로 받아 1초 공백이 드물다).
+    fn gap_log(&self) -> bool {
+        false
+    }
+}
+
+/// 수신 공백 로그 문턱(초). «끊김» 줄과 달리 글자 «끊김»을 쓰지 않는다(takeover.sh 가 «끊김» 줄 수 = 재접속 수로 센다).
+pub const GAP_LOG_S: f64 = 1.0;
+
+/// 벽시계 ms → «YYYY-MM-DDTHH:MM:SS.mmmZ»(UTC)
+pub fn utc(ms: i64) -> String {
+    let s = ms.div_euclid(1000);
+    format!("{}:{:02}:{:02}.{:03}Z", crate::depth::hour_key(ms).unwrap_or_default(), s.rem_euclid(3600) / 60, s.rem_euclid(60), ms.rem_euclid(1000))
 }
 
 impl Hl for crate::xyz::XyzCollector {
@@ -510,6 +523,9 @@ impl Hl for crate::hl_ctx::HlCtx {
         self.on_disconnect();
         3.0
     }
+    fn gap_log(&self) -> bool {
+        self.bt.is_some()
+    }
 }
 
 /// 영원히(xyz `run()` :107-152 · 자산 맥락 `run()` :120-168): [before = REST 메움(켰을 때)] → 접속 → 구독 → 수신 → 끊김이면 쉬고 다시.
@@ -517,19 +533,21 @@ pub async fn run_hl<C: Hl>(c: Rc<RefCell<C>>, url: String, mut before: impl FnMu
     let silence = Duration::from_secs_f64(crate::xyz::RECV_TIMEOUT_S); // 둘 다 receive(timeout=30)
     loop {
         before();
-        let why = match timeout(C::CONNECT, connect_async(url.as_str())).await {
+        let (why, last) = match timeout(C::CONNECT, connect_async(url.as_str())).await {
             Ok(Ok((ws, _))) => xyz_session(&c, ws, silence).await,
-            Ok(Err(e)) => format!("ClientConnectorError: {e}"),
-            Err(_) => "TimeoutError: ".into(),
+            Ok(Err(e)) => (format!("ClientConnectorError: {e}"), None),
+            Err(_) => ("TimeoutError: ".into(), None),
         };
         RECONNECTS.fetch_add(1, Relaxed);
         let wait = c.borrow_mut().fail();
-        eprintln!("[hl] 끊김 {why} -- {wait:.0}초 뒤 재접속");
+        let since = last.map(|t: f64| format!(" · 마지막 수신 {} ({:.1}초 전)", utc(crate::ms(t)), crate::rest::wall_s() - t)).unwrap_or_default();
+        eprintln!("[hl] {} 끊김 {why}{since} -- {wait:.0}초 뒤 재접속", utc(crate::ms(crate::rest::wall_s())));
         sleep(Duration::from_secs_f64(wait)).await;
     }
 }
 
-async fn xyz_session<C: Hl, S>(c: &Rc<RefCell<C>>, ws: tokio_tungstenite::WebSocketStream<S>, silence: Duration) -> String
+/// 반환 = (끊긴 까닭, 이 연결의 마지막 글자 수신 벽시계 초).
+async fn xyz_session<C: Hl, S>(c: &Rc<RefCell<C>>, ws: tokio_tungstenite::WebSocketStream<S>, silence: Duration) -> (String, Option<f64>)
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
@@ -537,21 +555,23 @@ where
     let subs = c.borrow_mut().open(mono_s());
     for s in subs {
         if let Err(e) = tx.send(Message::text(s)).await {
-            return format!("ClientConnectionResetError: {e}");
+            return (format!("ClientConnectionResetError: {e}"), None);
         }
     }
     let mut last = tokio::time::Instant::now();
+    let mut last_text: Option<f64> = None;
+    let log_gap = c.borrow().gap_log();
     let mut pinged: Option<tokio::time::Instant> = None;
     loop {
         let r = tokio::select! {
             _ = sleep_until(last + XYZ_HEARTBEAT), if pinged.is_none() => {
                 pinged = Some(tokio::time::Instant::now());
                 if let Err(e) = tx.send(Message::Ping(Default::default())).await {
-                    return format!("ClientConnectionResetError: {e}");
+                    return (format!("ClientConnectionResetError: {e}"), last_text);
                 }
                 continue;
             }
-            _ = sleep_until(pinged.unwrap_or(last) + XYZ_HEARTBEAT / 2), if pinged.is_some() => return "ConnectionError: ws CLOSED(pong 없음)".into(),
+            _ = sleep_until(pinged.unwrap_or(last) + XYZ_HEARTBEAT / 2), if pinged.is_some() => return ("ConnectionError: ws CLOSED(pong 없음)".into(), last_text),
             r = timeout_at(last + silence, rx.next()) => r,
         };
         let step = match r {
@@ -560,7 +580,7 @@ where
                 match c.borrow_mut().idle() {
                     Ok(()) => {
                         if let Err(e) = tx.send(Message::text(crate::xyz::PING)).await {
-                            return format!("ClientConnectionResetError: {e}");
+                            return (format!("ClientConnectionResetError: {e}"), last_text);
                         }
                         Ok(())
                     }
@@ -569,18 +589,25 @@ where
             }
             Ok(Some(Ok(Message::Text(t)))) => {
                 (last, pinged) = (tokio::time::Instant::now(), None);
-                c.borrow_mut().text(mono_s(), crate::rest::wall_s(), t.as_str())
+                let wall = crate::rest::wall_s();
+                if let (true, Some(p)) = (log_gap, last_text) {
+                    if wall - p >= GAP_LOG_S {
+                        eprintln!("[hl] {} 수신 공백 {:.1}초({} 부터)", utc(crate::ms(wall)), wall - p, utc(crate::ms(p)));
+                    }
+                }
+                last_text = Some(wall);
+                c.borrow_mut().text(mono_s(), wall, t.as_str())
             }
             Ok(Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)))) => {
                 (last, pinged) = (tokio::time::Instant::now(), None);
                 Ok(())
             }
-            Ok(Some(Ok(m))) => return format!("ConnectionError: ws {}", if m.is_binary() { "BINARY" } else { "CLOSE" }),
-            Ok(None) => return "ConnectionError: ws CLOSED".into(),
-            Ok(Some(Err(e))) => return format!("ConnectionError: {e}"),
+            Ok(Some(Ok(m))) => return (format!("ConnectionError: ws {}", if m.is_binary() { "BINARY" } else { "CLOSE" }), last_text),
+            Ok(None) => return ("ConnectionError: ws CLOSED".into(), last_text),
+            Ok(Some(Err(e))) => return (format!("ConnectionError: {e}"), last_text),
         };
         if let Err(e) = step {
-            return e.0;
+            return (e.0, last_text);
         }
     }
 }
