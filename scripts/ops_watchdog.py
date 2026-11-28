@@ -194,7 +194,8 @@ def dashboard_started_at(log_path: Path = DASHBOARD_LOG) -> float | None:
 
 def check_footprint_history(fetch=None, started_at: float | None = None) -> list[Check]:
     def _get(asset: str) -> int:
-        url = f"http://127.0.0.1:8787/api/footprint?asset={asset}&bars=12"
+        port = 8790 if (ROOT / "data/live/rtserve_live.on").exists() else 8787   # rtserve 전환 표식(2026-11-28)
+        url = f"http://127.0.0.1:{port}/api/footprint?asset={asset}&bars=12"
         with urllib.request.urlopen(url, timeout=8) as r:
             return len(json.load(r)["bars"])
     fetch = fetch or _get

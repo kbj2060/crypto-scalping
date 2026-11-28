@@ -304,13 +304,13 @@ async def main_async(args: argparse.Namespace) -> int:
         return 1
 
     state = load_state()
-    log(f"시작 -- base={args.base_url} poll={args.poll}s 구독={len(load_subscriptions())}대 "
+    log(f"시작 -- base={args.base_url or dashboard_base()} poll={args.poll}s 구독={len(load_subscriptions())}대 "
         f"dry_run={args.dry_run}")
 
     async with ClientSession(timeout=ClientTimeout(total=30)) as session:
         while True:
             try:
-                await run_cycle(session, args.base_url, state,
+                await run_cycle(session, args.base_url or dashboard_base(), state,
                                 private=private, subject=subject, dry_run=args.dry_run)
             except Exception as exc:  # noqa: BLE001 -- 한 사이클 실패로 데몬이 죽으면 안 된다
                 log(f"사이클 실패(다음 주기에 재시도): {exc!r}")
@@ -319,9 +319,16 @@ async def main_async(args: argparse.Namespace) -> int:
             await asyncio.sleep(args.poll)
 
 
+# 2026-11-28: data/live/rtserve_live.on(rtserve 전환 표식)이 있으면 응답 서버 = rtserve 8790. 없으면 예전 그대로 8787.
+def dashboard_base() -> str:
+    """매 사이클 다시 본다 -- 전환 뒤 워커를 다시 띄우지 않아도 따라간다. DASHBOARD_PORT 가 있으면 그것이 이긴다(예전처럼)."""
+    port = os.getenv("DASHBOARD_PORT") or ("8790" if (REPO_ROOT / "data/live/rtserve_live.on").exists() else "8787")
+    return f"http://127.0.0.1:{port}"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="대시보드 웹푸시 알림 데몬")
-    parser.add_argument("--base-url", default=f"http://127.0.0.1:{os.getenv('DASHBOARD_PORT', '8787')}")
+    parser.add_argument("--base-url", default=None, help="없으면 dashboard_base() 를 매 사이클")
     parser.add_argument("--poll", type=float, default=POLL_SECONDS)
     parser.add_argument("--once", action="store_true", help="한 사이클만 돌고 종료")
     parser.add_argument("--dry-run", action="store_true",

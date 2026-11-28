@@ -147,7 +147,6 @@ from dashboard.regime_band import regime_band_payload  # noqa: E402 -- ⑤ 예�
 from dashboard.sr_lean import sr_lean_payload  # noqa: E402 -- ETH «레벨 5분» 기울기 표식·칸(2026-11-18, 상시 워커가 쌓은 jsonl 꼬리)
 from dashboard.risk_radar import risk_radar_payload  # noqa: E402 -- ⑤ 예측 줄 «15분 폭»·«앞 1시간» + 꼬리표 «15분 N%»(2026-11-15, 매분 크론이 쓴 파일)
 from scripts.live_push_notifier_20260904 import PUSH_KINDS  # noqa: E402 -- 알림 센터 «무엇을 보내나»(2026-10-05)
-from scripts.ops_watchdog import send_telegram  # noqa: E402 -- 지지·저항 뚫림 알림(2026-10-25)
 # 2026-09-29 «시장 맥락» 카드(레버리지·교차 시장·호가 유동성·일정) -- 순수 함수 + 자체점검. 값은 전부 서술.
 from dashboard import market_ctx as mctx  # noqa: E402
 # 2026-10-28 «Macro Trend» 카드(사용자 «위 지표들을 대시보드 카드 하나로») -- ETF 이후 기준 13주 매크로 추세 · 표본내 연구, 신호 아님.
@@ -2027,88 +2026,14 @@ def make_app() -> web.Application:
                     print(f"situation {asset}: {exc!r}"[:240], flush=True)   # 2026-10-15 재기동 직후 원인이 로그에 안 남았다
             await asyncio.sleep(MICRO_REF_POLL_SECONDS)
 
-    async def chip_score_loop() -> None:
-        """머리 칩 «실전 성적» 기록기(2026-10-05). 화면이 안 열려 있어도 돈다 -- 칩 값은 미시 루프·상황 계산이
-        이미 들고 있는 것을 10초마다 **읽기만** 한다(계산 0). 결과가 정해진 줄만 월별 파일에 붙인다.
-        ponytail: 대기 중(15분 되돌림)은 메모리에만 -- 재기동하면 그 몇 건은 버린다. 칩 하나당 하루 수백 건이라 무시할 양."""
-        burst_on: dict[str, bool] = {}
-        pend_burst: list[dict] = []
-        while True:
-            await asyncio.sleep(10)
-            now, rows = time.time(), []
-            try:
-                # 2026-10-05 «30분 닿음» · 2026-10-18 경보기(전환 예고·탐지) 기록 제거 -- 옛 reach·bo 줄은 집계에서 무시
-                if "eth" in cctx:       # 청산 급증 배지는 ETH 만(근거가 ETH 뿐)
-                    mp = cctx["eth"].micro_state["payload"]
-                    mp = mp if mp.get("available") else {}
-                    liq, mid = mp.get("liq60") or {}, mp.get("mid")
-                    for i, side in enumerate(("long", "short")):
-                        on = float(liq.get(side) or 0) > LIQ_BURST_60S_USD[i]     # 배지와 같은 판정(mcLiqBurstSide)
-                        if on and not burst_on.get(side) and mid:
-                            pend_burst.append({"side": side, "t": now, "mid0": float(mid), "usd": float(liq.get(side) or 0)})
-                        burst_on[side] = on
-                    for b in [b for b in pend_burst if now >= b["t"] + 900]:
-                        pend_burst.remove(b)
-                        if mid:
-                            sgn = 1.0 if b["side"] == "long" else -1.0              # 롱 청산(가격 하락) 뒤 되돌림 = 위로
-                            rows.append({"k": "burst", "a": "eth", "t": int(b["t"]), "side": b["side"], "usd": round(b["usd"]),
-                                         "rev_bp": round((float(mid) / b["mid0"] - 1) * 1e4 * sgn, 2)})
-                if rows:
-                    with open(chip_score_path(now), "a", encoding="utf-8") as fh:
-                        fh.write("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # noqa: BLE001 -- 기록기 하나로 서버가 죽으면 안 된다
-                print(f"chip score: {type(exc).__name__}: {exc}", flush=True)
-
-    sr_watch: dict[str, dict] = {}   # 코인 -> {px, t(1초 마지막 체결 시각), dp, ku, sup[], res[]} -- sr_break_loop 이 10초마다 채운다
-
-    async def api_sr_watch(request: web.Request) -> web.Response:   # 2026-11-04 지지·저항 가까워짐 텔레그램 워커(scripts/live_sr_proximity_alert_20261104.py)가 읽는다 -- 읽기 전용·계산 0
-        return web.json_response({"now": time.time(), "assets": sr_watch}, headers=NOCACHE)
-
-    async def sr_break_loop() -> None:
-        """지지·저항 뚫림 텔레그램(2026-10-25 사용자 «지지와 저항라인들을 뚫었을 때마다 텔레그램»). 화면이 안 열려 있어도 돈다.
-        10초마다 코인별로 지난번 이후 1초 마지막 체결가 범위가 화면의 지지1~3·저항1~3(sr_breaks)에 닿았나 본다.
-        한 레벨은 지도 시각(밀도 이력 마지막 열의 정시 -- 화면 liqMapKnownUntilSec)이 바뀔 때까지 한 번만.
-        ponytail: 상태는 메모리 -- 재기동 직후 첫 틱은 기준만 잡는다(꺼져 있던 사이의 뚫림은 안 보낸다)."""
-        st: dict[str, dict] = {}
-        while True:
-            await asyncio.sleep(10)
-            for asset, f in flows.items():
-                try:
-                    m = await load_liquidation_map(asset)
-                    hh = m.get("heatmap_history") or []
-                    if not m.get("warmed_up") or not hh:
-                        continue
-                    ku = str(hh[-1].get("ts_utc"))[:13]
-                    s = st.get(asset)
-                    pts = [(t, float(c[6])) for t, c in sorted(list(f.footprint_state["sec"].items()))
-                           if c[6] and t > (s["sec"] if s else 0)]
-                    if not pts:
-                        continue
-                    if s is None or s["ku"] != ku:
-                        st[asset] = s = {"ku": ku, "broken": set(), "sec": (s or {}).get("sec", 0), "px": (s or {}).get("px")}
-                    prev = s["px"]
-                    s.update(sec=pts[-1][0], px=pts[-1][1])
-                    if prev is None:
-                        continue
-                    lo, hi = min(p for _, p in pts), max(p for _, p in pts)
-                    sup, res = [float(lv["price"]) for lv in m.get("support_levels") or []], [float(lv["price"]) for lv in m.get("resistance_levels") or []]
-                    hits = sr_breaks(sup, res, prev, lo, hi, s["broken"])
-                    sr_watch[asset] = {"px": s["px"], "t": s["sec"], "dp": f.spec.price_dp, "ku": ku, **sr_watch_view(sup, res, s["px"], s["broken"])}   # 2026-11-04 /api/sr-watch(가까워짐 워커)
-                    if not hits:
-                        continue
-                    dp, px = f.spec.price_dp, s["px"]
-                    lines = [f"{'🔻' if name.startswith('지지') else '🔺'} <b>{asset.upper()} {name} 뚫림</b> {lv:,.{dp}f}"
-                             + (f" · 다음 {name[:2]} {nxt:,.{dp}f} ({(nxt / px - 1) * 100:+.2f}%)" if nxt else "")
-                             for name, lv, nxt in hits]
-                    msg = "\n".join(lines + [f"지금 {px:,.{dp}f}"])
-                    sent = await asyncio.to_thread(send_telegram, msg)
-                    print(f"sr break {asset}: {[h[0] for h in hits]} sent={sent}", flush=True)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:  # noqa: BLE001 -- 알림 하나로 서버가 죽으면 안 된다
-                    print(f"sr break {asset}: {type(exc).__name__}: {exc}", flush=True)
+    # 2026-11-28 chip_score_loop(청산 급증 배지 채점)·sr_break_loop(지지·저항 뚫림 텔레그램)은 대시보드 밖 워커
+    #   scripts/live_sr_proximity_alert_20261104.py 로 옮겼다(rtserve 전환 -- 보내는 쪽은 늘 하나). 여기는 그 워커가 쓴 보기를 읽기만.
+    async def api_sr_watch(request: web.Request) -> web.Response:   # 2026-11-04 지지·저항 보기(코인 -> {px, t, dp, ku, sup[], res[]}) -- 읽기 전용·계산 0
+        try:
+            assets = json.loads((LIVE_DIR / "sr_watch.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            assets = {}
+        return web.json_response({"now": time.time(), "assets": assets}, headers=NOCACHE)
 
     async def api_chip_score(request: web.Request) -> web.Response:
         asset = str(request.query.get("asset") or "eth").lower()
@@ -2163,8 +2088,6 @@ def make_app() -> web.Application:
         app["micro_ref_tasks"] = [asyncio.create_task(collect_micro_ref(app, a)) for a in cctx]
         app["micro_ref_tasks"] += [asyncio.create_task(collect_mark_price(app, a)) for a in cctx]
         app["micro_ref_tasks"].append(asyncio.create_task(collect_force_orders(app)))
-        app["micro_ref_tasks"].append(asyncio.create_task(chip_score_loop()))
-        app["micro_ref_tasks"].append(asyncio.create_task(sr_break_loop()))
         app["micro_ref_tasks"].append(asyncio.create_task(pred_record_loop()))   # 2026-11-03 예측 기록(모델 파일 없으면 바로 끝)
 
     async def stop_micro_ref(app: web.Application) -> None:

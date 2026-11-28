@@ -68,5 +68,54 @@ class Proximity(unittest.TestCase):
         self.assertEqual(sr_watch_view([2300.0], [2280.0], 2290.0, set()), {"sup": [], "res": []})   # 가격이 넘어간 레벨은 그 쪽 목록에서 빠진다
 
 
+class MovedLoops(unittest.TestCase):
+    """2026-11-28 대시보드에서 옮겨 온 sr_break_loop·chip_score_loop 한 바퀴(가짜 응답 서버 · 텔레그램 0)."""
+
+    def test_sr_tick_baseline_then_break_message_and_watch_file(self):
+        import tempfile
+        from dashboard import server as srv
+        lm = {"warmed_up": True, "heatmap_history": [{"ts_utc": "2026-11-28T10:00:00Z"}],
+              "support_levels": [{"price": 2273.0}, {"price": 2257.0}], "resistance_levels": [{"price": 2317.0}]}
+        secs = [[[100, 0, 0, 0, 0, 0, 0, 2290.0]], [[100, 0, 0, 0, 0, 0, 0, 2290.0], [101, 0, 0, 0, 0, 0, 0, 2270.0], [102, 0, 0, 0, 0, 0, 0, 2275.0]]]
+        calls, sent = [], []
+
+        def get(path):
+            calls.append(path)
+            return lm if path.startswith("/api/liquidation-map") else {"seconds": secs[0] if len(sent) == 0 and len(calls) <= 2 else secs[1]}
+        with tempfile.TemporaryDirectory() as d:
+            w.SR_WATCH_PATH = Path(d) / "sr_watch.json"
+            st, watch = {}, {}
+            w.sr_tick(srv, ["eth"], st, watch, get=get, send=lambda m: sent.append(m) or True)
+            self.assertEqual(sent, [])                                   # 첫 바퀴 = 기준만(원본과 같다)
+            self.assertIn("since=0", calls[1])
+            w.sr_tick(srv, ["eth"], st, watch, get=get, send=lambda m: sent.append(m) or True)
+            self.assertIn("since=100", calls[3])                         # 커서 = 지난번 마지막 초
+            self.assertEqual(sent, ["🔻 <b>ETH 지지1 뚫림</b> 2,273.00 · 다음 지지 2,257.00 (-0.79%)\n지금 2,275.00"])
+            import json
+            self.assertEqual(json.loads(w.SR_WATCH_PATH.read_text())["eth"],
+                             {"px": 2275.0, "t": 102, "dp": 2, "ku": "2026-11-28T10", "sup": [2257.0], "res": [2317.0]})
+
+    def test_chip_tick_burst_row_after_15min(self):
+        import json
+        import tempfile
+        from dashboard import server as srv
+        thr = srv.LIQ_BURST_60S_USD[0]
+        mc = {"available": True, "mid": 2000.0, "burst": {"long_usd_60s": thr + 1, "short_usd_60s": 0}}
+        with tempfile.TemporaryDirectory() as d:
+            orig = srv.chip_score_path
+            srv.chip_score_path = lambda ts: Path(d) / "c.jsonl"
+            try:
+                cs = {}
+                w.chip_tick(srv, cs, 1000.0, get=lambda p: mc)
+                mc = {"available": True, "mid": 2010.0, "burst": {"long_usd_60s": 0, "short_usd_60s": 0}}
+                w.chip_tick(srv, cs, 1899.0, get=lambda p: mc)
+                self.assertFalse((Path(d) / "c.jsonl").exists())          # 15분 전엔 안 쓴다
+                w.chip_tick(srv, cs, 1900.0, get=lambda p: mc)
+                row = json.loads((Path(d) / "c.jsonl").read_text())
+                self.assertEqual(row, {"k": "burst", "a": "eth", "t": 1000, "side": "long", "usd": round(thr + 1), "rev_bp": 50.0})
+            finally:
+                srv.chip_score_path = orig
+
+
 if __name__ == "__main__":
     unittest.main()
