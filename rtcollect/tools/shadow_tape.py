@@ -77,6 +77,36 @@ INTENDED_EXTRA = {
 # 받은 시각(초·ms)을 빼면 같은 값이 여러 번 찍힌 줄 -- 몇 번 찍혔는지는 각자 받은 초에 달렸다 → 값 묶음의 «종류»(집합)로 견준다
 #   (xyz ctx: 파이썬에만 2,219 · Rust에만 1,024 가 대부분 같은 값의 찍힌 횟수 차였다)
 BAR_W = {"hl_xyz_1m": 60}
+# 1분봉 «같은 분의 앞선 스냅숏»: 거래소가 연결마다 candle 갱신을 묶어 보내 한 연결은 그 분 마지막 갱신(체결 1~수백 건)을 못 받는다
+#   (11-28 서버 7.5일: 값 다른 79봉 전부 이 꼴 · Rust 가 앞선 50·파이썬이 앞선 29 -- 양쪽 다 · REST 덮은 파이썬 봉과 Rust 는 644 중 636 같음)
+SNAP_TABLES = {"hl_xyz_1m"}
+PY_REST: list = []   # --py-rest-log: 원본 로그의 «접속 · 종목 REST 메움 N봉»(초, 종목, N) -- 그 N봉은 웹소켓이 아니라 REST 값(그림자 Rust 는 REST 꺼짐)
+
+
+def earlier(a: tuple, b: tuple) -> bool:
+    """a 가 b 와 같은 분의 앞선 스냅숏인가(열 = coin, ts_sec, open, high, low, close, volume, n): 시가 같음 · 체결 수 적음 · 거래량·고가 안 큼 · 저가 안 작음."""
+    return a[2] == b[2] and a[7] < b[7] and a[6] <= b[6] and a[3] <= b[3] and a[4] >= b[4]
+
+
+def rest_minutes(py) -> dict:
+    """{종목: {분}} -- 원본이 REST 로 쓴 봉 = 그 로그 줄 시각까지 그 종목 파이썬 봉 마지막 N개."""
+    out: dict = {}
+    for t, coin, n in PY_REST:
+        for (s,) in py.execute("SELECT ts_sec FROM hl_xyz_1m WHERE coin = ? AND ts_sec <= ? ORDER BY ts_sec DESC LIMIT ?", [coin, int(t), n]):
+            out.setdefault(coin, set()).add(s // 60)
+    return out
+
+
+def read_rest_log(pattern: str) -> list:
+    import glob
+    import re
+    out = []
+    for f in sorted(glob.glob(pattern)):
+        for line in open(f, errors="replace"):
+            m = re.match(r"\[xyz100\] (\S+ \S+) 접속 · (\S+) REST 메움 (\d+)봉", line)
+            if m and int(m[3]):
+                out.append((time.mktime(time.strptime(m[1], "%Y-%m-%d %H:%M:%S")), m[2], int(m[3])))   # 로그는 서버 지역 시각
+    return out
 SET_TABLES = {"hl_xyz_ctx_1s", "hl_asset_ctx"}
 SYMS: set = set()   # --syms: 이 종목만 견준다(hl_bt 코인 하나 -- 다른 코인 맥락은 다른 그림자·다른 재기동이라 hl_ctx check 몫)
 SUBSET = False   # --subset: Rust 가 받은 것이 파이썬에 있나만(파이썬이 오래 모은 «파이썬에만»은 세지 않음 -- 뉴스 한 회차)
@@ -142,6 +172,20 @@ def silences(a_ts: list, b_ts: list, gap: float, skip: list) -> list:
     return sorted(out, key=lambda g: g[0] - g[1])
 
 
+EPISODE_S = 10   # 한 끊김 = 한 일화: 사이가 이 초보다 짧은 빈틈들(다시 붙은 직후 드문 줄 1~2개가 끼어 쪼개진 것)은 하나로 -- 11-23 14:00 xyz 1분 정지가 3·7·…초 빈틈 여럿으로 쪼개져 «끊김» 한 줄이 한 조각만 설명
+
+
+def episodes(gs: list) -> list:
+    """빈틈들 → 일화(사이 < EPISODE_S 면 잇는다) · 긴 것부터."""
+    out: list = []
+    for a, b in sorted(gs):
+        if out and a - out[-1][1] < EPISODE_S:
+            out[-1] = (out[-1][0], max(out[-1][1], b))
+        else:
+            out.append((a, b))
+    return sorted(out, key=lambda g: g[0] - g[1])
+
+
 def merge(out: list) -> list:
     merged: list = []
     for a, b in sorted(out):
@@ -190,7 +234,7 @@ def proc_holes(con, tabs: list, starts: list, margin: int, py=None, reconnects: 
     gap = max(5.0, 10.0 * (d[len(d) // 2] if d else 1.0))
     if t.startswith("hl_"):   # HL 맥락(activeAssetCtx·xyz ctx)은 매 블록 ~1/초로 끊이지 않는다 -- 재접속 전 3초 쉼(두 구현 같음)이 만든 빈틈(초 차 ≥3)을 잡는다(11-22: 10초 문턱이라 «끊김» 134줄이 0번 설명)
         gap = 2.0
-    rsil, psil = silences(ts, pts, gap, hs), silences(pts, ts, gap, hs)
+    rsil, psil = episodes(silences(ts, pts, gap, hs)), silences(pts, ts, gap, hs)
     took = rsil[:reconnects]
     note = (f" · 연결 끊김(촘촘한 표 {t} 에서 {gap:.0f}초 넘게 한쪽만 빔): Rust {len(rsil)}번(그림자 로그 «끊김» {reconnects}줄 → {len(took)}번 설명 · 합 {sum(b - a for a, b in took):.0f}초)"
             f" · 파이썬 {len(psil)}번(합 {sum(b - a for a, b in psil):.0f}초)") if rsil or psil else ""
@@ -264,7 +308,7 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
     kidx = [names.index(k) for k in key] if key else None
     keepcols = [i for i, c in enumerate(names) if c not in drop]   # 비교에서 빼는 열(받은 시각) -- 창·종목 거르기에는 쓴다
     allsym = excl.get(None, set())
-    n_cmp = n_bad = only_py = only_rs = n_down = n_warm = 0
+    n_cmp = n_bad = only_py = only_rs = n_down = n_warm = n_snap = 0
     skipped: set = set()
     down = sym_down(rs, t, tcol, ms, SYM_COL.get(t), list(proc), margin)
     wi = names.index("warm") if "warm" in names else None
@@ -329,7 +373,9 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
             for k in dp.keys() & dr.keys():
                 n_cmp += 1
                 diff = [(kn, x, y) for kn, x, y in zip(knames, dp[k], dr[k]) if not same(x, y)]
-                if diff:
+                if diff and t in SNAP_TABLES and (earlier(dp[k], dr[k]) or earlier(dr[k], dp[k])):
+                    n_snap += 1
+                elif diff:
                     n_bad += 1
                     if len(first) < show:
                         first.append(f"다름 {k}: " + " · ".join(f"{kn} 파이썬 {x} / Rust {y}" for kn, x, y in diff[:4]) + (f" … 외 {len(diff) - 4}칸" if len(diff) > 4 else ""))
@@ -388,6 +434,8 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
     bad = n_bad + (0 if SUBSET else only_py - dup_py - same_sec[0]) + (0 if t in INTENDED_EXTRA else only_rs - dup_rs - resub - same_sec[1])
     if t == "hl_xyz_ctx_1s" and only_py + only_rs <= 0.005 * n_cmp:   # 받은 초가 1칸 밀린 합침 -- §5 의 0.5% 기준
         bad = n_bad
+    if n_snap > 0.005 * n_cmp:   # 앞선 스냅숏이 0.5% 를 넘으면 연결 잡음이 아니다 -- 전부 설명 못 함
+        bad += n_snap
     TALLY[0] += n_cmp
     TALLY[1] += bad
     line = (f"{t}: 비교 {n_cmp:,}행 · 불일치 {n_bad:,} · 파이썬에만 {only_py:,} · Rust에만 {only_rs:,}{rs_note} · 범위 [{s0}, {s1}) 초 · "
@@ -396,6 +444,7 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
             f"{hot}{f' · 준비 구간(warm) 봉 {n_warm:,} 뺌' if n_warm else ''}"
             f"{f' · 같은 줄 두 번(설명) 파이썬 {dup_py:,}·Rust {dup_rs:,}' if dup_py or dup_rs else ''}"
             f"{f' · Rust 재구독 현재값(직전 파이썬 줄과 같은 값 · 설명) {resub:,}' if resub else ''}"
+            f"{f' · 같은 분의 앞선 스냅숏(한 연결이 마감 갱신을 못 받음 · 0.5% 안이면 설명) {n_snap:,}' if n_snap else ''}"
             f"{f' · 같은 초(±1)에 다른 쪽도 받음(값만 다름 · 설명) 파이썬에만 {same_sec[0]:,}·Rust에만 {same_sec[1]:,}' if any(same_sec) else ''}")
     return line + "".join(f"\n    {x}" for x in first)
 
@@ -406,7 +455,9 @@ def run(py_path: Path, rs_path: Path, lo=None, hi=None, margin=5, window=3600, s
         excl = excluded_minutes(py, rs, margin)
         common = sorted(tables(py) & tables(rs) & TABLES.keys())
         proc, note = proc_holes(rs, [(t, TABLES[t][0], TABLES[t][1]) for t in common], list(starts), margin, py, reconnects)
-        return ([note.lstrip(" ·")] if note else []) + [compare_table(py, rs, t, lo, hi, margin, window, show, excl, proc) for t in common] or ["비교할 표가 없다"]
+        rm = rest_minutes(py) if PY_REST and "hl_xyz_1m" in common else {}
+        ex1 = {s: excl.get(s, set()) | rm.get(s, set()) for s in excl.keys() | rm.keys()}   # REST 로 쓴 분은 1분봉만 뺀다(맥락 줄은 웹소켓 그대로)
+        return ([note.lstrip(" ·")] if note else []) + [compare_table(py, rs, t, lo, hi, margin, window, show, ex1 if t == "hl_xyz_1m" else excl, proc) for t in common] or ["비교할 표가 없다"]
     finally:
         py.close()
         rs.close()
@@ -1020,6 +1071,44 @@ def selftest() -> None:
         run(e1, e2)
         SYMS.clear()
         assert TALLY[1] == 9, TALLY
+        # xyz 1분봉(11-28): 같은 분의 앞선 스냅숏 = 설명(0.5% 안) · REST 로 쓴 분 = 뺀다 -- 양성 대조: 값 0.01% · 봉 0.1% 빼기 · 앞선 스냅숏 1%
+        def bars(f, edit=()):
+            con = sqlite3.connect(f)
+            con.execute("CREATE TABLE IF NOT EXISTS hl_xyz_1m(coin TEXT, ts_sec INTEGER, open REAL, high REAL, low REAL, close REAL, volume REAL, n INTEGER, PRIMARY KEY(coin, ts_sec))")
+            con.execute("DELETE FROM hl_xyz_1m")
+            rows = {k: ["xyz:SP500", T + 60 * k, 100.0, 101.0, 99.0, 100.5, 10.0, 50] for k in range(1000)}
+            for k, v in edit:
+                if v is None:
+                    rows.pop(k)
+                else:
+                    rows[k][2:] = v
+            con.executemany("INSERT INTO hl_xyz_1m VALUES (?,?,?,?,?,?,?,?)", list(rows.values()))
+            con.commit()
+            con.close()
+        h1, h2 = Path(d) / "h1.sqlite", Path(d) / "h2.sqlite"
+        snap = [100.0, 100.8, 99.0, 100.2, 9.0, 48]   # 앞선 스냅숏: 체결 2건 덜 받음
+        bars(h1)
+
+        def bad(rs_edit, py_edit=()):
+            bars(h1, py_edit)
+            bars(h2, rs_edit)
+            TALLY[:] = [0, 0]
+            out = next(x for x in run(h1, h2) if x.startswith("hl_xyz_1m"))
+            return TALLY[1], out
+        b0, o = bad([(10, snap)], [(30, snap)])   # Rust 가 앞선 1 · 파이썬이 앞선 1
+        assert b0 == 0 and "앞선 스냅숏(한 연결이 마감 갱신을 못 받음 · 0.5% 안이면 설명) 2" in o, o
+        assert bad([(20, [100.0, 101.0, 99.0, 100.5 * 1.0001, 10.0, 50])])[0] == 1   # 값 0.01%(체결 수 같음) → 설명 못 함
+        assert bad([(20, [100.0, 101.0, 99.0, 100.5, 10.0 * 1.0001, 50])])[0] == 1
+        assert bad([(k, snap) for k in range(0, 1000, 100)])[0] == 10   # 1% 가 앞선 스냅숏 → 연결 잡음 아님 → 전부
+        assert bad([(500, None)])[0] == 1   # Rust 봉 0.1% 빠짐
+        assert bad([(k, None) for k in range(50, 1000, 100)])[0] == 10   # 1%
+        (Path(d) / "xyz100_x.log").write_text(f"[xyz100] {time.strftime('%F %T', time.localtime(T + 60 * 501 + 5))} 접속 · xyz:SP500 REST 메움 2봉\n")
+        PY_REST[:] = read_rest_log(str(Path(d) / "xyz100_*.log"))
+        b1, o = bad([(500, None), (501, snap[:3] + [100.4, 9.5, 49])])   # 원본이 REST 로 쓴 두 분(500 = Rust 에 없음 · 501 = 다름)은 뺀다
+        assert b1 == 0 and "뺀 (종목,분) 2" in o, o
+        assert bad([(499, None)])[0] == 1   # REST 분 밖은 그대로
+        PY_REST.clear()
+        assert episodes([(0, 3), (5, 8), (30, 33), (100, 101)]) == [(0, 8), (30, 33), (100, 101)]
         # 첫 기동 전(-inf)은 뺀다: 기동 T+600 하나면 그 앞 Rust 자료가 있어도 첫 기동 = 로그의 가장 이른 것
         assert holes([T + 603], [t0 := T + 600], 5) == [(float("-inf"), t0 + 8)]
         # 재기동: 죽인 때(T+100) 뒤 빈틈을 다시 붙을 때 받은 «최근 체결»(T+148~149)이 T 바로 앞까지 메워도, 가장 큰 빈틈 [T+100, T+148] 을 찾는다
@@ -1069,6 +1158,7 @@ def main() -> None:
     ap.add_argument("--summary", action="store_true", help="끝에 «요약: 견준 N · 설명 못 함 M» · M>0 이거나 N=0 이면 종료코드 1(takeover.sh check)")
     ap.add_argument("--subset", action="store_true", help="Rust 에만·다름만 센다(파이썬이 오래 모은 것은 안 셈)")
     ap.add_argument("--syms", default="", help="쉼표 목록 -- 이 종목만 견준다(hl_bt 코인)")
+    ap.add_argument("--py-rest-log", default="", help="원본 xyz100 로그 glob -- «REST 메움 N봉» 줄의 봉(원본이 REST 로 덮은 분)은 hl_xyz_1m 에서 뺀다(takeover.sh xyz)")
     ap.add_argument("--jsonl", default="", help="두 경로 = JSONL · 값 = 열쇠 칸(origin · weekend)")
     ap.add_argument("--cboe", action="store_true", help="두 경로 = cboe_option_state.json")
     ap.add_argument("--bt", action="store_true", help="두 경로 = HL .bt 코인 폴더 · --hours 시작,끝")
@@ -1083,6 +1173,7 @@ def main() -> None:
     global SUBSET
     SUBSET = a.subset
     SYMS.update(x for x in a.syms.split(",") if x)
+    PY_REST[:] = read_rest_log(a.py_rest_log) if a.py_rest_log else []
     if a.jsonl:
         out = compare_jsonl(a.py, a.rs, a.jsonl)
     elif a.cboe:

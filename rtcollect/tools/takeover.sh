@@ -81,7 +81,7 @@ case "$KIND" in
   binance_ctx)  PYSUP=supervisor_binance_ctx.sh; PYRUN=live_binance_ctx_collector_20261001.py; COPY="BN_CTX_MARK_SYMBOLS BN_CTX_OI_SYMBOLS BN_CTX_OI_SLOW_SYMBOLS"
                 TENV="BN_CTX_DB=data/hot/binance_ctx.sqlite RTCOLLECT_REST=1"; CHK="sq:data/hot/binance_ctx.sqlite:data/hot/rtcollect/binance_ctx.sqlite"; W="data/hot/binance_ctx.sqlite data/hot/binance_ctx.sqlite-wal" ;;
   xyz)          PYSUP=supervisor_xyz100.sh; PYRUN=live_xyz100_collector_20261014.py; COPY=HL_XYZ_COINS
-                TENV="HL_XYZ_DB=data/hot/hl_xyz.sqlite RTCOLLECT_REST=1"; CHK="sq:data/hot/hl_xyz.sqlite:data/hot/rtcollect/hl_xyz.sqlite"; W="data/hot/hl_xyz.sqlite data/hot/hl_xyz.sqlite-wal" ;;
+                TENV="HL_XYZ_DB=data/hot/hl_xyz.sqlite RTCOLLECT_REST=1"; CHK="sq:data/hot/hl_xyz.sqlite:data/hot/rtcollect/hl_xyz.sqlite"; PYREST="logs/supervisor/xyz100_*.log"; W="data/hot/hl_xyz.sqlite data/hot/hl_xyz.sqlite-wal" ;;
   hl_ctx)       PYSUP=supervisor_hyperliquid_book_ticker.sh; PYRUN=live_hyperliquid_book_ticker_collector_20260923.py; SELV=HL_BT_COIN; SELD=ETH; XV=HL_BT_CTX_ONLY; XD=""; XW=1; GROUP=1; RVAR=HL_BT_COIN
                 TENV="HL_CTX_DB_PATH=data/hot/hl_ctx.sqlite"; W="data/hot/hl_ctx.sqlite data/hot/hl_ctx.sqlite-wal"
                 CHK="sq:data/hot/hl_ctx.sqlite:$(ls data/hot/rtcollect/hl_ctx.sqlite data/hot/rtcollect/hl_ctx_only.sqlite 2>/dev/null | paste -sd+)"   # hl_bt 그림자(전체 모드 코인) + hl_ctx 그림자(CTX_ONLY 코인)를 이어 하나로
@@ -279,7 +279,7 @@ check() {
                 for c in $(log_syms); do LOGSYM="$c"
                   out+="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "$py" "$rs" --starts "$(starts)" --reconnects "$(reconn)" --syms "$c" --summary | sed "s/^/[$c] /; s/^\[$c\] 요약/요약/")"$'\n' || rc=1
                 done; LOGSYM=""
-              else out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "$py" "$rs" --starts "$ST" --reconnects "$RC" ${SYMS:+--syms "$SYMS"} --summary)"; fi ;;
+              else out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "$py" "$rs" --starts "$ST" --reconnects "$RC" ${SYMS:+--syms "$SYMS"} ${PYREST:+--py-rest-log "$PYREST"} --summary)"; fi ;;
       events) out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" --events "$py" "$rs" --summary)" ;;
       json)   out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" --json 'liq_tab_*.json' "$py" "$rs" --summary)" ;;
       duck)   out="$(nice -n 10 "$PYC" "$TOOLS/shadow_duck.py" "$py" "$rs" --starts "$ST" ${CHECK_FROM:+--from "$CHECK_FROM" --to "$(date +%s)"} --summary)" ;;
