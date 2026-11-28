@@ -10,7 +10,7 @@ use crate::fp::{Anchor, Clip, Col, Prim};
 use serde_json::Value;
 
 /// 6433 n(v, dp) = toLocaleString("en-US", 소수 dp 자리 고정) -- 0 이상만(sg 가 부호를 뗀다) · 반올림은 toFixed 와 같은 «반은 0 에서 먼 쪽»
-fn n(v: f64, dp: usize) -> String {
+pub fn n(v: f64, dp: usize) -> String {
     let s = to_fixed(v, dp);
     let (i, f) = s.split_once('.').map_or((s.as_str(), None), |(a, b)| (a, Some(b)));
     let mut g = String::new();
@@ -144,6 +144,7 @@ fn place(p: Prim, ox: f64, oy: f64, s: f64) -> Prim {
         Prim::Dashed { pts, c, a, lw, on, off, clip } => Prim::Dashed { pts: pts.iter().map(|p| q(p[0], p[1])).collect(), c, a, lw, on: on * s, off: off * s, clip },
         Prim::Circle { x, y, r, c, a, clip } => { let [x, y] = q(x, y); Prim::Circle { x, y, r: r * s, c, a, clip } }
         Prim::Text { x, y, s: st, size, wt, c, a, anchor, halo, clip } => { let [x, y] = q(x, y); Prim::Text { x, y, s: st, size: size * s, wt, c, a, anchor, halo, clip } }
+        p @ (Prim::Area { .. } | Prim::Mono { .. }) => p, // 시장 맥락은 안 쓴다
     }
 }
 
@@ -168,7 +169,7 @@ mod t {
             Prim::Line { pts, c, a, dash, .. } => ("line".into(), vec![pts[0][0], pts[0][1], pts[1][0], pts[1][1], dash.unwrap_or(0.0)], *c, *a),
             Prim::Circle { x, y, r, c, a, .. } => ("circle".into(), vec![*x, *y, *r], *c, *a),
             Prim::Text { x, y, s, size, wt, c, a, .. } => (format!("text {s} {wt}"), vec![*x, *y, *size], *c, *a),
-            Prim::Dashed { .. } => unreachable!(),
+            Prim::Dashed { .. } | Prim::Area { .. } | Prim::Mono { .. } => unreachable!(),
         }
     }
     fn js_key(s: &Value) -> Vec<(String, Vec<f64>, Col, f64)> {

@@ -23,6 +23,9 @@ pub fn rgba(c: Col, a: f64) -> Color32 {
         Col::Neutral => (0xcb, 0xd1, 0xe3, 1.0),
         Col::White => (255, 255, 255, 1.0), // rgb(var(--lift) / a) · 다크 --lift = 255 255 255(시장 맥락 게이지 바탕)
         Col::Lift => (0x8b, 0x94, 0x9e, 1.0), // var(--lift-solid, #8b949e) -- styles.css 에 토큰이 없어 대체값
+        Col::Lev10 => (0x7d, 0xd3, 0xfc, 1.0),
+        Col::Lev25 => (0x8b, 0x93, 0xf0, 1.0),
+        Col::Lev50 => (0xe6, 0xc4, 0x5c, 1.0),
 
     };
     Color32::from_rgba_unmultiplied(r, g, b, (255.0 * a0 * a).round().clamp(0.0, 255.0) as u8)
@@ -75,13 +78,14 @@ fn round_rect(p: &Painter, r: Rect, rx: f32, c: Color32) {
     p.add(Shape::convex_polygon(v, c, Stroke::NONE));
 }
 
-pub fn text(p: &Painter, at: Pos2, s: &str, size: f32, wt: u16, c: Color32, anchor: Anchor, halo: bool) {
-    let g = p.layout_no_wrap(s.to_owned(), fid(size, wt), c);
+pub fn text(p: &Painter, at: Pos2, s: &str, size: f32, wt: u16, c: Color32, anchor: Anchor, halo: bool) { text_f(p, at, s, fid(size, wt), c, anchor, halo) }
+pub fn text_f(p: &Painter, at: Pos2, s: &str, font: FontId, c: Color32, anchor: Anchor, halo: bool) {
+    let g = p.layout_no_wrap(s.to_owned(), font.clone(), c);
     let base = g.rows.first().and_then(|r| r.row.glyphs.first().map(|gl| r.pos.y + gl.pos.y)).unwrap_or(0.0);
     let dx = match anchor { Anchor::Start => 0.0, Anchor::Middle => g.size().x / 2.0, Anchor::End => g.size().x };
     let at = at - vec2(dx, base);
     if halo { // svg paint-order: stroke 3px(바깥 1.5px) 차트 바탕색 -- 여덟 방향으로 1.5px 밀어 깐다
-        let hg = p.layout_no_wrap(s.to_owned(), fid(size, wt), rgba(Col::ChartBg, 1.0));
+        let hg = p.layout_no_wrap(s.to_owned(), font, rgba(Col::ChartBg, 1.0));
         for k in 0..8 { let a = (45.0 * k as f32).to_radians(); p.galley(at + vec2(1.5 * a.cos(), 1.5 * a.sin()), hg.clone(), Color32::WHITE); }
     }
     p.galley(at, g, Color32::WHITE);
@@ -139,7 +143,7 @@ pub fn paint(p: &Painter, prims: &[Prim], origin: Pos2, plot: [f64; 4], lane: [f
     let cut = |r: [f64; 4]| p.with_clip_rect(Rect::from_min_size(pt(r[0], r[1]), vec2(r[2] as f32, r[3] as f32)).intersect(p.clip_rect()));
     let (plot, lane) = (cut(plot), cut(lane));
     for pr in prims {
-        let clip = match pr { Prim::Rect { clip, .. } | Prim::StrokeRect { clip, .. } | Prim::Line { clip, .. } | Prim::Text { clip, .. } | Prim::Circle { clip, .. } | Prim::Dashed { clip, .. } => *clip };
+        let clip = match pr { Prim::Rect { clip, .. } | Prim::StrokeRect { clip, .. } | Prim::Line { clip, .. } | Prim::Text { clip, .. } | Prim::Circle { clip, .. } | Prim::Dashed { clip, .. } => *clip, Prim::Area { .. } | Prim::Mono { .. } => Clip::No };
         let pa = match clip { Clip::No => p, Clip::Plot => &plot, Clip::Lane => &lane };
         match pr {
             &Prim::Rect { x, y, w, h, c, a, rx, .. } => {
@@ -175,6 +179,16 @@ pub fn paint(p: &Painter, prims: &[Prim], origin: Pos2, plot: [f64; 4], lane: [f
                 pa.extend(Shape::dashed_line(&v, Stroke::new(*lw as f32, rgba(*c, *a)), *on as f32, *off as f32));
             }
             Prim::Text { x, y, s, size, wt, c, a, anchor, halo, .. } => text(pa, pt(*x, *y), s, *size as f32, *wt, rgba(*c, *a), *anchor, *halo),
+            Prim::Mono { x, y, s, size, wt, c, a, anchor, halo } => text_f(pa, pt(*x, *y), s, mono(*size as f32, *wt), rgba(*c, *a), *anchor, *halo),
+            Prim::Area { pts, base, c, a } => { // 사다리꼴 띠 한 그물(겹친 테두리 없이 -- 볼록 조각마다 그리면 .10 면에 이음매 줄이 보인다)
+                let mut m = egui::Mesh::default();
+                for w in pts.windows(2) {
+                    let i = m.vertices.len() as u32;
+                    for q in [[w[0][0], w[0][1]], [w[1][0], w[1][1]], [w[1][0], *base], [w[0][0], *base]] { m.colored_vertex(pt(q[0], q[1]), rgba(*c, *a)); }
+                    m.add_triangle(i, i + 1, i + 2); m.add_triangle(i, i + 2, i + 3);
+                }
+                pa.add(Shape::mesh(m));
+            }
         }
     }
 }

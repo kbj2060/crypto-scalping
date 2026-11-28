@@ -99,17 +99,18 @@ fn truthy<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
 
 /// Date.parse(ISO 글자) → 초(내림). 받는 꼴: YYYY-MM-DDTHH:MM:SS[.fff][Z|±HH:MM] · 시간대 없으면 UTC 로 본다
 // ponytail: JS 는 시간대 없는 날짜+시각을 지역 시각으로 읽는다 -- 서버 ts 는 늘 +00:00/Z 를 단다(fixture 도). 아니면 여기서 tz 를 받는다
-pub fn iso_sec(s: &str) -> Option<i64> {
+pub fn iso_sec(s: &str) -> Option<i64> { iso_ms(s).map(|ms| (ms / 1000.0).floor() as i64) }
+/// Date.parse(ISO)(밀리초 · 소수 초 그대로)
+pub fn iso_ms(s: &str) -> Option<f64> {
     let b = s.as_bytes();
     let n = |a: usize, l: usize| s.get(a..a + l)?.parse::<i64>().ok();
     if b.len() < 19 { return None; }
     let (y, mo, d, h, mi, se) = (n(0, 4)?, n(5, 2)?, n(8, 2)?, n(11, 2)?, n(14, 2)?, n(17, 2)?);
     let mut i = 19;
     let mut ms = 0.0;
-    if b.get(i) == Some(&b'.') { let j = i + 1 + b[i + 1..].iter().take_while(|c| c.is_ascii_digit()).count(); ms = format!("0{}", &s[i..j]).parse::<f64>().ok()? * 1000.0; i = j; }
+    if b.get(i) == Some(&b'.') { let j = i + 1 + b[i + 1..].iter().take_while(|c| c.is_ascii_digit()).count(); ms = format!("0{}", &s[i..j]).parse::<f64>().ok()?.mul_add(1000.0, 1e-9).floor(); i = j; } // Date.parse = 밀리초까지(아래는 버림)
     let off = match b.get(i) { None | Some(b'Z') => 0, Some(&c) if c == b'+' || c == b'-' => { let v = n(i + 1, 2)? * 3600 + n(i + 4, 2)? * 60; if c == b'+' { v } else { -v } } _ => return None };
-    let ms_total = (days_from_civil(y, mo, d) * 86_400 + h * 3600 + mi * 60 + se - off) as f64 * 1000.0 + ms;
-    Some((ms_total / 1000.0).floor() as i64)
+    Some((days_from_civil(y, mo, d) * 86_400 + h * 3600 + mi * 60 + se - off) as f64 * 1000.0 + ms)
 }
 /// new Date(sec*1000).toISOString()
 pub fn iso_of(sec: i64) -> String {
