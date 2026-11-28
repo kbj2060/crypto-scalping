@@ -13,6 +13,7 @@ pub mod ctx_mc;
 pub mod ctx_micro;
 pub mod ctx_rest;
 pub mod ctx_x;
+pub mod filefeed;
 pub mod fpd;
 pub mod fpweek;
 pub mod heatmap;
@@ -280,6 +281,7 @@ fn routes(p: &str) -> Vec<(&'static str, Handler)> {
     v.extend(mc_live::routes(p));
     v.extend(mhist::routes(p));
     v.extend(fpweek::routes(p));
+    v.extend(filefeed::routes(p));
     v.extend(signals::routes(p));
     v.extend(posprof::routes(p));
     v
