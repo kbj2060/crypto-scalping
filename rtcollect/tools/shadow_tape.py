@@ -197,6 +197,8 @@ def merge(out: list) -> list:
 
 
 RASTER_L1 = 0.02
+RASTER_WARM = 3600   # ponytail: 그림자 (재)기동 뒤 1시간은 래스터 L1 기준에서 뺀다 -- 새 스냅숏으로 시작한 북과 오래 산 파이썬 북의 «diff 가 아직 안 닿은 레벨»이 갈린다
+#   (서버 SKHYNIX 11-21T14: 14:09 재기동 전 분마다 L1 0.0 → 14:09 0.054 → 14:40 0.020 → 15시 0.013 → 18시 0.001 · 첫 기동 03시·재기동 07시도 같은 꼴) -- 더 느린 종목이 나오면 늘린다
 RASTER_KEEP = 0.035   # 래스터 기준 칸 = mid ±3.5%(raster.rs PRUNE_PCT 4% − 가지치기 사이 mid 이동 0.5%p) -- compare_raster
 RECONNECT_MS = 3000   # .bt 연결 끊김 빈틈(재접속 전 3초 쉼 · 두 구현 같음)
 SKIP_RUN = 3   # .bt 연결마다 다른 표본: 공통 행 사이 한쪽만의 행 수 상한(다른 쪽도 그 칸에 제 행이 없을 때 · compare_bt)
@@ -571,10 +573,13 @@ def compare_raster(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", star
     hours = [(pp.stem, pp, rs_dir / pp.name) for pp in sorted(py_dir.glob("*.f32")) if lo <= pp.stem <= hi and (rs_dir / pp.name).exists()]
     data = [(h, rows(pp), rows(rp)) for h, pp, rp in hours]
     down = holes(sorted({t // 1000 for _, _, b in data for t in b}), list(starts), margin) if starts else []
-    res, n_down = [], 0
+    res, n_down, n_warm = [], 0, 0
     for h, a, b in data:
         both = [t for t in sorted(a.keys() & b.keys()) if not any(x <= t // 1000 < y for x, y in down)]
         n_down += len(a.keys() & b.keys()) - len(both)
+        nb = len(both)
+        both = [t for t in both if not any(s0 <= t // 1000 < s0 + RASTER_WARM for s0 in starts)]
+        n_warm += nb - len(both)
         same_hdr = sum(a[t][:2] == b[t][:2] for t in both)
         fr, near, l1, l1n, l1all = [], [], [], [], []
         L = lambda u, v: sum(abs(x - y) for x, y in zip(u, v)) / (sum(abs(x) + abs(y) for x, y in zip(u, v)) or 1)   # noqa: E731
@@ -602,6 +607,7 @@ def compare_raster(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", star
         TALLY[1] += int(bool(both) and (med(l1) is None or med(l1) > RASTER_L1))
         res.append(f"raster {h}: 두 쪽 유효 초 {len(both):,} · bin_lo·mid 같음 {same_hdr:,} · 칸 같음 비율 중앙 전체 {med(fr)} · mid ±20칸 {med(near)} · "
                    f"잔량 상대차(L1 · 가지치기 안 ±{RASTER_KEEP:.1%}) 중앙 {med(l1)}(전체 칸 {med(l1all)} · mid ±20칸 {med(l1n)}) · 파이썬만 유효 {len(a.keys() - b.keys()):,} · Rust만 유효 {len(b.keys() - a.keys()):,}")
+    res += [f"raster: 기동 뒤 {RASTER_WARM}초 준비 구간에서 뺀 초 {n_warm:,}"] if n_warm else []
     return (res + [f"raster:{down_note(down, n_down)}"] if down else res) or ["raster: 두 쪽에 같은 시 파일이 없다"]
 
 
@@ -976,6 +982,14 @@ def selftest() -> None:
             TALLY[:] = [0, 0]
             rz = compare_raster(Path(d) / "rp", Path(d) / f"rr_{name}")
             assert TALLY == [10, bad], (name, rz, TALLY)
+        # 기동 뒤 준비 구간(11-28 SKHYNIX 11-21T14): 재기동 T+10 → 뒤 10초 «안쪽 ×1.1» 은 뺀다(T 한 초는 재기동 빈틈 몫) · 양성 대조: 기동 없으면 · 앞 9초도 ×1.1 이면 불통과
+        sc = [float(j) * (1.1 if j in inner else 1) for j in range(60)]
+        f32(Path(d) / "rp/2026-11-21T08.f32", [base] * 20)
+        for rows_, st_, want in (([base] * 10 + [sc] * 10, [T - 5000, T + 10], [9, 0]), ([base] * 10 + [sc] * 10, [], [20, 1]), ([sc] * 20, [T - 5000, T + 10], [9, 1])):
+            f32(Path(d) / "rr_scale/2026-11-21T08.f32", rows_)
+            TALLY[:] = [0, 0]
+            rz = compare_raster(Path(d) / "rp", Path(d) / "rr_scale", lo="2026-11-21T08", starts=st_, margin=0)
+            assert TALLY == want, (st_, rz, TALLY)
         # 설명 규칙 양성 대조(11-22): 같은 줄 두 번 · 재구독 현재값 · 연결 끊김(로그 줄 수만큼)
         q, w = Path(d) / "q.sqlite", Path(d) / "w.sqlite"
         for f in (q, w):
