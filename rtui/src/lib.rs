@@ -12,6 +12,7 @@ pub mod fp;
 pub mod hover;
 pub mod lane;
 pub mod liq;
+pub mod liqx;
 pub mod marks;
 pub mod profile;
 pub mod rem;
@@ -236,6 +237,7 @@ impl Chart {
         if self.feed.srl_only { self.ui_srl(ui, now); return None; }
         if self.feed.dirs_only { self.ui_dirs(ui, now); return None; }
         if self.feed.liq_only { self.ui_liq(ui); return None; }
+        if self.feed.liqx.is_some() { self.ui_liqx(ui, now); return None; }
         if self.feed.rem_only { self.ui_rem(ui, now); return None; }
         let t = ui.input(|i| i.time) * 1000.0;
         if self.fill { // 혼자 뜨는 페이지: 창 = 화면 -- 가격 플롯 왼쪽 열(w)이 화면 폭을 채우는 viewBox 폭(8429-8430 을 거꾸로)

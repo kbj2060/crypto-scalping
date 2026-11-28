@@ -80,8 +80,8 @@ fn density(t: f64) -> Col {
     Col::Rgb(96, 156, 208)
 }
 /// .lq-cu / .lq-cd = color-mix(in srgb, good|bad 60%, --chart-bg)
-const CU: Col = Col::Rgb(65, 125, 93);
-const CD: Col = Col::Rgb(153, 99, 95);
+pub(crate) const CU: Col = Col::Rgb(65, 125, 93);
+pub(crate) const CD: Col = Col::Rgb(153, 99, 95);
 
 /// CH.remain -- None = 빈 상태(«남은 매물 계산 전입니다») · (w, h) = svg 상자(.lq-d) · rv = 보기(여기서 조인다)
 pub fn scene(tab: Option<&Value>, win: u32, p: f64, w: f64, h: f64, rv: &mut Option<Rv>) -> Option<(Vec<Prim>, Geo)> {

@@ -85,7 +85,7 @@ pub(crate) fn nice_step(v: f64, n: f64) -> Option<f64> {
     let m = 10f64.powf((if r == 0.0 || r.is_nan() { 1.0 } else { r }).log10().floor());
     [1.0, 2.0, 2.5, 5.0, 10.0].into_iter().map(|k| k * m).find(|&k| k >= r)
 }
-fn ticks(mx: f64, n: f64) -> Vec<f64> {
+pub(crate) fn ticks(mx: f64, n: f64) -> Vec<f64> {
     let (mut o, Some(st)) = (vec![], nice_step(mx, n)) else { return vec![] };
     let mut v = st;
     while v <= mx * 1.001 { o.push(v); v += st; }

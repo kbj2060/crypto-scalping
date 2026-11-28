@@ -66,6 +66,8 @@ pub fn on_get(kind: &str, body: Option<String>) {
         "Radar" => c.feed.on_fc(feed::Kind::Radar, body.as_deref()),
         "LiqTab" => c.feed.on_liq_tab(body.as_deref()),
         "LiqMap" => c.feed.on_liq_map(body.as_deref()),
+        "LiqAll" => if let Some(x) = c.feed.liqx.as_mut() { x.on_all(body.as_deref()) },
+        "LiqBars" => if let Some(x) = c.feed.liqx.as_mut() { x.on_bars(body.as_deref()) },
         _ => {}
     });
 }
@@ -129,6 +131,7 @@ pub async fn start(canvas_id: String, asset: String, x: f32, y: f32, w: f64, h: 
     ch.feed.dirs_only = card == "dirs";
     if let Some(d) = card.strip_prefix("liq").and_then(|d| d.parse::<u32>().ok()).filter(|d| [1, 7, 30, 60, 90, 180, 365].contains(d)) { (ch.feed.liq_only, ch.feed.liq_days) = (true, d); }
     if let Some(d) = card.strip_prefix("rem").and_then(|d| d.parse::<u32>().ok()).filter(|d| [7, 30, 60, 90, 180, 365].contains(d)) { (ch.feed.rem_only, ch.rem.win) = (true, d); }
+    if let Some(x) = card.strip_prefix("liqx").and_then(crate::liqx::State::new) { (ch.feed.liqx, ch.feed.rem_only, ch.feed.source) = (Some(x), true, feed::Source::Push); } // «청산» 탭 아랫줄(?card=liqx · liqx1W 처럼 주기) -- 허브 가격이라 늘 밀기
     ch.feed.acct_only = card == "acct"; // 계좌 칩(맨 위 전광판)만 -- 같은 출처 /api/binance-account + 허브 «모든 종목» 가격(push 로 연다)
     let ch = Rc::new(RefCell::new(ch));
     CH.with(|c| *c.borrow_mut() = Some(ch.clone()));
