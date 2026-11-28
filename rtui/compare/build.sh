@@ -10,4 +10,6 @@ H=$(sha256sum "$W" | cut -c1-8)
 rm -f dist/rtui*.js dist/rtui*_bg.wasm
 wasm-bindgen --target web --no-typescript --out-dir dist --out-name "rtui-$H" "$W"
 printf '%s\n' "$H" > dist/VERSION
+# 응답 서버 /rtweb/ = 이 폴더(rtserve lib.rs) -- 같은 페이지를 묶음 옆 경로로(./dist/ → ./)
+sed 's#\./dist/#./#g' index.html > dist/index.html
 ls -la dist

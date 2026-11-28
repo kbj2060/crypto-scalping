@@ -10,6 +10,7 @@ pub mod hover;
 pub mod lane;
 pub mod marks;
 pub mod profile;
+pub mod s1;
 pub mod view;
 
 use eframe::egui::{self, Color32, Context, Event, MouseWheelUnit, PointerButton, Pos2, Rect, vec2};
@@ -33,11 +34,27 @@ pub struct Chart {
     pub geo: Option<LastGeo>,
     /// 4417 pillWMax: 글자 수 → 본 가장 넓은 알약 폭
     pill_max: RefCell<HashMap<usize, f64>>,
+    /// 1초 수급 카드가 마지막으로 그린 것(새 봉 첫 1~2초에 흐리게 남긴다 -- app.js 7180)
+    s1_last: Option<Vec<fp::Prim>>,
 }
 
 impl Chart {
     pub fn new(feed: feed::Feed, cfg: fp::Cfg, origin: Pos2, bg: Color32) -> Self {
-        Self { feed, view: view::View::default(), cfg, origin, bg, fill: false, geo: None, pill_max: Default::default() }
+        Self { feed, view: view::View::default(), cfg, origin, bg, fill: false, geo: None, pill_max: Default::default(), s1_last: None }
+    }
+
+    /// 1초 수급 카드 한 장(feed.s1_only) -- 상자 = cfg.w_all×h_all(fill 이면 창)
+    pub fn ui_s1(&mut self, ui: &mut egui::Ui) {
+        if self.fill { let r = ui.ctx().content_rect(); (self.cfg.w_all, self.cfg.h_all) = ((r.width() - 2.0 * self.origin.x) as f64, (r.height() - 2.0 * self.origin.y) as f64); }
+        let (w, h) = (self.cfg.w_all, self.cfg.h_all);
+        let p = ui.painter();
+        if self.bg.a() > 0 { p.rect_filled(p.clip_rect(), 0.0, self.bg); }
+        let measure = |s: &str, z: f64, wt: u16| draw::measure(p, s, z, wt);
+        let all = [0.0, 0.0, w, h];
+        match s1::scene(&self.feed.s1, w, h, self.cfg.tz_off_min, &measure) {
+            Some(v) => { draw::paint(p, &v, self.origin, all, all, 1.0); self.s1_last = Some(v); }
+            None => match &self.s1_last { Some(v) => draw::paint(p, v, self.origin, all, all, 0.35), None => draw::paint(p, &s1::wait_text(w, h), self.origin, all, all, 1.0) },
+        }
     }
     /// 합성 자료로 바로(측정·네이티브 창): 풋프린트 응답 + 캔들 이력을 받은 것처럼
     pub fn from_json(fp_json: &str, mh_json: &str, cfg: fp::Cfg, origin: Pos2, bg: Color32) -> Self {
@@ -93,6 +110,7 @@ impl Chart {
 
     /// 한 장: 입력 → 가공(prep) + 그리기 + 호버. now = Date.now() · 반환 = 그린 장면·호버(좌표 대조용)
     pub fn ui(&mut self, ui: &mut egui::Ui, now: f64) -> Option<(fp::Scene, Option<hover::Hover>)> {
+        if self.feed.s1_only { self.ui_s1(ui); return None; }
         let t = ui.input(|i| i.time) * 1000.0;
         if self.fill { // 혼자 뜨는 페이지: 창 = 화면 -- 가격 플롯 왼쪽 열(w)이 화면 폭을 채우는 viewBox 폭(8429-8430 을 거꾸로)
             let r = ui.ctx().content_rect();
@@ -205,6 +223,7 @@ pub fn prims_json(prims: &[fp::Prim], groups: &[(&str, usize, usize)]) -> Vec<se
         Line { pts, c, a, lw, dash, .. } => serde_json::json!({"g": g, "k": "line", "pts": pts, "c": format!("{c:?}"), "a": a, "lw": lw, "dash": dash}),
         Text { x, y, s, size, wt, c, a, anchor, halo, .. } => serde_json::json!({"g": g, "k": "text", "x": x, "y": y, "s": s, "size": size, "wt": wt, "c": format!("{c:?}"), "a": a, "anchor": format!("{anchor:?}"), "halo": halo}),
         Circle { x, y, r, c, a, .. } => serde_json::json!({"g": g, "k": "circle", "x": x, "y": y, "r": r, "c": format!("{c:?}"), "a": a}),
+        Dashed { pts, c, a, lw, on, off, .. } => serde_json::json!({"g": g, "k": "line", "pts": pts, "c": format!("{c:?}"), "a": a, "lw": lw, "dash": [on, off]}),
     }}).collect()
 }
 

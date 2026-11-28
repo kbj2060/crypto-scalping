@@ -277,7 +277,11 @@ fn route(cfg: &Config, req: &Req) -> Resp {
     let rs = routes(p);
     let static_rest = if rs.is_empty() { p.strip_prefix("/dashboard/live/") } else { None };
     if let Some(rest) = static_rest {
-        return if m == "GET" { static_file(cfg, req, rest) } else { http_exc(405, None, &[("Allow", "GET,HEAD")]) };
+        return if m == "GET" { static_file(&cfg.dashboard_dir(), req, rest) } else { http_exc(405, None, &[("Allow", "GET,HEAD")]) };
+    }
+    // 2026-11-28 Rust 화면(rtui 웹어셈블리 묶음 · rtui/compare/build.sh 가 만든 rtui/dist) -- 지금 화면과 나란히 비교용 · /rtweb/ = index.html
+    if let Some(rest) = p.strip_prefix("/rtweb/").filter(|_| rs.is_empty() && m == "GET") {
+        return static_file(&cfg.root.join("rtui/dist"), req, if rest.is_empty() { "index.html" } else { rest });
     }
     if rs.is_empty() {
         return http_exc(404, None, &[]);
@@ -537,11 +541,11 @@ fn pwa_asset(cfg: &Config, req: &Req) -> Resp {
 }
 
 /// 원본 add_static("/dashboard/live/", show_index=False) -- 🔴신뢰 경계: 폴더 밖으로 나가는 경로는 404(심볼릭 링크로 나가는 것도)
-fn static_file(cfg: &Config, req: &Req, rel: &str) -> Resp {
+fn static_file(dir: &Path, req: &Req, rel: &str) -> Resp {
     if rel.starts_with('/') || rel.contains('\0') {
         return http_exc(404, None, &[]);
     }
-    let Ok(dir) = cfg.dashboard_dir().canonicalize() else { return http_exc(404, None, &[]) };
+    let Ok(dir) = dir.canonicalize() else { return http_exc(404, None, &[]) };
     let joined = dir.join(rel);
     let resolved = match joined.canonicalize() {
         Ok(p) => p,

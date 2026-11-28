@@ -29,7 +29,7 @@ pub struct Win { pub edge: f64, pub panned: bool, pub pan_y: f64 }
 
 /// styles.css :root(다크) 의 색 이름
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Col { Good, Bad, Muted, Amber, Accent, Ink, Line, OnFill, ChartBg, Text, Turnover, SoftLine, HoverLine }
+pub enum Col { Good, Bad, Muted, Amber, Accent, Ink, Line, OnFill, ChartBg, Text, Turnover, SoftLine, HoverLine, Spot, Neutral, Lift }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Anchor { Start, Middle, End }
@@ -49,6 +49,8 @@ pub enum Prim {
     /// wt = 굵기(400·700·800 -- 지금 화면의 font-weight · draw::fid 가 그 굵기 글꼴을 고른다)
     Text { x: f64, y: f64, s: String, size: f64, wt: u16, c: Col, a: f64, anchor: Anchor, halo: bool, clip: Clip },
     Circle { x: f64, y: f64, r: f64, c: Col, a: f64, clip: Clip },
+    /// svg stroke-dasharray "칠 빔"(1초 수급 중형 "6 3"·리테일 "2 3")
+    Dashed { pts: Vec<[f64; 2]>, c: Col, a: f64, lw: f64, on: f64, off: f64, clip: Clip },
 }
 
 pub struct Cfg {
