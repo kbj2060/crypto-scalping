@@ -40,6 +40,7 @@ export RTSERVE_ROOT="$ROOT"
 export RTSERVE_ADDR="${RTSERVE_ADDR:-127.0.0.1:8790}"
 export RTSERVE_HUB="${RTSERVE_HUB:-ws://127.0.0.1:8788/rt}"
 export RUST_BACKTRACE=1
+export RTSERVE_MICRO_ALL="${RTSERVE_MICRO_ALL:-1}"   # 다른 코인 미시 틱(11-28 서버 실측: 틱 0.1~0.5ms · 기준선은 스레드) -- 끄려면 0
 export RTSERVE_PY="${RTSERVE_PY:-${PYTHON_BIN:-$HOME/miniconda3/envs/quant_ai/bin/python}}"   # /api/push/test 가 원본 웹 푸시 모듈을 부를 때
 
 if [ ! -x "$BIN" ]; then

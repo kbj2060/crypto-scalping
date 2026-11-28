@@ -199,11 +199,13 @@ def proc_holes(con, tabs: list, starts: list, margin: int, py=None, reconnects: 
 
 def sym_down(con, t: str, tcol: str, ms: bool, symcol, proc: list, margin: int) -> dict:
     """표 하나의 뺄 구간을 종목마다({종목: 구간}, 종목 열이 없으면 {None: …}):
-    프로세스 빈틈(proc) + 종목마다 «그 빈틈 뒤 그 종목 첫 자료»까지(종목마다 다시 붙는 때가 다르다 · CAP 까지) + «그 종목 Rust 첫 자료 전»."""
+    프로세스 빈틈(proc · 첫 기동 전 포함) + 종목마다 «그 빈틈 뒤 그 종목 첫 자료»까지(종목마다 다시 붙는 때가 다르다 · EXT 까지).
+    기동 시각(proc)이 없을 때만 «그 종목 Rust 첫 자료 전» 전부 -- 있으면 그렇게 빼지 않는다(11-28: 드문 표 OKX 청산 536종목은
+    «그 종목 Rust 첫 청산 전» 파이썬 행 2,577 이 통째로 빠져 Rust 가 못 받은 것을 숨겼다)."""
     x = sec_expr(tcol, ms)
     g, sel = (f" GROUP BY {symcol}", f"{symcol}, ") if symcol else ("", "NULL, ")
     first = dict(con.execute(f"SELECT {sel}min({x}) FROM {t}{g}").fetchall())
-    out = {s: [(float("-inf"), f0 + (margin if proc else 0))] + list(proc) for s, f0 in first.items() if f0 is not None}
+    out = {s: list(proc) if proc else [(float("-inf"), f0)] for s, f0 in first.items() if f0 is not None}
     for a, b in proc:
         if b == float("inf"):
             continue
@@ -971,6 +973,15 @@ def selftest() -> None:
         TALLY[:] = [0, 0]
         ll = next(x for x in run(l1, l2, starts=[T + 190]) if x.startswith("okx_liquidations"))
         assert "파이썬에만 1 " in ll and TALLY[1] == 1, (TALLY, ll)   # ADBE T+50(그림자 뜨기 전)은 빼고 T+400 만 남는다
+        # 기동 뒤 «그 종목 Rust 첫 행 전» 파이썬 행은 빼지 않는다(11-28): BTC 파이썬 T+300·T+550 · Rust T+550 만 → T+300 은 설명 못 함
+        for f in (l1, l2):
+            con = sqlite3.connect(f)
+            con.executemany("INSERT INTO okx_liquidations VALUES ('BTC', 'BTC', ?, 'b', 'l', 1, 1, 1, 0)", [(1000 * (T + k),) for k in ((300, 550) if f == l1 else (550,))])
+            con.commit()
+            con.close()
+        TALLY[:] = [0, 0]
+        ll = next(x for x in run(l1, l2, starts=[T + 190]) if x.startswith("okx_liquidations"))
+        assert "파이썬에만 2 " in ll and TALLY[1] == 2, (TALLY, ll)
         # 전진 장부 JSONL: 같은 열쇠 줄(기록 시각만 다름) · 다른 값 · 파이썬 마지막 뒤 Rust 에만(안 셈) · 앞 Rust 에만(셈)
         (Path(d) / "j1.jsonl").write_text('{"origin":"a","cp":1,"recorded_at":1}\n{"origin":"b","cp":2}\n{"origin":"d","cp":4}\n')
         (Path(d) / "j2.jsonl").write_text('{"origin":"a","cp":1,"recorded_at":2}\n{"origin":"b","cp":3}\n{"origin":"c","cp":9}\n{"origin":"d","cp":4}\n{"origin":"e","cp":5}\n')
