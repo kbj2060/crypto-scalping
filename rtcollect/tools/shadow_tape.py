@@ -153,6 +153,7 @@ def merge(out: list) -> list:
 
 
 RASTER_L1 = 0.02
+RASTER_KEEP = 0.035   # 래스터 기준 칸 = mid ±3.5%(raster.rs PRUNE_PCT 4% − 가지치기 사이 mid 이동 0.5%p) -- compare_raster
 RECONNECT_MS = 3000   # .bt 연결 끊김 빈틈(재접속 전 3초 쉼 · 두 구현 같음)
 SKIP_RUN = 3   # .bt 연결마다 다른 표본: 공통 행 사이 한쪽만의 행 수 상한(다른 쪽도 그 칸에 제 행이 없을 때 · compare_bt)
 EXT = 30    # 빈틈 뒤 종목마다 다시 붙는 늦음은 30초까지만(실측 bybit BTC mark ~10초) -- 드문 표가 빈틈 뒤를 통째로 빼지 않게
@@ -503,7 +504,8 @@ def compare_raster(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", star
 
     def rows(p: Path) -> dict:
         b = p.read_bytes()
-        n = struct.unpack_from("<H", b, 6)[0]   # 머리 "FLWR" u16 판 · u16 칸 수
+        n, bs = struct.unpack_from("<Hf", b, 6)   # 머리 "FLWR" u16 판 · u16 칸 수 · f32 칸 크기
+        BS[0] = bs
         row = 16 + 4 * n
         out = {}
         for k in range((len(b) - 32) // row):
@@ -512,6 +514,7 @@ def compare_raster(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", star
             if ts and mid == mid:
                 out[ts] = (bl, mid, r[16:])
         return out
+    BS = [0.0]
     hours = [(pp.stem, pp, rs_dir / pp.name) for pp in sorted(py_dir.glob("*.f32")) if lo <= pp.stem <= hi and (rs_dir / pp.name).exists()]
     data = [(h, rows(pp), rows(rp)) for h, pp, rp in hours]
     down = holes(sorted({t // 1000 for _, _, b in data for t in b}), list(starts), margin) if starts else []
@@ -520,7 +523,8 @@ def compare_raster(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", star
         both = [t for t in sorted(a.keys() & b.keys()) if not any(x <= t // 1000 < y for x, y in down)]
         n_down += len(a.keys() & b.keys()) - len(both)
         same_hdr = sum(a[t][:2] == b[t][:2] for t in both)
-        fr, near, l1, l1n = [], [], [], []
+        fr, near, l1, l1n, l1all = [], [], [], [], []
+        L = lambda u, v: sum(abs(x - y) for x, y in zip(u, v)) / (sum(abs(x) + abs(y) for x, y in zip(u, v)) or 1)   # noqa: E731
         for t in both:
             if a[t][:2] != b[t][:2]:
                 continue
@@ -528,7 +532,13 @@ def compare_raster(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", star
             n, c = len(qa), len(qa) // 2
             fr.append(sum(x == y for x, y in zip(qa, qb)) / n)
             near.append(sum(qa[j] == qb[j] for j in range(c - 20, c + 20)) / 40)   # mid 칸 = n/2(raster.rs _row) · ±20칸 = diff 가 늘 갱신하는 곳
-            l1.append(sum(abs(x - y) for x, y in zip(qa, qb)) / (sum(abs(x) + abs(y) for x, y in zip(qa, qb)) or 1))
+            # 기준 칸 = 가지치기(±PRUNE_PCT, 60틱마다 그때 mid 로 -- raster.rs prune) 안쪽만(11-28): 그 밖 칸은 «마지막 가지치기 뒤 diff 가 다시 넣은 레벨»이라
+            #   각 프로세스의 틱 위상(기동 시각)에 달렸다 -- 둘 다 맞다. 얇은 주식 선물은 래스터 폭이 ±4% 를 넘는다(SOXL 0.02×240 ≈ ±9% · SKHYNIX 0.25×240).
+            #   ETH·BTC 등은 래스터 전체가 ±4% 안이라 그대로. 가지치기 뒤 mid 가 움직인 몫으로 0.5%p 안쪽만(서버 SOXL 11-25T16: ±4% 안 L1 중앙 1.3e-4 · ±3.5% 0).
+            bl, mid, bs = a[t][0], a[t][1], BS[0]
+            inr = [j for j in range(n) if (bl + j) * bs >= mid * (1 - RASTER_KEEP) and (bl + j + 1) * bs <= mid * (1 + RASTER_KEEP)]
+            l1.append(L([qa[j] for j in inr], [qb[j] for j in inr]))
+            l1all.append(L(qa, qb))
             na, nb = qa[c - 20:c + 20], qb[c - 20:c + 20]   # 진단(11-28): 먼 칸은 스냅숏 받은 순간 값이 diff 가 닿을 때까지 남는다 -- 얇은 주식 선물(SOXL·SKHYNIX)은 L1 이 먼 칸 몫인지
             l1n.append(sum(abs(x - y) for x, y in zip(na, nb)) / (sum(abs(x) + abs(y) for x, y in zip(na, nb)) or 1))
         med = lambda v: sorted(v)[len(v) // 2] if v else None   # noqa: E731
@@ -538,7 +548,7 @@ def compare_raster(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", star
         #   실측(11-21 12시간): L1 중앙 ETH 2e-5~6e-3 · BTC 1e-3~1.7e-2(재기동 시) · SOL 0~2.5e-10. 계산이 틀리면(부호·칸 밀림) L1 이 수십 % 로 뛴다.
         TALLY[1] += int(bool(both) and (med(l1) is None or med(l1) > RASTER_L1))
         res.append(f"raster {h}: 두 쪽 유효 초 {len(both):,} · bin_lo·mid 같음 {same_hdr:,} · 칸 같음 비율 중앙 전체 {med(fr)} · mid ±20칸 {med(near)} · "
-                   f"잔량 상대차(L1) 중앙 {med(l1)}(mid ±20칸 {med(l1n)}) · 파이썬만 유효 {len(a.keys() - b.keys()):,} · Rust만 유효 {len(b.keys() - a.keys()):,}")
+                   f"잔량 상대차(L1 · 가지치기 안 ±{RASTER_KEEP:.1%}) 중앙 {med(l1)}(전체 칸 {med(l1all)} · mid ±20칸 {med(l1n)}) · 파이썬만 유효 {len(a.keys() - b.keys()):,} · Rust만 유효 {len(b.keys() - a.keys()):,}")
     return (res + [f"raster:{down_note(down, n_down)}"] if down else res) or ["raster: 두 쪽에 같은 시 파일이 없다"]
 
 
@@ -892,7 +902,7 @@ def selftest() -> None:
         def f32(path, vals):
             n = 60
             h = b"FLWR" + struct.pack("<HHfIqII", 1, n, 0.5, 0, 0, 1000, 0)
-            rows_ = b"".join(struct.pack("<qif", 1000 * (T + k), 100, 50.0) + struct.pack(f"<{n}f", *v) for k, v in enumerate(vals))
+            rows_ = b"".join(struct.pack("<qif", 1000 * (T + k), 70, 50.0) + struct.pack(f"<{n}f", *v) for k, v in enumerate(vals))   # bin_lo = mid//bin − n/2
             path.write_bytes(h + rows_)
         (Path(d) / "rp").mkdir()
         (Path(d) / "rr").mkdir()
@@ -903,6 +913,16 @@ def selftest() -> None:
         TALLY[:] = [0, 0]
         rz = compare_raster(Path(d) / "rp", Path(d) / "rr")
         assert "mid ±20칸 1.0" in rz[0] and TALLY == [10, 0], (rz, TALLY)
+        # 가지치기 밖(±4% 넘는 칸 = 칸 0~25·34~59 · mid 50 · 칸 0.5)만 크게 달라도 통과(SOXL·SKHYNIX 꼴) · 양성 대조: 안쪽 3칸 밀림(오르막 잔량이라 1칸은 L1 1.7%) · 안쪽 ×1.1 = 불통과
+        inner = range(27, 34)
+        for name, v, bad in (("far", [float(j) * (1 if j in inner else 3) for j in range(60)], 0),
+                             ("shift", [float(j + (3 if j in inner else 0)) for j in range(60)], 1),
+                             ("scale", [float(j) * (1.1 if j in inner else 1) for j in range(60)], 1)):
+            (Path(d) / f"rr_{name}").mkdir()
+            f32(Path(d) / f"rr_{name}/2026-11-21T07.f32", [v] * 10)
+            TALLY[:] = [0, 0]
+            rz = compare_raster(Path(d) / "rp", Path(d) / f"rr_{name}")
+            assert TALLY == [10, bad], (name, rz, TALLY)
         # 설명 규칙 양성 대조(11-22): 같은 줄 두 번 · 재구독 현재값 · 연결 끊김(로그 줄 수만큼)
         q, w = Path(d) / "q.sqlite", Path(d) / "w.sqlite"
         for f in (q, w):
