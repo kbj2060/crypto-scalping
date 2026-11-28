@@ -343,13 +343,18 @@ fn bad_gateway(v: V) -> Resp {
     r
 }
 
+/// swr `liquidation_map:{asset}`(원본 load_liquidation_map 3505~3508) -- 화면 요청과 미시 틱(hub sit_levels)이 같은 칸을 읽는다
+pub(crate) fn map_cached(cfg: &Config, asset: &str) -> R<V> {
+    let (c, a) = (cfg.clone(), asset.to_string());
+    cfg.swr.get(&format!("liquidation_map:{asset}"), TTL, STALE, Arc::new(move || produce_map(&c, &a)))
+}
+
 fn api_liquidation_map(cfg: &Config, req: &Req) -> Resp {
     let asset = match crate::api::coin_asset(req) {
         Ok(a) => a,
         Err(r) => return r,
     };
-    let (c, a) = (cfg.clone(), asset.clone());
-    match cfg.swr.get(&format!("liquidation_map:{asset}"), TTL, STALE, Arc::new(move || produce_map(&c, &a))) {
+    match map_cached(cfg, &asset) {
         Ok(v) => Resp::json(&v),
         Err(PyErr(m)) if m.starts_with("HTTPBadGateway") => bad_gateway(json!({"error": REASON, "detail": "Binance klines fetch failed."})),
         Err(PyErr(m)) => uncaught(&m),

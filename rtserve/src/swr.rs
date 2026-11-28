@@ -83,6 +83,18 @@ impl Swr {
         }
     }
 
+    /// 원본 `swr_store[key]["ts"] = 0.0`(load_5m_day 식힘) -- 다음 get 은 기다려 새로
+    pub fn cool(&self, key: &str) {
+        if let Some(s) = self.slots.lock().unwrap().get_mut(key) {
+            s.ts = f64::NEG_INFINITY;
+        }
+    }
+
+    /// 마지막으로 만든 뒤 지난 초(원본 `time.monotonic() - st["ts"]`) -- 값이 없으면 None
+    pub fn age(&self, key: &str) -> Option<f64> {
+        self.slots.lock().unwrap().get(key).filter(|s| s.payload.is_some()).map(|s| (self.mono)() - s.ts)
+    }
+
     fn store(&self, key: &str, v: &V) {
         let mut g = self.slots.lock().unwrap();
         let s = g.entry(key.to_string()).or_default();

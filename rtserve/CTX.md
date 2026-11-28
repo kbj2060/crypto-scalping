@@ -127,7 +127,7 @@
 
 ### ✅ 붙임(2026-11-28 · `src/mc_live.rs`)
 - 마크 링 = 허브 Mark(스냅숏 mark 포함) → `rtcore::situation::MarkRing`(원본 1898~1906 같은 규칙) · x = situation_tick 셋째 값(hub `SitLive.x`) · 미시·미드·depth25 = hub `Live.run`(SitRun) · oi_1s = hot oi_1s 최근 660초 마지막 값 · 시험 `tests/mc_live.rs`.
-- 🔴ETH 말고는 미시·상황 틱이 rtserve 에 없어 micro·x·evidence 가 빈다(원본은 코인마다) -- mid 는 마크로 물러섬 · 화면의 그 칸들이 «—».
+- ~~🔴ETH 말고는 미시·상황 틱이 rtserve 에 없어 micro·x·evidence 가 빈다~~ → 2026-11-28 `RTSERVE_MICRO_ALL=1` 이면 hub `micro_once` 가 채운다(아래 §E) · 꺼져 있으면 여전히 빈다(mid 는 마크로 물러섬).
 - 상황 틱이 run 잠금을 쥔 동안(기준선 읽기 등) 시장 맥락 요청이 기다린다 -- 3초 넘으면 원본 실패 갈래(묵은 값).
 
 ### 붙이는 쪽 사용법 -- `/api/market-context?asset=`
@@ -137,6 +137,27 @@
 4. REST 몫(`RTSERVE_REST` 있을 때만 · gate): `funding_hist(gate_fetch(funding_hist_url(..)))` · ETH 만 `dvol_year(gate.send(dvol_url(now_ms), false))` -- 실패·꺼짐 = `[]`.
 5. 메모리 몫으로 `McIn { asset, now, bands_usd(풋프린트 메시지의 retail_max_usd·whale_min_usd), micro: &MicroRef.payload, x(situation_tick 이 낸 x), ev(코어 evidence), mark_ring, mid_ring, depth25, oi_1s, next_funding_ms, px_scale(코인 풋프린트 칸 ÷ ETH 칸) }`.
 6. `let r = market_context_payload(&i, &col, &hist, &prof, &fh, &dvy, &vprof)` -- 원본은 3초 안에 못 끝나면 실패 갈래(뒤에서 마저 돌려 캐시를 채움 · 2710~2715) → `mc_response(Ok(r) 또는 Err("TimeoutError: …"), &mut mc_last, now)` 를 json_response(NOCACHE)로.
+
+## E. 빠진 칸 붙임(2026-11-28 · hub.rs `situation_once`·`micro_once`) -- 채움 / 의도적 Null / 안 씀
+원본 줄은 HEAD 26e4c8b3 의 server.py 를 Read 로 다시 봤다: _situation_inputs 2102~2147 · load_5m_day 2347~2367 · compute_situation 2369~2398 · oi_5m_buckets 984~1020 · collect_micro_ref 1917~2027.
+REST 는 전부 `RTSERVE_REST` 가 있고 **첫 틱 90초 뒤**부터 · `model::fetch_binance`(→ binance_get 한 문 · 밴·가중치 문턱) · 실패면 60초 쉰다(원본은 틱마다 다시).
+
+| 칸 | 상태 | 원천 · 원본과 다른 점 |
+|---|---|---|
+| x.move60 · x.oi60 (inp.bars) | ✅ 채움(ETH) | 봉 = 닫힌 풋프린트 봉 마지막 13개(Sym.fp_bars) · 종가 = candles_day(원본 ETH = 증거 프레임 1500 -- 같은 klines 의 마감봉이라 값은 같고 받은 시각만 다르다) → 초 링(코어 Supply1s 의 그 봉 마지막 가격) → 봉 VWAP(풋프린트 칸 = round(x,3) · 가격 차례 -- 원본은 원값·칸 생긴 차례: 마지막 비트만) · oi_delta = `oi_5m_buckets(15)` swr `situation_oi5m_ethusdt` 5/30(원본 2390 · hot oi_1s · REST 0) |
+| x.move60_p75 · x.range30_pct · vol_mult(ETH) | ✅ 채움 | candles_day = klines 5m **limit 300**(가중치 2) swr `flow_read_5m_day_eth` 60/600 · 방금 닫힌 봉이 없고 2초 지났으면 식힘(`Swr::cool`) |
+| micro.sr(지지·저항·sup/res_levels) | ✅ 채움(ETH) | `liqmap::map_cached` = /api/liquidation-map 과 **같은 swr 칸**(liquidation_map:eth 60/600 · 1h×48 + 5m×460 = 가중치 3) -- 화면이 먼저 받았으면 추가 0. 원본과 다른 곳: 원본은 청산맵 실패 = 그 틱 미시 payload 전체 {available:false} · 여기는 레벨만 빈다 |
+| 5분봉 공유(청산맵 5m 460 ↔ candles_day 300) | 안 함 | 공유하면 청산맵이 최대 60초 묵은 5분봉을 쓴다(원본은 회차마다 새로) -- 아끼는 것은 가중치 2/분뿐 |
+| 다른 코인 micro·x·evidence | ✅ `RTSERVE_MICRO_ALL=1` 일 때만 | `micro_once`: 코어 호가 + 래스터 12행 + 래스터 요약 swr 5초(REST 0) · x = nets·Bybit 봉·기준선(flow_scales 14일 · combos 3곳) · evidence = 코어 Situation + obi·persist · 기준선 첫 읽기 = 코인 k 번째 × 10분 뒤 · ETH 다음 같은 spawn_blocking 안에서 차례로 · 60틱마다 `[micro-all] 틱/기준선 eth 3.1ms/0.80s · …` 한 줄 |
+| 다른 코인 move60·oi60·move60_p75·range30·dir_p·reach_p·sr | 의도적 Null | REST(klines·청산맵) 몫 -- 원본은 코인마다 받는다 |
+| vol_mult_by(ETH 밖) | 의도적 Null | 5분봉 하루를 ETH 만 받는다(`vol_size_mult(빈 봉)`) |
+| evidence.veto | 의도적 0 | 12h 추세(klines 720 · 결정 미룸) |
+| dir_p · reach_p(card30) | 의도적 Null | candles_day 는 있으나 card30.json 붙이기는 다음 조각(`Card30File`·`Card30Cache` 준비됨) |
+| FusedLog(장부) | 안 씀 | 읽는 곳 없음 -- None 유지 |
+
+새 REST 가중치(분당 · ETH 만): candles_day 2(+경계 식힘 몇 번) · 청산맵 3(화면이 이미 열려 있으면 0) = **약 5/분**.
+시험: tests/sit_parity.rs `situation_bars_day5_match_python`(정답지 tools/gen_sit_fixture.py `main_bars` · 37걸음 본문·SSE·x 글자 + klines 보낸 횟수) ·
+tests/liqmap_parity.rs `micro_tick_reads_same_liquidation_levels` · tests/mc_live.rs `other_coin_micro_tick_fills_market_context`.
 
 ## 3. 청산맵 레벨(load_liquidation_map 3461~3508) -- 표(옮기기 전)
 | 항목 | 원본 | 값 |

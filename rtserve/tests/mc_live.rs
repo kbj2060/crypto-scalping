@@ -38,3 +38,50 @@ fn market_context_wiring() {
     assert_eq!(get("/api/market-context?asset=xrp").0, 404, "꺼진 코인 = flow_off");
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// 2026-11-28 단계 3: ETH 밖 코인 미시 틱(hub::micro_once · RTSERVE_MICRO_ALL=1 일 때 situation_run 이 부르는 것) → /api/market-context?asset=sol 의
+/// mid·book.spread·book.sweep 이 찬다(합성 래스터 + 코어 호가 · REST 0). 양성 대조 = 틱 전엔 셋 다 빈다.
+#[test]
+fn other_coin_micro_tick_fills_market_context() {
+    let now = 1.795e9;
+    let held: std::sync::Arc<std::sync::Mutex<Option<rtserve::Config>>> = Default::default();
+    let h2 = held.clone();
+    let (addr, root) = common::start_with(&serde_json::Map::new(), 0, now, "eth,sol", "mc_live_sol", move |c| *h2.lock().unwrap() = Some(c.clone()));
+    let cfg = held.lock().unwrap().clone().unwrap();
+    // 합성 래스터(rtcollect raster.rs 형식: 머리 32B `<4sHHfIqII` · 행 `<qif` + f32[n]) -- 미드 150.01 아래 = 매수(+) · 위 = 매도(−)
+    let (n, bs, lo) = (40u16, 0.02f32, 7480i32);
+    let now_ms = (now * 1000.0) as i64;
+    let hour = now_ms - now_ms.rem_euclid(3_600_000);
+    let p = rtserve::raster_read::hour_path(&rtserve::raster_read::default_root(&root), "solusdt", hour);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    let mut b = Vec::new();
+    b.extend_from_slice(b"FLWR");
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&n.to_le_bytes());
+    b.extend_from_slice(&bs.to_le_bytes());
+    b.extend_from_slice(&[0u8; 20]);
+    for j in 0..=(now_ms - hour) / 1000 {
+        let live = j >= (now_ms - hour) / 1000 - 15;
+        b.extend_from_slice(&(if live { hour + j * 1000 } else { 0 }).to_le_bytes());
+        b.extend_from_slice(&lo.to_le_bytes());
+        b.extend_from_slice(&(if live { 150.01f32 } else { f32::NAN }).to_le_bytes());
+        for k in 0..n as i32 {
+            let px = (lo + k) as f64 * bs as f64;
+            let q: f32 = if !live { 0.0 } else if px < 150.0 { 10.0 + (j % 3) as f32 } else if px > 150.02 { -8.0 } else { 0.0 };
+            b.extend_from_slice(&q.to_le_bytes());
+        }
+    }
+    std::fs::write(&p, &b).unwrap();
+    let get = |q: &str| serde_json::from_slice::<Value>(&common::request(addr, "GET", q, &[]).body).unwrap_or(Value::Null);
+    let before = get("/api/market-context?asset=sol");
+    assert!(before["mid"].is_null() && before["book"]["spread"].is_null() && before["book"]["sweep"].is_null(), "틱 전엔 빈다: {}", before["book"]);
+    cfg.live.apply(r#"{"s":"solusdt","seq":1,"ex_ms":0,"rx_us":0,"tx_us":0,"type":"book","u":1,"bid":150.0,"bid_qty":50.0,"ask":150.02,"ask_qty":40.0}"#);
+    let r = cfg.live.runs.lock().unwrap().entry("sol".into()).or_default().clone();
+    rtserve::hub::micro_once(&cfg, &mut r.lock().unwrap(), "sol", 1);
+    let e = get("/api/market-context?asset=sol");
+    assert_eq!(e["mid"].as_f64(), Some(150.01), "미시 mid = 코어 호가 중간");
+    assert!((e["book"]["spread"].as_f64().unwrap() - 0.02).abs() < 1e-9, "{}", e["book"]);
+    assert!(e["book"]["sweep"].is_object() || e["book"]["sweep"].is_array(), "sweep 이 차야: {}", e["book"]);
+    assert!(r.lock().unwrap().micro.baseline_at > now, "첫 기준선은 10분 뒤로(코인 1번)");
+    let _ = std::fs::remove_dir_all(root);
+}
