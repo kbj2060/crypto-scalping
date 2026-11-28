@@ -77,6 +77,10 @@ pub struct Feed {
     /// 그릴 것이 바뀌었다(부르는 쪽이 다시 그리기를 요청하고 끈다)
     pub dirty: bool,
     pub out: Vec<Req>,
+    /// 1초 수급(허브 밀기만)
+    pub s1: crate::s1::State,
+    /// 1초 수급 카드만 띄운다 -- 허브만 붙고 풋프린트·캔들·청산 응답은 묻지 않는다
+    pub s1_only: bool,
 }
 
 /// 4477 roundHalfEven(파이썬 round 와 같은 격자)
@@ -110,14 +114,14 @@ impl Feed {
     pub fn new(asset: &str, symbol: &str, source: Source, urls: Urls, week_always: bool) -> Self {
         Self { source, urls, asset: asset.into(), symbol: symbol.into(), week_always, candles: vec![], fp_bars: BTreeMap::new(), fp: None, week: None,
                live: Live::default(), price: 0.0, price_ts_ms: None, shown: 0.0, last_fast: 0.0, last_full: 0.0, fp_last_fetch: 0.0, fp_in_flight: false,
-               hist_last_fetch: 0.0, hist_retry_at: 0.0, week_at: 0.0, week_tried_at: 0.0, week_in_flight: false, ws: false, ws_retry_at: 0.0, hub_seq: None, holes: vec![], liq: vec![], liq_gen: 0, liq_tail_gen: 0, liq_at: 0.0, liq_tail_at: 0.0, week_liq: vec![], dirty: false, out: vec![] }
+               hist_last_fetch: 0.0, hist_retry_at: 0.0, week_at: 0.0, week_tried_at: 0.0, week_in_flight: false, ws: false, ws_retry_at: 0.0, hub_seq: None, holes: vec![], liq: vec![], liq_gen: 0, liq_tail_gen: 0, liq_at: 0.0, liq_tail_at: 0.0, week_liq: vec![], dirty: false, out: vec![], s1: Default::default(), s1_only: false }
     }
     fn get(&mut self, kind: Kind, path: String) { let url = format!("{}{}", self.urls.api, path); self.out.push(Req::Get { kind, url }); }
 
     /// 11553 tick()(500ms · 숨으면 아무것도 안 한다)의 이 카드 몫 + 4556 ensurePriceWs
     pub fn tick(&mut self, now: f64, hidden: bool, want_week: bool) {
         self.ensure_ws(now, hidden);
-        if hidden { return; }
+        if hidden || self.s1_only { return; }
         if self.source == Source::Poll { self.refresh_footprint(now); }
         self.maybe_week(now, want_week);
         self.maybe_history(now);
@@ -336,6 +340,12 @@ impl Feed {
                 }
             }
         }
+        // 1초 수급(s1.rs) -- 스냅숏 supply 와 supply1s 본문이 같은 모양(app.js 4911 이 같은 applySupply1s 로 넣는다)
+        match ty {
+            "snapshot" => { self.s1.apply(&v["supply"]); self.dirty = true; }
+            "supply1s" => { self.s1.apply(&v); self.dirty = true; }
+            _ => {}
+        }
         match ty {
             "snapshot" | "footprint" => {
                 let fp = if ty == "snapshot" { v.get("footprint") } else { Some(&v) };
@@ -487,8 +497,11 @@ mod t {
         // 증분에 holes 가 없으면 = 구멍 없음
         f.on_ws(r#"{"s":"ethusdt","seq":8,"ex_ms":0,"rx_us":0,"tx_us":1,"type":"footprint","full":false,"bucket":0.5,"barSeconds":300,"barsExpected":144,"ready":true,"retailMaxUsd":1,"whaleMinUsd":2,"bars":[]}"#, 0.0);
         assert!(f.holes.is_empty());
+        // 1초 수급 증분 = s1 칸(초마다 덮어쓰기)
+        f.on_ws(r#"{"s":"ethusdt","seq":9,"ex_ms":0,"rx_us":0,"tx_us":1,"type":"supply1s","now":601,"seconds":[[600,1,0,0,0,2,0,9.5]],"partial":{"bn":[601,0,0,0,0,0,1,9.6],"okx":null,"spot":null}}"#, 0.0);
+        assert_eq!((f.s1.now, f.s1.bn.len(), f.s1.bn[&600][4], f.hub_seq), (601, 2, 2.0, Some(9)));
         // 빈 번호 → 끊고 다시(다음 tick 이 연다) · 그 메시지는 안 먹는다
-        f.on_ws(r#"{"s":"ethusdt","seq":10,"ex_ms":600200,"rx_us":0,"tx_us":1,"type":"trade","id":10,"px":3.0,"qty":2.0,"sell":true}"#, 0.0);
+        f.on_ws(r#"{"s":"ethusdt","seq":11,"ex_ms":600200,"rx_us":0,"tx_us":1,"type":"trade","id":10,"px":3.0,"qty":2.0,"sell":true}"#, 0.0);
         assert_eq!((f.price, f.out.drain(..).collect::<Vec<_>>()), (1.0, vec![Req::WsClose]));
         f.tick(1.0, false, false);
         assert!(f.out.contains(&Req::WsOpen("/rt".into())));

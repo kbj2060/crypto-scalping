@@ -59,6 +59,7 @@ fn static_traversal_blocked() {
     let mut files = serde_json::Map::new();
     files.insert("data/live/secret.json".into(), Value::String("eyJzZWNyZXQiOiB0cnVlfQ==".into()));
     files.insert("dashboard/live/ok.js".into(), Value::String("dmFyIGE9MTs=".into()));
+    files.insert("rtui/dist/index.html".into(), Value::String("dmFyIGE9MTs=".into()));
     let (addr, root) = start(&files, 1_700_000_000_000_000_000, 1.7e9, "eth", "trav");
     std::os::unix::fs::symlink(root.join("data/live/secret.json"), root.join("dashboard/live/link.json")).unwrap();
     std::os::unix::fs::symlink(root.join("data/live"), root.join("dashboard/live/linkdir")).unwrap();
@@ -74,11 +75,14 @@ fn static_traversal_blocked() {
         "/dashboard/live/linkdir/secret.json",
         "/dashboard/live/ok.js%00.png",
         "/dashboard/live/./../live/../../data/live/secret.json",
+        "/rtweb/../../data/live/secret.json",
+        "/rtweb/%2e%2e/%2e%2e/%2e%2e/data/live/secret.json",
     ] {
         let g = request(addr, "GET", p, &[]);
         assert!(g.status != 200 && !g.body.windows(secret.len()).any(|w| w == secret), "{p} → {} {:?}", g.status, String::from_utf8_lossy(&g.body));
     }
     assert_eq!(request(addr, "GET", "/dashboard/live/ok.js", &[]).status, 200); // 대조: 안쪽 파일은 나온다
+    assert_eq!(request(addr, "GET", "/rtweb/", &[]).status, 200); // Rust 화면 묶음(rtui/dist/index.html)
     let _ = std::fs::remove_dir_all(root);
 }
 

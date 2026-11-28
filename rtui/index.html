@@ -48,18 +48,18 @@ if (q.get("mode") === "bench") {
       fetch(url, { cache: "no-cache" }).then((res) => (res.ok ? res.text() : null)).catch(() => null).then((t) => m.on_get(kind, t));
     }
   };
-  const shot = q.get("mode") === "shot";
+  const shot = q.get("mode") === "shot", s1 = q.get("card") === "s1";   // ?card=s1 = 1초 수급 카드만(허브 /rt 밀기 · w·h 를 주면 지금 화면 오른쪽 칸 크기로)
   const bg = q.get("bg") === "none" ? 0xffffffff : parseInt(q.get("bg") || "1e2229", 16);
   if (q.get("plate")) document.body.style.background = `url(${q.get("plate")}) no-repeat 0 0`;   // 비교 캡처: 지금 화면에서 차트 층만 숨긴 바탕
   // 혼자 뜰 때 = 창 전체(w=0 → Rust 가 창에 맞춘다) · 상자 왼쪽 위 8px · 1주일은 지표 스위치 기본값처럼 늘 받는다(wk=0 이면 끔 -- 하네스)
   await m.start("c", q.get("asset") || "eth", N("x", 8), N("y", 8), N("w", 0), N("h", 0), N("tz", new Date().getTimezoneOffset()), bg,
-          N("wk", shot ? 0 : 1) === 1, q.get("api") || "", q.get("ws") || "", q.get("src") === "push", q.get("hub") || "");
+          N("wk", shot ? 0 : 1) === 1, q.get("api") || "", q.get("ws") || "", q.get("src") === "push" || s1, q.get("hub") || "", q.get("card") || "");
   const tick = () => m.tick(document.hidden);
   tick(); setInterval(tick, 500);
   document.addEventListener("visibilitychange", tick);
   if (q.has("bars")) m.set_bars(N("bars", 36));
   const tf = document.getElementById("tf");
-  if (!shot) {
+  if (!shot && !s1) {
     tf.hidden = false;
     const paint = (k) => tf.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.k === k)));
     tf.addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { m.tf(+b.dataset.k); paint(+b.dataset.k); } });
@@ -68,6 +68,6 @@ if (q.get("mode") === "bench") {
   window.rtui = m;
   window.rtui_scene = () => m.scene();
   const poll = () => { const s = m.scene(); if (s) requestAnimationFrame(() => requestAnimationFrame(() => { window.RESULT = { tInit, ...JSON.parse(m.scene()) }; })); else setTimeout(poll, 50); };
-  poll();
+  if (!s1) poll();
 }
 </script></body></html>

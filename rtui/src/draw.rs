@@ -19,6 +19,10 @@ pub fn rgba(c: Col, a: f64) -> Color32 {
         Col::Turnover => (0x5a, 0xa9, 0xf5, 1.0),
         Col::SoftLine => (203, 209, 227, 0.095),
         Col::HoverLine => (203, 209, 227, 0.38),
+        Col::Spot => (0xb8, 0x9c, 0xff, 1.0),
+        Col::Neutral => (0xcb, 0xd1, 0xe3, 1.0),
+        Col::Lift => (0x8b, 0x94, 0x9e, 1.0), // var(--lift-solid, #8b949e) -- styles.css 에 토큰이 없어 대체값
+
     };
     Color32::from_rgba_unmultiplied(r, g, b, (255.0 * a0 * a).round().clamp(0.0, 255.0) as u8)
 }
@@ -122,14 +126,19 @@ pub fn tip(p: &Painter, t: &mut crate::hover::Tip, vw: f32, vh: f32) {
 
 /// origin = svg 상자 왼쪽 위(화면 px) · 층 순서대로 나눠 부른다(lib.rs Chart::ui -- 호버 층이 가운데 끼인다)
 pub fn paint_prims(p: &Painter, prims: &[Prim], sc: &Scene, origin: Pos2) {
-    let o = origin.to_vec2();
     let g = &sc.g;
+    paint(p, prims, origin, [g.ml, g.mt, g.cw, g.ch], [g.ml, g.lane_top, g.cw, g.h - g.lane_top], 1.0);
+}
+
+/// plot·lane = 자르기 상자 [x, y, 폭, 높이] · dim = 불투명 곱(1초 수급: 새 봉 첫 초에 지난 그림을 .35 로)
+pub fn paint(p: &Painter, prims: &[Prim], origin: Pos2, plot: [f64; 4], lane: [f64; 4], dim: f64) {
+    let o = origin.to_vec2();
+    let rgba = |c: Col, a: f64| rgba(c, a * dim);
     let pt = |x: f64, y: f64| pos2(x as f32, y as f32) + o;
-    let cut = |x: f64, y: f64, w: f64, h: f64| p.with_clip_rect(Rect::from_min_size(pt(x, y), vec2(w as f32, h as f32)).intersect(p.clip_rect()));
-    let plot = cut(g.ml, g.mt, g.cw, g.ch);
-    let lane = cut(g.ml, g.lane_top, g.cw, g.h - g.lane_top);
+    let cut = |r: [f64; 4]| p.with_clip_rect(Rect::from_min_size(pt(r[0], r[1]), vec2(r[2] as f32, r[3] as f32)).intersect(p.clip_rect()));
+    let (plot, lane) = (cut(plot), cut(lane));
     for pr in prims {
-        let clip = match pr { Prim::Rect { clip, .. } | Prim::StrokeRect { clip, .. } | Prim::Line { clip, .. } | Prim::Text { clip, .. } | Prim::Circle { clip, .. } => *clip };
+        let clip = match pr { Prim::Rect { clip, .. } | Prim::StrokeRect { clip, .. } | Prim::Line { clip, .. } | Prim::Text { clip, .. } | Prim::Circle { clip, .. } | Prim::Dashed { clip, .. } => *clip };
         let pa = match clip { Clip::No => p, Clip::Plot => &plot, Clip::Lane => &lane };
         match pr {
             &Prim::Rect { x, y, w, h, c, a, rx, .. } => {
@@ -159,6 +168,10 @@ pub fn paint_prims(p: &Painter, prims: &[Prim], sc: &Scene, origin: Pos2) {
                     Some(d) => pa.extend(Shape::dashed_line(&v, s, *d as f32, *d as f32)),
                     None => { pa.add(Shape::line(v, s)); }
                 }
+            }
+            Prim::Dashed { pts, c, a, lw, on, off, .. } => {
+                let v: Vec<Pos2> = pts.iter().map(|q| pt(q[0], q[1])).collect();
+                pa.extend(Shape::dashed_line(&v, Stroke::new(*lw as f32, rgba(*c, *a)), *on as f32, *off as f32));
             }
             Prim::Text { x, y, s, size, wt, c, a, anchor, halo, .. } => text(pa, pt(*x, *y), s, *size as f32, *wt, rgba(*c, *a), *anchor, *halo),
         }
