@@ -263,4 +263,10 @@ ok "ETH 그림자 «끊김» 1줄 = 그 코인 빈틈 설명 → 통과(코인 �
 sed -i '/끊김/d' logs/supervisor/rtcollect_hl_bt_ETH_20251121.log
 OUT="$(bash rtcollect/tools/takeover.sh check hl_ctx 2>&1)"; RC=$?
 ok "양성 대조: ETH 로그에 «끊김»이 없으면 그 빈틈의 파이썬 4줄이 설명 못 함 → 불통과" '[ "$RC" != 0 ] && echo "$OUT" | grep -q "설명 못 함 4 "'
+OUT="$(CHECK_SINCE=$((T0 + 400)) bash rtcollect/tools/takeover.sh check hl_ctx 2>&1)"; RC=$?
+ok "CHECK_SINCE(400초): 그 앞 불일치(300~305초)는 빠지고 통과 · «창 시작» 줄" '[ "$RC" = 0 ] && echo "$OUT" | grep -q "창 시작 .* UTC(CHECK_SINCE=$((T0 + 400)))"'
+OUT="$(CHECK_SINCE=$((T0 + 200)) bash rtcollect/tools/takeover.sh check hl_ctx 2>&1)"; RC=$?
+ok "CHECK_SINCE(200초): 창 안 불일치(300~305초)는 그대로 잡힘 → 불통과" '[ "$RC" != 0 ] && echo "$OUT" | grep -q "설명 못 함 4 "'
+OUT="$(CHECK_SINCE=$((T0 + 9999)) bash rtcollect/tools/takeover.sh check hl_ctx 2>&1)"; RC=$?
+ok "CHECK_SINCE 가 자료 뒤면 견준 0 → 불통과" '[ "$RC" != 0 ]'
 [ "$FAIL" = 0 ] && echo "takeover selftest OK" || { echo "takeover selftest 실패"; exit 1; }

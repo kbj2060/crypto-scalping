@@ -115,6 +115,20 @@ def read_rest_log(pattern: str) -> list:
                 out.append((time.mktime(time.strptime(m[1], "%Y-%m-%d %H:%M:%S")), m[2], int(m[3])))   # 로그는 서버 지역 시각
     return out
 SET_TABLES = {"hl_xyz_ctx_1s", "hl_asset_ctx"}
+RTIMES: list = []   # --reconnect-times(11-29): 시각 찍힌 «끊김» 줄(초) -- 그 시각이 든 Rust 빈틈은 몫과 상관없이 설명 · 시각 없는 옛 줄만 긴 순서 몫
+SINCE = 0           # --since(.bt): 이 초 앞 행은 두 쪽 다 뺀다(takeover CHECK_SINCE -- 지금 실행 파일이 뜬 뒤만)
+RT_TOL = 2          # 끊김 줄 시각 ↔ 빈틈 짝 허용(초) -- 줄은 연결이 끝난 뒤 찍히고 빈틈 끝은 그 3초 뒤
+
+
+def took_silences(rsil: list, reconnects: int, scale: int) -> list:
+    """Rust 만 빈 곳(rsil · 긴 것부터 · scale=1000 이면 ms) 중 설명으로 칠 것: 시각 찍힌 끊김 줄이 든 빈틈 전부 +
+    나머지에서 긴 것부터 «시각 없는 줄 수»(reconnects − 시각 찍힌 줄 수)만큼(11-29: 전부 긴 순서 몫이면 새 빈틈이 옛 빈틈을 몫 밖으로 밀었다 -- XRP 11-24 15:08 26행)."""
+    tol = RT_TOL * scale
+    hit = [g for g in rsil if any(g[0] - tol <= t * scale <= g[1] + tol for t in RTIMES)]
+    rest = [g for g in rsil if g not in hit][:max(0, reconnects - len(RTIMES))]
+    return hit + rest
+
+
 SYMS: set = set()   # --syms: 이 종목만 견준다(hl_bt 코인 하나 -- 다른 코인 맥락은 다른 그림자·다른 재기동이라 hl_ctx check 몫)
 SUBSET = False   # --subset: Rust 가 받은 것이 파이썬에 있나만(파이썬이 오래 모은 «파이썬에만»은 세지 않음 -- 뉴스 한 회차)
 SYM_COL = {"treasury_fut_1m": "symbol", "yahoo_5m": "symbol", "items": "source","trade_tape_1s": "symbol", "bybit_liquidations": "symbol", "bybit_oi": "inst", "bybit_mark": "inst", "bybit_funding": "inst",
@@ -244,7 +258,7 @@ def proc_holes(con, tabs: list, starts: list, margin: int, py=None, reconnects: 
     if t.startswith("hl_"):   # HL 맥락(activeAssetCtx·xyz ctx)은 매 블록 ~1/초로 끊이지 않는다 -- 재접속 전 3초 쉼(두 구현 같음)이 만든 빈틈(초 차 ≥3)을 잡는다(11-22: 10초 문턱이라 «끊김» 134줄이 0번 설명)
         gap = 2.0
     rsil, psil = episodes(silences(ts, pts, gap, hs)), silences(pts, ts, gap, hs)
-    took = rsil[:reconnects]
+    took = took_silences(rsil, reconnects, 1)
     note = (f" · 연결 끊김(촘촘한 표 {t} 에서 {gap:.0f}초 넘게 한쪽만 빔): Rust {len(rsil)}번(그림자 로그 «끊김» {reconnects}줄 → {len(took)}번 설명 · 합 {sum(b - a for a, b in took):.0f}초)"
             f" · 파이썬 {len(psil)}번(합 {sum(b - a for a, b in psil):.0f}초)") if rsil or psil else ""
     return merge(hs + [(a, b) for a, b in took] + [(a, b) for a, b in psil]), note
@@ -634,7 +648,8 @@ def compare_bt(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", starts=(
             h = f.name.split(".")[0]
             if lo <= h <= hi:
                 raw = gzip.decompress(f.read_bytes()) if f.suffix == ".gz" else f.read_bytes()
-                out.setdefault(h, []).extend(raw[32 + 32 * k:64 + 32 * k] for k in range((len(raw) - 32) // 32))
+                out.setdefault(h, []).extend(r for r in (raw[32 + 32 * k:64 + 32 * k] for k in range((len(raw) - 32) // 32))
+                                             if struct.unpack_from("<q", r)[0] >= SINCE * 1000)
         return out
     a, b = read(py_dir), read(rs_dir)
     ts = lambda rows: sorted({struct.unpack_from("<q", r)[0] for h in rows for r in rows[h]})   # noqa: E731 -- 거래소 ms
@@ -644,7 +659,8 @@ def compare_bt(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", starts=(
     # 이 3~4초 빈틈을 못 잡아 Rust 로그 «끊김» 33줄이 0번 설명). 같은 연결 하나가 받은 bbo 는 둘 다 거래소 값 그대로 -- 빈 쪽은 그동안 연결이 없었을 뿐이다.
     hs_ms = [(x * 1000, y * 1000) for x, y in hs]
     rsil, psil = silences(tb, ta, RECONNECT_MS, hs_ms), silences(ta, tb, RECONNECT_MS, hs_ms)
-    down = merge(hs_ms + rsil[:reconnects] + psil)
+    took = took_silences(rsil, reconnects, 1000)
+    down = merge(hs_ms + took + psil)
     d0 = [x for x, _ in down]
     sa_, sb_ = set(ta), set(tb)
     res, n_down = [], 0
@@ -713,8 +729,8 @@ def compare_bt(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", starts=(
             for r in sorted(d)[:2]:
                 v = struct.unpack("<qdfdf", r)
                 res.append(f"    {who} {v} · 다른 쪽 같은 ms 행 {'있음' if v[0] in other else '없음'}")
-    res.append(f"bt: 연결 끊김(다른 쪽만 {RECONNECT_MS / 1000:.0f}초 넘게 받음) Rust {len(rsil)}번(로그 «끊김» {reconnects}줄 → {min(len(rsil), reconnects)} 설명) · 파이썬 {len(psil)}번"
-               f"{down_note([(x / 1000, y / 1000) for x, y in merge(hs_ms + rsil[:reconnects] + psil)], n_down)}")
+    res.append(f"bt: 연결 끊김(다른 쪽만 {RECONNECT_MS / 1000:.0f}초 넘게 받음) Rust {len(rsil)}번(로그 «끊김» {reconnects}줄 · 시각 찍힌 {len(RTIMES)} → {len(took)} 설명) · 파이썬 {len(psil)}번"
+               f"{down_note([(x / 1000, y / 1000) for x, y in merge(hs_ms + took + psil)], n_down)}")
     return res if len(res) > 1 else ["bt: 두 쪽에 같은 시 파일이 없다"]
 
 
@@ -918,7 +934,7 @@ def selftest() -> None:
             (Path(d) / side / "2026-11-21T08.bt").write_bytes(b"BTKR" + b"\0" * 28 + b"".join(rows))
         TALLY[:] = [0, 0]
         bt0 = compare_bt(Path(d) / "bp", Path(d) / "br", reconnects=1)
-        assert TALLY == [78, 2] and "Rust 1번(로그 «끊김» 1줄 → 1 설명)" in bt0[-1], (TALLY, bt0)   # 끊김 [39,60) 안 행(파이썬 21·Rust 1) 뺌 · 다른 값 1 행 = 양쪽 1씩
+        assert TALLY == [78, 2] and "Rust 1번(로그 «끊김» 1줄 · 시각 찍힌 0 → 1 설명)" in bt0[-1], (TALLY, bt0)   # 끊김 [39,60) 안 행(파이썬 21·Rust 1) 뺌 · 다른 값 1 행 = 양쪽 1씩
         TALLY[:] = [0, 0]
         compare_bt(Path(d) / "bp", Path(d) / "br", reconnects=0)
         assert TALLY[1] == 22, TALLY   # 로그에 끊김이 없으면 그 20행도 설명 못 함
@@ -967,6 +983,27 @@ def selftest() -> None:
             TALLY[:] = [0, 0]
             kb = compare_bt(Path(d) / p_, Path(d) / r_, reconnects=1)
             assert TALLY[1] == want, (p_, r_, TALLY, kb)
+        # 시각 찍힌 끊김(11-29): Rust 빈틈 둘(10.0~15.0초 25행 · 24.0~27.2초 16행) · 끊김 줄 1(24.5초에 시각) → 그 짧은 빈틈만 설명, 긴 쪽 25 는 설명 못 함
+        #   (옛 셈 = 긴 것부터 1개 → 16) · 두 줄 다 시각 → 0 · 양성 대조: 시각 없이 줄 1 → 16
+        def wbt(name, rows):
+            (Path(d) / name).mkdir()
+            (Path(d) / name / "2026-11-21T11.bt").write_bytes(b"BTKR" + b"\0" * 28 + b"".join(
+                struct.pack("<qdfdf", 1000 * T + 200 * i, 100.0, 1.0, 101.0 + (i == bad) * 9, 2.0 + i) for i, bad in rows))
+        wbt("r0", [(i, -1) for i in range(200)]); wbt("r1", [(i, -1) for i in range(200) if not (50 <= i <= 74 or 120 <= i <= 135)])
+        for times, n, want in (([T + 24.5], 1, 25), ([T + 12.0, T + 24.5], 2, 0), ([], 1, 16)):
+            TALLY[:] = [0, 0]
+            RTIMES[:] = times
+            kb = compare_bt(Path(d) / "r0", Path(d) / "r1", reconnects=n)
+            assert TALLY[1] == want, (times, TALLY, kb)
+        RTIMES[:] = []
+        # --since(CHECK_SINCE): 값 다른 행 2.0초(앞)·36.0초(뒤) -- 창 20초부터면 뒤 것만(2) · 창 없으면 둘 다(4)
+        wbt("s0", [(i, -1) for i in range(200)]); wbt("s1", [(i, i if i in (10, 180) else -1) for i in range(200)])
+        for since, want in ((T + 20, 2), (0, 4)):
+            TALLY[:] = [0, 0]
+            globals()["SINCE"] = since
+            kb = compare_bt(Path(d) / "s0", Path(d) / "s1")
+            assert TALLY[1] == want, (since, TALLY, kb)
+        globals()["SINCE"] = 0
         # raster: 머리 n 을 읽는다 · mid ±20칸만 같으면 통과 쪽
         def f32(path, vals):
             n = 60
@@ -1181,6 +1218,8 @@ def main() -> None:
     ap.add_argument("--drop", default="generated_ms")
     ap.add_argument("--starts", default="", help="그림자 Rust 감독 «SUPERVISOR starting» 시각(초, 쉼표) -- 그 앞뒤 Rust 가 비어 있던 구간을 뺀다(takeover.sh 가 로그에서 읽어 넘긴다)")
     ap.add_argument("--reconnects", type=int, default=0, help="그림자 Rust 감독 로그의 «끊김» 줄 수(takeover.sh 가 센다) -- 그만큼의 Rust 만 빈 곳을 설명으로")
+    ap.add_argument("--reconnect-times", default="", help="시각 찍힌 «끊김» 줄(UTC 초, 쉼표 · --reconnects 에 든 줄) -- 그 시각 빈틈과 직접 짝")
+    ap.add_argument("--since", type=int, default=0, help=".bt: 이 초(UTC) 앞 행은 두 쪽 다 뺀다(takeover CHECK_SINCE)")
     ap.add_argument("--summary", action="store_true", help="끝에 «요약: 견준 N · 설명 못 함 M» · M>0 이거나 N=0 이면 종료코드 1(takeover.sh check)")
     ap.add_argument("--subset", action="store_true", help="Rust 에만·다름만 센다(파이썬이 오래 모은 것은 안 셈)")
     ap.add_argument("--syms", default="", help="쉼표 목록 -- 이 종목만 견준다(hl_bt 코인)")
@@ -1199,6 +1238,9 @@ def main() -> None:
     global SUBSET
     SUBSET = a.subset
     SYMS.update(x for x in a.syms.split(",") if x)
+    RTIMES[:] = [float(x) for x in a.reconnect_times.split(",") if x.strip()]
+    global SINCE
+    SINCE = a.since
     PY_REST[:] = read_rest_log(a.py_rest_log) if a.py_rest_log else []
     if a.jsonl:
         out = compare_jsonl(a.py, a.rs, a.jsonl)

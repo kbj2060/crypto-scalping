@@ -10,6 +10,7 @@
 # 죽이는 것: 명령줄 인자가 그 종류의 러너 파일로 끝나고 environ 의 종목이 맞는 프로세스와 그 부모 _supervise.sh 뿐(PID 마다 /proc/<pid>/cmdline 다시 확인 · 이름으로 한꺼번에 안 죽인다).
 #   SIGTERM 뒤 기다렸다가 살아 있으면 보고만 하고 멈춘다(그때는 `back` 으로 되돌린다). 대시보드·감시·주문은 러너가 달라 걸리지 않는다(걸리면 멈춘다).
 #   bash rtcollect/tools/takeover.sh weight binance_ctx  바이낸스 가중치 머리(x-mbx-used-weight-1m)만 WEIGHT_N 번 읽어 최고를 찍는다(binance_ctx go 가 넘기기 전·뒤에 쓴다)
+# CHECK_SINCE=<UTC 초>(11-29): check(·go 의 check)가 그 시각 뒤 행만 견준다(sq·bt·duck · 끊김 몫은 시각 찍힌 그 뒤 줄만) -- 넘길 실행 파일이 뜬 뒤만으로 판정할 때
 # 바꿔 끼우기(시험용): CRONTAB_CMD(기본 crontab) · TAKEOVER_ROOT · WATCH_S(60) · TERM_WAIT_S(120 -- 체결 테이프류는 SIGTERM 뒤 마지막 묶음을 쓰느라 30초를 넘긴다) · CHECK_PY · RTCOLLECT_BIN · RTDUCK_BIN
 set -uo pipefail
 TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -158,15 +159,22 @@ starts() { # 그림자 감독 로그(logs/supervisor/<ENG>_<종류>_<목록>_<�
     done
   done | while read -r t; do date -d "$t" +%s 2>/dev/null; done | sort -un | paste -sd,
 }
-reconn() { # 같은 그림자 로그의 «끊김» 줄 수(연결 끊김 -- 재기동 아님) · shadow_tape 가 그만큼의 «Rust 만 빈 곳»을 설명으로 친다
-  local k f pre n=0
+logs_for() { # 이 종류(·종목·LOGSYM)의 그림자 감독 로그 파일들
+  local k f pre
   for k in $COVK; do
     pre="${ENG}_${k}_"; [ -z "$SELV" ] || [ "$GROUP" = 1 ] || pre="${ENG}_${k}_${SEL//[,:]/_}_"
-    for f in logs/supervisor/${ENG}_${k}_*.log; do [ -f "$f" ] || continue
-      logok "$f" "$pre" || continue
-      n=$((n + $(grep -c '끊김' "$f")))
-    done
+    for f in logs/supervisor/${ENG}_${k}_*.log; do [ -f "$f" ] && logok "$f" "$pre" && echo "$f"; done
   done
+}
+rtimes() { # 시각 찍힌 «끊김» 줄(«[hl] <UTC>Z 끊김 …» -- 11-28 실행 파일부터)의 초(쉼표) · CHECK_SINCE 가 있으면 그 뒤만
+  local f; for f in $(logs_for); do sed -nE 's/^\[hl\] ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z) 끊김.*/\1/p' "$f"; done |
+    while read -r t; do date -d "$t" +%s; done | awk -v s="${CHECK_SINCE:-0}" '$1 >= s' | sort -n | paste -sd,
+}
+reconn() { # 같은 그림자 로그의 «끊김» 줄 수(연결 끊김 -- 재기동 아님) · shadow_tape 가 시각 찍힌 줄은 그 시각 빈틈에, 나머지는 그만큼의 «Rust 만 빈 곳»을 긴 것부터 설명으로 친다
+  #   CHECK_SINCE 가 있으면 시각 찍힌 그 뒤 줄만 센다(시각 없는 옛 줄은 창 앞 일이라 몫에서 뺀다)
+  if [ -n "${CHECK_SINCE:-}" ]; then rtimes | tr , '\n' | grep -c .; return; fi
+  local f n=0
+  for f in $(logs_for); do n=$((n + $(grep -c '끊김' "$f"))); done
   echo "$n"
 }
 in_list() { local x; for x in ${1//,/ }; do [[ ",$2," == *",$x,"* ]] || return 1; done; }   # 앞 목록이 모두 뒤 목록에 있나
@@ -266,7 +274,8 @@ check() {
   [ "$KIND" = raster_archive ] && { archive_check; return $?; }
   [ "$KIND" = ob5m ] || [ "$KIND" = bookdepth ] && { replay_check; return $?; }
   local n=0 m=0 rc=0 e mode py rs out h f d0 d1
-  ST="$(starts)"; RC="$(reconn)"
+  ST="$(starts)"; RC="$(reconn)"; RT="$(rtimes)"; local CF="${CHECK_FROM:-${CHECK_SINCE:-}}"
+  [ -z "${CHECK_SINCE:-}" ] || echo "  창 시작 $(date -u -d @"$CHECK_SINCE" '+%F %T') UTC(CHECK_SINCE=$CHECK_SINCE) -- 그 앞 행은 두 쪽 다 뺀다(sq·bt·duck)"
   echo "  그림자 감독 기동 시각 $(echo "$ST" | tr , '\n' | grep -c .)개 · «끊김» 줄 $RC(로그) -- 그 앞뒤·그만큼의 Rust 빈 구간은 뺀다"
   coverage || rc=1
   for e in $CHK; do
@@ -277,14 +286,14 @@ check() {
       sq)     if [ "$KIND" = hl_ctx ]; then out=""   # 코인마다(11-28): 원본·그림자 다 코인(목록)마다 프로세스 -- 합친 초 목록에서는 한 코인의 재접속 빈틈(~4초)이
                 #   다른 코인 줄에 가려 그 빈틈의 다른 쪽 줄이 «설명 못 함»(서버 596줄 = 거의 전부 «다른 쪽이 4초 빈» 1줄) → 그 코인 로그의 기동·«끊김»으로 코인마다 견준다
                 for c in $(log_syms); do LOGSYM="$c"
-                  out+="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "$py" "$rs" --starts "$(starts)" --reconnects "$(reconn)" --syms "$c" --summary | sed "s/^/[$c] /; s/^\[$c\] 요약/요약/")"$'\n' || rc=1
+                  out+="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "$py" "$rs" --starts "$(starts)" --reconnects "$(reconn)" --reconnect-times "$(rtimes)" ${CHECK_SINCE:+--from "$CHECK_SINCE"} --syms "$c" --summary | sed "s/^/[$c] /; s/^\[$c\] 요약/요약/")"$'\n' || rc=1
                 done; LOGSYM=""
-              else out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "$py" "$rs" --starts "$ST" --reconnects "$RC" ${SYMS:+--syms "$SYMS"} ${PYREST:+--py-rest-log "$PYREST"} --summary)"; fi ;;
+              else out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "$py" "$rs" --starts "$ST" --reconnects "$RC" --reconnect-times "$RT" ${CHECK_SINCE:+--from "$CHECK_SINCE"} ${SYMS:+--syms "$SYMS"} ${PYREST:+--py-rest-log "$PYREST"} --summary)"; fi ;;
       events) out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" --events "$py" "$rs" --summary)" ;;
       json)   out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" --json 'liq_tab_*.json' "$py" "$rs" --summary)" ;;
-      duck)   out="$(nice -n 10 "$PYC" "$TOOLS/shadow_duck.py" "$py" "$rs" --starts "$ST" ${CHECK_FROM:+--from "$CHECK_FROM" --to "$(date +%s)"} --summary)" ;;
+      duck)   out="$(nice -n 10 "$PYC" "$TOOLS/shadow_duck.py" "$py" "$rs" --starts "$ST" ${CF:+--from "$CF" --to "$(date +%s)"} --summary)" ;;
       bt)     h="$(hours "$rs")" || { echo "  $e: 그림자 시 파일이 3개 미만"; rc=1; continue; }
-              out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" --bt "$py" "$rs" --hours "$h" --starts "$ST" --reconnects "$RC" --summary)" ;;
+              out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" --bt "$py" "$rs" --hours "$h" --starts "$ST" --reconnects "$RC" --reconnect-times "$RT" ${CHECK_SINCE:+--since "$CHECK_SINCE"} --summary)" ;;
       depth|raster) h="$(hours "$rs")" || { echo "  $e: 그림자 시 파일이 3개 미만"; rc=1; continue; }
               out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "--$mode" "$py" "$rs" --hours "$h" --starts "$ST" --summary)" ;;
       lake)   d0="$(ls -d "$rs"/*/*/coin=*/date=* 2>/dev/null | sed 's/.*date=//' | sort | head -1)"; d1="$(ls -d "$rs"/*/*/coin=*/date=* 2>/dev/null | sed 's/.*date=//' | sort | tail -1)"
