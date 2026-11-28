@@ -110,6 +110,8 @@ pub struct Feed {
     liq_tab_at: f64,
     liq_map_at: f64,
     pub liq_only: bool,
+    /// «남은 매물» 카드만(rem.rs · /api/liq-tab 만 묻는다)
+    pub rem_only: bool,
 }
 
 /// 4477 roundHalfEven(파이썬 round 와 같은 격자)
@@ -144,7 +146,7 @@ impl Feed {
         Self { source, urls, asset: asset.into(), symbol: symbol.into(), week_always, candles: vec![], fp_bars: BTreeMap::new(), fp: None, week: None,
                live: Live::default(), price: 0.0, price_ts_ms: None, shown: 0.0, last_fast: 0.0, last_full: 0.0, fp_last_fetch: 0.0, fp_in_flight: false,
                hist_last_fetch: 0.0, hist_retry_at: 0.0, week_at: 0.0, week_tried_at: 0.0, week_in_flight: false, ws: false, ws_retry_at: 0.0, hub_seq: None, holes: vec![], liq: vec![], liq_gen: 0, liq_tail_gen: 0, liq_at: 0.0, liq_tail_at: 0.0, week_liq: vec![], dirty: false, out: vec![], s1: Default::default(), s1_only: false, mc: None, mc_at: 0.0, mc_only: false, acct: None, acct_at: 0.0, prices: Default::default(), prices_seq: None, acct_only: false, srl: None, srl_at: 0.0, srl_skew: 0.0, srl_only: false,
-               liq_days: 7, liq_tab: None, liq_map: None, liq_sw: None, liq_tab_at: f64::NEG_INFINITY, liq_map_at: f64::NEG_INFINITY, liq_only: false }
+               liq_days: 7, liq_tab: None, liq_map: None, liq_sw: None, liq_tab_at: f64::NEG_INFINITY, liq_map_at: f64::NEG_INFINITY, liq_only: false, rem_only: false }
     }
     fn get(&mut self, kind: Kind, path: String) { let url = format!("{}{}", self.urls.api, path); self.out.push(Req::Get { kind, url }); }
 
@@ -163,9 +165,10 @@ impl Feed {
             if !hidden && now - self.acct_at >= ACCT_POLL_MS { self.acct_at = now; self.get(Kind::Acct, "/api/binance-account".into()); }
             return;
         }
-        if self.liq_only { // liq_tab.js tick(5초 · 숨으면 안 한다) fetchData 10분 · 지도 = 1일 app.js refreshLiquidationMap 30초 · 7일+ fetchExt 60초 · 지나간 칸용 5분봉
+        if self.liq_only || self.rem_only { // liq_tab.js tick(5초 · 숨으면 안 한다) fetchData 10분 · 지도 = 1일 app.js refreshLiquidationMap 30초 · 7일+ fetchExt 60초 · 지나간 칸용 5분봉
             if hidden { return; }
             if now - self.liq_tab_at >= LIQ_TAB_MS { self.liq_tab_at = now; let path = format!("/api/liq-tab?asset={}", self.asset); self.get(Kind::LiqTab, path); }
+            if self.rem_only { return; }
             let gap = if self.liq_days == 1 { LIQ_MAP1_MS } else { LIQ_TIERS_MS };
             if now - self.liq_map_at >= gap {
                 self.liq_map_at = now;
@@ -395,7 +398,7 @@ impl Feed {
         if self.source == Source::Push {
             (self.hub_seq, self.prices_seq) = (None, None);
             self.out.push(Req::WsOpen(self.urls.hub.clone()));
-            let subs: Vec<&str> = if self.acct_only || self.liq_only { vec![] } else { vec![&sym] }; // 계좌 칩은 «모든 종목» 가격만(구독과 상관없이 온다)
+            let subs: Vec<&str> = if self.acct_only || self.liq_only || self.rem_only { vec![] } else { vec![&sym] }; // 계좌 칩은 «모든 종목» 가격만(구독과 상관없이 온다)
             self.out.push(Req::WsSend(serde_json::json!({ "subscribe": subs }).to_string()));
         } else {
             self.out.push(Req::WsOpen(self.urls.trade_ws.replace("{sym}", &sym)));

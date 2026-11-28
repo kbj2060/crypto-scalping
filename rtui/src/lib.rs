@@ -12,6 +12,7 @@ pub mod lane;
 pub mod liq;
 pub mod marks;
 pub mod profile;
+pub mod rem;
 pub mod mc;
 pub mod s1;
 pub mod srl;
@@ -40,11 +41,13 @@ pub struct Chart {
     pill_max: RefCell<HashMap<usize, f64>>,
     /// 1초 수급 카드가 마지막으로 그린 것(새 봉 첫 1~2초에 흐리게 남긴다 -- app.js 7180)
     s1_last: Option<Vec<fp::Prim>>,
+    /// «남은 매물» 카드(feed.rem_only): 기간 · 보기 · 끌기 · 마지막 자리
+    pub rem: rem::Rem,
 }
 
 impl Chart {
     pub fn new(feed: feed::Feed, cfg: fp::Cfg, origin: Pos2, bg: Color32) -> Self {
-        Self { feed, view: view::View::default(), cfg, origin, bg, fill: false, geo: None, pill_max: Default::default(), s1_last: None }
+        Self { feed, view: view::View::default(), cfg, origin, bg, fill: false, geo: None, pill_max: Default::default(), s1_last: None, rem: Default::default() }
     }
 
     /// 1초 수급 카드 한 장(feed.s1_only) -- 상자 = cfg.w_all×h_all(fill 이면 창)
@@ -102,6 +105,59 @@ impl Chart {
         v.extend(liq::legend(h, &measure));
         let all = [0.0, 0.0, w, h + 20.0];
         draw::paint(pa, &v, self.origin, all, all, 1.0);
+    }
+    /// «청산» 탭 «남은 매물 일봉별» 한 장(feed.rem_only) -- 위 = 지표 줄(.lq-rib) · 가운데 = svg 상자 cfg.w_all×h_all(fill 이면 창 − 지표 − 범례) · 아래 = 범례 · 간격 5(.lq-b gap)
+    pub fn ui_rem(&mut self, ui: &mut egui::Ui, now: f64) {
+        let f = &self.feed;
+        let tab = f.liq_tab.as_ref();
+        let p = liq::price(f.prices.get(&f.asset).copied().unwrap_or(0.0), tab);
+        let pa = ui.painter();
+        if self.bg.a() > 0 { pa.rect_filled(pa.clip_rect(), 0.0, self.bg); }
+        let measure = |s: &str, z: f64, wt: u16| draw::measure(pa, s, z, wt);
+        let win = self.rem.win;
+        let k = rem::kpi(tab, win, p);
+        let top = rem::kpi_h(&k) + 5.0;
+        let age = tab.and_then(|t| t["generated_ms"].as_f64()).map(|g| (now - g) / 3_600_000.0);
+        if self.fill {
+            let r = ui.ctx().content_rect();
+            self.cfg.w_all = (r.width() - 2.0 * self.origin.x) as f64;
+            let lh = rem::legend(win, age, self.cfg.w_all, 0.0, &measure).1;
+            self.cfg.h_all = (r.height() - 2.0 * self.origin.y) as f64 - top - 5.0 - lh;
+        }
+        let (w, h) = (self.cfg.w_all, self.cfg.h_all);
+        let o = self.origin + vec2(0.0, top as f32);
+        let sv = |q: Pos2| ((q.x - o.x) as f64, (q.y - o.y) as f64);
+        let inb = |q: Pos2| { let (x, y) = sv(q); x >= 0.0 && y >= 0.0 && x <= w && y <= h };
+        let (events, hover, dbl) = ui.input(|i| (i.events.clone(), i.pointer.hover_pos(), i.pointer.button_double_clicked(PointerButton::Primary)));
+        for ev in events {
+            let e = match ev {
+                Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, .. } if inb(pos) => { let (x, y) = sv(pos); rem::Ev::Down(x, y) }
+                Event::PointerButton { button: PointerButton::Primary, pressed: false, .. } => rem::Ev::Up,
+                Event::PointerMoved(pos) => { let (x, y) = sv(pos); rem::Ev::Move(x, y) }
+                Event::MouseWheel { unit, delta, modifiers, .. } if hover.is_some_and(inb) => {
+                    let (x, y) = sv(hover.unwrap());
+                    let k = match unit { MouseWheelUnit::Line => 40.0, MouseWheelUnit::Page => 800.0, _ => 1.0 };
+                    rem::Ev::Wheel { x, y, dx: -delta.x as f64 * k, dy: -delta.y as f64 * k, shift: modifiers.shift }
+                }
+                _ => continue,
+            };
+            self.rem.event(e);
+        }
+        if dbl && hover.is_some_and(inb) { self.rem.event(rem::Ev::Dbl); }
+        if hover.is_some_and(inb) { ui.ctx().set_cursor_icon(if self.rem.panning() { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Crosshair }); }
+        let all = [0.0, 0.0, w, top + h + 5.0 + 60.0];
+        draw::paint(pa, &rem::ribbon(&k, w, &measure), self.origin, all, all, 1.0);
+        let out = rem::scene(tab, win, p, w, h, &mut self.rem.rv);
+        self.rem.geo = out.as_ref().map(|q| q.1);
+        match out {
+            Some((mut v, g)) => {
+                if let Some(q) = hover { let (x, y) = sv(q); v.extend(rem::xh(&g, x, y)); }
+                let (plot, lane) = rem::clips(&g);
+                draw::paint(pa, &v, o, plot, lane, 1.0);
+            }
+            None => draw::paint(pa, &liq::empty_msg("남은 매물 계산 전입니다"), o, all, all, 1.0),
+        }
+        draw::paint(pa, &rem::legend(win, age, w, h + 5.0, &measure).0, o, all, all, 1.0);
     }
     /// 합성 자료로 바로(측정·네이티브 창): 풋프린트 응답 + 캔들 이력을 받은 것처럼
     pub fn from_json(fp_json: &str, mh_json: &str, cfg: fp::Cfg, origin: Pos2, bg: Color32) -> Self {
@@ -162,6 +218,7 @@ impl Chart {
         if self.feed.acct_only { self.ui_acct(ui, now); return None; }
         if self.feed.srl_only { self.ui_srl(ui, now); return None; }
         if self.feed.liq_only { self.ui_liq(ui); return None; }
+        if self.feed.rem_only { self.ui_rem(ui, now); return None; }
         let t = ui.input(|i| i.time) * 1000.0;
         if self.fill { // 혼자 뜨는 페이지: 창 = 화면 -- 가격 플롯 왼쪽 열(w)이 화면 폭을 채우는 viewBox 폭(8429-8430 을 거꾸로)
             let r = ui.ctx().content_rect();
@@ -276,7 +333,7 @@ pub fn prims_json(prims: &[fp::Prim], groups: &[(&str, usize, usize)]) -> Vec<se
         Circle { x, y, r, c, a, .. } => serde_json::json!({"g": g, "k": "circle", "x": x, "y": y, "r": r, "c": format!("{c:?}"), "a": a}),
         Dashed { pts, c, a, lw, on, off, .. } => serde_json::json!({"g": g, "k": "line", "pts": pts, "c": format!("{c:?}"), "a": a, "lw": lw, "dash": [on, off]}),
         Area { pts, base, c, a } => serde_json::json!({"g": g, "k": "area", "pts": pts, "base": base, "c": format!("{c:?}"), "a": a}),
-        Mono { x, y, s, size, wt, c, a, anchor, halo } => serde_json::json!({"g": g, "k": "text", "mono": true, "x": x, "y": y, "s": s, "size": size, "wt": wt, "c": format!("{c:?}"), "a": a, "anchor": format!("{anchor:?}"), "halo": halo}),
+        Mono { x, y, s, size, wt, c, a, anchor, halo, .. } => serde_json::json!({"g": g, "k": "text", "mono": true, "x": x, "y": y, "s": s, "size": size, "wt": wt, "c": format!("{c:?}"), "a": a, "anchor": format!("{anchor:?}"), "halo": halo}),
     }}).collect()
 }
 

@@ -4,6 +4,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
+# 11-29: 글꼴 부분집합은 소스 글자에서 만든다 -- 새 카드 글자가 빠지면 네모로 그려지니 빌드마다 다시(전체 ttf 가 있을 때만 · 없으면 있는 *.sub.ttf 그대로)
+if ls fonts/*-Regular.ttf >/dev/null 2>&1; then bash fonts/subset.sh; fi
 cargo build -j 2 --release --lib --target wasm32-unknown-unknown
 W=target/wasm32-unknown-unknown/release/rtui.wasm
 H=$(sha256sum "$W" | cut -c1-8)
