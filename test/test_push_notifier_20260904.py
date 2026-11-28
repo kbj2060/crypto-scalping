@@ -100,7 +100,7 @@ class EnabledDetectorsTests(unittest.TestCase):
         self.assertTrue(items)
         for it in items:
             time.strptime(it["date"], "%Y-%m-%d")
-            self.assertTrue(it["id"] and it["title"] and it["how"])
+            self.assertTrue(it["id"] and it["title"] and (it["how"] or it.get("done")), it["id"])   # 닫은 줄(done)은 detect_verdicts 가 안 보낸다 -- how 없어도 됨
 
 
 class DetectorTests(unittest.TestCase):

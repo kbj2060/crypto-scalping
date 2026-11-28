@@ -171,8 +171,9 @@ class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 s = http.server.HTTPServer(("127.0.0.1", 0), H); print(s.server_address[1], flush=True); s.serve_forever()
 X
-python3 "$R/wsrv.py" > "$R/wport" & sleep 1
+python3 "$R/wsrv.py" > "$R/wport" & for _ in $(seq 50); do [ -s "$R/wport" ] && break; sleep 0.1; done
 WP="$(cat "$R/wport")"
+ip link show lo 2>/dev/null | grep -q 'state DOWN' && echo "  🔴 lo 가 꺼져 있다 -- 127.0.0.1 가짜 서버에 못 닿음(unshare -rn 이면 bash -c 'ip link set lo up; …' 안에서 돌린다)"
 W="$(WEIGHT_URL="http://127.0.0.1:$WP/fapi/v1/time" WEIGHT_N=3 WEIGHT_GAP=0 bash rtcollect/tools/takeover.sh weight binance_ctx 2>/dev/null | tr '\n' '|')"
 ok "가중치 세 번 = 100 250 180 · 중앙 180 ($W)" '[ "$W" = "100 250 180|중앙 180|" ]'
 J() { bash rtcollect/tools/takeover.sh weight-judge binance_ctx "" "$1" "$2" > /dev/null 2>&1; }
