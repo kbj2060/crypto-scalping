@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import argparse
+import bisect
 import sqlite3
 import time
 import sys
@@ -152,6 +153,7 @@ def merge(out: list) -> list:
 
 RASTER_L1 = 0.02
 RECONNECT_MS = 3000   # .bt 연결 끊김 빈틈(재접속 전 3초 쉼 · 두 구현 같음)
+SKIP_MS, SKIP_RUN = 1000, 3   # .bt 연결마다 다른 표본: 앞뒤 공통 행 간격 상한 · 그 사이 한쪽 행 수 상한(compare_bt)
 EXT = 30    # 빈틈 뒤 종목마다 다시 붙는 늦음은 30초까지만(실측 bybit BTC mark ~10초) -- 드문 표가 빈틈 뒤를 통째로 빼지 않게
 CAP = 300   # ponytail: 재기동 빈틈은 T 앞뒤 300초 안에서 찾는다(드문 종목 하나 때문에 몇 시간을 빼지 않게) -- 재기동이 더 길면 늘린다
 
@@ -572,9 +574,23 @@ def compare_bt(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", starts=(
             return out
         fa, fb = keep(a[h]), keep(b[h])
         same, op, orr = sum((fa & fb).values()), sum((fa - fb).values()), sum((fb - fa).values())
+        # 연결마다 다른 표본(11-28): HL bbo 는 연결마다 갱신 일부를 묶어 보낸다(같은 ms 행이 다른 쪽에 아예 없고 앞뒤 공통 행은 같다) -- 다음 상태는 둘 다 같아 값 정보는 잃지 않는다.
+        #   설명 = 다른 쪽에 그 ms 가 없고 · 앞뒤 공통 행 사이 SKIP_MS 안 · 그 사이 이쪽 한쪽 행 SKIP_RUN 개 이하 · 그 시에 두 쪽 수가 비슷(작은 쪽 ≥ 큰 쪽 절반 -- 한쪽만 빠지면 구현 결함이라 설명 안 함)
+        sh = sorted(struct.unpack_from("<q", r)[0] for r in (fa & fb).elements())
+        def sampled(d, other):
+            seg = Counter()
+            for r in d.elements():
+                t = struct.unpack_from("<q", r)[0]
+                i = bisect.bisect(sh, t)
+                if t not in other and 0 < i < len(sh) and sh[i] - sh[i - 1] <= SKIP_MS:
+                    seg[i] += 1
+            return sum(c for c in seg.values() if c <= SKIP_RUN)
+        sp_, sr_ = sampled(fa - fb, set(tb)), sampled(fb - fa, set(ta))
+        if min(sp_, sr_) < 0.5 * max(sp_, sr_):
+            sp_ = sr_ = 0
         TALLY[0] += same
-        TALLY[1] += op + orr
-        res.append(f"bt {h}: 같은 행 {same:,} · 파이썬에만 {op:,} · Rust에만 {orr:,}")
+        TALLY[1] += op + orr - sp_ - sr_
+        res.append(f"bt {h}: 같은 행 {same:,} · 파이썬에만 {op:,} · Rust에만 {orr:,}" + (f" · 연결마다 다른 표본(설명) 파이썬 {sp_:,}·Rust {sr_:,}" if sp_ else ""))
         for who, d, other in (("파이썬에만", fa - fb, tb), ("Rust에만", fb - fa, ta)):   # 진단: 남은 행 앞 2개 · 다른 쪽에 같은 ms 행이 있나(있으면 같은 시각 다른 값)
             for r in sorted(d)[:2]:
                 v = struct.unpack("<qdfdf", r)
@@ -800,6 +816,18 @@ def selftest() -> None:
         TALLY[:] = [0, 0]
         compare_bt(Path(d) / "sp", Path(d) / "sr", reconnects=0)
         assert TALLY[1] == 12 + 18, TALLY   # 로그에 끊김이 없으면 Rust 3.6초 빈틈의 파이썬 18행도 설명 못 함 · 파이썬 쪽 빈틈은 그대로 설명
+        # 연결마다 다른 표본(11-28 · 양성 대조): 110ms 간격 · 두 쪽이 서로 다른 외톨이 행 5개씩 못 받음 = 설명 · 한쪽만 5개 = 설명 못 함 · 한 자리에서 4개 연달아 = 설명 못 함
+        def kbt(name, drop, bad=-1):
+            (Path(d) / name).mkdir()
+            (Path(d) / name / "2026-11-21T09.bt").write_bytes(b"BTKR" + b"\0" * 28 + b"".join(
+                struct.pack("<qdfdf", 1000 * T + 110 * i, 100.0, 1.0, 101.0, 2.0 + i + (i == bad)) for i in range(500) if i not in drop))
+        for name, drop in (("k1", {10, 50, 90, 130, 170}), ("k2", {30, 70, 110, 150, 190}), ("k3", set()), ("k5", {300, 301, 302, 303, 350, 400, 450})):
+            kbt(name, drop)
+        kbt("k6", set(), bad=200)   # 같은 ms 값만 다름 = 설명 못 함(양쪽 1씩)
+        for p_, r_, want in (("k1", "k2", 0), ("k3", "k1", 5), ("k1", "k3", 5), ("k5", "k2", 4), ("k6", "k3", 2)):
+            TALLY[:] = [0, 0]
+            kb = compare_bt(Path(d) / p_, Path(d) / r_)
+            assert TALLY[1] == want, (p_, r_, TALLY, kb)   # k3·k1 = 한쪽만 빠짐(구현 결함 모양) · k5 = 외톨이 3은 설명, 4개 연달아는 설명 못 함
         # raster: 머리 n 을 읽는다 · mid ±20칸만 같으면 통과 쪽
         def f32(path, vals):
             n = 60
