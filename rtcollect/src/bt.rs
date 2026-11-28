@@ -14,13 +14,15 @@ pub struct HourFile {
     fh: Option<BufWriter<File>>,
     rows: u64,
     flushed: f64,
+    /// 압축 스레드(depth.rs HourFile 과 같은 꼴 -- 수신 고리를 막지 않는다 · 원본도 스레드)
+    zips: Vec<std::thread::JoinHandle<()>>,
 }
 
 impl HourFile {
     pub fn new(root: &Path, symbol: &str, now: f64) -> std::io::Result<Self> {
         let dir = root.join(symbol.to_uppercase());
         std::fs::create_dir_all(&dir)?;
-        Ok(Self { dir, hour: None, fh: None, rows: 0, flushed: now })
+        Ok(Self { dir, hour: None, fh: None, rows: 0, flushed: now, zips: vec![] })
     }
 
     /// `write`(:93-118). now = 단조 초(플러시 시각 -- 바이트에는 안 남는다).
@@ -61,8 +63,7 @@ impl HourFile {
         Ok(())
     }
 
-    /// `close`(:120-129): 시각(hour)은 남긴다. compress = 그 시 파일을 gzip(원본은 스레드 · 여기는 그 자리에서).
-    /// ponytail: 압축이 수신을 잠깐 막는다(시 파일 ~1MB = 수십 ms) -- 길어지면 스레드로.
+    /// `close`(:120-129): 시각(hour)은 남긴다. compress = 그 시 파일을 gzip(스레드 -- 원본과 같다).
     pub fn close(&mut self, compress: bool) {
         if let Some(mut f) = self.fh.take() {
             let _ = f.flush();
@@ -70,8 +71,16 @@ impl HourFile {
         if let (true, Some(h)) = (compress, &self.hour) {
             let p = self.dir.join(format!("{h}.bt"));
             if p.exists() {
-                crate::depth::gzip_done(&p);
+                self.zips.retain(|z| !z.is_finished());
+                self.zips.push(std::thread::spawn(move || crate::depth::gzip_done(&p)));
             }
+        }
+    }
+
+    /// 압축 스레드가 끝날 때까지(종료·시험).
+    pub fn join(&mut self) {
+        for z in self.zips.drain(..) {
+            let _ = z.join();
         }
     }
 }

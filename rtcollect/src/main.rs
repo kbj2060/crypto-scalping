@@ -286,18 +286,18 @@ async fn run_hl_ctx() {
     let coins = list("HL_BT_COIN", "ETH", true);
     let db = db_path("HL_CTX_DB_PATH", "hl_ctx.sqlite");
     let url = env_s("RTCOLLECT_WS_URL", hl_ctx::WS_URL);
-    let con = hl_ctx::open_db(&db).expect("DB 열기");
+    let _meta = hl_ctx::open_db(&db).expect("DB 열기"); // 표·meta -- 행은 코인마다 쓰기 스레드
     let mut cs = vec![];
     let mut tasks = JoinSet::new();
     for c in &coins {
-        let c = Rc::new(RefCell::new(hl_ctx::HlCtx::new(con.clone(), c, net::mono_s())));
+        let c = Rc::new(RefCell::new(hl_ctx::HlCtx::new(&db, c, net::mono_s())));
         tasks.spawn_local(net::run_hl(c.clone(), url.clone(), || {}));
         cs.push(c);
     }
     println!("hl_ctx {coins:?} → {}", db.display());
     wait_term(&mut tasks, || println!("rtcollect hl_ctx 60s · 재연결 {} (누적)", net::RECONNECTS.load(Relaxed))).await;
-    let n: usize = cs.iter().map(|c| c.borrow_mut().write()).sum();
-    println!("종료 신호 -- 남은 {n}행 쓰고 끝낸다");
+    let n: usize = cs.iter().map(|c| { let mut c = c.borrow_mut(); let n = c.write(); c.finish(); n }).sum();
+    println!("종료 신호 -- 남은 {n}행 쓰고 끝냈다");
 }
 
 /// 하이퍼리퀴드 호가 + 맥락 전체(live_hyperliquid_book_ticker_collector_20260923.py 기본 형태 -- Pi 에서 도는 것). 코인 하나(원본과 같다).
@@ -310,8 +310,8 @@ async fn run_hl_bt() {
     }
     let db = db_path("HL_CTX_DB_PATH", "hl_ctx.sqlite");
     let url = env_s("RTCOLLECT_WS_URL", hl_ctx::WS_URL);
-    let con = hl_ctx::open_db(&db).expect("DB 열기");
-    let mut h = hl_ctx::HlCtx::new(con, &coin, net::mono_s());
+    let _meta = hl_ctx::open_db(&db).expect("DB 열기");
+    let mut h = hl_ctx::HlCtx::new(&db, &coin, net::mono_s());
     h.bt = Some(rtcollect::bt::HourFile::new(&root, &coin, net::mono_s()).expect(".bt 폴더"));
     let c = Rc::new(RefCell::new(h));
     let mut tasks = JoinSet::new();
@@ -320,7 +320,8 @@ async fn run_hl_bt() {
     wait_term(&mut tasks, || { let c = c.borrow(); println!("rtcollect hl_bt 60s · bbo {} · 버림 {} · 재연결 {}", c.n_bbo, c.dropped, net::RECONNECTS.load(Relaxed)) }).await;
     let mut c = c.borrow_mut();
     c.on_disconnect();
-    println!("종료 신호 -- .bt 닫고 남은 맥락 행 쓰고 끝낸다");
+    c.finish();
+    println!("종료 신호 -- .bt 닫고(압축 기다림) 남은 맥락 행 쓰고 끝냈다");
 }
 
 /// depth_diff(live_depth_diff_collector_20260915.py `run()`). 종목 하나(원본과 같다 -- DD_SYMBOL). 정지 감시 없음(원본 그대로).

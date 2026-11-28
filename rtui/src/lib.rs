@@ -13,6 +13,7 @@ pub mod marks;
 pub mod profile;
 pub mod mc;
 pub mod s1;
+pub mod srl;
 pub mod view;
 
 use eframe::egui::{self, Color32, Context, Event, MouseWheelUnit, PointerButton, Pos2, Rect, vec2};
@@ -74,6 +75,18 @@ impl Chart {
         let cs = acct::chips(self.feed.acct.as_ref(), &self.feed.prices);
         if acct::paint(p, &cs, self.origin.x, self.origin.y, self.cfg.w_all, now) { ui.ctx().request_repaint(); }
     }
+    /// «레벨 5분» 칸 한 장(feed.srl_only · ETH 만 -- 6094) -- 폭 = cfg.w_all(fill 이면 창) · 남은 시간이 판정을 바꾸니 1초마다 다시 그린다
+    pub fn ui_srl(&mut self, ui: &mut egui::Ui, now: f64) {
+        if self.fill { self.cfg.w_all = (ui.ctx().content_rect().width() - 2.0 * self.origin.x) as f64; }
+        let p = ui.painter();
+        if self.bg.a() > 0 { p.rect_filled(p.clip_rect(), 0.0, self.bg); }
+        if self.feed.asset != "eth" { return; }
+        let c = srl::cell(self.feed.srl.as_ref(), self.feed.srl_now(now));
+        let measure = |s: &str, z: f64, wt: u16| draw::measure(p, s, z, wt);
+        let all = [0.0, 0.0, self.cfg.w_all, srl::height(&c)];
+        draw::paint(p, &srl::scene(&c, self.cfg.w_all, &measure), self.origin, all, all, 1.0);
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
+    }
     /// 합성 자료로 바로(측정·네이티브 창): 풋프린트 응답 + 캔들 이력을 받은 것처럼
     pub fn from_json(fp_json: &str, mh_json: &str, cfg: fp::Cfg, origin: Pos2, bg: Color32) -> Self {
         let mut f = feed::Feed::new("eth", "ETHUSDT", feed::Source::Poll, feed::Urls::default(), false);
@@ -131,6 +144,7 @@ impl Chart {
         if self.feed.s1_only { self.ui_s1(ui); return None; }
         if self.feed.mc_only { self.ui_mc(ui); return None; }
         if self.feed.acct_only { self.ui_acct(ui, now); return None; }
+        if self.feed.srl_only { self.ui_srl(ui, now); return None; }
         let t = ui.input(|i| i.time) * 1000.0;
         if self.fill { // 혼자 뜨는 페이지: 창 = 화면 -- 가격 플롯 왼쪽 열(w)이 화면 폭을 채우는 viewBox 폭(8429-8430 을 거꾸로)
             let r = ui.ctx().content_rect();

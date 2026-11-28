@@ -21,7 +21,7 @@ impl Default for Urls {
 #[derive(Debug, PartialEq, serde::Serialize)]
 pub enum Req { Get { kind: Kind, url: String }, WsOpen(String), WsClose, /** 열린(또는 열리는 중인) 소켓에 보낼 글 -- 허브 구독 */ WsSend(String) }
 #[derive(Debug, PartialEq, Clone, Copy, serde::Serialize)]
-pub enum Kind { Footprint, History, Week, LiqSig, Liq, LiqTail, Mc, Acct }
+pub enum Kind { Footprint, History, Week, LiqSig, Liq, LiqTail, Mc, Acct, Srl }
 
 /// 145 FOOTPRINT_POLL_MS · 148 FOOTPRINT_STALE_BARS · 38 CANDLE_HISTORY_POLL_MS · 1680 CHART_MAX_CANDLES · 4400 FAST_PRICE_MIN_INTERVAL_MS · 2224 FOOTPRINT_RENDER_MIN_INTERVAL_MS · 6638 FP_WEEK_REFRESH_MS
 const FP_POLL_MS: f64 = 400.0;
@@ -35,6 +35,7 @@ const LIQ_POLL_MS: f64 = 60_000.0; // 1653 LIQUIDATION_5M_POLL_MS
 const MARKET_CTX_POLL_MS: f64 = 1000.0; // 6116
 const LIQ_TAIL_MS: f64 = 2000.0;   // 3204 LIQ_5M_TAIL_POLL_MS
 const ACCT_POLL_MS: f64 = 10_000.0; // 1649 BINANCE_ACCOUNT_POLL_MS
+const SR_LEAN_POLL_MS: f64 = 2000.0; // 5810
 const BAR: i64 = 300; // CHART_CANDLE_MIN 5 × 60
 
 /// 4471 footprintLive -- 브라우저가 쌓는 형성 봉 칸. cells: 키 = roundHalfEven(가격/칸 폭) → [매수, 매도, 고래매수, 고래매도, 리테일매수, 리테일매도]
@@ -93,6 +94,11 @@ pub struct Feed {
     pub prices: std::collections::HashMap<String, f64>,
     prices_seq: Option<u64>,
     pub acct_only: bool,
+    /// «레벨 5분»(srl.rs): /api/sr-lean 응답(5820 latestSrLean) · 마지막으로 물은 시각 · 서버 시계 − 이 시계(초 · 5822 srLeanSkew) · 이 카드만
+    pub srl: Option<serde_json::Value>,
+    srl_at: f64,
+    srl_skew: f64,
+    pub srl_only: bool,
 }
 
 /// 4477 roundHalfEven(파이썬 round 와 같은 격자)
@@ -126,7 +132,7 @@ impl Feed {
     pub fn new(asset: &str, symbol: &str, source: Source, urls: Urls, week_always: bool) -> Self {
         Self { source, urls, asset: asset.into(), symbol: symbol.into(), week_always, candles: vec![], fp_bars: BTreeMap::new(), fp: None, week: None,
                live: Live::default(), price: 0.0, price_ts_ms: None, shown: 0.0, last_fast: 0.0, last_full: 0.0, fp_last_fetch: 0.0, fp_in_flight: false,
-               hist_last_fetch: 0.0, hist_retry_at: 0.0, week_at: 0.0, week_tried_at: 0.0, week_in_flight: false, ws: false, ws_retry_at: 0.0, hub_seq: None, holes: vec![], liq: vec![], liq_gen: 0, liq_tail_gen: 0, liq_at: 0.0, liq_tail_at: 0.0, week_liq: vec![], dirty: false, out: vec![], s1: Default::default(), s1_only: false, mc: None, mc_at: 0.0, mc_only: false, acct: None, acct_at: 0.0, prices: Default::default(), prices_seq: None, acct_only: false }
+               hist_last_fetch: 0.0, hist_retry_at: 0.0, week_at: 0.0, week_tried_at: 0.0, week_in_flight: false, ws: false, ws_retry_at: 0.0, hub_seq: None, holes: vec![], liq: vec![], liq_gen: 0, liq_tail_gen: 0, liq_at: 0.0, liq_tail_at: 0.0, week_liq: vec![], dirty: false, out: vec![], s1: Default::default(), s1_only: false, mc: None, mc_at: 0.0, mc_only: false, acct: None, acct_at: 0.0, prices: Default::default(), prices_seq: None, acct_only: false, srl: None, srl_at: 0.0, srl_skew: 0.0, srl_only: false }
     }
     fn get(&mut self, kind: Kind, path: String) { let url = format!("{}{}", self.urls.api, path); self.out.push(Req::Get { kind, url }); }
 
@@ -134,6 +140,10 @@ impl Feed {
     pub fn tick(&mut self, now: f64, hidden: bool, want_week: bool) {
         if self.mc_only { // 6259 refreshMarketCtx(1초 · 숨으면 안 묻는다)
             if !hidden && now - self.mc_at >= MARKET_CTX_POLL_MS { self.mc_at = now; let path = format!("/api/market-context?asset={}", self.asset); self.get(Kind::Mc, path); }
+            return;
+        }
+        if self.srl_only { // 5812 refreshSrLean(2초 · 숨으면 · ETH 아니면 안 묻는다)
+            if !hidden && self.asset == "eth" && now - self.srl_at >= SR_LEAN_POLL_MS { self.srl_at = now; self.get(Kind::Srl, "/api/sr-lean".into()); }
             return;
         }
         self.ensure_ws(now, hidden);
@@ -170,6 +180,15 @@ impl Feed {
         self.acct = body.and_then(|b| serde_json::from_str::<serde_json::Value>(b).ok()).filter(|v| v["ok"] == true);
         self.dirty = true;
     }
+    /// 5819 실패·못 읽음 = 받아 둔 값 그대로 · ok 면 서버 시계 차를 다시 잰다
+    pub fn on_srl(&mut self, body: Option<&str>, now: f64) {
+        let Some(v) = body.and_then(|b| serde_json::from_str::<serde_json::Value>(b).ok()) else { return };
+        if v["ok"] == true { self.srl_skew = v["now"].as_f64().unwrap_or(f64::NAN) - now / 1000.0; }
+        self.srl = Some(v);
+        self.dirty = true;
+    }
+    /// 5827 srLeanNowS(초)
+    pub fn srl_now(&self, now: f64) -> f64 { now / 1000.0 + self.srl_skew }
     /// 신호 응답(내용은 이 카드가 안 쓴다 -- 성공했을 때만 이력 전량을 묻는다)
     pub fn on_liq_sig(&mut self, body: Option<&str>) {
         if body.is_none() { return; }

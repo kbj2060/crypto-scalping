@@ -8,8 +8,9 @@ use crate::store::{in_tx, open_hot};
 use crate::{py_float, py_str, Reconnect};
 use rusqlite::{params, Connection};
 use serde_json::{Map, Value};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::mpsc;
 
 pub const WS_URL: &str = "wss://api.hyperliquid.xyz/ws";
 /// 이만큼 조용하면 {"method": "ping"} 을 보낸다(끊지 않는다 -- 재연결이 더 비싸다, :61).
@@ -60,9 +61,8 @@ pub fn parse_ctx(data: &Map<String, Value>, recv_ms: i64) -> Option<Row> {
     Some((py_str(data.get("coin"), ""), recv_ms, g("funding"), oi, g("premium"), g("oraclePx"), g("markPx"), g("midPx"), g("dayNtlVlm"), g("dayBaseVlm")))
 }
 
-/// 한 코인의 `run()`(:120-168) 상태. 같은 파일의 코인들은 연결 하나(Rc)를 나눠 쓴다.
+/// 한 코인의 `run()`(:120-168) 상태. 맥락 행 쓰기는 코인마다 쓰기 스레드(제 연결)가 한다 -- 수신 고리는 묶음을 넘기기만(11-28: 고리 안 SQLite 쓰기 제거).
 pub struct HlCtx {
-    con: Rc<Connection>,
     pub coin: String,
     /// Some = 전체 모드(bbo 구독 · .bt 쓰기). last_ts·last_row = 역행·완전 중복 버리기(재연결을 넘어 이어진다).
     pub bt: Option<HourFile>,
@@ -71,13 +71,56 @@ pub struct HlCtx {
     pub n_bbo: u64,
     pub dropped: u64,
     buf: Vec<Row>,
-    pending: Vec<Row>,
+    tx: Option<mpsc::Sender<Vec<Row>>>,
+    writer: Option<std::thread::JoinHandle<()>>,
     flushed_at: f64,
 }
 
+/// 쓰기 스레드: 묶음을 받은 차례대로 `CtxStore.write`(:100-115) -- 보류 + 묶음을 한 트랜잭션으로 · 못 쓰면 보류(5만 행 넘으면 뒤 절반만).
+/// 빈 묶음도 받는다(원본은 연결 끝마다 보류를 다시 써 본다). 보내는 쪽이 닫히면 끝.
+fn writer(path: PathBuf, coin: String, rx: mpsc::Receiver<Vec<Row>>) {
+    let mut con: Option<Connection> = None;
+    let mut pending: Vec<Row> = vec![];
+    for mut b in rx {
+        pending.append(&mut b);
+        if pending.is_empty() {
+            continue;
+        }
+        if con.is_none() {
+            con = open_hot(&path, &DDL).map_err(|e| eprintln!("[{coin}] ctx DB 열기 실패: {e}")).ok();
+        }
+        let r = match &con {
+            Some(c) => in_tx(c, || {
+                let mut st = c.prepare_cached("INSERT INTO hl_asset_ctx VALUES (?,?,?,?,?,?,?,?,?,?)")?;
+                for x in &pending {
+                    st.execute(params![x.0, x.1, x.2, x.3, x.4, x.5, x.6, x.7, x.8, x.9])?;
+                }
+                Ok(())
+            }),
+            None => Err(rusqlite::Error::InvalidQuery),
+        };
+        match r {
+            Ok(()) => pending.clear(),
+            Err(e) => {
+                if pending.len() > PENDING_CAP {
+                    let h = pending.len() / 2;
+                    pending.drain(..h);
+                    eprintln!("[{coin}] 쓰기가 계속 막혀 절반 버림");
+                } else {
+                    eprintln!("[{coin}] ctx 쓰기 보류 {}행: {e}", pending.len());
+                }
+            }
+        }
+    }
+}
+
 impl HlCtx {
-    pub fn new(con: Rc<Connection>, coin: &str, now: f64) -> Self {
-        Self { con, coin: coin.to_uppercase(), bt: None, last_ts: -1, last_row: None, n_bbo: 0, dropped: 0, buf: vec![], pending: vec![], flushed_at: now }
+    /// db = 맥락 SQLite(표·meta 는 `open_db` 가 먼저 만든다) -- 쓰기 스레드가 제 연결로 연다.
+    pub fn new(db: &Path, coin: &str, now: f64) -> Self {
+        let (tx, rx) = mpsc::channel();
+        let (p, c) = (db.to_path_buf(), coin.to_uppercase());
+        let writer = Some(std::thread::spawn(move || writer(p, c, rx)));
+        Self { coin: coin.to_uppercase(), bt: None, last_ts: -1, last_row: None, n_bbo: 0, dropped: 0, buf: vec![], tx: Some(tx), writer, flushed_at: now }
     }
 
     pub fn subscribe(&self) -> Vec<String> {
@@ -136,35 +179,25 @@ impl HlCtx {
         self.write();
     }
 
-    /// `CtxStore.write`(:100-115): 보류 + 버퍼를 한 트랜잭션으로. 못 쓰면 보류(5만 행 넘으면 뒤 절반만 남긴다).
+    /// `CtxStore.write`(:100-115) 를 쓰기 스레드에 넘긴다(막지 않는다). 반환 = 넘긴 행 수.
     pub fn write(&mut self) -> usize {
-        self.pending.append(&mut self.buf);
-        if self.pending.is_empty() {
-            return 0;
+        let b = std::mem::take(&mut self.buf);
+        let n = b.len();
+        if let Some(tx) = &self.tx {
+            let _ = tx.send(b);
         }
-        let r = in_tx(&self.con, || {
-            let mut st = self.con.prepare_cached("INSERT INTO hl_asset_ctx VALUES (?,?,?,?,?,?,?,?,?,?)")?;
-            for x in &self.pending {
-                st.execute(params![x.0, x.1, x.2, x.3, x.4, x.5, x.6, x.7, x.8, x.9])?;
-            }
-            Ok(())
-        });
-        match r {
-            Ok(()) => {
-                let n = self.pending.len();
-                self.pending.clear();
-                n
-            }
-            Err(e) => {
-                if self.pending.len() > PENDING_CAP {
-                    let h = self.pending.len() / 2;
-                    self.pending.drain(..h);
-                    eprintln!("[{}] 쓰기가 계속 막혀 절반 버림", self.coin);
-                } else {
-                    eprintln!("[{}] ctx 쓰기 보류 {}행: {e}", self.coin, self.pending.len());
-                }
-                0
-            }
+        n
+    }
+
+    /// 끝: 남은 행을 넘기고 쓰기 스레드·압축 스레드가 끝날 때까지 기다린다(종료·시험).
+    pub fn finish(&mut self) {
+        self.write();
+        self.tx = None;
+        if let Some(w) = self.writer.take() {
+            let _ = w.join();
+        }
+        if let Some(b) = self.bt.as_mut() {
+            b.join();
         }
     }
 }
@@ -173,10 +206,10 @@ impl HlCtx {
 /// 반환 = 보낸 글자.
 /// bt = Some(폴더) 면 전체 모드(hl_bt -- bbo 구독 · .bt). 실행 끝에 .bt 를 닫는다(원본은 실행이 끝나 파일이 닫힐 때 버퍼가 비워진다).
 pub fn replay(runs: &[Value], path: &Path, bt: Option<&Path>) -> rusqlite::Result<Vec<String>> {
-    let con = open_db(path)?;
+    let _meta = open_db(path)?;
     let mut sent = vec![];
     for run in runs {
-        let mut c = HlCtx::new(con.clone(), run["coin"].as_str().unwrap(), run["t0"].as_f64().unwrap());
+        let mut c = HlCtx::new(path, run["coin"].as_str().unwrap(), run["t0"].as_f64().unwrap());
         if let Some(root) = bt {
             c.bt = Some(HourFile::new(root, &c.coin, run["t0"].as_f64().unwrap()).unwrap());
         }
@@ -196,6 +229,7 @@ pub fn replay(runs: &[Value], path: &Path, bt: Option<&Path>) -> rusqlite::Resul
         if let Some(b) = c.bt.as_mut() {
             b.close(false);
         }
+        c.finish(); // 다음 실행 전에 쓰기·압축이 끝나야 차례가 원본과 같다
     }
     Ok(sent)
 }

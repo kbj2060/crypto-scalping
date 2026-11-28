@@ -133,7 +133,7 @@ async fn serve(script: Vec<Conn>) -> (u16, Arc<Mutex<Seen>>) {
 }
 
 /// 실행 파일을 띄워 마지막 연결의 메시지가 다 간 뒤 1.5초에 SIGTERM, 종료코드 0 확인.
-async fn run_bin(envs: &[(&str, String)], seen: &Arc<Mutex<Seen>>, n_conns: usize, limit_s: u64) {
+async fn run_bin(envs: &[(&str, String)], seen: &Arc<Mutex<Seen>>, n_conns: usize, limit_s: u64) -> String {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_rtcollect"));
     for (k, v) in envs {
         cmd.env(k, v);
@@ -155,6 +155,7 @@ async fn run_bin(envs: &[(&str, String)], seen: &Arc<Mutex<Seen>>, n_conns: usiz
     .await
     .unwrap();
     assert_eq!(st.code(), Some(0), "SIGTERM 은 0 으로 끝난다:\n{err}");
+    err
 }
 
 /// clock 0 = 단조 · 1 = 벽시계
@@ -768,6 +769,27 @@ async fn hl_ctx_loop_matches_replay() {
     assert_eq!(a, b, "실행 파일 DB != replay DB");
     assert_eq!(a.iter().filter(|r| r.starts_with("hl_asset_ctx|")).count(), 20);
     eprintln!("HL 맥락 접속 루프 = replay: 행 {} · PING {p:?} · 다시 붙기 {:.2}·{:.2}·{:.2}초", a.len(), redial(&s, 0, 0), redial(&s, 1, 0), redial(&s, 2, 0));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── hl_bt 수신 공백·끊김 로그(11-28) ── 1초 넘는 공백은 «수신 공백 N초»(글자 «끊김» 없음 -- takeover.sh 가 «끊김» 줄 = 재접속으로 센다) · 끊김 줄에 UTC 시각
+#[tokio::test]
+async fn hl_bt_logs_gap_and_disconnect_with_utc() {
+    let dir = tmpdir("hl_bt_gap");
+    let b = |ts: i64| json!({"channel": "bbo", "data": {"coin": "ETH", "time": ts, "bbo": [{"px": "100", "sz": "1", "n": 1}, {"px": format!("101.{ts}"), "sz": "1", "n": 1}]}}).to_string();
+    let (port, seen) = serve(vec![
+        Conn { msgs: vec![b(T0), "SLEEP:1500".into(), b(T0 + 1500)], end: End::Close },
+        Conn { msgs: vec![b(T0 + 5000)], end: End::Read(Duration::from_secs(10)) },
+    ])
+    .await;
+    let env = [("RTCOLLECT_KIND", "hl_bt".into()), ("HL_BT_COIN", "eth".into()), ("HL_BT_ROOT", dir.join("bt").display().to_string()),
+               ("HL_CTX_DB_PATH", dir.join("hl_ctx.sqlite").display().to_string()), ("RTCOLLECT_WS_URL", format!("ws://127.0.0.1:{port}/ws"))];
+    let err = run_bin(&env, &seen, 2, 30).await;
+    let gap: Vec<&str> = err.lines().filter(|l| l.contains("수신 공백")).collect();
+    let cut: Vec<&str> = err.lines().filter(|l| l.contains("끊김")).collect();
+    assert!(gap.len() == 1 && regex::Regex::new(r"^\[hl\] \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z 수신 공백 1\.[5-9]초").unwrap().is_match(gap[0]), "공백 줄: {err}");
+    assert!(cut.len() == 1 && regex::Regex::new(r"^\[hl\] \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z 끊김 .* 마지막 수신 .*Z \(\d+\.\d초 전\) -- 3초 뒤 재접속$").unwrap().is_match(cut[0]), "끊김 줄: {err}");
+    eprintln!("{}\n{}", gap[0], cut[0]);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
