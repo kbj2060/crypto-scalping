@@ -207,6 +207,8 @@ pub struct Supply {
     pub(crate) okx: Lane,
     pub(crate) okx_inst: String,
     pub(crate) okx_oi: BTreeMap<i64, f64>,
+    /// 바이낸스 선물 OI 1초 링(bnoi.rs).
+    pub(crate) bn_oi: BTreeMap<i64, f64>,
     /// OKX OI 5분봉 [처음, 끝](coin_flow.py okx_oi_5m · 288봉) · 마지막 밀기 뒤 바뀐 봉.
     pub(crate) okx_oi5m: BTreeMap<i64, [f64; 2]>,
     pub(crate) okx_oi5m_dirty: std::collections::BTreeSet<i64>,
@@ -279,6 +281,7 @@ impl Supply {
             okx: Lane::default(),
             okx_inst: okx_inst(symbol),
             okx_oi: BTreeMap::new(),
+            bn_oi: BTreeMap::new(),
             okx_oi5m: BTreeMap::new(),
             okx_oi5m_dirty: Default::default(),
             okx_fp: crate::footprint::Bars::new(symbol),
@@ -507,6 +510,7 @@ impl Supply {
         let oi_top = self.okx_oi.keys().next_back().copied().unwrap_or(0);
         m.okx_oi = self.okx_oi.range(oi_top - SUPPLY_1S_SECONDS + 1..).map(|(&s, &v)| (s, v)).collect();
         m.okx_liq = liq_rows(&self.okx_liq, |s| ok - SUPPLY_1S_SECONDS < s && s < ok);
+        m.oi = crate::bnoi::window(&self.bn_oi, i64::MIN);
         let b = now_us.div_euclid(1_000_000) - BYBIT_LAG_S;
         m.bybit_liq = liq_rows(&self.bybit, |s| b - SUPPLY_1S_SECONDS < s && s <= b);
         m
@@ -577,6 +581,7 @@ impl Supply {
             okx_liq: vec![],
             okx_oi: vec![],
             bybit_liq: vec![],
+            oi: vec![],
         }
     }
 

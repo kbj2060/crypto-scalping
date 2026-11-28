@@ -1,5 +1,6 @@
 //! rtcore M1: 바이낸스 선물 웹소켓 → 메모리 상태 → 화면 웹소켓 밀기. 읽기 전용(주문·계좌·키 없음).
 //! 설계: docs/rtcore_design_20261120.md
+pub mod bnoi;
 pub mod feed;
 pub mod footprint;
 pub mod hub;
@@ -210,6 +211,10 @@ pub fn start(cfg: &Cfg, listener: TcpListener) -> (Arc<state::State>, tokio::tas
         feeds.push((src.url.clone(), tokio::spawn(feed::run_src(src, state.clone(), cfg.silence))));
     }
     tokio::spawn(hub::serve(listener, state.clone(), cfg.hub.clone()));
+    // 2026-11-28 바이낸스 OI 1초(bnoi.rs · hot 읽기 전용) -- 빈 경로 = 끔
+    if !cfg.bn_ctx_db.is_empty() {
+        tokio::spawn(bnoi::run(state.clone(), cfg.bn_ctx_db.clone().into(), cfg.symbols.clone()));
+    }
     let st = state.clone();
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(1)); // 원본 micro-ref 1초 루프마다(SITUATION_EVERY_TICKS = 1)

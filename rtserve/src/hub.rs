@@ -297,7 +297,7 @@ pub fn supply_payload(cfg: &Config, live: &Live, symbol: &str, q: &HashMap<Strin
         now: 0, retail_max_usd: 0.0, whale_min_usd: 0.0, seconds: vec![], partial: rtcore::proto::Partial { bn: None, okx: None, spot: None },
         liq: vec![], spot: vec![], spot_now: 0, spot_meta: rtcore::proto::SpotMeta { connected: false, trade_age: None, errors: 0 },
         okx: vec![], okx_now: 0, okx_meta: rtcore::proto::OkxMeta { connected: false, trade_age: None, oi_age: None, inst: String::new(), errors: 0 },
-        okx_liq: vec![], okx_oi: vec![], bybit_liq: vec![],
+        okx_liq: vec![], okx_oi: vec![], bybit_liq: vec![], oi: vec![],
     };
     let s = g.get(symbol).and_then(|x| x.supply.as_ref()).unwrap_or(&empty);
     let (sm, sw) = band(symbol);

@@ -416,7 +416,8 @@ pub type LiqRow = (i64, f64, f64, i64, i64);
 pub type OiRow = (i64, f64);
 
 /// 이름은 파이썬 supply_1s_payload 와 같다 -- app.js applySupply1s 가 그대로 먹는다(그 함수는 없는 키를 건너뛴다).
-/// 파이썬에 있고 여기 없는 것: `symbol`(Stamped.s 가 같은 값) · `oi`(바이낸스 OI 는 수집기 REST 폴링 -- 코어 범위 밖).
+/// 파이썬에 있고 여기 없는 것: `symbol`(Stamped.s 가 같은 값).
+/// 2026-11-28 더함: `oi` = 바이낸스 선물 OI 1초(bnoi.rs · 수집기 hot oi_1s 꼬리 -- 원본 collect_oi_1s 와 같은 규칙). 비면 직렬화에서 빠진다.
 /// `spotMeta`·`okxMeta` 는 밀기마다 싣는다: applySupply1s 가 meta 를 통째로 갈아 끼워서, 빼면 화면의 connected 가 사라진다.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -436,6 +437,8 @@ pub struct Supply1s {
     pub okx_liq: Vec<LiqRow>,
     pub okx_oi: Vec<OiRow>,
     pub bybit_liq: Vec<LiqRow>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub oi: Vec<OiRow>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -486,6 +489,7 @@ impl Supply1s {
         upsert(&mut self.okx_liq, n.okx_liq, |r| r.0);
         upsert(&mut self.okx_oi, n.okx_oi, |r| r.0);
         upsert(&mut self.bybit_liq, n.bybit_liq, |r| r.0);
+        upsert(&mut self.oi, n.oi, |r| r.0);
         (self.now, self.retail_max_usd, self.whale_min_usd, self.partial) = (n.now, n.retail_max_usd, n.whale_min_usd, n.partial);
         (self.spot_now, self.spot_meta, self.okx_now, self.okx_meta) = (n.spot_now, n.spot_meta, n.okx_now, n.okx_meta);
     }
