@@ -80,6 +80,13 @@ BAR_W = {"hl_xyz_1m": 60}
 # 1분봉 «같은 분의 앞선 스냅숏»: 거래소가 연결마다 candle 갱신을 묶어 보내 한 연결은 그 분 마지막 갱신(체결 1~수백 건)을 못 받는다
 #   (11-28 서버 7.5일: 값 다른 79봉 전부 이 꼴 · Rust 가 앞선 50·파이썬이 앞선 29 -- 양쪽 다 · REST 덮은 파이썬 봉과 Rust 는 644 중 636 같음)
 SNAP_TABLES = {"hl_xyz_1m"}
+SNAP_ALL, SNAP_RS = 0.005, 0.0025   # ponytail: 상한 둘(전체 · Rust 뒤섬) -- 11-28 REST 확정값 대조(11-25~28 27봉: 뒤선 쪽만 틀림 21 = Rust 뒤섬 9·파이썬 뒤섬 12)로 정함 · 치우침 p 는 진단 줄
+
+
+def binom_p(k: int, n: int) -> float:
+    """반반 가정 이항 양측 p."""
+    import math
+    return min(1.0, sum(math.comb(n, x) for x in range(n + 1) if abs(x - n / 2) >= abs(k - n / 2)) / 2 ** n) if n else 1.0
 PY_REST: list = []   # --py-rest-log: 원본 로그의 «접속 · 종목 REST 메움 N봉»(초, 종목, N) -- 그 N봉은 웹소켓이 아니라 REST 값(그림자 Rust 는 REST 꺼짐)
 
 
@@ -310,7 +317,7 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
     kidx = [names.index(k) for k in key] if key else None
     keepcols = [i for i, c in enumerate(names) if c not in drop]   # 비교에서 빼는 열(받은 시각) -- 창·종목 거르기에는 쓴다
     allsym = excl.get(None, set())
-    n_cmp = n_bad = only_py = only_rs = n_down = n_warm = n_snap = 0
+    n_cmp = n_bad = only_py = only_rs = n_down = n_warm = n_snap = n_snap_rs = 0
     skipped: set = set()
     down = sym_down(rs, t, tcol, ms, SYM_COL.get(t), list(proc), margin)
     wi = names.index("warm") if "warm" in names else None
@@ -377,6 +384,7 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
                 diff = [(kn, x, y) for kn, x, y in zip(knames, dp[k], dr[k]) if not same(x, y)]
                 if diff and t in SNAP_TABLES and (earlier(dp[k], dr[k]) or earlier(dr[k], dp[k])):
                     n_snap += 1
+                    n_snap_rs += earlier(dr[k], dp[k])   # Rust 가 뒤섬(= Rust 가 마감 갱신을 놓침)
                 elif diff:
                     n_bad += 1
                     if len(first) < show:
@@ -436,8 +444,10 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
     bad = n_bad + (0 if SUBSET else only_py - dup_py - same_sec[0]) + (0 if t in INTENDED_EXTRA else only_rs - dup_rs - resub - same_sec[1])
     if t == "hl_xyz_ctx_1s" and only_py + only_rs <= 0.005 * n_cmp:   # 받은 초가 1칸 밀린 합침 -- §5 의 0.5% 기준
         bad = n_bad
-    if n_snap > 0.005 * n_cmp:   # 앞선 스냅숏이 0.5% 를 넘으면 연결 잡음이 아니다 -- 전부 설명 못 함
+    if n_snap > SNAP_ALL * n_cmp:   # 앞선 스냅숏이 0.5% 를 넘으면 연결 잡음이 아니다 -- 전부 설명 못 함
         bad += n_snap
+    elif n_snap_rs > SNAP_RS * n_cmp:   # Rust 쪽만 마감을 놓치는 결함은 따로 -- Rust 뒤섬이 0.25% 를 넘으면 그 봉은 설명 못 함
+        bad += n_snap_rs
     TALLY[0] += n_cmp
     TALLY[1] += bad
     line = (f"{t}: 비교 {n_cmp:,}행 · 불일치 {n_bad:,} · 파이썬에만 {only_py:,} · Rust에만 {only_rs:,}{rs_note} · 범위 [{s0}, {s1}) 초 · "
@@ -446,7 +456,7 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
             f"{hot}{f' · 준비 구간(warm) 봉 {n_warm:,} 뺌' if n_warm else ''}"
             f"{f' · 같은 줄 두 번(설명) 파이썬 {dup_py:,}·Rust {dup_rs:,}' if dup_py or dup_rs else ''}"
             f"{f' · Rust 재구독 현재값(직전 파이썬 줄과 같은 값 · 설명) {resub:,}' if resub else ''}"
-            f"{f' · 같은 분의 앞선 스냅숏(한 연결이 마감 갱신을 못 받음 · 0.5% 안이면 설명) {n_snap:,}' if n_snap else ''}"
+            f"{f' · 같은 분의 앞선 스냅숏(한 연결이 마감 갱신을 못 받음 · 전체 {SNAP_ALL:.1%}·Rust 뒤섬 {SNAP_RS:.2%} 안이면 설명) {n_snap:,} -- 치우침: Rust 뒤섬 {n_snap_rs:,} · 파이썬 뒤섬 {n_snap - n_snap_rs:,} · 이항 양측 p {binom_p(n_snap_rs, n_snap):.3f}' if n_snap else ''}"
             f"{f' · 같은 초(±1)에 다른 쪽도 받음(값만 다름 · 설명) 파이썬에만 {same_sec[0]:,}·Rust에만 {same_sec[1]:,}' if any(same_sec) else ''}")
     return line + "".join(f"\n    {x}" for x in first)
 
@@ -1110,10 +1120,12 @@ def selftest() -> None:
             out = next(x for x in run(h1, h2) if x.startswith("hl_xyz_1m"))
             return TALLY[1], out
         b0, o = bad([(10, snap)], [(30, snap)])   # Rust 가 앞선 1 · 파이썬이 앞선 1
-        assert b0 == 0 and "앞선 스냅숏(한 연결이 마감 갱신을 못 받음 · 0.5% 안이면 설명) 2" in o, o
+        assert b0 == 0 and "안이면 설명) 2 -- 치우침: Rust 뒤섬 1 · 파이썬 뒤섬 1" in o, o
         assert bad([(20, [100.0, 101.0, 99.0, 100.5 * 1.0001, 10.0, 50])])[0] == 1   # 값 0.01%(체결 수 같음) → 설명 못 함
         assert bad([(20, [100.0, 101.0, 99.0, 100.5, 10.0 * 1.0001, 50])])[0] == 1
         assert bad([(k, snap) for k in range(0, 1000, 100)])[0] == 10   # 1% 가 앞선 스냅숏 → 연결 잡음 아님 → 전부
+        assert bad([(k, snap) for k in (100, 400, 700)])[0] == 3   # Rust 쪽만 마감 놓침 0.3% → 불통과
+        assert bad([(k, snap) for k in (100, 400)], [(k, snap) for k in (200, 500)])[0] == 0   # 양쪽 0.2%씩(Rust 0.2% ≤ 0.25%) → 설명
         assert bad([(500, None)])[0] == 1   # Rust 봉 0.1% 빠짐
         assert bad([(k, None) for k in range(50, 1000, 100)])[0] == 10   # 1%
         (Path(d) / "xyz100_x.log").write_text(f"[xyz100] {time.strftime('%F %T', time.localtime(T + 60 * 501 + 5))} 접속 · xyz:SP500 REST 메움 2봉\n")
