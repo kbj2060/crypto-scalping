@@ -4,6 +4,7 @@
 //! · hover = 십자선·가격 배지·툴팁 · draw = egui 그리기.
 pub mod acct;
 pub mod data;
+pub mod dirs;
 pub mod draw;
 pub mod feed;
 pub mod fp;
@@ -89,6 +90,22 @@ impl Chart {
         let measure = |s: &str, z: f64, wt: u16| draw::measure(p, s, z, wt);
         let all = [0.0, 0.0, self.cfg.w_all, srl::height(&c)];
         draw::paint(p, &srl::scene(&c, self.cfg.w_all, &measure), self.origin, all, all, 1.0);
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
+    }
+    /// ⑤ «15분·1시간 예측» 두 줄(feed.dirs_only · fcRowHtml 차례 -- ETH 는 사이에 «레벨 5분») -- 폭 = cfg.w_all(fill 이면 창) · 15분 지연 판정이 시간에 걸리니 1초마다 다시 그린다
+    pub fn ui_dirs(&mut self, ui: &mut egui::Ui, now: f64) {
+        if self.fill { self.cfg.w_all = (ui.ctx().content_rect().width() - 2.0 * self.origin.x) as f64; }
+        let p = ui.painter();
+        if self.bg.a() > 0 { p.rect_filled(p.clip_rect(), 0.0, self.bg); }
+        let f = &self.feed;
+        let cs: Vec<_> = ["15m", "1h"].iter().map(|nm| dirs::cell(f.dirs.as_ref(), f.pred.as_ref(), &f.asset, now, nm)).collect();
+        let measure = |s: &str, z: f64, wt: u16| draw::measure(p, s, z, wt);
+        let (ys, seps, h) = srl::stack(&cs);
+        let w = self.cfg.w_all;
+        let all = [0.0, 0.0, w, h];
+        let sep: Vec<_> = seps.iter().map(|&y| fp::Prim::Dashed { pts: vec![[0.0, y], [w, y]], c: fp::Col::SoftLine, a: 1.0, lw: 1.0, on: 3.0, off: 3.0, clip: fp::Clip::No }).collect();
+        draw::paint(p, &sep, self.origin, all, all, 1.0);
+        for (c, y) in cs.iter().zip(ys) { draw::paint(p, &srl::scene(c, w, &measure), self.origin + vec2(0.0, y as f32), all, all, 1.0); }
         ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
     }
     /// «청산» 탭 청산맵 한 장(feed.liq_only) -- svg 상자 = cfg.w_all×h_all(fill 이면 창 − 범례 줄) · 범례는 그 아래
@@ -217,6 +234,7 @@ impl Chart {
         if self.feed.mc_only { self.ui_mc(ui); return None; }
         if self.feed.acct_only { self.ui_acct(ui, now); return None; }
         if self.feed.srl_only { self.ui_srl(ui, now); return None; }
+        if self.feed.dirs_only { self.ui_dirs(ui, now); return None; }
         if self.feed.liq_only { self.ui_liq(ui); return None; }
         if self.feed.rem_only { self.ui_rem(ui, now); return None; }
         let t = ui.input(|i| i.time) * 1000.0;
