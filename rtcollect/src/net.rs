@@ -477,14 +477,14 @@ pub trait Hl {
     fn idle(&mut self) -> Result<(), Reconnect>;
     /// 연결 끝. 반환 = 쉴 초.
     fn fail(&mut self) -> f64;
-    /// 연결 안 수신 공백(GAP_LOG_S 이상)을 로그에 남기나(hl_bt -- bbo·맥락을 한 연결로 받아 1초 공백이 드물다).
+    /// 연결 안 수신 공백(GAP_LOG_S 이상)을 로그에 남기나(hl_bt).
     fn gap_log(&self) -> bool {
         false
     }
 }
 
 /// 수신 공백 로그 문턱(초). «끊김» 줄과 달리 글자 «끊김»을 쓰지 않는다(takeover.sh 가 «끊김» 줄 수 = 재접속 수로 센다).
-pub const GAP_LOG_S: f64 = 1.0;
+pub const GAP_LOG_S: f64 = 2.0; // 11-28 서버: 1.0 이면 조용한 XRP 가 매초 한 줄(bbo 가 1초 넘게 안 바뀐다) · 따질 빈틈은 2.7~3.7초
 
 /// 벽시계 ms → «YYYY-MM-DDTHH:MM:SS.mmmZ»(UTC)
 pub fn utc(ms: i64) -> String {
