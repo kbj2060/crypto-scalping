@@ -125,6 +125,11 @@
   - tape_levels SQL 의 `floor()` = SQLite 수학 함수(파이썬 sqlite3 는 켜져 있음 · 이 크레이트의 묶음 SQLite 에는 없음) → 같은 값을 CAST 로(음수면 한 칸 아래).
 - 붙이는 쪽 재료: 미시 payload(ctx_micro `MicroRef.payload`) · x(situation_tick 이 낸 것 -- 원본 situation_state["ctx"]) · evidence(코어 Situation) · 마크 링(코어 Mark 를 초 → (마크, 지수, 펀딩) · 7200초) · 미드 링(`MicroRef.mid_ring`) · depth25(`MicroRef.depth25_ring`) · oi_1s(hub oi_rows 의 링) · next_funding_ms(코어 Micro.streams.mp) · 캐시 `TTL` 표(2617~2629) · REST 몫 = `funding_hist_url`/`funding_hist`(바이낸스 · gate)·`dvol_url`/`dvol_year`(Deribit · gate.send(url, false) · ETH 만) -- 실패·RTSERVE_REST 없음 = 빈 목록(원본 2622~2627).
 
+### ✅ 붙임(2026-11-28 · `src/mc_live.rs`)
+- 마크 링 = 허브 Mark(스냅숏 mark 포함) → `rtcore::situation::MarkRing`(원본 1898~1906 같은 규칙) · x = situation_tick 셋째 값(hub `SitLive.x`) · 미시·미드·depth25 = hub `Live.run`(SitRun) · oi_1s = hot oi_1s 최근 660초 마지막 값 · 시험 `tests/mc_live.rs`.
+- 🔴ETH 말고는 미시·상황 틱이 rtserve 에 없어 micro·x·evidence 가 빈다(원본은 코인마다) -- mid 는 마크로 물러섬 · 화면의 그 칸들이 «—».
+- 상황 틱이 run 잠금을 쥔 동안(기준선 읽기 등) 시장 맥락 요청이 기다린다 -- 3초 넘으면 원본 실패 갈래(묵은 값).
+
 ### 붙이는 쪽 사용법 -- `/api/market-context?asset=`
 1. lib.rs 에 `pub mod ctx_mc;` · 코인 표에 없는 asset 은 404 `flow_off`(2719~2720).
 2. 코인마다 상태: `mc_last_good: Map`(수집기 마지막 성공값) · `mc_last: Option<(V, f64)>`(마지막 성공 본문 · 시각).

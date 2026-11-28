@@ -556,6 +556,13 @@ requests 경로(macro_trend)는 server.py:171 의 binance_ban_guard 가 Session.
 - 알려진 차이: RTSERVE_REST 없음 = 503 `rest_off`(원본에 없는 갈래) · 밴·가중치 = 503 글자(원본 미포착 HTTPServiceUnavailable 과 같음).
 - 남음: heat 둘(FPD h4_heat_payload·소급 parquet) · `/api/sr-watch`(sr_break_loop = 텔레그램 보냄 + 코인별 1초 체결가 -- 병행 중 중복 알림 결정 필요).
 
+### 10-3c. 전환 준비(2026-11-28)
+- `/api/market-context` 붙임(`src/mc_live.rs` · rtserve/CTX.md §D «붙임»). REST 몫(fundingRate·Deribit DVOL)은 `RTSERVE_REST` 있을 때만 · 바이낸스는 `binance_get` 한 문.
+- 전환 모드 감독 `scripts/ops/supervisor_rtserve_live.sh`: READONLY=0 · `RTSERVE_REST`=원본 FAPI 뿌리 · 8790 · 8787 이 듣고 있으면 거절 · 전환·되돌리기 순서는 머리 주석.
+  확인 `rtserve/tools/live_mode_check.sh`(임시 폴더 · 진짜 실행 파일 · 쓰기 넷 + 접수 기록이 원본 자리 data/live/{acct_notes,acct_wrong,push_subscriptions}.json·order_requests.jsonl ·
+  양성 대조 = 병행 스크립트는 503 넷·파일 0 · 8787 듣는 중 거절). 글자 일치는 http2_parity(원본 정답지)가 본다.
+- 남음: `/api/position-profile`(Book 걸음 = numpy exp·pairwise 합 글자 재현 + 첫 적재 REST 24회 -- 정답지 필요) · market-history · footprint-week · heat 2.
+
 ### 10-4. 할당 한도(§9-1 에 더함)
 
 | 곳 | 크기를 정하는 것 | 한도 · 근거 |
