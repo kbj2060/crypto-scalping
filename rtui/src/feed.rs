@@ -24,6 +24,7 @@ pub enum Req { Get { kind: Kind, url: String }, WsOpen(String), WsClose, /** 열
 pub enum Kind { Footprint, History, Week, LiqSig, Liq, LiqTail, Mc, Acct, Srl, LiqTab, LiqMap, DirShort, PredRec, /** ⑤ 나머지 칸(fc.rs) -- Feed::fc 차례 */ Trend, Dir4h, OpenRev, Band, Radar, LiqAll, LiqBars,
     /** News 카드 + ⑤ 다음 24시간(news.rs): /api/news · market-context · gex · macro-calendar */ News, NewsMc, NewsGex, NewsCal,
     /** 왼쪽 위 «지표 방향» 판(dirb.rs): /api/situation */ Situation,
+    /** 풋프린트 머리 작은 칸(head.rs): /api/state · session-alerts · macro-spikes */ HeadState, HeadAlert, HeadSpk,
     /** Macro Trend(mt.rs): /api/macro-trend · macro-today · treasury-futures?h=24 · xyz100 · macro-calendar */ MtTrend, MtToday, MtTreas, MtXyz, MtCal, /** Option 카드(opt.rs) */ Gex, Smile }
 
 /// 145 FOOTPRINT_POLL_MS · 148 FOOTPRINT_STALE_BARS · 38 CANDLE_HISTORY_POLL_MS · 1680 CHART_MAX_CANDLES · 4400 FAST_PRICE_MIN_INTERVAL_MS · 2224 FOOTPRINT_RENDER_MIN_INTERVAL_MS · 6638 FP_WEEK_REFRESH_MS
@@ -204,6 +205,7 @@ impl Feed {
             return;
         }
         self.ensure_ws(now, hidden);
+        if crate::head::on() { crate::head::tick(now, hidden, &self.urls.api, &mut self.out); } // 풋프린트 머리 작은 칸 -- 계좌 10초·허브 가격은 바로 아래 acct_only 몫
         if self.acct_only { // 2991 refreshBinanceAccount(tick 에서 · 10초 게이트) -- 가격은 허브가 민다
             if !hidden && now - self.acct_at >= ACCT_POLL_MS { self.acct_at = now; self.get(Kind::Acct, "/api/binance-account".into()); }
             return;

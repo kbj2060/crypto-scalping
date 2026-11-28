@@ -10,6 +10,7 @@ pub mod fc;
 pub mod draw;
 pub mod feed;
 pub mod fp;
+pub mod head;
 pub mod hover;
 pub mod lane;
 pub mod liq;
@@ -275,6 +276,7 @@ impl Chart {
     pub fn ui(&mut self, ui: &mut egui::Ui, now: f64) -> Option<(fp::Scene, Option<hover::Hover>)> {
         if self.feed.s1_only { self.ui_s1(ui); return None; }
         if self.feed.mc_only { self.ui_mc(ui); return None; }
+        if head::on() { head::ui(self, ui, now); return None; } // 풋프린트 머리 작은 칸(?card=head · head.rs -- 계좌·가격은 acct_only 몫)
         if self.feed.acct_only { self.ui_acct(ui, now); return None; }
         if self.feed.srl_only { self.ui_srl(ui, now); return None; }
         if self.feed.dirs_only { self.ui_dirs(ui, now); return None; }

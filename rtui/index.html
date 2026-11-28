@@ -51,6 +51,7 @@ if (q.get("mode") === "bench") {
   };
   const shot = q.get("mode") === "shot", viaHub = ["s1", "acct", "liq", "rem", "dirs"].includes(q.get("card")), card = !!q.get("card");   // ?card=s1 = 1초 수급 카드만(허브 /rt 밀기 · w·h 를 주면 지금 화면 오른쪽 칸 크기로) · ?card=mc = 시장 맥락 ①②만(같은 출처 /api/market-context · w = 칸 폭) · ?card=acct = 계좌 칩(맨 위 전광판)만(/api/binance-account 10초 + 허브 /rt «모든 종목» 가격) · ?card=srl = «레벨 5분» 칸만(/api/sr-lean 2초 · ETH 만) · ?card=dirs = ⑤ 예측 줄 전체(종합·지금 추세·15분·레벨 5분·1시간·4h·횡보·추세·15분 폭·앞 1시간·4h 상대 강도 · 원본과 같은 주소·주기 + 허브 가격 · w = 칸 폭) · ?card=liq&lad=7 = «청산» 탭 청산맵만(지도 1·7·30·60·90·180·365일 · w·h = svg 칸 · 허브 가격) · ?card=rem&win=60 = «청산» 탭 «남은 매물 일봉별»만(입력 기간 7·30·60·90·180·365일 · w·h = svg 칸 · 허브 가격)
   if (q.get("card") === "opt") q.set("src", "push");   // ?card=opt = Option 카드만(/api/gex 60초 · 스마일 · 5분봉 · 허브 «모든 종목» 가격 · w = 카드 폭 · h = 사다리 높이)
+  if (q.get("card") === "head") q.set("src", "push");   // ?card=head = 풋프린트 머리 작은 칸(맨 위 세션·코인 이름·발표 배지·급변 칩 + 카드 머리 포지션 요약 · 1920 페이지 자리 · /api/state 5초 · session-alerts·macro-spikes 30초 · 계좌 10초 + 허브 가격)
   const bg = q.get("bg") === "none" ? 0xffffffff : parseInt(q.get("bg") || "1e2229", 16);
   if (q.get("plate")) document.body.style.background = `url(${q.get("plate")}) no-repeat 0 0`;   // 비교 캡처: 지금 화면에서 차트 층만 숨긴 바탕
   // 혼자 뜰 때 = 창 전체(w=0 → Rust 가 창에 맞춘다) · 상자 왼쪽 위 8px · 1주일은 지표 스위치 기본값처럼 늘 받는다(wk=0 이면 끔 -- 하네스)
