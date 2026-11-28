@@ -953,6 +953,39 @@ pub struct SitRun {
     /// REST 재료가 실패한 뒤 다시 부를 시각(5분봉 하루 · 청산맵)
     pub day5_retry: f64,
     pub liq_retry: f64,
+    /// 읽는 중인 기준선(시작 시각, 받을 곳) -- 11-28: 테이프 7일 + 14일×3곳 읽기가 ETH 10초라 틱 고리 밖 스레드에서
+    pub base_pending: Option<(f64, std::sync::mpsc::Receiver<BaseOut>)>,
+}
+
+/// 기준선 한 번 읽은 결과(sit_materials 가 틱 고리 안에서 넣는다)
+pub struct BaseOut {
+    got: Option<BTreeMap<i64, Vec<f64>>>,
+    flow: Option<crate::ctx_x::Scales>,
+    combos: HashMap<String, crate::ctx_x::Scales>,
+    secs: f64,
+    logs: Vec<String>,
+}
+
+/// 원본 collect_micro_ref 1931~1959 의 파일 읽기(무거운 몫) -- 결과 넣기는 sit_materials(원본 차례 그대로)
+fn base_read(hot: &std::path::Path, asset: &str, inst: &str, now_s: i64, since: i64) -> BaseOut {
+    let t0 = std::time::Instant::now();
+    let (sym, mut logs) = (format!("{asset}usdt"), Vec::new());
+    let symbol = sym.to_uppercase();
+    let got = crate::ctx_micro::baseline_from_tape(&hot.join("binance_tape.sqlite"), &sym, now_s, 7).unwrap_or_else(|e| {
+        logs.push(format!("micro-ref baseline {asset}: {e}"));
+        None
+    });
+    let flow = match crate::ctx_x::tape_flow_rows(&hot.join("binance_tape.sqlite"), &sym, now_s, 14, since) {
+        Ok(rows) => Some(crate::ctx_x::flow_hour_scales_from_bars(&rows)).filter(|sc| !sc.is_empty()), // 빈 결과면 있던 값
+        Err(e) => {
+            logs.push(format!("micro-ref flow_scales {asset}: {e}"));
+            None
+        }
+    };
+    let (bt, ot, yt) = (hot.join("binance_tape.sqlite"), hot.join("okx_tape.sqlite"), hot.join("bybit_tape.sqlite"));
+    let srcs = [("binance", bt.as_path(), sym.as_str()), ("okx", ot.as_path(), inst), ("bybit", yt.as_path(), symbol.as_str())];
+    let combos = crate::ctx_x::flow_hour_scales_combos(&srcs, now_s, 14, since);
+    BaseOut { got, flow, combos, secs: t0.elapsed().as_secs_f64(), logs }
 }
 
 /// 원본 size_bands_since(479~490): 표(SOL·XRP 1790487335)에 없으면 hot 테이프 meta `size_bands_changed:<심볼>` 마지막 값 · 못 읽으면 0
@@ -973,34 +1006,44 @@ fn sit_materials(cfg: &Config, run: &mut SitRun, now: f64, asset: &str) {
     let now_s = now.trunc() as i64;
     let sym = format!("{asset}usdt");
     let symbol = sym.to_uppercase();
-    if run.micro.baseline_due(now) {
-        let t0 = std::time::Instant::now();
-        let got = crate::ctx_micro::baseline_from_tape(&hot.join("binance_tape.sqlite"), &sym, now_s, 7).unwrap_or_else(|e| {
-            (cfg.log)(&format!("micro-ref baseline {asset}: {e}"));
-            None
+    // 기준선 = 스레드에서 읽고(ETH 약 10초) 다 읽은 틱에 넣는다 -- 그동안 틱은 있던 기준선으로 돈다. 시작한 틱은 50ms 기다린다(작은 파일 = 같은 틱에 들어가 원본과 같은 차례)
+    let mut started = false;
+    if run.base_pending.is_none() && run.micro.baseline_due(now) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (h2, a2, inst, since) = (hot.clone(), asset.to_string(), crate::mc_live::okx_inst(asset), size_bands_since(cfg, asset));
+        std::thread::spawn(move || {
+            let _ = tx.send(base_read(&h2, &a2, &inst, now_s, since));
         });
-        run.micro.baseline_set(now, got);
-        let since = size_bands_since(cfg, asset);
-        match crate::ctx_x::tape_flow_rows(&hot.join("binance_tape.sqlite"), &sym, now_s, 14, since) {
-            Ok(rows) => {
-                let sc = crate::ctx_x::flow_hour_scales_from_bars(&rows);
-                if !sc.is_empty() {
-                    run.flow_scales = sc; // `… or micro_state.get("flow_scales")` -- 빈 결과면 있던 값
+        run.base_pending = Some((now, rx));
+        started = true;
+    }
+    if let Some((at, rx)) = run.base_pending.as_ref() {
+        let at = *at;
+        let r = if started { rx.recv_timeout(Duration::from_millis(50)).map_err(|e| e == std::sync::mpsc::RecvTimeoutError::Disconnected) } else { rx.try_recv().map_err(|e| e == std::sync::mpsc::TryRecvError::Disconnected) };
+        match r {
+            Ok(out) => {
+                run.base_pending = None;
+                out.logs.iter().for_each(|l| (cfg.log)(l));
+                run.micro.baseline_set(at, out.got);
+                if let Some(sc) = out.flow {
+                    run.flow_scales = sc;
                 }
+                for (k, v) in out.combos {
+                    if !v.is_empty() {
+                        run.flow_scales_all.insert(k, v);
+                    } else {
+                        run.flow_scales_all.entry(k).or_default(); // 원본: v or 있던 값 or {}
+                    }
+                }
+                run.base_s = Some(out.secs);
             }
-            Err(e) => (cfg.log)(&format!("micro-ref flow_scales {asset}: {e}")),
-        }
-        let inst = crate::mc_live::okx_inst(asset);
-        let (bt, ot, yt) = (hot.join("binance_tape.sqlite"), hot.join("okx_tape.sqlite"), hot.join("bybit_tape.sqlite"));
-        let srcs = [("binance", bt.as_path(), sym.as_str()), ("okx", ot.as_path(), inst.as_str()), ("bybit", yt.as_path(), symbol.as_str())];
-        for (k, v) in crate::ctx_x::flow_hour_scales_combos(&srcs, now_s, 14, since) {
-            if !v.is_empty() {
-                run.flow_scales_all.insert(k, v);
-            } else {
-                run.flow_scales_all.entry(k).or_default(); // 원본: v or 있던 값 or {}
+            Err(true) => {
+                run.base_pending = None; // 읽는 스레드가 죽었다 -- 60초 뒤 다시(baseline_set None 갈래)
+                (cfg.log)(&format!("micro-ref baseline {asset}: 읽기 스레드 끝남(결과 없음)"));
+                run.micro.baseline_set(at, None);
             }
+            Err(false) => {}
         }
-        run.base_s = Some(t0.elapsed().as_secs_f64());
     }
     if now - run.bybit.0 >= 20.0 {
         run.bybit = (now, crate::ctx_x::bybit_bars(&symbol, now_s - 26 * 3600, (now - 10.0).trunc() as i64 / 300 * 300, &hot.join("bybit_tape.sqlite")));
