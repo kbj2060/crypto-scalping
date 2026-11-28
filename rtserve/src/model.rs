@@ -47,6 +47,8 @@ pub struct State {
     qiv: Mutex<HashMap<String, std::collections::BTreeMap<i64, Option<f64>>>>,
     /// 바이낸스 선물 REST 한 문(binance_get)의 공유 상태: 마지막으로 보낸 벽시계 · 가중치 문턱으로 안 보내는 끝 시각
     gate: Mutex<(f64, f64)>,
+    /// 11-29 계량: (분, 경로·limit 별 보낸 수, 그 분 IP 가중치 최고) -- 분이 바뀌면 한 줄 로그(이 서버가 IP 한도를 얼마나 쓰는지)
+    meter: Mutex<(i64, std::collections::BTreeMap<String, u32>, f64)>,
 }
 
 fn e(kind: &str, msg: impl AsRef<str>) -> PyErr {
@@ -213,15 +215,53 @@ pub fn binance_get(cfg: &Config, url: &str) -> Result<(u16, String), Refused> {
         (r, gate.weight)
     });
     st.0 = wall();
+    meter(cfg, url, st.0, r.1);
     let limit = env_num("RT_REST_WEIGHT_LIMIT", 1200.0); // Gate 와 같은 이름·기본값
     if let Some(w) = r.1.filter(|w| *w > limit) {
         st.1 = (st.0 / 60.0).floor() * 60.0 + 60.5;
-        (cfg.log)(&format!("[rest] 가중치 {w:.0} > 문턱 {limit:.0} -- 바이낸스 요청 {:.1}초 안 보냄", st.1 - st.0));
+        (cfg.log)(&format!("[rest] {} 가중치 {w:.0} > 문턱 {limit:.0} -- 바이낸스 요청 {:.1}초 안 보냄", rtmodel::risk_radar::iso((st.0 * 1000.0) as i64), st.1 - st.0));
     }
     match r.0 {
         Ok(x) => Ok(x),
         Err(Fail::Banned(s)) => Err(Refused::Ban(s)),
         Err(Fail::Conn(m) | Fail::Body(m)) => Err(Refused::Conn(m)),
+    }
+}
+
+/// 보낸 요청 하나를 그 분 칸에 센다 · 분이 바뀌면 지난 분을 한 줄로: `[rest-meter] <분 UTC> 보냄 N · IP 가중치 최고 W · 경로 …`(많은 순 6개)
+/// ponytail: 다음 요청이 와야 지난 분을 찍는다(조용한 분 뒤엔 늦게 · 요청 없는 분은 줄 없음)
+fn meter(cfg: &Config, url: &str, t: f64, w: Option<f64>) {
+    let min = (t / 60.0).floor() as i64;
+    let mut m = cfg.models_state.meter.lock().unwrap();
+    if m.0 != min {
+        if !m.1.is_empty() {
+            let n: u32 = m.1.values().sum();
+            let mut top: Vec<(&String, &u32)> = m.1.iter().collect();
+            top.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+            let top: Vec<String> = top.iter().take(6).map(|(k, v)| format!("{k}×{v}")).collect();
+            (cfg.log)(&format!("[rest-meter] {} 보냄 {n} · IP 가중치 최고 {:.0} · {}", rtmodel::risk_radar::iso(m.0 * 60_000), m.2, top.join(" ")));
+        }
+        *m = (min, Default::default(), 0.0);
+    }
+    *m.1.entry(meter_key(url)).or_default() += 1;
+    m.2 = m.2.max(w.unwrap_or(0.0));
+}
+
+/// 경로(뿌리·쿼리 뺌) + limit 값(klines 가중치가 limit 에 달림) -- 예: `/fapi/v1/klines?limit=1500`
+fn meter_key(url: &str) -> String {
+    let path = url.split('?').next().unwrap_or(url);
+    let path = path.find("/fapi/").or_else(|| path.find("/futures/")).map_or(path, |i| &path[i..]);
+    let lim = url.split(['?', '&']).find_map(|kv| kv.strip_prefix("limit="));
+    lim.map_or(path.to_string(), |l| format!("{path}?limit={l}"))
+}
+
+#[cfg(test)]
+mod meter_t {
+    #[test]
+    fn key() {
+        assert_eq!(super::meter_key("https://x.test/fapi/v1/klines?symbol=ETHUSDT&interval=5m&limit=300"), "/fapi/v1/klines?limit=300");
+        assert_eq!(super::meter_key("http://127.0.0.1:9/fapi/v1/premiumIndex?symbol=ETHUSDT"), "/fapi/v1/premiumIndex");
+        assert_eq!(super::meter_key("https://x.test/futures/data/openInterestHist?limit=30&period=5m"), "/futures/data/openInterestHist?limit=30");
     }
 }
 
