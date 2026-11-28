@@ -52,6 +52,8 @@ pub struct SitLive {
     pub out: Option<(Value, String, f64)>,
     /// 마지막 situation_tick 의 x(원본 situation_state["ctx"] · 시장 맥락 재료 -- mc_live.rs)
     pub x: Map<String, Value>,
+    /// ETH 밖 코인(RTSERVE_MICRO_ALL=1): 코인 → (x, evidence) -- 원본 compute_situation 이 코인마다 남기는 ctx · now.evidence
+    pub x_by: HashMap<String, (Map<String, Value>, Value)>,
 }
 
 #[derive(Default)]
@@ -64,6 +66,20 @@ pub struct Live {
     /// 시장 맥락 재료(mc_live.rs) · 상황 틱 상태(ETH · 시장 맥락이 미시 링을 읽는다)
     pub mc: Mutex<crate::mc_live::McLive>,
     pub run: Mutex<SitRun>,
+    /// ETH 밖 코인의 미시 틱 상태(RTSERVE_MICRO_ALL=1 일 때만 찬다 · 코인마다 잠금 하나)
+    pub runs: Mutex<HashMap<String, Arc<Mutex<SitRun>>>>,
+}
+
+impl Live {
+    /// 코인의 미시 상태 잠금(ETH = run) 안에서 f
+    pub fn with_run<T>(&self, asset: &str, f: impl FnOnce(&SitRun) -> T) -> Option<T> {
+        if asset == "eth" {
+            return Some(f(&self.run.lock().unwrap()));
+        }
+        let r = self.runs.lock().unwrap().get(asset).cloned()?;
+        let g = r.lock().unwrap();
+        Some(f(&g))
+    }
 }
 
 impl Live {
@@ -927,6 +943,16 @@ pub struct SitRun {
     pub flow_scales_all: HashMap<String, crate::ctx_x::Scales>,
     /// situation_state["bybit_bars"](원본 2470~2472 swr 20초) -- (읽은 시각, 봉)
     pub bybit: (f64, BTreeMap<i64, [f64; 4]>),
+    /// situation_state["candles_day"](원본 load_5m_day · 실패면 있던 값) -- ETH 만
+    pub day5: Vec<crate::ctx_x::Candle>,
+    /// 바이낸스 REST 를 처음 보낼 수 있는 시각(None = 첫 틱 + 90초 -- 기동 직후엔 이미 가중치 문턱 근처다)
+    pub rest_at: Option<f64>,
+    /// 마지막 틱 ms · 마지막 기준선 읽기 초(로그 한 줄용)
+    pub tick_ms: f64,
+    pub base_s: Option<f64>,
+    /// REST 재료가 실패한 뒤 다시 부를 시각(5분봉 하루 · 청산맵)
+    pub day5_retry: f64,
+    pub liq_retry: f64,
 }
 
 /// 원본 size_bands_since(479~490): 표(SOL·XRP 1790487335)에 없으면 hot 테이프 meta `size_bands_changed:<심볼>` 마지막 값 · 못 읽으면 0
@@ -941,29 +967,32 @@ fn size_bands_since(cfg: &Config, asset: &str) -> i64 {
     })
 }
 
-/// 파일만 읽는 재료(원본 collect_micro_ref 1926~1954 · compute_situation 2470~2472) -- 이 함수는 spawn_blocking 안에서 돈다(situation_run)
-fn sit_materials(cfg: &Config, run: &mut SitRun, now: f64) {
+/// 파일만 읽는 재료(원본 collect_micro_ref 1931~1959 · compute_situation 2399~2401) -- 이 함수는 spawn_blocking 안에서 돈다(situation_run)
+fn sit_materials(cfg: &Config, run: &mut SitRun, now: f64, asset: &str) {
     let hot = cfg.root.join("data/hot");
     let now_s = now.trunc() as i64;
+    let sym = format!("{asset}usdt");
+    let symbol = sym.to_uppercase();
     if run.micro.baseline_due(now) {
-        let got = crate::ctx_micro::baseline_from_tape(&hot.join("binance_tape.sqlite"), "ethusdt", now_s, 7).unwrap_or_else(|e| {
-            (cfg.log)(&format!("micro-ref baseline: {e}"));
+        let t0 = std::time::Instant::now();
+        let got = crate::ctx_micro::baseline_from_tape(&hot.join("binance_tape.sqlite"), &sym, now_s, 7).unwrap_or_else(|e| {
+            (cfg.log)(&format!("micro-ref baseline {asset}: {e}"));
             None
         });
         run.micro.baseline_set(now, got);
-        let since = size_bands_since(cfg, "eth");
-        match crate::ctx_x::tape_flow_rows(&hot.join("binance_tape.sqlite"), "ethusdt", now_s, 14, since) {
+        let since = size_bands_since(cfg, asset);
+        match crate::ctx_x::tape_flow_rows(&hot.join("binance_tape.sqlite"), &sym, now_s, 14, since) {
             Ok(rows) => {
                 let sc = crate::ctx_x::flow_hour_scales_from_bars(&rows);
                 if !sc.is_empty() {
                     run.flow_scales = sc; // `… or micro_state.get("flow_scales")` -- 빈 결과면 있던 값
                 }
             }
-            Err(e) => (cfg.log)(&format!("micro-ref flow_scales: {e}")),
+            Err(e) => (cfg.log)(&format!("micro-ref flow_scales {asset}: {e}")),
         }
-        let inst = std::env::var("DASHBOARD_OKX_INST").unwrap_or_else(|_| "ETH-USDT-SWAP".into()).to_uppercase();
+        let inst = crate::mc_live::okx_inst(asset);
         let (bt, ot, yt) = (hot.join("binance_tape.sqlite"), hot.join("okx_tape.sqlite"), hot.join("bybit_tape.sqlite"));
-        let srcs = [("binance", bt.as_path(), "ethusdt"), ("okx", ot.as_path(), inst.as_str()), ("bybit", yt.as_path(), "ETHUSDT")];
+        let srcs = [("binance", bt.as_path(), sym.as_str()), ("okx", ot.as_path(), inst.as_str()), ("bybit", yt.as_path(), symbol.as_str())];
         for (k, v) in crate::ctx_x::flow_hour_scales_combos(&srcs, now_s, 14, since) {
             if !v.is_empty() {
                 run.flow_scales_all.insert(k, v);
@@ -971,54 +1000,190 @@ fn sit_materials(cfg: &Config, run: &mut SitRun, now: f64) {
                 run.flow_scales_all.entry(k).or_default(); // 원본: v or 있던 값 or {}
             }
         }
+        run.base_s = Some(t0.elapsed().as_secs_f64());
     }
     if now - run.bybit.0 >= 20.0 {
-        run.bybit = (now, crate::ctx_x::bybit_bars("ETHUSDT", now_s - 26 * 3600, (now - 10.0).trunc() as i64 / 300 * 300, &hot.join("bybit_tape.sqlite")));
+        run.bybit = (now, crate::ctx_x::bybit_bars(&symbol, now_s - 26 * 3600, (now - 10.0).trunc() as i64 / 300 * 300, &hot.join("bybit_tape.sqlite")));
     }
 }
 
-/// 한 틱(원본 collect_micro_ref 1초 + compute_situation): 빠진 재료는 «없음» 모양(문서 §상황 카드 빠진 칸) --
-/// veto 0 · Bybit 봉·기준선(flow_scales)·5분봉 하루(candles_day)·card30·청산맵 레벨·vol_mult 없음 · 호가 = 코어 @bookTicker 최신값(REST 0).
-pub fn situation_once(cfg: &Config, run: &mut SitRun) {
-    const SYM: &str = "ethusdt";
-    let now = (cfg.now)();
+const DAY5_KEY: &str = "flow_read_5m_day_eth";
+/// REST 재료가 실패하면 이만큼 다시 안 부른다(원본은 틱마다 다시 -- 묵은 값 600초가 지난 뒤 실패가 이어지면 초마다 요청이 나간다)
+const REST_RETRY_S: f64 = 60.0;
+
+/// 원본 load_5m_day(2347~2367) + compute_situation 2375~2378 -- ETH 만: klines 5m limit 300(가중치 2) · swr 60/600 · 방금 닫힌 봉이 없고 2초 지났으면 식힘 ·
+/// 실패면 로그만(candles_day 는 있던 값)
+fn sit_day5(cfg: &Config, run: &mut SitRun, now: f64) {
+    if now < run.day5_retry {
+        return;
+    }
+    let bar_start = (now as i64).div_euclid(BAR_S) * BAR_S;
+    if crate::ctx_rest::day5_stale(&run.day5, bar_start, cfg.swr.age(DAY5_KEY).unwrap_or(0.0)) {
+        cfg.swr.cool(DAY5_KEY);
+    }
+    let c = cfg.clone();
+    let r = cfg.swr.get(DAY5_KEY, crate::ctx_rest::KLINES_TTL, crate::ctx_rest::STALE_GRACE, Arc::new(move || {
+        let url = crate::ctx_rest::klines_url(&c.rest, "ETHUSDT", crate::ctx_rest::DAY5_LIMIT);
+        let raw = crate::model::fetch_binance(&c, &url, Some("flow_read_5m_upstream_error")).map_err(py::PyErr)?.unwrap_or(Value::Null);
+        let d = crate::ctx_rest::day5(&raw, (c.now)()).map_err(py::PyErr)?;
+        Ok(json!(d.iter().map(|k| json!([k.time, k.high, k.low, k.close, k.volume, k.taker])).collect::<Vec<_>>()))
+    }));
+    match r {
+        Ok(v) => {
+            let n = |x: &Value| x.as_f64().unwrap_or(f64::NAN);
+            run.day5 = v.as_array().into_iter().flatten()
+                .map(|r| crate::ctx_x::Candle { time: r[0].as_i64().unwrap_or(0), high: n(&r[1]), low: n(&r[2]), close: n(&r[3]), volume: n(&r[4]), taker: r[5].as_f64() })
+                .collect();
+        }
+        Err(py::PyErr(m)) => {
+            run.day5_retry = now + REST_RETRY_S;
+            (cfg.log)(&format!("flow-read 5m day: {m}"));
+        }
+    }
+}
+
+/// 원본 collect_micro_ref 1996 `load_liquidation_map(asset)` -- /api/liquidation-map 과 같은 swr 칸(liquidation_map:{asset} 60/600 · 1h×48 + 5m×460 = 가중치 3)
+/// 원본과 다른 곳: 원본은 실패하면 그 틱 미시 payload 가 통째로 {available: false} -- 여기는 레벨만 비운다(sr = 레벨 없음) · 60초 뒤 다시
+fn sit_levels(cfg: &Config, run: &mut SitRun, now: f64, asset: &str) -> Value {
+    if now < run.liq_retry {
+        return Value::Null;
+    }
+    // ponytail: swr 값 통째 복사(ETH 청산맵 ~650KB JSON)가 초마다 -- 틱이 무거워지면 levels 두 칸만 봉 시각으로 memo
+    crate::liqmap::map_cached(cfg, asset).unwrap_or_else(|py::PyErr(m)| {
+        run.liq_retry = now + REST_RETRY_S;
+        (cfg.log)(&format!("micro-ref liquidation map {asset}: {m}"));
+        Value::Null
+    })
+}
+
+/// 원본 _situation_inputs(2102~2147)의 봉마다 (close, oi_delta): 닫힌 풋프린트 봉 마지막 2·WINDOW+1 개 ·
+/// 종가 = 캔들(원본 ETH = 증거 프레임 klines 1500 · 여기 = 같은 거래소 5분 klines 인 candles_day -- 마감봉 값은 같고 받은 시각만 다르다) →
+/// 그 봉 안 마지막 체결가(1초 링 = 코어 Supply1s) → 봉 VWAP(풋프린트 칸) · oi_delta = oi_5m_buckets(2·WINDOW+3) 공백이면 None(swr 5초/30 · 원본 2390)
+fn sit_bars(cfg: &Config, sym: &str, now: f64, day5: &[crate::ctx_x::Candle]) -> Vec<(Option<f64>, Option<f64>)> {
+    const W: usize = rtcore::situation::WINDOW;
+    let bar_start = (now as i64).div_euclid(BAR_S) * BAR_S;
+    let (c, s2) = (cfg.clone(), sym.to_string());
+    let oi = cfg.swr.get(&format!("situation_oi5m_{sym}"), 5.0, 30.0, Arc::new(move || oi_5m_buckets(&c, 2 * W as i64 + 3, &s2))).unwrap_or(json!([]));
+    let oi_map: HashMap<i64, Option<f64>> = oi.as_array().into_iter().flatten()
+        .filter_map(|r| Some((r[0].as_i64()?, if r[4].as_i64() == Some(0) { r[1].as_f64() } else { None })))
+        .collect();
+    let candles: HashMap<i64, f64> = day5.iter().map(|k| (k.time, k.close)).collect();
+    let g = cfg.live.syms.lock().unwrap();
+    let Some(s) = g.get(sym) else { return vec![] };
+    let want: Vec<i64> = s.fp_bars.range(..bar_start).map(|(t, _)| *t).collect();
+    let want = &want[want.len().saturating_sub(2 * W + 1)..];
+    let secs: Vec<&rtcore::proto::SecRow> = s.supply.iter().flat_map(|sp| sp.seconds.iter().chain(sp.partial.bn.iter())).collect();
+    want.iter()
+        .map(|b| {
+            let close = candles.get(b).copied()
+                .or_else(|| secs.iter().filter(|r| *b <= r.0 && r.0 < b + BAR_S && r.7 != 0.0).max_by_key(|r| r.0).map(|r| r.7))
+                .or_else(|| {
+                    // ponytail: 칸은 가격 차례·round(x, 3) 값(원본은 칸이 생긴 차례·원값) -- 캔들도 초 링도 없는 봉에서만 마지막 비트가 갈릴 수 있다
+                    let lv = &s.fp_bars[b].0;
+                    let tot: f64 = lv.values().map(|l| l.1 + l.2).sum();
+                    (tot > 0.0).then(|| lv.values().map(|l| l.0 * (l.1 + l.2)).sum::<f64>() / tot)
+                });
+            (close, oi_map.get(b).copied().flatten())
+        })
+        .collect()
+}
+
+/// 코인 하나의 미시 틱 + 상황 재료(원본 collect_micro_ref 1초 + compute_situation 의 래스터 요약 2392~2397) -- (코어 Situation, obi, persist, streams, nets)
+/// 호가 = 코어 @bookTicker 최신값(REST 0 · CTX.md bookTicker 결정안) · `levels` = 청산맵(ETH 만 · 다른 코인은 Null)
+fn micro_step(cfg: &Config, run: &mut SitRun, asset: &str, now: f64, levels: &Value) -> (Option<Value>, Option<f64>, Option<f64>, rtcore::proto::Streams, rtcore::situation::FlowNets) {
+    let sym = format!("{asset}usdt");
     let now_ms = (now * 1000.0) as i64;
     let root = crate::raster_read::default_root(&cfg.root);
     let (core, book, vol60, liq60, streams, nets) = {
         let st = cfg.live.sit.lock().unwrap();
-        (st.core.get(SYM).cloned(), st.book.get(SYM).copied(), st.vol60.get(SYM).copied().unwrap_or(0.0), st.liq60.get(SYM).cloned().unwrap_or(Value::Null),
-         st.streams.get(SYM).cloned().unwrap_or_default(), st.nets.get(SYM).cloned().unwrap_or_default())
+        (st.core.get(&sym).cloned(), st.book.get(&sym).copied(), st.vol60.get(&sym).copied().unwrap_or(0.0), st.liq60.get(&sym).cloned().unwrap_or(Value::Null),
+         st.streams.get(&sym).cloned().unwrap_or_default(), st.nets.get(&sym).cloned().unwrap_or_default())
     };
-    sit_materials(cfg, run, now);
+    sit_materials(cfg, run, now, asset);
     if let Some(b) = book {
-        let w = crate::raster_read::read_window(&root, SYM, now_ms, 12, 1);
-        run.micro.tick(now, b, &w, vol60, &Value::Null, &liq60);
+        let w = crate::raster_read::read_window(&root, &sym, now_ms, 12, 1);
+        run.micro.tick(now, b, &w, vol60, levels, &liq60);
     }
     // evidence.obi·persist = 래스터 요약(원본 _heatmap_read(sym, 300, 3, True) summary · swr 5초)
-    let (c, r2) = (cfg.clone(), root.clone());
-    let hm = cfg.swr.get("situation_heatmap_ethusdt", 5.0, 0.0, Arc::new(move || {
-        crate::heatmap::heatmap_read(&r2, SYM, ((c.now)() * 1000.0) as i64, 300, 3, true, None).map_err(py::PyErr)
+    let (c, r2, s2) = (cfg.clone(), root.clone(), sym.clone());
+    let hm = cfg.swr.get(&format!("situation_heatmap_{sym}"), 5.0, 0.0, Arc::new(move || {
+        crate::heatmap::heatmap_read(&r2, &s2, ((c.now)() * 1000.0) as i64, 300, 3, true, None).map_err(py::PyErr)
     })).unwrap_or(Value::Null);
-    let obi = hm["summary"]["obi"].as_f64();
-    let persist = hm["summary"]["persist_share"].as_f64();
-    let ring: Vec<f64> = run.micro.imb40_ring.iter().copied().collect();
-    let (fsc, fsa, byb) = (run.flow_scales.clone(), run.flow_scales_all.clone(), run.bybit.1.clone());
-    let xin = crate::ctx_x::XIn { now, nets: &nets, bybit: &byb, flow_scales: &fsc, flow_scales_all: &fsa, bars: &[], day5: &[], card30: (None, None),
-                                 micro: &run.micro.payload, imb40_ring: &ring };
-    // vol_mult_by = 흐름 코인마다(원본 situation_payload 2738 · situation_by) -- 5분봉 하루(REST)가 없으니 vol_size_mult(빈 봉) 모양
-    let vmb: Vec<(String, Value)> = cfg.flows().iter().map(|a| (a.to_string(), crate::ctx::vol_size_mult(&[], a))).collect();
-    let (payload, sse, x) = crate::ctx_x::situation_tick(core.as_ref(), 0, obi, persist, &streams, &xin, &mut run.fs, &vmb, None);
-    let ca = payload["now"]["computed_at"].as_f64().unwrap_or(0.0);
-    let mut st = cfg.live.sit.lock().unwrap();
-    st.out = Some((payload, sse, ca));
-    st.x = x;
+    (core, hm["summary"]["obi"].as_f64(), hm["summary"]["persist_share"].as_f64(), streams, nets)
 }
 
-/// 1초마다(원본 micro 틱) -- main 이 띄운다
+/// ETH 한 틱(원본 collect_micro_ref 1초 + compute_situation): REST 재료(5분봉 하루·청산맵 레벨)는 `RTSERVE_REST` 가 있고 첫 틱 90초 뒤부터 --
+/// 빠진 재료(veto 0 · card30 · FusedLog)는 «없음» 모양(CTX.md «빠진 칸»).
+pub fn situation_once(cfg: &Config, run: &mut SitRun) {
+    let t0 = std::time::Instant::now();
+    let now = (cfg.now)();
+    let rest = !cfg.rest.is_empty() && now >= *run.rest_at.get_or_insert(now + 90.0);
+    let levels = if rest { sit_levels(cfg, run, now, "eth") } else { Value::Null };
+    if rest {
+        sit_day5(cfg, run, now);
+    }
+    let (core, obi, persist, streams, nets) = micro_step(cfg, run, "eth", now, &levels);
+    let bars = sit_bars(cfg, "ethusdt", now, &run.day5);
+    let ring: Vec<f64> = run.micro.imb40_ring.iter().copied().collect();
+    let xin = crate::ctx_x::XIn { now, nets: &nets, bybit: &run.bybit.1, flow_scales: &run.flow_scales, flow_scales_all: &run.flow_scales_all, bars: &bars, day5: &run.day5,
+                                 card30: (None, None), micro: &run.micro.payload, imb40_ring: &ring };
+    // vol_mult_by = 흐름 코인마다(원본 situation_payload · situation_by) -- ETH = 완결 candles_day(2380~2381) · 다른 코인은 5분봉 하루가 없어 빈 봉 모양
+    let bar_start = (now as i64).div_euclid(BAR_S) * BAR_S;
+    let closed: Vec<(i64, f64)> = run.day5.iter().filter(|c| c.time < bar_start).map(|c| (c.time, c.close)).collect();
+    let vmb: Vec<(String, Value)> = cfg.flows().iter().map(|a| (a.to_string(), crate::ctx::vol_size_mult(if *a == "eth" { &closed } else { &[] }, a))).collect();
+    let (payload, sse, x) = crate::ctx_x::situation_tick(core.as_ref(), 0, obi, persist, &streams, &xin, &mut run.fs, &vmb, None);
+    let ca = payload["now"]["computed_at"].as_f64().unwrap_or(0.0);
+    {
+        let mut st = cfg.live.sit.lock().unwrap();
+        st.out = Some((payload, sse, ca));
+        st.x = x;
+    }
+    run.tick_ms = t0.elapsed().as_secs_f64() * 1e3;
+}
+
+/// ETH 밖 코인 한 틱(RTSERVE_MICRO_ALL=1): 파일만 읽는 미시(코어 호가 + 래스터 12행 + 래스터 요약 swr 5초 = REST 0) · x 는 nets·Bybit 봉·기준선까지 ·
+/// evidence = 코어 Situation + obi·persist. 5분봉 하루·card30·청산맵 레벨·move60/oi60 은 REST 라 ETH 만(원본은 코인마다 받는다 -- 그 칸은 빈다).
+/// 첫 기준선 읽기(테이프 7일 + 14일×3곳)는 `k`×10분 뒤 -- 코인끼리 같은 틱에 겹치지 않게(그 뒤로도 1시간마다 그 어긋남 그대로).
+pub fn micro_once(cfg: &Config, run: &mut SitRun, asset: &str, k: usize) {
+    let t0 = std::time::Instant::now();
+    let now = (cfg.now)();
+    if run.micro.baseline.is_none() && run.micro.baseline_at == 0.0 {
+        run.micro.baseline_at = now + k as f64 * 600.0 - 60.0; // baseline_due = 기준선 없을 때 «60초 지남»
+    }
+    let (core, obi, persist, _streams, nets) = micro_step(cfg, run, asset, now, &Value::Null);
+    let ring: Vec<f64> = run.micro.imb40_ring.iter().copied().collect();
+    let xin = crate::ctx_x::XIn { now, nets: &nets, bybit: &run.bybit.1, flow_scales: &run.flow_scales, flow_scales_all: &run.flow_scales_all, bars: &[], day5: &[],
+                                 card30: (None, None), micro: &run.micro.payload, imb40_ring: &ring };
+    let x = crate::ctx_x::flow_read_ctx(&xin, &mut run.fs);
+    let ev = core.as_ref().map(|c| crate::ctx::patch_now(c, 0, obi, persist)["evidence"].clone()).filter(|e| e.as_object().is_some_and(|o| !o.is_empty())).unwrap_or(json!({}));
+    cfg.live.sit.lock().unwrap().x_by.insert(asset.to_string(), (x, ev));
+    run.tick_ms = t0.elapsed().as_secs_f64() * 1e3;
+}
+
+/// 1초마다(원본 micro 틱) -- main 이 띄운다. RTSERVE_MICRO_ALL=1 이면 같은 spawn_blocking 안에서 ETH 다음 다른 흐름 코인을 차례로 ·
+/// 60틱마다 한 줄: 코인별 마지막 틱 ms · 마지막 기준선 읽기 초
 pub async fn situation_run(cfg: Arc<Config>) {
+    let all = std::env::var("RTSERVE_MICRO_ALL").as_deref() == Ok("1");
+    let mut n = 0u64;
     loop {
         let c = cfg.clone();
-        let _ = tokio::task::spawn_blocking(move || situation_once(&c, &mut c.live.run.lock().unwrap())).await;
+        let _ = tokio::task::spawn_blocking(move || {
+            situation_once(&c, &mut c.live.run.lock().unwrap());
+            if all {
+                for (k, a) in c.flows().into_iter().filter(|a| *a != "eth").enumerate() {
+                    let r = c.live.runs.lock().unwrap().entry(a.to_string()).or_default().clone();
+                    micro_once(&c, &mut r.lock().unwrap(), a, k + 1);
+                }
+            }
+        })
+        .await;
+        n += 1;
+        if all && n % 60 == 0 {
+            let parts: Vec<String> = cfg.flows().iter()
+                .filter_map(|a| cfg.live.with_run(a, |r| format!("{a} {:.1}ms/{}", r.tick_ms, r.base_s.map_or("-".into(), |s| format!("{s:.2}s")))))
+                .collect();
+            (cfg.log)(&format!("[micro-all] 틱/기준선 {}", parts.join(" · ")));
+        }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }

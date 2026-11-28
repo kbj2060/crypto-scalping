@@ -3,7 +3,7 @@
 //! collect_mark_price 1879~1916(마크 링 = 초 → (마크, 지수, 펀딩) · MARK_PRICE_RING_S 창 = rtcore::situation::MarkRing 이 같은 규칙).
 //! 메모리 몫: 마크 링(허브 Mark) · 미시 payload·미드 링·depth25(hub SitRun.micro -- ETH 만 돈다) · x(situation_tick 셋째 값) · evidence(/api/situation 의 now.evidence) ·
 //! oi_1s(hot oi_1s 최근 660초 -- hub oi_rows 와 같은 읽기의 마지막 값만) · next_funding_ms(코어 streams.mp).
-//! 🔴알려진 빈 곳: ETH 말고는 rtserve 가 미시·상황 틱을 안 돌려 micro·x·evidence 가 빈 채(원본은 코인마다 돈다) -- mid 는 마크로 물러선다.
+//! ETH 밖 코인: RTSERVE_MICRO_ALL=1 이면 hub micro_once 가 미시·x·evidence 를 채운다(Live.runs · SitLive.x_by) -- 꺼져 있으면 빈 채(mid 는 마크로 물러선다).
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
@@ -67,7 +67,7 @@ macro_rules! with_paths {
     }};
 }
 
-fn okx_inst(asset: &str) -> String {
+pub(crate) fn okx_inst(asset: &str) -> String {
     if asset == "eth" {
         std::env::var("DASHBOARD_OKX_INST").unwrap_or_else(|_| "ETH-USDT-SWAP".into()).to_uppercase() // hub.rs 상황 틱과 같은 원천
     } else {
@@ -146,18 +146,15 @@ pub fn payload(cfg: &Config, asset: &str) -> Result<V, String> {
     })
     .unwrap_or_else(|e| json!({"available": false, "error": e.chars().take(100).collect::<String>()}));
     // 메모리 몫
-    let (micro, mid_ring, depth25): (V, BTreeMap<i64, f64>, Vec<(f64, f64)>) = if asset == "eth" {
-        let r = cfg.live.run.lock().unwrap();
-        (r.micro.payload.clone(), r.micro.mid_ring.clone(), r.micro.depth25_ring.iter().copied().collect())
-    } else {
-        (json!({}), BTreeMap::new(), vec![])
-    };
+    let (micro, mid_ring, depth25): (V, BTreeMap<i64, f64>, Vec<(f64, f64)>) = cfg.live
+        .with_run(asset, |r| (r.micro.payload.clone(), r.micro.mid_ring.clone(), r.micro.depth25_ring.iter().copied().collect()))
+        .unwrap_or_else(|| (json!({}), BTreeMap::new(), vec![]));
     let (x, ev, next_funding_ms) = {
         let st = cfg.live.sit.lock().unwrap();
         let (x, ev) = if asset == "eth" {
             (st.x.clone(), st.out.as_ref().map_or(json!({}), |o| o.0["now"]["evidence"].clone()))
         } else {
-            (Map::new(), json!({}))
+            st.x_by.get(asset).cloned().unwrap_or_else(|| (Map::new(), json!({})))
         };
         (x, if ev.is_object() { ev } else { json!({}) }, st.streams.get(&sym).and_then(|s| s.mp.next_funding_ms))
     };
