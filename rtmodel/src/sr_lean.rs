@@ -520,7 +520,8 @@ pub(crate) fn roll_var(x: &[f64], w: usize, minp: usize) -> Vec<f64> {
 }
 
 /// pandas rolling(w, min_periods=minp).max()/min() 전체 열: NaN 뺀 최대/최소, 값 개수 < minp 면 NaN.
-pub(crate) fn roll_ext(x: &[f64], w: usize, minp: usize, max: bool) -> Vec<f64> {
+#[doc(hidden)]
+pub fn roll_ext(x: &[f64], w: usize, minp: usize, max: bool) -> Vec<f64> {
     let mut out = vec![NAN; x.len()];
     let mut dq: VecDeque<usize> = VecDeque::new();
     let mut cnt = 0usize;
