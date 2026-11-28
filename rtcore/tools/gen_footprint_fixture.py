@@ -353,6 +353,7 @@ def main() -> None:
         "t0": T0, "rows": [[c, k, T - T0, tid, p, q, m, w - T0] for c, k, T, tid, p, q, m, w in rows],
         **got,
     }
+    OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(fx, separators=(",", ":"), ensure_ascii=False))
     kinds: dict[str, int] = {}
     for b in got["final"]["bars"]:
