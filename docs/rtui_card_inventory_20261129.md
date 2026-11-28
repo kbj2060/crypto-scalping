@@ -12,7 +12,7 @@
 | 테마 · 알림 단추 · 알림 센터 | renderNotifyCenter | /api/notify-center · /api/push/* | ⛔ 입력 | 단추 |
 | 카드 머리 보기·봉 단추 | renderChartWindowTabs | (상태) | 🟡 rtui 는 5m·30m·1h 만 | 400×34 |
 | 머리 포지션 요약 | renderFpPos | /api/binance-account | ⬜ | 260×50 |
-| 머리 Macro 요약 | mtHeadHtml(#fpRates) | /api/macro-trend · /api/macro-today | ⬜ | 420×40 |
+| 머리 Macro 요약 | mtHeadHtml(#fpRates) | /api/macro-trend · /api/macro-calendar(다음 발표) | ✅ `?card=mth` | 420×38 |
 | 차트 위 미니맵 | renderChartPan | /api/market-history | ⬜ | 480×34 |
 | 선 주문 단추 · 대기 선 · 손절 선 | renderLineTool · renderArmedLines · renderSlCross | /api/manual-entry/* · /api/manual-bracket/* | ⛔ 주문 경로 · 보류 | 단추·선 |
 | 지표 단추·팝업 | renderMarketCtx(#fpLineSwitch) | (상태) | ⛔ 입력 | 단추 |
@@ -37,14 +37,15 @@
 | «청산» 탭 청산맵 | liq_tab.js CH.ladder | /api/liquidation-map(/tiers) · /api/liq-tab | ✅ `?card=liq` | 900×560 |
 | «청산» 탭 남은 매물 일봉별 | liq_tab.js CH.remain | /api/liq-tab | ✅ `?card=rem` | 900×300 |
 | «청산» 탭 오늘 누적 · 최대 고통 · 코인별 최대 고통 | CH.today · CH.pain · CH.quad · painKpi · coinTable | /api/liq-tab(all) · /api/liquidation-5m-history | ✅ `?card=liqx`(주기 = liqx1W 등 · 머리 단추·툴팁 빼고) | 3칸 × 340 |
-| Macro Trend 카드 | renderMacroTrend · refreshMtToday | /api/macro-trend · /api/macro-today · /api/treasury-futures | ⬜ | 전폭×창 |
+| Macro Trend 카드 | renderMacroTrend · refreshMtToday | /api/macro-trend · /api/macro-today · /api/treasury-futures?h=24 · /api/xyz100 · /api/macro-calendar | ✅ `?card=mt` (본문 #mtBody · 카드 머리 제목 줄은 밖) | 1838×917 |
 | News 카드 · ⑤ 다음 24시간 | renderNews · renderMarketCtx(#mcWhen) | /api/news · /api/market-context · /api/gex | ⬜ | 전폭×창 |
 | Option 카드 | renderOptions · renderIceChip | /api/gex · /api/opt-smile · /api/iceberg · /api/xyz100 | ⬜ | 전폭×창 |
 | Account 카드(잔고·곡선·순환·통계·달력) | renderSnapshotAccountCore · renderCycleCard | /api/binance-account · /api/cycle-path | ⬜ | 전폭×창 |
 | Account 메모 · 오답노트 | (acctNote·acctWrong) | /api/acct-notes · /api/acct-wrong | ⛔ 입력 | 탭 안 |
 
-남은 칸: ⬜ 13 · 🟡 1(봉 단추) · ⛔ 6(주문 경로·입력 · 보류) · ✅ 17줄. ⑤ 예측 줄 완성(11-29 둘째) = `?card=dirs` 가 fcRowHtml 전체(rtui/src/fc.rs).
+남은 칸: ⬜ 11 · 🟡 1(봉 단추) · ⛔ 6(주문 경로·입력 · 보류) · ✅ 19줄. ⑤ 예측 줄 완성(11-29 둘째) = `?card=dirs` 가 fcRowHtml 전체(rtui/src/fc.rs).
 11-29 둘째 정답지: compare/fc_js.mjs(원본 fcRowHtml 을 가짜 전역에서 · 지어낸 입력 8장) → compare/fc_layout.py(원본 styles.css · 헤드리스 크로미움 1920 · 폭 404 에서 글·상자·선 자리와 색을 잼) → `fc::t::js_parity`(645개 전부 하나씩 짝 · 높이 같음). 안 옮김: 칸 툴팁 · «?» 설명 팝업(단추 모양만).
 11-29 둘째 고침: 오른쪽이 글만(«쌓는 중»)인 줄 높이 30 → 27(`srl::height` -- 원본 실측 27).
 첫째(15분·1시간 예측)에 고침: 같은 칸 그리기(srl.rs scene)의 가로 자리 -- 넓은 화면 `#mcBody.mc-cmp .fc-c { gap: 2px }`·`.fc-t > .d4g` 가로 여백 0 을 놓쳐 «레벨 5분» 게이지·막대가 4~10px 어긋나 있었다(헤드리스 크로미움 실측으로 확인 · 시험 `srl::t::layout`).
 11-29 셋째: «청산» 탭 아랫줄 세 칸 = `?card=liqx`(rtui/src/liqx.rs · 정답지 compare/liqx_js.mjs · `liqx::t::js_parity`). 안 옮김: 머리 꼬리표·주기 단추·머리 오른쪽 글 · 툴팁 · 좁은 화면 배치.
+Macro Trend(11-29): ⬜ 20 → 18 · ✅ 12줄. `?card=mt` = mt.rs(renderMacroTrend 표·범례·상세·오늘 24시간 차트·겹친 그림·관계 표·꼬리 줄 · 줄 누르면 그 지표) · `?card=mth` = 머리 «Macro» 요약(오른쪽 붙임). 정답지 compare/mt_js.mjs(원본 구역 통째를 가짜 전역에서 · 지어낸 입력 9장) → compare/mt_layout.py(원본 styles.css · 헤드리스 1920 · html.fit1) → `mt::t::js_parity` 글·칠·테·고리·svg 상자 ±0.07(글 x ±0.6) · svg 요소 수 1e-6. 안 옮김: 툴팁·«?» 팝업·올림/초점 테·상세 칸 스크롤(넘치면 잘림)·1500px 이하 한 단·휴대폰 판.

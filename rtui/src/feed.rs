@@ -21,7 +21,8 @@ impl Default for Urls {
 #[derive(Debug, PartialEq, serde::Serialize)]
 pub enum Req { Get { kind: Kind, url: String }, WsOpen(String), WsClose, /** 열린(또는 열리는 중인) 소켓에 보낼 글 -- 허브 구독 */ WsSend(String) }
 #[derive(Debug, PartialEq, Clone, Copy, serde::Serialize)]
-pub enum Kind { Footprint, History, Week, LiqSig, Liq, LiqTail, Mc, Acct, Srl, LiqTab, LiqMap, DirShort, PredRec, /** ⑤ 나머지 칸(fc.rs) -- Feed::fc 차례 */ Trend, Dir4h, OpenRev, Band, Radar, LiqAll, LiqBars }
+pub enum Kind { Footprint, History, Week, LiqSig, Liq, LiqTail, Mc, Acct, Srl, LiqTab, LiqMap, DirShort, PredRec, /** ⑤ 나머지 칸(fc.rs) -- Feed::fc 차례 */ Trend, Dir4h, OpenRev, Band, Radar, LiqAll, LiqBars,
+    /** Macro Trend(mt.rs): /api/macro-trend · macro-today · treasury-futures?h=24 · xyz100 · macro-calendar */ MtTrend, MtToday, MtTreas, MtXyz, MtCal }
 
 /// 145 FOOTPRINT_POLL_MS · 148 FOOTPRINT_STALE_BARS · 38 CANDLE_HISTORY_POLL_MS · 1680 CHART_MAX_CANDLES · 4400 FAST_PRICE_MIN_INTERVAL_MS · 2224 FOOTPRINT_RENDER_MIN_INTERVAL_MS · 6638 FP_WEEK_REFRESH_MS
 const FP_POLL_MS: f64 = 400.0;
@@ -124,6 +125,8 @@ pub struct Feed {
     pub rem_only: bool,
     /// «청산» 탭 아랫줄 세 칸(liqx.rs) -- Some 이면 이 카드만(rem_only 도 켠다: 허브 «모든 종목» 가격만 · /api/liq-tab 묻기를 같이 쓴다)
     pub liqx: Option<crate::liqx::State>,
+    /// Macro Trend 카드(?card=mt · 머리 요약 ?card=mth) -- 있으면 이 카드만(mt.rs 가 묻고 받는다)
+    pub mt: Option<Box<crate::mt::Store>>,
 }
 
 /// 4477 roundHalfEven(파이썬 round 와 같은 격자)
@@ -158,12 +161,13 @@ impl Feed {
         Self { source, urls, asset: asset.into(), symbol: symbol.into(), week_always, candles: vec![], fp_bars: BTreeMap::new(), fp: None, week: None,
                live: Live::default(), price: 0.0, price_ts_ms: None, shown: 0.0, last_fast: 0.0, last_full: 0.0, fp_last_fetch: 0.0, fp_in_flight: false,
                hist_last_fetch: 0.0, hist_retry_at: 0.0, week_at: 0.0, week_tried_at: 0.0, week_in_flight: false, ws: false, ws_retry_at: 0.0, hub_seq: None, holes: vec![], liq: vec![], liq_gen: 0, liq_tail_gen: 0, liq_at: 0.0, liq_tail_at: 0.0, week_liq: vec![], dirty: false, out: vec![], s1: Default::default(), s1_only: false, mc: None, mc_at: 0.0, mc_only: false, acct: None, acct_at: 0.0, prices: Default::default(), prices_seq: None, acct_only: false, srl: None, srl_at: 0.0, srl_skew: 0.0, srl_only: false, dirs: None, pred: None, dirs_at: 0.0, pred_at: 0.0, dirs_only: false, fc: Default::default(), fc_at: [0.0; 5],
-               liq_days: 7, liq_tab: None, liq_map: None, liq_sw: None, liq_tab_at: f64::NEG_INFINITY, liq_map_at: f64::NEG_INFINITY, liq_only: false, rem_only: false, liqx: None }
+               liq_days: 7, liq_tab: None, liq_map: None, liq_sw: None, liq_tab_at: f64::NEG_INFINITY, liq_map_at: f64::NEG_INFINITY, liq_only: false, rem_only: false, liqx: None, mt: None }
     }
     fn get(&mut self, kind: Kind, path: String) { let url = format!("{}{}", self.urls.api, path); self.out.push(Req::Get { kind, url }); }
 
     /// 11553 tick()(500ms · 숨으면 아무것도 안 한다)의 이 카드 몫 + 4556 ensurePriceWs
     pub fn tick(&mut self, now: f64, hidden: bool, want_week: bool) {
+        if let Some(m) = self.mt.as_mut() { m.tick(now, hidden, &self.urls.api, &mut self.out); return; }
         if self.mc_only { // 6259 refreshMarketCtx(1초 · 숨으면 안 묻는다)
             if !hidden && now - self.mc_at >= MARKET_CTX_POLL_MS { self.mc_at = now; let path = format!("/api/market-context?asset={}", self.asset); self.get(Kind::Mc, path); }
             return;

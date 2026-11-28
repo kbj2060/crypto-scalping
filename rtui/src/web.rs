@@ -68,6 +68,11 @@ pub fn on_get(kind: &str, body: Option<String>) {
         "LiqMap" => c.feed.on_liq_map(body.as_deref()),
         "LiqAll" => if let Some(x) = c.feed.liqx.as_mut() { x.on_all(body.as_deref()) },
         "LiqBars" => if let Some(x) = c.feed.liqx.as_mut() { x.on_bars(body.as_deref()) },
+        "MtTrend" | "MtToday" | "MtTreas" | "MtXyz" | "MtCal" => if let Some(m) = c.feed.mt.as_mut() {
+            use feed::Kind::*;
+            m.on_get(match kind { "MtTrend" => MtTrend, "MtToday" => MtToday, "MtTreas" => MtTreas, "MtXyz" => MtXyz, _ => MtCal }, body.as_deref(), date_now());
+            c.feed.dirty = true;
+        },
         _ => {}
     });
 }
@@ -133,6 +138,8 @@ pub async fn start(canvas_id: String, asset: String, x: f32, y: f32, w: f64, h: 
     if let Some(d) = card.strip_prefix("rem").and_then(|d| d.parse::<u32>().ok()).filter(|d| [7, 30, 60, 90, 180, 365].contains(d)) { (ch.feed.rem_only, ch.rem.win) = (true, d); }
     if let Some(x) = card.strip_prefix("liqx").and_then(crate::liqx::State::new) { (ch.feed.liqx, ch.feed.rem_only, ch.feed.source) = (Some(x), true, feed::Source::Push); } // «청산» 탭 아랫줄(?card=liqx · liqx1W 처럼 주기) -- 허브 가격이라 늘 밀기
     ch.feed.acct_only = card == "acct"; // 계좌 칩(맨 위 전광판)만 -- 같은 출처 /api/binance-account + 허브 «모든 종목» 가격(push 로 연다)
+    // card = "mt" 면 Macro Trend 카드(mt.rs · /api/macro-trend · macro-today · treasury-futures · xyz100 · macro-calendar · w·h = #mtBody) · "mth" 면 풋프린트 머리 «Macro» 요약만(오른쪽 붙임)
+    if card == "mt" || card == "mth" { let mut s = Box::<mt::Store>::default(); s.head = card == "mth"; ch.feed.mt = Some(s); }
     let ch = Rc::new(RefCell::new(ch));
     CH.with(|c| *c.borrow_mut() = Some(ch.clone()));
     let canvas = eframe::web_sys::window().unwrap().document().unwrap().get_element_by_id(&canvas_id).unwrap()
