@@ -42,10 +42,10 @@
 | Option 카드(코인 ETH·BTC·SOL·XRP) | renderOptions | /api/gex · /api/opt-smile · /api/market-history(실현 감마) · 허브 가격 | 🟡 `?card=opt` (11-29 셋째 · 주식 판 · 사다리 «내 선» 빼고) | 전폭×창 |
 | Option 카드 주식(CBOE) 판 · 사다리 «내 선»(청산가·지정가) | renderOptions(o.src) · optEqKpiHtml · optTouchFront | /api/gex · /api/binance-account | ⬜ | (위 안) |
 | 알림 센터 «전진 검증 중» 아이스버그 | renderIceChip(#ncIce -- Option 카드 아님) | /api/iceberg | ⬜ | 알림 센터 안 |
-| Account 카드(잔고·곡선·순환·통계·달력) | renderSnapshotAccountCore · renderCycleCard | /api/binance-account · /api/cycle-path | ⬜ | 전폭×창 |
+| Account 카드(잔고·곡선·순환·통계·달력) | renderSnapshotAccountCore · renderCycleCard | /api/binance-account · /api/cycle-path | ✅ `?card=acc` (머리 아래 본문 · 카드 머리 순자산 줄·요약 알약·강제 조회 단추는 밖) | 1872×934 |
 | Account 메모 · 오답노트 | (acctNote·acctWrong) | /api/acct-notes · /api/acct-wrong | ⛔ 입력 | 탭 안 |
 
-남은 칸: ⬜ 6 · ➖ 1(미니맵 -- 1920 에 안 보임) · 🟡 3(봉 단추 · Option -- 주식 판·내 선 빼고 · 지표 방향 판 -- 줄 채우기 빼고) · ⛔ 6(주문 경로·입력 · 보류) · ✅ 23줄. ⑤ 예측 줄 완성(11-29 둘째) = `?card=dirs` 가 fcRowHtml 전체(rtui/src/fc.rs).
+남은 칸: ⬜ 5 · ➖ 1(미니맵 -- 1920 에 안 보임) · 🟡 3(봉 단추 · Option -- 주식 판·내 선 빼고 · 지표 방향 판 -- 줄 채우기 빼고) · ⛔ 6(주문 경로·입력 · 보류) · ✅ 24줄. ⑤ 예측 줄 완성(11-29 둘째) = `?card=dirs` 가 fcRowHtml 전체(rtui/src/fc.rs).
 11-29 둘째 정답지: compare/fc_js.mjs(원본 fcRowHtml 을 가짜 전역에서 · 지어낸 입력 8장) → compare/fc_layout.py(원본 styles.css · 헤드리스 크로미움 1920 · 폭 404 에서 글·상자·선 자리와 색을 잼) → `fc::t::js_parity`(645개 전부 하나씩 짝 · 높이 같음). 안 옮김: 칸 툴팁 · «?» 설명 팝업(단추 모양만).
 11-29 둘째 고침: 오른쪽이 글만(«쌓는 중»)인 줄 높이 30 → 27(`srl::height` -- 원본 실측 27).
 첫째(15분·1시간 예측)에 고침: 같은 칸 그리기(srl.rs scene)의 가로 자리 -- 넓은 화면 `#mcBody.mc-cmp .fc-c { gap: 2px }`·`.fc-t > .d4g` 가로 여백 0 을 놓쳐 «레벨 5분» 게이지·막대가 4~10px 어긋나 있었다(헤드리스 크로미움 실측으로 확인 · 시험 `srl::t::layout`).
@@ -61,3 +61,6 @@ Macro Trend(11-29): ⬜ 20 → 18 · ✅ 12줄. `?card=mt` = mt.rs(renderMacroTr
 11-29 다섯째 풋프린트 머리 작은 칸(`?card=head` · rtui/src/head.rs): ⬜ 10 → 6. 한 카드 = 1920×1080 페이지 자리 그대로(상자 0,0 = 페이지 왼쪽 위 · 1920×136 · 카드 레일 보임 · html.fit1) 네 덩이 -- 세션(buildSessionHtml · 맨 위 왼쪽) · 코인 이름(#fpCoinName · 맨 위 가운데) · 발표 배지 + 급변 칩(.session-alert-center · 코인 탭 왼쪽 · 넘친 칩은 둘째 줄로 숨음 · 경보 배지 맥박) · 포지션 요약(#fpPos · 카드 머리 정중앙). 자료 = /api/state 5초(세션 -- 원본은 SSE 밀기) · /api/session-alerts 30초(실패 = 숨김) · /api/macro-spikes 30초 · /api/binance-account 10초 + 허브 «모든 종목» 가격(acct_only 몫 그대로).
 정답지: compare/head_js.mjs(원본 함수 15개를 잘라 가짜 전역에서 · 지어낸 계좌·가격·급변 8장 -- 실제 응답 안 받음) → compare/head_layout.py(진짜 index.html 스크립트만 뺀 것 + 원본 styles.css · 헤드리스 1920 · 원본 renderSnapshotAssetTabs·placeTopLeft 를 그 페이지에서 돌려 제자리에) → `head::t::js_parity` 덩이마다 글·칠 121개 짝(글 x ±0.6 · ±0.07) + 덩이 페이지 자리. 경보 칸 폭 = .snap-head flex 줄임(코인 탭과 «안쪽» 기준 폭 비례로 나눔 -- 탭 안쪽 여백 6 · 실측 393.0 으로 확인). 양성 대조 compare/head_mut.sh = 원본 JS 8 · CSS 6 · Rust 5 = 19/19 잡음.
 안 옮김: 툴팁 · 코인 탭 누르기 · 세션 받기 전 «-» · 좁은 화면 배치 · 휴대폰 «다른 포지션» 칩. ponytail: 경보 칸 폭은 고정 칩 4개(eth·sol·xrp·sndk) 기준 상수 -- 지금 코인이 고정 밖이면(btc 등) 탭이 넓어져 실제 칸이 더 좁다(시험은 잰 재료로 맞춤).
+11-29 여섯째 Account 카드(`?card=acc` · rtui/src/acc.rs): 곡선 칸(기간 칩 오늘·1주·1개월·전체 · 오늘 0~24시 svg · 누적 실현 계단 + 풀별 선 + 낙폭 + 최악 3건 svg) · 오른쪽 기둥(순자산/오늘 손익 · 풀 비중 막대 · 풀 줄 증거금·가용·지갑·미실현·손절 없음 · 승률·최대 낙폭) · 아래 탭 순환(여러 순환 탭 · 머리 · 타일 6 · 체결·평단·첫 진입 svg · 체결 칩 한 줄) · 성과 통계(풀별 막대 카드) · 달력·복기(달 넘김 · 주 합 · 고른 날 거래 목록 · 아래 알림 줄). 누르기 = 기간 칩 · 탭 · 순환 탭 · ‹ › · 날(보기만).
+정답지: compare/acc_layout.py 하나 = 원본 계좌 구역 함수 20개를 잘라 진짜 #acctCard 틀(index.html)·원본 styles.css 로 헤드리스 크로미움 1920(html.fit1)에서 그대로 돌림(순환 칸은 원본처럼 그린 뒤 잰 나머지로 한 번 더) · 지어낸 계좌 15장(두 풀·통합·USDC 하나·불러오지 못함·빈 원장·34체결·잘린 순환·income·지난달·고른 날 …) → `acc::t::js_parity`(글·칠·테·윤곽·안쪽 고리·::before 점·::after 선·자르기 상자 1717개 + svg 수 6995개 1e-6). 양성 대조 compare/acc_mut.sh(JS 9 · CSS 6 · Rust 5).
+안 옮김: 카드 머리 · 메모 칸·오답노트(⛔ 입력 -- 오답노트 탭은 모양만 · 메모 자리는 비움) · 툴팁 · 호버·초점 테 · 기간 칩·탭 기억(localStorage) · 좁은 화면. 상태는 공용 줄을 안 고치려 acc.rs 스레드 지역(news.rs 와 같은 꼴). 계좌 값은 정답지에 전부 지어낸 값(실제 응답 안 받음).

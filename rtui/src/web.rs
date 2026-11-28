@@ -78,6 +78,7 @@ pub fn on_get(kind: &str, body: Option<String>) {
         "Situation" => { crate::dirb::on_get(body.as_deref()); c.feed.dirty = true; }
         "HeadState" | "HeadAlert" | "HeadSpk" => { crate::head::on_get(kind, body.as_deref(), date_now()); c.feed.dirty = true; }
         "News" | "NewsMc" | "NewsGex" | "NewsCal" => { crate::news::on_get(kind, body.as_deref()); c.feed.dirty = true; }
+        "AccAcct" | "AccPath" => { crate::acc::on_get(kind, body.as_deref(), date_now()); c.feed.dirty = true; }
         _ => {}
     });
 }
@@ -149,6 +150,7 @@ pub async fn start(canvas_id: String, asset: String, x: f32, y: f32, w: f64, h: 
     if card == "dirb" { crate::dirb::enable(); } // 왼쪽 위 «지표 방향» 판만(dirb.rs · /api/situation 1초 · ETH 만 · 판 왼쪽 위 = x·y)
     if card == "head" { crate::head::start(); ch.feed.acct_only = true; } // 풋프린트 머리 작은 칸(head.rs · 세션·발표 배지·급변 칩·코인 이름·포지션 요약 · 상자 = 1920×136 페이지 자리 · 계좌 + 허브 가격 = acct_only)
     if card == "news" { crate::news::start(); } // News 카드 + ⑤ 다음 24시간(news.rs · /api/news · market-context · gex · macro-calendar · w·h = #newsBody)
+    if card == "acc" { crate::acc::start(); } // Account 카드(acc.rs · /api/binance-account 10초 · /api/cycle-path · w·h = 머리 아래 본문 1872×934)
     let ch = Rc::new(RefCell::new(ch));
     CH.with(|c| *c.borrow_mut() = Some(ch.clone()));
     let canvas = eframe::web_sys::window().unwrap().document().unwrap().get_element_by_id(&canvas_id).unwrap()
