@@ -147,7 +147,7 @@ def build(base: str) -> dict:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base", default="http://127.0.0.1:8787")
+    ap.add_argument("--base", default="http://127.0.0.1:8790" if (ROOT / "data/live/rtserve_live.on").exists() else "http://127.0.0.1:8787")   # rtserve 전환 표식(2026-11-28)
     ap.add_argument("--out")
     a = ap.parse_args()
     t = time.time()

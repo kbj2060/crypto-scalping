@@ -53,6 +53,11 @@ HEALTH_CHECK_WAIT_SECONDS=60
 # Must match dashboard/scripts/supervise_server.sh's own defaults/env names -- the health check
 # below and that supervisor have to agree on which port "the dashboard" means.
 DASHBOARD_PORT="${DASHBOARD_PORT:-8787}"
+# 2026-11-28 rtserve 전환 표식: 있으면 thesan.xyz 응답 서버는 rtserve(8790 · supervisor_rtserve_live.sh)다.
+#   그때 이 워처는 8787 을 살리지 않는다(살리면 파이썬과 rtserve 가 같은 data/live 파일을 쓴다) -- 8790 을 보고 rtserve 를 살린다.
+#   표식이 없으면 아래 모든 줄은 예전 그대로다.
+RTSERVE_MARK="$ROOT/data/live/rtserve_live.on"
+[[ -f "$RTSERVE_MARK" ]] && DASHBOARD_PORT="${RTSERVE_PORT:-8790}"
 DASHBOARD_SIGTERM_GRACE_SECONDS=6   # then SIGKILL; see restart_dashboard()
 DASHBOARD_HEALTH_RETRIES=36         # x5s = 180s past the shared health window -- 2026-10-15 콜드 기동 3분 반 실측(옛 6=30초라 회귀 판정 -> 다음 사이클이 새 프로세스를 또 죽였다)
 # 재기동까지 마친 SHA. 헬스체크만 실패하고(롤백은 dirty 라 거부) 끝난 다음 사이클이 **이미 새 코드로 뜬
@@ -111,7 +116,12 @@ tunnel_running() {
 #   cloudflared 를 되살리자 이후 모든 사이클이 «previous run still in flight» 로 건너뛰었고,
 #   c73f133e 가 30분 넘게 배포되지 않았다(fd 주인을 /proc/*/fd 로 찾아 확인).
 revive_serving_if_down() {
-  if ! dashboard_listening; then
+  if ! dashboard_listening && [[ -f "$RTSERVE_MARK" ]]; then
+    log "rtserve NOT listening on ${DASHBOARD_PORT} (cutover mark) -- starting supervisor_rtserve_live.sh"
+    setsid nohup bash "$ROOT/scripts/ops/supervisor_rtserve_live.sh" >/dev/null 2>>"$ROOT/logs/supervisor/rtserve_reboot.log" </dev/null 9>&- &
+    sleep 8
+    dashboard_listening && log "rtserve revived" ||       { log "rtserve STILL not listening after start"; send_telegram "🔴 [WATCHER] rtserve down and revive failed (port ${DASHBOARD_PORT})"; }
+  elif ! dashboard_listening; then
     log "dashboard NOT listening on ${DASHBOARD_PORT} -- starting (no deploy involved)"
     bash "$ROOT/dashboard/scripts/start_external.sh" >/dev/null 2>&1 9>&- ||       log "start_external.sh failed"
     sleep 8
@@ -253,6 +263,13 @@ dashboard_imports_changed() {
   return 0
 }
 dashboard_imports_changed && dashboard_changed=1
+# 전환 표식이 있으면 «대시보드» = rtserve 다. 파이썬 서버 코드 변경은 아무도 안 쓰니 재시작할 것이 없고,
+#   rtserve 실행 파일(tmp/rtbin/rtserve)은 git 머지로 바뀌지 않는다 -- 그래서 rtserve/ 변경 때만 rtserve 를 재시작한다.
+#   ponytail: 실행 파일을 새로 빌드하는 일은 여전히 사람 몫. 워처가 빌드까지 하려면 여기서 cargo build 후 재시작.
+if [[ -f "$RTSERVE_MARK" ]]; then
+  dashboard_changed=0
+  affects '^rtserve/' && dashboard_changed=1
+fi
 
 # The dashboard is not a systemd unit: dashboard/scripts/supervise_server.sh owns it, records its
 # child's pid here, and respawns ~3s after that child exits. So "restarting" it means killing the
@@ -268,6 +285,7 @@ dashboard_imports_changed && dashboard_changed=1
 # ~2min while this script went on to log "deploy OK". Escalate to SIGKILL if it doesn't exit.
 restart_dashboard() {
   local child_pid_file="$ROOT/data/live/dashboard_external.child.pid"
+  [[ -f "$RTSERVE_MARK" ]] && child_pid_file=/dev/null   # 전환 뒤: 파이썬 pid 파일 대신 8790 포트 주인(rtserve)을 죽인다 -- _supervise.sh 가 되살린다
   local pid=""
   [[ -f "$child_pid_file" ]] && pid="$(cat "$child_pid_file" 2>/dev/null)"
 

@@ -10,7 +10,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; cd "$ROOT" || exit 2
 MODE="${1:?status|go|back}"
 LIVE="$ROOT/data/live"; MARK="$LIVE/rtorder_live.on"; BR=manual_bracket_state.json
 RDIR="$LIVE/rtorder"; SDIR="${RTORDER_SHADOW_DIR:-/mnt/data2/rtcollect_shadow/rtorder}"
-PYD=http://127.0.0.1:8787; DOOR=http://127.0.0.1:8791; C="${CURL:-/usr/bin/curl}"
+# rtserve 전환 표식(data/live/rtserve_live.on)이 있으면 thesan.xyz 응답 서버 = rtserve(8790) -- 조회는 그쪽으로 묻는다.
+PYD=http://127.0.0.1:8787; [ -f "$LIVE/rtserve_live.on" ] && PYD=http://127.0.0.1:8790; DOOR=http://127.0.0.1:8791; C="${CURL:-/usr/bin/curl}"
 ASSETS="${CUTOVER_ASSETS:-eth sol xrp btc soxl sndk}"
 TAG="#rtorder-live"
 say() { echo "[cutover $MODE $(date +%H:%M:%S)] $*"; }
@@ -111,6 +112,7 @@ go)
   status ;;
 back)
   [ -f "$MARK" ] || die "표식이 없다 -- 이미 파이썬이 감시 중"
+  ss -ltnH 2>/dev/null | awk '{print $4}' | grep -qE '(^|:)8787$' || die "파이썬 대시보드(8787)가 듣고 있지 않다 -- 표식을 지우면 손절 감시가 아무 데도 없다. 먼저 파이썬 대시보드를 살린 뒤 back"
   if pgrep -x rtorder >/dev/null; then idle_check "$DOOR" || die "rtorder 에 도는 작업·대기가 있다 -- 끝난 뒤에"; fi
   mark_set switching; say "표식 = switching (주문 POST 503)"
   stop_rtorder || say "⚠️ rtorder 를 깨끗이 못 껐다 -- 계속(무장 파일은 디스크에 있다)"

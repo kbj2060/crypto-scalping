@@ -29,7 +29,8 @@ sys.path[:0] = [str(ROOT / "scripts"), str(ROOT)]   # live_manual_peg_execute �
 import ops_watchdog as W  # noqa: E402  (.env 로드 · send_telegram · KST)
 
 OUT = ROOT / "data" / "live" / "ops_watchdog" / "morning_audit"
-DASH = "http://127.0.0.1:8787"
+# 2026-11-28: data/live/rtserve_live.on(rtserve 전환 표식)이 있으면 응답 서버 = rtserve 8790. 없으면 예전 그대로 8787.
+DASH = "http://127.0.0.1:8790" if (ROOT / "data/live/rtserve_live.on").exists() else "http://127.0.0.1:8787"
 CLAUDE = Path(os.getenv("AUDIT_CLAUDE_BIN", str(Path.home() / ".local" / "bin" / "claude")))
 # crontab 에 있어야 하는 줄(부분 문자열). 지우거나 옮기면 여기도 고친다.
 EXPECTED_CRON = {
