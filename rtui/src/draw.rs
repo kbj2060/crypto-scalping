@@ -26,6 +26,7 @@ pub fn rgba(c: Col, a: f64) -> Color32 {
         Col::Lev10 => (0x7d, 0xd3, 0xfc, 1.0),
         Col::Lev25 => (0x8b, 0x93, 0xf0, 1.0),
         Col::Lev50 => (0xe6, 0xc4, 0x5c, 1.0),
+        Col::Rgb(r, g, b) => (r, g, b, 1.0),
 
     };
     Color32::from_rgba_unmultiplied(r, g, b, (255.0 * a0 * a).round().clamp(0.0, 255.0) as u8)
@@ -143,7 +144,7 @@ pub fn paint(p: &Painter, prims: &[Prim], origin: Pos2, plot: [f64; 4], lane: [f
     let cut = |r: [f64; 4]| p.with_clip_rect(Rect::from_min_size(pt(r[0], r[1]), vec2(r[2] as f32, r[3] as f32)).intersect(p.clip_rect()));
     let (plot, lane) = (cut(plot), cut(lane));
     for pr in prims {
-        let clip = match pr { Prim::Rect { clip, .. } | Prim::StrokeRect { clip, .. } | Prim::Line { clip, .. } | Prim::Text { clip, .. } | Prim::Circle { clip, .. } | Prim::Dashed { clip, .. } => *clip, Prim::Area { .. } | Prim::Mono { .. } => Clip::No };
+        let clip = match pr { Prim::Rect { clip, .. } | Prim::StrokeRect { clip, .. } | Prim::Line { clip, .. } | Prim::Text { clip, .. } | Prim::Circle { clip, .. } | Prim::Dashed { clip, .. } | Prim::Mono { clip, .. } => *clip, Prim::Area { .. } => Clip::No };
         let pa = match clip { Clip::No => p, Clip::Plot => &plot, Clip::Lane => &lane };
         match pr {
             &Prim::Rect { x, y, w, h, c, a, rx, .. } => {
@@ -179,7 +180,7 @@ pub fn paint(p: &Painter, prims: &[Prim], origin: Pos2, plot: [f64; 4], lane: [f
                 pa.extend(Shape::dashed_line(&v, Stroke::new(*lw as f32, rgba(*c, *a)), *on as f32, *off as f32));
             }
             Prim::Text { x, y, s, size, wt, c, a, anchor, halo, .. } => text(pa, pt(*x, *y), s, *size as f32, *wt, rgba(*c, *a), *anchor, *halo),
-            Prim::Mono { x, y, s, size, wt, c, a, anchor, halo } => text_f(pa, pt(*x, *y), s, mono(*size as f32, *wt), rgba(*c, *a), *anchor, *halo),
+            Prim::Mono { x, y, s, size, wt, c, a, anchor, halo, .. } => text_f(pa, pt(*x, *y), s, mono(*size as f32, *wt), rgba(*c, *a), *anchor, *halo),
             Prim::Area { pts, base, c, a } => { // 사다리꼴 띠 한 그물(겹친 테두리 없이 -- 볼록 조각마다 그리면 .10 면에 이음매 줄이 보인다)
                 let mut m = egui::Mesh::default();
                 for w in pts.windows(2) {

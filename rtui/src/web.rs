@@ -101,7 +101,7 @@ impl eframe::App for WebApp {
 
 /// asset = ?asset= · (x, y) = 상자 왼쪽 위 · w·h = viewBox(0 이면 창에 맞춤) · tz = getTimezoneOffset · bg = 0xRRGGBB(0xFFFFFFFF 투명)
 /// week = 지표 스위치 기본값이 1주일을 늘 부르나(feed::Feed::week_always) · api·ws·hub = 주소(feed::Urls -- 빈 글자면 기본) · push = 풋프린트·체결을 rtcore 허브에서(feed::Source::Push)
-/// card = "s1" 이면 1초 수급 카드만(s1.rs · push 여야 자료가 온다) · "mc" 면 시장 맥락 ①② 만(mc.rs · 같은 출처 /api/market-context) · "acct" 면 계좌 칩만(acct.rs) · "srl" 이면 «레벨 5분» 칸만(srl.rs · 같은 출처 /api/sr-lean · ETH 만) · "liq7"(liqN · N = 지도 기간 1·7·30·60·90·180·365) 이면 «청산» 탭 청산맵만(liq.rs · push 로 연다)
+/// card = "s1" 이면 1초 수급 카드만(s1.rs · push 여야 자료가 온다) · "mc" 면 시장 맥락 ①② 만(mc.rs · 같은 출처 /api/market-context) · "acct" 면 계좌 칩만(acct.rs) · "srl" 이면 «레벨 5분» 칸만(srl.rs · 같은 출처 /api/sr-lean · ETH 만) · "liq7"(liqN · N = 지도 기간 1·7·30·60·90·180·365) 이면 «청산» 탭 청산맵만(liq.rs · push 로 연다) · "rem60"(remN · N = 입력 기간 7·30·60·90·180·365) 이면 «청산» 탭 «남은 매물 일봉별»만(rem.rs · push 로 연다)
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
 pub async fn start(canvas_id: String, asset: String, x: f32, y: f32, w: f64, h: f64, tz: i32, bg: u32, week: bool, api: String, ws: String, push: bool, hub: String, card: String) -> Result<(), JsValue> {
@@ -120,6 +120,7 @@ pub async fn start(canvas_id: String, asset: String, x: f32, y: f32, w: f64, h: 
     ch.feed.mc_only = card == "mc";
     ch.feed.srl_only = card == "srl";
     if let Some(d) = card.strip_prefix("liq").and_then(|d| d.parse::<u32>().ok()).filter(|d| [1, 7, 30, 60, 90, 180, 365].contains(d)) { (ch.feed.liq_only, ch.feed.liq_days) = (true, d); }
+    if let Some(d) = card.strip_prefix("rem").and_then(|d| d.parse::<u32>().ok()).filter(|d| [7, 30, 60, 90, 180, 365].contains(d)) { (ch.feed.rem_only, ch.rem.win) = (true, d); }
     ch.feed.acct_only = card == "acct"; // 계좌 칩(맨 위 전광판)만 -- 같은 출처 /api/binance-account + 허브 «모든 종목» 가격(push 로 연다)
     let ch = Rc::new(RefCell::new(ch));
     CH.with(|c| *c.borrow_mut() = Some(ch.clone()));

@@ -49,12 +49,12 @@ if (q.get("mode") === "bench") {
       fetch(url, { cache: "no-cache" }).then((res) => (res.ok ? res.text() : null)).catch(() => null).then((t) => m.on_get(kind, t));
     }
   };
-  const shot = q.get("mode") === "shot", viaHub = ["s1", "acct", "liq"].includes(q.get("card")), card = !!q.get("card");   // ?card=s1 = 1초 수급 카드만(허브 /rt 밀기 · w·h 를 주면 지금 화면 오른쪽 칸 크기로) · ?card=mc = 시장 맥락 ①②만(같은 출처 /api/market-context · w = 칸 폭) · ?card=acct = 계좌 칩(맨 위 전광판)만(/api/binance-account 10초 + 허브 /rt «모든 종목» 가격) · ?card=srl = «레벨 5분» 칸만(/api/sr-lean 2초 · ETH 만) · ?card=liq&lad=7 = «청산» 탭 청산맵만(지도 1·7·30·60·90·180·365일 · w·h = svg 칸 · 허브 가격)
+  const shot = q.get("mode") === "shot", viaHub = ["s1", "acct", "liq", "rem"].includes(q.get("card")), card = !!q.get("card");   // ?card=s1 = 1초 수급 카드만(허브 /rt 밀기 · w·h 를 주면 지금 화면 오른쪽 칸 크기로) · ?card=mc = 시장 맥락 ①②만(같은 출처 /api/market-context · w = 칸 폭) · ?card=acct = 계좌 칩(맨 위 전광판)만(/api/binance-account 10초 + 허브 /rt «모든 종목» 가격) · ?card=srl = «레벨 5분» 칸만(/api/sr-lean 2초 · ETH 만) · ?card=liq&lad=7 = «청산» 탭 청산맵만(지도 1·7·30·60·90·180·365일 · w·h = svg 칸 · 허브 가격) · ?card=rem&win=60 = «청산» 탭 «남은 매물 일봉별»만(입력 기간 7·30·60·90·180·365일 · w·h = svg 칸 · 허브 가격)
   const bg = q.get("bg") === "none" ? 0xffffffff : parseInt(q.get("bg") || "1e2229", 16);
   if (q.get("plate")) document.body.style.background = `url(${q.get("plate")}) no-repeat 0 0`;   // 비교 캡처: 지금 화면에서 차트 층만 숨긴 바탕
   // 혼자 뜰 때 = 창 전체(w=0 → Rust 가 창에 맞춘다) · 상자 왼쪽 위 8px · 1주일은 지표 스위치 기본값처럼 늘 받는다(wk=0 이면 끔 -- 하네스)
   await m.start("c", q.get("asset") || "eth", N("x", 8), N("y", 8), N("w", 0), N("h", 0), N("tz", new Date().getTimezoneOffset()), bg,
-          N("wk", shot ? 0 : 1) === 1, q.get("api") || "", q.get("ws") || "", q.get("src") === "push" || viaHub, q.get("hub") || "", q.get("card") === "liq" ? "liq" + (q.get("lad") || "7") : q.get("card") || "");
+          N("wk", shot ? 0 : 1) === 1, q.get("api") || "", q.get("ws") || "", q.get("src") === "push" || viaHub, q.get("hub") || "", q.get("card") === "liq" ? "liq" + (q.get("lad") || "7") : q.get("card") === "rem" ? "rem" + (q.get("win") || "60") : q.get("card") || "");
   const tick = () => m.tick(document.hidden);
   tick(); setInterval(tick, 500);
   document.addEventListener("visibilitychange", tick);

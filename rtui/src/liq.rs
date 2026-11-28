@@ -46,7 +46,7 @@ fn js_order<T>(v: Vec<(i64, T)>) -> Vec<(i64, T)> {
     pos
 }
 /// Math.round
-fn round(x: f64) -> f64 { (x + 0.5).floor() }
+pub(crate) fn round(x: f64) -> f64 { (x + 0.5).floor() }
 
 /// mapOf: 0.25% 칸(rows · JS 키 차례) · 0.1% 누적(dn·up, ±100%)
 pub struct Map { rows: Vec<(i64, [f64; 4])>, dn: Vec<f64>, up: Vec<f64>, share: bool }
@@ -70,7 +70,7 @@ pub fn map_of(tp: &Tp, p: f64) -> Option<Map> {
 }
 fn cum_at(m: &Map, d: f64) -> f64 { let i = FINE.min(round(d.abs() / 0.1) as usize); if d < 0.0 { m.dn[i] } else { m.up[i] } }
 
-fn usd(x: f64) -> String {
+pub(crate) fn usd(x: f64) -> String {
     if x.is_nan() { return "—".into(); }
     let (a, s) = (x.abs(), if x < 0.0 { "−" } else { "" });
     if a >= 1e9 { return format!("{s}${}B", to_fixed(a / 1e9, if a >= 1e10 { 0 } else { 1 })); }
@@ -78,9 +78,9 @@ fn usd(x: f64) -> String {
     if a >= 1e3 { return format!("{s}${}K", to_fixed(a / 1e3, 0)); }
     format!("{s}${}", to_fixed(a, 0))
 }
-fn pc(x: f64, d: usize) -> String { format!("{}%", to_fixed(x * 100.0, d)) }
-fn px(p: f64) -> String { crate::mc::n(p, if p >= 1000.0 { 0 } else if p >= 100.0 { 1 } else if p >= 1.0 { 2 } else { 4 }) }
-fn nice_step(v: f64, n: f64) -> Option<f64> {
+pub(crate) fn pc(x: f64, d: usize) -> String { format!("{}%", to_fixed(x * 100.0, d)) }
+pub(crate) fn px(p: f64) -> String { crate::mc::n(p, if p >= 1000.0 { 0 } else if p >= 100.0 { 1 } else if p >= 1.0 { 2 } else { 4 }) }
+pub(crate) fn nice_step(v: f64, n: f64) -> Option<f64> {
     let r = v / n;
     let m = 10f64.powf((if r == 0.0 || r.is_nan() { 1.0 } else { r }).log10().floor());
     [1.0, 2.0, 2.5, 5.0, 10.0].into_iter().map(|k| k * m).find(|&k| k >= r)
@@ -92,7 +92,7 @@ fn ticks(mx: f64, n: f64) -> Vec<f64> {
     o
 }
 /// toFixed(1) 을 숫자로(svg 속성 글자 그대로)
-fn f1(x: f64) -> f64 { to_fixed(x, 1).parse().unwrap_or(x) }
+pub(crate) fn f1(x: f64) -> f64 { to_fixed(x, 1).parse().unwrap_or(x) }
 
 /// ladRange: 가로 = 고른 기간 일봉 저가~고가(±1% 여유 · 최소 ±6% · 끝 ±100%) -- days = /api/liq-tab days([날, 시, 고, 저, 종, …])
 fn lad_range(days: &[Value], nd: usize, p: f64) -> (f64, f64) {
@@ -136,7 +136,7 @@ pub fn scene(mp: Option<&Map>, tab: Option<&Value>, nd: usize, p: f64, w: f64, h
     let y = |v: f64| tp + ch * (1.0 - v / mx);
     let line = |x1, x2, y1, y2, c, a, lw| Prim::Line { pts: vec![[x1, y1], [x2, y2]], c, a, lw, dash: None, clip: Clip::No };
     let gl = |x1, x2, y1, y2| line(x1, x2, y1, y2, Col::SoftLine, 1.0, 1.0);
-    let ax = |x, y, s: String, anchor, c, wt, halo| Prim::Mono { x, y, s, size: 10.0, wt, c, a: 1.0, anchor, halo };
+    let ax = |x, y, s: String, anchor, c, wt, halo| Prim::Mono { x, y, s, size: 10.0, wt, c, a: 1.0, anchor, halo, clip: Clip::No };
     let mut s = vec![];
     if !bars.is_empty() { for v in ticks(mx, 4.0) { s.extend([gl(l, xr, y(v), y(v)), ax(l - 6.0, y(v) + 3.0, fu(v), Anchor::End, Col::Muted, 500, false)]); } }
     let (p_lo, p_hi) = (p * (1.0 + d_lo / 100.0), p * (1.0 + d_hi / 100.0));
@@ -179,13 +179,14 @@ pub fn scene(mp: Option<&Map>, tab: Option<&Value>, nd: usize, p: f64, w: f64, h
     let x0 = x(0.0);
     s.push(Prim::Dashed { pts: vec![[x0, tp], [x0, tp + ch]], c: Col::Accent, a: 1.0, lw: 1.2, on: 4.0, off: 3.0, clip: Clip::No });
     s.push(Prim::Rect { x: x0 - 30.0, y: h - bt + 2.0, w: 60.0, h: 16.0, c: Col::Accent, a: 1.0, rx: 3.0, clip: Clip::No });
-    s.push(Prim::Mono { x: x0, y: h - bt + 13.5, s: px(p), size: 10.5, wt: 700, c: Col::OnFill, a: 1.0, anchor: Anchor::Middle, halo: false });
+    s.push(Prim::Mono { x: x0, y: h - bt + 13.5, s: px(p), size: 10.5, wt: 700, c: Col::OnFill, a: 1.0, anchor: Anchor::Middle, halo: false, clip: Clip::No });
     Some(s)
 }
 
 /// 빈 상태(.lq-empty: 여백 14/2 · 12px --muted) · 범례(.lq-leg: svg 아래 5 · 10.5px --muted · 칸 사이 10 · 색 칸 9×9 둥근 2 + 4) -- y0 = svg 바닥
 /// ponytail: 글자 바닥선 = 줄 가운데 + 0.36×크기 근사(mc.rs 와 같은) · 범례는 한 줄(넓은 화면) -- 좁으면 줄바꿈을 더한다
-pub fn empty() -> Vec<Prim> { vec![Prim::Text { x: 2.0, y: 14.0 + 7.2 + 12.0 * 0.36, s: "지도를 받는 중입니다".into(), size: 12.0, wt: 400, c: Col::Muted, a: 1.0, anchor: Anchor::Start, halo: false, clip: Clip::No }] }
+pub fn empty() -> Vec<Prim> { empty_msg("지도를 받는 중입니다") }
+pub fn empty_msg(s: &str) -> Vec<Prim> { vec![Prim::Text { x: 2.0, y: 14.0 + 7.2 + 12.0 * 0.36, s: s.into(), size: 12.0, wt: 400, c: Col::Muted, a: 1.0, anchor: Anchor::Start, halo: false, clip: Clip::No }] }
 pub fn legend(y0: f64, measure: &dyn Fn(&str, f64, u16) -> f64) -> Vec<Prim> {
     let (cy, mut x, mut v) = (y0 + 5.0 + 10.5 * 1.4 / 2.0, 0.0, vec![]);
     for (c, t) in [(Some(Col::Lev10), "10배"), (Some(Col::Lev25), "20~25배"), (Some(Col::Lev50), "50배"), (Some(Col::Amber), "75~100배"), (None, "선 = 지금가부터 누적(빨강 롱 · 초록 숏)"), (None, "지도 눈금 = 세 거래소 OI×2 · 절대액 아님")] {

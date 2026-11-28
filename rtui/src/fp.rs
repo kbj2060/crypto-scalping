@@ -29,7 +29,7 @@ pub struct Win { pub edge: f64, pub panned: bool, pub pan_y: f64 }
 
 /// styles.css :root(다크) 의 색 이름
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Col { Good, Bad, Muted, Amber, Accent, Ink, Line, OnFill, ChartBg, Text, Turnover, SoftLine, HoverLine, Spot, Neutral, Lift, White, /** 청산맵 레버리지 쌓기(styles.css 2589 --lev10 = --book-depth · --lev25 · --lev50 -- --lev100 = --warn = Amber) */ Lev10, Lev25, Lev50 }
+pub enum Col { Good, Bad, Muted, Amber, Accent, Ink, Line, OnFill, ChartBg, Text, Turnover, SoftLine, HoverLine, Spot, Neutral, Lift, White, /** 청산맵 레버리지 쌓기(styles.css 2589 --lev10 = --book-depth · --lev25 · --lev50 -- --lev100 = --warn = Amber) */ Lev10, Lev25, Lev50, /** 칸마다 다른 색(남은 매물 히트맵 densityColor · 캔들 color-mix) */ Rgb(u8, u8, u8) }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Anchor { Start, Middle, End }
@@ -54,7 +54,7 @@ pub enum Prim {
     /// 곡선 pts(x 가 한쪽으로만 간다) 와 바닥선 y = base 사이를 칠한 면(svg path …L 끝x base L 첫x base Z)
     Area { pts: Vec<[f64; 2]>, base: f64, c: Col, a: f64 },
     /// Text 와 같되 --font-mono(JetBrains Mono · 600 이상 Bold -- 청산 탭 축 글자 .lq-ax)
-    Mono { x: f64, y: f64, s: String, size: f64, wt: u16, c: Col, a: f64, anchor: Anchor, halo: bool },
+    Mono { x: f64, y: f64, s: String, size: f64, wt: u16, c: Col, a: f64, anchor: Anchor, halo: bool, clip: Clip },
 }
 
 pub struct Cfg {
