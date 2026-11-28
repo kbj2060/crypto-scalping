@@ -85,7 +85,7 @@ fn sub_bars(ts: &[i64], m: &Win) -> Option<Vec<[[f64; 12]; 3]>> {
 }
 
 /// _own_bar_alive: 봉 자신의 청산가가 같은 시간 «그 뒤 5분봉»에 안 닿은 거래량 몫(5분봉 없으면 1).
-fn own_alive(sub: &Option<Vec<[[f64; 12]; 3]>>, e: &[f64], liq: &[f64], long: bool) -> Vec<f64> {
+pub fn own_alive(sub: &Option<Vec<[[f64; 12]; 3]>>, e: &[f64], liq: &[f64], long: bool) -> Vec<f64> {
     let Some(sub) = sub else { return vec![1.0; liq.len()] };
     sub.iter().enumerate().map(|(i, [h5, l5, v5])| {
         let x: Vec<f64> = (0..12).map(|j| match (long, if long { l5[j] } else { h5[j] }) {
@@ -106,22 +106,27 @@ fn own_alive(sub: &Option<Vec<[[f64; 12]; 3]>>, e: &[f64], liq: &[f64], long: bo
 }
 
 pub struct Common {
-    base: Vec<f64>,
-    fmin: Vec<f64>,
-    fmax: Vec<f64>,
+    pub base: Vec<f64>,
+    pub fmin: Vec<f64>,
+    pub fmax: Vec<f64>,
     pub bw: f64,
     pub close: Vec<f64>,
-    sub: Option<Vec<[[f64; 12]; 3]>>,
+    pub sub: Option<Vec<[[f64; 12]; 3]>>,
 }
 
 /// _prepare_common(가중·생존 필터 · 5분봉 자기 봉 판정) -- 창이 20줄 미만이거나 가격이 0 이하면 None.
 pub fn prepare(w: &Win, cp: f64, m5: &Win) -> Option<Common> {
+    prepare_hl(w, cp, m5, Some(240.0))
+}
+
+/// prepare 에 halflife_h(None = 감쇠 끔 · 원본 2026-11-15 60·90·180일 지도) -- rtserve 청산 막대(compute_tier_profile)가 쓴다.
+pub fn prepare_hl(w: &Win, cp: f64, m5: &Win, hl: Option<f64>) -> Option<Common> {
     let n = w.t.len();
     if n < 20 || !(cp > 0.0) {
         return None;
     }
     let now = w.t[n - 1];
-    let base = (0..n).map(|i| w.v[i] * (-((now - w.t[i]) as f64 / 3600.0) / 240.0).exp()).collect();
+    let base = (0..n).map(|i| w.v[i] * hl.map_or(1.0, |hl| (-((now - w.t[i]) as f64 / 3600.0) / hl).exp())).collect();
     let (mut fmin, mut fmax) = (vec![f64::INFINITY; n], vec![f64::NEG_INFINITY; n]);
     for i in (0..n - 1).rev() {
         fmin[i] = fmin[i + 1].min(w.l[i + 1]);

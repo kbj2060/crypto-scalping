@@ -521,8 +521,8 @@ requests 경로(macro_trend)는 server.py:171 의 binance_ban_guard 가 Session.
 | `/api/swing-lines` (2762~2794) | klines 1h·30m limit 1000 ×2 | 10 | `swing_{a}` 60/600 | 한쪽 실패 = 그 tf null + partial · 둘 다 = 200 ok false | swing_lines.py 57줄(numpy max·min 같음 비교뿐) | **옮김** |
 | `/api/opt-smile` (4739~4755) | Deribit get_book_summary_by_currency(ETH·BTC·USDC) ×1 · 6초 | 바이낸스 아님 | `opt_smile_{CUR}` 60/600 · 🔴실패 payload 도 캐시 | 200 ok false deribit_unavailable·eth_btc_xrp_only | front_smile 35줄(np.polyfit) | 다음 |
 | `/api/market-history` (3701~) | eth·btc: ETH·BTC 5m limit 1500 ×2(evidence 캐시) · 그 밖: 5m limit 1000 ×1(3초) | 20 / 5 | `evidence_signal` 60/0 · `market_history:{a}` 60/600 | 502 텍스트 evidence_signal_upstream_error·market_history_upstream_error · 밴 503 · 400 unsupported_market_history_asset | trend_veto(pandas rolling·ewm -- ctx_rest.rs 에 이미 있음) · vwap_rows · 형성 봉 | 다음 |
-| `/api/liquidation-map` (4774 → 3461) | klines 1h limit 48 + 5m limit 460 | 3 | `liquidation_map:{a}` 60/600 + liq_hist_memo | 502 JSON `{"error": "liquidation_map_upstream_error", "detail": …}` · 밴 503 텍스트 | live_liquidation_map_20260824.py 725줄(numpy·pandas) + 로컬 OI 3 DB | 다음(무거움) |
-| `/api/liquidation-map/tiers` (4847 → 3359) | 1h limit days×24+2 · 1500 넘으면 endTime 으로 앞쪽(1d 1회 … 365d 6회) | 1~60 | `liquidation_tiers:{a}:{d}` 60(365d 300)/600 | 502 JSON · days 밖 = 조용히 1 | compute_tier_profile | 다음(청산맵과 함께) |
+| `/api/liquidation-map` (4774 → 3461) | klines 1h limit 48 + 5m limit 460 | 3 | `liquidation_map:{a}` 60/600 + liq_hist_memo | 502 JSON `{"error": "liquidation_map_upstream_error", "detail": …}` · 밴 503 텍스트 | live_liquidation_map_20260824.py 725줄(numpy·pandas) + 로컬 OI 3 DB | **옮김**(src/liqmap.rs · 11-28) |
+| `/api/liquidation-map/tiers` (4847 → 3359) | 1h limit days×24+2 · 1500 넘으면 endTime 으로 앞쪽(1d 1회 … 365d 6회) | 1~60 | `liquidation_tiers:{a}:{d}` 60(365d 300)/600 | 502 JSON · days 밖 = 조용히 1 | compute_tier_profile | **옮김**(src/liqmap.rs · 11-28) |
 | `/api/position-profile` (4785 → 3418·3388) | 첫 적재: openInterestHist 5m limit 500 ×18 + klines 5m limit 1500 ×6 · 증분: 각 1(5분봉 닫힌 뒤 · 60초 간격) | ≥60 + oiHist(모름) | `position_profile:{a}:{wins}:{rng}` 1/600 · pos_books(코인 장부) · 실패 백오프 60초 | 502 JSON position_profile_upstream_error · 404 flow_off · 400 bad_range | position_profile.py 204줄(numpy exp·pairwise 합) · **흐름 메모리(oi_1s·footprint sec·bars)** | 다음 |
 | `/api/sr-watch` (2060) | 직접 없음 -- sr_break_loop(2063~2105) 이 10초마다 load_liquidation_map 을 불러 채운 메모리 | (청산맵 몫) | 메모리 | — | sr_breaks·sr_watch_view + footprint sec | **막힘**: 청산맵 먼저 |
 | `/api/footprint-daily/heat` · `/api/footprint-4h/heat` (3928·3914 → 3753) | klines 1h limit 500 ×1(둘이 공유) | 5 | `fp_daily_k1h_{a}` 600/3600 · 바깥 `fp_*_heat_{a}_{from}_{to}_{row}` 300/1800 | 받기 실패 = 빈 heat 를 300초 캐시 | footprint_daily heat_at → 청산맵 내부 함수 · 소급 parquet | 다음 |
@@ -548,6 +548,13 @@ requests 경로(macro_trend)는 server.py:171 의 binance_ban_guard 가 Session.
   → 시험 `rest_parity::rest_endpoints_match_original` 본문 바이트·상태·보낸 요청 열 **33/33 같음**.
 - 알려진 차이: 연결 실패 글자(원본 aiohttp ClientConnectorError 문장 · rtserve `ClientError: <ureq 글>`) · cycle-path 연결 실패는 둘 다 500.
 - 원본 결함(그대로 둠 · 사용자 결정): cycle-path 15m × 1500봉 = 15.6일 -- start 가 그보다 오래면 선이 지금까지 안 온다.
+
+### 10-3b. 청산맵(2026-11-28 · `src/liqmap.rs`)
+- `/api/liquidation-map`(load_liquidation_map 3469~3516 전부: 레벨 + heatmap_bins + 5분 경계 밀도 이력 144 + liq_hist_memo + 청산 막대 tier_profile + levels_price·known_until) · `/api/liquidation-map/tiers`(1·7·30·60·90·180·365일 · 1,500 넘으면 endTime 쪽 나누기 · 60일 이상 감쇠 끔).
+- 계산 = rtmodel::regime_band(`prepare_hl`(감쇠 끔 갈래 더함 · `prepare` 는 그대로 240h) · `bins` · `side_levels` · `own_alive`/Common 칸 pub) -- 같은 원본을 한 곳만. liq_oi_usd = hot binance_ctx·okx_ctx·bybit_ctx.
+- 정답지 `tools/gen_liqmap_fixture.py`(원본 모듈 import + 적재 함수 옮겨 적음) → `tests/liqmap_parity.rs` 22요청 본문·상태·보낸 요청 열 같음 · 양성 대조(사본 변이) 6/6 잡음(memo 마지막 경계 변이는 한 번 호출 시나리오라 같은 값 -- 등가).
+- 알려진 차이: RTSERVE_REST 없음 = 503 `rest_off`(원본에 없는 갈래) · 밴·가중치 = 503 글자(원본 미포착 HTTPServiceUnavailable 과 같음).
+- 남음: heat 둘(FPD h4_heat_payload·소급 parquet) · `/api/sr-watch`(sr_break_loop = 텔레그램 보냄 + 코인별 1초 체결가 -- 병행 중 중복 알림 결정 필요).
 
 ### 10-4. 할당 한도(§9-1 에 더함)
 
