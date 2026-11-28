@@ -31,6 +31,7 @@ pub fn routes(p: &str) -> Vec<(&'static str, Handler)> {
         "/api/push/subscribe" => vec![("POST", push_subscribe)],
         "/api/push/unsubscribe" => vec![("POST", push_unsubscribe)],
         "/api/push/devices" => vec![("GET", push_devices)],
+        "/api/push/test" => vec![("POST", push_test)],
         "/api/client-timing" => vec![("POST", client_timing)],
         _ => Vec::new(),
     }
@@ -1046,6 +1047,31 @@ fn sub_id(endpoint: &V) -> R<String> {
 /// GET /api/push/config (server.py:4856) -- env 의 공개키 · 비밀키는 «있는지»만
 fn push_config(cfg: &Config, _: &Req) -> Resp {
     or500(load_subs(cfg).map(|s| json!({"enabled": !cfg.vapid_public.is_empty() && cfg.vapid_private_set, "vapid_public_key": cfg.vapid_public, "subscriber_count": s.len()})))
+}
+
+/// POST /api/push/test (server.py api_push_test) -- 웹 푸시 암호화·서명은 원본 파이썬 모듈을 그대로 부른다
+/// (`scripts/push_webpush_20260904.py test` · 결과 JSON 한 줄 · 구독 파일 정리 때문에 쓰기 잠금 안에서).
+/// ponytail: 누를 때만 도는 시험 단추라 파이썬 한 번 띄우는 값(~1초)을 감수 -- 알림을 rtserve 가 직접 보내게 되면 Rust 로 옮긴다.
+fn push_test(cfg: &Config, _: &Req) -> Resp {
+    if !cfg.vapid_private_set {
+        return exc_text(503, "VAPID_PRIVATE_KEY not configured");
+    }
+    let _g = cfg.write_lock.lock().unwrap();
+    let py_bin = std::env::var("RTSERVE_PY").unwrap_or_else(|_| "python3".into());
+    let out = std::process::Command::new(py_bin)
+        .arg(cfg.root.join("scripts/push_webpush_20260904.py"))
+        .arg("test")
+        .current_dir(&cfg.root)
+        .stdin(std::process::Stdio::null())
+        .output();
+    match out {
+        Ok(o) if o.status.success() => match std::str::from_utf8(&o.stdout).ok().and_then(|s| py::loads(s.trim()).ok()) {
+            Some(v) => or500(Ok(v)),
+            None => server_error(),
+        },
+        Ok(o) if o.status.code() == Some(3) => exc_text(503, "VAPID_PRIVATE_KEY not configured"),
+        _ => server_error(),
+    }
 }
 
 /// POST /api/push/subscribe (server.py:4868)

@@ -21,7 +21,7 @@ impl Default for Urls {
 #[derive(Debug, PartialEq, serde::Serialize)]
 pub enum Req { Get { kind: Kind, url: String }, WsOpen(String), WsClose, /** 열린(또는 열리는 중인) 소켓에 보낼 글 -- 허브 구독 */ WsSend(String) }
 #[derive(Debug, PartialEq, Clone, Copy, serde::Serialize)]
-pub enum Kind { Footprint, History, Week, LiqSig, Liq, LiqTail, Mc }
+pub enum Kind { Footprint, History, Week, LiqSig, Liq, LiqTail, Mc, Acct }
 
 /// 145 FOOTPRINT_POLL_MS · 148 FOOTPRINT_STALE_BARS · 38 CANDLE_HISTORY_POLL_MS · 1680 CHART_MAX_CANDLES · 4400 FAST_PRICE_MIN_INTERVAL_MS · 2224 FOOTPRINT_RENDER_MIN_INTERVAL_MS · 6638 FP_WEEK_REFRESH_MS
 const FP_POLL_MS: f64 = 400.0;
@@ -34,6 +34,7 @@ const WEEK_REFRESH_MS: f64 = 6.0 * 3600e3;
 const LIQ_POLL_MS: f64 = 60_000.0; // 1653 LIQUIDATION_5M_POLL_MS
 const MARKET_CTX_POLL_MS: f64 = 1000.0; // 6116
 const LIQ_TAIL_MS: f64 = 2000.0;   // 3204 LIQ_5M_TAIL_POLL_MS
+const ACCT_POLL_MS: f64 = 10_000.0; // 1649 BINANCE_ACCOUNT_POLL_MS
 const BAR: i64 = 300; // CHART_CANDLE_MIN 5 × 60
 
 /// 4471 footprintLive -- 브라우저가 쌓는 형성 봉 칸. cells: 키 = roundHalfEven(가격/칸 폭) → [매수, 매도, 고래매수, 고래매도, 리테일매수, 리테일매도]
@@ -86,6 +87,12 @@ pub struct Feed {
     pub mc: Option<serde_json::Value>,
     mc_at: f64,
     pub mc_only: bool,
+    /// 계좌 칩(acct.rs): /api/binance-account 응답(ok 인 것만 -- 2972) · 마지막으로 물은 시각 · 허브 «모든 종목» 가격(코인 → 가격 · 4916) · 그 번호 · 이 카드만
+    pub acct: Option<serde_json::Value>,
+    acct_at: f64,
+    pub prices: std::collections::HashMap<String, f64>,
+    prices_seq: Option<u64>,
+    pub acct_only: bool,
 }
 
 /// 4477 roundHalfEven(파이썬 round 와 같은 격자)
@@ -119,7 +126,7 @@ impl Feed {
     pub fn new(asset: &str, symbol: &str, source: Source, urls: Urls, week_always: bool) -> Self {
         Self { source, urls, asset: asset.into(), symbol: symbol.into(), week_always, candles: vec![], fp_bars: BTreeMap::new(), fp: None, week: None,
                live: Live::default(), price: 0.0, price_ts_ms: None, shown: 0.0, last_fast: 0.0, last_full: 0.0, fp_last_fetch: 0.0, fp_in_flight: false,
-               hist_last_fetch: 0.0, hist_retry_at: 0.0, week_at: 0.0, week_tried_at: 0.0, week_in_flight: false, ws: false, ws_retry_at: 0.0, hub_seq: None, holes: vec![], liq: vec![], liq_gen: 0, liq_tail_gen: 0, liq_at: 0.0, liq_tail_at: 0.0, week_liq: vec![], dirty: false, out: vec![], s1: Default::default(), s1_only: false, mc: None, mc_at: 0.0, mc_only: false }
+               hist_last_fetch: 0.0, hist_retry_at: 0.0, week_at: 0.0, week_tried_at: 0.0, week_in_flight: false, ws: false, ws_retry_at: 0.0, hub_seq: None, holes: vec![], liq: vec![], liq_gen: 0, liq_tail_gen: 0, liq_at: 0.0, liq_tail_at: 0.0, week_liq: vec![], dirty: false, out: vec![], s1: Default::default(), s1_only: false, mc: None, mc_at: 0.0, mc_only: false, acct: None, acct_at: 0.0, prices: Default::default(), prices_seq: None, acct_only: false }
     }
     fn get(&mut self, kind: Kind, path: String) { let url = format!("{}{}", self.urls.api, path); self.out.push(Req::Get { kind, url }); }
 
@@ -130,6 +137,10 @@ impl Feed {
             return;
         }
         self.ensure_ws(now, hidden);
+        if self.acct_only { // 2991 refreshBinanceAccount(tick 에서 · 10초 게이트) -- 가격은 허브가 민다
+            if !hidden && now - self.acct_at >= ACCT_POLL_MS { self.acct_at = now; self.get(Kind::Acct, "/api/binance-account".into()); }
+            return;
+        }
         if hidden || self.s1_only { return; }
         if self.source == Source::Poll { self.refresh_footprint(now); }
         self.maybe_week(now, want_week);
@@ -152,6 +163,11 @@ impl Feed {
     /// 6267 실패(접착은 HTTP 오류도 null 로 준다) = {available: false, error: "fetch_failed"}(asset 없음 → 화면은 «불러오는 중…» -- 지금 화면도 같다)
     pub fn on_mc(&mut self, body: Option<&str>) {
         self.mc = Some(body.and_then(|b| serde_json::from_str(b).ok()).unwrap_or_else(|| serde_json::json!({"available": false, "error": "fetch_failed"})));
+        self.dirty = true;
+    }
+    /// 2972 실패·ok 아님 = null(숨김)
+    pub fn on_acct(&mut self, body: Option<&str>) {
+        self.acct = body.and_then(|b| serde_json::from_str::<serde_json::Value>(b).ok()).filter(|v| v["ok"] == true);
         self.dirty = true;
     }
     /// 신호 응답(내용은 이 카드가 안 쓴다 -- 성공했을 때만 이력 전량을 묻는다)
@@ -318,9 +334,10 @@ impl Feed {
         self.ws = true;
         let sym = self.symbol.to_lowercase();
         if self.source == Source::Push {
-            self.hub_seq = None;
+            (self.hub_seq, self.prices_seq) = (None, None);
             self.out.push(Req::WsOpen(self.urls.hub.clone()));
-            self.out.push(Req::WsSend(serde_json::json!({ "subscribe": [sym] }).to_string()));
+            let subs: Vec<&str> = if self.acct_only { vec![] } else { vec![&sym] }; // 계좌 칩은 «모든 종목» 가격만(구독과 상관없이 온다)
+            self.out.push(Req::WsSend(serde_json::json!({ "subscribe": subs }).to_string()));
         } else {
             self.out.push(Req::WsOpen(self.urls.trade_ws.replace("{sym}", &sym)));
         }
@@ -342,6 +359,22 @@ impl Feed {
     fn on_hub(&mut self, text: &str, now: f64) {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else { return };
         let (seq, ty) = (v["seq"].as_u64(), v["type"].as_str().unwrap_or(""));
+        // «모든 종목»(s = "*" · Prices)은 번호가 따로다(hub.rs: 붙을 때 지금 번호로 한 벌 · 그 뒤 +1씩) -- 심볼 번호와 섞으면 빈 번호로 보고 끊는다
+        if v["s"] == "*" {
+            match (self.prices_seq, seq) {
+                (None, Some(s)) => self.prices_seq = Some(s),
+                (Some(p), Some(s)) if s == p + 1 => self.prices_seq = Some(s),
+                (Some(p), Some(s)) if s <= p => return,
+                _ => { self.out.push(Req::WsClose); self.ws = false; self.ws_retry_at = 0.0; self.prices_seq = None; return; }
+            }
+            if ty == "prices" { // 4916 RT_SYM_ASSET(ASSET_CONFIG 심볼만)
+                for r in v["rows"].as_array().into_iter().flatten() {
+                    let (Some(s), Some(px)) = (r[0].as_str(), r[1].as_f64()) else { continue };
+                    if let Some(a) = s.strip_suffix("usdt").filter(|a| crate::asset_cfg(a).is_some()).filter(|_| px > 0.0) { self.prices.insert(a.into(), px); self.dirty = true; }
+                }
+            }
+            return;
+        }
         if ty == "snapshot" {
             self.hub_seq = seq;
         } else {

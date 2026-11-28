@@ -154,7 +154,7 @@ def merge(out: list) -> list:
 
 RASTER_L1 = 0.02
 RECONNECT_MS = 3000   # .bt 연결 끊김 빈틈(재접속 전 3초 쉼 · 두 구현 같음)
-SKIP_MS, SKIP_RUN = 1000, 3   # .bt 연결마다 다른 표본: 앞뒤 공통 행 간격 상한 · 그 사이 한쪽 행 수 상한(compare_bt)
+SKIP_RUN = 3   # .bt 연결마다 다른 표본: 공통 행 사이 한쪽만의 행 수 상한(다른 쪽도 그 칸에 제 행이 없을 때 · compare_bt)
 EXT = 30    # 빈틈 뒤 종목마다 다시 붙는 늦음은 30초까지만(실측 bybit BTC mark ~10초) -- 드문 표가 빈틈 뒤를 통째로 빼지 않게
 CAP = 300   # ponytail: 재기동 빈틈은 T 앞뒤 300초 안에서 찾는다(드문 종목 하나 때문에 몇 시간을 빼지 않게) -- 재기동이 더 길면 늘린다
 
@@ -566,41 +566,74 @@ def compare_bt(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", starts=(
     hs_ms = [(x * 1000, y * 1000) for x, y in hs]
     rsil, psil = silences(tb, ta, RECONNECT_MS, hs_ms), silences(ta, tb, RECONNECT_MS, hs_ms)
     down = merge(hs_ms + rsil[:reconnects] + psil)
+    d0 = [x for x, _ in down]
+    sa_, sb_ = set(ta), set(tb)
     res, n_down = [], 0
-    for h in sorted(a.keys() & b.keys()):
-        def keep(rows):
-            nonlocal n_down
-            out = Counter()
-            for r in rows:
-                t = struct.unpack_from("<q", r)[0]
-                if any(x <= t < y for x, y in down):
-                    n_down += 1
-                else:
-                    out[r] += 1
-            return out
-        fa, fb = keep(a[h]), keep(b[h])
+    gone: tuple = ({}, {})   # 뺀 구간에서 빠진 행 {값 24B: [ms]} -- 쪽마다(③)
+
+    def keep(rows, side):
+        nonlocal n_down
+        out = Counter()
+        for r in rows:
+            t = struct.unpack_from("<q", r)[0]
+            i = bisect.bisect_right(d0, t) - 1   # down = 겹치지 않게 합친 구간
+            if i >= 0 and t < down[i][1]:
+                n_down += 1
+                gone[side].setdefault(r[8:], []).append(t)
+            else:
+                out[r] += 1
+        return out
+    kept = {h: (keep(a[h], 0), keep(b[h], 1)) for h in sorted(a.keys() & b.keys())}
+    # 연결마다 다른 표본(11-28): HL bbo 는 연결마다 갱신 일부를 묶어 보내고 같은 상태에 다른 ms 를 찍는다 -- 앞뒤 공통 행은 같아 다음 상태는 둘 다 같다.
+    #   공통 행(sh) 사이 칸마다 «다른 쪽에 그 ms 가 없는» 행을 값(ms 뺀 24B)으로 모아:
+    #   ① 같은 칸에 다른 쪽도 같은 값이 있으면 설명(같은 호가 상태 · 찍힌 ms 만 다름 -- 11-28 서버 XRP 남은 2,918행 중 2,676)
+    #   ② 나머지는 칸 폭 RECONNECT_MS 안이고 (SKIP_RUN 개 이하 또는 다른 쪽도 그 칸에 제 행이 있음 = 둘 다 다른 부분집합) 이면 설명
+    #      -- 그 시에 두 쪽 «한쪽에만» 수가 비슷할 때만(작은 쪽 ≥ 큰 쪽 절반 -- 한쪽만 빠지면 구현 결함이라 설명 안 함). 칸 폭 상한 = 끊김 문턱(그보다 긴 한쪽 빈틈은 끊김 몫).
+    #   ③ 다른 쪽의 같은 값 행이 뺀 구간(끊김·재기동)에 들어 빠졌고 RECONNECT_MS 안이면 설명(조용한 코인은 같은 상태를 3초+ 띄워 찍어 서로의 빈틈이
+    #      끊김으로 잡힌다 -- 한 짝만 빠지고 남은 짝이 고아가 됐다 · 11-28 XRP 남은 81 중 50).
+    #   공통 행은 시를 넘어 이어 본다(시 첫·끝 칸이 빠지지 않게). 같은 ms 다른 값은 ①②③ 어디에도 안 든다(설명 못 함).
+    sh = sorted(struct.unpack_from("<q", r)[0] for fa, fb in kept.values() for r in (fa & fb).elements())
+
+    def segs(d, other, g):
+        out: dict = {}
+        n_g = 0
+        for r in d.elements():
+            t = struct.unpack_from("<q", r)[0]
+            if t in other:
+                continue
+            if any(abs(t - u) <= RECONNECT_MS for u in g.get(r[8:], ())):
+                n_g += 1
+                continue
+            i = bisect.bisect(sh, t)
+            if 0 < i < len(sh):
+                out.setdefault(i, Counter())[r[8:]] += 1
+        return out, n_g
+
+    def explained(mine, theirs):
+        twin = samp = 0
+        for i, v in mine.items():
+            o = theirs.get(i)
+            tw = sum((v & o).values()) if o else 0
+            rest = sum(v.values()) - tw
+            twin += tw
+            if rest and sh[i] - sh[i - 1] <= RECONNECT_MS and (rest <= SKIP_RUN or o):
+                samp += rest
+        return twin, samp
+    for h, (fa, fb) in kept.items():
         same, op, orr = sum((fa & fb).values()), sum((fa - fb).values()), sum((fb - fa).values())
-        # 연결마다 다른 표본(11-28): HL bbo 는 연결마다 갱신 일부를 묶어 보낸다(같은 ms 행이 다른 쪽에 아예 없고 앞뒤 공통 행은 같다) -- 다음 상태는 둘 다 같아 값 정보는 잃지 않는다.
-        #   설명 = 다른 쪽에 그 ms 가 없고 · 앞뒤 공통 행 사이 SKIP_MS 안 · 그 사이 이쪽 한쪽 행 SKIP_RUN 개 이하 · 그 시에 두 쪽 수가 비슷(작은 쪽 ≥ 큰 쪽 절반 -- 한쪽만 빠지면 구현 결함이라 설명 안 함)
-        sh = sorted(struct.unpack_from("<q", r)[0] for r in (fa & fb).elements())
-        def sampled(d, other):
-            seg = Counter()
-            for r in d.elements():
-                t = struct.unpack_from("<q", r)[0]
-                i = bisect.bisect(sh, t)
-                if t not in other and 0 < i < len(sh) and sh[i] - sh[i - 1] <= SKIP_MS:
-                    seg[i] += 1
-            return sum(c for c in seg.values() if c <= SKIP_RUN)
-        sp_, sr_ = sampled(fa - fb, set(tb)), sampled(fb - fa, set(ta))
-        if min(sp_, sr_) < 0.5 * max(sp_, sr_):
+        (gp, gop), (gr, gor) = segs(fa - fb, sb_, gone[1]), segs(fb - fa, sa_, gone[0])
+        (twp, sp_), (twr, sr_) = explained(gp, gr), explained(gr, gp)
+        twp, twr = twp + gop, twr + gor
+        if min(op, orr) < 0.5 * max(op, orr):   # 대칭은 그 시 한쪽에만 행 전체로(①을 뺀 ② 는 수십 행이라 그것끼리 견주면 우연히 깨진다 -- 11-28 XRP 24T15 ② 23 대 51)
             sp_ = sr_ = 0
         TALLY[0] += same
-        TALLY[1] += op + orr - sp_ - sr_
-        res.append(f"bt {h}: 같은 행 {same:,} · 파이썬에만 {op:,} · Rust에만 {orr:,}" + (f" · 연결마다 다른 표본(설명) 파이썬 {sp_:,}·Rust {sr_:,}" if sp_ else ""))
-        for who, d, other in (("파이썬에만", fa - fb, tb), ("Rust에만", fb - fa, ta)):   # 진단: 남은 행 앞 2개 · 다른 쪽에 같은 ms 행이 있나(있으면 같은 시각 다른 값)
+        TALLY[1] += op + orr - twp - twr - sp_ - sr_
+        res.append(f"bt {h}: 같은 행 {same:,} · 파이썬에만 {op:,} · Rust에만 {orr:,}" + (f" · 같은 값 다른 ms(설명) {twp:,}" if twp else "")
+                   + (f" · 연결마다 다른 표본(설명) 파이썬 {sp_:,}·Rust {sr_:,}" if sp_ else ""))
+        for who, d, other in (("파이썬에만", fa - fb, sb_), ("Rust에만", fb - fa, sa_)):   # 진단: 남은 행 앞 2개 · 다른 쪽에 같은 ms 행이 있나(있으면 같은 시각 다른 값)
             for r in sorted(d)[:2]:
                 v = struct.unpack("<qdfdf", r)
-                res.append(f"    {who} {v} · 다른 쪽 같은 ms 행 {'있음' if v[0] in set(other) else '없음'}")
+                res.append(f"    {who} {v} · 다른 쪽 같은 ms 행 {'있음' if v[0] in other else '없음'}")
     res.append(f"bt: 연결 끊김(다른 쪽만 {RECONNECT_MS / 1000:.0f}초 넘게 받음) Rust {len(rsil)}번(로그 «끊김» {reconnects}줄 → {min(len(rsil), reconnects)} 설명) · 파이썬 {len(psil)}번"
                f"{down_note([(x / 1000, y / 1000) for x, y in merge(hs_ms + rsil[:reconnects] + psil)], n_down)}")
     return res if len(res) > 1 else ["bt: 두 쪽에 같은 시 파일이 없다"]
@@ -834,6 +867,27 @@ def selftest() -> None:
             TALLY[:] = [0, 0]
             kb = compare_bt(Path(d) / p_, Path(d) / r_)
             assert TALLY[1] == want, (p_, r_, TALLY, kb)   # k3·k1 = 한쪽만 빠짐(구현 결함 모양) · k5 = 외톨이 3은 설명, 4개 연달아는 설명 못 함
+        # 조용한 코인(11-28 서버 XRP 2,875): 공통 행 간격이 1초를 넘어도(1.5초 · 외톨이 칸 3초) 두 쪽이 서로 다른 외톨이 = 설명 ·
+        #   같은 값이 연결마다 다른 ms(2초 간격 · 칸 4초 > 끊김 문턱이라 ②는 안 됨) = 설명 · 양성 대조: ms 만이 아니라 값도 다르면 설명 못 함 2
+        def qbt(name, step, drop=(), shift=None, bad=False):
+            (Path(d) / name).mkdir()
+            (Path(d) / name / "2026-11-21T10.bt").write_bytes(b"BTKR" + b"\0" * 28 + b"".join(
+                struct.pack("<qdfdf", 1000 * T + step * i + (700 if i == shift else 0), 100.0, 1.0, 101.0, 2.0 + i + (bad and i == shift)) for i in range(100) if i not in drop))
+        qbt("q1", 1500, {10, 30, 50}); qbt("q2", 1500, {20, 40, 60}); qbt("t0", 2000); qbt("t1", 2000, shift=50); qbt("t2", 2000, shift=50, bad=True)
+        for p_, r_, want in (("q1", "q2", 0), ("t1", "t0", 0), ("t2", "t0", 2)):
+            TALLY[:] = [0, 0]
+            kb = compare_bt(Path(d) / p_, Path(d) / r_)
+            assert TALLY[1] == want, (p_, r_, TALLY, kb)
+        # ③ Rust 끊김(4.8~9.0초 빔 · 로그 1줄)으로 빠진 파이썬 8.8초 행과 같은 값을 Rust 가 9.1초에 찍음 = 설명 · 값이 다르면 설명 못 함 1
+        for name, rows in (("g0", [(200 * i, i) for i in range(100)]), ("g1", [(200 * i, i) for i in range(100) if not 25 <= i <= 44] + [(9100, 44)]),
+                           ("g2", [(200 * i, i) for i in range(100) if not 25 <= i <= 44] + [(9100, 45.5)])):
+            (Path(d) / name).mkdir()
+            (Path(d) / name / "2026-11-21T10.bt").write_bytes(b"BTKR" + b"\0" * 28 + b"".join(
+                struct.pack("<qdfdf", 1000 * T + x, 100.0, 1.0, 101.0, 2.0 + i) for x, i in sorted(rows)))
+        for p_, r_, want in (("g0", "g1", 0), ("g0", "g2", 1)):
+            TALLY[:] = [0, 0]
+            kb = compare_bt(Path(d) / p_, Path(d) / r_, reconnects=1)
+            assert TALLY[1] == want, (p_, r_, TALLY, kb)
         # raster: 머리 n 을 읽는다 · mid ±20칸만 같으면 통과 쪽
         def f32(path, vals):
             n = 60

@@ -314,7 +314,7 @@ fn route(cfg: &Config, req: &Req) -> Resp {
 
 /// 요청 하나 → 연결에 낼 응답(압축·길이까지 정한 것)
 /// 병행 가동 때 막는 쓰기 주소(api2: 메모·오답·푸시 구독 -- 파이썬과 같은 파일을 rename 으로 덮는다)
-pub const READONLY_BLOCK: [&str; 4] = ["/api/acct-notes", "/api/acct-wrong", "/api/push/subscribe", "/api/push/unsubscribe"];
+pub const READONLY_BLOCK: [&str; 5] = ["/api/acct-notes", "/api/acct-wrong", "/api/push/subscribe", "/api/push/unsubscribe", "/api/push/test"];
 
 pub fn handle(cfg: &Config, req: &Req) -> Resp {
     let t0 = (cfg.now)();
