@@ -25,6 +25,7 @@ pub enum Kind { Footprint, History, Week, LiqSig, Liq, LiqTail, Mc, Acct, Srl, L
     /** News 카드 + ⑤ 다음 24시간(news.rs): /api/news · market-context · gex · macro-calendar */ News, NewsMc, NewsGex, NewsCal,
     /** 왼쪽 위 «지표 방향» 판(dirb.rs): /api/situation */ Situation,
     /** 풋프린트 머리 작은 칸(head.rs): /api/state · session-alerts · macro-spikes */ HeadState, HeadAlert, HeadSpk,
+    /** Account 카드(acc.rs): /api/binance-account · /api/cycle-path */ AccAcct, AccPath,
     /** Macro Trend(mt.rs): /api/macro-trend · macro-today · treasury-futures?h=24 · xyz100 · macro-calendar */ MtTrend, MtToday, MtTreas, MtXyz, MtCal, /** Option 카드(opt.rs) */ Gex, Smile }
 
 /// 145 FOOTPRINT_POLL_MS · 148 FOOTPRINT_STALE_BARS · 38 CANDLE_HISTORY_POLL_MS · 1680 CHART_MAX_CANDLES · 4400 FAST_PRICE_MIN_INTERVAL_MS · 2224 FOOTPRINT_RENDER_MIN_INTERVAL_MS · 6638 FP_WEEK_REFRESH_MS
@@ -175,6 +176,7 @@ impl Feed {
         if crate::dirb::on() { crate::dirb::tick(now, hidden, &self.asset, &self.urls.api, &mut self.out); return; }
         if let Some(m) = self.mt.as_mut() { m.tick(now, hidden, &self.urls.api, &mut self.out); return; }
         if crate::news::tick(now, hidden, &self.urls.api, &self.asset, &mut self.out) { return; }
+        if crate::acc::tick(now, hidden, &self.urls.api, &mut self.out) { return; }
         if self.mc_only { // 6259 refreshMarketCtx(1초 · 숨으면 안 묻는다)
             if !hidden && now - self.mc_at >= MARKET_CTX_POLL_MS { self.mc_at = now; let path = format!("/api/market-context?asset={}", self.asset); self.get(Kind::Mc, path); }
             return;

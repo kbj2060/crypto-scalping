@@ -22,6 +22,7 @@ pub mod mc;
 pub mod mt;
 pub mod opt;
 pub mod news;
+pub mod acc;
 pub mod s1;
 pub mod srl;
 pub mod view;
@@ -287,6 +288,7 @@ impl Chart {
         if self.feed.opt.on { self.ui_opt(ui); return None; }
         if dirb::on() { self.ui_dirb(ui, now); return None; } // 왼쪽 위 «지표 방향» 판(?card=dirb · dirb.rs)
         if news::on() { news::ui(self, ui, now); return None; }
+        if acc::on() { acc::ui(self, ui, now); return None; } // Account 카드(?card=acc · acc.rs)
         let t = ui.input(|i| i.time) * 1000.0;
         if self.fill { // 혼자 뜨는 페이지: 창 = 화면 -- 가격 플롯 왼쪽 열(w)이 화면 폭을 채우는 viewBox 폭(8429-8430 을 거꾸로)
             let r = ui.ctx().content_rect();
