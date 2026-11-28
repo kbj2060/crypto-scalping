@@ -17,6 +17,7 @@ pub mod marks;
 pub mod profile;
 pub mod rem;
 pub mod mc;
+pub mod mt;
 pub mod s1;
 pub mod srl;
 pub mod view;
@@ -125,6 +126,28 @@ impl Chart {
         draw::paint(pa, &v, self.origin, all, all, 1.0);
     }
     /// «청산» 탭 «남은 매물 일봉별» 한 장(feed.rem_only) -- 위 = 지표 줄(.lq-rib) · 가운데 = svg 상자 cfg.w_all×h_all(fill 이면 창 − 지표 − 범례) · 아래 = 범례 · 간격 5(.lq-b gap)
+    /// Macro Trend 카드(feed.mt) -- 본문 = cfg.w_all×h_all(fill 이면 창 · 1920 화면 #mtBody 1838×917) · 머리 요약(head) = 오른쪽 붙임 · 줄을 누르면 그 지표
+    /// 본문은 원본처럼 응답이 올 때 지은 시각(Store::drawn)으로 · 머리 요약은 다음 발표까지 남은 시간이 흐르니 1초마다
+    pub fn ui_mt(&mut self, ui: &mut egui::Ui, now: f64) {
+        if self.fill { let r = ui.ctx().content_rect(); (self.cfg.w_all, self.cfg.h_all) = ((r.width() - 2.0 * self.origin.x) as f64, (r.height() - 2.0 * self.origin.y) as f64); }
+        let (w, h, o, tz) = (self.cfg.w_all, self.cfg.h_all, self.origin, self.cfg.tz_off_min);
+        let p = ui.painter();
+        if self.bg.a() > 0 { p.rect_filled(p.clip_rect(), 0.0, self.bg); }
+        let measure = |s: &str, z: f64, wt: u16, mono: bool| if mono { p.layout_no_wrap(s.to_owned(), draw::mono(z as f32, wt), Color32::WHITE).size().x as f64 } else { draw::measure(p, s, z, wt) };
+        let click = ui.input(|i| if i.pointer.primary_clicked() { i.pointer.interact_pos() } else { None });
+        let Some(m) = self.feed.mt.as_mut() else { return };
+        if m.head {
+            let (v, hw, hh) = mt::head(&m.input(now, tz), &measure);
+            let all = [0.0, 0.0, hw, hh];
+            draw::paint(p, &mt::prims(&v, &measure), o + vec2((w - hw) as f32, 0.0), all, all, 1.0);
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
+            return;
+        }
+        if let Some(c) = click { if m.click((c.x - o.x) as f64, (c.y - o.y) as f64, now) { ui.ctx().request_repaint(); } }
+        let out = mt::body(&m.input(if m.drawn > 0.0 { m.drawn } else { now }, tz), w, h, &measure);
+        (m.sel, m.rows, m.left) = (out.sel, out.rows, out.left);
+        draw::paint(p, &mt::prims(&out.items, &measure), o, out.det, out.det, 1.0);
+    }
     pub fn ui_rem(&mut self, ui: &mut egui::Ui, now: f64) {
         let f = &self.feed;
         let tab = f.liq_tab.as_ref();
@@ -239,6 +262,7 @@ impl Chart {
         if self.feed.liq_only { self.ui_liq(ui); return None; }
         if self.feed.liqx.is_some() { self.ui_liqx(ui, now); return None; }
         if self.feed.rem_only { self.ui_rem(ui, now); return None; }
+        if self.feed.mt.is_some() { self.ui_mt(ui, now); return None; }
         let t = ui.input(|i| i.time) * 1000.0;
         if self.fill { // 혼자 뜨는 페이지: 창 = 화면 -- 가격 플롯 왼쪽 열(w)이 화면 폭을 채우는 viewBox 폭(8429-8430 을 거꾸로)
             let r = ui.ctx().content_rect();
