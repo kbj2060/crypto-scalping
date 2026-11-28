@@ -55,13 +55,13 @@ fn or0(v: &Value) -> String { if truthy(v) { js(v) } else { "0".into() } }
 
 // ── 시각 ──
 /// 브라우저 지역 시각 hh:mm(tz = getTimezoneOffset 분)
-fn hm(t: f64, tz: i64) -> String { let m = ((t * 1000.0).floor() as i64 - tz * 60_000).div_euclid(60_000); format!("{:02}:{:02}", m.div_euclid(60).rem_euclid(24), m.rem_euclid(60)) }
+pub(crate) fn hm(t: f64, tz: i64) -> String { let m = ((t * 1000.0).floor() as i64 - tz * 60_000).div_euclid(60_000); format!("{:02}:{:02}", m.div_euclid(60).rem_euclid(24), m.rem_euclid(60)) }
 fn days_civil(y: i64, m: i64, d: i64) -> i64 { let y = if m <= 2 { y - 1 } else { y }; let era = y.div_euclid(400); let yoe = y - era * 400; let doy = (153 * ((m + 9) % 12) + 2) / 5 + d - 1; era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468 }
 fn year_of(days: i64) -> i64 { let mut y = 1970 + days.div_euclid(366); while days_civil(y + 1, 1, 1) <= days { y += 1; } y }
 /// 0 = 일요일
 fn weekday(days: i64) -> i64 { (days + 4).rem_euclid(7) }
 /// 미국 일광 절약 시간(3월 둘째 일요일 02:00 지역 표준 ~ 11월 첫 일요일 02:00 지역 일광) -- std = 표준시 UTC 차(시)
-fn us_local(t: f64, std: i64) -> (i64, i64) {
+pub(crate) fn us_local(t: f64, std: i64) -> (i64, i64) {
     let s = t.floor() as i64;
     let y = year_of((s + std * 3600).div_euclid(86400));
     let sun = |m: i64, k: i64| { let d1 = days_civil(y, m, 1); d1 + (7 - weekday(d1)) % 7 + 7 * (k - 1) };
@@ -75,7 +75,7 @@ fn cme_open(t: f64) -> bool { let (w, m) = us_local(t, -6); let h = m / 60; matc
 /// 3449 vixOpen(뉴욕 평일 03:15~16:15)
 fn vix_open(t: f64) -> bool { let (w, m) = us_local(t, -5); w != 0 && w != 6 && (195..975).contains(&m) }
 /// Date.parse(ISO) / 1000 -- 영역 없으면 지역 시각(JS 와 같다)
-fn parse_iso(s: &str, tz: i64) -> f64 {
+pub(crate) fn parse_iso(s: &str, tz: i64) -> f64 {
     let b = s.as_bytes();
     let n = |a: usize, l: usize| s.get(a..a + l).and_then(|x| x.parse::<i64>().ok());
     let (Some(y), Some(mo), Some(d)) = (n(0, 4), n(5, 2), n(8, 2)) else { return f64::NAN };
@@ -199,8 +199,8 @@ pub enum El {
 }
 
 /// 글꼴 세로: Pretendard 1950/−494(2048) · JetBrains Mono 1020/−300(1000) -- 크로미움은 둘 다 반올림해 더한다(줄 높이 normal = 합)
-fn asc(z: f64, mono: bool) -> f64 { (z * if mono { 1.02 } else { 1950.0 / 2048.0 }).round() }
-fn cont(z: f64, mono: bool) -> f64 { asc(z, mono) + (z * if mono { 0.3 } else { 494.0 / 2048.0 }).round() }
+pub(crate) fn asc(z: f64, mono: bool) -> f64 { (z * if mono { 1.02 } else { 1950.0 / 2048.0 }).round() }
+pub(crate) fn cont(z: f64, mono: bool) -> f64 { asc(z, mono) + (z * if mono { 0.3 } else { 494.0 / 2048.0 }).round() }
 /// 줄 상자 위 → 글 상자 위(반 행간은 내림)
 fn gt(line_top: f64, lh: f64, z: f64, mono: bool) -> f64 { line_top + ((lh - cont(z, mono)) / 2.0).floor() }
 
@@ -267,7 +267,7 @@ fn qbtn(cx: &mut Cx, x: f64, y: f64, s: &str, t: St, lh: f64, qlh: f64) -> f64 {
 // ── 줄바꿈 ──
 fn cjk(c: char) -> bool { matches!(c as u32, 0x1100..=0x11FF | 0x3130..=0x318F | 0xAC00..=0xD7A3 | 0x4E00..=0x9FFF | 0x3040..=0x30FF) }
 /// b 앞에서 끊어도 되나(a = 앞 글자)
-fn brk(a: char, b: char) -> bool {
+pub(crate) fn brk(a: char, b: char) -> bool {
     if b == ' ' { return false; }
     if a == ' ' { return true; }
     if ")]}»,.:;!?%·…".contains(b) || "([{«".contains(a) { return false; }
@@ -918,7 +918,7 @@ impl Store {
 }
 
 #[cfg(test)]
-mod t {
+pub(crate) mod t {
     use super::*;
 
     fn fx(name: &str) -> Value { serde_json::from_str(&std::fs::read_to_string(format!("{}/compare/fixture/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap()).unwrap() }
@@ -928,12 +928,12 @@ mod t {
         In { now: f(&s["now"]) * 1000.0, tz: -540, trend: nn(&s["trend"]), events: nn(&s["events"]), xyz, xyz_live: s["xyz"].get("live").filter(|v| !v.is_null()), skew: 0.0,
              intra: nn(&s["intra"]).map(|v| (f(&v["at"]), &v["p"])), treas: nn(&s["treas"]).map(|v| (f(&v["at"]), &v["p"])), sel: s["sel"].as_str() }
     }
-    fn wb(wt: f64, mono: bool) -> u16 { if mono { if wt >= 600.0 { 700 } else { 400 } } else if wt <= 500.0 { 400 } else if wt < 750.0 { 700 } else { 800 } }
-    fn r4(v: &Value) -> [f64; 4] { let a = v.as_array().unwrap(); [f(&a[0]), f(&a[1]), f(&a[2]), f(&a[3])] }
+    pub(crate) fn wb(wt: f64, mono: bool) -> u16 { if mono { if wt >= 600.0 { 700 } else { 400 } } else if wt <= 500.0 { 400 } else if wt < 750.0 { 700 } else { 800 } }
+    pub(crate) fn r4(v: &Value) -> [f64; 4] { let a = v.as_array().unwrap(); [f(&a[0]), f(&a[1]), f(&a[2]), f(&a[3])] }
     /// 색 = 그려지는 값(미리 곱한 8비트)
-    fn col(c: Col, a: f64) -> [f64; 4] { let q = crate::draw::rgba(c, a); [q.r(), q.g(), q.b(), q.a()].map(|v| v as f64) }
-    fn pmc(c: [f64; 4]) -> [f64; 4] { let q = eframe::egui::Color32::from_rgba_unmultiplied(c[0].round() as u8, c[1].round() as u8, c[2].round() as u8, (c[3] * 255.0).round() as u8); [q.r(), q.g(), q.b(), q.a()].map(|v| v as f64) }
-    fn rad(s: &Value, r: [f64; 4]) -> f64 { let s = s.as_str().unwrap_or("0px"); if s.ends_with('%') { r[2].min(r[3]) / 2.0 } else { s.trim_end_matches("px").parse().unwrap_or(0.0) } }
+    pub(crate) fn col(c: Col, a: f64) -> [f64; 4] { let q = crate::draw::rgba(c, a); [q.r(), q.g(), q.b(), q.a()].map(|v| v as f64) }
+    pub(crate) fn pmc(c: [f64; 4]) -> [f64; 4] { let q = eframe::egui::Color32::from_rgba_unmultiplied(c[0].round() as u8, c[1].round() as u8, c[2].round() as u8, (c[3] * 255.0).round() as u8); [q.r(), q.g(), q.b(), q.a()].map(|v| v as f64) }
+    pub(crate) fn rad(s: &Value, r: [f64; 4]) -> f64 { let s = s.as_str().unwrap_or("0px"); if s.ends_with('%') { r[2].min(r[3]) / 2.0 } else { s.trim_end_matches("px").parse().unwrap_or(0.0) } }
 
     /// 비교 단위: 글(t: x · 위 · 글) · 칠(b) · 고리(o) · svg(s: 상자 · 요소 글로 적은 것)
     #[derive(Debug, Clone)]
@@ -1050,7 +1050,7 @@ mod t {
         (act.iter().zip(&used).filter(|q| !q.1).map(|q| q.0.clone()).collect(), miss, ps)
     }
     /// 글자 폭 = 크로미움이 잰 폭(글 조각 · 자간 뺌) · 따로 잰 빈칸 · 없으면 같은 꼴 글자별 폭 합(줄바꿈 접두)
-    fn lookup(cases: &[&Value], probe: &Value) -> impl Fn(&str, f64, u16, bool) -> f64 {
+    pub(crate) fn lookup(cases: &[&Value], probe: &Value) -> impl Fn(&str, f64, u16, bool) -> f64 {
         let mut whole: Vec<(String, f64, u16, bool, f64)> = vec![];
         let mut chars: Vec<(char, f64, u16, bool, f64)> = vec![];
         for d in cases {
