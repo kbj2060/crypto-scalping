@@ -937,7 +937,7 @@ pub(crate) mod t {
 
     /// 비교 단위: 글(t: x · 위 · 글) · 칠(b) · 고리(o) · svg(s: 상자 · 요소 글로 적은 것)
     #[derive(Debug, Clone)]
-    struct Q { k: char, r: [f64; 4], c: [f64; 4], s: String, z: f64, wt: u16, mono: bool, lw: f64, rad: f64, kk: bool }
+    pub(crate) struct Q { k: char, r: [f64; 4], c: [f64; 4], s: String, z: f64, wt: u16, mono: bool, lw: f64, rad: f64, kk: bool }
     fn q(k: char, r: [f64; 4], c: [f64; 4]) -> Q { Q { k, r, c, s: String::new(), z: 0.0, wt: 0, mono: false, lw: 0.0, rad: 0.0, kk: false } }
     /// 요소 → 비교 글(색 8비트 · 수 1e-6 은 숫자 비교라 따로)
     fn el_key(e: &El) -> (String, Vec<f64>) {
@@ -981,7 +981,7 @@ pub(crate) mod t {
     }
     fn svg_key(els: &[(String, Vec<f64>)], vb: [f64; 2], meet: bool, a: f64) -> String { format!("{vb:?} {meet} {} {}", (a * 100.0).round(), els.iter().map(|e| e.0.clone()).collect::<Vec<_>>().join(" | ")) }
 
-    fn expected(d: &Value) -> (Vec<Q>, Vec<Vec<(String, Vec<f64>)>>) {
+    pub(crate) fn expected(d: &Value) -> (Vec<Q>, Vec<Vec<(String, Vec<f64>)>>) {
         let mut out = vec![];
         let mut svgs = vec![];
         for t in d["texts"].as_array().unwrap() {
@@ -1006,7 +1006,7 @@ pub(crate) mod t {
         }
         (out, svgs)
     }
-    fn actual(items: &[It], m: Measure) -> (Vec<Q>, Vec<Vec<(String, Vec<f64>)>>) {
+    pub(crate) fn actual(items: &[It], m: Measure) -> (Vec<Q>, Vec<Vec<(String, Vec<f64>)>>) {
         let mut out = vec![];
         let mut svgs = vec![];
         for it in items {
@@ -1024,7 +1024,7 @@ pub(crate) mod t {
         }
         (out, svgs)
     }
-    const TOL: f64 = 0.07;
+    pub(crate) const TOL: f64 = 0.07;
     fn same(a: &Q, e: &Q) -> bool {
         let n = |x: f64, y: f64, t: f64| (x - y).abs() <= t;
         let cs = (0..4).all(|k| (a.c[k] - e.c[k]).abs() <= 1.0);
@@ -1036,7 +1036,7 @@ pub(crate) mod t {
         }
     }
     /// 하나씩 짝짓기 → (짝 없는 rtui, 짝 없는 원본, 짝지은 svg 쌍 차례)
-    fn pair(act: &[Q], exp: &[Q]) -> (Vec<Q>, Vec<Q>, Vec<(usize, usize)>) {
+    pub(crate) fn pair(act: &[Q], exp: &[Q]) -> (Vec<Q>, Vec<Q>, Vec<(usize, usize)>) {
         let mut used = vec![false; act.len()];
         let (mut miss, mut ps) = (vec![], vec![]);
         let (mut si, mut sj) = (vec![], vec![]);
@@ -1071,7 +1071,7 @@ pub(crate) mod t {
                 .unwrap_or_else(|| panic!("잰 폭 없음: {s:?} ({c:?}) {z} {wt} {mono}"))).sum())
         }
     }
-    fn show(v: &[Q]) -> String { v.iter().map(|q| format!("{} {:?} {:?} {:?} z{} w{}{} lw{} rad{}{}", q.k, q.s.chars().take(90).collect::<String>(), q.r.map(|x| (x * 1000.0).round() / 1000.0), q.c, q.z, q.wt, if q.mono { " M" } else { "" }, q.lw, q.rad, if q.kk { " K" } else { "" })).collect::<Vec<_>>().join("\n") }
+    pub(crate) fn show(v: &[Q]) -> String { v.iter().map(|q| format!("{} {:?} {:?} {:?} z{} w{}{} lw{} rad{}{}", q.k, q.s.chars().take(90).collect::<String>(), q.r.map(|x| (x * 1000.0).round() / 1000.0), q.c, q.z, q.wt, if q.mono { " M" } else { "" }, q.lw, q.rad, if q.kk { " K" } else { "" })).collect::<Vec<_>>().join("\n") }
 
     /// 한 장 맞대기(본문 · 머리) → (맞춘 단위 수, 맞춘 svg 수 개수)
     fn check(k: usize, s: &Value, d: &Value, sel: &Value, m: Measure) -> (usize, usize) {

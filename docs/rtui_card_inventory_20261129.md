@@ -6,14 +6,14 @@
 | 칸 | 원본 render | 데이터 주소 | 옮김 | 크기 |
 |---|---|---|---|---|
 | 맨 위 코인 탭 | renderSnapshotAssetTabs · renderAssetPop | (상태) | ⛔ 입력(코인 전환) | 450×40 |
-| 맨 위 코인 이름 | renderSnapshotAssetTabs(#fpCoinName) | (상태) | ⬜ | 120×30 |
+| 맨 위 코인 이름 | renderSnapshotAssetTabs(#fpCoinName) | (상태) | ✅ `?card=head` (11-29 · 글만 · 탭 누르기 없음) | 120×30 |
 | 보유 종목 손익 전광판 | renderPnlTicker | /api/binance-account · /rt 가격 | ✅ `?card=acct` | 600×28 |
-| 발표 배지 · 급변 칩 · 세션 | renderMacroEventAlert · macroSpikeChips | /api/macro-spikes · 세션 알림 | ⬜ | 300×24 |
+| 발표 배지 · 급변 칩 · 세션 | renderMacroEventAlert · macroSpikeChips · buildSessionHtml | /api/session-alerts · /api/macro-spikes · 세션 = /api/state(원본 SSE) | ✅ `?card=head` (11-29) | 300×24 |
 | 테마 · 알림 단추 · 알림 센터 | renderNotifyCenter | /api/notify-center · /api/push/* | ⛔ 입력 | 단추 |
 | 카드 머리 보기·봉 단추 | renderChartWindowTabs | (상태) | 🟡 rtui 는 5m·30m·1h 만 | 400×34 |
-| 머리 포지션 요약 | renderFpPos | /api/binance-account | ⬜ | 260×50 |
+| 머리 포지션 요약 | renderFpPos | /api/binance-account · 허브 가격 | ✅ `?card=head` (11-29 · 표시만) | 260×50 |
 | 머리 Macro 요약 | mtHeadHtml(#fpRates) | /api/macro-trend · /api/macro-calendar(다음 발표) | ✅ `?card=mth` | 420×38 |
-| 차트 위 미니맵 | renderChartPan | /api/market-history | ⬜ | 480×34 |
+| 차트 위 미니맵 | renderChartPan | /api/market-history | ➖ 1920 화면엔 없음(넓은 화면 = .inrow → 7591 숨김 · 휴대폰도 숨김) -- 옮길 것 없음 | 480×34 |
 | 선 주문 단추 · 대기 선 · 손절 선 | renderLineTool · renderArmedLines · renderSlCross | /api/manual-entry/* · /api/manual-bracket/* | ⛔ 주문 경로 · 보류 | 단추·선 |
 | 지표 단추·팝업 | renderMarketCtx(#fpLineSwitch) | (상태) | ⛔ 입력 | 단추 |
 | 풋프린트 차트(칸·캔들·델타·POC·축·알약) | renderCandleSvg | /api/footprint · /api/market-history · /api/footprint-week · @trade | ✅ 기본 | 1420×880 |
@@ -45,7 +45,7 @@
 | Account 카드(잔고·곡선·순환·통계·달력) | renderSnapshotAccountCore · renderCycleCard | /api/binance-account · /api/cycle-path | ⬜ | 전폭×창 |
 | Account 메모 · 오답노트 | (acctNote·acctWrong) | /api/acct-notes · /api/acct-wrong | ⛔ 입력 | 탭 안 |
 
-남은 칸: ⬜ 10 · 🟡 3(봉 단추 · Option -- 주식 판·내 선 빼고 · 지표 방향 판 -- 줄 채우기 빼고) · ⛔ 6(주문 경로·입력 · 보류) · ✅ 20줄. ⑤ 예측 줄 완성(11-29 둘째) = `?card=dirs` 가 fcRowHtml 전체(rtui/src/fc.rs).
+남은 칸: ⬜ 6 · ➖ 1(미니맵 -- 1920 에 안 보임) · 🟡 3(봉 단추 · Option -- 주식 판·내 선 빼고 · 지표 방향 판 -- 줄 채우기 빼고) · ⛔ 6(주문 경로·입력 · 보류) · ✅ 23줄. ⑤ 예측 줄 완성(11-29 둘째) = `?card=dirs` 가 fcRowHtml 전체(rtui/src/fc.rs).
 11-29 둘째 정답지: compare/fc_js.mjs(원본 fcRowHtml 을 가짜 전역에서 · 지어낸 입력 8장) → compare/fc_layout.py(원본 styles.css · 헤드리스 크로미움 1920 · 폭 404 에서 글·상자·선 자리와 색을 잼) → `fc::t::js_parity`(645개 전부 하나씩 짝 · 높이 같음). 안 옮김: 칸 툴팁 · «?» 설명 팝업(단추 모양만).
 11-29 둘째 고침: 오른쪽이 글만(«쌓는 중»)인 줄 높이 30 → 27(`srl::height` -- 원본 실측 27).
 첫째(15분·1시간 예측)에 고침: 같은 칸 그리기(srl.rs scene)의 가로 자리 -- 넓은 화면 `#mcBody.mc-cmp .fc-c { gap: 2px }`·`.fc-t > .d4g` 가로 여백 0 을 놓쳐 «레벨 5분» 게이지·막대가 4~10px 어긋나 있었다(헤드리스 크로미움 실측으로 확인 · 시험 `srl::t::layout`).
@@ -58,3 +58,6 @@ Macro Trend(11-29): ⬜ 20 → 18 · ✅ 12줄. `?card=mt` = mt.rs(renderMacroTr
 11-29 넷째 «지표 방향» 판(`?card=dirb` · rtui/src/dirb.rs): 원본 renderDirBoard 는 /api/dir-signals 를 안 쓴다(그건 ⑤ 지평 사다리 몫) -- 판 줄은 차트 그리기가 캔들로 채우고 아래 «지금 읽기»는 /api/situation 의 read(ETH 만 · 180초 넘으면 없음). 옮김 = 판 그리기 전부(머리 · 접기 단추 모양 · 위/아래 막대·개수 · 줄 홀짝 · 넘으면/깨면(마감 대기) · 지금 읽기 ▲▼·네모(80 이상 주황) · 덧말 말줄임(fit) · 설명 줄·켜진 것) + /api/situation 1초 묻기. 실자료 카드는 줄 자리가 비어(rows·cond = 차트 카드 몫) ETH «지금 읽기»만 보인다.
 정답지: compare/dirb_js.mjs(원본 함수 10개를 잘라 fixture/dirb_src.js · 지어낸 입력 9장 = 다 있음/접힘/읽기만·말줄임/읽기 낡음 200초/ETH 아님/아무것도 없음/아래만·작은 네모·낡음 경계 150초/조건만/접힘+읽기) → compare/dirb_layout.py(진짜 svg + 원본 styles.css · 헤드리스 크로미움 · 계산된 fill/stroke · 원본 measureTextW 가 잰 폭 기록) → `dirb::t::js_parity` svg 요소 차례·수·글·색 ±3/255·알파 ±.003·자리 1e-6 · 높이 같음(원본 svg 요소 208개 · 투명 받이·빈 글 빼고 맞댐). 양성 대조 compare/dirb_mut.sh = 원본 변이 JS 12/12 · CSS 3/3 잡음.
 안 옮김: 툴팁(fpTipOn) · 접기 누르기(늘 펼침 · 모양만) · 휴대폰 «지금 읽기» 목록(renderDirReadMob) · 판 자리 예약(fpBoardBox -- 차트 꼬리표 비키기). 상태는 공용 줄을 안 고치려 dirb.rs 스레드 지역(ponytail 주석).
+11-29 다섯째 풋프린트 머리 작은 칸(`?card=head` · rtui/src/head.rs): ⬜ 10 → 6. 한 카드 = 1920×1080 페이지 자리 그대로(상자 0,0 = 페이지 왼쪽 위 · 1920×136 · 카드 레일 보임 · html.fit1) 네 덩이 -- 세션(buildSessionHtml · 맨 위 왼쪽) · 코인 이름(#fpCoinName · 맨 위 가운데) · 발표 배지 + 급변 칩(.session-alert-center · 코인 탭 왼쪽 · 넘친 칩은 둘째 줄로 숨음 · 경보 배지 맥박) · 포지션 요약(#fpPos · 카드 머리 정중앙). 자료 = /api/state 5초(세션 -- 원본은 SSE 밀기) · /api/session-alerts 30초(실패 = 숨김) · /api/macro-spikes 30초 · /api/binance-account 10초 + 허브 «모든 종목» 가격(acct_only 몫 그대로).
+정답지: compare/head_js.mjs(원본 함수 15개를 잘라 가짜 전역에서 · 지어낸 계좌·가격·급변 8장 -- 실제 응답 안 받음) → compare/head_layout.py(진짜 index.html 스크립트만 뺀 것 + 원본 styles.css · 헤드리스 1920 · 원본 renderSnapshotAssetTabs·placeTopLeft 를 그 페이지에서 돌려 제자리에) → `head::t::js_parity` 덩이마다 글·칠 121개 짝(글 x ±0.6 · ±0.07) + 덩이 페이지 자리. 경보 칸 폭 = .snap-head flex 줄임(코인 탭과 «안쪽» 기준 폭 비례로 나눔 -- 탭 안쪽 여백 6 · 실측 393.0 으로 확인). 양성 대조 compare/head_mut.sh = 원본 JS 8 · CSS 6 · Rust 5 = 19/19 잡음.
+안 옮김: 툴팁 · 코인 탭 누르기 · 세션 받기 전 «-» · 좁은 화면 배치 · 휴대폰 «다른 포지션» 칩. ponytail: 경보 칸 폭은 고정 칩 4개(eth·sol·xrp·sndk) 기준 상수 -- 지금 코인이 고정 밖이면(btc 등) 탭이 넓어져 실제 칸이 더 좁다(시험은 잰 재료로 맞춤).
