@@ -79,6 +79,7 @@ env TAPE_SYMBOL=ethusdt TAPE_MARKET=spot PYTHON_BIN=bash setsid nohup bash scrip
 sleep 1
 env RTCOLLECT_BIN="$R/tmp/rtbin/rtcollect" TAPE_SYMBOL=ethusdt,btcusdt setsid nohup bash scripts/ops/supervisor_rtcollect.sh binance_tape > /dev/null 2>&1 < /dev/null &
 sleep 3
+mono() { local u; read -r u _ < /proc/uptime; echo "${u%.*}"; }   # 단조 초(WSL 벽시계는 늦게 간다 · takeover.sh 와 같은 시계)
 envof() { tr '\0' '\n' 2>/dev/null < "/proc/$1/environ" | grep "^$2=" | cut -d= -f2-; }
 pyp() { for p in /proc/[0-9]*; do tr '\0' '\n' 2>/dev/null < "$p/cmdline" | grep -qx "$R/scripts/live_trade_tape_collector_20260916.py" && ! tr '\0' '\n' 2>/dev/null < "$p/cmdline" | grep -q '_supervise.sh$' && [ "$(envof "${p#/proc/}" TAPE_MARKET)" = "$1" ] && echo "${p#/proc/}"; done; }
 rsp() { for p in $(pgrep -x rtcollect); do tr '\0' ' ' < /proc/$p/cmdline | grep -qF "$R/" && [ "$(envof $p RTCOLLECT_TAKEOVER)" = "$1" ] && echo $p; done; }
@@ -138,7 +139,7 @@ echo "== 4. 느리게 죽는 파이썬: 기다림을 넘기면 스스로 되돌�
 env RTCOLLECT_BIN="$R/tmp/rtbin/rtcollect" TAPE_SYMBOL=ethusdt,btcusdt setsid nohup bash scripts/ops/supervisor_rtcollect.sh binance_tape > /dev/null 2>&1 < /dev/null &
 sleep 3; echo 20 > "$R/slow"; : > order.log
 FUT1="$(pyp futures)"
-G0=$SECONDS; OUT="$(TERM_WAIT_S=12 bash rtcollect/tools/takeover.sh go binance_tape 2>&1)"; RC=$?; GW=$((SECONDS - G0)); echo "$OUT" | grep -vE '^  (trade_tape|목록|그림자 감독)'
+G0=$(mono); OUT="$(TERM_WAIT_S=12 bash rtcollect/tools/takeover.sh go binance_tape 2>&1)"; RC=$?; GW=$(( $(mono) - G0 )); echo "$OUT" | grep -vE '^  (trade_tape|목록|그림자 감독)'
 ok "종료코드 8(되돌림)" '[ "$RC" = 8 ]'
 ok "«12초 뒤에도 산다»는 실제로 12초 넘게 기다린 뒤에만(go 전체 ${GW}초)" '[ "$GW" -ge 12 ] && echo "$OUT" | grep -q "SIGTERM 1[2-4]초 뒤에도 산다(기다림 한도 12초"'
 ok "기다리는 동안 «살아 있음 · mtime 전진» 을 찍음" 'echo "$OUT" | grep -q "기다림 10초: .*살아 있음 · 파일 mtime 전진"'
@@ -152,7 +153,7 @@ ok "수집기가 끝난 뒤 지킴이가 감독을 다시 띄움(새 파이썬 p
 ok "그림자는 그대로(④ 전에 멈춤)" '[ -n "$(rsp "")" ]'
 echo "== 4b. 40초 걸려 죽는 파이썬 + 기본 기다림(120초) → 넘김 성공 · 실제 기다린 초를 찍음"
 sleep 3; echo 40 > "$R/slow"; : > order.log
-G0=$SECONDS; OUT="$(TERM_WAIT_S=120 bash rtcollect/tools/takeover.sh go binance_tape 2>&1)"; RC=$?; GW=$((SECONDS - G0))
+G0=$(mono); OUT="$(TERM_WAIT_S=120 bash rtcollect/tools/takeover.sh go binance_tape 2>&1)"; RC=$?; GW=$(( $(mono) - G0 ))
 echo "$OUT" | grep -E "끔:|기다림|go binance"
 ok "go 종료코드 0 · 40초쯤 기다림(go 전체 ${GW}초)" '[ "$RC" = 0 ] && [ "$GW" -ge 40 ] && echo "$OUT" | grep -qE "수집기 pid [0-9]+ \(SIGTERM 뒤 (39|4[0-9])초\)"'
 ok "기다리는 동안 10초마다 «살아 있음»(30초 줄 있음)" 'echo "$OUT" | grep -q "기다림 30초: .*살아 있음"'
@@ -198,7 +199,7 @@ ok "넘긴 래스터 ETHUSDT 가 보이면 통과" '[ "$RC" = 0 ] && echo "$OUT"
 mv crontab.keep crontab.txt
 echo "== 8. 재생 대조 상한: 느린 가짜 파이썬(20초)·상한 4초 → «시간 초과(파이썬 단계)» · 진행 줄이 파일에 바로"
 H="$(date -u -d '1 hour ago' +%Y-%m-%dT%H)"; mkdir -p data/live/orderflow/depthdiff/XRPUSDT; echo '{"_snapshot":null}' > "data/live/orderflow/depthdiff/XRPUSDT/$H.jsonl"
-G0=$SECONDS; OUT="$(REPLAY_LIMIT_S=4 REPLAY_FAKE_PY_SLEEP=20 CHECK_PY=python3 bash rtcollect/tools/takeover.sh check ob5m XRPUSDT 2>&1)"; RC=$?; GW=$((SECONDS - G0))
+G0=$(mono); OUT="$(REPLAY_LIMIT_S=4 REPLAY_FAKE_PY_SLEEP=20 CHECK_PY=python3 bash rtcollect/tools/takeover.sh check ob5m XRPUSDT 2>&1)"; RC=$?; GW=$(( $(mono) - G0 ))
 echo "$OUT" | tail -4
 ok "상한 4초에서 끝남(${GW}초) · 불통과" '[ "$RC" != 0 ] && [ "$GW" -lt 15 ]'
 ok "«시간 초과(파이썬 단계»가 결과 파일에" 'grep -q "시간 초과(파이썬 단계" logs/supervisor/replay_book_ob5m_XRPUSDT.txt'

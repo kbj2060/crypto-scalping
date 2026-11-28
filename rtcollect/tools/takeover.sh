@@ -40,18 +40,21 @@ why_alive() { # 실패 갈래 진단 한 줄(다음에 또 나면 바로 보이�
 [ "${1:-}" = gone-test ] && { gone "${2:-0}" && echo 죽음 || echo 삶; exit 0; }   # 시험용: takeover.sh gone-test <pid>
 # 기다림은 «돈 횟수»가 아니라 벽시계 초(SECONDS)로 잰다 -- 11-22 hl_trades XRP go 에서 «120초 뒤에도 산다»가 9초 만에 나왔다
 #   (횟수 고리 seq×sleep 0.2 가 실제로 얼마나 기다렸는지 남지 않았다 · sleep 이 바로 돌아오는 환경이면 횟수는 시간이 아니다)
+#   🔧11-28: 벽시계(SECONDS)는 WSL 에서 늦게 간다(개발기 실측: 단조 40.6초 동안 벽시계 34.8초) → 40초 걸려 죽는 수집기가 «38초»로 찍혔다 ·
+#   한도도 그만큼 길어진다. 그래서 단조 시계(/proc/uptime 정수 초)로 잰다.
+mono() { local u; read -r u _ < /proc/uptime; echo "${u%.*}"; }
 nap() { sleep "$1" 2>/dev/null || read -rt "$1" _ <> <(:) 2>/dev/null || :; }
 wait_gone() { # wait_gone <pid> <초> [이름] -- 그 초까지 벽시계로 기다린다 · 10초마다 «살아 있음 · mtime» · 끝에 실제로 기다린 초를 WAITED 에
-  local p="$1" lim="$2" t0=$SECONDS nxt=$((SECONDS + 10)) m0 m1
+  local p="$1" lim="$2" t0=$(mono) nxt=$(( $(mono) + 10 )) m0 m1
   m0="$(mt)"
-  while ! gone "$p" && [ $((SECONDS - t0)) -lt "$lim" ]; do
+  while ! gone "$p" && [ $(( $(mono) - t0 )) -lt "$lim" ]; do
     nap 0.2
-    if [ -n "${3:-}" ] && [ $SECONDS -ge $nxt ]; then
-      m1="$(mt)"; echo "  기다림 $((SECONDS - t0))초: $3 pid $p 살아 있음 · 파일 mtime $([ "${m1:-0}" -gt "${m0:-0}" ] && echo 전진 || echo 멈춤)(마지막 묶음 쓰는 중이면 전진)"
+    if [ -n "${3:-}" ] && [ "$(mono)" -ge $nxt ]; then
+      m1="$(mt)"; echo "  기다림 $(( $(mono) - t0 ))초: $3 pid $p 살아 있음 · 파일 mtime $([ "${m1:-0}" -gt "${m0:-0}" ] && echo 전진 || echo 멈춤)(마지막 묶음 쓰는 중이면 전진)"
       m0="$m1"; nxt=$((nxt + 10))
     fi
   done
-  WAITED=$((SECONDS - t0))
+  WAITED=$(( $(mono) - t0 ))
   gone "$p"
 }
 ppid_of() { ps -o ppid= -p "$1" 2>/dev/null | tr -d ' '; }
@@ -262,7 +265,7 @@ check() {
     [ -n "$rs" ] && [ -z "$(for f in ${rs//+/ }; do [ -e "$f" ] || echo x; done)" ] || { echo "  $e: 그림자 출력 없음 -- 그림자를 먼저 띄운다"; rc=1; continue; }
     [ -e "$py" ] || { echo "  $e: 파이썬 출력 없음"; rc=1; continue; }
     case "$mode" in
-      sq)     out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "$py" "$rs" --starts "$ST" --reconnects "$RC" --summary)" ;;
+      sq)     out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "$py" "$rs" --starts "$ST" --reconnects "$RC" ${SYMS:+--syms "$SYMS"} --summary)" ;;
       events) out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" --events "$py" "$rs" --summary)" ;;
       json)   out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" --json 'liq_tab_*.json' "$py" "$rs" --summary)" ;;
       duck)   out="$(nice -n 10 "$PYC" "$TOOLS/shadow_duck.py" "$py" "$rs" --starts "$ST" ${CHECK_FROM:+--from "$CHECK_FROM" --to "$(date +%s)"} --summary)" ;;
@@ -469,7 +472,8 @@ case "$KIND" in   # 종목마다 경로가 갈리는 종류(이 종류들은 수
   raster)  CHK="raster:data/live/orderflow/raster/$SEL:data/live/rtcollect/orderflow/raster/$SEL"; W="data/live/orderflow/raster/$SEL" ;;
   ob5m)    TENV="OB_DB=data/live/ob5m/$SYML.sqlite"; CHK="sq:data/live/ob5m/$SYML.sqlite:data/live/rtcollect/ob5m/$SYML.sqlite"; W="data/live/ob5m/$SYML.sqlite data/live/ob5m/$SYML.sqlite-wal" ;;
   iceberg) c="${SYML%usdt}"; CHK="events:data/live/iceberg/${c}_events.jsonl:data/live/rtcollect/iceberg/${c}_events.jsonl"; W="data/live/iceberg/${c}_state.json" ;;
-  hl_bt)   CHK="bt:data/live/orderflow/hyperliquid_bookticker/$SEL:data/live/rtcollect/orderflow/hyperliquid_bookticker/$SEL sq:data/hot/hl_ctx.sqlite:$(ls data/hot/rtcollect/hl_ctx.sqlite data/hot/rtcollect/hl_ctx_only.sqlite 2>/dev/null | paste -sd+)"
+  hl_bt)   CHK="bt:data/live/orderflow/hyperliquid_bookticker/$SEL:data/live/rtcollect/orderflow/hyperliquid_bookticker/$SEL sq:data/hot/hl_ctx.sqlite:data/hot/rtcollect/hl_ctx.sqlite"
+           SYMS="$SEL"   # 맥락 표는 이 코인만(11-28: 다른 코인 줄은 다른 그림자·다른 재기동이라 이 그림자의 기동 시각으로 못 뺀다 → BTC «파이썬에만» 1,064 -- hl_ctx check 몫)
            W="data/live/orderflow/hyperliquid_bookticker/$SEL" ;;
   hl_positions) n="hl_positions.sqlite"; [ "$SEL" = ETH ] || n="hl_positions_$(echo "$SEL" | tr '[:upper:]' '[:lower:]' | tr , _).sqlite"   # rtduck hl_positions::default_db 와 같은 이름
            TENV="HL_POS_DB=data/hot/$n HL_ROOT=data/live/orderflow/hyperliquid RTDUCK_REST=1"; W="data/hot/$n data/hot/$n-wal"; POSDB="data/hot/$n" ;;
@@ -515,7 +519,7 @@ if [ "$MODE" = rest-shadow ]; then   # market_data: 미시구조 REST 를 켠 �
   for p in $(rs_procs shadow); do stop "$p" "그림자 Rust($RK)" nosave || die "그림자를 못 껐다"; done
   env RTDUCK_BIN="$BIN" TAIL_SYMBOLS=ETHUSDT BOT_SYMBOLS=ETHUSDT,BTCUSDT,SOLUSDT RTDUCK_REST=1 nohup setsid bash scripts/ops/supervisor_rtduck.sh market_data >> logs/supervisor/rtduck_boot.log 2>&1 < /dev/null &
   CHECK_FROM=$(( $(date +%s) + 60 ))   # 칸별 대조는 REST 를 켠 뒤(1분 지나서)부터만
-  t0=$SECONDS; while [ $((SECONDS - t0)) -lt "${REST_SHADOW_S:-600}" ]; do nap 5; done
+  t0=$(mono); while [ $(( $(mono) - t0 )) -lt "${REST_SHADOW_S:-600}" ]; do nap 5; done
   W_A="$(WEIGHT_N=3 weight_max)" && echo "  켠 동안 가중치(1분) [$W_A] 중앙 $(median "$W_A")"
   check; RC=$?
   for p in $(rs_procs shadow); do stop "$p" "REST 켠 그림자 Rust($RK)" nosave; done
@@ -625,7 +629,7 @@ NPY="$(for i in $LN; do printf '%s\n' "$CUR" | sed -n "${i}p"; done | grep -cE "
 echo "  ① crontab 백업 $B ② 주석 $NL줄(파이썬 $NPY · 그림자 $((NL - NPY))) + Rust 줄 $NADD · $NCUR → $((NCUR + NADD))줄"
 manifest take
 if [ "$CRON" = 1 ]; then
-  t0=$SECONDS; while [ -n "$(py_procs any)" ] && [ $((SECONDS - t0)) -lt 300 ]; do nap 1; done
+  t0=$(mono); while [ -n "$(py_procs any)" ] && [ $(( $(mono) - t0 )) -lt 300 ]; do nap 1; done
   [ -z "$(py_procs any)" ] || die "지금 도는 파이썬 $PYRUN 이 5분 뒤에도 안 끝났다 -- 줄은 이미 바뀜(되돌리기: back)"
   echo "go $TAG: 예약 줄 바꿈 -- 다음 «$SCHED» 부터 Rust · 그 시각 뒤 check 한 번 더"; exit 0
 fi
@@ -640,8 +644,8 @@ echo "  ⑤ 띄움: $RENV $ENG $RK"
 env "${ENGU}_BIN=$BIN" $RENV nohup setsid bash "scripts/ops/supervisor_$ENG.sh" "$RK" >> "logs/supervisor/${ENG}_takeover.log" 2>&1 < /dev/null &
 # ⑥ 지켜보기
 T_UP=""
-t0=$SECONDS
-while [ $((SECONDS - t0)) -lt "$WATCH_S" ]; do
+t0=$(mono)
+while [ $(( $(mono) - t0 )) -lt "$WATCH_S" ]; do
   nap 1
   [ -n "$T_UP" ] || { m="$(mt)"; [ -n "$m" ] && [ "$m" -gt "$T_DOWN" ] && T_UP="$m"; }
 done

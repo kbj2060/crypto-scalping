@@ -78,6 +78,7 @@ INTENDED_EXTRA = {
 #   (xyz ctx: 파이썬에만 2,219 · Rust에만 1,024 가 대부분 같은 값의 찍힌 횟수 차였다)
 BAR_W = {"hl_xyz_1m": 60}
 SET_TABLES = {"hl_xyz_ctx_1s", "hl_asset_ctx"}
+SYMS: set = set()   # --syms: 이 종목만 견준다(hl_bt 코인 하나 -- 다른 코인 맥락은 다른 그림자·다른 재기동이라 hl_ctx check 몫)
 SUBSET = False   # --subset: Rust 가 받은 것이 파이썬에 있나만(파이썬이 오래 모은 «파이썬에만»은 세지 않음 -- 뉴스 한 회차)
 SYM_COL = {"treasury_fut_1m": "symbol", "yahoo_5m": "symbol", "items": "source","trade_tape_1s": "symbol", "bybit_liquidations": "symbol", "bybit_oi": "inst", "bybit_mark": "inst", "bybit_funding": "inst",
            "okx_oi": "inst", "okx_mark": "inst", "okx_funding": "inst", "okx_liquidations": "inst_id",
@@ -177,12 +178,13 @@ def proc_holes(con, tabs: list, starts: list, margin: int, py=None, reconnects: 
     if not tabs:
         return [], ""
     t, tcol, ms = max(tabs, key=lambda x: con.execute(f"SELECT count(*) FROM {x[0]}").fetchone()[0])
-    q = f"SELECT DISTINCT {sec_expr(tcol, ms)} FROM {t} ORDER BY 1"
-    ts = [r[0] for r in con.execute(q)]
+    w = f" WHERE {SYM_COL[t]} IN ({','.join('?' * len(SYMS))})" if SYMS and t in SYM_COL else ""
+    q = f"SELECT DISTINCT {sec_expr(tcol, ms)} FROM {t}{w} ORDER BY 1"
+    ts = [r[0] for r in con.execute(q, sorted(SYMS) if w else [])]
     hs = holes(ts, starts, margin) if starts else []
     if py is None:
         return hs, ""
-    pts = [r[0] for r in py.execute(q)]
+    pts = [r[0] for r in py.execute(q, sorted(SYMS) if w else [])]
     d = sorted(b - a for a, b in zip(ts, ts[1:]))
     gap = max(5.0, 10.0 * (d[len(d) // 2] if d else 1.0))
     if t.startswith("hl_"):   # HL 맥락(activeAssetCtx·xyz ctx)은 매 블록 ~1/초로 끊이지 않는다 -- 재접속 전 3초 쉼(두 구현 같음)이 만든 빈틈(초 차 ≥3)을 잡는다(11-22: 10초 문턱이라 «끊김» 134줄이 0번 설명)
@@ -287,6 +289,8 @@ def compare_table(py, rs, t: str, lo: int | None, hi: int | None, margin: int, w
         nonlocal n_down
         sec = r[ti] // 1000 if ms else r[ti]
         sym = r[si] if si is not None else None
+        if SYMS and si is not None and sym not in SYMS:
+            return False
         w = BAR_W.get(t, 1)   # 봉 표: 그 봉 [시작, 시작+폭) 이 뺄 구간에 걸치면 뺀다(끊김이 걸친 1분봉은 받은 체결 수가 갈린다 -- SHADOW.md §5)
         if any(a < sec + w and sec < b for a, b in down.get(sym, proc)):   # Rust 표에 한 번도 없는 종목(OKX 청산 ADBE 등)도 프로세스 빈틈은 뺀다
             n_down += 1
@@ -516,7 +520,7 @@ def compare_raster(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", star
         both = [t for t in sorted(a.keys() & b.keys()) if not any(x <= t // 1000 < y for x, y in down)]
         n_down += len(a.keys() & b.keys()) - len(both)
         same_hdr = sum(a[t][:2] == b[t][:2] for t in both)
-        fr, near, l1 = [], [], []
+        fr, near, l1, l1n = [], [], [], []
         for t in both:
             if a[t][:2] != b[t][:2]:
                 continue
@@ -525,6 +529,8 @@ def compare_raster(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", star
             fr.append(sum(x == y for x, y in zip(qa, qb)) / n)
             near.append(sum(qa[j] == qb[j] for j in range(c - 20, c + 20)) / 40)   # mid 칸 = n/2(raster.rs _row) · ±20칸 = diff 가 늘 갱신하는 곳
             l1.append(sum(abs(x - y) for x, y in zip(qa, qb)) / (sum(abs(x) + abs(y) for x, y in zip(qa, qb)) or 1))
+            na, nb = qa[c - 20:c + 20], qb[c - 20:c + 20]   # 진단(11-28): 먼 칸은 스냅숏 받은 순간 값이 diff 가 닿을 때까지 남는다 -- 얇은 주식 선물(SOXL·SKHYNIX)은 L1 이 먼 칸 몫인지
+            l1n.append(sum(abs(x - y) for x, y in zip(na, nb)) / (sum(abs(x) + abs(y) for x, y in zip(na, nb)) or 1))
         med = lambda v: sorted(v)[len(v) // 2] if v else None   # noqa: E731
         TALLY[0] += len(both)
         # 기준(11-22 확정 제안): 그 시 «잔량 상대차(L1) 중앙» ≤ RASTER_L1 -- 칸 같음 비율은 진단만.
@@ -532,7 +538,7 @@ def compare_raster(py_dir: Path, rs_dir: Path, lo: str = "", hi: str = "~", star
         #   실측(11-21 12시간): L1 중앙 ETH 2e-5~6e-3 · BTC 1e-3~1.7e-2(재기동 시) · SOL 0~2.5e-10. 계산이 틀리면(부호·칸 밀림) L1 이 수십 % 로 뛴다.
         TALLY[1] += int(bool(both) and (med(l1) is None or med(l1) > RASTER_L1))
         res.append(f"raster {h}: 두 쪽 유효 초 {len(both):,} · bin_lo·mid 같음 {same_hdr:,} · 칸 같음 비율 중앙 전체 {med(fr)} · mid ±20칸 {med(near)} · "
-                   f"잔량 상대차(L1) 중앙 {med(l1)} · 파이썬만 유효 {len(a.keys() - b.keys()):,} · Rust만 유효 {len(b.keys() - a.keys()):,}")
+                   f"잔량 상대차(L1) 중앙 {med(l1)}(mid ±20칸 {med(l1n)}) · 파이썬만 유효 {len(a.keys() - b.keys()):,} · Rust만 유효 {len(b.keys() - a.keys()):,}")
     return (res + [f"raster:{down_note(down, n_down)}"] if down else res) or ["raster: 두 쪽에 같은 시 파일이 없다"]
 
 
@@ -916,6 +922,19 @@ def selftest() -> None:
         assert "같은 초(±1)에 다른 쪽도 받음(값만 다름 · 설명) 파이썬에만 3·Rust에만 1" in xl, xl
         # 파이썬에만 12 = 1.5(설명) + T+295~305 의 11(가장자리 295·305 는 Rust 가 ±1초 안에 받음 → 설명 · 296~304 의 9 는 못 받음 → 설명 못 함)
         assert "파이썬에만 12" in xl and TALLY[1] == 9, (TALLY, xl)
+        # --syms(11-28 hl_bt): 다른 그림자가 쓴 코인(파이썬에만 xyz:EUR 5줄)은 빼고 견준다 -- 양성 대조: 안 거르면 5줄이 설명 못 함
+        con = sqlite3.connect(e1)
+        con.executemany("INSERT INTO hl_xyz_ctx_1s VALUES ('xyz:EUR', ?, ?, 1.0, 1.0)", [(T + k, 2.0 + k) for k in range(5)])
+        con.commit()
+        con.close()
+        TALLY[:] = [0, 0]
+        run(e1, e2)
+        assert TALLY[1] == 9 + 5, TALLY
+        SYMS.add("xyz:JPY")
+        TALLY[:] = [0, 0]
+        run(e1, e2)
+        SYMS.clear()
+        assert TALLY[1] == 9, TALLY
         # 첫 기동 전(-inf)은 뺀다: 기동 T+600 하나면 그 앞 Rust 자료가 있어도 첫 기동 = 로그의 가장 이른 것
         assert holes([T + 603], [t0 := T + 600], 5) == [(float("-inf"), t0 + 8)]
         # 재기동: 죽인 때(T+100) 뒤 빈틈을 다시 붙을 때 받은 «최근 체결»(T+148~149)이 T 바로 앞까지 메워도, 가장 큰 빈틈 [T+100, T+148] 을 찾는다
@@ -964,6 +983,7 @@ def main() -> None:
     ap.add_argument("--reconnects", type=int, default=0, help="그림자 Rust 감독 로그의 «끊김» 줄 수(takeover.sh 가 센다) -- 그만큼의 Rust 만 빈 곳을 설명으로")
     ap.add_argument("--summary", action="store_true", help="끝에 «요약: 견준 N · 설명 못 함 M» · M>0 이거나 N=0 이면 종료코드 1(takeover.sh check)")
     ap.add_argument("--subset", action="store_true", help="Rust 에만·다름만 센다(파이썬이 오래 모은 것은 안 셈)")
+    ap.add_argument("--syms", default="", help="쉼표 목록 -- 이 종목만 견준다(hl_bt 코인)")
     ap.add_argument("--jsonl", default="", help="두 경로 = JSONL · 값 = 열쇠 칸(origin · weekend)")
     ap.add_argument("--cboe", action="store_true", help="두 경로 = cboe_option_state.json")
     ap.add_argument("--bt", action="store_true", help="두 경로 = HL .bt 코인 폴더 · --hours 시작,끝")
@@ -977,6 +997,7 @@ def main() -> None:
     st = [int(x) for x in a.starts.split(",") if x.strip()]
     global SUBSET
     SUBSET = a.subset
+    SYMS.update(x for x in a.syms.split(",") if x)
     if a.jsonl:
         out = compare_jsonl(a.py, a.rs, a.jsonl)
     elif a.cboe:
