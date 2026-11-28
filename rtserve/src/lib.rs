@@ -22,9 +22,11 @@ pub mod mc_live;
 pub mod mhist;
 pub mod model;
 pub mod order;
+pub mod posprof;
 pub mod py;
 pub mod raster_read;
 pub mod rest;
+pub mod signals;
 pub mod swr;
 pub mod text;
 
@@ -92,6 +94,8 @@ pub struct Config {
     pub readonly: bool,
     /// 일봉·4시간 풋프린트(fpd.rs) 코인마다 하나 -- 처음 요청 때 만든다(원본 fp_daily 표)
     pub fpd: Arc<std::sync::OnceLock<std::collections::HashMap<String, fpd::Fpd>>>,
+    /// 포지션 프로파일 장부(posprof.rs · 원본 pos_books·pos_seed_fail)
+    pub posprof: Arc<Mutex<posprof::State>>,
 }
 
 impl Config {
@@ -116,6 +120,7 @@ impl Config {
             models_state: Arc::new(model::State::default()),
             readonly: false,
             fpd: Arc::default(),
+            posprof: Arc::default(),
         }
     }
     /// 켜진 흐름 엔진 코인(원본 `flows` 의 열쇠 · FLOW_SPECS 순서)
@@ -275,6 +280,8 @@ fn routes(p: &str) -> Vec<(&'static str, Handler)> {
     v.extend(mc_live::routes(p));
     v.extend(mhist::routes(p));
     v.extend(fpweek::routes(p));
+    v.extend(signals::routes(p));
+    v.extend(posprof::routes(p));
     v
 }
 
