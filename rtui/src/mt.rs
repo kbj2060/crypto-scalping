@@ -784,7 +784,7 @@ pub fn head(i: &In, m: Measure) -> (Vec<It>, f64, f64) {
 }
 
 // ── 그리기 ──
-fn rr_pts(x: f64, y: f64, w: f64, h: f64, r: f64) -> Vec<[f64; 2]> {
+pub(crate) fn rr_pts(x: f64, y: f64, w: f64, h: f64, r: f64) -> Vec<[f64; 2]> {
     let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
     let mut v = vec![];
     for (cx, cy, a0) in [(x + w - r, y + r, -90f64), (x + w - r, y + h - r, 0.0), (x + r, y + h - r, 90.0), (x + r, y + r, 180.0)] {

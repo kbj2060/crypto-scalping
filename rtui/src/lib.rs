@@ -5,6 +5,7 @@
 pub mod acct;
 pub mod data;
 pub mod dirs;
+pub mod dirb;
 pub mod fc;
 pub mod draw;
 pub mod feed;
@@ -281,6 +282,7 @@ impl Chart {
         if self.feed.rem_only { self.ui_rem(ui, now); return None; }
         if self.feed.mt.is_some() { self.ui_mt(ui, now); return None; }
         if self.feed.opt.on { self.ui_opt(ui); return None; }
+        if dirb::on() { self.ui_dirb(ui, now); return None; } // 왼쪽 위 «지표 방향» 판(?card=dirb · dirb.rs)
         let t = ui.input(|i| i.time) * 1000.0;
         if self.fill { // 혼자 뜨는 페이지: 창 = 화면 -- 가격 플롯 왼쪽 열(w)이 화면 폭을 채우는 viewBox 폭(8429-8430 을 거꾸로)
             let r = ui.ctx().content_rect();
