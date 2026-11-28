@@ -25,8 +25,9 @@ fn read(e: &Value, now_s: f64) -> (bool, bool, bool) {
 
 /// 오른쪽 칸(.fz-r): None = 칸 없음 · Note = 글만(.pr-n) · Rec = 막대(맞음 Some(true) 초록·Some(false) 빨강·None 회색, 높이 px) + 적중률(글·색·분모) 또는 None = «쌓는 중»
 pub enum Right { None, Note(String), Rec { bars: Vec<(Option<bool>, f64)>, pct: Option<(String, Option<Col>, String)> } }
-/// ⑤ 예측 줄 한 칸(fcRowHtml 안 cell) -- hz = 이름 · c = 칸 색(--fc) · gauge = 점 자리 %(None = 게이지 없음 · 글자 가운데) · zone = 양끝 띠 폭 % · ago = 빈 점 자리 %
-pub struct Cell { pub hz: String, pub c: Col, pub main: String, pub gauge: Option<f64>, pub zone: f64, pub ago: Option<f64>, pub right: Right }
+/// ⑤ 예측 줄 한 칸(fcRowHtml 안 cell) -- hz = 이름 · c = 칸 색(--fc) · gauge = 점 자리 %(None = 게이지 없음 · 글자 가운데) · zone = 양끝 띠 [왼 띠 폭 %, 오른 띠 시작 %] · ago = 빈 점 자리 %
+/// risk = 띠 색이 위험 레이더(.z.rq 회색 34% · .z.rl 주황 45%) -- 아니면 .z.dn 빨강 · .z.up 초록 45%
+pub struct Cell { pub hz: String, pub c: Col, pub main: String, pub gauge: Option<f64>, pub zone: [f64; 2], pub risk: bool, pub ago: Option<f64>, pub right: Right }
 
 /// JS 숫자 → 글자(정수면 소수점 없이)
 pub(crate) fn js(v: &Value) -> String { match v.as_f64() { Some(x) if x.fract() == 0.0 && x.abs() < 1e15 => format!("{}", x as i64), Some(x) => format!("{x}"), None => "undefined".into() } }
@@ -45,19 +46,20 @@ pub fn cell(r: Option<&Value>, now_s: f64) -> Cell {
                          format!("{}/{}", js(&x["hit"]), js(&x["n"])))) }
         }
     };
-    let Some(r) = r.filter(|_| ok) else { return Cell { hz: HZ_NAME.into(), c: Col::Muted, main: "-".into(), gauge: None, zone: 10.0, ago: None, right } };
+    let Some(r) = r.filter(|_| ok) else { return Cell { hz: HZ_NAME.into(), c: Col::Muted, main: "-".into(), gauge: None, zone: [10.0, 90.0], risk: false, ago: None, right } };
     let warm = r["warm_until"].as_f64().is_some_and(|w| now_s < w);
     let stale = r["stale"].as_bool() == Some(true);
     let cur = if stale || warm { None } else { r["ev"].as_array().into_iter().flatten().rev().map(|e| read(e, now_s)).find(|q| q.2) };
     let Some((cont, up, _)) = cur else {
-        return Cell { hz: HZ_NAME.into(), c: Col::Muted, main: (if stale { "멈춤" } else if warm { "준비 중" } else { "대기" }).into(), gauge: Some(50.0), zone: 10.0, ago: None, right };
+        return Cell { hz: HZ_NAME.into(), c: Col::Muted, main: (if stale { "멈춤" } else if warm { "준비 중" } else { "대기" }).into(), gauge: Some(50.0), zone: [10.0, 90.0], risk: false, ago: None, right };
     };
     let pct = js(&r["pct"][if cont { "top" } else { "bot" }]);
-    Cell { hz: HZ_NAME.into(), c: if up { Col::Good } else { Col::Bad }, main: format!("{} {} {pct}%", if up { "▲" } else { "▼" }, if cont { "이어짐" } else { "되돌림" }), gauge: Some(if up { 95.0 } else { 5.0 }), zone: 10.0, ago: None, right }
+    Cell { hz: HZ_NAME.into(), c: if up { Col::Good } else { Col::Bad }, main: format!("{} {} {pct}%", if up { "▲" } else { "▼" }, if cont { "이어짐" } else { "되돌림" }), gauge: Some(if up { 95.0 } else { 5.0 }), zone: [10.0, 90.0], risk: false, ago: None, right }
 }
 
-/// 칸 높이 -- 게이지 있으면 30(20 + 4 + 6) · 없으면 적중 줄 18 · 오른쪽 칸도 없으면 판정 글자 15 · + 위아래 6
-pub fn height(c: &Cell) -> f64 { if c.gauge.is_some() { 42.0 } else if matches!(c.right, Right::None) { 27.0 } else { 30.0 } }
+/// 칸 높이 -- 게이지 있으면 30(20 + 4 + 6) · 없으면 적중 막대 줄 18 · 막대 없으면(글만 · 칸 없음) 판정 글자 15 · + 위아래 6
+/// (11-29 고침: 글만(«쌓는 중») 줄도 30 으로 잡았다 -- 원본은 27 · fc::t::js_parity 실측)
+pub fn height(c: &Cell) -> f64 { if c.gauge.is_some() { 42.0 } else if matches!(c.right, Right::Rec { .. }) { 30.0 } else { 27.0 } }
 
 /// JS 참·거짓(0·NaN·null·빈 글 = 거짓)
 pub(crate) fn truthy(v: &Value) -> bool {
@@ -76,8 +78,9 @@ pub fn scene(c: &Cell, w: f64, measure: &dyn Fn(&str, f64, u16) -> f64) -> Vec<P
     let mut v = vec![t(4.0, base(11.0), c.hz.clone(), 11.0, 700, Col::Muted, Anchor::Start)];
     match c.gauge {
         Some(x) => {
-            let (bx, bw, z) = (x2 + 6.0, cw - 12.0, c.zone / 100.0);
-            v.extend([rect(bx, 26.0, bw, 4.0, Col::Muted, 0.18, 2.0), rect(bx, 26.0, bw * z, 4.0, Col::Bad, 0.45, 2.0), rect(bx + bw * (1.0 - z), 26.0, bw * z, 4.0, Col::Good, 0.45, 2.0)]);
+            let (bx, bw, [z0, z1]) = (x2 + 6.0, cw - 12.0, c.zone.map(|z| z / 100.0));
+            let ((cl, al), (cr, ar)) = if c.risk { ((Col::Muted, 0.34), (Col::Amber, 0.45)) } else { ((Col::Bad, 0.45), (Col::Good, 0.45)) };
+            v.extend([rect(bx, 26.0, bw, 4.0, Col::Muted, 0.18, 2.0), rect(bx, 26.0, bw * z0, 4.0, cl, al, 2.0), rect(bx + bw * z1, 26.0, bw * (1.0 - z1), 4.0, cr, ar, 2.0)]);
             if let Some(a) = c.ago { // ponytail: 빈 점 = 꺾은선 24조각 -- 테 그리기가 생기면 그것으로
                 let (ax, r) = (bx + bw * a / 100.0, 3.0);
                 v.push(Prim::Line { pts: (0..=24).map(|i| { let q = i as f64 * std::f64::consts::TAU / 24.0; [ax + r * q.cos(), 28.0 + r * q.sin()] }).collect(), c: Col::Muted, a: 1.0, lw: 1.0, dash: None, clip: Clip::No });
@@ -109,17 +112,6 @@ pub fn scene(c: &Cell, w: f64, measure: &dyn Fn(&str, f64, u16) -> f64) -> Vec<P
         }
     }
     v
-}
-
-/// 줄 여럿(.fc-c + .fc-c = 위 1px 점선 · 자리는 그만큼 내려간다): (줄마다 위 끝 y, 점선 y, 전체 높이)
-pub fn stack(cells: &[Cell]) -> (Vec<f64>, Vec<f64>, f64) {
-    let (mut ys, mut seps, mut y) = (vec![], vec![], 0.0);
-    for (i, c) in cells.iter().enumerate() {
-        if i > 0 { seps.push(y + 0.5); y += 1.0; }
-        ys.push(y);
-        y += height(c);
-    }
-    (ys, seps, y)
 }
 
 #[cfg(test)]
@@ -158,7 +150,7 @@ mod t {
     #[test]
     fn layout() {
         let m = |_: &str, z: f64, wt: u16| if z == 15.0 { 34.77 } else if wt == 800 { 30.0 } else { 24.55 };
-        let c = Cell { hz: "15분 예측".into(), c: Col::Good, main: "▲ 상승".into(), gauge: Some(85.5), zone: 20.0, ago: Some(40.0),
+        let c = Cell { hz: "15분 예측".into(), c: Col::Good, main: "▲ 상승".into(), gauge: Some(85.5), zone: [20.0, 80.0], risk: false, ago: Some(40.0),
                        right: Right::Rec { bars: vec![(Some(true), 16.0), (Some(false), 6.0)], pct: Some(("56".into(), Some(Col::Good), "9/16".into())) } };
         let v = scene(&c, 404.0, &m);
         let near = |a: f64, b: f64| (a - b).abs() < 0.02; // 크로미움 배치 단위 1/64px
@@ -170,13 +162,10 @@ mod t {
         assert!(v.iter().any(|p| matches!(p, Prim::Text { x, s, c: Col::Good, .. } if s == "▲ 상승" && near(*x, 171.65))));
         assert!(v.iter().any(|p| matches!(p, Prim::Rect { x, w, y, h, c: Col::Good, a, .. } if *a == 0.7 && near(*x, 319.45) && *w == 8.0 && *y == 14.0 && *h == 16.0)));
         assert!(v.iter().any(|p| matches!(p, Prim::Text { x, wt: 800, .. } if near(*x, 345.45))));
-        let g = Cell { hz: "1시간 예측".into(), c: Col::Muted, main: "-".into(), gauge: None, zone: 20.0, ago: None, right: Right::None };
-        let (ys, seps, h) = stack(&[c, g]);
-        assert_eq!((ys, seps, h), (vec![0.0, 43.0], vec![42.5], 70.0));
-        let g = Cell { hz: "1시간 예측".into(), c: Col::Muted, main: "-".into(), gauge: None, zone: 20.0, ago: None, right: Right::None };
+        let g = Cell { hz: "1시간 예측".into(), c: Col::Muted, main: "-".into(), gauge: None, zone: [20.0, 80.0], risk: false, ago: None, right: Right::None };
         assert!(matches!(&scene(&g, 404.0, &m)[1], Prim::Text { anchor: Anchor::Middle, x, .. } if near(*x, 68.0 + 78.0)));
         // 넘치면 왼쪽이 잘린다
-        let c = Cell { hz: "레벨 5분".into(), c: Col::Good, main: "x".into(), gauge: None, zone: 10.0, ago: None, right: Right::Rec { bars: vec![(Some(true), 16.0); 40], pct: None } };
+        let c = Cell { hz: "레벨 5분".into(), c: Col::Good, main: "x".into(), gauge: None, zone: [10.0, 90.0], risk: false, ago: None, right: Right::Rec { bars: vec![(Some(true), 16.0); 40], pct: None } };
         let bars: Vec<(f64, f64)> = scene(&c, 404.0, &m).iter().filter_map(|p| if let Prim::Rect { x, w, c: Col::Good, .. } = p { Some((*x, *w)) } else { None }).collect();
         assert!(bars.iter().all(|b| b.0 >= 232.0 - 1e-9) && bars.len() < 40 && bars[0].0 < 232.0 + 4.0, "{bars:?}");
     }

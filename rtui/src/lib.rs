@@ -5,6 +5,7 @@
 pub mod acct;
 pub mod data;
 pub mod dirs;
+pub mod fc;
 pub mod draw;
 pub mod feed;
 pub mod fp;
@@ -92,20 +93,19 @@ impl Chart {
         draw::paint(p, &srl::scene(&c, self.cfg.w_all, &measure), self.origin, all, all, 1.0);
         ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
     }
-    /// ⑤ «15분·1시간 예측» 두 줄(feed.dirs_only · fcRowHtml 차례 -- ETH 는 사이에 «레벨 5분») -- 폭 = cfg.w_all(fill 이면 창) · 15분 지연 판정이 시간에 걸리니 1초마다 다시 그린다
+    /// ⑤ 예측 줄 전체(feed.dirs_only · fc.rs) -- 폭 = cfg.w_all(fill 이면 창) · 15분·90분 지연 판정·레벨 5분 남은 초가 시간에 걸리니 1초마다 다시 그린다
     pub fn ui_dirs(&mut self, ui: &mut egui::Ui, now: f64) {
         if self.fill { self.cfg.w_all = (ui.ctx().content_rect().width() - 2.0 * self.origin.x) as f64; }
         let p = ui.painter();
         if self.bg.a() > 0 { p.rect_filled(p.clip_rect(), 0.0, self.bg); }
         let f = &self.feed;
-        let cs: Vec<_> = ["15m", "1h"].iter().map(|nm| dirs::cell(f.dirs.as_ref(), f.pred.as_ref(), &f.asset, now, nm)).collect();
-        let measure = |s: &str, z: f64, wt: u16| draw::measure(p, s, z, wt);
-        let (ys, seps, h) = srl::stack(&cs);
+        let i = fc::In { asset: &f.asset, now, now_s: f.srl_now(now), price: f.prices.get(&f.asset).copied(), trend: f.fc[0].as_ref(), dir4h: f.fc[1].as_ref(), open_rev: f.fc[2].as_ref(),
+                         dirs: f.dirs.as_ref(), pred: f.pred.as_ref(), rb: f.fc[3].as_ref(), rr: f.fc[4].as_ref(), srl: f.srl.as_ref() };
+        let measure = |s: &str, z: f64, wt: u16, mono: bool| if mono { p.layout_no_wrap(s.to_owned(), draw::mono(z as f32, wt), egui::Color32::WHITE).size().x as f64 } else { draw::measure(p, s, z, wt) };
         let w = self.cfg.w_all;
+        let (groups, h) = fc::section(&i, w, &measure);
         let all = [0.0, 0.0, w, h];
-        let sep: Vec<_> = seps.iter().map(|&y| fp::Prim::Dashed { pts: vec![[0.0, y], [w, y]], c: fp::Col::SoftLine, a: 1.0, lw: 1.0, on: 3.0, off: 3.0, clip: fp::Clip::No }).collect();
-        draw::paint(p, &sep, self.origin, all, all, 1.0);
-        for (c, y) in cs.iter().zip(ys) { draw::paint(p, &srl::scene(c, w, &measure), self.origin + vec2(0.0, y as f32), all, all, 1.0); }
+        for (y, v) in &groups { draw::paint(p, v, self.origin + vec2(0.0, *y as f32), all, all, 1.0); }
         ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
     }
     /// «청산» 탭 청산맵 한 장(feed.liq_only) -- svg 상자 = cfg.w_all×h_all(fill 이면 창 − 범례 줄) · 범례는 그 아래
