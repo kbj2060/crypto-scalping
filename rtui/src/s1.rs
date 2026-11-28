@@ -1,7 +1,7 @@
 //! 1초 수급 카드(지금 화면 «1초 수급» = app.js applySupply1s 4658 · mergedSupplySrc 293 · renderSupply1s 7128, 데스크톱 분기).
 //! 자료 = rtcore 허브 /rt 의 snapshot.supply · supply1s(proto.rs Supply1s) 만. 줄 번호 = dashboard/live/app.js(이 작업 시점).
 //! 안 옮긴 것: 청산 급증 배지(7349 · 시장 맥락 응답이 필요) · 휴대폰(compact) 분기 · 마우스 툴팁(<title>).
-//! 🔴바이낸스 OI 는 허브에 없다(proto.rs 419) -- 지금 화면은 SSE 로 따로 받는다. 이 카드만 띄우면 OI 합은 비고 «OI —» 가 된다(같은 규칙: 293 oiSum 은 두 거래소가 다 있어야).
+//! 바이낸스 OI = 허브 supply 의 `oi`(2026-11-28 · rtcore bnoi.rs · 원본 /api/supply-1s 의 oi 와 같은 칸) -- 293 oiSum 은 두 거래소가 다 있어야.
 use crate::data::{fmt_qty, to_fixed};
 use crate::fp::{Anchor, Clip, Col, Prim};
 use serde_json::Value;

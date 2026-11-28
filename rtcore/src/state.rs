@@ -243,6 +243,14 @@ impl State {
         }
     }
 
+    /// 바이낸스 OI hot 꼬리(bnoi.rs)를 링에 얹고 새 초를 다음 묶음에 싣는다.
+    pub fn bn_oi(&self, s: &str, rows: &[(i64, f64)], now_us: i64) {
+        let Some(cell) = self.syms.get(s) else { return };
+        let mut g = cell.lock().unwrap();
+        let up = g.supply.bn_oi(rows, now_us);
+        Self::queue(&mut g, up, now_us);
+    }
+
     /// 시험용: 청산 링 -- (거래소 시각 ms, 롱 청산, 수량, USD).
     pub fn liq_events(&self, s: &str, venue: Venue) -> Option<Vec<(i64, bool, f64, f64)>> {
         Some(self.syms.get(s)?.lock().unwrap().supply.liq_events(venue))
