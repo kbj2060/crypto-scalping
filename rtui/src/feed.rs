@@ -21,7 +21,7 @@ impl Default for Urls {
 #[derive(Debug, PartialEq, serde::Serialize)]
 pub enum Req { Get { kind: Kind, url: String }, WsOpen(String), WsClose, /** 열린(또는 열리는 중인) 소켓에 보낼 글 -- 허브 구독 */ WsSend(String) }
 #[derive(Debug, PartialEq, Clone, Copy, serde::Serialize)]
-pub enum Kind { Footprint, History, Week, LiqSig, Liq, LiqTail, Mc, Acct, Srl }
+pub enum Kind { Footprint, History, Week, LiqSig, Liq, LiqTail, Mc, Acct, Srl, LiqTab, LiqMap }
 
 /// 145 FOOTPRINT_POLL_MS · 148 FOOTPRINT_STALE_BARS · 38 CANDLE_HISTORY_POLL_MS · 1680 CHART_MAX_CANDLES · 4400 FAST_PRICE_MIN_INTERVAL_MS · 2224 FOOTPRINT_RENDER_MIN_INTERVAL_MS · 6638 FP_WEEK_REFRESH_MS
 const FP_POLL_MS: f64 = 400.0;
@@ -36,6 +36,9 @@ const MARKET_CTX_POLL_MS: f64 = 1000.0; // 6116
 const LIQ_TAIL_MS: f64 = 2000.0;   // 3204 LIQ_5M_TAIL_POLL_MS
 const ACCT_POLL_MS: f64 = 10_000.0; // 1649 BINANCE_ACCOUNT_POLL_MS
 const SR_LEAN_POLL_MS: f64 = 2000.0; // 5810
+const LIQ_TAB_MS: f64 = 600_000.0; // liq_tab.js 9 DATA_POLL_MS
+const LIQ_MAP1_MS: f64 = 30_000.0; // 1672 LIQUIDATION_MAP_POLL_MS
+const LIQ_TIERS_MS: f64 = 60_000.0; // liq_profile.js 13 fetchExt
 const BAR: i64 = 300; // CHART_CANDLE_MIN 5 × 60
 
 /// 4471 footprintLive -- 브라우저가 쌓는 형성 봉 칸. cells: 키 = roundHalfEven(가격/칸 폭) → [매수, 매도, 고래매수, 고래매도, 리테일매수, 리테일매도]
@@ -99,6 +102,14 @@ pub struct Feed {
     srl_at: f64,
     srl_skew: f64,
     pub srl_only: bool,
+    /// «청산» 탭 청산맵(liq.rs): 지도 기간(1·7·30·60·90·180·365) · /api/liq-tab(ok 만) · 지도 응답 · 이 지도에서 가격이 지나간 [저, 고] · 이 카드만
+    pub liq_days: u32,
+    pub liq_tab: Option<serde_json::Value>,
+    pub liq_map: Option<serde_json::Value>,
+    pub liq_sw: Option<[f64; 2]>,
+    liq_tab_at: f64,
+    liq_map_at: f64,
+    pub liq_only: bool,
 }
 
 /// 4477 roundHalfEven(파이썬 round 와 같은 격자)
@@ -132,7 +143,8 @@ impl Feed {
     pub fn new(asset: &str, symbol: &str, source: Source, urls: Urls, week_always: bool) -> Self {
         Self { source, urls, asset: asset.into(), symbol: symbol.into(), week_always, candles: vec![], fp_bars: BTreeMap::new(), fp: None, week: None,
                live: Live::default(), price: 0.0, price_ts_ms: None, shown: 0.0, last_fast: 0.0, last_full: 0.0, fp_last_fetch: 0.0, fp_in_flight: false,
-               hist_last_fetch: 0.0, hist_retry_at: 0.0, week_at: 0.0, week_tried_at: 0.0, week_in_flight: false, ws: false, ws_retry_at: 0.0, hub_seq: None, holes: vec![], liq: vec![], liq_gen: 0, liq_tail_gen: 0, liq_at: 0.0, liq_tail_at: 0.0, week_liq: vec![], dirty: false, out: vec![], s1: Default::default(), s1_only: false, mc: None, mc_at: 0.0, mc_only: false, acct: None, acct_at: 0.0, prices: Default::default(), prices_seq: None, acct_only: false, srl: None, srl_at: 0.0, srl_skew: 0.0, srl_only: false }
+               hist_last_fetch: 0.0, hist_retry_at: 0.0, week_at: 0.0, week_tried_at: 0.0, week_in_flight: false, ws: false, ws_retry_at: 0.0, hub_seq: None, holes: vec![], liq: vec![], liq_gen: 0, liq_tail_gen: 0, liq_at: 0.0, liq_tail_at: 0.0, week_liq: vec![], dirty: false, out: vec![], s1: Default::default(), s1_only: false, mc: None, mc_at: 0.0, mc_only: false, acct: None, acct_at: 0.0, prices: Default::default(), prices_seq: None, acct_only: false, srl: None, srl_at: 0.0, srl_skew: 0.0, srl_only: false,
+               liq_days: 7, liq_tab: None, liq_map: None, liq_sw: None, liq_tab_at: f64::NEG_INFINITY, liq_map_at: f64::NEG_INFINITY, liq_only: false }
     }
     fn get(&mut self, kind: Kind, path: String) { let url = format!("{}{}", self.urls.api, path); self.out.push(Req::Get { kind, url }); }
 
@@ -149,6 +161,18 @@ impl Feed {
         self.ensure_ws(now, hidden);
         if self.acct_only { // 2991 refreshBinanceAccount(tick 에서 · 10초 게이트) -- 가격은 허브가 민다
             if !hidden && now - self.acct_at >= ACCT_POLL_MS { self.acct_at = now; self.get(Kind::Acct, "/api/binance-account".into()); }
+            return;
+        }
+        if self.liq_only { // liq_tab.js tick(5초 · 숨으면 안 한다) fetchData 10분 · 지도 = 1일 app.js refreshLiquidationMap 30초 · 7일+ fetchExt 60초 · 지나간 칸용 5분봉
+            if hidden { return; }
+            if now - self.liq_tab_at >= LIQ_TAB_MS { self.liq_tab_at = now; let path = format!("/api/liq-tab?asset={}", self.asset); self.get(Kind::LiqTab, path); }
+            let gap = if self.liq_days == 1 { LIQ_MAP1_MS } else { LIQ_TIERS_MS };
+            if now - self.liq_map_at >= gap {
+                self.liq_map_at = now;
+                let path = if self.liq_days == 1 { format!("/api/liquidation-map?asset={}", self.asset) } else { format!("/api/liquidation-map/tiers?asset={}&days={}", self.asset, self.liq_days) };
+                self.get(Kind::LiqMap, path);
+            }
+            self.maybe_history(now);
             return;
         }
         if hidden || self.s1_only { return; }
@@ -185,6 +209,22 @@ impl Feed {
         let Some(v) = body.and_then(|b| serde_json::from_str::<serde_json::Value>(b).ok()) else { return };
         if v["ok"] == true { self.srl_skew = v["now"].as_f64().unwrap_or(f64::NAN) - now / 1000.0; }
         self.srl = Some(v);
+        self.dirty = true;
+    }
+    /// liq_tab.js fetchData: ok 면 받고 · ok 아님 = 없음 · 실패·못 읽음 = 옛 값 그대로(접착이 HTTP 오류도 None 으로 줘서 «오류 = null» 갈래는 옛 값 쪽으로 감)
+    pub fn on_liq_tab(&mut self, body: Option<&str>) {
+        let Some(v) = body.and_then(|b| serde_json::from_str::<serde_json::Value>(b).ok()) else { return };
+        self.liq_tab = Some(v).filter(|v| v["ok"] == true);
+        self.dirty = true;
+    }
+    /// 1일(app.js 3275-3283): 실패 = 지도 없음 · 7일+(liq_profile.js 17-19): tier_profile 없는 응답·실패 = 옛 지도. 새 지도 = 지나간 범위를 그 기준가부터 다시(sweep WeakMap)
+    pub fn on_liq_map(&mut self, body: Option<&str>) {
+        let v = body.and_then(|b| serde_json::from_str::<serde_json::Value>(b).ok());
+        if self.liq_days == 1 { self.liq_map = v; } else {
+            let Some(v) = v.filter(|v| v["tier_profile"].is_object()) else { return };
+            self.liq_map = Some(v);
+        }
+        self.liq_sw = None;
         self.dirty = true;
     }
     /// 5827 srLeanNowS(초)
@@ -355,7 +395,7 @@ impl Feed {
         if self.source == Source::Push {
             (self.hub_seq, self.prices_seq) = (None, None);
             self.out.push(Req::WsOpen(self.urls.hub.clone()));
-            let subs: Vec<&str> = if self.acct_only { vec![] } else { vec![&sym] }; // 계좌 칩은 «모든 종목» 가격만(구독과 상관없이 온다)
+            let subs: Vec<&str> = if self.acct_only || self.liq_only { vec![] } else { vec![&sym] }; // 계좌 칩은 «모든 종목» 가격만(구독과 상관없이 온다)
             self.out.push(Req::WsSend(serde_json::json!({ "subscribe": subs }).to_string()));
         } else {
             self.out.push(Req::WsOpen(self.urls.trade_ws.replace("{sym}", &sym)));
