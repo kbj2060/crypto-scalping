@@ -365,7 +365,7 @@ fn api_open_rev(cfg: &Config, _: &Req) -> Resp {
 }
 
 /// 원본 dir_signals._get: urllib · User-Agent Mozilla/5.0 · 30초(바이낸스 현물도 requests 가 아니라 밴 가드 밖)
-fn ext_get(cfg: &Config, url: &str) -> Result<Value, String> {
+pub(crate) fn ext_get(cfg: &Config, url: &str) -> Result<Value, String> {
     rest_on(cfg)?;
     let u = match &cfg.ext {
         Some(b) => ["https://api.exchange.coinbase.com", "https://api.binance.com", "https://api.stlouisfed.org", "https://www.deribit.com"].iter()

@@ -50,6 +50,8 @@ pub struct SitLive {
     pub nets: HashMap<String, rtcore::situation::FlowNets>,
     /// 마지막 /api/situation 본문 · SSE 한 줄 · computed_at
     pub out: Option<(Value, String, f64)>,
+    /// 마지막 situation_tick 의 x(원본 situation_state["ctx"] · 시장 맥락 재료 -- mc_live.rs)
+    pub x: Map<String, Value>,
 }
 
 #[derive(Default)]
@@ -59,6 +61,9 @@ pub struct Live {
     /// 종목(대문자) → (가격, 거래소 ms) -- 원본 /api/events tickers 의 원천(REST ticker/price 대신 허브 Prices)
     pub prices: Mutex<BTreeMap<String, (f64, i64)>>,
     pub connected: Mutex<bool>,
+    /// 시장 맥락 재료(mc_live.rs) · 상황 틱 상태(ETH · 시장 맥락이 미시 링을 읽는다)
+    pub mc: Mutex<crate::mc_live::McLive>,
+    pub run: Mutex<SitRun>,
 }
 
 impl Live {
@@ -78,7 +83,10 @@ impl Live {
     pub fn apply(&self, v: &str) {
         let Ok(m) = serde_json::from_str::<Stamped>(v) else { return };
         match m.ev {
-            Event::Snapshot { supply, footprint, micro, liq5m, situation, book, tick, fp1m, .. } => {
+            Event::Snapshot { supply, footprint, micro, liq5m, situation, book, tick, fp1m, mark, .. } => {
+                if let Some(mk) = mark {
+                    self.mc.lock().unwrap().put_mark(&mk);
+                }
                 {
                     let mut st = self.sit.lock().unwrap();
                     if let Some(v) = situation.and_then(|s| serde_json::to_value(&s).ok()) {
@@ -152,6 +160,7 @@ impl Live {
             Event::Book { bid, bid_qty, ask, ask_qty, .. } => {
                 self.sit.lock().unwrap().book.insert(m.s.clone(), (bid, bid_qty, ask, ask_qty));
             }
+            Event::Mark { .. } => self.mc.lock().unwrap().put_mark(&m),
             Event::Prices { rows } => {
                 let mut p = self.prices.lock().unwrap();
                 for (s, px, ms) in rows {
@@ -337,7 +346,7 @@ pub fn supply_payload(cfg: &Config, live: &Live, symbol: &str, q: &HashMap<Strin
 type V = Value;
 
 /// 코인별 (리테일 상한, 고래 하한) -- scripts/live_trade_tape_collector size_bands(SIZE_BANDS_USD · 없으면 ETH 1만/10만)
-fn band(symbol: &str) -> (f64, f64) {
+pub(crate) fn band(symbol: &str) -> (f64, f64) {
     const B: [(&str, f64, f64); 8] = [("solusdt", 7_500.0, 55_000.0), ("xrpusdt", 3_400.0, 23_000.0), ("btcusdt", 13_000.0, 160_000.0), ("zecusdt", 1_000.0, 6_000.0),
         ("sndkusdt", 1_000.0, 6_700.0), ("soxlusdt", 3_900.0, 36_000.0), ("skhynixusdt", 700.0, 4_300.0), ("muusdt", 700.0, 5_400.0)];
     B.iter().find(|x| x.0 == symbol).map_or((10_000.0, 100_000.0), |x| (x.1, x.2))
@@ -460,7 +469,7 @@ pub fn api_tick_bars(cfg: &Config, live: &Live, req: &Req) -> Resp {
 }
 
 /// dashboard/coin_flow.py FLOW_SPECS 칸 폭(코어가 아직 아무것도 안 보냈을 때만 쓴다)
-fn fp_bucket(sym: &str) -> f64 {
+pub(crate) fn fp_bucket(sym: &str) -> f64 {
     match sym {
         "solusdt" | "soxlusdt" => 0.02,
         "xrpusdt" => 0.0003,
@@ -807,7 +816,7 @@ fn hl_whale_liq_events(cfg: &Config, since_ms: i64, db: &str, coin: &str) -> Vec
 }
 
 /// 원본 HL_LIQ_BY_ASSET(server.py:497)
-fn hl_db(asset: &str) -> Option<String> {
+pub(crate) fn hl_db(asset: &str) -> Option<String> {
     match asset {
         "eth" => Some("data/hot/hl_positions.sqlite".into()),
         "sol" | "xrp" => Some("data/hot/hl_positions_sol_xrp.sqlite".into()),
@@ -998,17 +1007,18 @@ pub fn situation_once(cfg: &Config, run: &mut SitRun) {
                                  micro: &run.micro.payload, imb40_ring: &ring };
     // vol_mult_by = 흐름 코인마다(원본 situation_payload 2738 · situation_by) -- 5분봉 하루(REST)가 없으니 vol_size_mult(빈 봉) 모양
     let vmb: Vec<(String, Value)> = cfg.flows().iter().map(|a| (a.to_string(), crate::ctx::vol_size_mult(&[], a))).collect();
-    let (payload, sse, _x) = crate::ctx_x::situation_tick(core.as_ref(), 0, obi, persist, &streams, &xin, &mut run.fs, &vmb, None);
+    let (payload, sse, x) = crate::ctx_x::situation_tick(core.as_ref(), 0, obi, persist, &streams, &xin, &mut run.fs, &vmb, None);
     let ca = payload["now"]["computed_at"].as_f64().unwrap_or(0.0);
-    cfg.live.sit.lock().unwrap().out = Some((payload, sse, ca));
+    let mut st = cfg.live.sit.lock().unwrap();
+    st.out = Some((payload, sse, ca));
+    st.x = x;
 }
 
 /// 1초마다(원본 micro 틱) -- main 이 띄운다
 pub async fn situation_run(cfg: Arc<Config>) {
-    let run = Arc::new(Mutex::new(SitRun::default()));
     loop {
-        let (c, r) = (cfg.clone(), run.clone());
-        let _ = tokio::task::spawn_blocking(move || situation_once(&c, &mut r.lock().unwrap())).await;
+        let c = cfg.clone();
+        let _ = tokio::task::spawn_blocking(move || situation_once(&c, &mut c.live.run.lock().unwrap())).await;
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
