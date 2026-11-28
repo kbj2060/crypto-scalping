@@ -21,7 +21,7 @@ impl Default for Urls {
 #[derive(Debug, PartialEq, serde::Serialize)]
 pub enum Req { Get { kind: Kind, url: String }, WsOpen(String), WsClose, /** 열린(또는 열리는 중인) 소켓에 보낼 글 -- 허브 구독 */ WsSend(String) }
 #[derive(Debug, PartialEq, Clone, Copy, serde::Serialize)]
-pub enum Kind { Footprint, History, Week, LiqSig, Liq, LiqTail, Mc, Acct, Srl, LiqTab, LiqMap, DirShort, PredRec, /** ⑤ 나머지 칸(fc.rs) -- Feed::fc 차례 */ Trend, Dir4h, OpenRev, Band, Radar }
+pub enum Kind { Footprint, History, Week, LiqSig, Liq, LiqTail, Mc, Acct, Srl, LiqTab, LiqMap, DirShort, PredRec, /** ⑤ 나머지 칸(fc.rs) -- Feed::fc 차례 */ Trend, Dir4h, OpenRev, Band, Radar, LiqAll, LiqBars }
 
 /// 145 FOOTPRINT_POLL_MS · 148 FOOTPRINT_STALE_BARS · 38 CANDLE_HISTORY_POLL_MS · 1680 CHART_MAX_CANDLES · 4400 FAST_PRICE_MIN_INTERVAL_MS · 2224 FOOTPRINT_RENDER_MIN_INTERVAL_MS · 6638 FP_WEEK_REFRESH_MS
 const FP_POLL_MS: f64 = 400.0;
@@ -122,6 +122,8 @@ pub struct Feed {
     pub liq_only: bool,
     /// «남은 매물» 카드만(rem.rs · /api/liq-tab 만 묻는다)
     pub rem_only: bool,
+    /// «청산» 탭 아랫줄 세 칸(liqx.rs) -- Some 이면 이 카드만(rem_only 도 켠다: 허브 «모든 종목» 가격만 · /api/liq-tab 묻기를 같이 쓴다)
+    pub liqx: Option<crate::liqx::State>,
 }
 
 /// 4477 roundHalfEven(파이썬 round 와 같은 격자)
@@ -156,7 +158,7 @@ impl Feed {
         Self { source, urls, asset: asset.into(), symbol: symbol.into(), week_always, candles: vec![], fp_bars: BTreeMap::new(), fp: None, week: None,
                live: Live::default(), price: 0.0, price_ts_ms: None, shown: 0.0, last_fast: 0.0, last_full: 0.0, fp_last_fetch: 0.0, fp_in_flight: false,
                hist_last_fetch: 0.0, hist_retry_at: 0.0, week_at: 0.0, week_tried_at: 0.0, week_in_flight: false, ws: false, ws_retry_at: 0.0, hub_seq: None, holes: vec![], liq: vec![], liq_gen: 0, liq_tail_gen: 0, liq_at: 0.0, liq_tail_at: 0.0, week_liq: vec![], dirty: false, out: vec![], s1: Default::default(), s1_only: false, mc: None, mc_at: 0.0, mc_only: false, acct: None, acct_at: 0.0, prices: Default::default(), prices_seq: None, acct_only: false, srl: None, srl_at: 0.0, srl_skew: 0.0, srl_only: false, dirs: None, pred: None, dirs_at: 0.0, pred_at: 0.0, dirs_only: false, fc: Default::default(), fc_at: [0.0; 5],
-               liq_days: 7, liq_tab: None, liq_map: None, liq_sw: None, liq_tab_at: f64::NEG_INFINITY, liq_map_at: f64::NEG_INFINITY, liq_only: false, rem_only: false }
+               liq_days: 7, liq_tab: None, liq_map: None, liq_sw: None, liq_tab_at: f64::NEG_INFINITY, liq_map_at: f64::NEG_INFINITY, liq_only: false, rem_only: false, liqx: None }
     }
     fn get(&mut self, kind: Kind, path: String) { let url = format!("{}{}", self.urls.api, path); self.out.push(Req::Get { kind, url }); }
 
@@ -192,6 +194,7 @@ impl Feed {
         if self.liq_only || self.rem_only { // liq_tab.js tick(5초 · 숨으면 안 한다) fetchData 10분 · 지도 = 1일 app.js refreshLiquidationMap 30초 · 7일+ fetchExt 60초 · 지나간 칸용 5분봉
             if hidden { return; }
             if now - self.liq_tab_at >= LIQ_TAB_MS { self.liq_tab_at = now; let path = format!("/api/liq-tab?asset={}", self.asset); self.get(Kind::LiqTab, path); }
+            if let Some(x) = self.liqx.as_mut() { let q = x.due(now, &self.asset); for (k, p) in q { self.get(k, p); } self.maybe_history(now); return; }
             if self.rem_only { return; }
             let gap = if self.liq_days == 1 { LIQ_MAP1_MS } else { LIQ_TIERS_MS };
             if now - self.liq_map_at >= gap {
