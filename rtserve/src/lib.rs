@@ -14,10 +14,12 @@ pub mod ctx_micro;
 pub mod ctx_rest;
 pub mod ctx_x;
 pub mod fpd;
+pub mod fpweek;
 pub mod heatmap;
 pub mod hub;
 pub mod liqmap;
 pub mod mc_live;
+pub mod mhist;
 pub mod model;
 pub mod order;
 pub mod py;
@@ -271,6 +273,8 @@ fn routes(p: &str) -> Vec<(&'static str, Handler)> {
     v.extend(rest::routes(p));
     v.extend(liqmap::routes(p));
     v.extend(mc_live::routes(p));
+    v.extend(mhist::routes(p));
+    v.extend(fpweek::routes(p));
     v
 }
 
