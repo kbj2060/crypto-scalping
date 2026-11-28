@@ -139,12 +139,21 @@ hours() { # 그림자 폴더의 시 파일 -- 첫 시(그림자가 중간에 떴
   [ "$(echo "$h" | grep -c .)" -ge 3 ] || return 1
   echo "$(echo "$h" | sed -n 2p),$(echo "$h" | tail -2 | head -1)"
 }
+LOGSYM=""   # 비어 있지 않으면 starts·reconn 은 목록에 그 종목이 든 그림자 로그만(hl_ctx 코인마다 대조)
+logok() { # logok <로그 파일> <접두사> -- 접두사로 시작하고 · LOGSYM 이 있으면 접두사 뒤 «_목록_날짜» 에 그 종목이 든다
+  local b p; b="$(basename "$1" | tr '[:lower:]' '[:upper:]')"; p="$(echo "$2" | tr '[:lower:]' '[:upper:]')"
+  [[ "$b" == "$p"* ]] && { [ -z "$LOGSYM" ] || [[ "_${b#"$p"}" == *"_${LOGSYM}_"* ]]; }
+}
+log_syms() { # 그림자 감독 로그 이름의 종목들(hl_ctx: rtcollect_hl_bt_ETH_<날짜>.log · rtcollect_hl_ctx_BTC_<날짜>.log)
+  local k f; for k in $COVK; do for f in logs/supervisor/${ENG}_${k}_*.log; do [ -f "$f" ] || continue
+    basename "$f" .log | sed -E "s/^${ENG}_${k}_//; s/_[0-9]{8}\$//" | tr '_' '\n'; done; done | tr '[:lower:]' '[:upper:]' | grep . | sort -u
+}
 starts() { # 그림자 감독 로그(logs/supervisor/<ENG>_<종류>_<목록>_<날짜>.log)의 «SUPERVISOR starting» 시각(초, 쉼표) -- 도구가 그 앞뒤 Rust 빈 구간을 뺀다
   local k f pre
   for k in $COVK; do
     pre="${ENG}_${k}_"; [ -z "$SELV" ] || [ "$GROUP" = 1 ] || pre="${ENG}_${k}_${SEL//[,:]/_}_"
     for f in logs/supervisor/${ENG}_${k}_*.log; do [ -f "$f" ] || continue
-      [[ "$(basename "$f" | tr '[:lower:]' '[:upper:]')" == "$(echo "$pre" | tr '[:lower:]' '[:upper:]')"* ]] || continue
+      logok "$f" "$pre" || continue
       grep -h 'SUPERVISOR starting' "$f" | sed -nE 's/^\[([^]]+)\].*/\1/p'
     done
   done | while read -r t; do date -d "$t" +%s 2>/dev/null; done | sort -un | paste -sd,
@@ -154,7 +163,7 @@ reconn() { # 같은 그림자 로그의 «끊김» 줄 수(연결 끊김 -- 재�
   for k in $COVK; do
     pre="${ENG}_${k}_"; [ -z "$SELV" ] || [ "$GROUP" = 1 ] || pre="${ENG}_${k}_${SEL//[,:]/_}_"
     for f in logs/supervisor/${ENG}_${k}_*.log; do [ -f "$f" ] || continue
-      [[ "$(basename "$f" | tr '[:lower:]' '[:upper:]')" == "$(echo "$pre" | tr '[:lower:]' '[:upper:]')"* ]] || continue
+      logok "$f" "$pre" || continue
       n=$((n + $(grep -c '끊김' "$f")))
     done
   done
@@ -265,7 +274,12 @@ check() {
     [ -n "$rs" ] && [ -z "$(for f in ${rs//+/ }; do [ -e "$f" ] || echo x; done)" ] || { echo "  $e: 그림자 출력 없음 -- 그림자를 먼저 띄운다"; rc=1; continue; }
     [ -e "$py" ] || { echo "  $e: 파이썬 출력 없음"; rc=1; continue; }
     case "$mode" in
-      sq)     out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "$py" "$rs" --starts "$ST" --reconnects "$RC" ${SYMS:+--syms "$SYMS"} --summary)" ;;
+      sq)     if [ "$KIND" = hl_ctx ]; then out=""   # 코인마다(11-28): 원본·그림자 다 코인(목록)마다 프로세스 -- 합친 초 목록에서는 한 코인의 재접속 빈틈(~4초)이
+                #   다른 코인 줄에 가려 그 빈틈의 다른 쪽 줄이 «설명 못 함»(서버 596줄 = 거의 전부 «다른 쪽이 4초 빈» 1줄) → 그 코인 로그의 기동·«끊김»으로 코인마다 견준다
+                for c in $(log_syms); do LOGSYM="$c"
+                  out+="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "$py" "$rs" --starts "$(starts)" --reconnects "$(reconn)" --syms "$c" --summary | sed "s/^/[$c] /; s/^\[$c\] 요약/요약/")"$'\n' || rc=1
+                done; LOGSYM=""
+              else out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" "$py" "$rs" --starts "$ST" --reconnects "$RC" ${SYMS:+--syms "$SYMS"} --summary)"; fi ;;
       events) out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" --events "$py" "$rs" --summary)" ;;
       json)   out="$(nice -n 10 "$PYC" "$TOOLS/shadow_tape.py" --json 'liq_tab_*.json' "$py" "$rs" --summary)" ;;
       duck)   out="$(nice -n 10 "$PYC" "$TOOLS/shadow_duck.py" "$py" "$rs" --starts "$ST" ${CHECK_FROM:+--from "$CHECK_FROM" --to "$(date +%s)"} --summary)" ;;

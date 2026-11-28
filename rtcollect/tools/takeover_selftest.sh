@@ -244,4 +244,22 @@ echo "== 11. hl_positions: 넘기기 전 check = 정답지 근거 + 표·칸 모
 python3 -c "import sqlite3; c=sqlite3.connect('data/hot/hl_positions.sqlite'); c.execute('CREATE TABLE hl_cycles(ts_ms INTEGER, n INTEGER)'); c.execute('CREATE TABLE hl_positions(addr TEXT, coin TEXT, szi REAL)'); c.commit()"
 OUT="$(bash rtcollect/tools/takeover.sh check hl_positions 2>&1)"; RC=$?
 ok "통과 · 모양을 적어 둠" '[ "$RC" = 0 ] && grep -q "hl_cycles: ts_ms,n" logs/supervisor/takeover_schema_hl_positions_ETH.txt'
+echo "== 12. hl_ctx: 코인마다 빈틈(한 코인 그림자의 4초 재접속 빈틈이 다른 코인 줄에 가리지 않는다 · 11-28 서버 596줄)"
+python3 - <<'PY'
+import os, sqlite3
+R, T0 = os.environ["R"], 1763683200
+DDL = "CREATE TABLE hl_asset_ctx(coin VARCHAR, recv_ms BIGINT, funding DOUBLE, open_interest DOUBLE, premium DOUBLE, oracle_px DOUBLE, mark_px DOUBLE, mid_px DOUBLE, day_ntl_vlm DOUBLE, day_base_vlm DOUBLE)"
+row = lambda c, s: (c, (T0 + s) * 1000 + 7, 0.0, s * 10.0 + (c == "BTC"), 0.0, 1.0, 1.0, 1.0, 1.0, 1.0)
+for f, coins, gap in (("data/hot/hl_ctx.sqlite", ("ETH", "BTC"), False), ("data/hot/rtcollect/hl_ctx.sqlite", ("ETH",), True), ("data/hot/rtcollect/hl_ctx_only.sqlite", ("BTC",), False)):
+    c = sqlite3.connect(f"{R}/{f}"); c.execute(DDL)   # 그림자 ETH 만 300~305초 빔(재접속 3초 쉼) -- 그동안 BTC 그림자는 계속 받는다
+    c.executemany("INSERT INTO hl_asset_ctx VALUES (?,?,?,?,?,?,?,?,?,?)", [row(k, s) for s in range(600) for k in coins if not (gap and 300 <= s <= 305)])
+    c.commit()
+PY
+for k in hl_bt_ETH hl_ctx_BTC; do echo "[$(date -d @$((T0 - 100)) -Iseconds)] SUPERVISOR starting rtcollect($k) (pid will follow)" > "logs/supervisor/rtcollect_${k}_20251121.log"; done
+echo "[hl] 끊김 ConnectionError: ws CLOSE -- 3초 뒤 재접속" >> logs/supervisor/rtcollect_hl_bt_ETH_20251121.log
+OUT="$(bash rtcollect/tools/takeover.sh check hl_ctx 2>&1)"; RC=$?; echo "$OUT" | grep -E "^\s*\[|check hl_ctx" | head -6
+ok "ETH 그림자 «끊김» 1줄 = 그 코인 빈틈 설명 → 통과(코인 둘 다 견줌)" '[ "$RC" = 0 ] && echo "$OUT" | grep -q "\[ETH\]" && echo "$OUT" | grep -q "\[BTC\]"'
+sed -i '/끊김/d' logs/supervisor/rtcollect_hl_bt_ETH_20251121.log
+OUT="$(bash rtcollect/tools/takeover.sh check hl_ctx 2>&1)"; RC=$?
+ok "양성 대조: ETH 로그에 «끊김»이 없으면 그 빈틈의 파이썬 4줄이 설명 못 함 → 불통과" '[ "$RC" != 0 ] && echo "$OUT" | grep -q "설명 못 함 4 "'
 [ "$FAIL" = 0 ] && echo "takeover selftest OK" || { echo "takeover selftest 실패"; exit 1; }
