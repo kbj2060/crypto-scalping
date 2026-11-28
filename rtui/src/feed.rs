@@ -21,7 +21,7 @@ impl Default for Urls {
 #[derive(Debug, PartialEq, serde::Serialize)]
 pub enum Req { Get { kind: Kind, url: String }, WsOpen(String), WsClose, /** 열린(또는 열리는 중인) 소켓에 보낼 글 -- 허브 구독 */ WsSend(String) }
 #[derive(Debug, PartialEq, Clone, Copy, serde::Serialize)]
-pub enum Kind { Footprint, History, Week, LiqSig, Liq, LiqTail, Mc, Acct, Srl, LiqTab, LiqMap }
+pub enum Kind { Footprint, History, Week, LiqSig, Liq, LiqTail, Mc, Acct, Srl, LiqTab, LiqMap, DirShort, PredRec }
 
 /// 145 FOOTPRINT_POLL_MS · 148 FOOTPRINT_STALE_BARS · 38 CANDLE_HISTORY_POLL_MS · 1680 CHART_MAX_CANDLES · 4400 FAST_PRICE_MIN_INTERVAL_MS · 2224 FOOTPRINT_RENDER_MIN_INTERVAL_MS · 6638 FP_WEEK_REFRESH_MS
 const FP_POLL_MS: f64 = 400.0;
@@ -36,6 +36,7 @@ const MARKET_CTX_POLL_MS: f64 = 1000.0; // 6116
 const LIQ_TAIL_MS: f64 = 2000.0;   // 3204 LIQ_5M_TAIL_POLL_MS
 const ACCT_POLL_MS: f64 = 10_000.0; // 1649 BINANCE_ACCOUNT_POLL_MS
 const SR_LEAN_POLL_MS: f64 = 2000.0; // 5810
+const DIR_SHORT_POLL_MS: f64 = 60_000.0; // 5718 · 5915 PRED_RECORD_POLL_MS 도 같다
 const LIQ_TAB_MS: f64 = 600_000.0; // liq_tab.js 9 DATA_POLL_MS
 const LIQ_MAP1_MS: f64 = 30_000.0; // 1672 LIQUIDATION_MAP_POLL_MS
 const LIQ_TIERS_MS: f64 = 60_000.0; // liq_profile.js 13 fetchExt
@@ -102,6 +103,12 @@ pub struct Feed {
     srl_at: f64,
     srl_skew: f64,
     pub srl_only: bool,
+    /// ⑤ «15분·1시간 예측»(dirs.rs): /api/dir-short 응답(5705 latestDirShort) · /api/pred-record 응답(5916 latestPredRecord) · 마지막으로 물은 시각 둘 · 이 카드만
+    pub dirs: Option<serde_json::Value>,
+    pub pred: Option<serde_json::Value>,
+    dirs_at: f64,
+    pred_at: f64,
+    pub dirs_only: bool,
     /// «청산» 탭 청산맵(liq.rs): 지도 기간(1·7·30·60·90·180·365) · /api/liq-tab(ok 만) · 지도 응답 · 이 지도에서 가격이 지나간 [저, 고] · 이 카드만
     pub liq_days: u32,
     pub liq_tab: Option<serde_json::Value>,
@@ -145,7 +152,7 @@ impl Feed {
     pub fn new(asset: &str, symbol: &str, source: Source, urls: Urls, week_always: bool) -> Self {
         Self { source, urls, asset: asset.into(), symbol: symbol.into(), week_always, candles: vec![], fp_bars: BTreeMap::new(), fp: None, week: None,
                live: Live::default(), price: 0.0, price_ts_ms: None, shown: 0.0, last_fast: 0.0, last_full: 0.0, fp_last_fetch: 0.0, fp_in_flight: false,
-               hist_last_fetch: 0.0, hist_retry_at: 0.0, week_at: 0.0, week_tried_at: 0.0, week_in_flight: false, ws: false, ws_retry_at: 0.0, hub_seq: None, holes: vec![], liq: vec![], liq_gen: 0, liq_tail_gen: 0, liq_at: 0.0, liq_tail_at: 0.0, week_liq: vec![], dirty: false, out: vec![], s1: Default::default(), s1_only: false, mc: None, mc_at: 0.0, mc_only: false, acct: None, acct_at: 0.0, prices: Default::default(), prices_seq: None, acct_only: false, srl: None, srl_at: 0.0, srl_skew: 0.0, srl_only: false,
+               hist_last_fetch: 0.0, hist_retry_at: 0.0, week_at: 0.0, week_tried_at: 0.0, week_in_flight: false, ws: false, ws_retry_at: 0.0, hub_seq: None, holes: vec![], liq: vec![], liq_gen: 0, liq_tail_gen: 0, liq_at: 0.0, liq_tail_at: 0.0, week_liq: vec![], dirty: false, out: vec![], s1: Default::default(), s1_only: false, mc: None, mc_at: 0.0, mc_only: false, acct: None, acct_at: 0.0, prices: Default::default(), prices_seq: None, acct_only: false, srl: None, srl_at: 0.0, srl_skew: 0.0, srl_only: false, dirs: None, pred: None, dirs_at: 0.0, pred_at: 0.0, dirs_only: false,
                liq_days: 7, liq_tab: None, liq_map: None, liq_sw: None, liq_tab_at: f64::NEG_INFINITY, liq_map_at: f64::NEG_INFINITY, liq_only: false, rem_only: false }
     }
     fn get(&mut self, kind: Kind, path: String) { let url = format!("{}{}", self.urls.api, path); self.out.push(Req::Get { kind, url }); }
@@ -158,6 +165,12 @@ impl Feed {
         }
         if self.srl_only { // 5812 refreshSrLean(2초 · 숨으면 · ETH 아니면 안 묻는다)
             if !hidden && self.asset == "eth" && now - self.srl_at >= SR_LEAN_POLL_MS { self.srl_at = now; self.get(Kind::Srl, "/api/sr-lean".into()); }
+            return;
+        }
+        if self.dirs_only { // 5715 refreshDirShort(1분 · 네 코인만) · 5917 refreshPredRecord(1분) -- 둘 다 숨으면 안 묻는다
+            if hidden { return; }
+            if crate::dirs::ASSETS.contains(&self.asset.as_str()) && now - self.dirs_at >= DIR_SHORT_POLL_MS { self.dirs_at = now; let path = format!("/api/dir-short?asset={}", self.asset); self.get(Kind::DirShort, path); }
+            if now - self.pred_at >= DIR_SHORT_POLL_MS { self.pred_at = now; self.get(Kind::PredRec, "/api/pred-record".into()); }
             return;
         }
         self.ensure_ws(now, hidden);
@@ -214,6 +227,9 @@ impl Feed {
         self.srl = Some(v);
         self.dirty = true;
     }
+    /// 5722 · 5924 res.ok 면 받은 것(ok 아님도) · 실패·못 읽음 = 받아 둔 값 그대로
+    pub fn on_dirs(&mut self, body: Option<&str>) { if let Some(v) = body.and_then(|b| serde_json::from_str(b).ok()) { self.dirs = Some(v); self.dirty = true; } }
+    pub fn on_pred(&mut self, body: Option<&str>) { if let Some(v) = body.and_then(|b| serde_json::from_str(b).ok()) { self.pred = Some(v); self.dirty = true; } }
     /// liq_tab.js fetchData: ok 면 받고 · ok 아님 = 없음 · 실패·못 읽음 = 옛 값 그대로(접착이 HTTP 오류도 None 으로 줘서 «오류 = null» 갈래는 옛 값 쪽으로 감)
     pub fn on_liq_tab(&mut self, body: Option<&str>) {
         let Some(v) = body.and_then(|b| serde_json::from_str::<serde_json::Value>(b).ok()) else { return };
