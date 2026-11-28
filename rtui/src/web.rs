@@ -59,6 +59,11 @@ pub fn on_get(kind: &str, body: Option<String>) {
         "Srl" => c.feed.on_srl(body.as_deref(), date_now()),
         "DirShort" => c.feed.on_dirs(body.as_deref()),
         "PredRec" => c.feed.on_pred(body.as_deref()),
+        "Trend" => c.feed.on_fc(feed::Kind::Trend, body.as_deref()),
+        "Dir4h" => c.feed.on_fc(feed::Kind::Dir4h, body.as_deref()),
+        "OpenRev" => c.feed.on_fc(feed::Kind::OpenRev, body.as_deref()),
+        "Band" => c.feed.on_fc(feed::Kind::Band, body.as_deref()),
+        "Radar" => c.feed.on_fc(feed::Kind::Radar, body.as_deref()),
         "LiqTab" => c.feed.on_liq_tab(body.as_deref()),
         "LiqMap" => c.feed.on_liq_map(body.as_deref()),
         _ => {}
@@ -103,7 +108,7 @@ impl eframe::App for WebApp {
 
 /// asset = ?asset= · (x, y) = 상자 왼쪽 위 · w·h = viewBox(0 이면 창에 맞춤) · tz = getTimezoneOffset · bg = 0xRRGGBB(0xFFFFFFFF 투명)
 /// week = 지표 스위치 기본값이 1주일을 늘 부르나(feed::Feed::week_always) · api·ws·hub = 주소(feed::Urls -- 빈 글자면 기본) · push = 풋프린트·체결을 rtcore 허브에서(feed::Source::Push)
-/// card = "s1" 이면 1초 수급 카드만(s1.rs · push 여야 자료가 온다) · "mc" 면 시장 맥락 ①② 만(mc.rs · 같은 출처 /api/market-context) · "acct" 면 계좌 칩만(acct.rs) · "srl" 이면 «레벨 5분» 칸만(srl.rs · 같은 출처 /api/sr-lean · ETH 만) · "dirs" 면 ⑤ «15분·1시간 예측» 두 줄만(dirs.rs · 같은 출처 /api/dir-short · /api/pred-record) · "liq7"(liqN · N = 지도 기간 1·7·30·60·90·180·365) 이면 «청산» 탭 청산맵만(liq.rs · push 로 연다) · "rem60"(remN · N = 입력 기간 7·30·60·90·180·365) 이면 «청산» 탭 «남은 매물 일봉별»만(rem.rs · push 로 연다)
+/// card = "s1" 이면 1초 수급 카드만(s1.rs · push 여야 자료가 온다) · "mc" 면 시장 맥락 ①② 만(mc.rs · 같은 출처 /api/market-context) · "acct" 면 계좌 칩만(acct.rs) · "srl" 이면 «레벨 5분» 칸만(srl.rs · 같은 출처 /api/sr-lean · ETH 만) · "dirs" 면 ⑤ 예측 줄 전체(fc.rs · 같은 출처 /api/trend · dir-short · sr-lean · dir4h · open-rev · regime-band · risk-radar · pred-record + 허브 가격 · push 로 연다) · "liq7"(liqN · N = 지도 기간 1·7·30·60·90·180·365) 이면 «청산» 탭 청산맵만(liq.rs · push 로 연다) · "rem60"(remN · N = 입력 기간 7·30·60·90·180·365) 이면 «청산» 탭 «남은 매물 일봉별»만(rem.rs · push 로 연다)
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
 pub async fn start(canvas_id: String, asset: String, x: f32, y: f32, w: f64, h: f64, tz: i32, bg: u32, week: bool, api: String, ws: String, push: bool, hub: String, card: String) -> Result<(), JsValue> {

@@ -24,15 +24,15 @@
 | 주문 상태 줄 | renderManualWait(#ordStat) | /api/manual-entry/status | ⛔ 주문 경로 · 보류 | 줄 |
 | 오른쪽 칸 ①② 게이지 | renderMarketCtx(.mc-strip-wall) | /api/market-context | ✅ `?card=mc` | 460×128 |
 | 오른쪽 칸 1초 수급 | renderSupply1s | /rt supply | ✅ `?card=s1` | 460×330 |
-| ⑤ 종합 칩(ETH) | fcRowHtml(fcSum) | /api/dir4h · /api/trend · /api/open-rev | ⬜ | 460×22 |
-| ⑤ 지금 추세 | fcTrendCell | /api/trend | ⬜ | 460×42 |
-| ⑤ 15분 예측 | fcRowHtml sCell · prHit | /api/dir-short · /api/pred-record | ✅ `?card=dirs` (이번) | 460×42 |
-| ⑤ 레벨 5분(ETH) | srLeanCell | /api/sr-lean | ✅ `?card=srl` | 460×42 |
-| ⑤ 1시간 예측 | fcRowHtml sCell · prHit | /api/dir-short · /api/pred-record | ✅ `?card=dirs` (이번) | 460×42 |
-| ⑤ 4h 예측 | fcRowHtml | /api/dir4h · /api/vol-forecast · /api/pred-record | ⬜ | 460×42 |
-| ⑤ 횡보·추세 | fcRowHtml rbCell | /api/regime-band · /api/pred-record | ⬜ | 460×30 |
-| ⑤ 위험 레이더 | rrCells | /api/risk-radar | ⬜ | 460×60 |
-| ⑤ 4h 상대 강도 표 | predXsecHtml | /api/pred-record | ⬜ | 460×80 |
+| ⑤ 종합 칩(ETH) | fcRowHtml(fcSum) | /api/dir4h · /api/trend · /api/open-rev | ✅ `?card=dirs` (11-29 둘째) | 460×22 |
+| ⑤ 지금 추세(+7일 추세) | fcTrendCell · f1Html | /api/trend | ✅ `?card=dirs` (11-29 둘째) | 460×46 |
+| ⑤ 15분 예측 | fcRowHtml sCell · prHit | /api/dir-short · /api/pred-record | ✅ `?card=dirs` | 460×42 |
+| ⑤ 레벨 5분(ETH) | srLeanCell | /api/sr-lean | ✅ `?card=srl` · `?card=dirs` 안에도 | 460×42 |
+| ⑤ 1시간 예측 | fcRowHtml sCell · prHit | /api/dir-short · /api/pred-record | ✅ `?card=dirs` | 460×42 |
+| ⑤ 4h 예측 | fcRowHtml | /api/dir4h · /api/pred-record (/api/vol-forecast 는 툴팁에만 쓰여 안 부름) | ✅ `?card=dirs` (11-29 둘째) | 460×42 |
+| ⑤ 횡보·추세 | fcRowHtml rbCell | /api/regime-band · /api/pred-record | ✅ `?card=dirs` (11-29 둘째) | 460×30 |
+| ⑤ 위험 레이더(15분 폭 · 앞 1시간) | rrCells | /api/risk-radar · 허브 가격 | ✅ `?card=dirs` (11-29 둘째) | 460×88 |
+| ⑤ 4h 상대 강도 표 | predXsecHtml | /api/pred-record | ✅ `?card=dirs` (11-29 둘째) | 460×122 |
 | 보기: 틱 차트 · 체결 버블 · 일봉 풋프린트 | tick_charts · bubble_map.js · fp_daily.js | /api/footprint-week 등 | ⬜ | 차트 자리 |
 | «청산» 탭 청산맵 | liq_tab.js CH.ladder | /api/liquidation-map(/tiers) · /api/liq-tab | ✅ `?card=liq` | 900×560 |
 | «청산» 탭 남은 매물 일봉별 | liq_tab.js CH.remain | /api/liq-tab | ✅ `?card=rem` | 900×300 |
@@ -43,5 +43,7 @@
 | Account 카드(잔고·곡선·순환·통계·달력) | renderSnapshotAccountCore · renderCycleCard | /api/binance-account · /api/cycle-path | ⬜ | 전폭×창 |
 | Account 메모 · 오답노트 | (acctNote·acctWrong) | /api/acct-notes · /api/acct-wrong | ⛔ 입력 | 탭 안 |
 
-남은 칸: ⬜ 20 · 🟡 1(봉 단추) · ⛔ 6(주문 경로·입력 · 보류) · ✅ 10줄. 이번 = ⑤ 15분·1시간 예측(같은 함수 sCell 두 줄).
-이번에 고침: 같은 칸 그리기(srl.rs scene)의 가로 자리 -- 넓은 화면 `#mcBody.mc-cmp .fc-c { gap: 2px }`·`.fc-t > .d4g` 가로 여백 0 을 놓쳐 «레벨 5분» 게이지·막대가 4~10px 어긋나 있었다(헤드리스 크로미움 실측으로 확인 · 시험 `srl::t::layout`).
+남은 칸: ⬜ 14 · 🟡 1(봉 단추) · ⛔ 6(주문 경로·입력 · 보류) · ✅ 16줄. ⑤ 예측 줄 완성(11-29 둘째) = `?card=dirs` 가 fcRowHtml 전체(rtui/src/fc.rs).
+11-29 둘째 정답지: compare/fc_js.mjs(원본 fcRowHtml 을 가짜 전역에서 · 지어낸 입력 8장) → compare/fc_layout.py(원본 styles.css · 헤드리스 크로미움 1920 · 폭 404 에서 글·상자·선 자리와 색을 잼) → `fc::t::js_parity`(645개 전부 하나씩 짝 · 높이 같음). 안 옮김: 칸 툴팁 · «?» 설명 팝업(단추 모양만).
+11-29 둘째 고침: 오른쪽이 글만(«쌓는 중»)인 줄 높이 30 → 27(`srl::height` -- 원본 실측 27).
+첫째(15분·1시간 예측)에 고침: 같은 칸 그리기(srl.rs scene)의 가로 자리 -- 넓은 화면 `#mcBody.mc-cmp .fc-c { gap: 2px }`·`.fc-t > .d4g` 가로 여백 0 을 놓쳐 «레벨 5분» 게이지·막대가 4~10px 어긋나 있었다(헤드리스 크로미움 실측으로 확인 · 시험 `srl::t::layout`).

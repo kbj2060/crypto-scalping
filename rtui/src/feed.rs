@@ -21,7 +21,7 @@ impl Default for Urls {
 #[derive(Debug, PartialEq, serde::Serialize)]
 pub enum Req { Get { kind: Kind, url: String }, WsOpen(String), WsClose, /** 열린(또는 열리는 중인) 소켓에 보낼 글 -- 허브 구독 */ WsSend(String) }
 #[derive(Debug, PartialEq, Clone, Copy, serde::Serialize)]
-pub enum Kind { Footprint, History, Week, LiqSig, Liq, LiqTail, Mc, Acct, Srl, LiqTab, LiqMap, DirShort, PredRec }
+pub enum Kind { Footprint, History, Week, LiqSig, Liq, LiqTail, Mc, Acct, Srl, LiqTab, LiqMap, DirShort, PredRec, /** ⑤ 나머지 칸(fc.rs) -- Feed::fc 차례 */ Trend, Dir4h, OpenRev, Band, Radar }
 
 /// 145 FOOTPRINT_POLL_MS · 148 FOOTPRINT_STALE_BARS · 38 CANDLE_HISTORY_POLL_MS · 1680 CHART_MAX_CANDLES · 4400 FAST_PRICE_MIN_INTERVAL_MS · 2224 FOOTPRINT_RENDER_MIN_INTERVAL_MS · 6638 FP_WEEK_REFRESH_MS
 const FP_POLL_MS: f64 = 400.0;
@@ -109,6 +109,9 @@ pub struct Feed {
     dirs_at: f64,
     pred_at: f64,
     pub dirs_only: bool,
+    /// ⑤ 나머지 칸(fc.rs): [/api/trend · /api/dir4h · /api/open-rev · /api/regime-band · /api/risk-radar] 응답 · 마지막으로 물은 시각
+    pub fc: [Option<serde_json::Value>; 5],
+    fc_at: [f64; 5],
     /// «청산» 탭 청산맵(liq.rs): 지도 기간(1·7·30·60·90·180·365) · /api/liq-tab(ok 만) · 지도 응답 · 이 지도에서 가격이 지나간 [저, 고] · 이 카드만
     pub liq_days: u32,
     pub liq_tab: Option<serde_json::Value>,
@@ -152,7 +155,7 @@ impl Feed {
     pub fn new(asset: &str, symbol: &str, source: Source, urls: Urls, week_always: bool) -> Self {
         Self { source, urls, asset: asset.into(), symbol: symbol.into(), week_always, candles: vec![], fp_bars: BTreeMap::new(), fp: None, week: None,
                live: Live::default(), price: 0.0, price_ts_ms: None, shown: 0.0, last_fast: 0.0, last_full: 0.0, fp_last_fetch: 0.0, fp_in_flight: false,
-               hist_last_fetch: 0.0, hist_retry_at: 0.0, week_at: 0.0, week_tried_at: 0.0, week_in_flight: false, ws: false, ws_retry_at: 0.0, hub_seq: None, holes: vec![], liq: vec![], liq_gen: 0, liq_tail_gen: 0, liq_at: 0.0, liq_tail_at: 0.0, week_liq: vec![], dirty: false, out: vec![], s1: Default::default(), s1_only: false, mc: None, mc_at: 0.0, mc_only: false, acct: None, acct_at: 0.0, prices: Default::default(), prices_seq: None, acct_only: false, srl: None, srl_at: 0.0, srl_skew: 0.0, srl_only: false, dirs: None, pred: None, dirs_at: 0.0, pred_at: 0.0, dirs_only: false,
+               hist_last_fetch: 0.0, hist_retry_at: 0.0, week_at: 0.0, week_tried_at: 0.0, week_in_flight: false, ws: false, ws_retry_at: 0.0, hub_seq: None, holes: vec![], liq: vec![], liq_gen: 0, liq_tail_gen: 0, liq_at: 0.0, liq_tail_at: 0.0, week_liq: vec![], dirty: false, out: vec![], s1: Default::default(), s1_only: false, mc: None, mc_at: 0.0, mc_only: false, acct: None, acct_at: 0.0, prices: Default::default(), prices_seq: None, acct_only: false, srl: None, srl_at: 0.0, srl_skew: 0.0, srl_only: false, dirs: None, pred: None, dirs_at: 0.0, pred_at: 0.0, dirs_only: false, fc: Default::default(), fc_at: [0.0; 5],
                liq_days: 7, liq_tab: None, liq_map: None, liq_sw: None, liq_tab_at: f64::NEG_INFINITY, liq_map_at: f64::NEG_INFINITY, liq_only: false, rem_only: false }
     }
     fn get(&mut self, kind: Kind, path: String) { let url = format!("{}{}", self.urls.api, path); self.out.push(Req::Get { kind, url }); }
@@ -167,8 +170,16 @@ impl Feed {
             if !hidden && self.asset == "eth" && now - self.srl_at >= SR_LEAN_POLL_MS { self.srl_at = now; self.get(Kind::Srl, "/api/sr-lean".into()); }
             return;
         }
-        if self.dirs_only { // 5715 refreshDirShort(1분 · 네 코인만) · 5917 refreshPredRecord(1분) -- 둘 다 숨으면 안 묻는다
+        if self.dirs_only { // ⑤ 예측 줄: 5715 refreshDirShort(1분 · 네 코인만) · 5917 refreshPredRecord(1분) · 5578 refreshTrend(1분) · 5694 refreshDir4h(2분 · ETH·SOL·XRP) ·
+            //   5727 refreshOpenRev(2분 · ETH) · 5798 refreshRegimeBand(5분) · 5898 refreshRiskRadar(30초) · 5812 refreshSrLean(2초 · ETH) -- 숨으면 안 묻는다 · 가격(15분 폭 $)은 허브가 민다
+            self.ensure_ws(now, hidden);
             if hidden { return; }
+            let (a, eth) = (self.asset.clone(), self.asset == "eth");
+            for (k, (kind, gap, on, path)) in [(Kind::Trend, 60e3, true, format!("/api/trend?asset={a}")), (Kind::Dir4h, 120e3, crate::fc::DIR4H.contains(&a.as_str()), format!("/api/dir4h?asset={a}")),
+                    (Kind::OpenRev, 120e3, eth, "/api/open-rev".into()), (Kind::Band, 300e3, true, "/api/regime-band".into()), (Kind::Radar, 30e3, true, "/api/risk-radar".into())].into_iter().enumerate() {
+                if on && now - self.fc_at[k] >= gap { self.fc_at[k] = now; self.get(kind, path); }
+            }
+            if eth && now - self.srl_at >= SR_LEAN_POLL_MS { self.srl_at = now; self.get(Kind::Srl, "/api/sr-lean".into()); }
             if crate::dirs::ASSETS.contains(&self.asset.as_str()) && now - self.dirs_at >= DIR_SHORT_POLL_MS { self.dirs_at = now; let path = format!("/api/dir-short?asset={}", self.asset); self.get(Kind::DirShort, path); }
             if now - self.pred_at >= DIR_SHORT_POLL_MS { self.pred_at = now; self.get(Kind::PredRec, "/api/pred-record".into()); }
             return;
@@ -230,6 +241,16 @@ impl Feed {
     /// 5722 · 5924 res.ok 면 받은 것(ok 아님도) · 실패·못 읽음 = 받아 둔 값 그대로
     pub fn on_dirs(&mut self, body: Option<&str>) { if let Some(v) = body.and_then(|b| serde_json::from_str(b).ok()) { self.dirs = Some(v); self.dirty = true; } }
     pub fn on_pred(&mut self, body: Option<&str>) { if let Some(v) = body.and_then(|b| serde_json::from_str(b).ok()) { self.pred = Some(v); self.dirty = true; } }
+    /// ⑤ 나머지 칸 응답: res.ok 면 받은 것 · 실패·못 읽음 = 받아 둔 값 그대로 -- 지금 추세만 실패도 ok 아님으로 덮는다(5586)
+    pub fn on_fc(&mut self, kind: Kind, body: Option<&str>) {
+        let k = [Kind::Trend, Kind::Dir4h, Kind::OpenRev, Kind::Band, Kind::Radar].iter().position(|q| *q == kind).unwrap();
+        match body.and_then(|b| serde_json::from_str(b).ok()) {
+            Some(v) => self.fc[k] = Some(v),
+            None if kind == Kind::Trend => self.fc[k] = Some(serde_json::json!({ "ok": false })),
+            None => return,
+        }
+        self.dirty = true;
+    }
     /// liq_tab.js fetchData: ok 면 받고 · ok 아님 = 없음 · 실패·못 읽음 = 옛 값 그대로(접착이 HTTP 오류도 None 으로 줘서 «오류 = null» 갈래는 옛 값 쪽으로 감)
     pub fn on_liq_tab(&mut self, body: Option<&str>) {
         let Some(v) = body.and_then(|b| serde_json::from_str::<serde_json::Value>(b).ok()) else { return };
@@ -414,7 +435,7 @@ impl Feed {
         if self.source == Source::Push {
             (self.hub_seq, self.prices_seq) = (None, None);
             self.out.push(Req::WsOpen(self.urls.hub.clone()));
-            let subs: Vec<&str> = if self.acct_only || self.liq_only || self.rem_only { vec![] } else { vec![&sym] }; // 계좌 칩은 «모든 종목» 가격만(구독과 상관없이 온다)
+            let subs: Vec<&str> = if self.acct_only || self.liq_only || self.rem_only || self.dirs_only { vec![] } else { vec![&sym] }; // 계좌 칩은 «모든 종목» 가격만(구독과 상관없이 온다)
             self.out.push(Req::WsSend(serde_json::json!({ "subscribe": subs }).to_string()));
         } else {
             self.out.push(Req::WsOpen(self.urls.trade_ws.replace("{sym}", &sym)));
