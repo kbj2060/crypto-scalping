@@ -22,7 +22,7 @@ impl Default for Urls {
 pub enum Req { Get { kind: Kind, url: String }, WsOpen(String), WsClose, /** 열린(또는 열리는 중인) 소켓에 보낼 글 -- 허브 구독 */ WsSend(String) }
 #[derive(Debug, PartialEq, Clone, Copy, serde::Serialize)]
 pub enum Kind { Footprint, History, Week, LiqSig, Liq, LiqTail, Mc, Acct, Srl, LiqTab, LiqMap, DirShort, PredRec, /** ⑤ 나머지 칸(fc.rs) -- Feed::fc 차례 */ Trend, Dir4h, OpenRev, Band, Radar, LiqAll, LiqBars,
-    /** Macro Trend(mt.rs): /api/macro-trend · macro-today · treasury-futures?h=24 · xyz100 · macro-calendar */ MtTrend, MtToday, MtTreas, MtXyz, MtCal }
+    /** Macro Trend(mt.rs): /api/macro-trend · macro-today · treasury-futures?h=24 · xyz100 · macro-calendar */ MtTrend, MtToday, MtTreas, MtXyz, MtCal, /** Option 카드(opt.rs) */ Gex, Smile }
 
 /// 145 FOOTPRINT_POLL_MS · 148 FOOTPRINT_STALE_BARS · 38 CANDLE_HISTORY_POLL_MS · 1680 CHART_MAX_CANDLES · 4400 FAST_PRICE_MIN_INTERVAL_MS · 2224 FOOTPRINT_RENDER_MIN_INTERVAL_MS · 6638 FP_WEEK_REFRESH_MS
 const FP_POLL_MS: f64 = 400.0;
@@ -127,6 +127,8 @@ pub struct Feed {
     pub liqx: Option<crate::liqx::State>,
     /// Macro Trend 카드(?card=mt · 머리 요약 ?card=mth) -- 있으면 이 카드만(mt.rs 가 묻고 받는다)
     pub mt: Option<Box<crate::mt::Store>>,
+    /// Option 카드(opt.rs): 이 카드만 · /api/gex · 스마일 · 그린 시각·가격
+    pub opt: crate::opt::Io,
 }
 
 /// 4477 roundHalfEven(파이썬 round 와 같은 격자)
@@ -161,7 +163,7 @@ impl Feed {
         Self { source, urls, asset: asset.into(), symbol: symbol.into(), week_always, candles: vec![], fp_bars: BTreeMap::new(), fp: None, week: None,
                live: Live::default(), price: 0.0, price_ts_ms: None, shown: 0.0, last_fast: 0.0, last_full: 0.0, fp_last_fetch: 0.0, fp_in_flight: false,
                hist_last_fetch: 0.0, hist_retry_at: 0.0, week_at: 0.0, week_tried_at: 0.0, week_in_flight: false, ws: false, ws_retry_at: 0.0, hub_seq: None, holes: vec![], liq: vec![], liq_gen: 0, liq_tail_gen: 0, liq_at: 0.0, liq_tail_at: 0.0, week_liq: vec![], dirty: false, out: vec![], s1: Default::default(), s1_only: false, mc: None, mc_at: 0.0, mc_only: false, acct: None, acct_at: 0.0, prices: Default::default(), prices_seq: None, acct_only: false, srl: None, srl_at: 0.0, srl_skew: 0.0, srl_only: false, dirs: None, pred: None, dirs_at: 0.0, pred_at: 0.0, dirs_only: false, fc: Default::default(), fc_at: [0.0; 5],
-               liq_days: 7, liq_tab: None, liq_map: None, liq_sw: None, liq_tab_at: f64::NEG_INFINITY, liq_map_at: f64::NEG_INFINITY, liq_only: false, rem_only: false, liqx: None, mt: None }
+               liq_days: 7, liq_tab: None, liq_map: None, liq_sw: None, liq_tab_at: f64::NEG_INFINITY, liq_map_at: f64::NEG_INFINITY, liq_only: false, rem_only: false, liqx: None, mt: None, opt: Default::default() }
     }
     fn get(&mut self, kind: Kind, path: String) { let url = format!("{}{}", self.urls.api, path); self.out.push(Req::Get { kind, url }); }
 
@@ -188,6 +190,13 @@ impl Feed {
             if eth && now - self.srl_at >= SR_LEAN_POLL_MS { self.srl_at = now; self.get(Kind::Srl, "/api/sr-lean".into()); }
             if crate::dirs::ASSETS.contains(&self.asset.as_str()) && now - self.dirs_at >= DIR_SHORT_POLL_MS { self.dirs_at = now; let path = format!("/api/dir-short?asset={}", self.asset); self.get(Kind::DirShort, path); }
             if now - self.pred_at >= DIR_SHORT_POLL_MS { self.pred_at = now; self.get(Kind::PredRec, "/api/pred-record".into()); }
+            return;
+        }
+        if self.opt.on { // 5457 refreshGex(60초 · 숨으면 안 묻는다 -- 스마일은 on_gex 가) · 실현 감마 5분봉 · 가격은 허브가 민다
+            self.ensure_ws(now, hidden);
+            if hidden { return; }
+            if self.opt.due(now) { self.get(Kind::Gex, "/api/gex".into()); }
+            self.maybe_history(now);
             return;
         }
         self.ensure_ws(now, hidden);
@@ -442,7 +451,7 @@ impl Feed {
         if self.source == Source::Push {
             (self.hub_seq, self.prices_seq) = (None, None);
             self.out.push(Req::WsOpen(self.urls.hub.clone()));
-            let subs: Vec<&str> = if self.acct_only || self.liq_only || self.rem_only || self.dirs_only { vec![] } else { vec![&sym] }; // 계좌 칩은 «모든 종목» 가격만(구독과 상관없이 온다)
+            let subs: Vec<&str> = if self.acct_only || self.liq_only || self.rem_only || self.dirs_only || self.opt.on { vec![] } else { vec![&sym] }; // 계좌 칩은 «모든 종목» 가격만(구독과 상관없이 온다)
             self.out.push(Req::WsSend(serde_json::json!({ "subscribe": subs }).to_string()));
         } else {
             self.out.push(Req::WsOpen(self.urls.trade_ws.replace("{sym}", &sym)));

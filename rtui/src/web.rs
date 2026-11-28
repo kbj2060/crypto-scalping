@@ -73,6 +73,8 @@ pub fn on_get(kind: &str, body: Option<String>) {
             m.on_get(match kind { "MtTrend" => MtTrend, "MtToday" => MtToday, "MtTreas" => MtTreas, "MtXyz" => MtXyz, _ => MtCal }, body.as_deref(), date_now());
             c.feed.dirty = true;
         },
+        "Gex" => c.feed.on_gex(body.as_deref(), date_now()),
+        "Smile" => c.feed.on_smile(body.as_deref()),
         _ => {}
     });
 }
@@ -134,6 +136,7 @@ pub async fn start(canvas_id: String, asset: String, x: f32, y: f32, w: f64, h: 
     ch.feed.mc_only = card == "mc";
     ch.feed.srl_only = card == "srl";
     ch.feed.dirs_only = card == "dirs";
+    ch.feed.opt.on = card == "opt"; // Option 카드만(opt.rs · w = 카드 폭 · h = 사다리 높이 · push 로 연다)
     if let Some(d) = card.strip_prefix("liq").and_then(|d| d.parse::<u32>().ok()).filter(|d| [1, 7, 30, 60, 90, 180, 365].contains(d)) { (ch.feed.liq_only, ch.feed.liq_days) = (true, d); }
     if let Some(d) = card.strip_prefix("rem").and_then(|d| d.parse::<u32>().ok()).filter(|d| [7, 30, 60, 90, 180, 365].contains(d)) { (ch.feed.rem_only, ch.rem.win) = (true, d); }
     if let Some(x) = card.strip_prefix("liqx").and_then(crate::liqx::State::new) { (ch.feed.liqx, ch.feed.rem_only, ch.feed.source) = (Some(x), true, feed::Source::Push); } // «청산» 탭 아랫줄(?card=liqx · liqx1W 처럼 주기) -- 허브 가격이라 늘 밀기

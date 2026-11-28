@@ -18,6 +18,7 @@ pub mod profile;
 pub mod rem;
 pub mod mc;
 pub mod mt;
+pub mod opt;
 pub mod s1;
 pub mod srl;
 pub mod view;
@@ -148,6 +149,22 @@ impl Chart {
         (m.sel, m.rows, m.left) = (out.sel, out.rows, out.left);
         draw::paint(p, &mt::prims(&out.items, &measure), o, out.det, out.det, 1.0);
     }
+    /// Option 카드 한 장(feed.opt.on) -- 폭 = cfg.w_all(fill 이면 창) · 사다리 높이 = cfg.h_all(0 이면 1080 창 fitLadderFormula 514) · /api/gex 가 온 시각·가격으로 그린다(원본도 그때만 다시 그린다)
+    pub fn ui_opt(&mut self, ui: &mut egui::Ui) {
+        if self.fill { self.cfg.w_all = (ui.ctx().content_rect().width() - 2.0 * self.origin.x) as f64; }
+        let p = ui.painter();
+        if self.bg.a() > 0 { p.rect_filled(p.clip_rect(), 0.0, self.bg); }
+        let f = &self.feed;
+        let c: Vec<(i64, f64)> = f.candles.iter().map(|c| (c.time, c.close)).collect();
+        let i = opt::In { asset: &f.asset, now: f.opt.at, tz: self.cfg.tz_off_min as f64, price: f.opt.px, gex: f.opt.gex.as_ref(), smile: &f.opt.smile, candles: &c,
+                          lad: if self.cfg.h_all > 0.0 { self.cfg.h_all } else { 514.0 }, ck: 0.9 };
+        let measure = |s: &str, z: f64, wt: u16, mono: bool| if mono { p.layout_no_wrap(s.to_owned(), draw::mono(z as f32, wt), egui::Color32::WHITE).size().x as f64 } else { draw::measure(p, s, z, wt) };
+        let w = self.cfg.w_all;
+        let o = opt::card(&i, w, &measure);
+        let all = [0.0, 0.0, w, o.h];
+        draw::paint(p, &o.html, self.origin, all, all, 1.0);
+        for (x, y, v) in &o.svgs { draw::paint(p, v, self.origin + vec2(*x as f32, *y as f32), all, all, 1.0); }
+    }
     pub fn ui_rem(&mut self, ui: &mut egui::Ui, now: f64) {
         let f = &self.feed;
         let tab = f.liq_tab.as_ref();
@@ -263,6 +280,7 @@ impl Chart {
         if self.feed.liqx.is_some() { self.ui_liqx(ui, now); return None; }
         if self.feed.rem_only { self.ui_rem(ui, now); return None; }
         if self.feed.mt.is_some() { self.ui_mt(ui, now); return None; }
+        if self.feed.opt.on { self.ui_opt(ui); return None; }
         let t = ui.input(|i| i.time) * 1000.0;
         if self.fill { // 혼자 뜨는 페이지: 창 = 화면 -- 가격 플롯 왼쪽 열(w)이 화면 폭을 채우는 viewBox 폭(8429-8430 을 거꾸로)
             let r = ui.ctx().content_rect();
