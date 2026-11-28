@@ -10,10 +10,12 @@ pub mod api2;
 pub mod api3;
 pub mod ctx;
 pub mod ctx_micro;
+pub mod ctx_rest;
 pub mod ctx_x;
 pub mod fpd;
 pub mod heatmap;
 pub mod hub;
+pub mod liqmap;
 pub mod model;
 pub mod order;
 pub mod py;
@@ -265,6 +267,7 @@ fn routes(p: &str) -> Vec<(&'static str, Handler)> {
     v.extend(order::routes(p));
     v.extend(model::routes(p));
     v.extend(rest::routes(p));
+    v.extend(liqmap::routes(p));
     v
 }
 
