@@ -10,10 +10,10 @@
 #   1. 병행 rtserve 끄기: supervisor_rtserve.sh 감독과 rtserve 프로세스(같은 8790 · 같은 잠금 파일)를 멈춘다.
 #   2. 파이썬 대시보드 끄기: dashboard/scripts/supervise_server.sh 감독째 멈춘다(crontab @reboot 줄도 주석) -- `ss -ltn | grep 8787` 이 비어야 한다.
 #   3. 이 스크립트로 rtserve 를 8790 에 띄운다 → `curl -s -o /dev/null -w '%{http_code}\n' 127.0.0.1:8790/dashboard/live/` = 200 확인.
-#   4. Cloudflare 터널의 --url 을 http://127.0.0.1:8790 으로 바꿔 재시작한다(🔴원격 규칙을 추가·삭제하지 말 것 -- 11-22 사고: 규칙 하나가 나머지를 404 로 만든다).
-#   ⚠️(11-28 검토) thesan.xyz 전환은 Cloudflare 원격 규칙(호스트 → 8790)으로 사용자가 한다 -- 원격 규칙이 있으면 터널은 --url 을 무시한다(위 4 의 --url 변경은 효과 없음) · /rt → 8788 규칙은 그대로.
+#   4. 사용자가 Cloudflare 원격 규칙 중 «경로 빈 thesan.xyz» 줄의 서비스만 http://127.0.0.1:8790 으로 고친다(2026-11-28 실제로 한 방법).
+#      원격 규칙이 있으면 터널은 --url 을 무시한다. 🔴규칙을 지우거나 더하지 말 것(11-22: 지우면 DNS 까지 삭제) · `^/rt$` → 8788 줄은 위에 그대로.
 #   표식: data/live/rtserve_live.on 을 만들면 deploy_watcher·rtorder_cutover·알림 워커가 8787 대신 8790 을 본다(지우면 예전 그대로).
-#   5. 되돌리기: 이 감독 멈춤 → 파이썬 감독 다시 → 터널 --url 을 8787 로.
+#   5. 되돌리기: 이 감독 멈춤 → 표식 지움 → 파이썬 감독 다시 → 사용자가 같은 규칙 줄을 8787 로.
 #
 # 병행 모드와 다른 점:
 #   RTSERVE_READONLY=0               쓰기 주소 4 + 접수 기록이 열린다(같은 파일 · 같은 잠금 없음 = 혼자 쓸 때만 안전)
@@ -40,6 +40,7 @@ export RTSERVE_ROOT="$ROOT"
 export RTSERVE_ADDR="${RTSERVE_ADDR:-127.0.0.1:8790}"
 export RTSERVE_HUB="${RTSERVE_HUB:-ws://127.0.0.1:8788/rt}"
 export RUST_BACKTRACE=1
+export RTSERVE_PY="${RTSERVE_PY:-${PYTHON_BIN:-$HOME/miniconda3/envs/quant_ai/bin/python}}"   # /api/push/test 가 원본 웹 푸시 모듈을 부를 때
 
 if [ ! -x "$BIN" ]; then
   echo "[$(date -Iseconds)] rtserve 실행 파일이 없다: $BIN -- 켜지 않는다." >&2

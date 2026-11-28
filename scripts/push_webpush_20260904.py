@@ -313,6 +313,18 @@ if __name__ == "__main__":
         priv, pub = generate_vapid_keys()
         print(f"VAPID_PRIVATE_KEY={priv}")
         print(f"VAPID_PUBLIC_KEY={pub}")
+    elif len(sys.argv) > 1 and sys.argv[1] == "test":
+        # 2026-11-28 rtserve POST /api/push/test 가 부른다 -- 원본 server.py api_push_test 본문과 같은 알림 · 결과 JSON 한 줄.
+        # 보낸 사람(subject)은 프로세스 환경의 VAPID_SUBJECT 만 쓴다(없으면 exit 3 -- rtserve 가 503 으로 돌려준다).
+        if not os.getenv("VAPID_PRIVATE_KEY") or not os.getenv("VAPID_SUBJECT"):
+            print("VAPID_PRIVATE_KEY/VAPID_SUBJECT not configured", file=sys.stderr)
+            sys.exit(3)
+        print(json.dumps(asyncio.run(broadcast(
+            {"tier": "test", "title": "알림 설정 완료",
+             "body": "이 알림이 보이면 정상입니다. 실제 신호가 나면 같은 방식으로 도착합니다.",
+             "tag": "push-test", "url": "/dashboard/live/"},
+            private_b64=os.environ["VAPID_PRIVATE_KEY"], subject=os.environ["VAPID_SUBJECT"], ttl=60,
+        ))), flush=True)
     else:
         selftest_rfc8291()
         print("RFC 8291 section 5 self-test: PASS")
