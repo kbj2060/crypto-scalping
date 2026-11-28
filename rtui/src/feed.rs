@@ -22,6 +22,7 @@ impl Default for Urls {
 pub enum Req { Get { kind: Kind, url: String }, WsOpen(String), WsClose, /** 열린(또는 열리는 중인) 소켓에 보낼 글 -- 허브 구독 */ WsSend(String) }
 #[derive(Debug, PartialEq, Clone, Copy, serde::Serialize)]
 pub enum Kind { Footprint, History, Week, LiqSig, Liq, LiqTail, Mc, Acct, Srl, LiqTab, LiqMap, DirShort, PredRec, /** ⑤ 나머지 칸(fc.rs) -- Feed::fc 차례 */ Trend, Dir4h, OpenRev, Band, Radar, LiqAll, LiqBars,
+    /** News 카드 + ⑤ 다음 24시간(news.rs): /api/news · market-context · gex · macro-calendar */ News, NewsMc, NewsGex, NewsCal,
     /** 왼쪽 위 «지표 방향» 판(dirb.rs): /api/situation */ Situation,
     /** Macro Trend(mt.rs): /api/macro-trend · macro-today · treasury-futures?h=24 · xyz100 · macro-calendar */ MtTrend, MtToday, MtTreas, MtXyz, MtCal, /** Option 카드(opt.rs) */ Gex, Smile }
 
@@ -172,6 +173,7 @@ impl Feed {
     pub fn tick(&mut self, now: f64, hidden: bool, want_week: bool) {
         if crate::dirb::on() { crate::dirb::tick(now, hidden, &self.asset, &self.urls.api, &mut self.out); return; }
         if let Some(m) = self.mt.as_mut() { m.tick(now, hidden, &self.urls.api, &mut self.out); return; }
+        if crate::news::tick(now, hidden, &self.urls.api, &self.asset, &mut self.out) { return; }
         if self.mc_only { // 6259 refreshMarketCtx(1초 · 숨으면 안 묻는다)
             if !hidden && now - self.mc_at >= MARKET_CTX_POLL_MS { self.mc_at = now; let path = format!("/api/market-context?asset={}", self.asset); self.get(Kind::Mc, path); }
             return;

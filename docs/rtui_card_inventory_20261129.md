@@ -38,18 +38,19 @@
 | «청산» 탭 남은 매물 일봉별 | liq_tab.js CH.remain | /api/liq-tab | ✅ `?card=rem` | 900×300 |
 | «청산» 탭 오늘 누적 · 최대 고통 · 코인별 최대 고통 | CH.today · CH.pain · CH.quad · painKpi · coinTable | /api/liq-tab(all) · /api/liquidation-5m-history | ✅ `?card=liqx`(주기 = liqx1W 등 · 머리 단추·툴팁 빼고) | 3칸 × 340 |
 | Macro Trend 카드 | renderMacroTrend · refreshMtToday | /api/macro-trend · /api/macro-today · /api/treasury-futures?h=24 · /api/xyz100 · /api/macro-calendar | ✅ `?card=mt` (본문 #mtBody · 카드 머리 제목 줄은 밖) | 1838×917 |
-| News 카드 · ⑤ 다음 24시간 | renderNews · renderMarketCtx(#mcWhen) | /api/news · /api/market-context · /api/gex | ⬜ | 전폭×창 |
+| News 카드 · ⑤ 다음 24시간 | renderNews · renderMarketCtx(#mcWhen) | /api/news · /api/market-context · /api/gex · /api/macro-calendar | ✅ `?card=news` (본문 #newsBody · 카드 머리 제목·건수 줄은 밖) | 1838×917 |
 | Option 카드(코인 ETH·BTC·SOL·XRP) | renderOptions | /api/gex · /api/opt-smile · /api/market-history(실현 감마) · 허브 가격 | 🟡 `?card=opt` (11-29 셋째 · 주식 판 · 사다리 «내 선» 빼고) | 전폭×창 |
 | Option 카드 주식(CBOE) 판 · 사다리 «내 선»(청산가·지정가) | renderOptions(o.src) · optEqKpiHtml · optTouchFront | /api/gex · /api/binance-account | ⬜ | (위 안) |
 | 알림 센터 «전진 검증 중» 아이스버그 | renderIceChip(#ncIce -- Option 카드 아님) | /api/iceberg | ⬜ | 알림 센터 안 |
 | Account 카드(잔고·곡선·순환·통계·달력) | renderSnapshotAccountCore · renderCycleCard | /api/binance-account · /api/cycle-path | ⬜ | 전폭×창 |
 | Account 메모 · 오답노트 | (acctNote·acctWrong) | /api/acct-notes · /api/acct-wrong | ⛔ 입력 | 탭 안 |
 
-남은 칸: ⬜ 11 · 🟡 3(봉 단추 · Option -- 주식 판·내 선 빼고 · 지표 방향 판 -- 줄 채우기 빼고) · ⛔ 6(주문 경로·입력 · 보류) · ✅ 19줄. ⑤ 예측 줄 완성(11-29 둘째) = `?card=dirs` 가 fcRowHtml 전체(rtui/src/fc.rs).
+남은 칸: ⬜ 10 · 🟡 3(봉 단추 · Option -- 주식 판·내 선 빼고 · 지표 방향 판 -- 줄 채우기 빼고) · ⛔ 6(주문 경로·입력 · 보류) · ✅ 20줄. ⑤ 예측 줄 완성(11-29 둘째) = `?card=dirs` 가 fcRowHtml 전체(rtui/src/fc.rs).
 11-29 둘째 정답지: compare/fc_js.mjs(원본 fcRowHtml 을 가짜 전역에서 · 지어낸 입력 8장) → compare/fc_layout.py(원본 styles.css · 헤드리스 크로미움 1920 · 폭 404 에서 글·상자·선 자리와 색을 잼) → `fc::t::js_parity`(645개 전부 하나씩 짝 · 높이 같음). 안 옮김: 칸 툴팁 · «?» 설명 팝업(단추 모양만).
 11-29 둘째 고침: 오른쪽이 글만(«쌓는 중»)인 줄 높이 30 → 27(`srl::height` -- 원본 실측 27).
 첫째(15분·1시간 예측)에 고침: 같은 칸 그리기(srl.rs scene)의 가로 자리 -- 넓은 화면 `#mcBody.mc-cmp .fc-c { gap: 2px }`·`.fc-t > .d4g` 가로 여백 0 을 놓쳐 «레벨 5분» 게이지·막대가 4~10px 어긋나 있었다(헤드리스 크로미움 실측으로 확인 · 시험 `srl::t::layout`).
 11-29 셋째: «청산» 탭 아랫줄 세 칸 = `?card=liqx`(rtui/src/liqx.rs · 정답지 compare/liqx_js.mjs · `liqx::t::js_parity`). 안 옮김: 머리 꼬리표·주기 단추·머리 오른쪽 글 · 툴팁 · 좁은 화면 배치.
+News(11-29): ⬜ 11 → 10. `?card=news` = news.rs(renderNews 머리 칩 «관련만»·«코인+매크로» · 기울기 1·6·12시간 · 코인별 12시간 · 고영향 상위 6(두 줄 자름) · 출처 줄 · 12시간 축 svg · 기사 목록(해킹·장애 고정 5 + 60건 · 말줄임 · 제목 누르면 새 탭 · 휠 스크롤) + ⑤ 다음 24시간(펀딩·옵션 만기·미국장·오늘·내일 발표 · 같은 분 합침 · mcGfx.timeline)). 자료 = /api/news 30초 · /api/market-context 1초 · /api/gex 1분 · /api/macro-calendar 6시간. 정답지 compare/news_js.mjs(원본 함수를 가짜 전역에서 · 지어낸 기사·일정 8장) → compare/news_layout.py(원본 styles.css · 헤드리스 1920 · html.fit1 · 실제 카드 구조 #newsBody 1838×917) → `news::t::js_parity` 글·칠·테·자르기 상자 1945개 ±0.07(글 x ±0.6 · 자르기 ±1) · svg 요소 수 976개 1e-6. 양성 대조 compare/news_mut.sh 원본 JS 8 · CSS 7 · Rust 5 = 20/20 잡음. 안 옮김: 카드 머리(제목·건수 줄) · 툴팁 · 밑줄·초점 테 · «?» 팝업 · 왼쪽 요약 스크롤 · 좁은 화면 두 줄 모양 · ⑤ 600 미만 목록.
 Macro Trend(11-29): ⬜ 20 → 18 · ✅ 12줄. `?card=mt` = mt.rs(renderMacroTrend 표·범례·상세·오늘 24시간 차트·겹친 그림·관계 표·꼬리 줄 · 줄 누르면 그 지표) · `?card=mth` = 머리 «Macro» 요약(오른쪽 붙임). 정답지 compare/mt_js.mjs(원본 구역 통째를 가짜 전역에서 · 지어낸 입력 9장) → compare/mt_layout.py(원본 styles.css · 헤드리스 1920 · html.fit1) → `mt::t::js_parity` 글·칠·테·고리·svg 상자 ±0.07(글 x ±0.6) · svg 요소 수 1e-6. 안 옮김: 툴팁·«?» 팝업·올림/초점 테·상세 칸 스크롤(넘치면 잘림)·1500px 이하 한 단·휴대폰 판.
 11-29 셋째 Option 카드(`?card=opt` · rtui/src/opt.rs): 정답지 = compare/opt_js.mjs(원본 renderOptions 와 부르는 함수 28개를 잘라 묶음 · 지어낸 입력 7장 ETH 다 있음/아직 없음/안 모으는 코인/BTC 지연·블록 0/SOL DVOL 없음·행사가 빈칸/XRP 작은 가격/ETH 22분 묵음) → compare/opt_layout.py(진짜 #optCard 틀 + 원본 styles.css · 헤드리스 크로미움 1920 html.fit1 · 카드 폭 1838 · 사다리 514 · 배율 .9 · renderOptions 두 번) → `opt::t::js_parity`: HTML 글·상자·선 하나씩 짝(fc 와 같은 허용) + svg 요소(사다리·만기·흐름) 전부 1e-6 · 높이 ±.02 · 7장 1,263개 · 양성 대조 원본 변이 JS 7/8 · CSS 5/5 · Rust 3/4(놓친 둘 = 지어낸 입력에 그 문턱을 넘는 값이 없음).
 찾은 원본 결함(옮김 그대로 · 고치지 않음): 실현 감마 칸 격자 자리·13.5px 줄은 `[data-tip="rg"]`(ETH)만 -- XRP·BTC·SOL(rg_xrp 등)은 첫 빈 칸(cov 줄 · 지연 설명이 있으면 «gamma» 자리)으로 가고 12.5px 블록으로 그려진다.

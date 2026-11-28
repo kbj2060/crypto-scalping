@@ -76,6 +76,7 @@ pub fn on_get(kind: &str, body: Option<String>) {
         "Gex" => c.feed.on_gex(body.as_deref(), date_now()),
         "Smile" => c.feed.on_smile(body.as_deref()),
         "Situation" => { crate::dirb::on_get(body.as_deref()); c.feed.dirty = true; }
+        "News" | "NewsMc" | "NewsGex" | "NewsCal" => { crate::news::on_get(kind, body.as_deref()); c.feed.dirty = true; }
         _ => {}
     });
 }
@@ -145,6 +146,7 @@ pub async fn start(canvas_id: String, asset: String, x: f32, y: f32, w: f64, h: 
     // card = "mt" 면 Macro Trend 카드(mt.rs · /api/macro-trend · macro-today · treasury-futures · xyz100 · macro-calendar · w·h = #mtBody) · "mth" 면 풋프린트 머리 «Macro» 요약만(오른쪽 붙임)
     if card == "mt" || card == "mth" { let mut s = Box::<mt::Store>::default(); s.head = card == "mth"; ch.feed.mt = Some(s); }
     if card == "dirb" { crate::dirb::enable(); } // 왼쪽 위 «지표 방향» 판만(dirb.rs · /api/situation 1초 · ETH 만 · 판 왼쪽 위 = x·y)
+    if card == "news" { crate::news::start(); } // News 카드 + ⑤ 다음 24시간(news.rs · /api/news · market-context · gex · macro-calendar · w·h = #newsBody)
     let ch = Rc::new(RefCell::new(ch));
     CH.with(|c| *c.borrow_mut() = Some(ch.clone()));
     let canvas = eframe::web_sys::window().unwrap().document().unwrap().get_element_by_id(&canvas_id).unwrap()
