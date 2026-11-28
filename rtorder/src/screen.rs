@@ -308,6 +308,11 @@ pub async fn income_refresh<R: AccountRest>(state: &mut Value, rest: &mut R, off
     out
 }
 
+/// «건너뜀» 줄은 처음 한 번만 남긴다(나머지 줄은 그대로).
+fn quiet_repeats(said: &mut std::collections::HashSet<String>, logs: &mut Vec<String>) {
+    logs.retain(|l| !l.contains("건너뜀") || said.insert(l.clone()));
+}
+
 /// 화면 몫 상태(프로세스에 하나 · `SharedAccount.screen`).
 pub struct Screen {
     pub dir: PathBuf,
@@ -316,11 +321,12 @@ pub struct Screen {
     income_ts: f64,
     daily: HashMap<String, (f64, Vec<f64>, Vec<i64>)>,
     pub logs: Vec<String>,
+    said: std::collections::HashSet<String>, // 이미 찍은 «건너뜀» 줄 -- 원장 주기마다 같은 줄이 다시 나와 로그 93%를 채웠다(11-23~28)
 }
 
 impl Screen {
     pub fn new(dir: PathBuf) -> Self {
-        Screen { dir, seen: None, income: None, income_ts: 0.0, daily: HashMap::new(), logs: vec![] }
+        Screen { dir, seen: None, income: None, income_ts: 0.0, daily: HashMap::new(), logs: vec![], said: Default::default() }
     }
 
     /// 원본 account_income: {income_days, income_from, income_synced_at} · 10분 넘게 못 따라잡았으면 {}.
@@ -394,6 +400,8 @@ impl Screen {
         if added > 0 {
             logs.push(format!("account_round_trips: +{added}건 (누적 {}건)", seen.len()));
         }
+        // ponytail: 프로세스 수명 동안 쌓이는 집합(7일 창 왕복 키라 작다) -- 재시작하면 한 번씩 다시 찍힌다
+        quiet_repeats(&mut self.said, &mut logs);
         self.logs.append(&mut logs);
         let mut rows = load_trip_rows(&self.dir);
         let mut daily = HashMap::new();
@@ -427,4 +435,15 @@ mod tests {
         assert_eq!(trend_sign(&up.iter().rev().cloned().collect::<Vec<_>>()), Some(-1));
         assert_eq!(trend_sign(&up[..91]), None);
     }
+}
+
+#[cfg(test)]
+#[test]
+fn skip_lines_once() {
+    let mut said = Default::default();
+    let mk = || vec!["account_round_trips: 잘린 체결 스트림이라 건너뜀 A".to_string(), "account_round_trips: +1건 (누적 2건)".into()];
+    let (mut a, mut b) = (mk(), mk());
+    quiet_repeats(&mut said, &mut a);
+    quiet_repeats(&mut said, &mut b);
+    assert_eq!((a.len(), b), (2, vec!["account_round_trips: +1건 (누적 2건)".to_string()]));
 }
