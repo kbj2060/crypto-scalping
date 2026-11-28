@@ -10,6 +10,7 @@ pub mod hover;
 pub mod lane;
 pub mod marks;
 pub mod profile;
+pub mod mc;
 pub mod s1;
 pub mod view;
 
@@ -55,6 +56,14 @@ impl Chart {
             Some(v) => { draw::paint(p, &v, self.origin, all, all, 1.0); self.s1_last = Some(v); }
             None => match &self.s1_last { Some(v) => draw::paint(p, v, self.origin, all, all, 0.35), None => draw::paint(p, &s1::wait_text(w, h), self.origin, all, all, 1.0) },
         }
+    }
+    /// 시장 맥락 ①② 한 장(feed.mc_only) -- 폭 = cfg.w_all(fill 이면 창) · 높이 = mc::H
+    pub fn ui_mc(&mut self, ui: &mut egui::Ui) {
+        if self.fill { self.cfg.w_all = (ui.ctx().content_rect().width() - 2.0 * self.origin.x) as f64; }
+        let p = ui.painter();
+        if self.bg.a() > 0 { p.rect_filled(p.clip_rect(), 0.0, self.bg); }
+        let all = [0.0, 0.0, self.cfg.w_all, mc::H];
+        draw::paint(p, &mc::scene(self.feed.mc.as_ref(), &self.feed.asset, self.cfg.w_all), self.origin, all, all, 1.0);
     }
     /// 합성 자료로 바로(측정·네이티브 창): 풋프린트 응답 + 캔들 이력을 받은 것처럼
     pub fn from_json(fp_json: &str, mh_json: &str, cfg: fp::Cfg, origin: Pos2, bg: Color32) -> Self {
@@ -111,6 +120,7 @@ impl Chart {
     /// 한 장: 입력 → 가공(prep) + 그리기 + 호버. now = Date.now() · 반환 = 그린 장면·호버(좌표 대조용)
     pub fn ui(&mut self, ui: &mut egui::Ui, now: f64) -> Option<(fp::Scene, Option<hover::Hover>)> {
         if self.feed.s1_only { self.ui_s1(ui); return None; }
+        if self.feed.mc_only { self.ui_mc(ui); return None; }
         let t = ui.input(|i| i.time) * 1000.0;
         if self.fill { // 혼자 뜨는 페이지: 창 = 화면 -- 가격 플롯 왼쪽 열(w)이 화면 폭을 채우는 viewBox 폭(8429-8430 을 거꾸로)
             let r = ui.ctx().content_rect();

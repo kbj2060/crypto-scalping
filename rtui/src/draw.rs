@@ -21,6 +21,7 @@ pub fn rgba(c: Col, a: f64) -> Color32 {
         Col::HoverLine => (203, 209, 227, 0.38),
         Col::Spot => (0xb8, 0x9c, 0xff, 1.0),
         Col::Neutral => (0xcb, 0xd1, 0xe3, 1.0),
+        Col::White => (255, 255, 255, 1.0), // rgb(var(--lift) / a) · 다크 --lift = 255 255 255(시장 맥락 게이지 바탕)
         Col::Lift => (0x8b, 0x94, 0x9e, 1.0), // var(--lift-solid, #8b949e) -- styles.css 에 토큰이 없어 대체값
 
     };

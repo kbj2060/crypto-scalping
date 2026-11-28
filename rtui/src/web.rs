@@ -54,6 +54,7 @@ pub fn on_get(kind: &str, body: Option<String>) {
         "LiqSig" => c.feed.on_liq_sig(body.as_deref()),
         "Liq" => c.feed.on_liq(body.as_deref()),
         "LiqTail" => c.feed.on_liq_tail(body.as_deref()),
+        "Mc" => c.feed.on_mc(body.as_deref()),
         _ => {}
     });
 }
@@ -96,7 +97,7 @@ impl eframe::App for WebApp {
 
 /// asset = ?asset= · (x, y) = 상자 왼쪽 위 · w·h = viewBox(0 이면 창에 맞춤) · tz = getTimezoneOffset · bg = 0xRRGGBB(0xFFFFFFFF 투명)
 /// week = 지표 스위치 기본값이 1주일을 늘 부르나(feed::Feed::week_always) · api·ws·hub = 주소(feed::Urls -- 빈 글자면 기본) · push = 풋프린트·체결을 rtcore 허브에서(feed::Source::Push)
-/// card = "s1" 이면 1초 수급 카드만(s1.rs · push 여야 자료가 온다)
+/// card = "s1" 이면 1초 수급 카드만(s1.rs · push 여야 자료가 온다) · "mc" 면 시장 맥락 ①② 만(mc.rs · 같은 출처 /api/market-context)
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
 pub async fn start(canvas_id: String, asset: String, x: f32, y: f32, w: f64, h: f64, tz: i32, bg: u32, week: bool, api: String, ws: String, push: bool, hub: String, card: String) -> Result<(), JsValue> {
@@ -112,6 +113,7 @@ pub async fn start(canvas_id: String, asset: String, x: f32, y: f32, w: f64, h: 
     let mut ch = Chart::new(feed::Feed::new(&asset, sym, if push { feed::Source::Push } else { feed::Source::Poll }, urls, week), cfg, pos2(x, y), bgc);
     ch.fill = w == 0.0;
     ch.feed.s1_only = card == "s1"; // 1초 수급 카드만(index.html ?card=s1 -- 허브 밀기로 연다)
+    ch.feed.mc_only = card == "mc";
     let ch = Rc::new(RefCell::new(ch));
     CH.with(|c| *c.borrow_mut() = Some(ch.clone()));
     let canvas = eframe::web_sys::window().unwrap().document().unwrap().get_element_by_id(&canvas_id).unwrap()

@@ -21,7 +21,7 @@ impl Default for Urls {
 #[derive(Debug, PartialEq, serde::Serialize)]
 pub enum Req { Get { kind: Kind, url: String }, WsOpen(String), WsClose, /** 열린(또는 열리는 중인) 소켓에 보낼 글 -- 허브 구독 */ WsSend(String) }
 #[derive(Debug, PartialEq, Clone, Copy, serde::Serialize)]
-pub enum Kind { Footprint, History, Week, LiqSig, Liq, LiqTail }
+pub enum Kind { Footprint, History, Week, LiqSig, Liq, LiqTail, Mc }
 
 /// 145 FOOTPRINT_POLL_MS · 148 FOOTPRINT_STALE_BARS · 38 CANDLE_HISTORY_POLL_MS · 1680 CHART_MAX_CANDLES · 4400 FAST_PRICE_MIN_INTERVAL_MS · 2224 FOOTPRINT_RENDER_MIN_INTERVAL_MS · 6638 FP_WEEK_REFRESH_MS
 const FP_POLL_MS: f64 = 400.0;
@@ -32,6 +32,7 @@ const FAST_PRICE_MS: f64 = 80.0;
 const RENDER_GATE_MS: f64 = 400.0;
 const WEEK_REFRESH_MS: f64 = 6.0 * 3600e3;
 const LIQ_POLL_MS: f64 = 60_000.0; // 1653 LIQUIDATION_5M_POLL_MS
+const MARKET_CTX_POLL_MS: f64 = 1000.0; // 6116
 const LIQ_TAIL_MS: f64 = 2000.0;   // 3204 LIQ_5M_TAIL_POLL_MS
 const BAR: i64 = 300; // CHART_CANDLE_MIN 5 × 60
 
@@ -81,6 +82,10 @@ pub struct Feed {
     pub s1: crate::s1::State,
     /// 1초 수급 카드만 띄운다 -- 허브만 붙고 풋프린트·캔들·청산 응답은 묻지 않는다
     pub s1_only: bool,
+    /// 시장 맥락 응답(mc.rs · /api/market-context) · 마지막으로 물은 시각 · 이 카드만 띄운다(허브·풋프린트 없이 이 응답만 1초마다)
+    pub mc: Option<serde_json::Value>,
+    mc_at: f64,
+    pub mc_only: bool,
 }
 
 /// 4477 roundHalfEven(파이썬 round 와 같은 격자)
@@ -114,12 +119,16 @@ impl Feed {
     pub fn new(asset: &str, symbol: &str, source: Source, urls: Urls, week_always: bool) -> Self {
         Self { source, urls, asset: asset.into(), symbol: symbol.into(), week_always, candles: vec![], fp_bars: BTreeMap::new(), fp: None, week: None,
                live: Live::default(), price: 0.0, price_ts_ms: None, shown: 0.0, last_fast: 0.0, last_full: 0.0, fp_last_fetch: 0.0, fp_in_flight: false,
-               hist_last_fetch: 0.0, hist_retry_at: 0.0, week_at: 0.0, week_tried_at: 0.0, week_in_flight: false, ws: false, ws_retry_at: 0.0, hub_seq: None, holes: vec![], liq: vec![], liq_gen: 0, liq_tail_gen: 0, liq_at: 0.0, liq_tail_at: 0.0, week_liq: vec![], dirty: false, out: vec![], s1: Default::default(), s1_only: false }
+               hist_last_fetch: 0.0, hist_retry_at: 0.0, week_at: 0.0, week_tried_at: 0.0, week_in_flight: false, ws: false, ws_retry_at: 0.0, hub_seq: None, holes: vec![], liq: vec![], liq_gen: 0, liq_tail_gen: 0, liq_at: 0.0, liq_tail_at: 0.0, week_liq: vec![], dirty: false, out: vec![], s1: Default::default(), s1_only: false, mc: None, mc_at: 0.0, mc_only: false }
     }
     fn get(&mut self, kind: Kind, path: String) { let url = format!("{}{}", self.urls.api, path); self.out.push(Req::Get { kind, url }); }
 
     /// 11553 tick()(500ms · 숨으면 아무것도 안 한다)의 이 카드 몫 + 4556 ensurePriceWs
     pub fn tick(&mut self, now: f64, hidden: bool, want_week: bool) {
+        if self.mc_only { // 6259 refreshMarketCtx(1초 · 숨으면 안 묻는다)
+            if !hidden && now - self.mc_at >= MARKET_CTX_POLL_MS { self.mc_at = now; let path = format!("/api/market-context?asset={}", self.asset); self.get(Kind::Mc, path); }
+            return;
+        }
         self.ensure_ws(now, hidden);
         if hidden || self.s1_only { return; }
         if self.source == Source::Poll { self.refresh_footprint(now); }
@@ -139,6 +148,11 @@ impl Feed {
             let path = format!("/api/liquidation-5m-history?asset={}&bars=2", self.asset);
             self.get(Kind::LiqTail, path);
         }
+    }
+    /// 6267 실패(접착은 HTTP 오류도 null 로 준다) = {available: false, error: "fetch_failed"}(asset 없음 → 화면은 «불러오는 중…» -- 지금 화면도 같다)
+    pub fn on_mc(&mut self, body: Option<&str>) {
+        self.mc = Some(body.and_then(|b| serde_json::from_str(b).ok()).unwrap_or_else(|| serde_json::json!({"available": false, "error": "fetch_failed"})));
+        self.dirty = true;
     }
     /// 신호 응답(내용은 이 카드가 안 쓴다 -- 성공했을 때만 이력 전량을 묻는다)
     pub fn on_liq_sig(&mut self, body: Option<&str>) {

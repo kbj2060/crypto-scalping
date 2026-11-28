@@ -29,7 +29,7 @@ pub struct Win { pub edge: f64, pub panned: bool, pub pan_y: f64 }
 
 /// styles.css :root(다크) 의 색 이름
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Col { Good, Bad, Muted, Amber, Accent, Ink, Line, OnFill, ChartBg, Text, Turnover, SoftLine, HoverLine, Spot, Neutral, Lift }
+pub enum Col { Good, Bad, Muted, Amber, Accent, Ink, Line, OnFill, ChartBg, Text, Turnover, SoftLine, HoverLine, Spot, Neutral, Lift, White }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Anchor { Start, Middle, End }
